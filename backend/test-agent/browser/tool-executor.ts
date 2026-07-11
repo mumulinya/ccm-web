@@ -12,6 +12,10 @@ export interface RecordingBrowserToolExecutor {
   transcriptPath: string;
 }
 
+export interface RecordingBrowserToolExecutorOptions {
+  suppressDetails?: boolean;
+}
+
 function previewOutput(output: any) {
   if (output === undefined) return "";
   if (typeof output === "string") return compactText(output, 2000);
@@ -22,7 +26,19 @@ function previewOutput(output: any) {
   }
 }
 
-export function createRecordingBrowserToolExecutor(input: TestAgentBrowserToolExecutor, artifactDir: string): RecordingBrowserToolExecutor {
+function suppressedInputMetadata(input: Record<string, any>) {
+  const action = String(input?.action || input?.type || "").trim();
+  return {
+    inputKeys: Object.keys(input || {}).sort(),
+    ...(action && /^[A-Za-z0-9_.:-]{1,80}$/.test(action) ? { action } : {}),
+  };
+}
+
+export function createRecordingBrowserToolExecutor(
+  input: TestAgentBrowserToolExecutor,
+  artifactDir: string,
+  options: RecordingBrowserToolExecutorOptions = {},
+): RecordingBrowserToolExecutor {
   const records: BrowserToolCallRecord[] = [];
   const transcriptDir = ensureDir(path.join(artifactDir, "browser-tools"));
   const transcriptPath = path.join(transcriptDir, "tool-calls.jsonl");
@@ -44,24 +60,28 @@ export function createRecordingBrowserToolExecutor(input: TestAgentBrowserToolEx
           appendRecord({
             id,
             toolName,
-            input: toolInput,
+            input: options.suppressDetails ? suppressedInputMetadata(toolInput) : toolInput,
             status: "passed",
             startedAt,
             finishedAt: nowIso(),
             durationMs: Date.now() - started,
-            outputPreview: previewOutput(output),
+            outputPreview: options.suppressDetails
+              ? "[suppressed for existing authenticated browser session]"
+              : previewOutput(output),
           });
           return output;
         } catch (error: any) {
           appendRecord({
             id,
             toolName,
-            input: toolInput,
+            input: options.suppressDetails ? suppressedInputMetadata(toolInput) : toolInput,
             status: "failed",
             startedAt,
             finishedAt: nowIso(),
             durationMs: Date.now() - started,
-            error: error.message || String(error),
+            error: options.suppressDetails
+              ? "Browser tool call failed; raw provider error suppressed."
+              : error.message || String(error),
           });
           throw error;
         }

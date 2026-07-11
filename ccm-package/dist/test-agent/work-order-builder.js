@@ -54,6 +54,8 @@ function inferRequiredChecks(projects, options) {
             add("adversarial");
         }
     }
+    if (options?.requireAdversarialProbe !== false)
+        add("adversarial");
     return uniqueStrings(checks);
 }
 function buildProject(project, index, warnings) {
@@ -115,6 +117,7 @@ function buildTestAgentWorkOrderFromHandoff(input) {
         browserProvider: "auto",
         autoDiscoverVerificationCommands: true,
         collectBrowserArtifacts: true,
+        requireAdversarialProbe: true,
         ...(input.options || {}),
     };
     const inferredRequiredChecks = inferRequiredChecks(projects, options);

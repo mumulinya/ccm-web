@@ -18,6 +18,20 @@ import { buildAcceptanceSummary, formatAcceptanceMarkdownSummaryLines } from "./
 import { buildRequiredCheckSummary, formatRequiredCheckMarkdownSummaryLines } from "./required-check-summary";
 import { formatBrowserProviderGapLine } from "./browser/provider-gaps";
 import { formatBrowserProviderSummaryLine } from "./browser/provider-summary";
+import { formatBrowserFlowSummaryLine } from "./browser/flow-summary";
+import { formatBrowserMultiSessionSummaryLine } from "./browser/multi-session-summary";
+import { formatBrowserStabilitySummaryLine } from "./browser/stability-summary";
+import {
+  buildBrowserAuthenticationSummary,
+  formatBrowserAuthenticationEvidence,
+  formatBrowserAuthenticationSummaryLine,
+} from "./browser/authentication-summary";
+import { formatBrowserRecoverySummaryLine } from "./browser/recovery-summary";
+import { formatBrowserActionEffectSummaryLine } from "./browser/action-effect-summary";
+import { formatAdversarialEvidenceSummaryLine } from "./adversarial-summary";
+import { formatAcceptanceEvidenceGateSummaryLine } from "./acceptance-gate";
+import { formatHttpConcurrencySummaryLine } from "./http-concurrency";
+import { formatHttpPageResourceSummary } from "./http-page-resources";
 import { compactText, ensureDir, nowIso } from "./utils";
 import { buildTestAgentVerdict } from "./verdict";
 
@@ -64,7 +78,7 @@ function commandLine(result: CommandRunResult) {
 }
 
 function httpLine(result: HttpCheckResult) {
-  const detail = result.error || `status=${result.statusCode}; resources=${result.resourceChecks.length}${result.probeType ? `; probe=${result.probeType}` : ""}`;
+  const detail = result.error || `status=${result.statusCode}; resources=${result.resourceChecks.length}${result.concurrency ? `; concurrentRequests=${result.concurrency.requested}; maxInFlight=${result.concurrency.maxInFlight}` : ""}${result.probeType ? `; probe=${result.probeType}` : ""}`;
   return statusLine(`${result.project} ${result.adversarial ? "adversarial " : ""}HTTP ${result.name || result.url}`, result.status, detail);
 }
 
@@ -74,7 +88,14 @@ function browserLine(result: BrowserCheckResult) {
   const browserContext = result.contextOptions ? `; context=${browserContextOptionsSummary(result.contextOptions)}` : "";
   const source = browserSourceSummary(result.context);
   const artifacts = (result.browserArtifacts || []).length;
-  const detail = result.error || `${result.url}${finalUrl}${viewport}${browserContext}${source ? `; source=${source}` : ""}; steps=${result.steps.length}; screenshots=${result.screenshots.length}; artifacts=${artifacts}${result.probeType ? `; probe=${result.probeType}` : ""}`;
+  const sessions = (result.browserSessions || []).length;
+  const stability = Number(result.context?.stabilityRuns || 0) > 1
+    ? `; stabilityRun=${result.context?.stabilityRun}/${result.context?.stabilityRuns}`
+    : "";
+  const authentication = result.authentication ? `; authentication=${formatBrowserAuthenticationEvidence(result.authentication)}` : "";
+  const actionEffects = result.actionEffects || [];
+  const failedActionEffects = actionEffects.filter(effect => effect.status !== "changed").length;
+  const detail = result.error || `${result.url}${finalUrl}${viewport}${browserContext}${source ? `; source=${source}` : ""}; steps=${result.steps.length}; actionEffects=${actionEffects.length}; failedActionEffects=${failedActionEffects}; sessions=${sessions}; screenshots=${result.screenshots.length}; artifacts=${artifacts}${authentication}${stability}${result.probeType ? `; probe=${result.probeType}` : ""}`;
   return statusLine(`${result.project} ${result.adversarial ? "adversarial " : ""}browser ${result.name}`, result.status, detail);
 }
 
@@ -112,6 +133,144 @@ function browserInteractionSummaryLine(item: TestAgentReport["browserInteraction
   const failed = item.failedSteps.length ? `; failed=${item.failedSteps.slice(0, 3).map(step => `${step.name}${step.error ? `(${step.error})` : ""}`).join(", ")}` : "";
   const detail = `actions=${item.actionCount} passed=${item.passedActions} failed=${item.failedActions}; assertions=${item.assertionCount} passed=${item.passedAssertions} failed=${item.failedAssertions}; actionTypes=${typedCounts(item.actionTypes)}; assertionTypes=${typedCounts(item.assertionTypes)}${failed}`;
   return statusLine(`${item.project} browser interactions ${item.name}`, item.status, detail);
+}
+
+function browserFlowSummaryLines(report: TestAgentReport) {
+  const summary = report.browserFlowSummary;
+  if (!summary) return ["- none"];
+  const lines = [`- ${formatBrowserFlowSummaryLine(summary)}; actions=${summary.actionCount}; assertions=${summary.assertionCount}; failedSteps=${summary.failedStepCount}`];
+  for (const item of summary.items) {
+    const counts = item.statusCounts;
+    const detail = [
+      `total=${item.total}`,
+      `passed=${counts.passed}`,
+      `failed=${counts.failed}`,
+      `blocked=${counts.blocked}`,
+      `skipped=${counts.skipped}`,
+      `criteria=${item.criteriaCount}`,
+      `projects=${item.projects.join(",") || "none"}`,
+      `providers=${item.providers.join(",") || "none"}`,
+      `actions=${item.actionCount}`,
+      `assertions=${item.assertionCount}`,
+      `failedSteps=${item.failedStepCount}`,
+      item.failures[0] ? `firstFailure=${item.failures[0].project}/${item.failures[0].name}` : "",
+    ].filter(Boolean).join("; ");
+    lines.push(statusLine(item.flowType, counts.failed || counts.blocked ? "attention" : "passed", detail));
+  }
+  return lines;
+}
+
+function browserMultiSessionSummaryLines(report: TestAgentReport) {
+  const summary = report.browserMultiSessionSummary;
+  if (!summary) return ["- none"];
+  const lines = [
+    `- ${formatBrowserMultiSessionSummaryLine(summary)}; actions=${summary.actionCount}; assertions=${summary.assertionCount}; failedSteps=${summary.failedStepCount}; screenshots=${summary.screenshotCount}; consoleErrors=${summary.consoleErrorCount}; pageErrors=${summary.pageErrorCount}; networkErrors=${summary.networkErrorCount}`,
+  ];
+  for (const item of summary.items) {
+    const detail = [
+      `sessions=${item.sessionNames.join(",") || "none"}`,
+      `parallelGroups=${item.parallelGroupCount}`,
+      `comparisons=${item.comparisonCount}`,
+      `failedComparisons=${item.failedComparisonCount}`,
+      `actions=${item.actionCount}`,
+      `assertions=${item.assertionCount}`,
+      `failedSteps=${item.failedStepCount}`,
+      `screenshots=${item.screenshotCount}`,
+      `consoleErrors=${item.consoleErrorCount}`,
+      `pageErrors=${item.pageErrorCount}`,
+      `networkErrors=${item.networkErrorCount}`,
+      item.failedSessionNames.length ? `failedSessions=${item.failedSessionNames.join(",")}` : "",
+      item.failedSteps[0] ? `firstFailure=${item.failedSteps[0]}` : "",
+    ].filter(Boolean).join("; ");
+    lines.push(statusLine(`${item.project} / ${item.name}`, item.status, detail));
+  }
+  return lines;
+}
+
+function browserStabilitySummaryLines(report: TestAgentReport) {
+  const summary = report.browserStabilitySummary;
+  if (!summary) return ["- none"];
+  const lines = [
+    `- ${formatBrowserStabilitySummaryLine(summary)}; passedRuns=${summary.passedRunCount}; failedRuns=${summary.failedRunCount}; blockedRuns=${summary.blockedRunCount}; screenshots=${summary.screenshotCount}`,
+  ];
+  for (const item of summary.items) {
+    const detail = [
+      `runs=${item.runCount}/${item.expectedRuns}`,
+      `passed=${item.statusCounts.passed}`,
+      `failed=${item.statusCounts.failed}`,
+      `blocked=${item.statusCounts.blocked}`,
+      `skipped=${item.statusCounts.skipped}`,
+      `failedRuns=${item.failedRuns.join(",") || "none"}`,
+      `blockedRuns=${item.blockedRuns.join(",") || "none"}`,
+      `durationMs=${item.durationMs}`,
+      `screenshots=${item.screenshotCount}`,
+      item.firstFailure ? `firstFailure=${item.firstFailure}` : "",
+    ].filter(Boolean).join("; ");
+    lines.push(statusLine(`${item.project} / ${item.name}`, item.status, detail));
+  }
+  return lines;
+}
+
+function browserAuthenticationSummaryLines(report: TestAgentReport) {
+  const summary = buildBrowserAuthenticationSummary(report.browserResults);
+  return [
+    `- ${formatBrowserAuthenticationSummaryLine(summary)}`,
+    `- Credential environment names: ${summary.credentialEnvNames.join(", ") || "none"}`,
+  ];
+}
+
+function browserRecoverySummaryLines(report: TestAgentReport) {
+  const summary = report.browserRecoverySummary;
+  if (!summary) return ["- none"];
+  const lines = [`- ${formatBrowserRecoverySummaryLine(summary)}`];
+  for (const item of summary.items) {
+    const events = item.events.map(event =>
+      `${event.provider}/${event.operation}:${event.trigger}:${event.status}`
+    ).join(", ");
+    lines.push(statusLine(
+      `${item.project} / ${item.name}`,
+      item.failed || item.notRetried ? "attention" : "recovered",
+      `attempted=${item.attempted}; recovered=${item.recovered}; failed=${item.failed}; unsafeRetriesPrevented=${item.notRetried}${events ? `; events=${events}` : ""}`,
+    ));
+  }
+  return lines;
+}
+
+function browserActionEffectSummaryLines(report: TestAgentReport) {
+  const summary = report.browserActionEffectSummary;
+  if (!summary) return ["- none"];
+  const lines = [`- ${formatBrowserActionEffectSummaryLine(summary)}`];
+  for (const item of summary.items) {
+    const changedSignals = Object.entries(item.changedSignals)
+      .filter(([, count]) => count > 0)
+      .map(([signal, count]) => `${signal}:${count}`)
+      .join(",") || "none";
+    lines.push(statusLine(
+      `${item.project} / ${item.name}`,
+      item.failed ? "attention" : "passed",
+      `actions=${item.actions}; changed=${item.changed}; failed=${item.failed}; unchanged=${item.unchanged}; unavailable=${item.unavailable}; crossSession=${item.crossSession}; detailSuppressed=${item.detailSuppressed}; changedSignals=${changedSignals}`,
+    ));
+  }
+  return lines;
+}
+
+function adversarialEvidenceSummaryLines(report: TestAgentReport) {
+  const summary = report.adversarialEvidenceSummary;
+  const lines = [`- ${formatAdversarialEvidenceSummaryLine(summary)}`];
+  for (const item of summary.items) {
+    const linkage = [
+      `relevance=${item.relevance}`,
+      item.linkedCriteria.length ? `criteria=${item.linkedCriteria.join(" | ")}` : "",
+      item.goalLinked ? "goalLinked=yes" : "",
+      `score=${item.matchScore}`,
+    ].filter(Boolean).join("; ");
+    lines.push(statusLine(
+      `${item.project} ${item.surface} ${item.name}`,
+      item.status,
+      `${item.target}${item.probeType ? `; probe=${item.probeType}` : ""}${item.provider ? `; provider=${item.provider}` : ""}; ${linkage}`,
+    ));
+  }
+  return lines;
 }
 
 function browserProviderGapLine(item: BrowserProviderGapItem) {
@@ -207,10 +366,21 @@ function devServerDetail(result: DevServerResult, index: number) {
 
 function httpDetail(result: HttpCheckResult, index: number) {
   const resources = result.resourceChecks.length
-    ? result.resourceChecks.map(item => `- ${item.status}: ${item.statusCode ?? "(none)"} ${item.url}${item.contentType ? ` (${item.contentType})` : ""}${item.error ? ` - ${item.error}` : ""}`)
+    ? result.resourceChecks.map(item => `- ${item.status}: ${item.kind || "other"} ${item.statusCode ?? "(none)"} ${item.url}${item.finalUrl && item.finalUrl !== item.url ? ` -> ${item.finalUrl}` : ""}${item.contentType ? ` (${item.contentType})` : ""}${item.source ? `; source=${item.source}` : ""}${item.contentTypeMatched === false ? "; content-type mismatch" : ""}${item.error ? ` - ${item.error}` : ""}`)
     : ["- none"];
   const assertions = (result.assertions || []).length
     ? (result.assertions || []).map(item => `- ${item.status}: ${item.name}${item.detail ? ` - ${item.detail}` : ""}${item.error ? ` - ${item.error}` : ""}`)
+    : ["- none"];
+  const concurrency = result.concurrency;
+  const concurrentRequests = concurrency
+    ? concurrency.requests.map(request =>
+      `- ${request.requestNumber}. ${request.status}: ${request.method} ${request.url}; status=${request.statusCode}; duration=${request.durationMs}ms; aggregateValues=${request.aggregateValues.length}${request.error ? `; error=${request.error}` : ""}`
+    )
+    : ["- none"];
+  const concurrencyAssertions = concurrency?.aggregateAssertions.length
+    ? concurrency.aggregateAssertions.map(item =>
+      `- ${item.status}: ${item.name}${item.detail ? ` - ${item.detail}` : ""}${item.error ? ` - ${item.error}` : ""}`
+    )
     : ["- none"];
   return [
     detailTitle(index, `${result.project}: ${result.name || result.url}`),
@@ -228,6 +398,24 @@ function httpDetail(result: HttpCheckResult, index: number) {
     "**Assertions:**",
     ...assertions,
     "",
+    "**Concurrency:**",
+    ...(concurrency ? [
+      `- Requested: ${concurrency.requested}`,
+      `- Completed: ${concurrency.completed}`,
+      `- Passed: ${concurrency.passed}`,
+      `- Failed: ${concurrency.failed}`,
+      `- Blocked: ${concurrency.blocked}`,
+      `- Launch spread: ${concurrency.launchSpreadMs}ms`,
+      `- Max in flight: ${concurrency.maxInFlight}`,
+      `- Overlap observed: ${concurrency.overlapObserved ? "yes" : "no"}`,
+    ] : ["- none"]),
+    "",
+    "**Concurrency aggregate assertions:**",
+    ...concurrencyAssertions,
+    "",
+    "**Concurrent requests:**",
+    ...concurrentRequests,
+    "",
     "**Resource sample:**",
     ...resources,
     "",
@@ -241,6 +429,8 @@ function browserDetail(result: BrowserCheckResult, index: number) {
     ? result.steps.map((step, stepIndex) => `- ${stepIndex + 1}. ${step.kind} ${step.name}: ${step.status}${step.detail ? ` - ${step.detail}` : ""}${step.error ? ` - ${step.error}` : ""}`)
     : ["- none"];
   const browserArtifacts = result.browserArtifacts || [];
+  const browserSessions = result.browserSessions || [];
+  const actionEffects = result.actionEffects || [];
   return [
     detailTitle(index, `${result.project}: ${result.name}`),
     "",
@@ -253,6 +443,10 @@ function browserDetail(result: BrowserCheckResult, index: number) {
     ...(result.finalUrl ? [`- Final URL: ${result.finalUrl}`] : []),
     ...(result.viewport ? [`- Viewport: ${result.viewport.width}x${result.viewport.height}${result.viewport.isMobile ? " mobile" : ""}${result.viewport.deviceScaleFactor ? ` @${result.viewport.deviceScaleFactor}x` : ""}`] : []),
     ...(result.contextOptions ? [`- Context: ${browserContextOptionsSummary(result.contextOptions)}`] : []),
+    ...(result.authentication ? [`- Authentication: ${formatBrowserAuthenticationEvidence(result.authentication)}`] : []),
+    ...(result.recovery ? [
+      `- Recovery: attempted=${result.recovery.attempted}; recovered=${result.recovery.recovered}; failed=${result.recovery.failed}; unsafeRetriesPrevented=${result.recovery.notRetried}`,
+    ] : []),
     ...(result.title ? [`- Title: ${result.title}`] : []),
     `- Duration: ${result.durationMs}ms`,
     ...(result.error ? [`- Error: ${result.error}`] : []),
@@ -266,6 +460,28 @@ function browserDetail(result: BrowserCheckResult, index: number) {
     "",
     "**Steps:**",
     ...steps,
+    "",
+    "**Action effects:**",
+    ...(actionEffects.length ? actionEffects.map(effect => `- ${[
+      `actionIndex=${effect.actionIndex}`,
+      effect.session ? `session=${effect.session}` : "",
+      effect.effectSession ? `effectSession=${effect.effectSession}` : "",
+      `action=${effect.actionType}`,
+      `status=${effect.status}`,
+      `requested=${effect.requestedSignals.join(",") || "none"}`,
+      `observed=${effect.observedSignals.join(",") || "none"}`,
+      `changed=${effect.changedSignals.join(",") || "none"}`,
+      `timeoutMs=${effect.timeoutMs}`,
+      effect.detailSuppressed ? "detail=suppressed" : "",
+    ].filter(Boolean).join("; ")}`) : ["- none"]),
+    "",
+    "**Browser sessions:**",
+    ...(browserSessions.length ? browserSessions.flatMap(session => [
+      `- ${session.name}: ${session.url}${session.finalUrl && session.finalUrl !== session.url ? ` -> ${session.finalUrl}` : ""}; screenshots=${session.screenshots.length}; consoleErrors=${session.consoleErrors.length}; pageErrors=${session.pageErrors.length}; networkErrors=${session.networkErrors.length}${session.authentication ? `; authentication=${formatBrowserAuthenticationEvidence(session.authentication)}` : ""}`,
+      ...(session.consoleLogPath ? [`  - Console log: ${session.consoleLogPath}`] : []),
+      ...(session.networkLogPath ? [`  - Network log: ${session.networkLogPath}`] : []),
+      ...(session.pageTextPreview ? [`  - Text: ${compactText(session.pageTextPreview, 300)}`] : []),
+    ]) : ["- none"]),
     "",
     "**Console errors:**",
     ...(result.consoleErrors.length ? result.consoleErrors.map(item => `- ${item}`) : ["- none"]),
@@ -477,6 +693,8 @@ export function buildTestAgentArtifactManifest(report: TestAgentReport, manifest
     workOrderId: report.workOrderId,
     taskId: report.taskId,
     groupId: report.groupId,
+    originalUserGoal: report.originalUserGoal,
+    acceptanceCriteria: report.acceptanceCriteria,
     status: report.status,
     artifactDir: report.artifactDir,
     generatedAt: nowIso(),
@@ -512,6 +730,7 @@ export function buildTestAgentMarkdownReport(report: TestAgentReport) {
     `- Work order: ${report.workOrderId}`,
     `- Task: ${report.taskId || "(none)"}`,
     `- Group: ${report.groupId || "(none)"}`,
+    `- Original goal: ${report.originalUserGoal || "(none)"}`,
     `- Started: ${report.startedAt}`,
     `- Finished: ${report.finishedAt}`,
     `- Duration: ${report.durationMs}ms`,
@@ -519,6 +738,10 @@ export function buildTestAgentMarkdownReport(report: TestAgentReport) {
     "## Summary",
     "",
     report.summary,
+    "",
+    "## Acceptance Criteria",
+    "",
+    ...(report.acceptanceCriteria.length ? report.acceptanceCriteria.map(criterion => `- ${criterion}`) : ["- none"]),
     "",
     "## Commands",
     "",
@@ -528,6 +751,23 @@ export function buildTestAgentMarkdownReport(report: TestAgentReport) {
     "",
     ...(report.httpResults.length ? report.httpResults.map(httpLine) : ["- none"]),
     "",
+    "## HTTP Concurrency Summary",
+    "",
+    `- ${formatHttpConcurrencySummaryLine(report.httpConcurrencySummary)}`,
+    ...((report.httpConcurrencySummary?.items || []).map(item => statusLine(
+      `${item.project} / ${item.name}`,
+      item.status,
+      `requested=${item.requested}; completed=${item.completed}; passed=${item.passed}; failed=${item.failed}; blocked=${item.blocked}; maxInFlight=${item.maxInFlight}; aggregatePassed=${item.aggregatePassed}; aggregateFailed=${item.aggregateFailed}; aggregateSkipped=${item.aggregateSkipped}`,
+    ))),
+    "",
+    "## HTTP Page Resource Summary",
+    "",
+    `- ${formatHttpPageResourceSummary(report.httpResults)}`,
+    "",
+    "## Adversarial Evidence Summary",
+    "",
+    ...adversarialEvidenceSummaryLines(report),
+    "",
     "## Browser",
     "",
     ...(report.browserResults.length ? report.browserResults.map(browserLine) : ["- none"]),
@@ -536,9 +776,33 @@ export function buildTestAgentMarkdownReport(report: TestAgentReport) {
     "",
     ...((report.browserNetworkSummary || []).length ? (report.browserNetworkSummary || []).map(browserNetworkSummaryLine) : ["- none"]),
     "",
+    "## Browser Authentication Summary",
+    "",
+    ...browserAuthenticationSummaryLines(report),
+    "",
+    "## Browser Recovery Summary",
+    "",
+    ...browserRecoverySummaryLines(report),
+    "",
+    "## Browser Action Effect Summary",
+    "",
+    ...browserActionEffectSummaryLines(report),
+    "",
     "## Browser Interaction Summary",
     "",
     ...((report.browserInteractionSummary || []).length ? (report.browserInteractionSummary || []).map(browserInteractionSummaryLine) : ["- none"]),
+    "",
+    "## Browser Multi-Session Summary",
+    "",
+    ...browserMultiSessionSummaryLines(report),
+    "",
+    "## Browser Stability Summary",
+    "",
+    ...browserStabilitySummaryLines(report),
+    "",
+    "## Browser Acceptance Flow Summary",
+    "",
+    ...browserFlowSummaryLines(report),
     "",
     "## Browser Provider Summary",
     "",
@@ -563,6 +827,19 @@ export function buildTestAgentMarkdownReport(report: TestAgentReport) {
     "## Acceptance Summary",
     "",
     ...formatAcceptanceMarkdownSummaryLines(acceptanceSummary),
+    "",
+    "## Required Acceptance Evidence Gate",
+    "",
+    `- ${formatAcceptanceEvidenceGateSummaryLine(report.acceptanceEvidenceGateSummary)}`,
+    ...(report.acceptanceEvidenceGateSummary.failedCriteria.length
+      ? report.acceptanceEvidenceGateSummary.failedCriteria.map(criterion => `- Failed criterion: ${criterion}`)
+      : []),
+    ...(report.acceptanceEvidenceGateSummary.incompleteCriteria.length
+      ? report.acceptanceEvidenceGateSummary.incompleteCriteria.map(criterion => `- Missing matched evidence: ${criterion}`)
+      : []),
+    ...(report.acceptanceEvidenceGateSummary.weakCriteria.length
+      ? report.acceptanceEvidenceGateSummary.weakCriteria.map(criterion => `- Fallback-only evidence: ${criterion}`)
+      : []),
     "",
     "## Acceptance Coverage",
     "",

@@ -5,6 +5,8 @@ exports.runBrowserVerificationWithProviders = runBrowserVerificationWithProvider
 const provider_types_1 = require("./provider-types");
 const mcp_provider_1 = require("./mcp-provider");
 const playwright_provider_1 = require("./playwright-provider");
+const existing_session_1 = require("./existing-session");
+const provider_routing_1 = require("./provider-routing");
 const shared_1 = require("./shared");
 function preferredProvider(workOrder, runtime) {
     return runtime.browserProvider || workOrder.options.browserProvider || "auto";
@@ -57,10 +59,40 @@ async function runBrowserVerificationWithProviders(workOrder, runtime = {}) {
     const preferred = preferredProvider(workOrder, runtime);
     if (preferred === "none")
         return [];
-    const context = { workOrder, runtime };
-    const ordered = orderedProviders(preferred);
+    const hasExistingSessionChecks = workOrder.projects.some(project => (0, shared_1.checksForProject)(project, workOrder.acceptanceCriteria).some(existing_session_1.browserCheckUsesExistingSession));
+    const hasStandardChecks = workOrder.projects.some(project => (0, shared_1.checksForProject)(project, workOrder.acceptanceCriteria).some(check => !(0, existing_session_1.browserCheckUsesExistingSession)(check)));
+    const results = [];
+    if (hasStandardChecks) {
+        const standardFilter = (_project, check) => !(0, existing_session_1.browserCheckUsesExistingSession)(check);
+        if (preferred === "mcp") {
+            const playwrightRequiredFilter = (_project, check, index) => standardFilter(_project, check, index)
+                && (0, provider_routing_1.browserProviderRouteForCheck)(workOrder, check, preferred).provider === "playwright";
+            const mcpCompatibleFilter = (_project, check, index) => standardFilter(_project, check, index)
+                && (0, provider_routing_1.browserProviderRouteForCheck)(workOrder, check, preferred).provider === "mcp";
+            if (hasChecksMatching(workOrder, mcpCompatibleFilter)) {
+                results.push(...await runProviderChain(workOrder, runtime, [mcp_provider_1.McpBrowserProvider, playwright_provider_1.PlaywrightBrowserProvider], mcpCompatibleFilter));
+            }
+            if (hasChecksMatching(workOrder, playwrightRequiredFilter)) {
+                results.push(...await runProviderChain(workOrder, runtime, [playwright_provider_1.PlaywrightBrowserProvider], playwrightRequiredFilter));
+            }
+        }
+        else {
+            results.push(...await runProviderChain(workOrder, runtime, orderedProviders(preferred), standardFilter));
+        }
+    }
+    if (hasExistingSessionChecks) {
+        results.push(...await runProviderChain(workOrder, runtime, [mcp_provider_1.McpBrowserProvider], (_project, check) => (0, existing_session_1.browserCheckUsesExistingSession)(check)));
+    }
+    return results.length ? results : [(0, provider_types_1.blockedBrowserResult)("none", "Browser verification", "No browser checks were routed to a provider.")];
+}
+function hasChecksMatching(workOrder, checkFilter) {
+    return workOrder.projects.some(project => (0, shared_1.checksForProject)(project, workOrder.acceptanceCriteria)
+        .some((check, index) => checkFilter(project, check, index)));
+}
+async function runProviderChain(workOrder, runtime, providers, checkFilter) {
+    const context = { workOrder, runtime, checkFilter };
     const blocked = [];
-    for (const provider of ordered) {
+    for (const provider of providers) {
         const availability = await provider.availability(context);
         if (!availability.available) {
             blocked.push((0, provider_types_1.blockedBrowserResult)(provider.id, `${provider.label} availability`, availability.reason || "provider unavailable"));

@@ -2255,9 +2255,12 @@ function bootstrapServerRuntime(startupCollabCtx: any, port: number) {
   if (soakResume.resumed) console.log("[Soak Test] 已恢复未完成的稳定性浸泡测试");
   const resumeResult = resumeTaskQueues(startupCollabCtx);
   if (resumeResult.total > 0) {
-    console.log(resumeResult.manual_recovery
-      ? `[任务队列] 启动发现 ${resumeResult.total} 个可恢复自动任务，已进入手动恢复模式`
-      : `[任务队列] 启动恢复 ${resumeResult.resumed}/${resumeResult.total} 个自动执行任务`);
+    console.log(
+      `[任务队列] 启动恢复检查 ${resumeResult.total} 个未完成任务：`
+      + `已自动接上 ${resumeResult.auto_resumed || resumeResult.resumed || 0} 个，`
+      + `等待确认 ${resumeResult.manual_pending || 0} 个，`
+      + `跳过 ${resumeResult.skipped || 0} 个`,
+    );
   }
 }
 

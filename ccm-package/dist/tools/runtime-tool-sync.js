@@ -854,7 +854,7 @@ function loadCodexLocalAccessConfig() {
             return null;
         const apiUrl = tomlQuotedValue(section, "base_url").replace(/\/+$/, "");
         const apiKey = tomlQuotedValue(section, "experimental_bearer_token");
-        const model = tomlQuotedValue(text, "model") || "gpt-5.5";
+        const model = tomlQuotedValue(text, "model") || "gpt5.6-sol";
         if (!apiUrl || !apiKey || !model)
             return null;
         return {

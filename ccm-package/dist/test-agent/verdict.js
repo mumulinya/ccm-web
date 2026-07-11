@@ -39,6 +39,13 @@ function nextActionsFor(report, failedRequired, unknownRequired) {
     }
     if (report.status === "failed") {
         const failed = failedRequired.map(item => item.check).join(", ");
+        if (report.acceptanceEvidenceGateSummary.status === "failed") {
+            return [
+                `Route the task back for rework on failed acceptance criteria: ${report.acceptanceEvidenceGateSummary.failedCriteria.join(", ") || "see acceptance coverage"}.`,
+                "Use the criterion-linked command, HTTP, or browser evidence in the report to diagnose the failure.",
+                "Run TestAgent again after rework produces new criterion-linked evidence.",
+            ];
+        }
         return [
             `Route the task back for rework${failed ? ` on required checks: ${failed}` : ""}.`,
             "Use failed command, HTTP, browser, and acceptance evidence from the report before changing code.",
@@ -47,6 +54,30 @@ function nextActionsFor(report, failedRequired, unknownRequired) {
     }
     if (report.status === "partial") {
         const unknown = unknownRequired.map(item => item.check).join(", ");
+        if (report.adversarialEvidenceSummary.status === "missing" && report.adversarialEvidenceSummary.required) {
+            return [
+                "Run at least one relevant adversarial probe and record its actual result before accepting the delivery.",
+                "Use a boundary, invalid-input, idempotency, orphan-operation, concurrency, or equivalent product-specific probe.",
+            ];
+        }
+        if (report.adversarialEvidenceSummary.status === "unlinked" && report.adversarialEvidenceSummary.required) {
+            return [
+                "Add or rerun an adversarial probe that is explicitly linked to the original goal or an exact acceptance criterion.",
+                "Set coversAcceptanceCriteria on the probe, or use a product-specific probe name, target, and intent that clearly establish relevance.",
+            ];
+        }
+        if (report.acceptanceEvidenceGateSummary.status === "weak") {
+            return [
+                `Add criterion-linked execution evidence for: ${report.acceptanceEvidenceGateSummary.weakCriteria.join(", ") || "the acceptance criteria"}.`,
+                "Do not accept a delivery from a passing overall command alone; prove each criterion with matching command output, HTTP assertions, or browser observations.",
+            ];
+        }
+        if (report.acceptanceEvidenceGateSummary.status === "incomplete") {
+            return [
+                `Run checks that directly cover the unresolved acceptance criteria: ${report.acceptanceEvidenceGateSummary.incompleteCriteria.join(", ") || "see acceptance coverage"}.`,
+                "Record exact command output, HTTP assertions, or browser observations that can be matched to each criterion.",
+            ];
+        }
         return [
             `Resolve incomplete verification coverage${unknown ? `: ${unknown}` : ""}.`,
             "Treat passed evidence as partial only; do not accept until missing required checks are verified or explicitly waived.",
@@ -62,7 +93,10 @@ function buildTestAgentVerdict(report) {
     const unknownRequiredChecks = report.requiredCheckCoverage.filter(item => item.status === "unknown");
     const failedAcceptanceCriteria = report.acceptanceCoverage.filter(item => item.status === "not_verified");
     const unknownAcceptanceCriteria = report.acceptanceCoverage.filter(item => item.status === "unknown");
-    const canAccept = report.status === "passed" && report.recommendation === "accept";
+    const canAccept = report.status === "passed"
+        && report.recommendation === "accept"
+        && ["verified", "waived"].includes(report.adversarialEvidenceSummary.status)
+        && report.acceptanceEvidenceGateSummary.canAccept;
     const requiredCheckSummary = (0, required_check_summary_1.buildRequiredCheckSummary)(report.requiredCheckCoverage);
     const acceptanceSummary = (0, acceptance_summary_1.buildAcceptanceSummary)(report.acceptanceCoverage);
     return {
@@ -91,6 +125,10 @@ function buildTestAgentVerdict(report) {
             commands: countStatuses(report.commandResults),
             devServers: countStatuses(report.devServerResults),
             httpChecks: countStatuses(report.httpResults),
+            httpConcurrencyChecks: report.httpConcurrencySummary?.checks || 0,
+            httpConcurrentRequests: report.httpConcurrencySummary?.requests || 0,
+            httpConcurrentFailed: report.httpConcurrencySummary?.failed || 0,
+            httpConcurrentBlocked: report.httpConcurrencySummary?.blocked || 0,
             browserChecks: countStatuses(report.browserResults),
             browserToolCalls: countStatuses(report.browserToolCalls),
             browserNetworkErrors: browserNetworkErrorCount(report),
@@ -98,11 +136,49 @@ function buildTestAgentVerdict(report) {
             browserFailedActions: browserInteractionCount(report, "failedActions"),
             browserAssertions: browserInteractionCount(report, "assertionCount"),
             browserFailedAssertions: browserInteractionCount(report, "failedAssertions"),
+            browserAcceptanceFlows: report.browserFlowSummary?.total || 0,
+            browserFailedAcceptanceFlows: (report.browserFlowSummary?.statusCounts.failed || 0) + (report.browserFlowSummary?.statusCounts.blocked || 0),
+            browserMultiSessionScenarios: report.browserMultiSessionSummary?.total || 0,
+            browserMultiSessionSessions: report.browserMultiSessionSummary?.sessionCount || 0,
+            browserMultiSessionParallelGroups: report.browserMultiSessionSummary?.parallelGroupCount || 0,
+            browserMultiSessionComparisons: report.browserMultiSessionSummary?.comparisonCount || 0,
+            browserFailedSessionComparisons: report.browserMultiSessionSummary?.failedComparisonCount || 0,
+            browserFailedMultiSessionScenarios: (report.browserMultiSessionSummary?.statusCounts.failed || 0) + (report.browserMultiSessionSummary?.statusCounts.blocked || 0),
+            browserStabilityGroups: report.browserStabilitySummary?.total || 0,
+            browserFlakyStabilityGroups: report.browserStabilitySummary?.statusCounts.flaky || 0,
+            browserStabilityRuns: report.browserStabilitySummary?.runCount || 0,
+            browserFailedStabilityRuns: report.browserStabilitySummary?.failedRunCount || 0,
+            browserRecoveryAttempts: report.browserRecoverySummary?.attempted || 0,
+            browserRecoveredOperations: report.browserRecoverySummary?.recovered || 0,
+            browserFailedRecoveries: report.browserRecoverySummary?.failed || 0,
+            browserUnsafeRetriesPrevented: report.browserRecoverySummary?.notRetried || 0,
+            browserActionEffectChecks: report.browserActionEffectSummary?.checks || 0,
+            browserActionEffects: report.browserActionEffectSummary?.actions || 0,
+            browserFailedActionEffects: report.browserActionEffectSummary?.failed || 0,
+            browserCrossSessionActionEffects: report.browserActionEffectSummary?.crossSession || 0,
+            adversarialProbes: report.adversarialEvidenceSummary.total,
+            adversarialPassed: report.adversarialEvidenceSummary.passed,
+            adversarialFailed: report.adversarialEvidenceSummary.failed,
+            adversarialBlocked: report.adversarialEvidenceSummary.blocked,
+            adversarialRelevant: report.adversarialEvidenceSummary.relevant,
+            adversarialUnlinked: report.adversarialEvidenceSummary.unlinked,
+            adversarialPassedRelevant: report.adversarialEvidenceSummary.passedRelevant,
+            acceptanceMatchedEvidence: report.acceptanceEvidenceGateSummary.matchedEvidence,
+            acceptanceFallbackEvidence: report.acceptanceEvidenceGateSummary.fallbackEvidence,
+            acceptanceMissingEvidence: report.acceptanceEvidenceGateSummary.missingEvidence,
             browserProviderGaps: (report.browserProviderGaps || []).length,
             artifacts: report.evidence.filter(item => item.type === "artifact" && item.path).length,
         },
         browserNetworkSummary: report.browserNetworkSummary || [],
+        httpConcurrencySummary: report.httpConcurrencySummary,
         browserInteractionSummary: report.browserInteractionSummary || [],
+        browserFlowSummary: report.browserFlowSummary,
+        browserMultiSessionSummary: report.browserMultiSessionSummary,
+        browserStabilitySummary: report.browserStabilitySummary,
+        browserRecoverySummary: report.browserRecoverySummary,
+        browserActionEffectSummary: report.browserActionEffectSummary,
+        adversarialEvidenceSummary: report.adversarialEvidenceSummary,
+        acceptanceEvidenceGateSummary: report.acceptanceEvidenceGateSummary,
         browserProviderSummary: report.browserProviderSummary,
         browserProviderGaps: report.browserProviderGaps || [],
         failureSummary: report.failureSummary || [],

@@ -7,7 +7,7 @@ const props = defineProps({
   accentStyle: { type: Object, default: () => ({}) },
   actionLoading: { type: Object, default: () => ({}) },
   highlightMentions: { type: Function, default: (value) => value || '' },
-  getAgentDisplayName: { type: Function, default: (agent) => agent || 'Agent' },
+  getAgentDisplayName: { type: Function, default: (agent) => agent || '执行成员' },
 })
 
 const emit = defineEmits(['action'])

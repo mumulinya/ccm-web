@@ -88,6 +88,14 @@ export declare function buildTaskDeliveryReport(task: any, summary: any, status:
     acceptance: string[];
     independent_review: string[];
     independentReview: string[];
+    post_review_spot_check: string[];
+    postReviewSpotCheck: string[];
+    post_review_spot_check_gate: any;
+    postReviewSpotCheckGate: any;
+    post_review_spot_check_summary: any;
+    postReviewSpotCheckSummary: any;
+    post_review_spot_check_required: boolean;
+    post_review_spot_check_gate_passed: boolean;
     risks: string[];
     next_action: string;
     final_summary_quality: {

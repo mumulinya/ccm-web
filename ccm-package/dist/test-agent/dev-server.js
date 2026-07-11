@@ -3,10 +3,16 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.startDevServersForBrowserChecks = startDevServersForBrowserChecks;
 const child_process_1 = require("child_process");
 const utils_1 = require("./utils");
+const existing_session_1 = require("./browser/existing-session");
+const shared_1 = require("./browser/shared");
 function browserChecksRequested(workOrder) {
     if ((0, utils_1.hasRequiredCheck)(workOrder.requiredChecks, /browser|e2e|screenshot|console|http|api/i))
         return true;
     return workOrder.projects.some(project => !!project.targetUrl || project.browserChecks.length > 0 || project.httpChecks.length > 0 || project.adversarialHttpChecks.length > 0);
+}
+function projectUsesOnlyExistingBrowserSession(workOrder, project) {
+    const checks = (0, shared_1.checksForProject)(project, workOrder.acceptanceCriteria);
+    return checks.length > 0 && checks.every(existing_session_1.browserCheckUsesExistingSession);
 }
 async function probeUrl(url, timeoutMs = 3000) {
     if (!url)
@@ -102,6 +108,12 @@ async function startDevServersForBrowserChecks(workOrder) {
     for (const project of workOrder.projects) {
         if (!project.targetUrl && !project.startupUrl && !project.browserChecks.length && !project.httpChecks.length && !project.adversarialHttpChecks.length)
             continue;
+        if (!project.devServerCommand
+            && !project.httpChecks.length
+            && !project.adversarialHttpChecks.length
+            && projectUsesOnlyExistingBrowserSession(workOrder, project)) {
+            continue;
+        }
         servers.push(await startProjectServer(project, workOrder.options.maxOutputChars));
     }
     return servers;

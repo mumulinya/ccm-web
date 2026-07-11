@@ -58,6 +58,8 @@ const loop_1 = require("../../agents/global/loop");
 const mission_supervisor_1 = require("../../agents/global/mission-supervisor");
 const memory_3 = require("../../agents/global/memory");
 const quality_center_1 = require("../../agents/quality-center");
+const test_agent_review_bridge_1 = require("../../agents/test-agent-review-bridge");
+const post_review_spot_check_1 = require("../../agents/post-review-spot-check");
 const agent_sessions_1 = require("../../tasks/agent-sessions");
 const reasoning_loop_1 = require("../../agents/reasoning-loop");
 const runtime_kernel_1 = require("../../agents/runtime-kernel");
@@ -395,7 +397,7 @@ function buildGlobalAgentEventUi(event = {}) {
             dispatchSummary?.headline || (targets ? `我已把这次需求交给：${targets}。` : ""),
             dispatchSummary?.next_action ? `下一步：${dispatchSummary.next_action}` : "",
         ].filter(Boolean).join(" ");
-        return text(parts, 280, "派发已发出，正在等待下游执行目标更新结果。");
+        return text(parts, 280, "派发已发出，正在等待执行目标更新结果。");
     };
     const withCheckpoint = (ui) => ({
         ...ui,
@@ -422,6 +424,18 @@ function buildGlobalAgentEventUi(event = {}) {
     }
     if (type === "started")
         return withCheckpoint({ phase: "understanding", tone: "running", title: "理解需求", text: "正在理解你的消息，判断是普通对话还是需要执行操作。" });
+    if (type === "user_steer_applied") {
+        const steering = event.steering || event.user_steer || event.userSteer || {};
+        const revised = steering.kind === "revise_goal" || event.replan_required === true;
+        return withCheckpoint({
+            phase: revised ? "planning" : "understanding",
+            tone: "running",
+            title: revised ? "目标调整已纳入" : "补充要求已纳入",
+            text: text(event.message, 260, revised
+                ? "新的目标边界已纳入，我会先重新核对计划再继续。"
+                : "补充要求已纳入当前任务，我会带着它继续处理。"),
+        });
+    }
     if (type === "test_agent_execution_plan_ready") {
         const plan = event.test_agent_execution_plan || event.testAgentExecutionPlan || event.technical?.test_agent_execution_plan || null;
         const blocked = plan?.valid === false || String(event.status || "").toLowerCase() === "warn";
@@ -437,12 +451,12 @@ function buildGlobalAgentEventUi(event = {}) {
     if (type === "test_agent_review_ready") {
         const summary = event.test_agent_review_summary || event.testAgentReviewSummary || event.independent_review_summary || event.independentReviewSummary || {};
         const reviewRows = globalSafeArray(summary.rows)
-            .filter((item) => /返工重点|排查建议|待处理/i.test(String(item || "")))
+            .filter((item) => /返工重点|排查建议|待处理|操作结果验证|浏览器会话恢复|边界与异常验证|重新复验/i.test(String(item || "")))
             .slice(0, 2)
             .join(" ");
         return withCheckpoint({
             phase: "reviewing",
-            tone: summary.status === "passed" ? "ok" : summary.status === "needs_rework" || summary.status === "needs_user" ? "waiting" : "running",
+            tone: summary.status === "passed" ? "ok" : ["needs_rework", "needs_recheck", "needs_user"].includes(summary.status) ? "waiting" : "running",
             title: summary.title || "独立复核",
             text: text([summary.headline || event.detail, reviewRows].filter(Boolean).join(" "), 360, "TestAgent 已提交独立复核结论，我会纳入最终验收。"),
         });
@@ -521,7 +535,7 @@ function relayGlobalPetEvent(ctx, event = {}, options = {}) {
     }
     if (type === "dispatch_launch_summary") {
         const summary = event.dispatch_launch_summary || event.dispatchLaunchSummary || {};
-        const message = globalVisibleText(summary.headline || summary.next_action, "派发已发出，正在等待下游执行目标更新结果。", 180);
+        const message = globalVisibleText(summary.headline || summary.next_action, "派发已发出，正在等待执行目标更新结果。", 180);
         ctx.setAgentActivity(GLOBAL_PET_AGENT_NAME, "building", compactPetText(message), { tab: "global-agent" }, 90 * 1000);
         speech("status", message, false);
         return;
@@ -1394,7 +1408,7 @@ function inferLocalGlobalAction(message, projects, groups, resources = {}) {
         const targets = buildLocalDevelopmentTargets(text, projects, groups);
         if (targets.length > 0) {
             return {
-                reply: "我会把这条业务需求交给全局总控流程，建立跨项目计划并向 " + targets.length + " 个执行目标派发持久任务。",
+                reply: "我会建立跨项目执行计划，并把任务交给 " + targets.length + " 个执行目标持续跟进。",
                 action: {
                     type: "orchestrate_development",
                     params: {
@@ -1414,7 +1428,7 @@ function inferLocalGlobalAction(message, projects, groups, resources = {}) {
         const group = matchedGroup || null;
         if (group) {
             return {
-                reply: `我会把这条指令下发到群聊「${group.name || group.id}」的主 Agent。`,
+                reply: `我会把这项工作交给协作群「${group.name || group.id}」继续拆分和跟进。`,
                 action: {
                     type: "send_group_cmd",
                     params: { group_id: group.id, message: text, target_project: "coordinator" }
@@ -1424,7 +1438,7 @@ function inferLocalGlobalAction(message, projects, groups, resources = {}) {
     }
     if (matchedProject && /(修改|修复|改一下|处理|实现|新增|删除|优化|项目\s*agent|项目agent)/.test(text)) {
         return {
-            reply: `我会把这条修改指令发送给项目 Agent「${matchedProject}」。`,
+            reply: `我会把这项工作交给项目「${matchedProject}」的执行成员。`,
             action: { type: "send_project_cmd", params: { project: matchedProject, message: text } }
         };
     }
@@ -1550,6 +1564,14 @@ function runGlobalAgentIntentSelfTest() {
     const fallbackDelegationCannotWrite = modelUnavailableDelegation?.state === "answer" && !modelUnavailableDelegation.tool;
     const localGroupDispatch = inferLocalGlobalAction("给开发群派发任务，修复登录问题", projects, groups, {});
     const localGroupDispatchUsesSchema = localGroupDispatch?.action?.params?.group_id === "dev-group" && !("groupId" in (localGroupDispatch?.action?.params || {}));
+    const localProjectDispatch = inferLocalGlobalAction("我明确授权：现在给 backend-api 运行测试，影响范围仅限测试，不修改代码", projects, groups, {});
+    const localDevelopmentDispatch = inferLocalGlobalAction("请优化整个项目的知识库检索，并完成测试", projects, groups, {});
+    const localDispatchRepliesFriendly = localGroupDispatch?.reply?.includes("协作群「开发群」")
+        && !/主\s*Agent|项目\s*Agent/.test(localGroupDispatch.reply)
+        && localProjectDispatch?.reply?.includes("项目「backend-api」的执行成员")
+        && !/主\s*Agent|项目\s*Agent/.test(localProjectDispatch.reply)
+        && localDevelopmentDispatch?.reply?.includes("跨项目执行计划")
+        && !localDevelopmentDispatch?.reply?.includes("全局总控流程");
     const modelUnavailableCronCreate = localActionToAgenticDecision({ reply: "准备创建定时任务", action: { type: "manage_cron", params: { operation: "create", name: "检查 backend-api", schedule: "0 8 * * *", prompt: "检查 backend-api" } } }, { steps: [], user_message: "创建一个每天早上八点检查 backend-api 的定时任务", explicit_write_authorization: true });
     const fallbackCronCannotWrite = modelUnavailableCronCreate?.state === "answer" && !modelUnavailableCronCreate.tool;
     const modelUnavailableAmbiguousWrite = localActionToAgenticDecision({ reply: "准备派发", action: { type: "create_task", params: { title: "优化", business_goal: "帮我优化一下" } } }, { steps: [], user_message: "帮我优化一下", explicit_write_authorization: true });
@@ -1597,6 +1619,14 @@ function runGlobalAgentIntentSelfTest() {
         message: "运行测试并总结失败项",
         originalText: "我明确授权：现在给 backend-api 运行测试，影响范围仅限测试，不修改代码",
         handoff: directProjectDispatch.handoff,
+    });
+    const supervisedSingleProjectPayload = buildGlobalSingleProjectMissionPayload({
+        project: "backend-api",
+        message: "修复登录恢复并运行测试",
+        originalText: "给 backend-api 修复登录恢复并完成独立验收",
+        traceId: "trace-single-project-supervision",
+        globalRunId: "global-run-single-project-supervision",
+        sessionId: "session-single-project-supervision",
     });
     const feishuDevelopmentVisible = formatGlobalDevelopmentDispatchVisibleResult({
         mission: { id: "mission-secret-1", title: "修复登录链路" },
@@ -1677,6 +1707,76 @@ function runGlobalAgentIntentSelfTest() {
         },
     }, { globalRunId: "global-run-test-agent-not-verified", traceId: "trace-test-agent-not-verified" });
     const notVerifiedCoverageTestAgentUi = buildGlobalAgentEventUi(notVerifiedCoverageTestAgentRelay || {});
+    const passedSpotCheckTestAgentRelay = compactGlobalTestAgentReviewRelayEvent({
+        type: "test_agent_review_ready",
+        agent: "TestAgent",
+        detail: "TestAgent 独立复核完成，报告已返回。",
+        test_agent_report: {
+            schema: "ccm-test-agent-report-v1",
+            id: "global-test-agent-report-spot-check-passed",
+            status: "passed",
+            recommendation: "accept",
+            requiredCheckCoverage: [{ check: "commands", status: "verified", evidence: ["命令验证已通过"] }],
+            acceptanceCoverage: [{ criterion: "登录恢复验证必须通过", status: "verified", evidence: ["验证已通过"] }],
+            evidence: [],
+        },
+        test_agent_verdict: { status: "passed", recommendation: "accept", canAccept: true },
+        technical: {
+            post_review_spot_check: {
+                schema: "ccm-main-agent-post-review-spot-check-v1",
+                required: true,
+                pass: true,
+                status: "passed",
+                executed_count: 2,
+                passed_count: 2,
+                mismatch_count: 0,
+                checks: [{
+                        command: "node scripts/private-global-pass.mjs",
+                        cwd: "C:/private/global-pass",
+                        review_exit_code: 0,
+                        observed_exit_code: 0,
+                        matches_review: true,
+                    }],
+                headline: "我已抽查 2 项验证，结果与 TestAgent 的通过结论一致。",
+                next_action: "继续完成最终验收。",
+            },
+        },
+    }, { globalRunId: "global-run-test-agent-spot-check-passed", traceId: "trace-test-agent-spot-check-passed" });
+    const mismatchedSpotCheckTestAgentRelay = compactGlobalTestAgentReviewRelayEvent({
+        type: "test_agent_review_ready",
+        agent: "TestAgent",
+        detail: "TestAgent 独立复核完成，报告已返回。",
+        test_agent_report: {
+            schema: "ccm-test-agent-report-v1",
+            id: "global-test-agent-report-spot-check-mismatch",
+            status: "passed",
+            recommendation: "accept",
+            requiredCheckCoverage: [{ check: "commands", status: "verified", evidence: ["命令验证已通过"] }],
+            acceptanceCoverage: [{ criterion: "登录恢复验证必须通过", status: "verified", evidence: ["验证已通过"] }],
+            evidence: [],
+        },
+        test_agent_verdict: { status: "passed", recommendation: "accept", canAccept: true },
+        technical: {
+            post_review_spot_check: {
+                schema: "ccm-main-agent-post-review-spot-check-v1",
+                required: true,
+                pass: false,
+                status: "needs_recheck",
+                executed_count: 2,
+                passed_count: 1,
+                mismatch_count: 1,
+                checks: [{
+                        command: "node scripts/private-global-mismatch.mjs",
+                        cwd: "C:/private/global-mismatch",
+                        review_exit_code: 0,
+                        observed_exit_code: 3,
+                        matches_review: false,
+                    }],
+                headline: "TestAgent 已通过，但我的完成前抽查有 1 项结果不一致。",
+                next_action: "沿用原复核工作单重新运行 TestAgent，并再次抽查关键验证。",
+            },
+        },
+    }, { globalRunId: "global-run-test-agent-spot-check-mismatch", traceId: "trace-test-agent-spot-check-mismatch" });
     const summaryOnlyGapTestAgentRelay = compactGlobalTestAgentReviewRelayEvent({
         type: "test_agent_review_ready",
         agent: "TestAgent",
@@ -1754,6 +1854,292 @@ function runGlobalAgentIntentSelfTest() {
         },
     }, { globalRunId: "global-run-test-agent-weak-summary", traceId: "trace-test-agent-weak-summary" });
     const weakSummaryTestAgentUi = buildGlobalAgentEventUi(weakSummaryTestAgentRelay || {});
+    const failedBrowserFlowTestAgentRelay = compactGlobalTestAgentReviewRelayEvent({
+        type: "test_agent_review_ready",
+        agent: "TestAgent",
+        detail: "TestAgent 独立复核完成，报告已返回。",
+        test_agent_report: {
+            schema: "ccm-test-agent-report-v1",
+            id: "global-test-agent-report-browser-flow-failed",
+            status: "passed",
+            recommendation: "accept",
+            summary: "Legacy verdict says pass, but a real browser acceptance flow failed.",
+            requiredCheckCoverage: [],
+            acceptanceCoverage: [],
+            browserFlowSummary: {
+                total: 2,
+                statusCounts: { passed: 1, failed: 1, blocked: 0, skipped: 0 },
+                flowTypeCount: 1,
+                criteriaCount: 2,
+                actionCount: 4,
+                assertionCount: 5,
+                failedStepCount: 1,
+                items: [{
+                        flowType: "acceptance_popup_flow",
+                        total: 2,
+                        statusCounts: { passed: 1, failed: 1, blocked: 0, skipped: 0 },
+                        criteriaCount: 2,
+                        criteria: ["打开设置弹窗后可以保存"],
+                        projects: ["web"],
+                        providers: ["playwright"],
+                        actionCount: 4,
+                        assertionCount: 5,
+                        failedStepCount: 1,
+                        failures: [{ project: "web", name: "设置弹窗", status: "failed", failedSteps: ["raw locator"] }],
+                    }],
+            },
+            evidence: [],
+        },
+        test_agent_verdict: { status: "passed", recommendation: "accept", canAccept: true },
+    }, { globalRunId: "global-run-test-agent-browser-flow", traceId: "trace-test-agent-browser-flow" });
+    const failedMultiSessionTestAgentRelay = compactGlobalTestAgentReviewRelayEvent({
+        type: "test_agent_review_ready",
+        agent: "TestAgent",
+        detail: "TestAgent 独立复核完成，报告已返回。",
+        test_agent_report: {
+            schema: "ccm-test-agent-report-v1",
+            id: "global-test-agent-report-multi-session-failed",
+            status: "passed",
+            recommendation: "accept",
+            summary: "Legacy verdict says pass, but the observer session did not receive the update.",
+            requiredCheckCoverage: [],
+            acceptanceCoverage: [],
+            browserMultiSessionSummary: {
+                total: 2,
+                statusCounts: { passed: 1, failed: 1, blocked: 0, skipped: 0 },
+                sessionCount: 4,
+                uniqueSessionCount: 4,
+                sessionNames: ["sender", "receiver", "author", "observer"],
+                parallelGroupCount: 2,
+                comparisonCount: 2,
+                failedComparisonCount: 1,
+                actionCount: 7,
+                assertionCount: 8,
+                failedStepCount: 1,
+                items: [{
+                        check: "发送消息后接收方实时看到",
+                        status: "passed",
+                        sessionNames: ["sender", "receiver"],
+                        comparisonCount: 1,
+                        failedComparisonCount: 0,
+                        failedSessionNames: [],
+                        failedSteps: [],
+                    }, {
+                        check: "作者更新后观察方同步刷新",
+                        status: "failed",
+                        sessionNames: ["author", "observer"],
+                        comparisonCount: 1,
+                        failedComparisonCount: 1,
+                        failedSessionNames: ["observer"],
+                        failedSteps: [{ name: "session:observer:assert:visible", error: "locator=#raw-observer" }],
+                    }],
+            },
+            browserActionEffectSummary: {
+                checks: 1,
+                actions: 1,
+                changed: 0,
+                unchanged: 1,
+                unavailable: 0,
+                failed: 1,
+                detailSuppressed: 0,
+                crossSession: 1,
+                actionTypes: { click: 1 },
+                changedSignals: { url: 0, title: 0, page_text: 0, dom: 0, network: 0, dialog: 0, popup: 0, download: 0 },
+                items: [{
+                        project: "web",
+                        name: "观察方刷新",
+                        provider: "playwright",
+                        status: "failed",
+                        actions: 1,
+                        changed: 0,
+                        unchanged: 1,
+                        unavailable: 0,
+                        failed: 1,
+                        detailSuppressed: 0,
+                        crossSession: 1,
+                        actionTypes: { click: 1 },
+                        changedSignals: { url: 0, title: 0, page_text: 0, dom: 0, network: 0, dialog: 0, popup: 0, download: 0 },
+                    }],
+            },
+            adversarialEvidenceSummary: {
+                required: true,
+                waived: false,
+                status: "failed",
+                total: 1,
+                passed: 0,
+                failed: 1,
+                blocked: 0,
+                skipped: 0,
+                http: 0,
+                browser: 1,
+                relevant: 1,
+                unlinked: 0,
+                passedRelevant: 0,
+                goalLinked: 1,
+                criteriaCovered: ["观察方断线重连后不能丢失更新"],
+                probeTypes: ["session_reconnect"],
+                items: [{
+                        project: "web",
+                        surface: "browser",
+                        name: "观察方断线重连",
+                        target: "http://127.0.0.1:5173/collaboration?token=hidden",
+                        status: "failed",
+                        probeType: "session_reconnect",
+                        provider: "playwright",
+                        relevance: "explicit",
+                        linkedCriteria: ["观察方断线重连后不能丢失更新"],
+                        goalLinked: true,
+                        matchScore: 100,
+                    }],
+            },
+            evidence: [],
+        },
+        test_agent_verdict: { status: "passed", recommendation: "accept", canAccept: true },
+    }, { globalRunId: "global-run-test-agent-multi-session", traceId: "trace-test-agent-multi-session" });
+    const needsRecheckTestAgentRelay = compactGlobalTestAgentReviewRelayEvent({
+        type: "test_agent_review_ready",
+        agent: "TestAgent",
+        detail: "TestAgent 独立复核完成，报告已返回。",
+        test_agent_report: {
+            schema: "ccm-test-agent-report-v1",
+            id: "global-test-agent-report-needs-recheck",
+            status: "passed",
+            recommendation: "accept",
+            summary: "Legacy verdict says pass, but action effects, recovery, and adversarial evidence are incomplete.",
+            requiredCheckCoverage: [],
+            acceptanceCoverage: [],
+            browserActionEffectSummary: {
+                checks: 1,
+                actions: 1,
+                changed: 0,
+                unchanged: 0,
+                unavailable: 1,
+                failed: 1,
+                detailSuppressed: 1,
+                crossSession: 0,
+                actionTypes: { click: 1 },
+                changedSignals: { url: 0, title: 0, page_text: 0, dom: 0, network: 0, dialog: 0, popup: 0, download: 0 },
+                items: [{
+                        project: "web",
+                        name: "提交登录表单",
+                        provider: "playwright",
+                        status: "blocked",
+                        actions: 1,
+                        changed: 0,
+                        unchanged: 0,
+                        unavailable: 1,
+                        failed: 1,
+                        detailSuppressed: 1,
+                        crossSession: 0,
+                        actionTypes: { click: 1 },
+                        changedSignals: { url: 0, title: 0, page_text: 0, dom: 0, network: 0, dialog: 0, popup: 0, download: 0 },
+                    }],
+            },
+            browserRecoverySummary: {
+                checks: 1,
+                attempted: 1,
+                recovered: 0,
+                failed: 0,
+                notRetried: 1,
+                items: [{
+                        project: "web",
+                        name: "提交登录表单",
+                        provider: "playwright",
+                        status: "blocked",
+                        attempted: 1,
+                        recovered: 0,
+                        failed: 0,
+                        notRetried: 1,
+                        events: [{ reason: "unsafe duplicate side effect", sessionId: "global-hidden-session" }],
+                    }],
+            },
+            adversarialEvidenceSummary: {
+                required: true,
+                waived: false,
+                status: "missing",
+                total: 0,
+                passed: 0,
+                failed: 0,
+                blocked: 0,
+                skipped: 0,
+                http: 0,
+                browser: 0,
+                relevant: 0,
+                unlinked: 0,
+                passedRelevant: 0,
+                goalLinked: 0,
+                criteriaCovered: [],
+                probeTypes: [],
+                items: [],
+            },
+            evidence: [],
+        },
+        test_agent_verdict: {
+            status: "passed",
+            recommendation: "accept",
+            canAccept: true,
+            needsRework: false,
+            needsHuman: false,
+        },
+    }, { globalRunId: "global-run-test-agent-needs-recheck", traceId: "trace-test-agent-needs-recheck" });
+    const needsRecheckTestAgentUi = buildGlobalAgentEventUi(needsRecheckTestAgentRelay || {});
+    const failedAuthenticationTestAgentRelay = compactGlobalTestAgentReviewRelayEvent({
+        type: "test_agent_review_ready",
+        agent: "TestAgent",
+        detail: "TestAgent 独立复核完成，报告已返回。",
+        test_agent_report: {
+            schema: "ccm-test-agent-report-v1",
+            id: "global-test-agent-report-authentication-failed",
+            status: "passed",
+            recommendation: "accept",
+            summary: "Legacy verdict says pass, but authenticated browser verification failed.",
+            metadata: {
+                browserAuthenticationSummary: {
+                    configuredChecks: 2,
+                    passedChecks: 1,
+                    failedChecks: 1,
+                    blockedChecks: 0,
+                    authenticatedSessions: 2,
+                    credentialEnvNames: ["GLOBAL_TEST_EMAIL", "GLOBAL_TEST_PASSWORD"],
+                    storageStateCount: 2,
+                    sensitiveArtifactSuppressionCount: 2,
+                },
+            },
+            requiredCheckCoverage: [],
+            acceptanceCoverage: [],
+            evidence: [],
+        },
+        test_agent_verdict: { status: "passed", recommendation: "accept", canAccept: true },
+    }, { globalRunId: "global-run-test-agent-authentication-failed", traceId: "trace-test-agent-authentication-failed" });
+    const blockedAuthenticationTestAgentRelay = compactGlobalTestAgentReviewRelayEvent({
+        type: "test_agent_review_ready",
+        agent: "TestAgent",
+        detail: "TestAgent 独立复核完成，报告已返回。",
+        test_agent_report: {
+            schema: "ccm-test-agent-report-v1",
+            id: "global-test-agent-report-authentication-blocked",
+            status: "passed",
+            recommendation: "accept",
+            summary: "Legacy verdict says pass, but authenticated browser verification is blocked.",
+            metadata: {
+                browserAuthenticationSummary: {
+                    configuredChecks: 1,
+                    passedChecks: 0,
+                    failedChecks: 0,
+                    blockedChecks: 1,
+                    authenticatedSessions: 0,
+                    credentialEnvNames: ["GLOBAL_TEST_EMAIL", "GLOBAL_TEST_PASSWORD"],
+                    storageStateCount: 1,
+                    sensitiveArtifactSuppressionCount: 1,
+                },
+            },
+            requiredCheckCoverage: [],
+            acceptanceCoverage: [],
+            evidence: [],
+        },
+        test_agent_verdict: { status: "passed", recommendation: "accept", canAccept: true },
+    }, { globalRunId: "global-run-test-agent-authentication-blocked", traceId: "trace-test-agent-authentication-blocked" });
+    const blockedAuthenticationTestAgentUi = buildGlobalAgentEventUi(blockedAuthenticationTestAgentRelay || {});
     const failureSummaryTestAgentRelay = compactGlobalTestAgentReviewRelayEvent({
         type: "test_agent_review_ready",
         agent: "TestAgent",
@@ -2149,10 +2535,30 @@ function runGlobalAgentIntentSelfTest() {
         projectInternalWorkOrderSelfContained: directProjectMessage.includes("全局主 Agent 指令工作单") && directProjectMessage.includes("你看不到用户和主 Agent 的完整历史对话") && directProjectMessage.includes("CCM_AGENT_RECEIPT"),
         directDispatchHandoffSummary: directGroupDispatch.summary.label === "工作单已补齐" && directProjectDispatch.summary.project === "backend-api",
         verificationOnlyCanAvoidCodeChanges: directProjectDispatch.handoff.verification.required.includes("说明产出和人工核验依据"),
+        singleProjectDispatchUsesPersistentMission: supervisedSingleProjectPayload.targets.length === 1
+            && supervisedSingleProjectPayload.targets[0].project === "backend-api"
+            && supervisedSingleProjectPayload.auto_execute === true
+            && supervisedSingleProjectPayload.single_project_supervision.independent_review_required === true
+            && supervisedSingleProjectPayload.single_project_supervision.post_review_spot_check_required === true,
+        singleProjectDispatchCarriesReviewAcceptance: supervisedSingleProjectPayload.acceptance.includes("TestAgent")
+            && supervisedSingleProjectPayload.acceptance.includes("主 Agent 抽查")
+            && supervisedSingleProjectPayload.targets[0].requires_independent_review === true,
         dispatchLaunchUiFriendly: dispatchLaunchUi?.title === "已派发的工作" && dispatchLaunchUi?.text.includes("dev-group") && dispatchLaunchUi?.checkpoint?.label === "已派发的工作",
         dispatchLaunchUiHidesProtocol: !/CCM_AGENT_RECEIPT|trace_id|raw payload/i.test(JSON.stringify(protocolDispatchLaunchUi || {})),
     };
     const testAgentRelayChecks = {
+        globalTestAgentPassedSpotCheckAllowsAcceptance: passedSpotCheckTestAgentRelay?.independentReviewSummary?.status === "passed"
+            && passedSpotCheckTestAgentRelay?.independentReview?.[0]?.verdict === "passed"
+            && passedSpotCheckTestAgentRelay?.independentReviewSummary?.headline.includes("我的关键验证抽查也已通过")
+            && passedSpotCheckTestAgentRelay?.independentReviewSummary?.rows.some((item) => item.includes("2 项结果一致"))
+            && !/private-global-pass|review_exit_code|observed_exit_code|C:\/private/i.test(JSON.stringify(passedSpotCheckTestAgentRelay?.independentReviewSummary || {})),
+        globalTestAgentSpotCheckMismatchOverridesLegacyPass: mismatchedSpotCheckTestAgentRelay?.independentReviewSummary?.status === "needs_recheck"
+            && mismatchedSpotCheckTestAgentRelay?.independentReviewSummary?.status_label === "需复验"
+            && mismatchedSpotCheckTestAgentRelay?.independentReview?.[0]?.verdict === "needs_recheck"
+            && mismatchedSpotCheckTestAgentRelay?.independentReviewSummary?.headline.includes("我的完成前抽查尚未一致")
+            && mismatchedSpotCheckTestAgentRelay?.independentReviewSummary?.next_action.includes("沿用原复核工作单重新运行 TestAgent")
+            && !mismatchedSpotCheckTestAgentRelay?.independentReviewSummary?.headline.includes("原实现成员返工")
+            && !/private-global-mismatch|review_exit_code|observed_exit_code|C:\/private/i.test(JSON.stringify(mismatchedSpotCheckTestAgentRelay?.independentReviewSummary || {})),
         globalTestAgentUnknownCoverageRelayNeedsUser: unknownCoverageTestAgentRelay?.independentReviewSummary?.status === "needs_user"
             && unknownCoverageTestAgentRelay?.independentReview?.[0]?.verdict === "needs_user"
             && unknownCoverageTestAgentRelay?.independentReviewSummary?.headline.includes("需要人工确认")
@@ -2187,6 +2593,44 @@ function runGlobalAgentIntentSelfTest() {
             && weakSummaryTestAgentUi?.text.includes("人工确认")
             && weakSummaryTestAgentUi?.text.includes("验收证据待确认")
             && !/fallback|single_criterion_report_status|ccm-test-agent-verdict-v1/i.test(JSON.stringify(weakSummaryTestAgentUi || {})),
+        globalTestAgentFailedBrowserFlowRelayNeedsRework: failedBrowserFlowTestAgentRelay?.independentReviewSummary?.status === "needs_rework"
+            && failedBrowserFlowTestAgentRelay?.independentReviewSummary?.rows.some((item) => item.includes("真实浏览器验收") && item.includes("1 个未通过"))
+            && failedBrowserFlowTestAgentRelay?.independentReviewSummary?.rows.some((item) => item.includes("弹窗流程") && item.includes("未通过"))
+            && !/acceptance_popup_flow|raw locator|ccm-test-agent-report/i.test(JSON.stringify(failedBrowserFlowTestAgentRelay?.independentReviewSummary || {})),
+        globalTestAgentFailedMultiSessionRelayNeedsRework: failedMultiSessionTestAgentRelay?.independentReviewSummary?.status === "needs_rework"
+            && failedMultiSessionTestAgentRelay?.independentReview?.[0]?.verdict === "needs_rework"
+            && failedMultiSessionTestAgentRelay?.independentReviewSummary?.rows.some((item) => item.includes("多人协作浏览器验收") && item.includes("1 个未通过"))
+            && failedMultiSessionTestAgentRelay?.independentReviewSummary?.rows.some((item) => item.includes("观察方") && item.includes("未通过"))
+            && failedMultiSessionTestAgentRelay?.independentReviewSummary?.rows.some((item) => item.includes("操作结果验证") && item.includes("没有产生可见效果"))
+            && failedMultiSessionTestAgentRelay?.independentReviewSummary?.rows.some((item) => item.includes("边界与异常验证") && item.includes("未通过"))
+            && !/session:observer|#raw-observer|locator|browserMultiSessionSummary|token=hidden|session_reconnect|playwright|ccm-test-agent-report/i.test(JSON.stringify(failedMultiSessionTestAgentRelay?.independentReviewSummary || {})),
+        globalTestAgentIncompleteLatestEvidenceNeedsRecheck: needsRecheckTestAgentRelay?.independentReviewSummary?.status === "needs_recheck"
+            && needsRecheckTestAgentRelay?.independentReviewSummary?.status_label === "需复验"
+            && needsRecheckTestAgentRelay?.independentReview?.[0]?.verdict === "needs_recheck"
+            && needsRecheckTestAgentRelay?.independentReviewSummary?.headline.includes("不会直接要求原实现成员返工")
+            && needsRecheckTestAgentRelay?.independentReviewSummary?.rows.some((item) => item.includes("暂时无法确认页面效果"))
+            && needsRecheckTestAgentRelay?.independentReviewSummary?.rows.some((item) => item.includes("不代表实现失败"))
+            && needsRecheckTestAgentRelay?.independentReviewSummary?.rows.some((item) => item.includes("TestAgent 工作单"))
+            && needsRecheckTestAgentRelay?.independentReviewSummary?.next_action.includes("重新运行 TestAgent")
+            && needsRecheckTestAgentUi?.tone === "waiting"
+            && needsRecheckTestAgentUi?.checkpoint?.status === "warning"
+            && !/global-hidden-session|unsafe duplicate side effect|sessionId|actionTypes|changedSignals|playwright/i.test(JSON.stringify({
+                summary: needsRecheckTestAgentRelay?.independentReviewSummary,
+                ui: needsRecheckTestAgentUi,
+            })),
+        globalTestAgentFailedAuthenticationOverridesLegacyPass: failedAuthenticationTestAgentRelay?.independentReviewSummary?.status === "needs_rework"
+            && failedAuthenticationTestAgentRelay?.independentReview?.[0]?.verdict === "needs_rework"
+            && failedAuthenticationTestAgentRelay?.independentReviewSummary?.rows.some((item) => item.includes("登录态浏览器验收") && item.includes("1 项未通过"))
+            && !/GLOBAL_TEST_EMAIL|GLOBAL_TEST_PASSWORD|credentialEnvNames|storageState|cookie|token|sha/i.test(JSON.stringify(failedAuthenticationTestAgentRelay?.independentReviewSummary || {})),
+        globalTestAgentBlockedAuthenticationNeedsUser: blockedAuthenticationTestAgentRelay?.independentReviewSummary?.status === "needs_user"
+            && blockedAuthenticationTestAgentRelay?.independentReview?.[0]?.verdict === "needs_user"
+            && blockedAuthenticationTestAgentRelay?.independentReviewSummary?.rows.some((item) => item.includes("测试账号或登录条件"))
+            && blockedAuthenticationTestAgentUi?.tone === "waiting"
+            && blockedAuthenticationTestAgentUi?.checkpoint?.status === "warning"
+            && !/GLOBAL_TEST_EMAIL|GLOBAL_TEST_PASSWORD|credentialEnvNames|storageState|cookie|token|sha/i.test(JSON.stringify({
+                summary: blockedAuthenticationTestAgentRelay?.independentReviewSummary,
+                ui: blockedAuthenticationTestAgentUi,
+            })),
         globalTestAgentFailureSummaryRelayNeedsRework: failureSummaryTestAgentRelay?.independentReviewSummary?.status === "needs_rework"
             && failureSummaryTestAgentRelay?.independentReview?.[0]?.verdict === "needs_rework"
             && failureSummaryTestAgentRelay?.independentReviewSummary?.rows.some((item) => item.includes("返工重点") && item.includes("浏览器检查"))
@@ -2203,6 +2647,7 @@ function runGlobalAgentIntentSelfTest() {
             && actionBlockHidden
             && fallbackDelegationCannotWrite
             && localGroupDispatchUsesSchema
+            && localDispatchRepliesFriendly
             && fallbackCronCannotWrite
             && ambiguousFallbackCannotWrite
             && fallbackObservationFriendly
@@ -2214,6 +2659,7 @@ function runGlobalAgentIntentSelfTest() {
         actionBlockHidden,
         fallbackDelegationCannotWrite,
         localGroupDispatchUsesSchema,
+        localDispatchRepliesFriendly,
         fallbackCronCannotWrite,
         ambiguousFallbackCannotWrite,
         fallbackObservationFriendly,
@@ -2381,23 +2827,128 @@ function compactGlobalTestAgentReviewRelayEvent(event = {}, options = {}) {
     const verdict = event.test_agent_verdict || event.testAgentVerdict || report?.verdict || receipt?.testAgentVerdict || receipt?.test_agent_verdict || receipt?.testAgentReport?.verdict || receipt?.test_agent_report?.verdict || null;
     const rawStatus = String(verdict?.status || report?.status || receipt?.status || event.status || "").toLowerCase();
     const rawRecommendation = String(verdict?.recommendation || report?.recommendation || receipt?.testAgentReport?.recommendation || "").toLowerCase();
+    const postReviewSpotCheck = event.technical?.post_review_spot_check
+        || event.post_review_spot_check
+        || event.postReviewSpotCheck
+        || receipt?.post_review_spot_check
+        || receipt?.postReviewSpotCheck
+        || null;
+    const postReviewSpotCheckSummary = event.post_review_spot_check_summary
+        || event.postReviewSpotCheckSummary
+        || receipt?.post_review_spot_check_summary
+        || receipt?.postReviewSpotCheckSummary
+        || (0, post_review_spot_check_1.buildPostReviewSpotCheckSummary)(postReviewSpotCheck);
+    const spotCheckRequired = postReviewSpotCheck?.required === true;
+    const spotCheckPassed = !spotCheckRequired || postReviewSpotCheck?.pass === true || postReviewSpotCheck?.status === "passed";
+    const spotCheckNeedsUser = spotCheckRequired && !spotCheckPassed && /needs[_-]?user|manual|待确认|人工/i.test(String(postReviewSpotCheck?.status || postReviewSpotCheckSummary?.status || ""));
+    const spotCheckNeedsRecheck = spotCheckRequired && !spotCheckPassed && !spotCheckNeedsUser;
     const coverageGaps = collectGlobalTestAgentCoverageGaps(report, verdict);
     const hasFailedCoverage = coverageGaps.failedLines.length > 0;
     const hasUnknownCoverage = coverageGaps.unknownLines.length > 0;
     const hasWeakAcceptance = coverageGaps.weakLines.length > 0;
+    const browserFlows = (0, test_agent_review_bridge_1.summarizeTestAgentBrowserFlows)(report, verdict);
+    const hasFailedBrowserFlows = !!browserFlows?.failedCount || !!browserFlows?.failedStepCount;
+    const hasIncompleteBrowserFlows = !!browserFlows?.blockedCount || !!browserFlows?.skippedCount;
+    const multiSessionBrowser = (0, test_agent_review_bridge_1.summarizeTestAgentMultiSessionBrowser)(report, verdict);
+    const hasFailedMultiSessionBrowser = !!multiSessionBrowser?.failedCount
+        || !!multiSessionBrowser?.failedStepCount
+        || !!multiSessionBrowser?.failedComparisonCount;
+    const hasIncompleteMultiSessionBrowser = !!multiSessionBrowser?.blockedCount || !!multiSessionBrowser?.skippedCount;
+    const browserAuthentication = (0, test_agent_review_bridge_1.summarizeTestAgentBrowserAuthentication)(report, verdict);
+    const hasFailedBrowserAuthentication = !!browserAuthentication?.failedChecks;
+    const hasIncompleteBrowserAuthentication = !!browserAuthentication?.blockedChecks || !!browserAuthentication?.pendingChecks;
+    const browserActionEffects = (0, test_agent_review_bridge_1.summarizeTestAgentBrowserActionEffects)(report, verdict);
+    const hasFailedBrowserActionEffects = !!browserActionEffects?.unchanged;
+    const hasIncompleteBrowserActionEffects = !!browserActionEffects?.unavailable;
+    const browserRecovery = (0, test_agent_review_bridge_1.summarizeTestAgentBrowserRecovery)(report, verdict);
+    const hasIncompleteBrowserRecovery = !!browserRecovery?.failed || !!browserRecovery?.notRetried;
+    const adversarialEvidence = (0, test_agent_review_bridge_1.summarizeTestAgentAdversarialEvidence)(report, verdict);
+    const hasFailedAdversarialEvidence = adversarialEvidence?.status === "failed";
+    const hasIncompleteAdversarialEvidence = adversarialEvidence?.status === "missing"
+        || adversarialEvidence?.status === "unlinked";
+    const hasBlockedAdversarialEvidence = adversarialEvidence?.status === "blocked";
     const failureSummaries = collectGlobalTestAgentFailureSummaries(report, verdict);
     const receiptBlockers = Array.isArray(receipt?.blockers) ? receipt.blockers : [];
-    const blockers = globalUniqueStrings(receiptBlockers, failureSummaries.failureLines, coverageGaps.failedLines, coverageGaps.unknownLines, coverageGaps.weakLines);
+    const blockers = globalUniqueStrings(receiptBlockers, failureSummaries.failureLines, browserAuthentication?.failedLines || [], browserAuthentication?.incompleteLines || [], browserActionEffects?.failedLines || [], browserActionEffects?.recheckLines || [], browserRecovery?.recheckLines || [], adversarialEvidence?.failedLines || [], adversarialEvidence?.recheckLines || [], adversarialEvidence?.blockedLines || [], multiSessionBrowser?.failedLines || [], multiSessionBrowser?.incompleteLines || [], browserFlows?.failedLines || [], browserFlows?.incompleteLines || [], coverageGaps.failedLines, coverageGaps.unknownLines, coverageGaps.weakLines, spotCheckNeedsRecheck || spotCheckNeedsUser ? [postReviewSpotCheckSummary?.headline || "完成前抽查尚未通过"] : []);
     const verification = Array.isArray(receipt?.verification) ? receipt.verification : [];
-    const canAccept = !hasFailedCoverage && !hasUnknownCoverage && !hasWeakAcceptance && !failureSummaries.hasRework && !failureSummaries.hasNeedsUser && blockers.length === 0 && (verdict?.canAccept === true || rawRecommendation === "accept" || rawStatus === "passed");
-    const needsRework = hasFailedCoverage || failureSummaries.hasRework || verdict?.needsRework === true || rawRecommendation.includes("rework") || receiptBlockers.length > 0 || rawStatus === "failed";
-    const needsHuman = !needsRework && (hasUnknownCoverage || hasWeakAcceptance || failureSummaries.hasNeedsUser || verdict?.needsHuman === true || rawRecommendation.includes("human") || rawStatus === "blocked");
-    const status = needsRework ? "needs_rework" : needsHuman ? "needs_user" : canAccept ? "passed" : "recorded";
-    const statusLabel = status === "passed" ? "已通过" : status === "needs_rework" ? "需返工" : status === "needs_user" ? "等你确认" : "已记录";
+    const canAccept = !hasFailedCoverage
+        && !hasUnknownCoverage
+        && !hasWeakAcceptance
+        && !hasFailedBrowserFlows
+        && !hasIncompleteBrowserFlows
+        && !hasFailedMultiSessionBrowser
+        && !hasIncompleteMultiSessionBrowser
+        && !hasFailedBrowserAuthentication
+        && !hasIncompleteBrowserAuthentication
+        && !hasFailedBrowserActionEffects
+        && !hasIncompleteBrowserActionEffects
+        && !hasIncompleteBrowserRecovery
+        && !hasFailedAdversarialEvidence
+        && !hasIncompleteAdversarialEvidence
+        && !hasBlockedAdversarialEvidence
+        && !failureSummaries.hasRework
+        && !failureSummaries.hasNeedsUser
+        && spotCheckPassed
+        && blockers.length === 0
+        && (verdict?.canAccept === true || rawRecommendation === "accept" || rawStatus === "passed");
+    const needsRework = hasFailedCoverage
+        || hasFailedBrowserFlows
+        || hasFailedMultiSessionBrowser
+        || hasFailedBrowserAuthentication
+        || hasFailedBrowserActionEffects
+        || hasFailedAdversarialEvidence
+        || failureSummaries.hasRework
+        || verdict?.needsRework === true
+        || rawRecommendation.includes("rework")
+        || rawStatus === "failed";
+    const needsRecheck = !needsRework && (spotCheckNeedsRecheck
+        || hasIncompleteBrowserActionEffects
+        || hasIncompleteBrowserRecovery
+        || hasIncompleteAdversarialEvidence
+        || verdict?.needsRecheck === true);
+    const needsEnvironment = !needsRework && !needsRecheck && (hasBlockedAdversarialEvidence
+        || verdict?.needsEnvironment === true);
+    const needsHuman = !needsRework && !needsRecheck && !needsEnvironment && (hasUnknownCoverage
+        || hasWeakAcceptance
+        || hasIncompleteBrowserFlows
+        || hasIncompleteMultiSessionBrowser
+        || hasIncompleteBrowserAuthentication
+        || failureSummaries.hasNeedsUser
+        || spotCheckNeedsUser
+        || verdict?.needsHuman === true
+        || rawRecommendation.includes("human")
+        || rawStatus === "blocked");
+    const status = needsRework
+        ? "needs_rework"
+        : needsRecheck
+            ? "needs_recheck"
+            : needsEnvironment || needsHuman
+                ? "needs_user"
+                : canAccept
+                    ? "passed"
+                    : "recorded";
+    const statusLabel = status === "passed"
+        ? "已通过"
+        : status === "needs_recheck"
+            ? "需复验"
+            : status === "needs_rework"
+                ? "需返工"
+                : status === "needs_user"
+                    ? needsEnvironment
+                        ? "补条件"
+                        : "等你确认"
+                    : "已记录";
     const reviewer = event.agent || receipt?.reviewer || receipt?.agent || "TestAgent";
     const detail = globalVisibleText(event.detail || receipt?.summary || event.text || "", "TestAgent 已提交独立复核结论，我会纳入最终验收。", 320);
     const evidence = [
         `${reviewer}：${statusLabel}`,
+        ...(Array.isArray(postReviewSpotCheckSummary?.rows) ? postReviewSpotCheckSummary.rows.slice(0, 3) : []),
+        ...(browserAuthentication?.evidenceLines || []).slice(0, 3),
+        ...(browserActionEffects?.evidenceLines || []).slice(0, 4),
+        ...(browserRecovery?.evidenceLines || []).slice(0, 3),
+        ...(adversarialEvidence?.evidenceLines || []).slice(0, 4),
+        ...(multiSessionBrowser?.evidenceLines || []).slice(0, 4),
+        ...(browserFlows?.evidenceLines || []).slice(0, 4),
         verification.length ? `验证证据：${globalVisibleText(verification[0], "已记录验证证据。", 180)}` : "",
         ...failureSummaries.failureLines.slice(0, 3).map((item) => `返工重点：${globalVisibleText(item, "复核发现待处理问题。", 180)}`),
         ...failureSummaries.diagnosticLines.slice(0, 2).map((item) => `排查建议：${globalVisibleText(item, "按复核诊断先排查。", 180)}`),
@@ -2410,20 +2961,34 @@ function compactGlobalTestAgentReviewRelayEvent(event = {}, options = {}) {
         status,
         status_label: statusLabel,
         headline: status === "passed"
-            ? "TestAgent/独立复核已检查交付证据，我可以继续做最终验收。"
+            ? spotCheckPassed && spotCheckRequired
+                ? "TestAgent 已完成独立复核，我的关键验证抽查也已通过。"
+                : "TestAgent/独立复核已检查交付证据，我可以继续做最终验收。"
             : status === "needs_rework"
                 ? "独立复核发现待处理缺口，我会先安排返工，再重新验收。"
-                : status === "needs_user"
-                    ? "独立复核需要人工确认，我会先暂停最终验收。"
-                    : detail,
+                : status === "needs_recheck"
+                    ? spotCheckNeedsRecheck
+                        ? "TestAgent 已通过，但我的完成前抽查尚未一致，我会先重新复验。"
+                        : "TestAgent 的复核证据还没有闭环，我会先补齐检查并重新复验，不会直接要求原实现成员返工。"
+                    : status === "needs_user"
+                        ? needsEnvironment
+                            ? "TestAgent 的复核受环境或登录条件阻塞，我会先补齐条件再继续验收。"
+                            : "独立复核需要人工确认，我会先暂停最终验收。"
+                        : detail,
         rows: evidence.length ? evidence : [detail],
         next_action: status === "passed"
             ? "继续核对交付总结、改动和验证结果。"
             : status === "needs_rework"
                 ? "先处理复核指出的缺口，再重新执行验收。"
-                : status === "needs_user"
-                    ? "等待你确认复核标记的问题。"
-                    : "继续等待完整复核证据或最终总结。",
+                : status === "needs_recheck"
+                    ? spotCheckNeedsRecheck
+                        ? "沿用原复核工作单重新运行 TestAgent，并再次抽查关键验证。"
+                        : "补齐可观察结果或目标关联的边界检查后，重新运行 TestAgent 复核。"
+                    : status === "needs_user"
+                        ? needsEnvironment
+                            ? "先补齐环境、登录或运行条件，再继续 TestAgent 复核。"
+                            : "等待你确认复核标记的问题。"
+                        : "继续等待完整复核证据或最终总结。",
         display_policy: { user_text_first: true, technical_default_collapsed: true, hide_internal_protocols: true, show_for_ordinary_conversation: false },
     };
     const reviewRows = [{
@@ -2451,11 +3016,16 @@ function compactGlobalTestAgentReviewRelayEvent(event = {}, options = {}) {
         independentReview: reviewRows,
         test_agent_report: report,
         testAgentReport: report,
+        test_agent_verdict: verdict,
+        testAgentVerdict: verdict,
+        post_review_spot_check_summary: postReviewSpotCheckSummary,
+        postReviewSpotCheckSummary: postReviewSpotCheckSummary,
         receipt,
         technical: {
             receipt,
             test_agent_report: report,
             test_agent_verdict: verdict,
+            post_review_spot_check: postReviewSpotCheck,
             group_task_id: event.task_id || event.taskId || "",
         },
     };
@@ -2656,6 +3226,45 @@ function buildGlobalDirectDispatchHandoff(input) {
         requiresCodeChanges: inferGlobalDirectDispatchRequiresCodeChanges(input.message),
     });
     return { handoff, summary: (0, worker_handoff_1.summarizeWorkerHandoffForUser)(handoff), runtime };
+}
+function buildGlobalSingleProjectMissionPayload(input) {
+    const project = String(input.project || "").trim();
+    const message = String(input.message || input.originalText || "").trim();
+    const userGoal = String(input.originalText || message).trim();
+    const requiresCodeChanges = inferGlobalDirectDispatchRequiresCodeChanges(message);
+    return {
+        title: compactPetText(userGoal || message || `处理 ${project} 项目任务`, 100),
+        business_goal: userGoal || message,
+        acceptance: [
+            "项目执行成员必须说明实际动作、文件变化、已执行验证和剩余风险。",
+            "需要独立复核时，TestAgent 必须基于最新状态执行；复核失败先返工再复验。",
+            "TestAgent 通过后由主 Agent 抽查关键验证，全部门禁通过后才能输出最终总结。",
+        ].join("；"),
+        targets: [{
+                type: "project",
+                project,
+                task: message,
+                reason: "全局主 Agent 判断该需求适合由指定项目执行，并由全局任务链持续监督验收。",
+                requires_code_changes: requiresCodeChanges,
+                requires_verification: true,
+                requires_independent_review: true,
+            }],
+        requires_code_changes: requiresCodeChanges,
+        requires_verification: true,
+        requires_independent_review: true,
+        auto_execute: true,
+        source: input.source || "global-agent-single-project-dispatch",
+        trace_id: input.traceId || "",
+        global_run_id: input.globalRunId || "",
+        session_id: input.sessionId || "default",
+        idempotency_key: input.idempotencyKey || "",
+        single_project_supervision: {
+            schema: "ccm-global-single-project-supervision-v1",
+            project,
+            independent_review_required: true,
+            post_review_spot_check_required: true,
+        },
+    };
 }
 function renderGlobalDirectGroupWorkOrder(input) {
     const summary = (0, worker_handoff_1.summarizeWorkerHandoffForUser)(input.handoff);
@@ -2986,7 +3595,7 @@ function getGlobalStatusProgressRefreshSummary(source, childTasks = [], nowMs = 
     const target = targetNameForTask(first);
     const ageLabel = globalStatusAgeLabel(stalled[0]?.ageMs || staleQueued[0]?.ageMs || sourceAgeMs);
     const headline = stalled.length
-        ? `${stalled.length} 个下游执行目标已经 ${ageLabel || "一段时间"} 没有新的可展示进展，我会先刷新状态，再决定继续等待、重派或请你确认。`
+        ? `${stalled.length} 个执行目标已经 ${ageLabel || "一段时间"} 没有新的可展示进展，我会先刷新状态，再决定继续等待、重派或请你确认。`
         : staleQueued.length
             ? `${staleQueued.length} 个下游任务排队较久，我会检查执行通道并接上下一步。`
             : `这项全局任务已经 ${ageLabel || "一段时间"} 没有新的可展示进展，我会主动刷新状态。`;
@@ -2999,7 +3608,7 @@ function getGlobalStatusProgressRefreshSummary(source, childTasks = [], nowMs = 
         ? "先刷新下游任务卡；如果仍没有新结果，就重新派发或定向补充。"
         : staleQueued.length
             ? "检查执行通道和队列状态，能恢复就继续推进；不能恢复会提示你处理。"
-            : "刷新全局任务状态，并继续等待下游执行目标的可验收结果。";
+            : "刷新全局任务状态，并继续等待执行目标的可验收结果。";
     return {
         title: "进度刷新提醒",
         headline: sanitizeGlobalDirectAgentOutput(headline, "我已整理进度刷新状态。", 240),
@@ -3606,7 +4215,7 @@ function formatMissionStatus(input = {}) {
         missionRows.length ? `最近全局任务进展：\n${missionRows.join("\n")}` : "",
         directRows.length ? `最近全局直派任务：\n${directRows.join("\n")}` : "",
         runRows.length ? `最近全局运行：\n${runRows.join("\n")}` : "",
-        "我不会猜测还没返回的执行成员结果；未完成的部分会继续等下游执行目标更新，技术记录默认在任务卡技术详情里。",
+        "我不会猜测还没返回的执行成员结果；未完成的部分会继续等待执行目标更新，技术记录默认在任务卡技术详情里。",
     ].filter(Boolean).join("\n\n");
 }
 function formatSystemStatus() {
@@ -3871,32 +4480,21 @@ async function executeFeishuAction(baseUrl, action, originalText = "", traceId =
     if (action.type === "send_project_cmd") {
         const project = params.project || params.projectName;
         const rawMessage = String(params.message || params.prompt || params.command || originalText || "").trim();
-        const dispatch = buildGlobalDirectDispatchHandoff({
-            kind: "project",
+        const missionPayload = buildGlobalSingleProjectMissionPayload({
             project,
             message: rawMessage,
             originalText,
             traceId,
+            globalRunId: options.globalRunId,
+            sessionId: options.sessionId,
+            source: options.source || "feishu-control-bot-single-project",
+            idempotencyKey: traceId ? `feishu:${traceId}:single-project` : "",
         });
-        const agentMessage = renderGlobalDirectProjectWorkOrder({
-            project,
-            message: rawMessage,
-            originalText,
-            handoff: dispatch.handoff,
+        const result = await postLocalApi(baseUrl, "/api/global-agent/orchestrate", missionPayload);
+        return formatGlobalDevelopmentDispatchVisibleResult(result, {
+            title: missionPayload.title,
+            business_goal: missionPayload.business_goal,
         });
-        const result = await postLocalApi(baseUrl, "/api/send", {
-            project,
-            message: agentMessage,
-            global_handoff: dispatch.summary,
-            trace_id: traceId,
-            source: "global-agent-direct-dispatch",
-        });
-        return [
-            "项目执行成员已按全局工作单执行。",
-            `- 项目：${project}`,
-            "- 工作单：已补齐目标、范围、验收和完成后总结要求。",
-            `- 执行结果：${sanitizeGlobalDirectAgentOutput(result.output || "已完成", "项目执行成员已提交执行结果，详细输出在项目技术详情中。", 900)}`,
-        ].join("\n");
     }
     if (action.type === "create_cron_task") {
         const result = await postLocalApi(baseUrl, "/api/cron/create", params);
@@ -4080,6 +4678,10 @@ function attachGlobalRunTestAgentReview(run, event = {}) {
     run.independentReview = rows;
     run.test_agent_report = event.test_agent_report || event.testAgentReport || event.technical?.test_agent_report || null;
     run.testAgentReport = event.testAgentReport || event.test_agent_report || event.technical?.test_agent_report || null;
+    run.post_review_spot_check_summary = event.post_review_spot_check_summary || event.postReviewSpotCheckSummary || null;
+    run.postReviewSpotCheckSummary = event.postReviewSpotCheckSummary || event.post_review_spot_check_summary || null;
+    run.post_review_spot_check = event.technical?.post_review_spot_check || event.post_review_spot_check || event.postReviewSpotCheck || null;
+    run.postReviewSpotCheck = event.postReviewSpotCheck || event.post_review_spot_check || event.technical?.post_review_spot_check || null;
 }
 async function executeAgenticTool(baseUrl, ctx, name, args, run, onEvent) {
     const signature = crypto.createHash("sha256").update(`${name}:${JSON.stringify(args || {})}`).digest("hex").slice(0, 24);
@@ -4178,12 +4780,26 @@ async function executeAgenticTool(baseUrl, ctx, name, args, run, onEvent) {
                 throw new Error("全局任务监工不存在");
             observation = { success: true, supervisor, mission: (0, collaboration_1.getGlobalDevelopmentMission)(supervisor.mission_id) };
         }
-        else if (name === "orchestrate_development") {
+        else if (name === "orchestrate_development" || name === "send_project_cmd") {
+            const missionArgs = name === "send_project_cmd"
+                ? buildGlobalSingleProjectMissionPayload({
+                    project: String(args.project || args.projectName || ""),
+                    message: String(args.message || args.prompt || args.command || run.user_message || ""),
+                    originalText: run.original_user_message || run.user_message,
+                    traceId: run.trace_id,
+                    globalRunId: run.id,
+                    sessionId: run.session_id,
+                    source: run.source || "global-agent-single-project-dispatch",
+                    idempotencyKey: args.idempotency_key || `${run.id}:single-project-mission`,
+                })
+                : {
+                    ...args,
+                    source: run.source || "global-agent",
+                    trace_id: run.trace_id,
+                    idempotency_key: args.idempotency_key || `${run.id}:mission`,
+                };
             const missionResult = (0, collaboration_1.createGlobalDevelopmentMission)({
-                ...args,
-                source: run.source || "global-agent",
-                trace_id: run.trace_id,
-                idempotency_key: args.idempotency_key || `${run.id}:mission`,
+                ...missionArgs,
             }, ctx);
             const supervisor = (0, mission_supervisor_1.startGlobalMissionSupervisor)({
                 mission_id: missionResult.mission.id,
@@ -4191,9 +4807,9 @@ async function executeAgenticTool(baseUrl, ctx, name, args, run, onEvent) {
                 trace_id: run.trace_id,
                 session_id: run.session_id,
                 source: run.source,
-                business_goal: missionResult.mission.business_goal || args.business_goal,
-                acceptance: missionResult.mission.acceptance_criteria || args.acceptance,
-                max_attempts: args.max_attempts || 3,
+                business_goal: missionResult.mission.business_goal || missionArgs.business_goal,
+                acceptance: missionResult.mission.acceptance_criteria || missionArgs.acceptance,
+                max_attempts: missionArgs.max_attempts || 3,
             });
             (0, loop_1.attachGlobalAgentRunSupervision)(run, { mission_id: missionResult.mission.id, supervisor_id: supervisor.id, state: supervisor.status });
             observation = {
@@ -4395,6 +5011,8 @@ function publicGlobalAgentRun(run, includeObservations = false) {
         display_stream: run.display_stream,
         displayStream: run.display_stream,
         workchain: run.workchain,
+        todo_plan: run.todo_plan || run.todoPlan || run.workchain?.todo_plan || run.workchain?.todoPlan || null,
+        todoPlan: run.todoPlan || run.todo_plan || run.workchain?.todoPlan || run.workchain?.todo_plan || null,
         decision_summary: run.decision_summary,
         clarification_question: run.clarification_question,
         clarification_summary: run.clarification_summary || run.clarificationSummary || null,
@@ -4417,6 +5035,12 @@ function publicGlobalAgentRun(run, includeObservations = false) {
         lastResumeFeedbackAt: run.lastResumeFeedbackAt || run.last_resume_feedback_at || "",
         resume_feedback_history: Array.isArray(run.resume_feedback_history) ? run.resume_feedback_history : Array.isArray(run.resumeFeedbackHistory) ? run.resumeFeedbackHistory : [],
         resumeFeedbackHistory: Array.isArray(run.resumeFeedbackHistory) ? run.resumeFeedbackHistory : Array.isArray(run.resume_feedback_history) ? run.resume_feedback_history : [],
+        pending_user_messages: Array.isArray(run.pending_user_messages) ? run.pending_user_messages : Array.isArray(run.pendingUserMessages) ? run.pendingUserMessages : [],
+        pendingUserMessages: Array.isArray(run.pendingUserMessages) ? run.pendingUserMessages : Array.isArray(run.pending_user_messages) ? run.pending_user_messages : [],
+        user_steer_history: Array.isArray(run.user_steer_history) ? run.user_steer_history : Array.isArray(run.userSteerHistory) ? run.userSteerHistory : [],
+        userSteerHistory: Array.isArray(run.userSteerHistory) ? run.userSteerHistory : Array.isArray(run.user_steer_history) ? run.user_steer_history : [],
+        last_user_steer: run.last_user_steer || run.lastUserSteer || null,
+        lastUserSteer: run.lastUserSteer || run.last_user_steer || null,
         test_agent_execution_plan: run.test_agent_execution_plan || run.testAgentExecutionPlan || null,
         testAgentExecutionPlan: run.testAgentExecutionPlan || run.test_agent_execution_plan || null,
         test_agent_execution_plan_summary: run.test_agent_execution_plan_summary || run.testAgentExecutionPlanSummary || null,
@@ -4427,6 +5051,10 @@ function publicGlobalAgentRun(run, includeObservations = false) {
         testAgentReviewSummary: run.testAgentReviewSummary || run.test_agent_review_summary || run.independentReviewSummary || run.independent_review_summary || null,
         independent_review_summary: run.independent_review_summary || run.independentReviewSummary || run.test_agent_review_summary || run.testAgentReviewSummary || null,
         independentReviewSummary: run.independentReviewSummary || run.independent_review_summary || run.testAgentReviewSummary || run.test_agent_review_summary || null,
+        post_review_spot_check: run.post_review_spot_check || run.postReviewSpotCheck || null,
+        postReviewSpotCheck: run.postReviewSpotCheck || run.post_review_spot_check || null,
+        post_review_spot_check_summary: run.post_review_spot_check_summary || run.postReviewSpotCheckSummary || null,
+        postReviewSpotCheckSummary: run.postReviewSpotCheckSummary || run.post_review_spot_check_summary || null,
         independent_review: Array.isArray(run.independent_review) ? run.independent_review : Array.isArray(run.independentReview) ? run.independentReview : [],
         independentReview: Array.isArray(run.independentReview) ? run.independentReview : Array.isArray(run.independent_review) ? run.independent_review : [],
         test_agent_report: run.test_agent_report || run.testAgentReport || null,
@@ -5059,6 +5687,154 @@ function handleGlobalAgentApi(pathname, req, res, parsed, ctx) {
         const sessionId = String(parsed.query.session_id || parsed.query.sessionId || "").trim();
         const status = String(parsed.query.status || "").trim();
         (0, utils_1.sendJson)(res, { success: true, runs: (0, loop_1.listGlobalAgentRuns)({ sessionId: sessionId || undefined, status: status || undefined, limit: Number(parsed.query.limit || 30) }).map(run => publicGlobalAgentRun(run)) });
+        return true;
+    }
+    if (pathname === "/api/global-agent/runs/steer" && req.method === "POST") {
+        let body = "";
+        req.on("data", (chunk) => body += chunk);
+        req.on("end", async () => {
+            try {
+                const payload = body ? JSON.parse(body) : {};
+                const id = String(payload.id || payload.run_id || payload.runId || "").trim();
+                const message = String(payload.message || payload.text || "").trim();
+                if (!id)
+                    return (0, utils_1.sendJson)(res, { success: false, error: "缺少运行 ID" }, 400);
+                if (!message)
+                    return (0, utils_1.sendJson)(res, { success: false, error: "补充要求不能为空" }, 400);
+                const storedRun = (0, loop_1.getGlobalAgentRun)(id);
+                if (storedRun?.supervisor_id && ["supervising", "paused"].includes(storedRun.status)) {
+                    const requestId = String(payload.request_id || payload.requestId || "").trim();
+                    const existing = requestId
+                        ? (storedRun.user_steer_history || storedRun.userSteerHistory || []).find((item) => item?.request_id === requestId)
+                        : null;
+                    if (existing) {
+                        const existingSupervisor = (0, mission_supervisor_1.getGlobalMissionSupervisor)(storedRun.supervisor_id);
+                        return (0, utils_1.sendJson)(res, {
+                            success: true,
+                            accepted: true,
+                            applied: existing.status === "applied",
+                            duplicate: true,
+                            steering: existing,
+                            run: publicGlobalAgentRun(storedRun),
+                            supervisor: existingSupervisor,
+                            mission: existingSupervisor ? (0, collaboration_1.getGlobalDevelopmentMission)(existingSupervisor.mission_id) : null,
+                            message: existing.kind === "revise_goal"
+                                ? "目标调整已接收。旧执行已停止，正在按新目标重新规划。"
+                                : "补充要求已接收，已并入当前任务继续处理。",
+                        });
+                    }
+                    const kind = (0, loop_1.classifyGlobalAgentUserSteer)(message, payload.kind || payload.steering_kind || payload.steeringKind || "auto");
+                    const supervisorBefore = (0, mission_supervisor_1.getGlobalMissionSupervisor)(storedRun.supervisor_id);
+                    if (!supervisorBefore)
+                        throw new Error("全局任务跟进记录不存在");
+                    const goalPrefix = String(supervisorBefore.business_goal || storedRun.original_user_message || storedRun.user_message || "").trim();
+                    const businessGoal = [
+                        goalPrefix,
+                        `${kind === "revise_goal" ? "目标调整" : "补充要求"}：${message}`,
+                    ].filter(Boolean).join("\n").slice(0, 50_000);
+                    const source = String(payload.source || "global_web_supervision_steer");
+                    const supervisor = await (0, mission_supervisor_1.controlGlobalMissionSupervisor)(storedRun.supervisor_id, "update_goal", createMissionSupervisorRuntime(ctx), {
+                        ...payload,
+                        business_goal: businessGoal,
+                        acceptance: supervisorBefore.acceptance,
+                        message,
+                        continuation_kind: kind,
+                        request_id: requestId,
+                        source,
+                        continuation: {
+                            ...(payload.continuation && typeof payload.continuation === "object" ? payload.continuation : {}),
+                            kind,
+                            source,
+                            reason: message,
+                            title: kind === "revise_goal" ? "监督阶段目标调整" : "监督阶段补充要求",
+                            interrupt_current_run: kind === "revise_goal",
+                        },
+                    });
+                    const result = (0, loop_1.applyGlobalAgentSupervisionSteer)(id, message, {
+                        kind,
+                        source,
+                        requestId,
+                        supervisorState: supervisor.status,
+                        continuationSummary: supervisor.last_continuation || null,
+                    });
+                    try {
+                        (0, memory_3.ingestGlobalAgentConversation)({
+                            sessionId: result.run.session_id,
+                            source,
+                            messages: [{
+                                    role: "user",
+                                    content: message,
+                                    timestamp: result.steering.at,
+                                    trace_id: result.run.trace_id,
+                                    run_id: result.run.id,
+                                    metadata: {
+                                        kind: result.steering.kind,
+                                        steering_id: result.steering.id,
+                                        supervision: true,
+                                        applied: true,
+                                    },
+                                }],
+                        });
+                    }
+                    catch (error) {
+                        console.warn(`[全局记忆] 持续跟进补充要求写入失败：${error?.message || error}`);
+                    }
+                    return (0, utils_1.sendJson)(res, {
+                        success: true,
+                        accepted: true,
+                        applied: true,
+                        duplicate: result.duplicate,
+                        steering: result.steering,
+                        continuation: result.continuation,
+                        supervisor,
+                        mission: (0, collaboration_1.getGlobalDevelopmentMission)(supervisor.mission_id),
+                        run: publicGlobalAgentRun(result.run),
+                        message: kind === "revise_goal"
+                            ? "目标调整已接收。旧执行已停止，正在按新目标重新规划。"
+                            : "补充要求已接收，已并入当前任务继续处理。",
+                    });
+                }
+                const result = (0, loop_1.steerGlobalAgentRun)(id, message, {
+                    kind: payload.kind || payload.steering_kind || payload.steeringKind || "auto",
+                    source: payload.source || "global_web_mid_turn",
+                    requestId: payload.request_id || payload.requestId || "",
+                });
+                try {
+                    (0, memory_3.ingestGlobalAgentConversation)({
+                        sessionId: result.run.session_id,
+                        source: payload.source || "global_web_mid_turn",
+                        messages: [{
+                                role: "user",
+                                content: message,
+                                timestamp: result.steering.at,
+                                trace_id: result.run.trace_id,
+                                run_id: result.run.id,
+                                metadata: {
+                                    kind: result.steering.kind,
+                                    steering_id: result.steering.id,
+                                    mid_turn: true,
+                                },
+                            }],
+                    });
+                }
+                catch (error) {
+                    console.warn(`[全局记忆] 执行中补充要求写入失败：${error?.message || error}`);
+                }
+                (0, utils_1.sendJson)(res, {
+                    success: true,
+                    accepted: true,
+                    duplicate: result.duplicate,
+                    steering: result.steering,
+                    run: publicGlobalAgentRun(result.run),
+                    message: result.steering.kind === "revise_goal"
+                        ? "目标调整已接收，会在当前任务中重新核对计划。"
+                        : "补充要求已接收，会在当前任务中继续处理。",
+                });
+            }
+            catch (error) {
+                (0, utils_1.sendJson)(res, { success: false, error: error?.message || String(error) }, 409);
+            }
+        });
         return true;
     }
     if (["/api/global-agent/runs/confirm", "/api/global-agent/runs/resume", "/api/global-agent/runs/pause", "/api/global-agent/runs/cancel"].includes(pathname) && req.method === "POST") {

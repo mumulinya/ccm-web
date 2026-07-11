@@ -3,6 +3,15 @@ import {
   sanitizeUserFacingProtocolTerms,
   sanitizeUserFacingTerminology,
 } from "./user-facing-text";
+import {
+  summarizeTestAgentAdversarialEvidence,
+  summarizeTestAgentBrowserActionEffects,
+  summarizeTestAgentBrowserAuthentication,
+  summarizeTestAgentBrowserFlows,
+  summarizeTestAgentBrowserRecovery,
+  summarizeTestAgentMultiSessionBrowser,
+} from "./test-agent-review-bridge";
+import { buildPostReviewSpotCheckSummary } from "./post-review-spot-check";
 
 const INTERNAL_TEXT_PATTERN = /CCM_AGENT_RECEIPT|CCM_AGENT_REQUESTS|scratchpad|trace_id|session_ids|session_id|run_id|native_session|task_agent_session|shouldDelegate|Runtime Kernel|Coordinator|Pipeline|Trace Replay|WorkerContextPacket|task-notification|receipt[-_\s]*status|raw[_\s-]*payload|回执要求|任务级原生会话|execution_lease|workchain/i;
 const WORKCHAIN_USER_VISIBLE_PROTOCOL_PATTERN = /CCM_AGENT_RECEIPT|CCM_AGENT_REQUESTS|scratchpad|trace_id|session_ids|session_id|run_id|native_session|task_agent_session|shouldDelegate|Runtime Kernel|Trace Replay|WorkerContextPacket|task-notification|receipt[-_\s]*status|raw[_\s-]*payload|回执要求|任务级原生会话|execution_lease/i;
@@ -92,7 +101,7 @@ function testAgentFailureTypeLabel(type: any) {
   return labels[value] || "复核问题";
 }
 
-function sanitizeTestAgentFailureText(value: any, fallback = "复核发现需要处理的问题。", max = 220) {
+function sanitizeTestAgentFailureText(value: any, fallback = "复核发现待补齐的问题。", max = 220) {
   return sanitizeWorkchainUserText(scrubWorkchainTestAgentPathText(value || fallback), fallback, max);
 }
 
@@ -219,6 +228,20 @@ function collectTestAgentReviewSourcesFromSource(source: any, depth = 0, seenObj
     || source.required_check_summary
     || source.acceptanceSummary
     || source.acceptance_summary
+    || source.browserFlowSummary
+    || source.browser_flow_summary
+    || source.browserMultiSessionSummary
+    || source.browser_multi_session_summary
+    || source.browserAuthenticationSummary
+    || source.browser_authentication_summary
+    || source.metadata?.browserAuthenticationSummary
+    || source.metadata?.browser_authentication_summary
+    || source.browserActionEffectSummary
+    || source.browser_action_effect_summary
+    || source.browserRecoverySummary
+    || source.browser_recovery_summary
+    || source.adversarialEvidenceSummary
+    || source.adversarial_evidence_summary
     || source.failedRequiredChecks
     || source.failedAcceptanceCriteria
     || source.unknownRequiredChecks
@@ -262,7 +285,18 @@ function collectTestAgentReviewSources(input: MainAgentWorkchainInput) {
       item?.workOrderId || item?.work_order_id || "",
       item?.status || "",
       item?.recommendation || "",
-      JSON.stringify(item?.requiredCheckSummary || item?.acceptanceSummary || item?.failedRequiredChecks || item?.failedAcceptanceCriteria || "").slice(0, 180),
+      JSON.stringify(
+        item?.requiredCheckSummary
+        || item?.acceptanceSummary
+        || item?.browserAuthenticationSummary
+        || item?.metadata?.browserAuthenticationSummary
+        || item?.browserActionEffectSummary
+        || item?.browserRecoverySummary
+        || item?.adversarialEvidenceSummary
+        || item?.failedRequiredChecks
+        || item?.failedAcceptanceCriteria
+        || ""
+      ).slice(0, 180),
     ].join("|");
     if (seen.has(key)) continue;
     seen.add(key);
@@ -301,6 +335,11 @@ function testAgentCoverageLabel(type: any) {
     http: "接口检查",
     api: "接口检查",
     browser_e2e: "浏览器流程",
+    browser_auth: "登录态浏览器验收",
+    browser_authentication: "登录态浏览器验收",
+    authenticated_browser: "登录态浏览器验收",
+    login_session: "登录态浏览器验收",
+    browser_multi_session: "多人协作浏览器验收",
     browser_network: "浏览器网络",
     browser_visual: "视觉检查",
     browser_layout: "布局检查",
@@ -407,6 +446,78 @@ function collectTestAgentCoverageSummary(input: MainAgentWorkchainInput) {
   };
 }
 
+function collectTestAgentBrowserFlowSummary(input: MainAgentWorkchainInput) {
+  const summaries = collectTestAgentReviewSources(input)
+    .map(source => summarizeTestAgentBrowserFlows(source))
+    .filter(Boolean) as NonNullable<ReturnType<typeof summarizeTestAgentBrowserFlows>>[];
+  return {
+    summaries,
+    evidenceLines: [...new Set(summaries.flatMap(item => item.evidenceLines))].slice(0, 8),
+    failedLines: [...new Set(summaries.flatMap(item => item.failedLines))].slice(0, 6),
+    incompleteLines: [...new Set(summaries.flatMap(item => item.incompleteLines))].slice(0, 6),
+  };
+}
+
+function collectTestAgentBrowserMultiSessionSummary(input: MainAgentWorkchainInput) {
+  const summaries = collectTestAgentReviewSources(input)
+    .map(source => summarizeTestAgentMultiSessionBrowser(source))
+    .filter(Boolean) as NonNullable<ReturnType<typeof summarizeTestAgentMultiSessionBrowser>>[];
+  return {
+    summaries,
+    evidenceLines: [...new Set(summaries.flatMap(item => item.evidenceLines))].slice(0, 8),
+    failedLines: [...new Set(summaries.flatMap(item => item.failedLines))].slice(0, 6),
+    incompleteLines: [...new Set(summaries.flatMap(item => item.incompleteLines))].slice(0, 6),
+  };
+}
+
+function collectTestAgentBrowserAuthenticationSummary(input: MainAgentWorkchainInput) {
+  const summaries = collectTestAgentReviewSources(input)
+    .map(source => summarizeTestAgentBrowserAuthentication(source))
+    .filter(Boolean) as NonNullable<ReturnType<typeof summarizeTestAgentBrowserAuthentication>>[];
+  return {
+    summaries,
+    evidenceLines: [...new Set(summaries.flatMap(item => item.evidenceLines))].slice(0, 6),
+    failedLines: [...new Set(summaries.flatMap(item => item.failedLines))].slice(0, 4),
+    incompleteLines: [...new Set(summaries.flatMap(item => item.incompleteLines))].slice(0, 4),
+  };
+}
+
+function collectTestAgentBrowserActionEffectSummary(input: MainAgentWorkchainInput) {
+  const summaries = collectTestAgentReviewSources(input)
+    .map(source => summarizeTestAgentBrowserActionEffects(source))
+    .filter(Boolean) as NonNullable<ReturnType<typeof summarizeTestAgentBrowserActionEffects>>[];
+  return {
+    summaries,
+    evidenceLines: [...new Set(summaries.flatMap(item => item.evidenceLines))].slice(0, 8),
+    failedLines: [...new Set(summaries.flatMap(item => item.failedLines))].slice(0, 6),
+    recheckLines: [...new Set(summaries.flatMap(item => item.recheckLines))].slice(0, 6),
+  };
+}
+
+function collectTestAgentBrowserRecoverySummary(input: MainAgentWorkchainInput) {
+  const summaries = collectTestAgentReviewSources(input)
+    .map(source => summarizeTestAgentBrowserRecovery(source))
+    .filter(Boolean) as NonNullable<ReturnType<typeof summarizeTestAgentBrowserRecovery>>[];
+  return {
+    summaries,
+    evidenceLines: [...new Set(summaries.flatMap(item => item.evidenceLines))].slice(0, 8),
+    recheckLines: [...new Set(summaries.flatMap(item => item.recheckLines))].slice(0, 6),
+  };
+}
+
+function collectTestAgentAdversarialEvidenceSummary(input: MainAgentWorkchainInput) {
+  const summaries = collectTestAgentReviewSources(input)
+    .map(source => summarizeTestAgentAdversarialEvidence(source))
+    .filter(Boolean) as NonNullable<ReturnType<typeof summarizeTestAgentAdversarialEvidence>>[];
+  return {
+    summaries,
+    evidenceLines: [...new Set(summaries.flatMap(item => item.evidenceLines))].slice(0, 8),
+    failedLines: [...new Set(summaries.flatMap(item => item.failedLines))].slice(0, 6),
+    recheckLines: [...new Set(summaries.flatMap(item => item.recheckLines))].slice(0, 6),
+    blockedLines: [...new Set(summaries.flatMap(item => item.blockedLines))].slice(0, 6),
+  };
+}
+
 function formatReviewEvidence(item: any) {
   if (!item) return "";
   if (typeof item === "string") return sanitizeWorkchainUserText(item, "", 260);
@@ -457,6 +568,12 @@ function getIndependentReviewGateState(input: MainAgentWorkchainInput) {
   const gate = summary.independent_review_gate || summary.independentReviewGate || deliveryReport.independent_review_gate || deliveryReport.independentReviewGate || {};
   const testAgentFailures = collectTestAgentFailureSummary(input);
   const testAgentCoverage = collectTestAgentCoverageSummary(input);
+  const testAgentBrowserFlows = collectTestAgentBrowserFlowSummary(input);
+  const testAgentMultiSessionBrowser = collectTestAgentBrowserMultiSessionSummary(input);
+  const testAgentBrowserAuthentication = collectTestAgentBrowserAuthenticationSummary(input);
+  const testAgentBrowserActionEffects = collectTestAgentBrowserActionEffectSummary(input);
+  const testAgentBrowserRecovery = collectTestAgentBrowserRecoverySummary(input);
+  const testAgentAdversarialEvidence = collectTestAgentAdversarialEvidenceSummary(input);
   const failedEvidence = [
     ...asList(gate.failed_evidence || gate.failedEvidence),
     ...asList(deliveryReport.failed_independent_review || deliveryReport.failedIndependentReview),
@@ -467,14 +584,39 @@ function getIndependentReviewGateState(input: MainAgentWorkchainInput) {
     || testAgentFailures.items.length > 0
     || testAgentCoverage.failedLines.length > 0
     || testAgentCoverage.unknownLines.length > 0
-    || testAgentCoverage.weakLines.length > 0;
-  const hasCoverageFailure = testAgentCoverage.failedLines.length > 0;
-  const hasCoverageNeedsUser = testAgentCoverage.unknownLines.length > 0 || testAgentCoverage.weakLines.length > 0;
+    || testAgentCoverage.weakLines.length > 0
+    || testAgentBrowserFlows.summaries.length > 0
+    || testAgentMultiSessionBrowser.summaries.length > 0
+    || testAgentBrowserAuthentication.summaries.length > 0
+    || testAgentBrowserActionEffects.summaries.length > 0
+    || testAgentBrowserRecovery.summaries.length > 0
+    || testAgentAdversarialEvidence.summaries.length > 0;
+  const hasCoverageFailure = testAgentCoverage.failedLines.length > 0
+    || testAgentBrowserFlows.failedLines.length > 0
+    || testAgentMultiSessionBrowser.failedLines.length > 0
+    || testAgentBrowserAuthentication.failedLines.length > 0
+    || testAgentBrowserActionEffects.failedLines.length > 0
+    || testAgentAdversarialEvidence.failedLines.length > 0;
+  const hasCoverageNeedsRecheck = testAgentBrowserActionEffects.recheckLines.length > 0
+    || testAgentBrowserRecovery.recheckLines.length > 0
+    || testAgentAdversarialEvidence.recheckLines.length > 0;
+  const hasCoverageEnvironment = testAgentAdversarialEvidence.blockedLines.length > 0;
+  const hasCoverageNeedsUser = testAgentCoverage.unknownLines.length > 0
+    || testAgentCoverage.weakLines.length > 0
+    || testAgentBrowserFlows.incompleteLines.length > 0
+    || testAgentMultiSessionBrowser.incompleteLines.length > 0
+    || testAgentBrowserAuthentication.incompleteLines.length > 0;
   const rawPassed = summary.independent_review_gate_passed === true
     || deliveryReport.independent_review_gate_passed === true
     || gate.pass === true
     || gate.status === "passed";
-  const passed = rawPassed && !testAgentFailures.hasRework && !testAgentFailures.hasNeedsUser && !hasCoverageFailure && !hasCoverageNeedsUser;
+  const passed = rawPassed
+    && !testAgentFailures.hasRework
+    && !testAgentFailures.hasNeedsUser
+    && !hasCoverageFailure
+    && !hasCoverageNeedsRecheck
+    && !hasCoverageEnvironment
+    && !hasCoverageNeedsUser;
   const failed = required && !passed && (
     gate.status === "failed"
     || Number(gate.failed_count || gate.failedCount || 0) > 0
@@ -487,17 +629,55 @@ function getIndependentReviewGateState(input: MainAgentWorkchainInput) {
   const reviewer = sanitizeWorkchainUserText(firstFailure.reviewer || firstFailure.agent || "TestAgent", "TestAgent", 80);
   const coverageFailedText = testAgentCoverage.failedLines[0] || "";
   const coverageNeedsUserText = testAgentCoverage.unknownLines[0] || testAgentCoverage.weakLines[0] || "";
+  const browserFlowFailedText = testAgentBrowserFlows.failedLines[0] || "";
+  const browserFlowNeedsUserText = testAgentBrowserFlows.incompleteLines[0] || "";
+  const multiSessionFailedText = testAgentMultiSessionBrowser.failedLines[0] || "";
+  const multiSessionNeedsUserText = testAgentMultiSessionBrowser.incompleteLines[0] || "";
+  const authenticationFailedText = testAgentBrowserAuthentication.failedLines[0] || "";
+  const authenticationNeedsUserText = testAgentBrowserAuthentication.incompleteLines[0] || "";
+  const actionEffectFailedText = testAgentBrowserActionEffects.failedLines[0] || "";
+  const actionEffectRecheckText = testAgentBrowserActionEffects.recheckLines[0] || "";
+  const recoveryRecheckText = testAgentBrowserRecovery.recheckLines[0] || "";
+  const adversarialFailedText = testAgentAdversarialEvidence.failedLines[0] || "";
+  const adversarialRecheckText = testAgentAdversarialEvidence.recheckLines[0] || "";
+  const adversarialEnvironmentText = testAgentAdversarialEvidence.blockedLines[0] || "";
   const failedText = testAgentFailures.primaryLine
     ? `TestAgent 复核未通过：${testAgentFailures.primaryLine}`
     : coverageFailedText
       ? `TestAgent 复核未通过：${coverageFailedText}`
+    : browserFlowFailedText
+      ? `TestAgent 真实浏览器验收未通过：${browserFlowFailedText}`
+    : multiSessionFailedText
+      ? `TestAgent 多人协作浏览器验收未通过：${multiSessionFailedText}`
+    : authenticationFailedText
+      ? `TestAgent 登录态浏览器验收未通过：${authenticationFailedText}`
+    : actionEffectFailedText
+      ? `TestAgent 操作结果验证未通过：${actionEffectFailedText}`
+    : adversarialFailedText
+      ? `TestAgent 边界与异常验证未通过：${adversarialFailedText}`
     : subject
       ? `${reviewer} 对 ${subject} 的复核未通过，需要原实现成员返工后重新复核`
       : "复杂变更独立复核未通过，需要原实现成员返工后重新复核";
   const diagnosticAction = testAgentFailures.diagnosticLines[0]
     ? `先按复核诊断处理：${testAgentFailures.diagnosticLines[0]}；修复后重新运行 TestAgent/独立复核。`
     : "";
-  const needsUser = required && !passed && !failed && (hasCoverageNeedsUser || !!coverageNeedsUserText);
+  const needsUser = required && !passed && !failed && (
+    hasCoverageNeedsUser
+    || !!coverageNeedsUserText
+    || !!browserFlowNeedsUserText
+    || !!multiSessionNeedsUserText
+    || !!authenticationNeedsUserText
+  );
+  const needsRecheck = required && !passed && !failed && hasCoverageNeedsRecheck;
+  const needsEnvironment = required && !passed && !failed && !needsRecheck && hasCoverageEnvironment;
+  const visiblePendingText = actionEffectRecheckText
+    || recoveryRecheckText
+    || adversarialRecheckText
+    || adversarialEnvironmentText
+    || coverageNeedsUserText
+    || browserFlowNeedsUserText
+    || multiSessionNeedsUserText
+    || authenticationNeedsUserText;
   return {
     required,
     passed,
@@ -508,13 +688,102 @@ function getIndependentReviewGateState(input: MainAgentWorkchainInput) {
     failedEvidence,
     testAgentFailures,
     testAgentCoverage,
+    testAgentBrowserFlows,
+    testAgentMultiSessionBrowser,
+    testAgentBrowserAuthentication,
+    testAgentBrowserActionEffects,
+    testAgentBrowserRecovery,
+    testAgentAdversarialEvidence,
     failedText,
-    riskText: failed ? failedText : needsUser ? `TestAgent 复核需要确认：${coverageNeedsUserText}` : "",
+    riskText: failed
+      ? failedText
+      : needsRecheck
+        ? `TestAgent 复核需要重新验证：${visiblePendingText}`
+        : needsEnvironment
+          ? `TestAgent 复核需要补齐执行条件：${visiblePendingText}`
+      : needsUser
+        ? `TestAgent 复核需要确认：${visiblePendingText}`
+        : "",
     nextAction: failed
       ? diagnosticAction || "先让原实现成员修复复核失败点，修复后重新运行 TestAgent/独立复核。"
+      : needsRecheck
+        ? "先补齐可观察结果、会话恢复或目标关联的边界检查，再重新运行 TestAgent；不要直接要求原实现成员返工。"
+        : needsEnvironment
+          ? "先补齐环境、登录或运行条件，再继续 TestAgent 复核和最终总结。"
       : needsUser
         ? "先补齐或确认 TestAgent 标记的待确认验收项，再继续最终总结。"
         : "",
+    needsRecheck,
+    needsEnvironment,
+  };
+}
+
+function getPostReviewSpotCheckState(input: MainAgentWorkchainInput) {
+  const summary = input.summary || {};
+  const completion = input.completion || {};
+  const deliveryReport = summary.delivery_report || summary.deliveryReport || completion.delivery_report || completion.deliveryReport || {};
+  const gate = summary.post_review_spot_check_gate
+    || summary.postReviewSpotCheckGate
+    || deliveryReport.post_review_spot_check_gate
+    || deliveryReport.postReviewSpotCheckGate
+    || completion.post_review_spot_check_gate
+    || completion.postReviewSpotCheckGate
+    || {};
+  const spotCheck = summary.post_review_spot_check
+    || summary.postReviewSpotCheck
+    || deliveryReport.post_review_spot_check
+    || deliveryReport.postReviewSpotCheck
+    || completion.post_review_spot_check
+    || completion.postReviewSpotCheck
+    || gate.latest
+    || null;
+  const visibleSummary = summary.post_review_spot_check_summary
+    || summary.postReviewSpotCheckSummary
+    || deliveryReport.post_review_spot_check_summary
+    || deliveryReport.postReviewSpotCheckSummary
+    || completion.post_review_spot_check_summary
+    || completion.postReviewSpotCheckSummary
+    || gate.summary
+    || buildPostReviewSpotCheckSummary(spotCheck);
+  const required = summary.post_review_spot_check_required === true
+    || deliveryReport.post_review_spot_check_required === true
+    || completion.post_review_spot_check_required === true
+    || gate.required === true
+    || spotCheck?.required === true;
+  const passed = !required
+    || summary.post_review_spot_check_gate_passed === true
+    || deliveryReport.post_review_spot_check_gate_passed === true
+    || completion.post_review_spot_check_gate_passed === true
+    || gate.pass === true
+    || spotCheck?.pass === true
+    || spotCheck?.status === "passed";
+  const status = String(spotCheck?.status || gate.status || visibleSummary?.status || "").toLowerCase();
+  const needsUser = required && !passed && /needs[_-]?user|waiting[_-]?user|manual|待确认|人工/.test(status);
+  const failed = required && !passed && !needsUser;
+  const failedText = sanitizeWorkchainUserText(
+    visibleSummary?.headline || spotCheck?.headline || gate.reason || "",
+    failed ? "TestAgent 已通过，但我的完成前抽查尚未一致。" : "",
+    260
+  );
+  return {
+    required,
+    passed,
+    failed,
+    needsUser,
+    missing: required && !passed && !failed && !needsUser,
+    gate,
+    spotCheck,
+    summary: visibleSummary,
+    failedText,
+    nextAction: sanitizeWorkchainUserText(
+      visibleSummary?.next_action || visibleSummary?.nextAction || spotCheck?.next_action || spotCheck?.nextAction || "",
+      failed
+        ? "沿用原复核工作单重新运行 TestAgent，并再次抽查关键验证。"
+        : needsUser
+          ? "确认或补齐抽查条件后再继续最终验收。"
+          : "",
+      260
+    ),
   };
 }
 
@@ -555,6 +824,12 @@ function collectIndependentReviewEvidence(input: MainAgentWorkchainInput) {
   const gateState = getIndependentReviewGateState(input);
   const testAgentFailures = gateState.testAgentFailures || collectTestAgentFailureSummary(input);
   const testAgentCoverage = gateState.testAgentCoverage || collectTestAgentCoverageSummary(input);
+  const testAgentBrowserFlows = gateState.testAgentBrowserFlows || collectTestAgentBrowserFlowSummary(input);
+  const testAgentMultiSessionBrowser = gateState.testAgentMultiSessionBrowser || collectTestAgentBrowserMultiSessionSummary(input);
+  const testAgentBrowserAuthentication = gateState.testAgentBrowserAuthentication || collectTestAgentBrowserAuthenticationSummary(input);
+  const testAgentBrowserActionEffects = gateState.testAgentBrowserActionEffects || collectTestAgentBrowserActionEffectSummary(input);
+  const testAgentBrowserRecovery = gateState.testAgentBrowserRecovery || collectTestAgentBrowserRecoverySummary(input);
+  const testAgentAdversarialEvidence = gateState.testAgentAdversarialEvidence || collectTestAgentAdversarialEvidenceSummary(input);
   return stringList([
     ...asList(deliveryReport.independent_review || deliveryReport.independentReview),
     ...asList(summary.independent_review || summary.independentReview),
@@ -568,14 +843,24 @@ function collectIndependentReviewEvidence(input: MainAgentWorkchainInput) {
     ...testAgentCoverage.failedLines.map((item: string) => `返工重点：${item}`),
     ...testAgentCoverage.unknownLines.map((item: string) => `待确认：${item}`),
     ...testAgentCoverage.weakLines.map((item: string) => `证据强度：${item}`),
+    ...testAgentBrowserAuthentication.evidenceLines,
+    ...testAgentBrowserActionEffects.evidenceLines,
+    ...testAgentBrowserRecovery.evidenceLines,
+    ...testAgentAdversarialEvidence.evidenceLines,
+    ...testAgentMultiSessionBrowser.evidenceLines,
+    ...testAgentBrowserFlows.evidenceLines,
     gateState.required
       ? gateState.passed
         ? "复杂变更独立复核已通过"
         : gateState.failed
           ? gateState.failedText
-          : "复杂变更独立复核仍需补齐"
+          : gateState.needsRecheck
+            ? "复杂变更独立复核需要重新复验"
+            : gateState.needsEnvironment
+              ? "复杂变更独立复核需要补齐环境或登录条件"
+              : "复杂变更独立复核仍需补齐"
       : "",
-  ], 12);
+  ], 16);
 }
 
 function normalizeStepStatus(status: any) {
@@ -999,7 +1284,7 @@ export function sanitizeWorkchainUserText(value: any, fallback = "我正在处�
   let text = compactText(value, max);
   if (!text) text = fallback;
   if (INTERNAL_TEXT_PATTERN.test(text)) {
-    if (/error|失败|denied|invalid|权限|门禁/i.test(text)) text = "执行时遇到需要处理的保护或权限问题，排障信息已放入技术详情。";
+    if (/error|失败|denied|invalid|权限|门禁/i.test(text)) text = "执行时遇到保护或权限问题，我会继续排查；详细信息已放入技术详情。";
     else if (/done|完成|receipt|回执/i.test(text)) text = "执行成员已提交结果说明，我正在汇总验收。";
     else text = fallback;
   }
@@ -1018,6 +1303,7 @@ function collectCompletionEvidence(input: MainAgentWorkchainInput) {
   const acceptance = collectAcceptanceEvidence(input);
   const independentReview = collectIndependentReviewEvidence(input);
   const independentReviewGate = getIndependentReviewGateState(input);
+  const postReviewSpotCheck = getPostReviewSpotCheckState(input);
   const files = [
     ...stringList(summary.files_changed, 20),
     ...(Array.isArray(summary.actual_file_changes) ? summary.actual_file_changes.map((item: any) => item?.path || item?.file || item).filter(Boolean) : []),
@@ -1031,6 +1317,7 @@ function collectCompletionEvidence(input: MainAgentWorkchainInput) {
     ...(verification.length ? [`执行检查 ${verification.length} 项`] : []),
     ...(acceptance.length ? [`验收结论：${acceptance[0]}`] : []),
     ...(independentReview.length ? [`独立复核：${independentReview[0]}`] : []),
+    ...(postReviewSpotCheck.required && postReviewSpotCheck.passed ? ["我已完成关键验证抽查"] : []),
     ...(receipts ? [`收到执行成员结果说明 ${receipts} 条`] : []),
     ...(workersDone ? [`完成执行目标 ${workersDone} 个`] : []),
   ];
@@ -1042,8 +1329,9 @@ function collectCompletionEvidence(input: MainAgentWorkchainInput) {
     ...(technical.blockers || []),
     ...(completion.risks || []),
     independentReviewGate.riskText,
+    postReviewSpotCheck.failedText,
   ], 12).map(item => sanitizeWorkchainUserText(item, "排障信息已放入技术详情。", 240)).filter(Boolean))].slice(0, 8);
-  return { files, verification, acceptance, independentReview, independentReviewGate, receipts, workersDone, evidence: [...new Set(evidence)].slice(0, 10), risks };
+  return { files, verification, acceptance, independentReview, independentReviewGate, postReviewSpotCheck, receipts, workersDone, evidence: [...new Set(evidence)].slice(0, 10), risks };
 }
 
 function terminalWorkchain(input: MainAgentWorkchainInput) {
@@ -1145,7 +1433,8 @@ function buildFinalSummaryQuality(input: MainAgentWorkchainInput, evidence: Retu
     { id: "outcome", label: "完成内容", passed: !!headline, detail: headline },
     { id: "evidence", label: "交付证据", passed: !required || evidence.evidence.length > 0 || evidence.files.length > 0 || evidence.workersDone > 0 || evidence.receipts > 0, detail: evidence.evidence.slice(0, 3).join("；") },
     { id: "verification", label: "验证或验收", passed: !required || (strongVerificationEvidence && !failedVerificationEvidence && !failedAcceptanceEvidence), detail: verificationStatus },
-    { id: "independent_review", label: "独立复核", passed: !required || !evidence.independentReviewGate?.required || evidence.independentReviewGate.passed === true, detail: evidence.independentReviewGate?.failed ? evidence.independentReviewGate.failedText : evidence.independentReviewGate?.needsUser ? evidence.independentReviewGate.riskText : evidence.independentReviewGate?.missing ? "复杂变更独立复核仍需补齐。" : evidence.independentReviewGate?.passed ? "复杂变更独立复核已通过。" : "" },
+    { id: "independent_review", label: "独立复核", passed: !required || !evidence.independentReviewGate?.required || evidence.independentReviewGate.passed === true, detail: evidence.independentReviewGate?.failed ? evidence.independentReviewGate.failedText : evidence.independentReviewGate?.needsRecheck || evidence.independentReviewGate?.needsEnvironment || evidence.independentReviewGate?.needsUser ? evidence.independentReviewGate.riskText : evidence.independentReviewGate?.missing ? "复杂变更独立复核仍需补齐。" : evidence.independentReviewGate?.passed ? "复杂变更独立复核已通过。" : "" },
+    { id: "post_review_spot_check", label: "完成前抽查", passed: !required || !evidence.postReviewSpotCheck?.required || evidence.postReviewSpotCheck.passed === true, detail: evidence.postReviewSpotCheck?.failed || evidence.postReviewSpotCheck?.needsUser ? evidence.postReviewSpotCheck.failedText : evidence.postReviewSpotCheck?.missing ? "TestAgent 通过后我仍需抽查关键验证。" : evidence.postReviewSpotCheck?.passed ? "我已抽查关键验证，结果与 TestAgent 结论一致。" : "" },
     { id: "risk", label: "风险说明", passed: !required || !!riskStatus, detail: riskStatus },
     { id: "next_action", label: "下一步", passed: !required || !!nextAction, detail: nextAction },
   ];
@@ -1188,13 +1477,25 @@ function buildWorkchainQualityFollowup(quality: any) {
   const independentReviewGap = Array.isArray(quality.checks)
     ? quality.checks.find((item: any) => item?.id === "independent_review" && item?.passed === false)
     : null;
+  const postReviewSpotCheckGap = Array.isArray(quality.checks)
+    ? quality.checks.find((item: any) => item?.id === "post_review_spot_check" && item?.passed === false)
+    : null;
   const independentReviewDetail = sanitizeWorkchainUserText(independentReviewGap?.detail || "", "", 220);
   const independentReviewNeedsConfirmation = /需要确认|待确认|证据待确认|人工确认/i.test(independentReviewDetail);
-  const nextAction = independentReviewGap
+  const independentReviewNeedsRecheck = /需要重新验证|重新复验|复核证据.*没有闭环|会话恢复.*没有闭环/i.test(independentReviewDetail);
+  const independentReviewNeedsEnvironment = /需要补齐执行条件|环境|登录条件|运行条件/i.test(independentReviewDetail);
+  const postReviewSpotCheckDetail = sanitizeWorkchainUserText(postReviewSpotCheckGap?.detail || "", "", 220);
+  const nextAction = postReviewSpotCheckGap
+    ? `${postReviewSpotCheckDetail || "TestAgent 通过后我仍需抽查关键验证。"}。沿用原复核工作单重新运行 TestAgent，并再次抽查关键验证；结论一致后再给出最终交付总结。`
+    : independentReviewGap
     ? independentReviewDetail && !/复杂变更独立复核仍需补齐/.test(independentReviewDetail)
-      ? independentReviewNeedsConfirmation
-        ? `${independentReviewDetail}。确认或补齐证据后重新运行 TestAgent/独立复核，再给出最终交付总结。`
-        : `${independentReviewDetail}。修复后重新运行 TestAgent/独立复核，再给出最终交付总结。`
+      ? independentReviewNeedsRecheck
+        ? "先补齐可观察结果、会话恢复或目标关联的边界检查，再重新运行 TestAgent；不要直接要求原实现成员返工。"
+        : independentReviewNeedsConfirmation
+          ? `${independentReviewDetail}。确认或补齐证据后重新运行 TestAgent/独立复核，再给出最终交付总结。`
+          : independentReviewNeedsEnvironment
+            ? "先补齐环境、登录或运行条件，再继续 TestAgent 复核和最终总结。"
+            : "先让原实现成员修复复核失败点，修复后重新运行 TestAgent/独立复核，再给出最终交付总结。"
       : "先让原实现成员修复复核未通过的问题，修复后重新运行 TestAgent/独立复核，再给出最终交付总结。"
     : `先补齐${missing[0]}，再给出最终交付总结。`;
   return {
@@ -1236,11 +1537,35 @@ function buildUserVisibleText(input: MainAgentWorkchainInput, evidence: ReturnTy
     if (/返工|rework|修复|重新复核|重新运行 TestAgent/i.test(`${explicitText}\n${nextText}`) && explicitText) return explicitText;
     return "已受理并进入持续跟踪；最终交付通过验收后，我会再给你完整总结。";
   }
+  if (evidence.postReviewSpotCheck?.failed) {
+    const failure = sanitizeWorkchainUserText(evidence.postReviewSpotCheck.failedText || "", "", 260);
+    return failure
+      ? `这轮还不能算完成：${failure}`
+      : "这轮还不能算完成：TestAgent 已通过，但我的完成前抽查尚未一致。";
+  }
+  if (evidence.postReviewSpotCheck?.needsUser) {
+    const detail = sanitizeWorkchainUserText(evidence.postReviewSpotCheck.failedText || "", "", 260);
+    return detail
+      ? `这轮还需要确认：${detail}`
+      : "这轮还需要确认：完成前抽查缺少可复跑的验证条件。";
+  }
   if (evidence.independentReviewGate?.failed) {
     const failure = sanitizeWorkchainUserText(evidence.independentReviewGate.failedText || "", "", 260);
     return failure
       ? `这轮还不能算完成：${failure}。`
       : "这轮还不能算完成：独立复核未通过，需要原实现成员返工后重新复核。";
+  }
+  if (evidence.independentReviewGate?.needsRecheck) {
+    const detail = sanitizeWorkchainUserText(evidence.independentReviewGate.riskText || "", "", 260);
+    return detail
+      ? `这轮还不能算完成：${detail}。`
+      : "这轮还不能算完成：TestAgent 的复核证据还没有闭环，需要重新复验。";
+  }
+  if (evidence.independentReviewGate?.needsEnvironment) {
+    const detail = sanitizeWorkchainUserText(evidence.independentReviewGate.riskText || "", "", 260);
+    return detail
+      ? `这轮还不能算完成：${detail}。`
+      : "这轮还不能算完成：TestAgent 复核需要先补齐环境或登录条件。";
   }
   if (evidence.independentReviewGate?.needsUser) {
     const detail = sanitizeWorkchainUserText(evidence.independentReviewGate.riskText || "", "", 260);
@@ -1255,7 +1580,11 @@ function buildUserVisibleText(input: MainAgentWorkchainInput, evidence: ReturnTy
     const parts = [];
     if (evidence.files.length) parts.push(`修改了 ${evidence.files.length} 个文件`);
     if (evidence.verification.length) parts.push(`完成 ${evidence.verification.length} 项检查`);
-    if (evidence.independentReview.length && !evidence.independentReviewGate?.failed && !evidence.independentReviewGate?.needsUser) parts.push(`完成独立复核`);
+    if (evidence.independentReview.length
+      && !evidence.independentReviewGate?.failed
+      && !evidence.independentReviewGate?.needsRecheck
+      && !evidence.independentReviewGate?.needsEnvironment
+      && !evidence.independentReviewGate?.needsUser) parts.push(`完成独立复核`);
     if (evidence.workersDone) parts.push(`${evidence.workersDone} 个执行目标已完成`);
     return parts.length
       ? `已完成：${parts.join("，")}。`
@@ -1305,6 +1634,7 @@ export function buildMainAgentWorkchain(input: MainAgentWorkchainInput) {
   const baseTodoPlan = buildWorkchainTodoPlan(input, stages, evidence, terminal);
   const explicitNextAction = sanitizeWorkchainUserText(input.completion?.next_action, "", 260);
   const provisionalNextAction = explicitNextAction
+    || evidence.postReviewSpotCheck?.nextAction
     || evidence.independentReviewGate?.nextAction
     || (evidence.risks.length ? "先处理风险或缺口，再继续交付" : terminal ? "可以查看详情、继续补充要求或保存为知识" : "继续执行并在完成后给出总结");
   const provisionalQuality = buildFinalSummaryQuality(input, evidence, terminal, userVisibleText, provisionalNextAction, { todoPlan: baseTodoPlan, progressCheckpoints: baseProgressCheckpoints });
@@ -1337,6 +1667,14 @@ export function buildMainAgentWorkchain(input: MainAgentWorkchainInput) {
       acceptance: evidence.acceptance,
       independent_review: evidence.independentReview,
       independentReview: evidence.independentReview,
+      post_review_spot_check: evidence.postReviewSpotCheck?.spotCheck || null,
+      postReviewSpotCheck: evidence.postReviewSpotCheck?.spotCheck || null,
+      post_review_spot_check_summary: evidence.postReviewSpotCheck?.summary || null,
+      postReviewSpotCheckSummary: evidence.postReviewSpotCheck?.summary || null,
+      post_review_spot_check_gate: evidence.postReviewSpotCheck?.gate || null,
+      postReviewSpotCheckGate: evidence.postReviewSpotCheck?.gate || null,
+      post_review_spot_check_required: evidence.postReviewSpotCheck?.required === true,
+      post_review_spot_check_gate_passed: evidence.postReviewSpotCheck?.passed === true,
       risks: evidence.risks,
       next_action: nextAction,
       verification_status: finalSummaryQuality.verification_status,
@@ -1391,6 +1729,7 @@ export function formatMainAgentCompletionReply(options: { reply?: any; workchain
   const reviewLines = [
     ...narrativeList(summary.acceptance, 4, "验收结论已整理，技术细节已放入技术详情。").map(item => `验收：${item}`),
     ...narrativeList(summary.independent_review || summary.independentReview, 4, "复核结论已整理，技术细节已放入技术详情。").map(item => `复核：${item}`),
+    ...narrativeList(summary.post_review_spot_check_summary?.rows || summary.postReviewSpotCheckSummary?.rows, 3, "完成前抽查结论已整理。").map(item => `抽查：${item}`),
   ];
   const riskLines = narrativeList(summary.risks, 5, "风险信息已整理，技术细节已放入技术详情。");
   const riskStatus = sanitizeWorkchainUserText(summary.risk_status, "", 260);
@@ -1584,6 +1923,404 @@ export function runMainAgentWorkchainSelfTest() {
       },
     },
   });
+  const failedBrowserFlowSummary = buildMainAgentWorkchain({
+    surface: "group",
+    status: "completed",
+    mode: "delegation",
+    userText: "已完成。",
+    summary: {
+      actual_file_changes: [{ path: "src/settings.ts" }],
+      verification_executed: ["npm test"],
+      acceptance_gate_passed: true,
+      test_agent_report: {
+        schema: "ccm-test-agent-report-v1",
+        status: "passed",
+        recommendation: "accept",
+        browserFlowSummary: {
+          total: 2,
+          statusCounts: { passed: 1, failed: 1, blocked: 0, skipped: 0 },
+          flowTypeCount: 1,
+          criteriaCount: 2,
+          actionCount: 4,
+          assertionCount: 5,
+          failedStepCount: 1,
+          items: [{
+            flowType: "acceptance_popup_flow",
+            total: 2,
+            statusCounts: { passed: 1, failed: 1, blocked: 0, skipped: 0 },
+            criteria: ["打开设置弹窗后可以保存"],
+            failedStepCount: 1,
+            failures: [{ project: "web", name: "设置弹窗", status: "failed", failedSteps: ["raw locator"] }],
+          }],
+        },
+      },
+    },
+  });
+  const failedMultiSessionBrowserSummary = buildMainAgentWorkchain({
+    surface: "global",
+    status: "completed",
+    mode: "delegation",
+    userText: "已完成。",
+    summary: {
+      actual_file_changes: [{ path: "src/collaboration.ts" }],
+      verification_executed: ["npm test"],
+      acceptance_gate_passed: true,
+      test_agent_report: {
+        schema: "ccm-test-agent-report-v1",
+        status: "passed",
+        recommendation: "accept",
+        browserMultiSessionSummary: {
+          total: 2,
+          statusCounts: { passed: 1, failed: 1, blocked: 0, skipped: 0 },
+          sessionCount: 4,
+          uniqueSessionCount: 4,
+          sessionNames: ["sender", "receiver", "author", "observer"],
+          parallelGroupCount: 2,
+          comparisonCount: 2,
+          failedComparisonCount: 1,
+          actionCount: 7,
+          assertionCount: 8,
+          failedStepCount: 1,
+          items: [{
+            check: "作者更新后观察方同步刷新",
+            status: "failed",
+            sessionNames: ["author", "observer"],
+            failedSessionNames: ["observer"],
+            failedComparisonCount: 1,
+            failedSteps: [{ name: "session:observer:assert:visible", error: "locator=#raw-observer" }],
+          }],
+        },
+      },
+    },
+  });
+  const failedBrowserAuthenticationSummary = buildMainAgentWorkchain({
+    surface: "group",
+    status: "completed",
+    mode: "delegation",
+    userText: "已完成。",
+    summary: {
+      actual_file_changes: [{ path: "src/session.ts" }],
+      verification_executed: ["npm test"],
+      acceptance_gate_passed: true,
+      independent_review_required: true,
+      independent_review_gate_passed: true,
+      test_agent_report: {
+        schema: "ccm-test-agent-report-v1",
+        status: "passed",
+        recommendation: "accept",
+        metadata: {
+          browserAuthenticationSummary: {
+            configuredChecks: 2,
+            passedChecks: 1,
+            failedChecks: 1,
+            blockedChecks: 0,
+            authenticatedSessions: 2,
+            credentialEnvNames: ["PRIVATE_LOGIN_EMAIL", "PRIVATE_LOGIN_PASSWORD"],
+            storageStateCount: 2,
+            sensitiveArtifactSuppressionCount: 2,
+          },
+        },
+      },
+    },
+  });
+  const blockedBrowserAuthenticationSummary = buildMainAgentWorkchain({
+    surface: "global",
+    status: "completed",
+    mode: "delegation",
+    userText: "已完成。",
+    summary: {
+      actual_file_changes: [{ path: "src/session.ts" }],
+      verification_executed: ["npm test"],
+      acceptance_gate_passed: true,
+      independent_review_required: true,
+      independent_review_gate_passed: true,
+      test_agent_report: {
+        schema: "ccm-test-agent-report-v1",
+        status: "passed",
+        recommendation: "accept",
+        metadata: {
+          browserAuthenticationSummary: {
+            configuredChecks: 1,
+            passedChecks: 0,
+            failedChecks: 0,
+            blockedChecks: 1,
+            authenticatedSessions: 0,
+            credentialEnvNames: ["PRIVATE_LOGIN_EMAIL", "PRIVATE_LOGIN_PASSWORD"],
+            storageStateCount: 1,
+            sensitiveArtifactSuppressionCount: 1,
+          },
+        },
+      },
+    },
+  });
+  const failedActionEffectAndAdversarialSummary = buildMainAgentWorkchain({
+    surface: "group",
+    status: "completed",
+    mode: "delegation",
+    userText: "已完成。",
+    summary: {
+      actual_file_changes: [{ path: "src/settings.ts" }],
+      verification_executed: ["npm test"],
+      acceptance_gate_passed: true,
+      independent_review_required: true,
+      independent_review_gate_passed: true,
+      test_agent_report: {
+        schema: "ccm-test-agent-report-v1",
+        status: "passed",
+        recommendation: "accept",
+        verdict: {
+          schema: "ccm-test-agent-verdict-v1",
+          status: "passed",
+          recommendation: "accept",
+          canAccept: true,
+        },
+        browserActionEffectSummary: {
+          checks: 1,
+          actions: 1,
+          changed: 0,
+          unchanged: 1,
+          unavailable: 0,
+          failed: 1,
+          detailSuppressed: 0,
+          crossSession: 0,
+          actionTypes: { click: 1 },
+          changedSignals: { url: 0, title: 0, page_text: 0, dom: 0, network: 0, dialog: 0, popup: 0, download: 0 },
+          items: [{
+            project: "web",
+            name: "保存设置",
+            provider: "playwright",
+            status: "failed",
+            actions: 1,
+            changed: 0,
+            unchanged: 1,
+            unavailable: 0,
+            failed: 1,
+            detailSuppressed: 0,
+            crossSession: 0,
+            actionTypes: { click: 1 },
+            changedSignals: { url: 0, title: 0, page_text: 0, dom: 0, network: 0, dialog: 0, popup: 0, download: 0 },
+          }],
+        },
+        adversarialEvidenceSummary: {
+          required: true,
+          waived: false,
+          status: "failed",
+          total: 1,
+          passed: 0,
+          failed: 1,
+          blocked: 0,
+          skipped: 0,
+          http: 0,
+          browser: 1,
+          relevant: 1,
+          unlinked: 0,
+          passedRelevant: 0,
+          goalLinked: 1,
+          criteriaCovered: ["重复保存不能产生重复记录"],
+          probeTypes: ["duplicate_submit"],
+          items: [{
+            project: "web",
+            surface: "browser",
+            name: "重复保存设置",
+            target: "http://127.0.0.1:5173/settings?token=hidden",
+            status: "failed",
+            probeType: "duplicate_submit",
+            provider: "playwright",
+            relevance: "explicit",
+            linkedCriteria: ["重复保存不能产生重复记录"],
+            goalLinked: true,
+            matchScore: 100,
+          }],
+        },
+      },
+    },
+  });
+  const needsRecheckLatestEvidenceSummary = buildMainAgentWorkchain({
+    surface: "global",
+    status: "completed",
+    mode: "delegation",
+    userText: "已完成。",
+    summary: {
+      actual_file_changes: [{ path: "src/session.ts" }],
+      verification_executed: ["npm test"],
+      acceptance_gate_passed: true,
+      independent_review_required: true,
+      independent_review_gate_passed: true,
+      test_agent_report: {
+        schema: "ccm-test-agent-report-v1",
+        status: "passed",
+        recommendation: "accept",
+        verdict: {
+          schema: "ccm-test-agent-verdict-v1",
+          status: "passed",
+          recommendation: "accept",
+          canAccept: true,
+        },
+        browserActionEffectSummary: {
+          checks: 1,
+          actions: 1,
+          changed: 0,
+          unchanged: 0,
+          unavailable: 1,
+          failed: 1,
+          detailSuppressed: 1,
+          crossSession: 0,
+          actionTypes: { click: 1 },
+          changedSignals: { url: 0, title: 0, page_text: 0, dom: 0, network: 0, dialog: 0, popup: 0, download: 0 },
+          items: [{
+            project: "web",
+            name: "提交登录表单",
+            provider: "playwright",
+            status: "blocked",
+            actions: 1,
+            changed: 0,
+            unchanged: 0,
+            unavailable: 1,
+            failed: 1,
+            detailSuppressed: 1,
+            crossSession: 0,
+            actionTypes: { click: 1 },
+            changedSignals: { url: 0, title: 0, page_text: 0, dom: 0, network: 0, dialog: 0, popup: 0, download: 0 },
+          }],
+        },
+        browserRecoverySummary: {
+          checks: 1,
+          attempted: 1,
+          recovered: 0,
+          failed: 0,
+          notRetried: 1,
+          items: [{
+            project: "web",
+            name: "提交登录表单",
+            provider: "playwright",
+            status: "blocked",
+            attempted: 1,
+            recovered: 0,
+            failed: 0,
+            notRetried: 1,
+            events: [{ reason: "unsafe duplicate side effect", sessionId: "hidden-session" }],
+          }],
+        },
+        adversarialEvidenceSummary: {
+          required: true,
+          waived: false,
+          status: "missing",
+          total: 0,
+          passed: 0,
+          failed: 0,
+          blocked: 0,
+          skipped: 0,
+          http: 0,
+          browser: 0,
+          relevant: 0,
+          unlinked: 0,
+          passedRelevant: 0,
+          goalLinked: 0,
+          criteriaCovered: [],
+          probeTypes: [],
+          items: [],
+        },
+      },
+    },
+  });
+  const passedPostReviewSpotCheck = buildMainAgentWorkchain({
+    surface: "group",
+    status: "completed",
+    mode: "delegation",
+    userText: "已完成。",
+    summary: {
+      actual_file_changes: [{ path: "src/session.ts" }],
+      verification_executed: ["npm test"],
+      receipt_count: 2,
+      acceptance_gate_passed: true,
+      acceptance_gate: { checks: [{ id: "acceptance", label: "用户目标覆盖", ok: true, detail: "核心流程已验证" }] },
+      independent_review_required: true,
+      independent_review_gate_passed: true,
+      independent_review_gate: {
+        required: true,
+        pass: true,
+        status: "passed",
+        evidence: [{ reviewer: "test-agent", verdict: "passed", summary: "TestAgent 已通过独立复核。" }],
+      },
+      post_review_spot_check_required: true,
+      post_review_spot_check_gate_passed: true,
+      post_review_spot_check_gate: {
+        required: true,
+        pass: true,
+        status: "passed",
+        reason: "TestAgent 通过后，我已完成关键验证抽查",
+      },
+      post_review_spot_check: {
+        schema: "ccm-main-agent-post-review-spot-check-v1",
+        required: true,
+        pass: true,
+        status: "passed",
+        executed_count: 2,
+        passed_count: 2,
+        mismatch_count: 0,
+        headline: "我已抽查 2 项验证，结果与 TestAgent 的通过结论一致。",
+        next_action: "继续完成最终验收。",
+      },
+      post_review_spot_check_summary: {
+        schema: "ccm-main-agent-post-review-spot-check-summary-v1",
+        title: "完成前抽查",
+        status: "passed",
+        status_label: "已通过",
+        headline: "我已抽查 2 项验证，结果与 TestAgent 的通过结论一致。",
+        rows: ["已抽查 2 项验证，2 项结果一致"],
+        next_action: "继续完成最终验收。",
+      },
+    },
+  });
+  const failedPostReviewSpotCheck = buildMainAgentWorkchain({
+    surface: "global",
+    status: "completed",
+    mode: "delegation",
+    userText: "已完成。",
+    summary: {
+      actual_file_changes: [{ path: "src/session.ts" }],
+      verification_executed: ["npm test"],
+      receipt_count: 2,
+      acceptance_gate_passed: true,
+      acceptance_gate: { checks: [{ id: "acceptance", label: "用户目标覆盖", ok: true, detail: "核心流程已验证" }] },
+      independent_review_required: true,
+      independent_review_gate_passed: true,
+      independent_review_gate: {
+        required: true,
+        pass: true,
+        status: "passed",
+        evidence: [{ reviewer: "test-agent", verdict: "passed", summary: "TestAgent 已通过独立复核。" }],
+      },
+      post_review_spot_check_required: true,
+      post_review_spot_check_gate_passed: false,
+      post_review_spot_check_gate: {
+        required: true,
+        pass: false,
+        status: "needs_recheck",
+        reason: "TestAgent 已通过，但我的完成前抽查有 1 项结果不一致。",
+      },
+      post_review_spot_check: {
+        schema: "ccm-main-agent-post-review-spot-check-v1",
+        required: true,
+        pass: false,
+        status: "needs_recheck",
+        executed_count: 2,
+        passed_count: 1,
+        mismatch_count: 1,
+        headline: "TestAgent 已通过，但我的完成前抽查有 1 项结果不一致。",
+        next_action: "沿用原复核工作单重新运行 TestAgent，并再次抽查关键验证。",
+      },
+      post_review_spot_check_summary: {
+        schema: "ccm-main-agent-post-review-spot-check-summary-v1",
+        title: "完成前抽查",
+        status: "needs_recheck",
+        status_label: "需复验",
+        headline: "TestAgent 已通过，但我的完成前抽查有 1 项结果不一致。",
+        rows: ["已抽查 2 项验证，1 项结果一致，1 项不一致"],
+        next_action: "沿用原复核工作单重新运行 TestAgent，并再次抽查关键验证。",
+      },
+    },
+  });
   const reply = formatMainAgentCompletionReply({ reply: "已完成。", workchain: group, includeDetails: true });
   const shapedReply = formatMainAgentCompletionReply({ reply: "任务已建立", workchain: group, includeDetails: false });
   const ordinary = buildMainAgentWorkchain({ surface: "global", status: "completed", mode: "conversation", userText: "知识库压缩会按时间和主题整理。", traceId: "trace-3" });
@@ -1677,13 +2414,36 @@ export function runMainAgentWorkchainSelfTest() {
     evidence: ["trace_id raw payload should fail"],
     risks: [],
   } as any, true, "已完成", "继续");
+  const protectedFailureCopy = sanitizeWorkchainUserText("CCM_AGENT_RECEIPT failed raw payload trace_id=hidden denied");
+  const testAgentFailureFallbackCopy = sanitizeTestAgentFailureText(null);
   const checks = {
+    protectedFailureCopyUsesInvestigationLanguage: protectedFailureCopy.includes("我会继续排查")
+      && protectedFailureCopy.includes("技术详情")
+      && !protectedFailureCopy.includes("需要处理")
+      && !INTERNAL_TEXT_PATTERN.test(protectedFailureCopy),
+    testAgentFailureFallbackUsesGapLanguage: testAgentFailureFallbackCopy.includes("待补齐")
+      && !testAgentFailureFallbackCopy.includes("需要处理"),
     simpleHasSummary: simple.user_visible_text.includes("回复已整理给你"),
     groupEvidenceVisible: group.completion_summary.evidence.length >= 5,
     groupCompletionSummaryIncludesReviewEvidence: group.completion_summary.acceptance?.some((item: string) => item.includes("最终验收已通过"))
       && group.completion_summary.independent_review?.some((item: string) => item.includes("test-agent"))
       && group.completion_summary.evidence?.some((item: string) => item.includes("独立复核")),
     finalSummaryQualityRequired: group.completion_summary.final_summary_quality?.required === true && group.completion_summary.final_summary_quality?.passed === true,
+    passedPostReviewSpotCheckAllowsCompletion: passedPostReviewSpotCheck.completion_summary.final_summary_quality?.passed === true
+      && passedPostReviewSpotCheck.completion_summary.final_summary_quality?.checks?.some((item: any) => item.id === "post_review_spot_check" && item.passed === true)
+      && passedPostReviewSpotCheck.completion_summary.post_review_spot_check_gate_passed === true
+      && passedPostReviewSpotCheck.completion_summary.post_review_spot_check_summary?.rows?.some((item: string) => item.includes("2 项结果一致"))
+      && !passedPostReviewSpotCheck.user_visible_text.includes("主 Agent"),
+    failedPostReviewSpotCheckBlocksFalseCompletion: failedPostReviewSpotCheck.completion_summary.final_summary_quality?.passed === false
+      && failedPostReviewSpotCheck.completion_summary.final_summary_quality?.checks?.some((item: any) => item.id === "post_review_spot_check" && item.passed === false)
+      && failedPostReviewSpotCheck.completion_summary.post_review_spot_check_gate_passed === false
+      && failedPostReviewSpotCheck.user_visible_text.includes("不能算完成")
+      && failedPostReviewSpotCheck.user_visible_text.includes("完成前抽查")
+      && failedPostReviewSpotCheck.completion_summary.next_action?.includes("沿用原复核工作单重新运行 TestAgent")
+      && failedPostReviewSpotCheck.todo_plan?.quality_followup_required === true
+      && failedPostReviewSpotCheck.todo_plan?.current_step?.id === "quality-followup"
+      && !/^已完成/.test(failedPostReviewSpotCheck.user_visible_text || "")
+      && !failedPostReviewSpotCheck.user_visible_text.includes("主 Agent"),
     failedReviewBlocksFalseCompletion: failedReview.completion_summary.final_summary_quality?.passed === false
       && failedReview.completion_summary.final_summary_quality?.checks?.some((item: any) => item.id === "independent_review" && item.passed === false)
       && failedReview.user_visible_text.includes("不能算完成")
@@ -1726,6 +2486,86 @@ export function runMainAgentWorkchainSelfTest() {
         text: weakTestAgentAcceptanceSummary.user_visible_text,
         review: weakTestAgentAcceptanceSummary.completion_summary.independent_review,
         next: weakTestAgentAcceptanceSummary.completion_summary.next_action,
+      })),
+    testAgentFailedBrowserFlowBlocksFalseCompletion: failedBrowserFlowSummary.completion_summary.final_summary_quality?.passed === false
+      && failedBrowserFlowSummary.user_visible_text.includes("TestAgent 真实浏览器验收未通过")
+      && failedBrowserFlowSummary.completion_summary.independent_review?.some((item: string) => item.includes("真实浏览器验收") && item.includes("1 个未通过"))
+      && failedBrowserFlowSummary.completion_summary.independent_review?.some((item: string) => item.includes("弹窗流程") && item.includes("未通过"))
+      && !/acceptance_popup_flow|raw locator|ccm-test-agent/i.test(JSON.stringify({
+        text: failedBrowserFlowSummary.user_visible_text,
+        review: failedBrowserFlowSummary.completion_summary.independent_review,
+      })),
+    testAgentFailedMultiSessionBrowserBlocksFalseCompletion: failedMultiSessionBrowserSummary.completion_summary.final_summary_quality?.passed === false
+      && failedMultiSessionBrowserSummary.user_visible_text.includes("TestAgent 多人协作浏览器验收未通过")
+      && failedMultiSessionBrowserSummary.completion_summary.independent_review?.some((item: string) => item.includes("多人协作浏览器验收") && item.includes("1 个未通过"))
+      && failedMultiSessionBrowserSummary.completion_summary.independent_review?.some((item: string) => item.includes("观察方") && item.includes("未通过"))
+      && failedMultiSessionBrowserSummary.completion_summary.next_action?.includes("重新运行 TestAgent")
+      && !/^已完成/.test(failedMultiSessionBrowserSummary.user_visible_text || "")
+      && !/session:observer|#raw-observer|locator|browserMultiSessionSummary|ccm-test-agent/i.test(JSON.stringify({
+        text: failedMultiSessionBrowserSummary.user_visible_text,
+        review: failedMultiSessionBrowserSummary.completion_summary.independent_review,
+        next: failedMultiSessionBrowserSummary.completion_summary.next_action,
+      })),
+    testAgentFailedAuthenticationBlocksLegacyPass: failedBrowserAuthenticationSummary.completion_summary.final_summary_quality?.passed === false
+      && failedBrowserAuthenticationSummary.user_visible_text.includes("TestAgent 登录态浏览器验收未通过")
+      && failedBrowserAuthenticationSummary.completion_summary.independent_review?.some((item: string) =>
+        item.includes("登录态浏览器验收") && item.includes("1 项未通过")
+      )
+      && failedBrowserAuthenticationSummary.completion_summary.next_action?.includes("重新运行 TestAgent")
+      && failedBrowserAuthenticationSummary.todo_plan?.quality_followup_required === true
+      && !/^已完成/.test(failedBrowserAuthenticationSummary.user_visible_text || "")
+      && !/PRIVATE_LOGIN_EMAIL|PRIVATE_LOGIN_PASSWORD|credentialEnvNames|storageState|cookie|token|sha/i.test(JSON.stringify({
+        text: failedBrowserAuthenticationSummary.user_visible_text,
+        review: failedBrowserAuthenticationSummary.completion_summary.independent_review,
+        next: failedBrowserAuthenticationSummary.completion_summary.next_action,
+      })),
+    testAgentBlockedAuthenticationNeedsConfirmation: blockedBrowserAuthenticationSummary.completion_summary.final_summary_quality?.passed === false
+      && blockedBrowserAuthenticationSummary.user_visible_text.includes("还需要确认")
+      && blockedBrowserAuthenticationSummary.completion_summary.independent_review?.some((item: string) =>
+        item.includes("测试账号或登录条件")
+      )
+      && blockedBrowserAuthenticationSummary.completion_summary.next_action?.includes("确认")
+      && blockedBrowserAuthenticationSummary.todo_plan?.quality_followup_required === true
+      && !/^已完成/.test(blockedBrowserAuthenticationSummary.user_visible_text || "")
+      && !/PRIVATE_LOGIN_EMAIL|PRIVATE_LOGIN_PASSWORD|credentialEnvNames|storageState|cookie|token|sha/i.test(JSON.stringify({
+        text: blockedBrowserAuthenticationSummary.user_visible_text,
+        review: blockedBrowserAuthenticationSummary.completion_summary.independent_review,
+        next: blockedBrowserAuthenticationSummary.completion_summary.next_action,
+      })),
+    testAgentFailedActionEffectAndAdversarialEvidenceBlockLegacyPass: failedActionEffectAndAdversarialSummary.completion_summary.final_summary_quality?.passed === false
+      && failedActionEffectAndAdversarialSummary.user_visible_text.includes("TestAgent 操作结果验证未通过")
+      && failedActionEffectAndAdversarialSummary.completion_summary.independent_review?.some((item: string) =>
+        item.includes("操作结果验证") && item.includes("没有产生可见效果")
+      )
+      && failedActionEffectAndAdversarialSummary.completion_summary.independent_review?.some((item: string) =>
+        item.includes("边界与异常验证") && item.includes("未通过")
+      )
+      && failedActionEffectAndAdversarialSummary.completion_summary.next_action?.includes("原实现成员修复")
+      && !/^已完成/.test(failedActionEffectAndAdversarialSummary.user_visible_text || "")
+      && !/127\.0\.0\.1|token=hidden|duplicate_submit|playwright|changedSignals/i.test(JSON.stringify({
+        text: failedActionEffectAndAdversarialSummary.user_visible_text,
+        review: failedActionEffectAndAdversarialSummary.completion_summary.independent_review,
+        next: failedActionEffectAndAdversarialSummary.completion_summary.next_action,
+      })),
+    testAgentIncompleteLatestEvidenceRequiresRecheckWithoutImplementationRework: needsRecheckLatestEvidenceSummary.completion_summary.final_summary_quality?.passed === false
+      && needsRecheckLatestEvidenceSummary.user_visible_text.includes("TestAgent 复核需要重新验证")
+      && needsRecheckLatestEvidenceSummary.completion_summary.independent_review?.some((item: string) =>
+        item.includes("暂时无法确认页面效果")
+      )
+      && needsRecheckLatestEvidenceSummary.completion_summary.independent_review?.some((item: string) =>
+        item.includes("不代表实现失败")
+      )
+      && needsRecheckLatestEvidenceSummary.completion_summary.independent_review?.some((item: string) =>
+        item.includes("TestAgent 工作单")
+      )
+      && needsRecheckLatestEvidenceSummary.completion_summary.next_action?.includes("重新运行 TestAgent")
+      && needsRecheckLatestEvidenceSummary.completion_summary.next_action?.includes("不要直接要求原实现成员返工")
+      && needsRecheckLatestEvidenceSummary.todo_plan?.quality_followup_required === true
+      && !/^已完成/.test(needsRecheckLatestEvidenceSummary.user_visible_text || "")
+      && !/hidden-session|unsafe duplicate side effect|sessionId|actionTypes|changedSignals|playwright/i.test(JSON.stringify({
+        text: needsRecheckLatestEvidenceSummary.user_visible_text,
+        review: needsRecheckLatestEvidenceSummary.completion_summary.independent_review,
+        next: needsRecheckLatestEvidenceSummary.completion_summary.next_action,
       })),
     workchainQualityRequiresProtocolSanitizer: group.completion_summary.final_summary_quality?.checks?.some((item: any) => item.id === "user_visible_protocol_sanitized" && item.passed === true)
       && protocolLeak.completion_summary.final_summary_quality?.checks?.some((item: any) => item.id === "user_visible_protocol_sanitized" && item.passed === true),
@@ -1800,5 +2640,5 @@ export function runMainAgentWorkchainSelfTest() {
     progressCheckpointsVisible: group.progress_checkpoints?.schema === "ccm-main-agent-progress-checkpoints-v1" && group.progress_checkpoints.items.length > 0,
     progressCheckpointsHideRawProtocol: !INTERNAL_TEXT_PATTERN.test(JSON.stringify(group.progress_checkpoints.items)),
   };
-  return { pass: Object.values(checks).every(Boolean), checks, simple, group, failedTestAgentSummary, summaryOnlyTestAgentGap, weakTestAgentAcceptanceSummary, reply, shapedReply, ordinaryReply, runningTodo, missingVerificationTodo, incompleteQuality, incompleteQualityReply, protocolLeak, protocolLeakReply, legacySummaryReply, rawLeakQuality };
+  return { pass: Object.values(checks).every(Boolean), checks, simple, group, failedTestAgentSummary, summaryOnlyTestAgentGap, weakTestAgentAcceptanceSummary, passedPostReviewSpotCheck, failedPostReviewSpotCheck, reply, shapedReply, ordinaryReply, runningTodo, missingVerificationTodo, incompleteQuality, incompleteQualityReply, protocolLeak, protocolLeakReply, legacySummaryReply, rawLeakQuality };
 }

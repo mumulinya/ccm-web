@@ -738,7 +738,7 @@ function summarizeGroupStatusIndependentReview(source = {}) {
         .filter(Boolean)
         .slice(0, 3);
     const headline = cleanGroupStatusFollowupText(summary.headline || summary.summary || rows[0] || "", status === "needs_rework"
-        ? "独立复核发现待处理缺口。"
+        ? "独立复核发现未通过项。"
         : status === "needs_user"
             ? "独立复核需要你确认。"
             : status === "passed"
@@ -1693,7 +1693,7 @@ function runGroupStatusFollowupSelfTest() {
                         headline: "TestAgent 复核指出仍有未覆盖项，需要先返工。",
                         rows: [
                             "TestAgent：需返工",
-                            "待处理：验收条件未通过：登录恢复验证必须通过",
+                            "待返工：验收条件未通过：登录恢复验证必须通过",
                         ],
                         next_action: "先处理复核指出的缺口，再重新运行 TestAgent/独立复核。",
                     },

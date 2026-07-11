@@ -28,11 +28,77 @@ const normalizeMessage = (message) => {
   }
 }
 
-const messageKey = (message) => [
+const messageStableIdentity = (message) => {
+  const explicitId = message?.id || message?.message_id || message?.messageId
+  if (explicitId) return `message:${explicitId}`
+  const runId = message?.agenticRun?.id || message?.agentic_run?.id || message?.run_id || message?.runId
+  if (runId && (message?.type === 'global_stream' || message?.agenticRun || message?.agentic_run)) {
+    return `run:${runId}`
+  }
+  const missionId = message?.globalMission?.id || message?.global_mission?.id
+  if (missionId && message?.type === 'global_mission') return `mission:${missionId}`
+  return ''
+}
+
+const messageLegacyKey = (message) => [
   String(message?.role || ''),
   String(message?.timestamp || ''),
   String(message?.content || ''),
 ].join('\u0001')
+
+const messageKey = (message) => {
+  const stableIdentity = messageStableIdentity(message)
+  return stableIdentity
+    ? [String(message?.role || ''), stableIdentity].join('\u0001')
+    : messageLegacyKey(message)
+}
+
+const addStableLegacyCandidate = (candidatesByLegacy, legacyKey, record) => {
+  const candidates = candidatesByLegacy.get(legacyKey) || new Set()
+  candidates.add(record)
+  candidatesByLegacy.set(legacyKey, candidates)
+}
+
+const uniqueStableLegacyCandidate = (candidatesByLegacy, legacyKey) => {
+  const candidates = candidatesByLegacy.get(legacyKey)
+  return candidates?.size === 1 ? [...candidates][0] : null
+}
+
+const plainLegacyRecord = (recordsByPlainLegacyKey, legacyKey) => {
+  const record = recordsByPlainLegacyKey.get(legacyKey)
+  return record && !messageStableIdentity(record.message) ? record : null
+}
+
+const messageRevisionAt = (message) => {
+  const run = message?.agenticRun || message?.agentic_run || {}
+  const mission = message?.globalMission || message?.global_mission || {}
+  const values = [
+    message?.updated_at,
+    message?.updatedAt,
+    run?.updated_at,
+    run?.updatedAt,
+    run?.completed_at,
+    run?.completedAt,
+    mission?.updated_at,
+    mission?.updatedAt,
+    message?.timestamp,
+  ]
+  return Math.max(0, ...values.map(value => Date.parse(String(value || '')) || 0))
+}
+
+const mergeMessageVersions = (previous, incoming) => {
+  const previousRevision = messageRevisionAt(previous)
+  const incomingRevision = messageRevisionAt(incoming)
+  if (previousRevision > incomingRevision) return { ...incoming, ...previous }
+  if (incomingRevision > previousRevision) return { ...previous, ...incoming }
+  return {
+    ...previous,
+    ...incoming,
+    role: previous.role,
+    content: previous.content,
+    timestamp: previous.timestamp,
+  }
+}
 
 const messageSignature = (message) => {
   try {
@@ -43,21 +109,42 @@ const messageSignature = (message) => {
 }
 
 const mergeHistoryMessages = (current = [], incoming = []) => {
-  const byKey = new Map()
+  const records = []
+  const recordsByStableKey = new Map()
+  const recordsByPlainLegacyKey = new Map()
+  const stableCandidatesByLegacyKey = new Map()
   for (const raw of [...(current || []), ...(incoming || [])]) {
     const message = normalizeMessage(raw)
     if (!message) continue
-    const key = messageKey(message)
-    const previous = byKey.get(key)
-    byKey.set(key, previous ? {
-      ...previous,
-      ...message,
-      role: previous.role,
-      content: previous.content,
-      timestamp: previous.timestamp,
-    } : message)
+    const stableKey = messageStableIdentity(message)
+      ? messageKey(message)
+      : ''
+    const legacyKey = messageLegacyKey(message)
+    let record = stableKey
+      ? recordsByStableKey.get(stableKey) || plainLegacyRecord(recordsByPlainLegacyKey, legacyKey)
+      : plainLegacyRecord(recordsByPlainLegacyKey, legacyKey) || uniqueStableLegacyCandidate(stableCandidatesByLegacyKey, legacyKey)
+    if (!record) {
+      record = { message }
+      records.push(record)
+    } else {
+      record.message = mergeMessageVersions(record.message, message)
+    }
+
+    const mergedStableKey = messageStableIdentity(record.message)
+      ? messageKey(record.message)
+      : ''
+    const mergedLegacyKey = messageLegacyKey(record.message)
+    if (mergedStableKey) {
+      recordsByStableKey.set(mergedStableKey, record)
+      addStableLegacyCandidate(stableCandidatesByLegacyKey, mergedLegacyKey, record)
+      if (stableKey) addStableLegacyCandidate(stableCandidatesByLegacyKey, legacyKey, record)
+    } else {
+      recordsByPlainLegacyKey.set(mergedLegacyKey, record)
+      recordsByPlainLegacyKey.set(legacyKey, record)
+    }
   }
-  return [...byKey.values()]
+  return records
+    .map(record => record.message)
     .sort((a, b) => String(a.timestamp || '').localeCompare(String(b.timestamp || '')))
     .slice(-SESSION_MESSAGE_LIMIT)
 }
@@ -89,6 +176,8 @@ const normalizeSession = (session) => {
 
 export const __globalAgentSessionTestHooks = {
   normalizeMessage,
+  messageKey,
+  messageRevisionAt,
   mergeHistoryMessages,
   messagesChanged,
 }

@@ -7,12 +7,17 @@ exports.buildAcceptancePathBrowserSmokeChecks = buildAcceptancePathBrowserSmokeC
 exports.buildBrowserChecksForProject = buildBrowserChecksForProject;
 const utils_1 = require("../utils");
 const acceptance_derived_checks_1 = require("./acceptance-derived-checks");
+const acceptance_clipboard_flows_1 = require("./acceptance-clipboard-flows");
 const acceptance_click_flows_1 = require("./acceptance-click-flows");
 const acceptance_dialog_flows_1 = require("./acceptance-dialog-flows");
+const acceptance_drag_flows_1 = require("./acceptance-drag-flows");
 const acceptance_download_flows_1 = require("./acceptance-download-flows");
 const acceptance_form_flows_1 = require("./acceptance-form-flows");
+const acceptance_history_flows_1 = require("./acceptance-history-flows");
 const acceptance_hover_flows_1 = require("./acceptance-hover-flows");
 const acceptance_keyboard_flows_1 = require("./acceptance-keyboard-flows");
+const acceptance_network_state_flows_1 = require("./acceptance-network-state-flows");
+const acceptance_popup_flows_1 = require("./acceptance-popup-flows");
 const acceptance_repeated_click_checks_1 = require("./acceptance-repeated-click-checks");
 const acceptance_responsive_checks_1 = require("./acceptance-responsive-checks");
 const acceptance_scroll_flows_1 = require("./acceptance-scroll-flows");
@@ -140,12 +145,17 @@ function buildBrowserChecksForProject(project, acceptanceCriteria = []) {
     if (explicit.length)
         return explicit;
     const formFlowChecks = (0, acceptance_form_flows_1.buildAcceptanceFormFlowBrowserChecks)(project, acceptanceCriteria);
+    const clipboardFlowChecks = (0, acceptance_clipboard_flows_1.buildAcceptanceClipboardFlowBrowserChecks)(project, acceptanceCriteria);
     const dialogFlowChecks = (0, acceptance_dialog_flows_1.buildAcceptanceDialogFlowBrowserChecks)(project, acceptanceCriteria);
+    const dragFlowChecks = (0, acceptance_drag_flows_1.buildAcceptanceDragFlowBrowserChecks)(project, acceptanceCriteria);
+    const popupFlowChecks = (0, acceptance_popup_flows_1.buildAcceptancePopupFlowBrowserChecks)(project, acceptanceCriteria);
     const downloadFlowChecks = (0, acceptance_download_flows_1.buildAcceptanceDownloadFlowBrowserChecks)(project, acceptanceCriteria);
     const uploadFlowChecks = (0, acceptance_upload_flows_1.buildAcceptanceUploadFlowBrowserChecks)(project, acceptanceCriteria);
     const repeatedClickChecks = (0, acceptance_repeated_click_checks_1.buildAcceptanceRepeatedClickBrowserChecks)(project, acceptanceCriteria);
     const keyboardFlowChecks = (0, acceptance_keyboard_flows_1.buildAcceptanceKeyboardFlowBrowserChecks)(project, acceptanceCriteria);
-    const clickFlowChecks = (0, acceptance_click_flows_1.buildAcceptanceClickFlowBrowserChecks)(project, acceptanceCriteria.filter(criterion => !(0, acceptance_repeated_click_checks_1.acceptanceRepeatedClickIntent)(criterion) && !(0, acceptance_keyboard_flows_1.acceptanceKeyboardIntent)(criterion) && !(0, acceptance_dialog_flows_1.acceptanceDialogIntent)(criterion)));
+    const networkStateFlowChecks = (0, acceptance_network_state_flows_1.buildAcceptanceNetworkStateFlowBrowserChecks)(project, acceptanceCriteria);
+    const historyFlowChecks = (0, acceptance_history_flows_1.buildAcceptanceHistoryFlowBrowserChecks)(project, acceptanceCriteria);
+    const clickFlowChecks = (0, acceptance_click_flows_1.buildAcceptanceClickFlowBrowserChecks)(project, acceptanceCriteria.filter(criterion => !(0, acceptance_repeated_click_checks_1.acceptanceRepeatedClickIntent)(criterion) && !(0, acceptance_keyboard_flows_1.acceptanceKeyboardIntent)(criterion) && !(0, acceptance_clipboard_flows_1.acceptanceClipboardIntent)(criterion) && !(0, acceptance_dialog_flows_1.acceptanceDialogIntent)(criterion) && !(0, acceptance_popup_flows_1.acceptancePopupIntent)(criterion) && !(0, acceptance_history_flows_1.acceptanceHistoryIntent)(criterion)));
     const hoverFlowChecks = (0, acceptance_hover_flows_1.buildAcceptanceHoverFlowBrowserChecks)(project, acceptanceCriteria);
     const scrollFlowChecks = (0, acceptance_scroll_flows_1.buildAcceptanceScrollFlowBrowserChecks)(project, acceptanceCriteria);
     const responsiveChecks = (0, acceptance_responsive_checks_1.buildAcceptanceResponsiveBrowserChecks)(project, acceptanceCriteria);
@@ -161,12 +171,42 @@ function buildBrowserChecksForProject(project, acceptanceCriteria = []) {
         }
     }
     const generatedFlowUrls = new Set(formFlowUrls);
+    for (const check of clipboardFlowChecks) {
+        generatedFlowUrls.add(normalizedUrlKey(check.url || ""));
+        for (const assertion of check.assertions || []) {
+            if (assertion.type !== "urlIncludes")
+                continue;
+            const urlPath = String(assertion.text || assertion.value || "");
+            if (urlPath)
+                generatedFlowUrls.add(normalizedUrlKey((0, utils_1.resolveUrl)(project.targetUrl, urlPath)));
+        }
+    }
     for (const check of dialogFlowChecks) {
         generatedFlowUrls.add(normalizedUrlKey(check.url || ""));
         for (const assertion of check.assertions || []) {
             if (assertion.type !== "urlIncludes")
                 continue;
             const urlPath = String(assertion.text || assertion.value || "");
+            if (urlPath)
+                generatedFlowUrls.add(normalizedUrlKey((0, utils_1.resolveUrl)(project.targetUrl, urlPath)));
+        }
+    }
+    for (const check of dragFlowChecks) {
+        generatedFlowUrls.add(normalizedUrlKey(check.url || ""));
+        for (const assertion of check.assertions || []) {
+            if (assertion.type !== "urlIncludes")
+                continue;
+            const urlPath = String(assertion.text || assertion.value || "");
+            if (urlPath)
+                generatedFlowUrls.add(normalizedUrlKey((0, utils_1.resolveUrl)(project.targetUrl, urlPath)));
+        }
+    }
+    for (const check of popupFlowChecks) {
+        generatedFlowUrls.add(normalizedUrlKey(check.url || ""));
+        for (const assertion of check.assertions || []) {
+            if (assertion.type !== "urlIncludes" && assertion.type !== "popupUrlIncludes")
+                continue;
+            const urlPath = String(assertion.text || assertion.value || assertion.url || assertion.urlIncludes || assertion.url_includes || "");
             if (urlPath)
                 generatedFlowUrls.add(normalizedUrlKey((0, utils_1.resolveUrl)(project.targetUrl, urlPath)));
         }
@@ -211,6 +251,26 @@ function buildBrowserChecksForProject(project, acceptanceCriteria = []) {
                 generatedFlowUrls.add(normalizedUrlKey((0, utils_1.resolveUrl)(project.targetUrl, urlPath)));
         }
     }
+    for (const check of networkStateFlowChecks) {
+        generatedFlowUrls.add(normalizedUrlKey(check.url || ""));
+        for (const assertion of check.assertions || []) {
+            if (assertion.type !== "urlIncludes")
+                continue;
+            const urlPath = String(assertion.text || assertion.value || "");
+            if (urlPath)
+                generatedFlowUrls.add(normalizedUrlKey((0, utils_1.resolveUrl)(project.targetUrl, urlPath)));
+        }
+    }
+    for (const check of historyFlowChecks) {
+        generatedFlowUrls.add(normalizedUrlKey(check.url || ""));
+        for (const action of check.actions || []) {
+            if (action.type !== "waitForUrl")
+                continue;
+            const urlPath = String(action.text || action.value || action.url || "");
+            if (urlPath)
+                generatedFlowUrls.add(normalizedUrlKey((0, utils_1.resolveUrl)(project.targetUrl, urlPath)));
+        }
+    }
     for (const check of clickFlowChecks) {
         generatedFlowUrls.add(normalizedUrlKey(check.url || ""));
         for (const assertion of check.assertions || []) {
@@ -245,8 +305,8 @@ function buildBrowserChecksForProject(project, acceptanceCriteria = []) {
         generatedFlowUrls.add(normalizedUrlKey(check.url || ""));
     const pathChecks = buildAcceptancePathBrowserSmokeChecks(project, acceptanceCriteria);
     const remainingPathChecks = pathChecks.filter(check => !generatedFlowUrls.has(normalizedUrlKey(check.url || "")));
-    if (formFlowChecks.length || dialogFlowChecks.length || downloadFlowChecks.length || uploadFlowChecks.length || repeatedClickChecks.length || keyboardFlowChecks.length || clickFlowChecks.length || hoverFlowChecks.length || scrollFlowChecks.length || responsiveChecks.length || remainingPathChecks.length) {
-        return [...formFlowChecks, ...dialogFlowChecks, ...downloadFlowChecks, ...uploadFlowChecks, ...repeatedClickChecks, ...keyboardFlowChecks, ...clickFlowChecks, ...hoverFlowChecks, ...scrollFlowChecks, ...responsiveChecks, ...remainingPathChecks];
+    if (formFlowChecks.length || clipboardFlowChecks.length || dialogFlowChecks.length || dragFlowChecks.length || popupFlowChecks.length || downloadFlowChecks.length || uploadFlowChecks.length || repeatedClickChecks.length || keyboardFlowChecks.length || networkStateFlowChecks.length || historyFlowChecks.length || clickFlowChecks.length || hoverFlowChecks.length || scrollFlowChecks.length || responsiveChecks.length || remainingPathChecks.length) {
+        return [...formFlowChecks, ...clipboardFlowChecks, ...dialogFlowChecks, ...dragFlowChecks, ...popupFlowChecks, ...downloadFlowChecks, ...uploadFlowChecks, ...repeatedClickChecks, ...keyboardFlowChecks, ...networkStateFlowChecks, ...historyFlowChecks, ...clickFlowChecks, ...hoverFlowChecks, ...scrollFlowChecks, ...responsiveChecks, ...remainingPathChecks];
     }
     const auto = buildAutoBrowserSmokeCheck(project, acceptanceCriteria);
     return auto ? [auto] : [];

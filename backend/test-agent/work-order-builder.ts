@@ -135,6 +135,7 @@ function inferRequiredChecks(projects: TestAgentProjectTarget[], options: TestAg
       add("adversarial");
     }
   }
+  if (options?.requireAdversarialProbe !== false) add("adversarial");
   return uniqueStrings(checks);
 }
 
@@ -195,6 +196,7 @@ export function buildTestAgentWorkOrderFromHandoff(input: TestAgentHandoff): Tes
     browserProvider: "auto",
     autoDiscoverVerificationCommands: true,
     collectBrowserArtifacts: true,
+    requireAdversarialProbe: true,
     ...(input.options || {}),
   };
   const inferredRequiredChecks = inferRequiredChecks(projects, options);

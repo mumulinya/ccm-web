@@ -468,6 +468,12 @@ function buildSelfContainedWorkerHandoff(input) {
 }
 function renderReceiptSchemaForWorker(handoff) {
     const fields = handoff?.receipt_schema?.required_fields || [];
+    const providerRankingContract = handoff?.worker_context_packet?.provider_ranking_compact_repair_receipt_memory_contract
+        || handoff?.worker_context_packet?.providerRankingCompactRepairReceiptMemoryContract
+        || null;
+    const postCompactReinjectionRepairReceiptMemoryContract = handoff?.worker_context_packet?.post_compact_reinjection_repair_receipt_memory_contract
+        || handoff?.worker_context_packet?.postCompactReinjectionRepairReceiptMemoryContract
+        || null;
     return [
         "CCM_AGENT_RECEIPT JSON：",
         "```json",
@@ -491,6 +497,16 @@ function renderReceiptSchemaForWorker(handoff) {
             consumedInjectionIds: ["消费的 injection_id；没有填空数组"],
             memoryUsed: ["实际使用的记忆/文档/知识库；未使用填空数组"],
             memoryIgnored: ["没有使用或无法使用记忆的原因；没有填空数组"],
+            providerSwitchExecution: {
+                decisionReceiptId: "Provider switch decision receipt id；没有 approved switch 填空字符串",
+                expectedProvider: "approved new provider；没有填空字符串",
+                executedProvider: "本轮实际执行 provider；没有填空字符串",
+                taskAgentSessionId: "必须与本轮 task_agent_session_id 一致",
+                nativeSessionId: "必须与本轮 native_session_id 一致；没有填空字符串",
+                executionId: "本轮 execution id；没有填空字符串",
+                usageState: "executed | mismatch | not_applicable",
+                reason: "说明实际 runner 是否与 approved switch 一致",
+            },
             memoryProvenanceUsage: [{
                     relPath: "typed MEMORY.md relPath；没有填空字符串",
                     name: "typed memory name；没有填空字符串",
@@ -575,8 +591,15 @@ function renderReceiptSchemaForWorker(handoff) {
         "如果工作包包含 global_memory_health_gate，回执 memoryUsed/memoryIgnored 必须引用 gate_id；当 gate status=fail 或 action=block_global_agent_memory_recall 时，必须在 memoryIgnored 说明未使用全局记忆，且不得在 globalMemoryUsage 声明 used。",
         "如果工作包或平台记忆出现 pressure repair / provenance / disputed_under_repair / stale_evidence_under_repair，回执 memoryProvenanceUsage 必须逐条声明 relPath、usageState、provenanceStatus、repairWorkItemId；若使用 disputed 记忆，必须 currentSourceVerified=true。",
         "如果工作包包含 Replay repair dispatch brief，回执 replayRepairDispatchBriefUsage 必须逐条引用 briefId/workItemId，并声明 used/verified/ignored/blocked/strong；provider re-proof 不能只靠口头 strong，仍需 native provider proof ledger 证明。",
+        providerRankingContract?.active === true
+            ? `如果工作包包含 Provider ranking compact repair receipt memory usage contract，回执 memoryUsed/memoryIgnored 必须引用 ${providerRankingContract.doc_rel_path || providerRankingContract.docRelPath || "provider-ranking-provenance-compact-repair-receipt-memory.md"}，并声明 used/verified/ignored/background；该历史只作 ranking evidence，不是 provider switch authorization，新的切换仍需 fresh valid provider switch decision receipt。`
+            : "",
+        postCompactReinjectionRepairReceiptMemoryContract?.active === true
+            ? `如果工作包包含 Post-compact reinjection repair receipt memory usage contract，回执 memoryUsed/memoryIgnored 必须逐条引用 ${(postCompactReinjectionRepairReceiptMemoryContract.memory_receipt_required_doc_rel_paths || postCompactReinjectionRepairReceiptMemoryContract.doc_rel_paths || []).join("、") || "post-compact-reinjection-repair-receipt-memory.md"}；used/verified 必须 currentSourceVerified=true，ignored 必须写 reason；历史完成只作 recovery evidence，不是永久新鲜的仓库事实。`
+            : "",
         "如果存在 read_plan_revalidation_gate，memoryUsed/memoryIgnored 或 readPlanRevalidationUsage 必须同时引用 gateId、readPlanId，并声明 currentSourceVerified=true；回执 session id 必须匹配工作包 session_binding。",
         "如果存在 API microcompact edit plan，回执 apiMicrocompactUsage 或 memoryUsed/memoryIgnored 必须引用 planChecksum，并声明 usageState=native_applied/advisory/ignored/not_supported；apiMicrocompactUsage 应绑定本轮 taskAgentSessionId/nativeSessionId/memoryContextSnapshotId；第三方 CLI 未实际调用 native API context-management 时不得声明 native_applied。",
+        "如果工作包包含 Provider switch decision receipt，回执 providerSwitchExecution 必须引用 decisionReceiptId，并声明 expectedProvider、executedProvider、taskAgentSessionId、nativeSessionId、executionId；CCM 会用实际 runner/session 做系统见证，字段不一致时该切换不能视为已执行。",
     ].filter(Boolean).join("\n");
 }
 function renderSelfContainedWorkerHandoff(handoff) {

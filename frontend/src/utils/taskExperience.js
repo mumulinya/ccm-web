@@ -95,7 +95,7 @@ const buildRunTerminalFallbackDeliveryReport = (run = {}, report = {}, message =
       { id: 'scope', title: '涉及范围', items: ['未检测到代码文件变更。'] },
       { id: 'verification', title: '验证结果', items: ['暂无系统捕获的验证命令。'] },
       { id: 'acceptance', title: '验收结论', items: [failed ? '最终验收：未通过，原因已整理在未完成原因里。' : '最终验收：任务已停止，未继续验收。'] },
-      { id: 'risks', title: failed ? '未完成原因' : '停止原因', items: risks.length ? risks.map(item => friendlyTerminalText(item, failed ? '执行过程中遇到需要处理的问题。' : '任务已停止。')) : [failed ? '未捕获到明确失败原因；排障信息已放入技术详情。' : '任务已停止；没有继续执行。'] },
+      { id: 'risks', title: failed ? '未完成原因' : '停止原因', items: risks.length ? risks.map(item => friendlyTerminalText(item, failed ? '执行过程中遇到待排查的问题，我会继续定位。' : '任务已停止。')) : [failed ? '未捕获到明确失败原因；排障信息已放入技术详情。' : '任务已停止；没有继续执行。'] },
       { id: 'next_action', title: '下一步', items: [nextAction] },
     ],
     files: [],
@@ -830,7 +830,7 @@ const buildUserHandoff = ({ provided = null, phase = '', status = '', nextAction
     {
       id: 'attention',
       label: '待关注',
-      value: unresolved.length ? (needsUser ? `${unresolved.length} 项待你确认/补充` : `${unresolved.length} 项待补齐`) : '暂无待处理风险',
+      value: unresolved.length ? (needsUser ? `${unresolved.length} 项待你确认/补充` : `${unresolved.length} 项待补齐`) : '暂无需要额外关注的风险',
       tone: unresolved.length ? 'warning' : 'ok',
     },
     {
@@ -938,13 +938,26 @@ export const globalMissionTaskCard = (message = {}) => {
   const recoverySummary = buildRecoverySummary(mission) || buildRecoverySummary(supervisor)
   const continuationStatus = buildContinuationStatus(mission) || buildContinuationStatus(missionDelivery) || buildContinuationStatus(supervisor)
   const receiptReworkSummary = buildReceiptReworkSummary(mission) || buildReceiptReworkSummary(missionDelivery) || buildReceiptReworkSummary(supervisor)
+  const collaborationState = mission.collaboration_state || mission.collaborationState || {}
+  const lastContinuation = collaborationState.last_continuation
+    || collaborationState.lastContinuation
+    || mission.last_continuation
+    || mission.lastContinuation
+    || {}
+  const lastContinuationKind = String(lastContinuation.kind || lastContinuation.continuation_kind || lastContinuation.continuationKind || '').toLowerCase()
   const supervisorStatus = supervisor.status || ''
   const presentationStatus = mission.rolled_back_at
     ? 'reverted'
     : ['paused', 'waiting_user', 'manual_takeover', 'cancelled', 'failed', 'completed'].includes(supervisorStatus)
       ? supervisorStatus
       : mission.status
-  const presentation = taskPhasePresentation(presentationStatus, mission.status === 'done' ? 'completed' : 'executing')
+  const basePresentation = taskPhasePresentation(presentationStatus, mission.status === 'done' ? 'completed' : 'executing')
+  const revisionNeedsReplan = lastContinuationKind === 'revise_goal'
+    && mission.status !== 'done'
+    && !['paused', 'waiting_user', 'manual_takeover', 'cancelled', 'failed', 'completed'].includes(String(supervisorStatus).toLowerCase())
+  const presentation = revisionNeedsReplan
+    ? { phase: 'planning', label: '重新规划中', progress: 35 }
+    : basePresentation
   const total = Number(summary.total || children.length || 0)
   const passed = Number(summary.passed || children.filter(row => row.task?.status === 'done').length || 0)
   const blocked = Number(summary.blocked || children.filter(row => ['blocked', 'failed'].includes(row.task?.status)).length || 0)
@@ -1058,6 +1071,15 @@ export const globalMissionTaskCard = (message = {}) => {
     finalReport.independent_review,
     finalReport.independentReview
   ).map(handoffText))
+  const missionPostReviewSpotCheckSummary = mission.post_review_spot_check_summary
+    || mission.postReviewSpotCheckSummary
+    || missionDelivery.post_review_spot_check_summary
+    || missionDelivery.postReviewSpotCheckSummary
+    || finalReport.post_review_spot_check_summary
+    || finalReport.postReviewSpotCheckSummary
+    || mission.workchain?.completion_summary?.post_review_spot_check_summary
+    || mission.workchain?.completionSummary?.postReviewSpotCheckSummary
+    || null
   const missionQualityFollowup = mission.quality_followup
     || mission.qualityFollowup
     || missionDelivery.quality_followup
@@ -1073,12 +1095,24 @@ export const globalMissionTaskCard = (message = {}) => {
     missionDisplayStream.todoPlan = missionTodoPlan
   }
   const missionProgressCheckpoints = missionDisplayStream?.progress_checkpoints || missionDisplayStream?.progressCheckpoints || missionDisplayStream?.workchain?.progress_checkpoints || missionDisplayStream?.workchain?.progressCheckpoints || mission.workchain?.progress_checkpoints || mission.workchain?.progressCheckpoints || null
-  const mainAgentDecision = mission.mainAgentDecision || mission.main_agent_decision || missionDisplayStream?.mainAgentDecision || missionDisplayStream?.main_agent_decision || null
+  const mainAgentDecision = lastContinuationKind
+    ? null
+    : mission.mainAgentDecision || mission.main_agent_decision || missionDisplayStream?.mainAgentDecision || missionDisplayStream?.main_agent_decision || null
   const agentProgressSummary = mission.agent_progress_summary || mission.agentProgressSummary || missionDelivery.agent_progress_summary || missionDelivery.agentProgressSummary || buildChildAgentProgressSummary({ phase: presentation.phase, agents, workItems })
   const changeSummary = mission.change_summary || mission.changeSummary || missionDelivery.change_summary || missionDelivery.changeSummary || buildChangeSummary({ files, workItems, agents })
   const missionPlanMode = mission.plan_mode || mission.planMode || mission.workflow_meta?.plan_mode || mission.workflowMeta?.planMode || missionDelivery.plan_mode || missionDelivery.planMode || finalReport.plan_mode || finalReport.planMode || null
   const planAlignment = buildPlanAlignment({ provided: mission.plan_alignment || mission.planAlignment || missionDelivery.plan_alignment || missionDelivery.planAlignment || finalReport.plan_alignment || finalReport.planAlignment, planMode: missionPlanMode, deliveryReport, files, verification, workItems, phase: presentation.phase, report: finalReport })
-  const nextAction = presentation.phase === 'completed' ? '可以查看交付总结、验证结果和风险提示' : presentation.phase === 'needs_user' ? '请确认后继续' : presentation.phase === 'failed' ? '可以重新执行，系统会复用已有证据' : '我正在协调各执行目标'
+  const nextAction = presentation.phase === 'completed'
+    ? '可以查看交付总结、验证结果和风险提示'
+    : presentation.phase === 'needs_user'
+      ? '请确认后继续'
+      : presentation.phase === 'failed'
+        ? '可以重新执行，系统会复用已有证据'
+        : lastContinuationKind === 'revise_goal'
+          ? '正在按新目标重新规划；完成后会重新执行验收和复核。'
+          : lastContinuationKind === 'supplement'
+            ? '补充要求已同步，正在继续执行和验收。'
+            : '我正在协调各执行目标'
   const userHandoff = buildUserHandoff({ provided: mission.user_handoff || mission.userHandoff || missionDelivery.user_handoff || missionDelivery.userHandoff || finalReport.user_handoff || finalReport.userHandoff || deliveryReport?.user_handoff || deliveryReport?.userHandoff, phase: presentation.phase, status: presentationStatus, nextAction, blockers: blocked ? [`${blocked} 个执行目标待补齐`] : [], deliveryReport, changeSummary, planAlignment, files, verification, risks })
   const deliveryAccepted = hasStrongDeliveryAcceptance({ deliveryReport, report: { ...missionDelivery, ...finalReport }, verificationRows: verification })
   return {
@@ -1128,6 +1162,8 @@ export const globalMissionTaskCard = (message = {}) => {
     independentReviewSummary: missionIndependentReviewSummary,
     independent_review: missionIndependentReview,
     independentReview: missionIndependentReview,
+    post_review_spot_check_summary: missionPostReviewSpotCheckSummary,
+    postReviewSpotCheckSummary: missionPostReviewSpotCheckSummary,
     quality_followup: missionQualityFollowup,
     qualityFollowup: missionQualityFollowup,
     display_stream: missionDisplayStream,
@@ -1135,7 +1171,7 @@ export const globalMissionTaskCard = (message = {}) => {
     delivery_report: deliveryReport,
     delivery: { headline: deliveryReport?.headline || finalReport.summary || missionDelivery.headline || mission.status_detail || '', files, changes: files, verification, risks, acceptance_passed: deliveryAccepted },
     actions,
-    technical: { trace_id: mission.trace_id || '', execution_ids: children.map(row => row.task?.id).filter(Boolean), session_ids: [], supervisor_id: supervisor.id || mission.supervisor_id || '', agent_progress_summary: agentProgressSummary, change_summary: changeSummary, plan_alignment: planAlignment, user_handoff: userHandoff },
+    technical: { trace_id: mission.trace_id || '', execution_ids: children.map(row => row.task?.id).filter(Boolean), session_ids: [], supervisor_id: supervisor.id || mission.supervisor_id || '', agent_progress_summary: agentProgressSummary, change_summary: changeSummary, plan_alignment: planAlignment, user_handoff: userHandoff, post_review_spot_check: mission.post_review_spot_check || mission.postReviewSpotCheck || missionDelivery.post_review_spot_check || missionDelivery.postReviewSpotCheck || null },
   }
 }
 
@@ -1145,7 +1181,15 @@ export const globalAgentRunTaskCard = (message = {}) => {
   const category = run.decision_summary?.intent?.category
   const ordinaryReply = ['conversation', 'question', 'analysis'].includes(category) && Number(run.tool_calls || 0) === 0 && !run.mission_id
   if (ordinaryReply) return null
-  const presentation = taskPhasePresentation(run.status, 'executing')
+  const presentationStatus = ['running', 'in_progress'].includes(String(run.status || '').toLowerCase()) && run.phase
+    ? run.phase
+    : run.status
+  const basePresentation = taskPhasePresentation(presentationStatus, 'executing')
+  const presentation = run.status === 'supervising' && run.supervision_state === 'replanning'
+    ? { phase: 'planning', label: '重新规划中', progress: 35 }
+    : run.status === 'supervising'
+      ? { phase: 'executing', label: '持续跟进', progress: 55 }
+    : basePresentation
   const report = run.final_report || {}
   const deliveryReport = getUnifiedDeliveryReport(run) || getUnifiedDeliveryReport(report) || buildRunTerminalFallbackDeliveryReport(run, report, message, presentation.phase)
   const recoverySummary = buildRecoverySummary(run)
@@ -1181,7 +1225,14 @@ export const globalAgentRunTaskCard = (message = {}) => {
   const risks = uniq(toList(report.risks, report.remaining_items, run.risks, deliveryReport?.risks))
   const runPlanMode = run.plan_mode || run.planMode || run.workflow_meta?.plan_mode || run.workflowMeta?.planMode || report.plan_mode || report.planMode || null
   const planAlignment = buildPlanAlignment({ provided: run.plan_alignment || run.planAlignment || report.plan_alignment || report.planAlignment, planMode: runPlanMode, deliveryReport, files, verification, workItems: runWorkItems, phase: presentation.phase, report })
-  const nextAction = userRequestSummary?.next_action || (presentation.phase === 'needs_user' ? (run.clarification_question || '请确认后继续') : presentation.phase === 'completed' ? '可以查看交付总结、验证结果和风险提示' : presentation.phase === 'failed' ? '可以重新执行，系统会复用已有证据' : presentation.phase === 'cancelled' ? '任务已取消；需要时可以重新发起' : '系统会继续处理并更新结果')
+  const supervisionNextAction = report.next_action
+    || report.nextAction
+    || deliveryReport?.next_action
+    || deliveryReport?.nextAction
+    || run.display_stream?.dispatch_launch_summary?.next_action
+    || run.displayStream?.dispatchLaunchSummary?.nextAction
+    || ''
+  const nextAction = userRequestSummary?.next_action || (presentation.phase === 'needs_user' ? (run.clarification_question || '请确认后继续') : presentation.phase === 'completed' ? '可以查看交付总结、验证结果和风险提示' : presentation.phase === 'failed' ? '可以重新执行，系统会复用已有证据' : presentation.phase === 'cancelled' ? '任务已取消；需要时可以重新发起' : run.status === 'supervising' ? (supervisionNextAction || '继续跟进执行、独立复核和最终验收') : '系统会继续处理并更新结果')
   const userHandoff = buildUserHandoff({ provided: run.user_handoff || run.userHandoff || report.user_handoff || report.userHandoff || deliveryReport?.user_handoff || deliveryReport?.userHandoff, phase: presentation.phase, status: run.status, nextAction, blockers: uniq([userRequestSummary?.question, run.clarification_question, run.last_error, run.error]).slice(0, 4), deliveryReport, changeSummary, planAlignment, files, verification, risks })
   const deliveryAccepted = hasStrongDeliveryAcceptance({ deliveryReport, report, verificationRows: verification })
   let actions = taskActions(presentation.phase, { viewChanges: files.length > 0, continue: !!run.mission_id, cancel: true, resume: true, retry: true, rollback: false, saveKnowledge: true })
@@ -1213,6 +1264,15 @@ export const globalAgentRunTaskCard = (message = {}) => {
     report.independent_review,
     report.independentReview
   ).map(handoffText))
+  const runPostReviewSpotCheckSummary = run.post_review_spot_check_summary
+    || run.postReviewSpotCheckSummary
+    || report.post_review_spot_check_summary
+    || report.postReviewSpotCheckSummary
+    || deliveryReport?.post_review_spot_check_summary
+    || deliveryReport?.postReviewSpotCheckSummary
+    || run.workchain?.completion_summary?.post_review_spot_check_summary
+    || run.workchain?.completionSummary?.postReviewSpotCheckSummary
+    || null
   const runQualityFollowup = run.quality_followup
     || run.qualityFollowup
     || report.quality_followup
@@ -1236,7 +1296,7 @@ export const globalAgentRunTaskCard = (message = {}) => {
     phase_label: presentation.label,
     status: run.status,
     progress: presentation.progress,
-    active_agents: presentation.phase === 'executing' ? ['我正在处理'] : [],
+    active_agents: presentation.phase === 'executing' ? [run.status === 'supervising' ? '我在持续跟进' : '我正在处理'] : [],
     agents: [],
     work_items: runWorkItems,
     work_item_summary: mergeWorkItemSummary(run.work_item_summary || run.workItemSummary, runWorkItems),
@@ -1276,6 +1336,8 @@ export const globalAgentRunTaskCard = (message = {}) => {
     independentReviewSummary: runIndependentReviewSummary,
     independent_review: runIndependentReview,
     independentReview: runIndependentReview,
+    post_review_spot_check_summary: runPostReviewSpotCheckSummary,
+    postReviewSpotCheckSummary: runPostReviewSpotCheckSummary,
     quality_followup: runQualityFollowup,
     qualityFollowup: runQualityFollowup,
     display_stream: runDisplayStream,
@@ -1283,7 +1345,7 @@ export const globalAgentRunTaskCard = (message = {}) => {
     delivery_report: deliveryReport,
     delivery: { headline: deliveryReport?.headline || report.summary || (presentation.phase === 'completed' ? compact(message.content, 240) : ''), files, changes: files, verification, risks, acceptance_passed: deliveryAccepted },
     actions,
-    technical: { trace_id: run.trace_id || '', execution_ids: [], session_ids: [], run_id: run.id, supervisor_id: run.supervisor_id || '', recovery_summary: recoverySummary, agent_progress_summary: agentProgressSummary, change_summary: changeSummary, plan_alignment: planAlignment, user_handoff: userHandoff },
+    technical: { trace_id: run.trace_id || '', execution_ids: [], session_ids: [], run_id: run.id, supervisor_id: run.supervisor_id || '', recovery_summary: recoverySummary, agent_progress_summary: agentProgressSummary, change_summary: changeSummary, plan_alignment: planAlignment, user_handoff: userHandoff, post_review_spot_check: run.post_review_spot_check || run.postReviewSpotCheck || report.post_review_spot_check || report.postReviewSpotCheck || null },
   }
 }
 

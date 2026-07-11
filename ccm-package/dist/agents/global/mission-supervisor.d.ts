@@ -107,6 +107,8 @@ export declare function runGlobalMissionSupervisorAsyncSelfTest(): Promise<{
         restartReloadKeepsIdentity: boolean;
         pauseWorks: boolean;
         resumeWorks: boolean;
+        updateGoalUsesActualContinuationKind: boolean;
+        updateGoalPersistsInterruptionStats: boolean;
         finalGateCompletes: boolean;
         fixedFinalReport: any;
         completionNotifiedOnce: boolean;

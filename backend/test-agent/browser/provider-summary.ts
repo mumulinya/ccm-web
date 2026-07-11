@@ -36,12 +36,12 @@ function resultIsSelectedSignal(result: BrowserCheckResult) {
 function statusFor(input: {
   preferred: string;
   hasAnyProviderEvidence: boolean;
-  selectedProvider: string;
+  selectedProviders: string[];
   availableProviders: string[];
   browserResults: BrowserCheckResult[];
 }): BrowserProviderSummary["status"] {
   if (!input.hasAnyProviderEvidence) return input.preferred === "none" ? "provider_none" : "not_required";
-  if (input.selectedProvider) return "used";
+  if (input.selectedProviders.length) return "used";
   if (input.browserResults.length && input.browserResults.every(result => result.status === "blocked")) return "blocked";
   if (input.availableProviders.length) return "ready";
   return "unavailable";
@@ -79,6 +79,9 @@ export function buildBrowserProviderSummary(
 
   const selectedResult = browserResults.find(resultIsSelectedSignal);
   const selectedProvider = selectedResult ? resultProvider(selectedResult) : "";
+  const selectedProviders = sortedUnique(
+    browserResults.filter(resultIsSelectedSignal).map(resultProvider),
+  );
   const preflightByProvider = new Map(preflight.map(item => [String(item.provider || ""), item]));
   const items: BrowserProviderSummaryItem[] = providerKeys.map(provider => {
     const preflightItem = preflightByProvider.get(provider);
@@ -89,7 +92,7 @@ export function buildBrowserProviderSummary(
       ...(preflightItem?.label ? { label: preflightItem.label } : {}),
       preferred: Boolean(preflightItem?.preferred || preferred === provider || preferred === "auto"),
       available: Boolean(preflightItem?.available || hasNonBlockedResult),
-      selected: Boolean(selectedProvider && provider === selectedProvider),
+      selected: selectedProviders.includes(provider),
       attempted: counts.resultCount > 0,
       ...counts,
       ...(preflightItem?.reason ? { reason: preflightItem.reason } : {}),
@@ -102,7 +105,7 @@ export function buildBrowserProviderSummary(
   const status = statusFor({
     preferred,
     hasAnyProviderEvidence: preflight.length > 0 || browserResults.length > 0,
-    selectedProvider,
+    selectedProviders,
     availableProviders,
     browserResults,
   });
@@ -111,16 +114,24 @@ export function buildBrowserProviderSummary(
     preferred,
     status,
     ...(selectedProvider ? { selectedProvider } : {}),
+    ...(selectedProviders.length ? { selectedProviders } : {}),
     availableProviders,
     attemptedProviders,
-    fallbackUsed: Boolean(selectedProvider && preferred !== "auto" && preferred !== "none" && selectedProvider !== preferred),
+    fallbackUsed: Boolean(
+      selectedProviders.length
+      && preferred !== "auto"
+      && preferred !== "none"
+      && selectedProviders.some(provider => provider !== preferred)
+    ),
     items,
   };
 }
 
 export function formatBrowserProviderSummaryLine(summary: BrowserProviderSummary | undefined) {
   if (!summary) return "status=not_required; preferred=unknown; selected=none; available=none; attempted=none; fallback=no";
-  const selected = summary.selectedProvider || "none";
+  const selected = (summary.selectedProviders?.length
+    ? summary.selectedProviders.join(",")
+    : summary.selectedProvider) || "none";
   const available = summary.availableProviders.join(",") || "none";
   const attempted = summary.attemptedProviders.join(",") || "none";
   return `status=${summary.status}; preferred=${summary.preferred}; selected=${selected}; available=${available}; attempted=${attempted}; fallback=${summary.fallbackUsed ? "yes" : "no"}`;

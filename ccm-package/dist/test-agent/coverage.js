@@ -130,10 +130,19 @@ function browserCandidate(result) {
         result.probeType || "",
     ].join("\n"));
 }
-function toolCallCandidate(records) {
-    const failed = records.some(item => item.status === "failed");
+function toolCallCandidate(records, browserResults) {
+    const failedCalls = records.filter(item => item.status === "failed").length;
+    const failedFinalResult = browserResults.some(item => item.status === "failed" || item.status === "blocked");
+    const passedFinalResult = browserResults.some(item => item.status === "passed");
+    const status = failedFinalResult
+        ? "failed"
+        : passedFinalResult
+            ? "passed"
+            : failedCalls
+                ? "failed"
+                : "passed";
     const haystack = records.map(item => `${item.status} ${item.toolName} ${JSON.stringify(item.input)} ${item.outputPreview || ""} ${item.error || ""}`).join("\n");
-    return candidate("Browser MCP tool call transcript", failed ? "failed" : "passed", `${records.length} browser tool calls recorded`, haystack);
+    return candidate("Browser MCP tool call transcript", status, `${records.length} browser tool calls recorded; failedCalls=${failedCalls}; finalBrowserResults=${browserResults.map(item => item.status).join(",") || "none"}`, haystack);
 }
 function issueCandidate(issue) {
     return candidate(`Work order issue ${issue.code}`, issue.severity === "error" ? "blocked" : "skipped", issue.project ? `${issue.project}: ${issue.message}` : issue.message);
@@ -198,7 +207,7 @@ function buildAcceptanceCoverage(input) {
         ...input.evidence.map(evidenceCandidate),
     ];
     if (input.browserToolCalls.length)
-        candidates.push(toolCallCandidate(input.browserToolCalls));
+        candidates.push(toolCallCandidate(input.browserToolCalls, input.browserResults));
     const positiveCandidates = candidates.filter(item => item.status === "passed");
     const negativeCandidates = candidates.filter(item => item.status === "failed" || item.status === "blocked");
     const singleCriterion = input.workOrder.acceptanceCriteria.length === 1;

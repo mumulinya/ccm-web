@@ -1,6 +1,8 @@
 import { ChildProcess, spawn, spawnSync } from "child_process";
 import { DevServerResult, NormalizedTestAgentProjectTarget, NormalizedTestAgentWorkOrder } from "./types";
 import { appendLimited, compactText, hasRequiredCheck, nowIso } from "./utils";
+import { browserCheckUsesExistingSession } from "./browser/existing-session";
+import { checksForProject } from "./browser/shared";
 
 export interface ManagedDevServer {
   result: DevServerResult;
@@ -10,6 +12,14 @@ export interface ManagedDevServer {
 function browserChecksRequested(workOrder: NormalizedTestAgentWorkOrder) {
   if (hasRequiredCheck(workOrder.requiredChecks, /browser|e2e|screenshot|console|http|api/i)) return true;
   return workOrder.projects.some(project => !!project.targetUrl || project.browserChecks.length > 0 || project.httpChecks.length > 0 || project.adversarialHttpChecks.length > 0);
+}
+
+function projectUsesOnlyExistingBrowserSession(
+  workOrder: NormalizedTestAgentWorkOrder,
+  project: NormalizedTestAgentProjectTarget,
+) {
+  const checks = checksForProject(project, workOrder.acceptanceCriteria);
+  return checks.length > 0 && checks.every(browserCheckUsesExistingSession);
 }
 
 async function probeUrl(url: string, timeoutMs = 3000) {
@@ -105,6 +115,14 @@ export async function startDevServersForBrowserChecks(workOrder: NormalizedTestA
   const servers: ManagedDevServer[] = [];
   for (const project of workOrder.projects) {
     if (!project.targetUrl && !project.startupUrl && !project.browserChecks.length && !project.httpChecks.length && !project.adversarialHttpChecks.length) continue;
+    if (
+      !project.devServerCommand
+      && !project.httpChecks.length
+      && !project.adversarialHttpChecks.length
+      && projectUsesOnlyExistingBrowserSession(workOrder, project)
+    ) {
+      continue;
+    }
     servers.push(await startProjectServer(project, workOrder.options.maxOutputChars));
   }
   return servers;

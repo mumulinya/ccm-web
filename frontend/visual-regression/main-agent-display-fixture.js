@@ -41,6 +41,32 @@ const now = '2026-07-06T10:00:00.000Z'
 const GLOBAL_AGENT_SESSIONS_KEY = 'cc_global_assistant_sessions_v2'
 const GLOBAL_AGENT_CURRENT_ID_KEY = 'cc_global_assistant_current_id_v2'
 let globalAgentFixtureSessions = []
+let globalSteerStreamController = null
+let globalSteerFixtureRun = null
+let globalSupervisingFixtureRun = null
+let globalSupervisingFixtureMission = null
+
+const encodeSseEvent = (event) => new TextEncoder().encode(`data: ${JSON.stringify(event)}\n\n`)
+const enqueueGlobalSteerFixtureEvent = (event) => {
+  if (globalSteerStreamController) globalSteerStreamController.enqueue(encodeSseEvent(event))
+}
+
+window.__ccmFinishGlobalSteerFixtureRun = () => {
+  if (!globalSteerStreamController || !globalSteerFixtureRun) return
+  const completedRun = {
+    ...globalSteerFixtureRun,
+    status: 'completed',
+    phase: 'complete',
+    final_reply: '补充要求已纳入，当前任务已完成。',
+    updated_at: new Date().toISOString(),
+    completed_at: new Date().toISOString(),
+  }
+  enqueueGlobalSteerFixtureEvent({ type: 'result', run: completedRun })
+  enqueueGlobalSteerFixtureEvent({ type: 'done' })
+  globalSteerStreamController.close()
+  globalSteerStreamController = null
+  globalSteerFixtureRun = null
+}
 
 const jsonResponse = (body, status = 200) => new Response(JSON.stringify(body), {
   status,
@@ -65,6 +91,276 @@ window.fetch = async (input, init = {}) => {
   }
   if (url.includes('/api/global-agent/bridge/pending')) {
     return jsonResponse({ success: true, requests: [] })
+  }
+  if (url.includes('/api/global-agent/missions')) {
+    const mission = globalSupervisingFixtureMission || {
+      id: 'fixture-mission-running',
+      status: 'in_progress',
+      business_goal: globalSupervisingFixtureRun?.user_message || '修复登录状态恢复逻辑并完成验收',
+      status_detail: '正在持续跟踪执行和验收。',
+      mission_summary: { all_passed: false, pending: 2 },
+    }
+    return jsonResponse({
+      success: true,
+      mission,
+      children: [],
+      supervisor: {
+        id: 'fixture-supervisor-running',
+        mission_id: 'fixture-mission-running',
+        global_run_id: globalSupervisingFixtureRun?.id || 'global-supervising-goal-revision-run',
+        status: 'monitoring',
+        phase: globalSupervisingFixtureRun?.supervision_state === 'replanning' ? 'replanning' : 'supervising',
+        business_goal: mission.business_goal,
+        last_continuation: mission.collaboration_state?.last_continuation || null,
+      },
+    })
+  }
+  if (url.includes('/api/global-agent/runs?')) {
+    return jsonResponse({ success: true, run: globalSupervisingFixtureRun })
+  }
+  if (url.includes('/api/global-agent/runs/steer')) {
+    const payload = JSON.parse(String(init?.body || '{}'))
+    const revised = /目标调整|改为|改成|只做|不再|不要再/.test(String(payload.message || ''))
+    if (payload.id === globalSupervisingFixtureRun?.id) {
+      const steering = {
+        id: 'fixture-supervision-steer',
+        message: payload.message,
+        kind: revised ? 'revise_goal' : 'supplement',
+        source: 'global_web_supervision_steer',
+        request_id: payload.request_id,
+        at: new Date().toISOString(),
+        applied_at: new Date().toISOString(),
+        status: 'applied',
+        authorization_preserved: false,
+      }
+      const todoPlan = {
+        ...(globalSupervisingFixtureRun.todo_plan || {}),
+        source: 'global-supervision-steering',
+        title: '调整后的执行计划',
+        steps: [
+          { id: 'recheck_goal', label: '重新核对目标和范围', active_form: '已接收新的目标边界', status: 'completed' },
+          { id: 'interrupt_previous_run', label: '停止旧执行轮', active_form: '旧执行已停止', detail: '旧方向已经停止，不会继续写入。', status: 'completed' },
+          { id: 'replan_supervised_mission', label: '按新目标重新规划', active_form: '正在按新目标重新规划', detail: '正在重新核对执行范围和验收标准。', status: 'in_progress' },
+          { id: 'rerun_acceptance_review', label: '重新执行验收和复核', active_form: '等待重新执行验收和复核', status: 'pending' },
+        ],
+        next_action: '重新核对计划后继续派发，并重新运行 TestAgent 复核。',
+      }
+      const continuation = {
+        kind: revised ? 'revise_goal' : 'supplement',
+        affected_task_count: 2,
+        queued_task_count: 1,
+        deferred_task_count: 1,
+        interrupted_task_count: revised ? 1 : 0,
+        failed_task_count: 0,
+        at: new Date().toISOString(),
+      }
+      const workchain = {
+        ...(globalSupervisingFixtureRun.workchain || {}),
+        mode: 'plan',
+        phase: 'plan',
+        status: 'supervising',
+        user_visible_text: '目标调整已接收。旧执行已停止，正在按新目标重新规划。',
+        todo_plan: todoPlan,
+        todoPlan,
+        technical_details: [{
+          id: 'supervision_continuation',
+          title: '持续跟进接续统计',
+          items: [
+            { label: '受影响子任务', value: '2' },
+            { label: '停止旧执行轮', value: '1' },
+            { label: '重新排队', value: '1' },
+          ],
+        }],
+      }
+      const revisedDecision = {
+        ...(globalSupervisingFixtureRun.display_stream?.main_agent_decision || {}),
+        mode: revised ? 'goal_revision' : 'followup',
+        decision: {
+          selected_actions: revised
+            ? ['replan_from_observation', 'dispatch_child_agent', 'read_child_agent_receipts', 'generate_final_reply']
+            : ['dispatch_child_agent', 'read_child_agent_receipts', 'generate_final_reply'],
+          dispatch_policy: {
+            action: revised ? 'replan' : 'continue',
+            reason: workchain.user_visible_text,
+            nextStep: todoPlan.next_action,
+          },
+          reason: workchain.user_visible_text,
+        },
+        todo_plan: todoPlan,
+        todoPlan,
+        user_plan_steps: todoPlan.steps,
+        verify: {
+          passed: false,
+          blocked_actions: [],
+          conclusion: revised ? '正在按新目标重新规划' : '正在继续执行和验收',
+        },
+      }
+      globalSupervisingFixtureRun = {
+        ...globalSupervisingFixtureRun,
+        status: 'supervising',
+        phase: 'plan',
+        supervision_state: 'replanning',
+        final_reply: '目标调整已接收。旧执行已停止，正在按新目标重新规划。',
+        last_user_steer: steering,
+        lastUserSteer: steering,
+        user_steer_history: [...(globalSupervisingFixtureRun.user_steer_history || []), steering],
+        userSteerHistory: [...(globalSupervisingFixtureRun.user_steer_history || []), steering],
+        todo_plan: todoPlan,
+        todoPlan,
+        workchain,
+        display_stream: {
+          ...(globalSupervisingFixtureRun.display_stream || {}),
+          user_visible_text: workchain.user_visible_text,
+          workchain,
+          todo_plan: todoPlan,
+          todoPlan,
+          technical_details: workchain.technical_details,
+          main_agent_decision: revisedDecision,
+          mainAgentDecision: revisedDecision,
+        },
+        final_report: {
+          summary: workchain.user_visible_text,
+          next_action: todoPlan.next_action,
+          supervision_continuation: continuation,
+        },
+        updated_at: new Date().toISOString(),
+      }
+      globalSupervisingFixtureMission = {
+        ...(globalSupervisingFixtureMission || {}),
+        id: 'fixture-mission-running',
+        status: 'in_progress',
+        business_goal: revised ? '只检查登录恢复，不修改其他模块' : globalSupervisingFixtureRun.user_message,
+        status_detail: revised
+          ? '旧执行已停止，正在按新目标重新规划。'
+          : '补充要求已同步，正在继续执行和验收。',
+        mission_summary: { all_passed: false, pending: 2 },
+        collaboration_state: {
+          ...(globalSupervisingFixtureMission?.collaboration_state || {}),
+          last_continuation: continuation,
+        },
+        todo_plan: todoPlan,
+        todoPlan,
+      }
+      return jsonResponse({
+        success: true,
+        accepted: true,
+        applied: true,
+        duplicate: false,
+        steering,
+        continuation: globalSupervisingFixtureRun.final_report.supervision_continuation,
+        supervisor: {
+          id: 'fixture-supervisor-running',
+          mission_id: 'fixture-mission-running',
+          global_run_id: globalSupervisingFixtureRun.id,
+          status: 'monitoring',
+          phase: 'replanning',
+          business_goal: '只检查登录恢复，不修改其他模块',
+          last_continuation: continuation,
+        },
+        mission: globalSupervisingFixtureMission,
+        run: globalSupervisingFixtureRun,
+        message: revised
+          ? '目标调整已接收。旧执行已停止，正在按新目标重新规划。'
+          : '补充要求已接收，已并入当前任务继续处理。',
+      })
+    }
+    const steering = {
+      id: 'fixture-user-steer',
+      message: payload.message,
+      kind: revised ? 'revise_goal' : 'supplement',
+      source: 'global_web_mid_turn',
+      request_id: payload.request_id,
+      at: new Date().toISOString(),
+      status: 'queued',
+      authorization_preserved: false,
+    }
+    globalSteerFixtureRun = {
+      ...(globalSteerFixtureRun || {}),
+      pending_user_messages: [steering],
+      pendingUserMessages: [steering],
+      last_user_steer: steering,
+      lastUserSteer: steering,
+    }
+    setTimeout(() => enqueueGlobalSteerFixtureEvent({
+      type: 'user_steer_applied',
+      run_id: globalSteerFixtureRun?.id || 'global-mid-turn-steer-run',
+      trace_id: globalSteerFixtureRun?.trace_id || 'trace-global-mid-turn-steer',
+      status: 'running',
+      phase: revised ? 'plan' : 'execute',
+      steering: { ...steering, status: 'applied', applied_at: new Date().toISOString() },
+      replan_required: revised,
+      message: revised
+        ? '新的目标边界已纳入，我会先重新核对计划再继续。'
+        : '补充要求已纳入当前任务，我会带着它继续处理。',
+    }), 0)
+    return jsonResponse({
+      success: true,
+      accepted: true,
+      duplicate: false,
+      steering,
+      run: globalSteerFixtureRun,
+      message: revised
+        ? '目标调整已接收，会在当前任务中重新核对计划。'
+        : '补充要求已接收，会在当前任务中继续处理。',
+    })
+  }
+  if (url.includes('/api/global-agent/run')) {
+    const payload = JSON.parse(String(init?.body || '{}'))
+    globalSteerFixtureRun = {
+      id: 'global-mid-turn-steer-run',
+      trace_id: 'trace-global-mid-turn-steer',
+      session_id: payload.session_id || 'global-stream-fixture',
+      source: 'web',
+      status: 'running',
+      phase: 'execute',
+      explicit_write_authorization: false,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      deadline_at: new Date(Date.now() + 60_000).toISOString(),
+      max_steps: 8,
+      steps: [],
+      pending_tool: null,
+      final_reply: '',
+      error: '',
+      resume_count: 0,
+      model_calls: 1,
+      tool_calls: 0,
+      client_effects: [],
+      user_message: payload.message,
+      original_user_message: payload.message,
+      pending_user_messages: [],
+      user_steer_history: [],
+    }
+    return new Response(new ReadableStream({
+      start(controller) {
+        globalSteerStreamController = controller
+        enqueueGlobalSteerFixtureEvent({
+          type: 'started',
+          run_id: globalSteerFixtureRun.id,
+          trace_id: globalSteerFixtureRun.trace_id,
+          status: 'running',
+          phase: 'execute',
+        })
+        enqueueGlobalSteerFixtureEvent({
+          type: 'decision',
+          run_id: globalSteerFixtureRun.id,
+          trace_id: globalSteerFixtureRun.trace_id,
+          status: 'running',
+          phase: 'execute',
+          step: {
+            state: 'execute',
+            message: '我正在处理这项任务，你可以继续补充当前要求。',
+            plan: ['确认当前目标', '执行并验证', '整理总结'],
+          },
+        })
+      },
+    }), {
+      status: 200,
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+      },
+    })
   }
   return originalFetch(input, init)
 }
@@ -262,7 +558,7 @@ const renderedUserHandoff = {
   summary_cards: [
     { id: 'completed', label: '完成内容', value: '登录状态刷新后的恢复逻辑已经完成。', tone: 'ok' },
     { id: 'verification', label: '验证状态', value: '已执行 1 项验证', tone: 'ok' },
-    { id: 'attention', label: '待关注', value: '暂无待处理风险', tone: 'ok' },
+    { id: 'attention', label: '待关注', value: '暂无需要额外关注的风险', tone: 'ok' },
     { id: 'next', label: '下一步', value: 'web 产生了 2 个文件改动。', tone: 'ok' },
   ],
   primary_action: { id: 'view_changes', label: '查看改动', detail: 'web 产生了 2 个文件改动。', kind: 'view_changes', tone: 'primary' },
@@ -553,7 +849,7 @@ const workchainCompletedArchivedCard = {
     metrics: [
       { id: 'status', label: '状态', value: '已完成' },
       { id: 'verification', label: '验证', value: 'TestAgent 已复核' },
-      { id: 'risk', label: '风险', value: '无待处理风险' },
+      { id: 'risk', label: '风险', value: '暂无需要额外关注的风险' },
     ],
     highlights: ['计划、执行、TestAgent 复核和总结都已收尾。'],
     verification: ['TestAgent 独立复核已通过。'],
@@ -767,7 +1063,7 @@ const deliveryReport = {
       { id: 'scope', label: '涉及范围', value: '2 个文件', detail: 'frontend/src/stores/login.js；frontend/src/views/Login.vue' },
       { id: 'verification', label: '验证', value: '1 项实际执行', detail: '已实际执行 1 项验证：npm run test:login-state；外部 Runner 证据 1 项：验证来源已记录。', tone: 'success' },
       { id: 'acceptance', label: '验收', value: '已通过', detail: '主 Agent 验收：已通过', tone: 'success' },
-      { id: 'risk', label: '风险', value: '无待处理风险', tone: 'success' },
+      { id: 'risk', label: '风险', value: '暂无需要额外关注的风险', tone: 'success' },
     ],
     highlights: ['刷新页面后会恢复登录态。'],
     verification: ['已实际执行 1 项验证：npm run test:login-state', '项目配置要求的验证命令：已覆盖。', '外部 Runner 证据 1 项：验证来源已记录。'],
@@ -809,7 +1105,7 @@ const planGapDeliveryReport = {
     { id: 'plan_review', title: '计划回顾', items: ['执行前计划：登录修复执行计划', '计划缺口：登录恢复验证通过（还没有系统捕获 npm run test:login 的通过记录）', '计划步骤：修复登录恢复逻辑；运行登录验证', '计划核对：仍有缺口'] },
     { id: 'verification', title: '验证结果', items: ['npm test -- --run login 失败'] },
     { id: 'verification_evidence', title: '验收证据', items: ['失败验证 1 项：npm test -- --run login 失败', '项目必需验证缺口 1 项：web：npm run test:login'] },
-    { id: 'acceptance', title: '验收结论', items: ['最终验收：未通过，仍需处理缺口', '计划核对：仍有缺口'] },
+    { id: 'acceptance', title: '验收结论', items: ['最终验收：未通过，仍有待补齐项', '计划核对：仍有缺口'] },
     { id: 'risks', title: '未完成原因', items: ['缺少测试环境变量'] },
     { id: 'next_action', title: '下一步', items: ['先补齐计划缺口：登录恢复验证通过（还没有系统捕获 npm run test:login 的通过记录）'] },
   ],
@@ -817,7 +1113,7 @@ const planGapDeliveryReport = {
   plan_review: ['执行前计划：登录修复执行计划', '计划缺口：登录恢复验证通过（还没有系统捕获 npm run test:login 的通过记录）', '计划步骤：修复登录恢复逻辑；运行登录验证', '计划核对：仍有缺口'],
   planReview: ['执行前计划：登录修复执行计划', '计划缺口：登录恢复验证通过（还没有系统捕获 npm run test:login 的通过记录）', '计划步骤：修复登录恢复逻辑；运行登录验证', '计划核对：仍有缺口'],
   verification: ['npm test -- --run login 失败'],
-  acceptance: ['最终验收：未通过，仍需处理缺口', '计划核对：仍有缺口'],
+  acceptance: ['最终验收：未通过，仍有待补齐项', '计划核对：仍有缺口'],
   risks: ['缺少测试环境变量'],
   next_action: ['先补齐计划缺口：登录恢复验证通过（还没有系统捕获 npm run test:login 的通过记录）'],
   pickup_summary: {
@@ -949,16 +1245,26 @@ const testAgentFailedReviewSummary = {
   title: '独立复核',
   status: 'needs_rework',
   status_label: '需返工',
-  headline: '独立复核发现待处理缺口，我会先安排返工，再重新验收。',
+  headline: '独立复核发现未通过项，我会先安排返工，再重新验收。',
   rows: [
     'TestAgent：未通过，需要返工',
+    '登录态浏览器验收：共执行 2 项登录检查，1 项通过、1 项未通过，覆盖 2 个已登录会话。',
+    '登录态浏览器验收有 1 项未通过，需要先修复登录流程或会话恢复问题，再重新验证。',
+    '操作结果验证：共核对 1 次页面操作，1 次没有产生可见效果。',
+    '场景“提交登录表单”中有 1 次操作没有产生可见效果，需要修复交互结果后重新验证。',
+    '边界与异常验证：已执行 1 项检查，其中 1 项未通过，需要修复后重新验证。',
+    '边界检查“重复提交登录”未通过（验收目标：重复提交不能创建重复会话），需要修复后重新验证。',
+    '多人协作浏览器验收：共执行 2 个场景，1 个通过、1 个未通过，覆盖 4 个会话角色，包含 2 组并行动作，核对 2 项跨会话结果。',
+    '场景“作者更新后观察方同步刷新”中，观察方未通过，失败步骤已放入技术详情。',
+    '真实浏览器验收：共执行 2 个流程，1 个通过、1 个未通过，覆盖 2 条验收条件。',
+    '表单流程有 1 个流程未通过（验收目标：登录恢复后进入工作台），失败步骤已放入技术详情。',
     '必检项 命令验证未覆盖：npm test 未通过',
     '验收条件未通过：登录恢复验证必须通过',
     '浏览器网络：发现 1 个网络问题',
     '把失败检查项带回给原实现成员返工',
-    '返工后重新运行 TestAgent 复核',
+    '返工完成后，我会自动沿用原工作单重新运行 TestAgent 复核',
   ],
-  next_action: '把失败检查项带回给原实现成员返工；返工后重新运行 TestAgent 复核。',
+  next_action: '把失败检查项带回给原实现成员返工；返工完成后，我会自动沿用原工作单重新运行 TestAgent 复核。',
   display_policy: { user_text_first: true, technical_default_collapsed: true, hide_internal_protocols: true, show_for_ordinary_conversation: false },
 }
 
@@ -970,6 +1276,9 @@ const groupLiveTestAgentReviewSummary = {
   headline: 'TestAgent 已检查交付证据，我会继续核对最终总结。',
   rows: [
     'TestAgent：已通过',
+    '登录态浏览器验收：共执行 2 项登录检查，2 项通过，覆盖 2 个已登录会话。',
+    '多人协作浏览器验收：共执行 2 个场景，2 个通过，覆盖 4 个会话角色，包含 2 组并行动作，核对 2 项跨会话结果。',
+    '真实浏览器验收：共执行 2 个流程，2 个通过，覆盖 2 条验收条件。',
     '验证证据：npm run test:login-state',
     '文件上传：已验证 2 个上传文件（notes.txt、meta.json）',
     '文件下载：已验证 1 个下载文件（tasks.csv）',
@@ -990,10 +1299,10 @@ const testAgentFailedReviewCard = {
   phase_label: '待返工',
   progress: 72,
   active_agents: ['我正在安排返工'],
-  agents: [{ name: 'TestAgent', status: 'failed', summary: '独立复核发现待处理缺口，需要原实现成员返工。' }],
+  agents: [{ name: 'TestAgent', status: 'failed', summary: '独立复核发现未通过项，需要原实现成员返工。' }],
   completed: ['已完成 TestAgent 独立复核'],
   blockers: ['命令验证未通过', '登录恢复验收条件未通过'],
-  next_action: '把失败检查项带回给原实现成员返工；返工后重新运行 TestAgent 复核。',
+  next_action: '把失败检查项带回给原实现成员返工；返工完成后，我会自动沿用原工作单重新运行 TestAgent 复核。',
   independent_review_summary: testAgentFailedReviewSummary,
   independentReviewSummary: testAgentFailedReviewSummary,
   independent_review: testAgentFailedReviewSummary.rows,
@@ -1009,7 +1318,7 @@ const testAgentFailedReviewCard = {
       { id: 'independent_review', title: '复核结论', items: testAgentFailedReviewSummary.rows },
       { id: 'acceptance', title: '验收结论', items: ['最终验收：未通过，需要先返工。'] },
       { id: 'risks', title: '未完成原因', items: ['命令验证未通过，登录恢复验收条件未通过。'] },
-      { id: 'next_action', title: '下一步', items: ['把失败检查项带回给原实现成员返工；返工后重新运行 TestAgent 复核。'] },
+      { id: 'next_action', title: '下一步', items: ['把失败检查项带回给原实现成员返工；返工完成后，我会自动沿用原工作单重新运行 TestAgent 复核。'] },
     ],
     independent_review_summary: testAgentFailedReviewSummary,
     independentReviewSummary: testAgentFailedReviewSummary,
@@ -1017,14 +1326,14 @@ const testAgentFailedReviewCard = {
     independentReview: testAgentFailedReviewSummary.rows,
     acceptance: ['最终验收：未通过，需要先返工。'],
     risks: ['命令验证未通过，登录恢复验收条件未通过。'],
-    next_action: ['把失败检查项带回给原实现成员返工；返工后重新运行 TestAgent 复核。'],
+    next_action: ['把失败检查项带回给原实现成员返工；返工完成后，我会自动沿用原工作单重新运行 TestAgent 复核。'],
     technical_hint: 'TestAgent 原始报告、裁决文件和证据路径已放入技术详情。',
     display_policy: { user_text_first: true, technical_default_collapsed: true, hide_internal_protocols: true },
   },
   display_stream: {
     schema: 'ccm-streamlined-display-v2',
     user_visible_text: 'TestAgent 独立复核没有通过，我会先安排原实现成员返工，再重新复核。',
-    tool_use_summary: { type: 'streamlined_tool_use_summary', tool_summary: '独立复核 1 次，发现 2 个待处理缺口' },
+    tool_use_summary: { type: 'streamlined_tool_use_summary', tool_summary: '独立复核 1 次，发现 2 个未通过项' },
   },
   technical: {
     trace_id: 'trace-test-agent-review-failed',
@@ -1032,10 +1341,34 @@ const testAgentFailedReviewCard = {
       verdict: 'failed',
       recommendation: 'rework',
       needsRework: true,
+      metadata: {
+        browserAuthenticationSummary: {
+          configuredChecks: 2,
+          passedChecks: 1,
+          failedChecks: 1,
+          blockedChecks: 0,
+          authenticatedSessions: 2,
+          credentialEnvNames: ['TEST_EMAIL', 'TEST_PASSWORD'],
+          storageStateCount: 2,
+          sensitiveArtifactSuppressionCount: 2,
+        },
+      },
       report_json: 'C:/tmp/test-agent-artifacts/failed/report.json',
       verdict_json: 'C:/tmp/test-agent-artifacts/failed/verdict.json',
       artifact_manifest: 'C:/tmp/test-agent-artifacts/failed/artifact-manifest.json',
       browser_artifacts: 'C:/tmp/test-agent-artifacts/failed/browser-artifacts',
+      browserActionEffectSummary: {
+        provider: 'playwright',
+        url: 'http://127.0.0.1:5173/login?token=hidden',
+        actionTypes: { click: 1 },
+        changedSignals: { page_text: 0, network: 0 },
+      },
+      adversarialEvidenceSummary: {
+        provider: 'playwright',
+        probeType: 'duplicate_submit',
+        target: 'http://127.0.0.1:5173/login?token=hidden',
+        rawSessionId: 'failed-review-session-hidden',
+      },
     },
   },
 }
@@ -1064,6 +1397,16 @@ const groupLiveTestAgentReviewMergedCard = {
   testAgentReviewSummary: groupLiveTestAgentReviewSummary,
   independent_review: groupLiveTestAgentReviewSummary.rows,
   independentReview: groupLiveTestAgentReviewSummary.rows,
+  post_review_spot_check_summary: {
+    schema: 'ccm-main-agent-post-review-spot-check-summary-v1',
+    title: '完成前抽查',
+    status: 'passed',
+    status_label: '已通过',
+    headline: '我已抽查 2 项验证，结果与 TestAgent 的通过结论一致。',
+    rows: ['已抽查 2 项验证，2 项结果一致'],
+    next_action: '继续核对交付总结并完成最终验收。',
+    display_policy: { user_text_first: true, technical_default_collapsed: true, hide_internal_protocols: true, show_for_ordinary_conversation: false },
+  },
   display_stream: {
     schema: 'ccm-streamlined-display-v2',
     user_visible_text: 'TestAgent 已提交独立复核结论，我会纳入最终验收。',
@@ -1074,10 +1417,41 @@ const groupLiveTestAgentReviewMergedCard = {
     test_agent_report: {
       schema: 'ccm-test-agent-report-v1',
       verdict: 'passed',
+      metadata: {
+        browserAuthenticationSummary: {
+          configuredChecks: 2,
+          passedChecks: 2,
+          failedChecks: 0,
+          blockedChecks: 0,
+          authenticatedSessions: 2,
+          credentialEnvNames: ['TEST_EMAIL', 'TEST_PASSWORD'],
+          storageStateCount: 2,
+          sensitiveArtifactSuppressionCount: 2,
+        },
+      },
       report_json: 'C:/tmp/test-agent-artifacts/live/report.json',
       verdict_json: 'C:/tmp/test-agent-artifacts/live/verdict.json',
       artifact_manifest: 'C:/tmp/test-agent-artifacts/live/artifact-manifest.json',
       browser_artifacts: 'C:/tmp/test-agent-artifacts/live/browser-artifacts',
+    },
+    post_review_spot_check: {
+      schema: 'ccm-main-agent-post-review-spot-check-v1',
+      required: true,
+      pass: true,
+      status: 'passed',
+      executed_count: 2,
+      passed_count: 2,
+      mismatch_count: 0,
+      checks: [{
+        command: 'node scripts/private-login-check.mjs',
+        cwd: 'C:/private/group-project',
+        review_exit_code: 0,
+        observed_exit_code: 0,
+        review_output_preview: 'private group check passed',
+        observed_output_preview: 'private group check passed',
+        observed_output_file: 'C:/private/group-project/.ccm-output/spot-check.log',
+        matches_review: true,
+      }],
     },
   },
 }
@@ -1284,6 +1658,88 @@ const taskStatusFallbackCard = {
   blockers: ['真实浏览器验收证据待补齐'],
   next_action: '补齐验收证据并排查失败动作后再总结。',
   technical: { trace_id: 'trace-status-fallback-copy' },
+}
+
+const startupAutoRecoveryTodo = [
+  { id: 'restore_task_context', content: '恢复任务上下文并重新核对', activeForm: '已恢复任务上下文并重新核对', status: 'completed', evidence: ['原计划、执行队列和验收条件已恢复'] },
+  { id: 'continue_execution', content: '继续执行剩余任务', activeForm: '正在继续执行剩余任务', status: 'in_progress', evidence: ['已重新进入原任务执行队列'] },
+  { id: 'verify_and_summarize', content: '完成验收并总结', activeForm: '等待完成验收并总结', status: 'pending', evidence: ['完成后必须核对改动、验证和剩余风险'] },
+]
+
+const startupAutoRecoveryCard = {
+  version: 1,
+  visible: true,
+  task_id: 'task-startup-auto-recovery',
+  title: '登录状态恢复任务',
+  goal: '完成登录状态恢复修改、验证和最终总结。',
+  phase: 'planning',
+  phase_label: '正在接续',
+  progress: 34,
+  active_agents: ['前端 · web 正在继续执行'],
+  agents: [{ name: '前端 · web', status: 'running', summary: '已恢复原任务上下文，正在继续修改和验证' }],
+  recovery_summary: {
+    schema: 'ccm-main-agent-recovery-summary-v1',
+    title: '恢复接续',
+    status: 'active',
+    status_label: '已自动接上',
+    mode: 'startup_auto_recovery',
+    headline: '服务重启后，我已自动接上这轮任务，并重新核对目标、当前状态和验收条件。',
+    revalidated: { goal: true, state: true, acceptance: true },
+    preserved: ['已保留你之前确认的执行授权', '保留 1 个执行成员会话上下文', '恢复 2 个执行队列工作项'],
+    remaining_gaps: ['真实浏览器验收仍待执行'],
+    next_action: '我会沿用原计划和执行上下文继续推进，完成后再给你最终总结。',
+    technical: {
+      decision_code: 'authorized_incomplete_task',
+      decision_reason: 'persisted queue evidence',
+      authorization_evidence: ['intake_confirmed', 'queued_at', 'started_at'],
+      recovery_checks: 1,
+      lease_recovery_count: 1,
+    },
+  },
+  live_todo_plan: {
+    source: 'ccm-live-task-todo',
+    visible: true,
+    items: startupAutoRecoveryTodo,
+  },
+  mainAgentDecision: {
+    version: 1,
+    kind: 'task',
+    mode: 'project_task',
+    show_todo: true,
+    goal: '完成登录状态恢复修改、验证和最终总结。',
+    phase: 'execute',
+    phase_label: '正在执行',
+    current_step: '正在继续执行剩余任务',
+    decision: {
+      selected_actions: ['inspect_task_status', 'create_project_task'],
+      reason: '服务重启后继续执行已经确认并入队的原任务。',
+      dispatch_policy: {
+        reason: '原任务授权仍然有效，继续同一任务上下文。',
+        nextStep: '继续执行剩余修改和验证，完成后给出最终总结。',
+      },
+    },
+    verify: { passed: false, status: 'in_progress' },
+    todo_plan: {
+      source: 'ccm-live-task-todo',
+      title: '我准备这样处理',
+      steps: startupAutoRecoveryTodo,
+      display_policy: { user_visible: true },
+    },
+    user_plan_steps: startupAutoRecoveryTodo,
+    display_stream: {
+      schema: 'ccm-streamlined-display-v2',
+      user_visible_text: '我已接上重启前的任务，正在从原计划继续执行。',
+    },
+  },
+  completed: ['已恢复原计划和执行上下文', '已重新核对目标、当前状态和验收条件'],
+  blockers: [],
+  next_action: '继续执行剩余修改和验证，完成后给出最终总结。',
+  technical: {
+    trace_id: 'trace-startup-auto-recovery-hidden',
+    recovery_policy: 'risk_tiered_authorization_preserving',
+    decision_code: 'authorized_incomplete_task',
+    authorization_evidence: ['intake_confirmed', 'queued_at', 'started_at'],
+  },
 }
 
 const workQueueCard = {
@@ -2003,7 +2459,7 @@ const globalTestAgentUnknownCoverageSummary = {
   headline: '独立复核需要人工确认，我会先暂停最终验收。',
   rows: [
     'TestAgent：等你确认',
-    '待处理：验收条件待确认：登录恢复验收需要真实浏览器证据',
+    '待确认：验收条件待确认：登录恢复验收需要真实浏览器证据',
   ],
   next_action: '等待你确认复核标记的问题。',
   display_policy: { user_text_first: true, technical_default_collapsed: true, hide_internal_protocols: true, show_for_ordinary_conversation: false },
@@ -2053,11 +2509,11 @@ const globalTestAgentNotVerifiedCoverageSummary = {
   title: '独立复核',
   status: 'needs_rework',
   status_label: '需返工',
-  headline: '独立复核发现待处理缺口，我会先安排返工，再重新验收。',
+  headline: '独立复核发现未通过项，我会先安排返工，再重新验收。',
   rows: [
     'TestAgent：需返工',
-    '待处理：必检项：浏览器流程未覆盖：浏览器流程没有实际执行证据',
-    '待处理：验收条件未通过：登录恢复验证必须通过',
+    '待返工：必检项：浏览器流程未覆盖：浏览器流程没有实际执行证据',
+    '待返工：验收条件未通过：登录恢复验证必须通过',
   ],
   next_action: '先处理复核指出的缺口，再重新执行验收。',
   display_policy: { user_text_first: true, technical_default_collapsed: true, hide_internal_protocols: true, show_for_ordinary_conversation: false },
@@ -2065,7 +2521,7 @@ const globalTestAgentNotVerifiedCoverageSummary = {
 
 const globalTestAgentNotVerifiedCoverageMessage = {
   role: 'assistant',
-  content: '独立复核发现待处理缺口，我会先安排返工，再重新验收。',
+  content: '独立复核发现未通过项，我会先安排返工，再重新验收。',
   timestamp: now,
   type: 'global_agent_result',
   agenticRun: {
@@ -2102,6 +2558,154 @@ const globalTestAgentNotVerifiedCoverageMessage = {
   },
 }
 const globalTestAgentNotVerifiedCoverageCard = globalAgentRunTaskCard(globalTestAgentNotVerifiedCoverageMessage)
+
+const globalTestAgentLatestEvidenceRecheckSummary = {
+  schema: 'ccm-main-agent-independent-review-summary-v1',
+  title: '独立复核',
+  status: 'needs_recheck',
+  status_label: '需复验',
+  headline: 'TestAgent 的复核证据还没有闭环，我会先补齐检查并重新复验。',
+  rows: [
+    'TestAgent：需复验',
+    '操作结果验证：共核对 1 次页面操作，1 次暂时无法确认效果。',
+    '场景“提交登录表单”中有 1 次操作暂时无法确认页面效果，需要补齐可观察结果后重新复验。',
+    '浏览器会话恢复：共检查 1 次恢复过程，1 次为避免重复副作用未自动重试。',
+    '场景“提交登录表单”中有 1 次操作为避免重复点击或提交而没有自动重试；这不代表实现失败，需要在安全条件下重新复验。',
+    '边界与异常验证：本轮缺少与当前目标相关的边界或异常检查。',
+    '需要在 TestAgent 工作单中补充至少一项与当前目标相关的边界或异常检查，并重新运行复核。',
+  ],
+  next_action: '补齐可观察结果或目标关联的边界检查后，重新运行 TestAgent 复核。',
+  display_policy: { user_text_first: true, technical_default_collapsed: true, hide_internal_protocols: true, show_for_ordinary_conversation: false },
+}
+
+const globalTestAgentLatestEvidenceRecheckMessage = {
+  role: 'assistant',
+  content: globalTestAgentLatestEvidenceRecheckSummary.headline,
+  timestamp: now,
+  type: 'global_agent_result',
+  agenticRun: {
+    id: 'global-run-test-agent-latest-evidence-recheck',
+    status: 'running',
+    phase: 'reviewing',
+    user_message: '重新核对 TestAgent 的浏览器操作、恢复和边界证据',
+    tool_calls: 1,
+    final_reply: globalTestAgentLatestEvidenceRecheckSummary.headline,
+    independent_review_summary: globalTestAgentLatestEvidenceRecheckSummary,
+    independentReviewSummary: globalTestAgentLatestEvidenceRecheckSummary,
+    test_agent_review_summary: globalTestAgentLatestEvidenceRecheckSummary,
+    testAgentReviewSummary: globalTestAgentLatestEvidenceRecheckSummary,
+    independent_review: globalTestAgentLatestEvidenceRecheckSummary.rows,
+    independentReview: globalTestAgentLatestEvidenceRecheckSummary.rows,
+    final_report: {
+      summary: globalTestAgentLatestEvidenceRecheckSummary.headline,
+      risks: ['浏览器操作效果、会话恢复和目标关联边界证据尚未闭环。'],
+      independent_review_summary: globalTestAgentLatestEvidenceRecheckSummary,
+      independentReviewSummary: globalTestAgentLatestEvidenceRecheckSummary,
+      independent_review: globalTestAgentLatestEvidenceRecheckSummary.rows,
+      independentReview: globalTestAgentLatestEvidenceRecheckSummary.rows,
+      acceptance_gate_passed: false,
+      technical: {
+        schema: 'ccm-test-agent-report-v1',
+        status: 'passed',
+        recommendation: 'accept',
+        browserActionEffectSummary: {
+          provider: 'playwright',
+          url: 'http://127.0.0.1:5173/login?token=hidden',
+          actionTypes: { click: 1 },
+          changedSignals: { page_text: 0 },
+        },
+        browserRecoverySummary: {
+          notRetried: 1,
+          events: [{ rawSessionId: 'global-recheck-session-hidden', reason: 'unsafe duplicate side effect' }],
+        },
+        adversarialEvidenceSummary: {
+          status: 'missing',
+          probeTypes: ['duplicate_submit'],
+          target: 'http://127.0.0.1:5173/login?token=hidden',
+        },
+        report_json: 'C:/tmp/test-agent-artifacts/global-recheck/report.json',
+      },
+    },
+  },
+}
+const globalTestAgentLatestEvidenceRecheckCard = globalAgentRunTaskCard(globalTestAgentLatestEvidenceRecheckMessage)
+
+const globalPostReviewSpotCheckRecheckSummary = {
+  schema: 'ccm-main-agent-post-review-spot-check-summary-v1',
+  title: '完成前抽查',
+  status: 'needs_recheck',
+  status_label: '需复验',
+  headline: 'TestAgent 已通过，但我的完成前抽查有 1 项结果不一致。',
+  rows: ['已抽查 2 项验证，1 项结果一致，1 项不一致'],
+  next_action: '我会沿用原复核工作单重新运行 TestAgent，并再次抽查关键验证。',
+  display_policy: { user_text_first: true, technical_default_collapsed: true, hide_internal_protocols: true, show_for_ordinary_conversation: false },
+}
+
+const globalPostReviewSpotCheckRecheck = {
+  schema: 'ccm-main-agent-post-review-spot-check-v1',
+  required: true,
+  pass: false,
+  status: 'needs_recheck',
+  report_id: 'global-private-spot-check-report',
+  work_order_id: 'global-private-spot-check-work-order',
+  candidate_count: 2,
+  selected_count: 2,
+  executed_count: 2,
+  passed_count: 1,
+  mismatch_count: 1,
+  checks: [{
+    command: 'node scripts/private-global-check.mjs',
+    cwd: 'D:/private/global-project',
+    review_exit_code: 0,
+    observed_exit_code: 3,
+    review_output_preview: 'claimed pass',
+    observed_output_preview: 'private global check failed',
+    observed_output_file: 'D:/private/global-project/.ccm-output/spot-check.log',
+    matches_review: false,
+  }],
+  issues: ['复跑结果与 TestAgent 的通过结论不一致。'],
+  headline: globalPostReviewSpotCheckRecheckSummary.headline,
+  next_action: globalPostReviewSpotCheckRecheckSummary.next_action,
+}
+
+const globalPostReviewSpotCheckRecheckMessage = {
+  role: 'assistant',
+  content: globalPostReviewSpotCheckRecheckSummary.headline,
+  timestamp: now,
+  type: 'global_agent_result',
+  agenticRun: {
+    id: 'global-run-post-review-spot-check-recheck',
+    status: 'running',
+    phase: 'reviewing',
+    user_message: '完成 TestAgent 复核后再抽查关键验证',
+    tool_calls: 1,
+    final_reply: globalPostReviewSpotCheckRecheckSummary.headline,
+    post_review_spot_check_summary: globalPostReviewSpotCheckRecheckSummary,
+    postReviewSpotCheckSummary: globalPostReviewSpotCheckRecheckSummary,
+    post_review_spot_check: globalPostReviewSpotCheckRecheck,
+    postReviewSpotCheck: globalPostReviewSpotCheckRecheck,
+    independent_review_summary: {
+      schema: 'ccm-main-agent-independent-review-summary-v1',
+      title: '独立复核',
+      status: 'needs_rework',
+      status_label: '需复验',
+      headline: globalPostReviewSpotCheckRecheckSummary.headline,
+      rows: ['TestAgent：已通过', '完成前抽查：1 项结果不一致，需要同一个 TestAgent 重新复验。'],
+      next_action: globalPostReviewSpotCheckRecheckSummary.next_action,
+      display_policy: { user_text_first: true, technical_default_collapsed: true, hide_internal_protocols: true, show_for_ordinary_conversation: false },
+    },
+    final_report: {
+      summary: globalPostReviewSpotCheckRecheckSummary.headline,
+      risks: ['完成前抽查尚未一致，本轮不能宣布完成。'],
+      acceptance_gate_passed: false,
+      post_review_spot_check_summary: globalPostReviewSpotCheckRecheckSummary,
+      technical: {
+        post_review_spot_check: globalPostReviewSpotCheckRecheck,
+      },
+    },
+  },
+}
+const globalPostReviewSpotCheckRecheckCard = globalAgentRunTaskCard(globalPostReviewSpotCheckRecheckMessage)
 
 const globalDirectDispatchSummary = {
   schema: 'ccm-main-agent-dispatch-launch-summary-v1',
@@ -2216,6 +2820,102 @@ const setupGlobalAgentFixtureState = () => {
       visible_when_completed: false,
       visibleWhenCompleted: false,
     },
+  }
+  const globalSupervisingTodoPlan = {
+    schema: 'ccm-main-agent-workchain-todo-v1',
+    source: 'global-supervision',
+    title: '全局任务当前计划',
+    steps: [
+      { id: 'understand', label: '确认目标和影响范围', active_form: '已确认目标和影响范围', status: 'completed' },
+      { id: 'dispatch', label: '派发执行目标', active_form: '已派发执行目标', status: 'completed' },
+      { id: 'track', label: '跟踪执行和验收', active_form: '正在跟踪执行和验收', detail: '持续等待执行成员提交结果，并进行 TestAgent 复核。', status: 'in_progress' },
+      { id: 'summary', label: '整理最终总结', active_form: '等待整理最终总结', status: 'pending' },
+    ],
+    next_action: '继续跟踪执行、验收和最终总结。',
+    display_policy: {
+      user_visible: true,
+      technical_default_collapsed: true,
+      hide_internal_protocols: true,
+      show_for_ordinary_conversation: false,
+    },
+  }
+  const globalSupervisingWorkchain = {
+    schema: 'ccm-main-agent-workchain-v1',
+    surface: 'global',
+    mode: 'execute',
+    phase: 'execute',
+    status: 'supervising',
+    user_visible_text: '任务已派发，正在持续跟踪执行和验收。',
+    todo_plan: globalSupervisingTodoPlan,
+    todoPlan: globalSupervisingTodoPlan,
+    completion_summary: {
+      headline: '任务仍在执行中，这还不是完成结果。',
+      next_action: '继续跟踪执行、验收和最终总结。',
+      evidence: ['已派发 2 个执行目标'],
+      risks: [],
+    },
+    technical_details: [{
+      id: 'ids',
+      title: '运行标识',
+      items: [
+        { label: 'Mission', value: 'fixture-mission-running' },
+        { label: 'Supervisor', value: 'fixture-supervisor-running' },
+      ],
+    }],
+  }
+  const globalSupervisingDecision = {
+    version: 2,
+    mode: 'delegation',
+    todo_plan: globalSupervisingTodoPlan,
+    todoPlan: globalSupervisingTodoPlan,
+    user_plan_steps: globalSupervisingTodoPlan.steps,
+  }
+  globalSupervisingFixtureRun = {
+    id: 'global-supervising-goal-revision-run',
+    trace_id: 'trace-global-supervising-goal-revision',
+    session_id: 'global-stream-fixture',
+    source: 'web',
+    status: 'supervising',
+    phase: 'execute',
+    supervision_state: 'monitoring',
+    mission_id: 'fixture-mission-running',
+    supervisor_id: 'fixture-supervisor-running',
+    explicit_write_authorization: true,
+    user_message: '修复登录状态恢复逻辑并完成验收',
+    original_user_message: '修复登录状态恢复逻辑并完成验收',
+    final_reply: '任务已派发，正在持续跟踪执行和验收。',
+    tool_calls: 1,
+    model_calls: 2,
+    todo_plan: globalSupervisingTodoPlan,
+    todoPlan: globalSupervisingTodoPlan,
+    workchain: globalSupervisingWorkchain,
+    display_stream: {
+      schema: 'ccm-streamlined-display-v2',
+      user_visible_text: globalSupervisingWorkchain.user_visible_text,
+      workchain: globalSupervisingWorkchain,
+      todo_plan: globalSupervisingTodoPlan,
+      todoPlan: globalSupervisingTodoPlan,
+      technical_details: globalSupervisingWorkchain.technical_details,
+      main_agent_decision: globalSupervisingDecision,
+      mainAgentDecision: globalSupervisingDecision,
+    },
+    final_report: {
+      summary: '任务仍在执行中，这还不是完成结果。',
+      next_action: '继续跟踪执行、验收和最终总结。',
+    },
+    user_steer_history: [],
+    created_at: now,
+    updated_at: now,
+  }
+  globalSupervisingFixtureMission = {
+    id: 'fixture-mission-running',
+    status: 'in_progress',
+    business_goal: '修复登录状态恢复逻辑并完成验收',
+    status_detail: '正在持续跟踪执行和验收。',
+    mission_summary: { all_passed: false, pending: 2 },
+    collaboration_state: {},
+    todo_plan: globalSupervisingTodoPlan,
+    todoPlan: globalSupervisingTodoPlan,
   }
   globalAgentFixtureSessions = [
     {
@@ -2438,7 +3138,7 @@ const setupGlobalAgentFixtureState = () => {
               status: 'passed',
               status_label: '已通过',
               headline: 'TestAgent/独立复核已检查交付证据，主 Agent 可以继续做最终验收。',
-              rows: ['TestAgent：已通过', '验证证据：npm run test:login-state', '文件上传：已验证 2 个上传文件（notes.txt、meta.json）', '文件下载：已验证 1 个下载文件（tasks.csv）', '浏览器交互：已执行 2 个操作、3 个断言，未发现失败步骤', '浏览器网络：记录 4 个请求、4 个响应，未发现网络错误'],
+              rows: ['TestAgent：已通过', '登录态浏览器验收：共执行 2 项登录检查，2 项通过，覆盖 2 个已登录会话。', '多人协作浏览器验收：共执行 2 个场景，2 个通过，覆盖 4 个会话角色，包含 2 组并行动作，核对 2 项跨会话结果。', '真实浏览器验收：共执行 2 个流程，2 个通过，覆盖 2 条验收条件。', '验证证据：npm run test:login-state', '文件上传：已验证 2 个上传文件（notes.txt、meta.json）', '文件下载：已验证 1 个下载文件（tasks.csv）', '浏览器交互：已执行 2 个操作、3 个断言，未发现失败步骤', '浏览器网络：记录 4 个请求、4 个响应，未发现网络错误'],
               next_action: '继续核对交付总结、改动和验证结果。',
               display_policy: { user_text_first: true, technical_default_collapsed: true, hide_internal_protocols: true, show_for_ordinary_conversation: false },
             },
@@ -2448,12 +3148,18 @@ const setupGlobalAgentFixtureState = () => {
               status: 'passed',
               status_label: '已通过',
               headline: 'TestAgent/独立复核已检查交付证据，主 Agent 可以继续做最终验收。',
-              rows: ['TestAgent：已通过', '验证证据：npm run test:login-state', '文件上传：已验证 2 个上传文件（notes.txt、meta.json）', '文件下载：已验证 1 个下载文件（tasks.csv）', '浏览器交互：已执行 2 个操作、3 个断言，未发现失败步骤', '浏览器网络：记录 4 个请求、4 个响应，未发现网络错误'],
+              rows: ['TestAgent：已通过', '登录态浏览器验收：共执行 2 项登录检查，2 项通过，覆盖 2 个已登录会话。', '多人协作浏览器验收：共执行 2 个场景，2 个通过，覆盖 4 个会话角色，包含 2 组并行动作，核对 2 项跨会话结果。', '真实浏览器验收：共执行 2 个流程，2 个通过，覆盖 2 条验收条件。', '验证证据：npm run test:login-state', '文件上传：已验证 2 个上传文件（notes.txt、meta.json）', '文件下载：已验证 1 个下载文件（tasks.csv）', '浏览器交互：已执行 2 个操作、3 个断言，未发现失败步骤', '浏览器网络：记录 4 个请求、4 个响应，未发现网络错误'],
               next_action: '继续核对交付总结、改动和验证结果。',
               display_policy: { user_text_first: true, technical_default_collapsed: true, hide_internal_protocols: true, show_for_ordinary_conversation: false },
             },
-            independent_review: ['TestAgent：已通过 - 已复核登录恢复逻辑和验证记录，未发现阻塞风险。', '文件上传：已验证 2 个上传文件（notes.txt、meta.json）', '文件下载：已验证 1 个下载文件（tasks.csv）', '浏览器交互：已执行 2 个操作、3 个断言，未发现失败步骤', '浏览器网络：记录 4 个请求、4 个响应，未发现网络错误'],
-            independentReview: ['TestAgent：已通过 - 已复核登录恢复逻辑和验证记录，未发现阻塞风险。', '文件上传：已验证 2 个上传文件（notes.txt、meta.json）', '文件下载：已验证 1 个下载文件（tasks.csv）', '浏览器交互：已执行 2 个操作、3 个断言，未发现失败步骤', '浏览器网络：记录 4 个请求、4 个响应，未发现网络错误'],
+            independent_review: ['TestAgent：已通过 - 已复核登录恢复逻辑和验证记录，未发现阻塞风险。', '登录态浏览器验收：共执行 2 项登录检查，2 项通过，覆盖 2 个已登录会话。', '多人协作浏览器验收：共执行 2 个场景，2 个通过，覆盖 4 个会话角色，包含 2 组并行动作，核对 2 项跨会话结果。', '真实浏览器验收：共执行 2 个流程，2 个通过，覆盖 2 条验收条件。', '文件上传：已验证 2 个上传文件（notes.txt、meta.json）', '文件下载：已验证 1 个下载文件（tasks.csv）', '浏览器交互：已执行 2 个操作、3 个断言，未发现失败步骤', '浏览器网络：记录 4 个请求、4 个响应，未发现网络错误'],
+            independentReview: ['TestAgent：已通过 - 已复核登录恢复逻辑和验证记录，未发现阻塞风险。', '登录态浏览器验收：共执行 2 项登录检查，2 项通过，覆盖 2 个已登录会话。', '多人协作浏览器验收：共执行 2 个场景，2 个通过，覆盖 4 个会话角色，包含 2 组并行动作，核对 2 项跨会话结果。', '真实浏览器验收：共执行 2 个流程，2 个通过，覆盖 2 条验收条件。', '文件上传：已验证 2 个上传文件（notes.txt、meta.json）', '文件下载：已验证 1 个下载文件（tasks.csv）', '浏览器交互：已执行 2 个操作、3 个断言，未发现失败步骤', '浏览器网络：记录 4 个请求、4 个响应，未发现网络错误'],
+            test_agent_report: groupLiveTestAgentReviewMergedCard.technical.test_agent_report,
+            testAgentReport: groupLiveTestAgentReviewMergedCard.technical.test_agent_report,
+            post_review_spot_check_summary: groupLiveTestAgentReviewMergedCard.post_review_spot_check_summary,
+            postReviewSpotCheckSummary: groupLiveTestAgentReviewMergedCard.post_review_spot_check_summary,
+            post_review_spot_check: groupLiveTestAgentReviewMergedCard.technical.post_review_spot_check,
+            postReviewSpotCheck: groupLiveTestAgentReviewMergedCard.technical.post_review_spot_check,
           },
         },
         {
@@ -2465,11 +3171,11 @@ const setupGlobalAgentFixtureState = () => {
           role: 'assistant',
           type: 'global_stream',
           streaming: false,
-          content: '⚠️ 独立复核未通过：TestAgent 发现待处理缺口，我会先安排返工，再重新验收。',
+          content: '⚠️ 独立复核未通过：TestAgent 发现未通过项，我会先安排返工，再重新验收。',
           timestamp: now,
           streamEvents: [
             { tone: 'running', icon: '✅', title: '读取独立复核', text: 'TestAgent 已返回复核结论。' },
-            { tone: 'warning', icon: '⚠️', title: '需要返工', text: '独立复核发现待处理缺口，我会先安排返工，再重新验收。' },
+            { tone: 'warning', icon: '⚠️', title: '需要返工', text: '独立复核发现未通过项，我会先安排返工，再重新验收。' },
           ],
           agenticRun: {
             id: 'global-test-agent-review-failed-run',
@@ -2477,7 +3183,7 @@ const setupGlobalAgentFixtureState = () => {
             phase: 'failed',
             user_message: '如果 TestAgent 发现没通过，要告诉我怎么返工',
             original_user_message: '如果 TestAgent 发现没通过，要告诉我怎么返工',
-            final_reply: 'TestAgent 独立复核未通过，我会先把失败检查项带回给原实现成员返工，返工后重新运行 TestAgent 复核。',
+            final_reply: 'TestAgent 独立复核未通过，我会先把失败检查项带回给原实现成员返工；返工完成后会自动沿用原工作单重新运行 TestAgent 复核。',
             tool_calls: 1,
             independent_review_summary: testAgentFailedReviewSummary,
             independentReviewSummary: testAgentFailedReviewSummary,
@@ -2496,6 +3202,18 @@ const setupGlobalAgentFixtureState = () => {
               technical: {
                 verdict: 'failed',
                 recommendation: 'rework',
+                browserActionEffectSummary: {
+                  provider: 'playwright',
+                  url: 'http://127.0.0.1:5173/login?token=hidden',
+                  actionTypes: { click: 1 },
+                  changedSignals: { page_text: 0, network: 0 },
+                },
+                adversarialEvidenceSummary: {
+                  provider: 'playwright',
+                  probeType: 'duplicate_submit',
+                  target: 'http://127.0.0.1:5173/login?token=hidden',
+                  rawSessionId: 'global-failed-review-session-hidden',
+                },
                 report_json: 'C:/tmp/test-agent-artifacts/failed/report.json',
                 verdict_json: 'C:/tmp/test-agent-artifacts/failed/verdict.json',
                 artifact_manifest: 'C:/tmp/test-agent-artifacts/failed/artifact-manifest.json',
@@ -2590,7 +3308,7 @@ const setupGlobalAgentFixtureState = () => {
             final_report: {
               summary: '全局主 Agent 已完成本轮处理，Todo 已归档，最终总结已整理。',
               verification: ['TestAgent 独立复核已通过'],
-              independent_review: ['TestAgent：已通过', '文件上传：已验证 2 个上传文件（notes.txt、meta.json）', '文件下载：已验证 1 个下载文件（tasks.csv）', '浏览器交互：已执行 2 个操作、3 个断言，未发现失败步骤', '浏览器网络：记录 4 个请求、4 个响应，未发现网络错误'],
+              independent_review: ['TestAgent：已通过', '多人协作浏览器验收：共执行 2 个场景，2 个通过，覆盖 4 个会话角色，包含 2 组并行动作，核对 2 项跨会话结果。', '真实浏览器验收：共执行 2 个流程，2 个通过，覆盖 2 条验收条件。', '文件上传：已验证 2 个上传文件（notes.txt、meta.json）', '文件下载：已验证 1 个下载文件（tasks.csv）', '浏览器交互：已执行 2 个操作、3 个断言，未发现失败步骤', '浏览器网络：记录 4 个请求、4 个响应，未发现网络错误'],
               acceptance_gate_passed: true,
             },
             final_delivery_report: {
@@ -2601,6 +3319,29 @@ const setupGlobalAgentFixtureState = () => {
               acceptance: ['主 Agent 已纳入复核结论。'],
             },
           },
+        },
+        {
+          role: 'user',
+          content: '修复登录状态恢复逻辑并完成验收',
+          timestamp: now,
+        },
+        {
+          role: 'assistant',
+          type: 'global_stream',
+          streaming: false,
+          content: '📡 持续跟进中：任务已派发，正在持续跟踪执行和验收。',
+          timestamp: now,
+          streamEvents: [
+            { tone: 'running', icon: '📡', title: '持续跟进中', text: '任务已派发，正在持续跟踪执行和验收。' },
+          ],
+          globalMissionSupervisor: {
+            id: 'fixture-supervisor-running',
+            mission_id: 'fixture-mission-running',
+            global_run_id: globalSupervisingFixtureRun.id,
+            status: 'monitoring',
+            phase: 'supervising',
+          },
+          agenticRun: globalSupervisingFixtureRun,
         },
       ],
     },
@@ -2650,6 +3391,63 @@ const globalDirectDispatchMessage = {
 }
 const globalDirectDispatchCard = globalAgentRunTaskCard(globalDirectDispatchMessage)
 
+const globalSingleProjectDispatchSummary = {
+  schema: 'ccm-main-agent-dispatch-launch-summary-v1',
+  source: 'global-agent-direct-dispatch',
+  title: '已派发的工作',
+  count_label: '1 个执行目标',
+  headline: '我已把这次需求交给 backend-api，并开始持续跟进执行和验收。',
+  rows: [
+    {
+      id: 'global-dispatch-send_project_cmd-backend-api',
+      kind: 'project',
+      agent: 'backend-api',
+      role: '项目执行成员',
+      task: '修复登录恢复逻辑，运行项目验证，并在独立复核通过后总结。',
+      reason: '该需求适合由指定项目执行，我会继续跟进独立复核和最终验收。',
+      depends_on: [],
+      status: 'running',
+      status_label: '已进入持续监督',
+    },
+  ],
+  acceptance: [
+    '项目执行成员需要说明实际动作、文件变化、验证结果和风险。',
+    'TestAgent 独立复核和完成前抽查通过后才能输出最终总结。',
+  ],
+  next_action: '等待项目执行结果；随后运行 TestAgent 独立复核和完成前抽查。',
+  display_policy: { user_text_first: true, technical_default_collapsed: true, hide_internal_protocols: true, show_for_ordinary_conversation: false, show_when_plan_archived: true },
+}
+
+const globalSingleProjectDispatchMessage = {
+  role: 'assistant',
+  content: '单项目任务已进入持续监督；当前只是已派发，不代表最终完成。',
+  timestamp: now,
+  type: 'global_agent_result',
+  agenticRun: {
+    id: 'global-run-single-project-supervised',
+    status: 'supervising',
+    phase: 'execute',
+    user_message: '给 backend-api 修复登录恢复逻辑并完成独立验收',
+    tool_calls: 1,
+    mission_id: 'mission-single-project-private',
+    supervisor_id: 'supervisor-single-project-private',
+    supervision_state: 'monitoring',
+    final_reply: '单项目任务已进入持续监督；当前只是已派发，不代表最终完成。',
+    final_report: {
+      summary: '单项目任务已进入持续监督。',
+      next_action: '等待项目执行结果；随后运行 TestAgent 独立复核和完成前抽查。',
+      technical_content: 'ccm-test-agent-handoff-v1 trace_id=single-project-secret raw payload',
+    },
+    display_stream: {
+      schema: 'ccm-streamlined-display-v2',
+      user_visible_text: '单项目任务已进入持续监督；当前只是已派发，不代表最终完成。',
+      dispatch_launch_summary: globalSingleProjectDispatchSummary,
+      technical_details: ['ccm-test-agent-handoff-v1 trace_id=single-project-secret raw payload'],
+    },
+  },
+}
+const globalSingleProjectDispatchCard = globalAgentRunTaskCard(globalSingleProjectDispatchMessage)
+
 const globalFailedHistoryMessage = {
   role: 'assistant',
   content: '任务没有完成，原因已整理。',
@@ -2666,6 +3464,23 @@ const globalFailedHistoryMessage = {
   },
 }
 const globalFailedHistoryCard = globalAgentRunTaskCard(globalFailedHistoryMessage)
+
+const internalProtocolFailureMessage = {
+  role: 'assistant',
+  content: '任务没有完成，排障信息已整理。',
+  timestamp: now,
+  type: 'global_agent_result',
+  agenticRun: {
+    id: 'global-run-render-internal-failure',
+    status: 'failed',
+    goal: '同步支付状态',
+    user_message: '同步支付状态',
+    tool_calls: 1,
+    error: 'CCM_AGENT_RECEIPT failed raw payload trace_id=exec-hidden-failure denied',
+    final_report: { risks: ['Runtime Kernel failed session_id=session-hidden-failure'] },
+  },
+}
+const internalProtocolFailureCard = globalAgentRunTaskCard(internalProtocolFailureMessage)
 
 const globalCancelledHistoryMessage = {
   role: 'assistant',
@@ -2749,7 +3564,7 @@ const FixtureApp = {
     const closeCodeDrawer = () => {
       codeDrawer.value = { ...codeDrawer.value, visible: false }
     }
-    return { conversationDecision, taskDecision, taskCompletedDecision, taskMissingVerificationDecision, taskCard, internalUserRequestSummaryCard, explicitUserRequestSummaryCard, taskStatusFallbackCard, planGapDeliveryCard, groupIntakeMessage, workQueueCard, workchainTodoCard, workchainCompletedArchivedCard, workchainQualityFollowupCard, ordinaryWorkchainTodoCard, testAgentBlockedPlanCard, testAgentFailedReviewCard, groupLiveTestAgentReviewMergedCard, workItemVerificationReminderCard, receiptResolvedCard, goalRevisionContinuationCard, planRevisionCard, confirmedPlanFollowupCard, mainAgentStatus, mainAgentActiveStatus, mainAgentArchivedTodoStatus, globalHistoryCard, globalTestAgentUnknownCoverageCard, globalTestAgentNotVerifiedCoverageCard, globalDirectDispatchCard, globalFailedHistoryCard, globalCancelledHistoryCard, agentQaVisibleMessage, agentDisplayName, childEvents, childSummary, compactWorkText, codeDrawer, handleTaskAction, closeCodeDrawer }
+    return { conversationDecision, taskDecision, taskCompletedDecision, taskMissingVerificationDecision, taskCard, internalUserRequestSummaryCard, explicitUserRequestSummaryCard, taskStatusFallbackCard, startupAutoRecoveryCard, planGapDeliveryCard, groupIntakeMessage, workQueueCard, workchainTodoCard, workchainCompletedArchivedCard, workchainQualityFollowupCard, ordinaryWorkchainTodoCard, testAgentBlockedPlanCard, testAgentFailedReviewCard, groupLiveTestAgentReviewMergedCard, workItemVerificationReminderCard, receiptResolvedCard, goalRevisionContinuationCard, planRevisionCard, confirmedPlanFollowupCard, mainAgentStatus, mainAgentActiveStatus, mainAgentArchivedTodoStatus, globalHistoryCard, globalTestAgentUnknownCoverageCard, globalTestAgentNotVerifiedCoverageCard, globalTestAgentLatestEvidenceRecheckCard, globalPostReviewSpotCheckRecheckCard, globalDirectDispatchCard, globalSingleProjectDispatchCard, globalFailedHistoryCard, internalProtocolFailureCard, globalCancelledHistoryCard, agentQaVisibleMessage, agentDisplayName, childEvents, childSummary, compactWorkText, codeDrawer, handleTaskAction, closeCodeDrawer }
   },
   template: `
     <main class="visual-fixture">
@@ -2801,6 +3616,10 @@ const FixtureApp = {
           <h2>共享任务卡状态文案</h2>
           <TaskExperienceCard :card="taskStatusFallbackCard" @action="handleTaskAction" />
         </div>
+        <div id="case-startup-auto-recovery" style="margin-top:14px">
+          <h2>服务重启自动接续</h2>
+          <TaskExperienceCard :card="startupAutoRecoveryCard" @action="handleTaskAction" />
+        </div>
         <div id="case-test-agent-plan-blocked" style="margin-top:14px">
           <h2>TestAgent 计划预检受阻</h2>
           <TaskExperienceCard :card="testAgentBlockedPlanCard" @action="handleTaskAction" />
@@ -2845,15 +3664,32 @@ const FixtureApp = {
           <h2>全局 TestAgent 复核覆盖提醒</h2>
           <TaskExperienceCard :card="globalTestAgentUnknownCoverageCard" context="global" @action="handleTaskAction" />
           <TaskExperienceCard :card="globalTestAgentNotVerifiedCoverageCard" context="global" @action="handleTaskAction" />
+          <TaskExperienceCard :card="globalTestAgentLatestEvidenceRecheckCard" context="global" @action="handleTaskAction" />
+          <div id="case-global-post-review-spot-check-recheck" style="margin-top:14px">
+            <h2>全局完成前抽查需复验</h2>
+            <TaskExperienceCard :card="globalPostReviewSpotCheckRecheckCard" context="global" @action="handleTaskAction" />
+          </div>
         </div>
         <div id="case-global-direct-dispatch" style="margin-top:14px">
           <h2>全局直派已接管</h2>
           <TaskExperienceCard :card="globalDirectDispatchCard" context="global" @action="handleTaskAction" />
         </div>
+        <div id="case-global-single-project-supervision" style="margin-top:14px">
+          <h2>全局单项目持续监督</h2>
+          <TaskExperienceCard :card="globalSingleProjectDispatchCard" context="global" @action="handleTaskAction" />
+        </div>
         <div id="case-global-history-terminal" style="margin-top:14px">
           <h2>全局历史失败/取消态</h2>
           <TaskExperienceCard :card="globalFailedHistoryCard" context="global" @action="handleTaskAction" />
           <TaskExperienceCard :card="globalCancelledHistoryCard" context="global" @action="handleTaskAction" />
+          <div id="case-internal-failure-surfaces" style="margin-top:14px">
+            <div id="case-global-internal-failure">
+              <TaskExperienceCard :card="internalProtocolFailureCard" context="global" @action="handleTaskAction" />
+            </div>
+            <div id="case-group-internal-failure" style="margin-top:14px">
+              <TaskExperienceCard :card="internalProtocolFailureCard" context="group" @action="handleTaskAction" />
+            </div>
+          </div>
         </div>
       </section>
 

@@ -36,6 +36,12 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.normalizeTestAgentWorkOrder = normalizeTestAgentWorkOrder;
 const path = __importStar(require("path"));
 const browser_probe_templates_1 = require("./browser-probe-templates");
+const authentication_1 = require("./browser/authentication");
+const existing_session_1 = require("./browser/existing-session");
+const multi_session_1 = require("./browser/multi-session");
+const stability_summary_1 = require("./browser/stability-summary");
+const action_effects_1 = require("./browser/action-effects");
+const http_concurrency_1 = require("./http-concurrency");
 const utils_1 = require("./utils");
 const DEFAULT_OPTIONS = {
     artifactDir: "",
@@ -52,6 +58,8 @@ const DEFAULT_OPTIONS = {
     autoDiscoverVerificationCommands: true,
     collectBrowserArtifacts: true,
     collectBrowserVideo: false,
+    requireAdversarialProbe: true,
+    adversarialProbeWaiver: "",
 };
 function text(value) {
     return String(value || "").trim();
@@ -612,6 +620,21 @@ const HTTP_ASSERTION_ALIASES = {
     json_includes: "jsonPathIncludes",
     json_path_includes: "jsonPathIncludes",
 };
+const HTTP_CONCURRENCY_ASSERTION_TYPES = new Set([
+    "responseCount",
+    "statusCount",
+    "jsonPathUniqueCount",
+    "jsonPathAllEqual",
+]);
+const HTTP_CONCURRENCY_ASSERTION_ALIASES = {
+    response_count: "responseCount",
+    completed_count: "responseCount",
+    status_count: "statusCount",
+    json_path_unique_count: "jsonPathUniqueCount",
+    unique_json_path_count: "jsonPathUniqueCount",
+    json_path_all_equal: "jsonPathAllEqual",
+    all_json_path_equal: "jsonPathAllEqual",
+};
 function normalizedType(rawType, aliases) {
     const raw = text(rawType);
     return aliases[raw] || raw;
@@ -768,6 +791,45 @@ function normalizeBrowserAction(raw, issues, project, checkName, index) {
         issues.push({ severity: "error", code: "invalid_browser_action_type", message: `Browser action ${index + 1} in "${checkName}" has unsupported type "${type || "(missing)"}".`, project });
         return null;
     }
+    const valueEnv = text(raw.valueEnv || raw.value_env || raw.textEnv || raw.text_env || raw.contentEnv || raw.content_env);
+    if (valueEnv && !(0, authentication_1.isValidBrowserEnvironmentName)(valueEnv)) {
+        issues.push({
+            severity: "error",
+            code: "invalid_browser_action_value_env",
+            message: `Browser action ${index + 1} in "${checkName}" has invalid environment variable name "${valueEnv}".`,
+            project,
+        });
+    }
+    const hasLiteralValue = raw.value !== undefined || raw.text !== undefined || raw.content !== undefined;
+    if (valueEnv && hasLiteralValue) {
+        issues.push({
+            severity: "error",
+            code: "browser_action_value_source_conflict",
+            message: `Browser action ${index + 1} in "${checkName}" cannot define both a literal value and an environment value binding.`,
+            project,
+        });
+    }
+    const configuredEffectSignals = normalizeStringList(raw.effectSignals || raw.effect_signals);
+    const effectSignals = action_effects_1.BROWSER_ACTION_EFFECT_SIGNALS.filter(signal => configuredEffectSignals.includes(signal));
+    const unsupportedEffectSignals = configuredEffectSignals.filter(signal => !action_effects_1.BROWSER_ACTION_EFFECT_SIGNALS.includes(signal));
+    if (unsupportedEffectSignals.length) {
+        issues.push({
+            severity: "error",
+            code: "invalid_browser_action_effect_signal",
+            message: `Browser action ${index + 1} in "${checkName}" has unsupported effect signal(s): ${unsupportedEffectSignals.join(", ")}.`,
+            project,
+        });
+    }
+    const rawEffectTimeoutMs = raw.effectTimeoutMs ?? raw.effect_timeout_ms;
+    const effectTimeoutMs = optionalNumber(rawEffectTimeoutMs);
+    if (rawEffectTimeoutMs !== undefined && (effectTimeoutMs === undefined || effectTimeoutMs <= 0)) {
+        issues.push({
+            severity: "error",
+            code: "invalid_browser_action_effect_timeout",
+            message: `Browser action ${index + 1} in "${checkName}" requires a positive effectTimeoutMs.`,
+            project,
+        });
+    }
     const normalized = {
         ...raw,
         type: type,
@@ -775,6 +837,12 @@ function normalizeBrowserAction(raw, issues, project, checkName, index) {
         locator: text(raw.locator || raw.selector || raw.css) || undefined,
         text: raw.text === undefined ? undefined : String(raw.text),
         value: raw.value === undefined ? undefined : String(raw.value),
+        valueEnv: valueEnv || undefined,
+        value_env: valueEnv || undefined,
+        textEnv: valueEnv || undefined,
+        text_env: valueEnv || undefined,
+        contentEnv: valueEnv || undefined,
+        content_env: valueEnv || undefined,
         storage: normalizeBrowserStorageArea(raw, type) || undefined,
         storageArea: normalizeBrowserStorageArea(raw, type) || undefined,
         storage_area: normalizeBrowserStorageArea(raw, type) || undefined,
@@ -859,7 +927,25 @@ function normalizeBrowserAction(raw, issues, project, checkName, index) {
         timeoutMs: optionalNumber(raw.timeoutMs || raw.timeout_ms),
         timeout_ms: optionalNumber(raw.timeout_ms || raw.timeoutMs),
         waitUntil: raw.waitUntil || raw.wait_until,
+        verifyEffect: optionalBoolean(raw.verifyEffect ?? raw.verify_effect ?? raw.expectEffect ?? raw.expect_effect),
+        verify_effect: optionalBoolean(raw.verify_effect ?? raw.verifyEffect ?? raw.expect_effect ?? raw.expectEffect),
+        expectEffect: optionalBoolean(raw.expectEffect ?? raw.expect_effect ?? raw.verifyEffect ?? raw.verify_effect),
+        expect_effect: optionalBoolean(raw.expect_effect ?? raw.expectEffect ?? raw.verify_effect ?? raw.verifyEffect),
+        effectTimeoutMs,
+        effect_timeout_ms: effectTimeoutMs,
+        effectSignals,
+        effect_signals: effectSignals,
+        effectSession: text(raw.effectSession || raw.effect_session) || undefined,
+        effect_session: text(raw.effect_session || raw.effectSession) || undefined,
     };
+    if (valueEnv && !(0, authentication_1.browserActionSupportsEnvironmentValue)(normalized)) {
+        issues.push({
+            severity: "error",
+            code: "unsupported_browser_action_value_env",
+            message: `Browser action ${index + 1} in "${checkName}" cannot use an environment value binding with type "${type}".`,
+            project,
+        });
+    }
     return normalized;
 }
 function normalizeBrowserAssertion(raw, issues, project, checkName, index) {
@@ -987,6 +1073,133 @@ function normalizeBrowserAssertion(raw, issues, project, checkName, index) {
         settle_ms: optionalNumber(raw.settle_ms || raw.settleMs),
     };
 }
+function normalizeBrowserSession(raw, issues, project, checkName, index) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+        issues.push({ severity: "error", code: "invalid_browser_session", message: `Browser session ${index + 1} in "${checkName}" must be an object.`, project });
+        return null;
+    }
+    const name = text(raw.name || raw.session || raw.id);
+    const setupName = `${checkName} / session ${name || index + 1} setup`;
+    const setupActions = (0, utils_1.asArray)(raw.setupActions || raw.setup_actions || raw.actions)
+        .map((action, actionIndex) => normalizeBrowserAction(action, issues, project, setupName, actionIndex))
+        .filter(Boolean);
+    if (["storageState", "storage_state", "authState", "auth_state"].some(key => raw[key] !== undefined)) {
+        issues.push({
+            severity: "error",
+            code: "invalid_browser_storage_state",
+            message: `Browser session ${index + 1} in "${checkName}" must reference authentication state with storageStatePath/authStatePath; inline cookies, tokens, and storage values are not accepted.`,
+            project,
+        });
+    }
+    const storageStatePath = text(raw.storageStatePath || raw.storage_state_path || raw.authStatePath || raw.auth_state_path);
+    return {
+        name,
+        url: text(raw.url || raw.targetUrl || raw.target_url) || undefined,
+        storageStatePath: storageStatePath || undefined,
+        storage_state_path: storageStatePath || undefined,
+        authStatePath: storageStatePath || undefined,
+        auth_state_path: storageStatePath || undefined,
+        setupActions,
+        setup_actions: setupActions,
+    };
+}
+function normalizeBrowserSessionLeafStep(raw, issues, project, checkName, label, index) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+        issues.push({ severity: "error", code: "invalid_browser_session_step", message: `${label} in "${checkName}" must be an object.`, project });
+        return null;
+    }
+    const session = text(raw.session || raw.sessionName || raw.session_name || raw.actor);
+    const rawAction = raw.action || raw.do;
+    const rawAssertion = raw.assertion || raw.expect;
+    if (Boolean(rawAction) === Boolean(rawAssertion)) {
+        issues.push({ severity: "error", code: "invalid_browser_session_step_kind", message: `${label} in "${checkName}" must contain exactly one action or assertion.`, project });
+    }
+    const stepName = `${checkName} / session ${session || "(missing)"}`;
+    const action = rawAction ? normalizeBrowserAction(rawAction, issues, project, stepName, index) || undefined : undefined;
+    const assertion = rawAssertion ? normalizeBrowserAssertion(rawAssertion, issues, project, stepName, index) || undefined : undefined;
+    if (!action && !assertion)
+        return null;
+    return { session, action, assertion };
+}
+function normalizeBrowserSessionComparisonStep(raw, issues, project, checkName, index) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+        issues.push({ severity: "error", code: "invalid_browser_session_comparison", message: `Browser session comparison step ${index + 1} in "${checkName}" must be an object.`, project });
+        return null;
+    }
+    const leftSession = text(raw.leftSession || raw.left_session || raw.left || raw.firstSession || raw.first_session || raw.sourceSession || raw.source_session);
+    const rightSession = text(raw.rightSession || raw.right_session || raw.right || raw.secondSession || raw.second_session || raw.targetSession || raw.target_session);
+    const expression = text(raw.expression || raw.js || raw.javascript);
+    const leftExpression = text(raw.leftExpression || raw.left_expression || raw.leftJs || raw.left_js || expression);
+    const rightExpression = text(raw.rightExpression || raw.right_expression || raw.rightJs || raw.right_js || expression);
+    const operatorKey = text(raw.operator || raw.relation || raw.mode || "equals").replace(/[\s_-]+/g, "").toLowerCase();
+    const operatorAliases = {
+        equal: "equals",
+        equals: "equals",
+        deepequals: "equals",
+        notequal: "notEquals",
+        notequals: "notEquals",
+        differs: "notEquals",
+        include: "includes",
+        includes: "includes",
+        contains: "includes",
+    };
+    const operator = operatorAliases[operatorKey] || operatorKey;
+    const rawTimeoutMs = raw.timeoutMs ?? raw.timeout_ms;
+    const rawPollMs = raw.pollMs ?? raw.poll_ms ?? raw.intervalMs ?? raw.interval_ms;
+    const timeoutMs = optionalNumber(rawTimeoutMs);
+    const pollMs = optionalNumber(rawPollMs);
+    if (rawTimeoutMs !== undefined && (timeoutMs === undefined || timeoutMs <= 0)) {
+        issues.push({ severity: "error", code: "invalid_browser_session_comparison_timeout", message: `Browser session comparison step ${index + 1} in "${checkName}" requires a positive timeoutMs.`, project });
+    }
+    if (rawPollMs !== undefined && (pollMs === undefined || pollMs <= 0)) {
+        issues.push({ severity: "error", code: "invalid_browser_session_comparison_poll", message: `Browser session comparison step ${index + 1} in "${checkName}" requires a positive pollMs.`, project });
+    }
+    return {
+        compare: {
+            leftSession,
+            rightSession,
+            ...(expression ? { expression } : {}),
+            leftExpression,
+            rightExpression,
+            operator: operator,
+            ...(timeoutMs === undefined ? {} : { timeoutMs }),
+            ...(pollMs === undefined ? {} : { pollMs }),
+        },
+    };
+}
+function normalizeBrowserSessionStep(raw, issues, project, checkName, index) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+        issues.push({ severity: "error", code: "invalid_browser_session_step", message: `Browser session step ${index + 1} in "${checkName}" must be an object.`, project });
+        return null;
+    }
+    const rawComparison = raw.compare ?? raw.comparison ?? raw.compareSessions ?? raw.compare_sessions ?? raw.convergence;
+    if (rawComparison !== undefined) {
+        if (raw.parallel !== undefined || raw.parallelSteps !== undefined || raw.parallel_steps !== undefined || raw.action || raw.do || raw.assertion || raw.expect || raw.session || raw.sessionName || raw.session_name || raw.actor) {
+            issues.push({
+                severity: "error",
+                code: "invalid_browser_session_comparison_kind",
+                message: `Browser session comparison step ${index + 1} in "${checkName}" cannot also define parallel or session action/assertion fields.`,
+                project,
+            });
+        }
+        return normalizeBrowserSessionComparisonStep(rawComparison, issues, project, checkName, index);
+    }
+    const rawParallel = raw.parallel ?? raw.parallelSteps ?? raw.parallel_steps;
+    if (rawParallel !== undefined) {
+        if (!Array.isArray(rawParallel)) {
+            issues.push({ severity: "error", code: "invalid_browser_parallel_step", message: `Browser parallel session step group ${index + 1} in "${checkName}" must be an array.`, project });
+            return null;
+        }
+        if (raw.action || raw.do || raw.assertion || raw.expect || raw.session || raw.sessionName || raw.session_name || raw.actor) {
+            issues.push({ severity: "error", code: "invalid_browser_parallel_step_kind", message: `Browser parallel session step group ${index + 1} in "${checkName}" cannot also define a session action/assertion.`, project });
+        }
+        const parallel = rawParallel
+            .map((step, parallelIndex) => normalizeBrowserSessionLeafStep(step, issues, project, checkName, `Browser parallel session step ${index + 1}.${parallelIndex + 1}`, parallelIndex))
+            .filter(Boolean);
+        return { parallel };
+    }
+    return normalizeBrowserSessionLeafStep(raw, issues, project, checkName, `Browser session step ${index + 1}`, index);
+}
 function normalizeHeaders(raw) {
     const out = {};
     if (!raw || typeof raw !== "object" || Array.isArray(raw))
@@ -996,6 +1209,22 @@ function normalizeHeaders(raw) {
             out[key] = String(value);
     }
     return out;
+}
+function normalizeCheckContext(raw) {
+    const context = raw?.context && typeof raw.context === "object" && !Array.isArray(raw.context)
+        ? { ...raw.context }
+        : {};
+    const acceptanceCriteria = (0, utils_1.asArray)(raw?.coversAcceptanceCriteria
+        || raw?.covers_acceptance_criteria
+        || raw?.acceptanceCriteria
+        || raw?.acceptance_criteria
+        || context.coversAcceptanceCriteria
+        || context.covers_acceptance_criteria
+        || context.acceptanceCriteria
+        || context.acceptance_criteria).map(String).map(item => item.trim()).filter(Boolean);
+    if (acceptanceCriteria.length)
+        context.acceptanceCriteria = Array.from(new Set(acceptanceCriteria));
+    return Object.keys(context).length ? context : undefined;
 }
 function normalizeHttpAssertion(raw, issues, project, checkName, index) {
     if (!raw || typeof raw !== "object") {
@@ -1016,6 +1245,124 @@ function normalizeHttpAssertion(raw, issues, project, checkName, index) {
         text: raw.text === undefined ? undefined : String(raw.text),
         value: raw.value,
         path: text(raw.path || raw.jsonPath || raw.json_path) || undefined,
+    };
+}
+function normalizeHttpConcurrencyAssertion(raw, issues, project, checkName, index) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+        issues.push({
+            severity: "error",
+            code: "invalid_http_concurrency_assertion",
+            message: `HTTP concurrency assertion ${index + 1} in "${checkName}" must be an object.`,
+            project,
+        });
+        return null;
+    }
+    const type = normalizedType(raw.type || raw.assertion || raw.kind, HTTP_CONCURRENCY_ASSERTION_ALIASES);
+    if (!HTTP_CONCURRENCY_ASSERTION_TYPES.has(type)) {
+        issues.push({
+            severity: "error",
+            code: "invalid_http_concurrency_assertion_type",
+            message: `HTTP concurrency assertion ${index + 1} in "${checkName}" has unsupported type "${type || "(missing)"}".`,
+            project,
+        });
+        return null;
+    }
+    const count = optionalNumber(raw.count ?? raw.expectedCount ?? raw.expected_count);
+    const minCount = optionalNumber(raw.minCount ?? raw.min_count);
+    const maxCount = optionalNumber(raw.maxCount ?? raw.max_count);
+    const counts = [count, minCount, maxCount].filter(value => value !== undefined);
+    if (counts.some(value => !Number.isInteger(value) || value < 0)) {
+        issues.push({
+            severity: "error",
+            code: "invalid_http_concurrency_assertion_count",
+            message: `HTTP concurrency assertion ${index + 1} in "${checkName}" requires non-negative integer count bounds.`,
+            project,
+        });
+    }
+    if (type !== "jsonPathAllEqual" && !counts.length) {
+        issues.push({
+            severity: "error",
+            code: "missing_http_concurrency_assertion_count",
+            message: `HTTP concurrency assertion ${index + 1} in "${checkName}" requires count, minCount, or maxCount.`,
+            project,
+        });
+    }
+    if (minCount !== undefined && maxCount !== undefined && minCount > maxCount) {
+        issues.push({
+            severity: "error",
+            code: "invalid_http_concurrency_assertion_range",
+            message: `HTTP concurrency assertion ${index + 1} in "${checkName}" has minCount greater than maxCount.`,
+            project,
+        });
+    }
+    const status = optionalNumber(raw.status ?? raw.statusCode ?? raw.status_code);
+    if (type === "statusCount" && (!Number.isInteger(status) || Number(status) < 100 || Number(status) > 599)) {
+        issues.push({
+            severity: "error",
+            code: "invalid_http_concurrency_status",
+            message: `HTTP concurrency statusCount assertion ${index + 1} in "${checkName}" requires an HTTP status from 100 to 599.`,
+            project,
+        });
+    }
+    const path = text(raw.path || raw.jsonPath || raw.json_path);
+    if ((type === "jsonPathUniqueCount" || type === "jsonPathAllEqual") && !path) {
+        issues.push({
+            severity: "error",
+            code: "missing_http_concurrency_json_path",
+            message: `HTTP concurrency ${type} assertion ${index + 1} in "${checkName}" requires path/jsonPath.`,
+            project,
+        });
+    }
+    return {
+        type: type,
+        ...(status === undefined ? {} : { status, statusCode: status, status_code: status }),
+        ...(path ? { path } : {}),
+        ...(count === undefined ? {} : { count, expectedCount: count, expected_count: count }),
+        ...(minCount === undefined ? {} : { minCount, min_count: minCount }),
+        ...(maxCount === undefined ? {} : { maxCount, max_count: maxCount }),
+    };
+}
+function normalizeHttpConcurrency(raw, issues, project, checkName) {
+    const rawConcurrency = raw.concurrency
+        ?? raw.concurrentRequests
+        ?? raw.concurrent_requests
+        ?? raw.parallelRequests
+        ?? raw.parallel_requests;
+    if (rawConcurrency === undefined || rawConcurrency === null || rawConcurrency === "")
+        return undefined;
+    const objectConfig = rawConcurrency && typeof rawConcurrency === "object" && !Array.isArray(rawConcurrency)
+        ? rawConcurrency
+        : {};
+    const requests = optionalNumber(typeof rawConcurrency === "number" || typeof rawConcurrency === "string"
+        ? rawConcurrency
+        : objectConfig.requests
+            ?? objectConfig.count
+            ?? objectConfig.concurrentRequests
+            ?? objectConfig.concurrent_requests
+            ?? objectConfig.parallelRequests
+            ?? objectConfig.parallel_requests);
+    if (requests === undefined
+        || !Number.isInteger(requests)
+        || requests < http_concurrency_1.MIN_HTTP_CONCURRENT_REQUESTS
+        || requests > http_concurrency_1.MAX_HTTP_CONCURRENT_REQUESTS) {
+        issues.push({
+            severity: "error",
+            code: "invalid_http_concurrency_requests",
+            message: `HTTP check "${checkName}" concurrency must be an integer from ${http_concurrency_1.MIN_HTTP_CONCURRENT_REQUESTS} to ${http_concurrency_1.MAX_HTTP_CONCURRENT_REQUESTS}.`,
+            project,
+        });
+    }
+    const rawAssertions = (0, utils_1.asArray)(objectConfig.aggregateAssertions
+        || objectConfig.aggregate_assertions
+        || objectConfig.assertions
+        || raw.concurrencyAssertions
+        || raw.concurrency_assertions);
+    const aggregateAssertions = rawAssertions
+        .map((assertion, index) => normalizeHttpConcurrencyAssertion(assertion, issues, project, checkName, index))
+        .filter(Boolean);
+    return {
+        requests: requests || http_concurrency_1.MIN_HTTP_CONCURRENT_REQUESTS,
+        aggregateAssertions,
     };
 }
 function normalizeHttpCheck(raw, issues, project, index, forceAdversarial = false) {
@@ -1044,6 +1391,8 @@ function normalizeHttpCheck(raw, issues, project, index, forceAdversarial = fals
             text: String(raw.responseContains ?? raw.response_contains),
         });
     }
+    const concurrency = normalizeHttpConcurrency(raw, issues, project, checkName);
+    const context = normalizeCheckContext(raw);
     return {
         name: checkName,
         url,
@@ -1055,8 +1404,12 @@ function normalizeHttpCheck(raw, issues, project, index, forceAdversarial = fals
         adversarial: forceAdversarial || raw.adversarial === true || raw.probe === true,
         probeType: text(raw.probeType || raw.probe_type || raw.kind || raw.category) || undefined,
         probe_type: text(raw.probe_type || raw.probeType || raw.kind || raw.category) || undefined,
+        coversAcceptanceCriteria: (0, utils_1.asArray)(raw.coversAcceptanceCriteria || raw.covers_acceptance_criteria).map(String).filter(Boolean),
+        covers_acceptance_criteria: (0, utils_1.asArray)(raw.covers_acceptance_criteria || raw.coversAcceptanceCriteria).map(String).filter(Boolean),
         timeoutMs: optionalNumber(raw.timeoutMs || raw.timeout_ms),
         timeout_ms: optionalNumber(raw.timeout_ms || raw.timeoutMs),
+        context,
+        ...(concurrency ? { concurrency } : {}),
     };
 }
 function normalizeBrowserCheck(raw, issues, project, index, forceAdversarial = false) {
@@ -1071,22 +1424,123 @@ function normalizeBrowserCheck(raw, issues, project, index, forceAdversarial = f
     const assertions = (0, utils_1.asArray)(raw.assertions || raw.expectations)
         .map((assertion, assertionIndex) => normalizeBrowserAssertion(assertion, issues, project, checkName, assertionIndex))
         .filter(Boolean);
+    const sessions = (0, utils_1.asArray)(raw.sessions || raw.browserSessions || raw.browser_sessions)
+        .map((session, sessionIndex) => normalizeBrowserSession(session, issues, project, checkName, sessionIndex))
+        .filter(Boolean);
+    const sessionSteps = (0, utils_1.asArray)(raw.sessionSteps || raw.session_steps || raw.scenarioSteps || raw.scenario_steps)
+        .map((step, stepIndex) => normalizeBrowserSessionStep(step, issues, project, checkName, stepIndex))
+        .filter(Boolean);
     const rawViewport = raw.viewport && typeof raw.viewport === "object" ? raw.viewport : {};
     const viewportWidth = optionalNumber(raw.viewportWidth || raw.viewport_width || raw.width || rawViewport.width);
     const viewportHeight = optionalNumber(raw.viewportHeight || raw.viewport_height || raw.height || rawViewport.height);
     const deviceScaleFactor = optionalNumber(raw.deviceScaleFactor || raw.device_scale_factor || rawViewport.deviceScaleFactor || rawViewport.device_scale_factor);
     const rawContext = raw.context && typeof raw.context === "object" ? raw.context : {};
+    if (["storageState", "storage_state", "authState", "auth_state"].some(key => raw[key] !== undefined)
+        || ["storageState", "storage_state", "authState", "auth_state"].some(key => rawContext[key] !== undefined)) {
+        issues.push({
+            severity: "error",
+            code: "invalid_browser_storage_state",
+            message: `Browser check "${checkName}" must reference authentication state with storageStatePath/authStatePath; inline cookies, tokens, and storage values are not accepted.`,
+            project,
+        });
+    }
     const locale = text(raw.locale || raw.browserLocale || raw.browser_locale || rawContext.locale) || undefined;
     const timezoneId = text(raw.timezoneId || raw.timezone_id || raw.timeZoneId || raw.time_zone_id || raw.timezone || rawContext.timezoneId || rawContext.timezone_id || rawContext.timezone) || undefined;
     const colorScheme = text(raw.colorScheme || raw.color_scheme || raw.theme || rawContext.colorScheme || rawContext.color_scheme) || undefined;
     const reducedMotion = text(raw.reducedMotion || raw.reduced_motion || raw.motion || rawContext.reducedMotion || rawContext.reduced_motion) || undefined;
     const permissions = normalizeStringList(raw.permissions || raw.browserPermissions || raw.browser_permissions || rawContext.permissions);
     const geolocation = normalizeBrowserGeolocation(raw.geolocation || raw.geo || raw.location || rawContext.geolocation || rawContext.geo || rawContext.location);
-    return {
+    const storageStatePath = text(raw.storageStatePath
+        || raw.storage_state_path
+        || raw.authStatePath
+        || raw.auth_state_path
+        || rawContext.storageStatePath
+        || rawContext.storage_state_path
+        || rawContext.authStatePath
+        || rawContext.auth_state_path);
+    const rawStabilityRuns = raw.stabilityRuns ?? raw.stability_runs ?? raw.repeatRuns ?? raw.repeat_runs;
+    const parsedStabilityRuns = optionalNumber(rawStabilityRuns);
+    const stabilityRuns = rawStabilityRuns === undefined
+        ? undefined
+        : Number.isInteger(parsedStabilityRuns) && Number(parsedStabilityRuns) >= 1 && Number(parsedStabilityRuns) <= stability_summary_1.MAX_BROWSER_STABILITY_RUNS
+            ? Number(parsedStabilityRuns)
+            : undefined;
+    if (rawStabilityRuns !== undefined && stabilityRuns === undefined) {
+        issues.push({
+            severity: "error",
+            code: "invalid_browser_stability_runs",
+            message: `Browser check "${checkName}" stabilityRuns must be an integer from 1 to ${stability_summary_1.MAX_BROWSER_STABILITY_RUNS}.`,
+            project,
+        });
+    }
+    const normalizedAuthentication = (0, existing_session_1.normalizeBrowserAuthenticationConfig)(raw);
+    for (const message of normalizedAuthentication.errors) {
+        issues.push({
+            severity: "error",
+            code: "invalid_browser_authentication",
+            message: `Browser check "${checkName}": ${message}`,
+            project,
+        });
+    }
+    if (normalizedAuthentication.config?.mode === "existing_session") {
+        if (actions.some(action => (0, authentication_1.browserActionValueEnvName)(action))) {
+            issues.push({
+                severity: "error",
+                code: "browser_authentication_mode_conflict",
+                message: `Browser check "${checkName}" cannot combine existing_session authentication with credential environment bindings.`,
+                project,
+            });
+        }
+        if (storageStatePath) {
+            issues.push({
+                severity: "error",
+                code: "browser_authentication_mode_conflict",
+                message: `Browser check "${checkName}" cannot combine existing_session authentication with storageStatePath/authStatePath.`,
+                project,
+            });
+        }
+        if (sessions.length) {
+            issues.push({
+                severity: "error",
+                code: "browser_authentication_mode_conflict",
+                message: `Browser check "${checkName}" cannot combine existing_session authentication with isolated multi-session browser contexts.`,
+                project,
+            });
+        }
+        if (Number(stabilityRuns || 1) > 1) {
+            issues.push({
+                severity: "error",
+                code: "browser_authentication_mode_conflict",
+                message: `Browser check "${checkName}" cannot combine existing_session authentication with isolated browser stability runs.`,
+                project,
+            });
+        }
+    }
+    const check = {
         name: checkName,
         url: text(raw.url || raw.targetUrl || raw.target_url) || undefined,
+        authentication: normalizedAuthentication.config,
+        authenticationMode: normalizedAuthentication.config?.mode,
+        authentication_mode: normalizedAuthentication.config?.mode,
+        authMode: normalizedAuthentication.config?.mode,
+        auth_mode: normalizedAuthentication.config?.mode,
+        existingSessionProvider: normalizedAuthentication.config?.provider,
+        existing_session_provider: normalizedAuthentication.config?.provider,
+        authenticatedBrowserProvider: normalizedAuthentication.config?.provider,
+        authenticated_browser_provider: normalizedAuthentication.config?.provider,
+        existingSessionEvidencePolicy: normalizedAuthentication.config?.evidencePolicy,
+        existing_session_evidence_policy: normalizedAuthentication.config?.evidencePolicy,
         actions,
         assertions,
+        sessions,
+        sessionSteps,
+        session_steps: sessionSteps,
+        stabilityRuns,
+        stability_runs: stabilityRuns,
+        storageStatePath: storageStatePath || undefined,
+        storage_state_path: storageStatePath || undefined,
+        authStatePath: storageStatePath || undefined,
+        auth_state_path: storageStatePath || undefined,
         screenshot: raw.screenshot === undefined ? undefined : raw.screenshot !== false,
         ...(viewportWidth || viewportHeight ? { viewport: { ...(viewportWidth ? { width: viewportWidth } : {}), ...(viewportHeight ? { height: viewportHeight } : {}) } } : {}),
         viewportWidth,
@@ -1111,10 +1565,26 @@ function normalizeBrowserCheck(raw, issues, project, index, forceAdversarial = f
         adversarial: forceAdversarial || raw.adversarial === true || raw.probe === true,
         probeType: text(raw.probeType || raw.probe_type || raw.kind || raw.category) || undefined,
         probe_type: text(raw.probe_type || raw.probeType || raw.kind || raw.category) || undefined,
+        coversAcceptanceCriteria: (0, utils_1.asArray)(raw.coversAcceptanceCriteria || raw.covers_acceptance_criteria).map(String).filter(Boolean),
+        covers_acceptance_criteria: (0, utils_1.asArray)(raw.covers_acceptance_criteria || raw.coversAcceptanceCriteria).map(String).filter(Boolean),
         timeoutMs: optionalNumber(raw.timeoutMs || raw.timeout_ms),
         timeout_ms: optionalNumber(raw.timeout_ms || raw.timeoutMs),
-        context: raw.context && typeof raw.context === "object" && !Array.isArray(raw.context) ? raw.context : undefined,
+        context: normalizeCheckContext(raw),
     };
+    if ((0, multi_session_1.hasMultiSessionBrowserScenario)(check)) {
+        for (const message of (0, multi_session_1.validateMultiSessionBrowserScenario)(check)) {
+            issues.push({ severity: "error", code: "invalid_browser_multi_session", message: `${checkName}: ${message}`, project });
+        }
+    }
+    else if (actions.some(action => action.effectSession || action.effect_session)) {
+        issues.push({
+            severity: "error",
+            code: "invalid_browser_action_effect_session",
+            message: `Browser check "${checkName}" can use effectSession only inside an isolated multi-session scenario.`,
+            project,
+        });
+    }
+    return check;
 }
 function normalizeProject(raw, index, globalStartupTimeoutMs, issues) {
     const name = text(raw?.name) || `project-${index + 1}`;
@@ -1159,10 +1629,27 @@ function normalizeProject(raw, index, globalStartupTimeoutMs, issues) {
 function normalizeTestAgentWorkOrder(input, overrides = {}) {
     const issues = [];
     const runId = text(input?.id) || (0, utils_1.makeRunId)("test-agent-work-order");
+    const inputOptions = (input?.options || {});
+    const overrideOptions = (overrides || {});
+    const requireAdversarialProbe = Object.prototype.hasOwnProperty.call(overrideOptions, "requireAdversarialProbe")
+        ? overrideOptions.requireAdversarialProbe
+        : Object.prototype.hasOwnProperty.call(overrideOptions, "require_adversarial_probe")
+            ? overrideOptions.require_adversarial_probe
+            : Object.prototype.hasOwnProperty.call(inputOptions, "requireAdversarialProbe")
+                ? inputOptions.requireAdversarialProbe
+                : Object.prototype.hasOwnProperty.call(inputOptions, "require_adversarial_probe")
+                    ? inputOptions.require_adversarial_probe
+                    : DEFAULT_OPTIONS.requireAdversarialProbe;
+    const adversarialProbeWaiver = text(overrideOptions.adversarialProbeWaiver
+        || overrideOptions.adversarial_probe_waiver
+        || inputOptions.adversarialProbeWaiver
+        || inputOptions.adversarial_probe_waiver);
     const options = {
         ...DEFAULT_OPTIONS,
-        ...(input?.options || {}),
+        ...inputOptions,
         ...(overrides || {}),
+        requireAdversarialProbe: requireAdversarialProbe !== false,
+        adversarialProbeWaiver,
     };
     options.artifactDir = path.resolve(text(options.artifactDir) || (0, utils_1.defaultArtifactDir)(runId));
     options.commandTimeoutMs = Math.max(1_000, Number(options.commandTimeoutMs || DEFAULT_OPTIONS.commandTimeoutMs));
@@ -1170,15 +1657,33 @@ function normalizeTestAgentWorkOrder(input, overrides = {}) {
     options.httpTimeoutMs = Math.max(1_000, Number(options.httpTimeoutMs || DEFAULT_OPTIONS.httpTimeoutMs));
     options.startupTimeoutMs = Math.max(1_000, Number(options.startupTimeoutMs || DEFAULT_OPTIONS.startupTimeoutMs));
     options.maxOutputChars = Math.max(1_000, Number(options.maxOutputChars || DEFAULT_OPTIONS.maxOutputChars));
-    options.maxHttpResourceChecks = Math.max(0, Number(options.maxHttpResourceChecks || DEFAULT_OPTIONS.maxHttpResourceChecks));
+    options.maxHttpResourceChecks = Math.max(0, Number(options.maxHttpResourceChecks ?? DEFAULT_OPTIONS.maxHttpResourceChecks));
     options.failOnConsoleError = options.failOnConsoleError !== false;
     options.failOnHttpResourceError = options.failOnHttpResourceError !== false;
     options.verificationOnly = options.verificationOnly !== false;
     options.autoDiscoverVerificationCommands = options.autoDiscoverVerificationCommands !== false;
     options.collectBrowserArtifacts = options.collectBrowserArtifacts !== false;
     options.collectBrowserVideo = options.collectBrowserVideo === true;
+    options.requireAdversarialProbe = options.requireAdversarialProbe !== false;
+    options.adversarialProbeWaiver = text(options.adversarialProbeWaiver);
     if (!["auto", "playwright", "mcp", "none"].includes(String(options.browserProvider || "")))
         options.browserProvider = "auto";
+    if (!options.requireAdversarialProbe && !options.adversarialProbeWaiver) {
+        issues.push({
+            severity: "error",
+            code: "missing_adversarial_probe_waiver",
+            message: "Disabling the adversarial probe gate requires a non-empty adversarialProbeWaiver reason.",
+        });
+        options.requireAdversarialProbe = true;
+    }
+    else if (options.requireAdversarialProbe && options.adversarialProbeWaiver) {
+        issues.push({
+            severity: "warning",
+            code: "unused_adversarial_probe_waiver",
+            message: "adversarialProbeWaiver is ignored while requireAdversarialProbe is enabled.",
+        });
+        options.adversarialProbeWaiver = "";
+    }
     const projects = (0, utils_1.asArray)(input?.projects).map((item, index) => normalizeProject(item, index, options.startupTimeoutMs, issues));
     if (!projects.length) {
         issues.push({ severity: "error", code: "missing_projects", message: "TestAgent work order must include at least one project target." });
@@ -1191,6 +1696,9 @@ function normalizeTestAgentWorkOrder(input, overrides = {}) {
         }
     }
     const requiredChecks = (0, utils_1.asArray)(input?.requiredChecks || input?.required_checks).map(String).filter(Boolean);
+    const hasAdversarialRequiredCheck = requiredChecks.some(check => /adversarial|boundary|orphan|idempot|concurr|race/i.test(String(check || "").replace(/[\s:-]+/g, "_")));
+    if (options.requireAdversarialProbe && !hasAdversarialRequiredCheck)
+        requiredChecks.push("adversarial");
     const workOrder = {
         schema: "ccm-test-agent-work-order-v1",
         id: runId,

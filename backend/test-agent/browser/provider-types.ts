@@ -1,5 +1,7 @@
 import {
+  BrowserCheckSpec,
   BrowserCheckResult,
+  NormalizedTestAgentProjectTarget,
   NormalizedTestAgentWorkOrder,
   TestAgentRuntimeOptions,
 } from "../types";
@@ -8,6 +10,11 @@ import { nowIso } from "../utils";
 export interface BrowserProviderContext {
   workOrder: NormalizedTestAgentWorkOrder;
   runtime: TestAgentRuntimeOptions;
+  checkFilter?: (
+    project: NormalizedTestAgentProjectTarget,
+    check: BrowserCheckSpec,
+    index: number,
+  ) => boolean;
 }
 
 export interface BrowserProviderAvailability {

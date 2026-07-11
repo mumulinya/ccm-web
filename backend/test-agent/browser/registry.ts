@@ -1,8 +1,10 @@
 import { BrowserCheckResult, NormalizedTestAgentWorkOrder, TestAgentRuntimeOptions } from "../types";
-import { blockedBrowserResult, BrowserProvider, BrowserProviderAvailability } from "./provider-types";
+import { blockedBrowserResult, BrowserProvider, BrowserProviderAvailability, BrowserProviderContext } from "./provider-types";
 import { McpBrowserProvider } from "./mcp-provider";
 import { PlaywrightBrowserProvider } from "./playwright-provider";
-import { wantsBrowser } from "./shared";
+import { browserCheckUsesExistingSession } from "./existing-session";
+import { browserProviderRouteForCheck } from "./provider-routing";
+import { checksForProject, wantsBrowser } from "./shared";
 
 export interface BrowserProviderPreflightResult {
   provider: BrowserProvider["id"];
@@ -13,6 +15,8 @@ export interface BrowserProviderPreflightResult {
   tools?: string[];
   diagnostics?: Record<string, any>;
 }
+
+type BrowserCheckFilter = NonNullable<BrowserProviderContext["checkFilter"]>;
 
 function preferredProvider(workOrder: NormalizedTestAgentWorkOrder, runtime: TestAgentRuntimeOptions) {
   return runtime.browserProvider || workOrder.options.browserProvider || "auto";
@@ -65,11 +69,79 @@ export async function runBrowserVerificationWithProviders(workOrder: NormalizedT
   const preferred = preferredProvider(workOrder, runtime);
   if (preferred === "none") return [];
 
-  const context = { workOrder, runtime };
-  const ordered = orderedProviders(preferred);
+  const hasExistingSessionChecks = workOrder.projects.some(project =>
+    checksForProject(project, workOrder.acceptanceCriteria).some(browserCheckUsesExistingSession)
+  );
+  const hasStandardChecks = workOrder.projects.some(project =>
+    checksForProject(project, workOrder.acceptanceCriteria).some(check => !browserCheckUsesExistingSession(check))
+  );
+  const results: BrowserCheckResult[] = [];
 
+  if (hasStandardChecks) {
+    const standardFilter: BrowserCheckFilter = (_project, check) =>
+      !browserCheckUsesExistingSession(check);
+    if (preferred === "mcp") {
+      const playwrightRequiredFilter: BrowserCheckFilter = (_project, check, index) =>
+        standardFilter(_project, check, index)
+        && browserProviderRouteForCheck(workOrder, check, preferred).provider === "playwright";
+      const mcpCompatibleFilter: BrowserCheckFilter = (_project, check, index) =>
+        standardFilter(_project, check, index)
+        && browserProviderRouteForCheck(workOrder, check, preferred).provider === "mcp";
+      if (hasChecksMatching(workOrder, mcpCompatibleFilter)) {
+        results.push(...await runProviderChain(
+          workOrder,
+          runtime,
+          [McpBrowserProvider, PlaywrightBrowserProvider],
+          mcpCompatibleFilter,
+        ));
+      }
+      if (hasChecksMatching(workOrder, playwrightRequiredFilter)) {
+        results.push(...await runProviderChain(
+          workOrder,
+          runtime,
+          [PlaywrightBrowserProvider],
+          playwrightRequiredFilter,
+        ));
+      }
+    } else {
+      results.push(...await runProviderChain(
+        workOrder,
+        runtime,
+        orderedProviders(preferred),
+        standardFilter,
+      ));
+    }
+  }
+  if (hasExistingSessionChecks) {
+    results.push(...await runProviderChain(
+      workOrder,
+      runtime,
+      [McpBrowserProvider],
+      (_project, check) => browserCheckUsesExistingSession(check),
+    ));
+  }
+  return results.length ? results : [blockedBrowserResult("none", "Browser verification", "No browser checks were routed to a provider.")];
+}
+
+function hasChecksMatching(
+  workOrder: NormalizedTestAgentWorkOrder,
+  checkFilter: BrowserCheckFilter,
+) {
+  return workOrder.projects.some(project =>
+    checksForProject(project, workOrder.acceptanceCriteria)
+      .some((check, index) => checkFilter(project, check, index))
+  );
+}
+
+async function runProviderChain(
+  workOrder: NormalizedTestAgentWorkOrder,
+  runtime: TestAgentRuntimeOptions,
+  providers: BrowserProvider[],
+  checkFilter: BrowserCheckFilter,
+) {
+  const context = { workOrder, runtime, checkFilter };
   const blocked: BrowserCheckResult[] = [];
-  for (const provider of ordered) {
+  for (const provider of providers) {
     const availability = await provider.availability(context);
     if (!availability.available) {
       blocked.push(blockedBrowserResult(provider.id, `${provider.label} availability`, availability.reason || "provider unavailable"));

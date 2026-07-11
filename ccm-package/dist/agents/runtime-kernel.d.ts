@@ -163,6 +163,12 @@ export declare function buildWorkerContextPacket(input: {
     pressure_provenance_provider_dispatch_advisory?: any;
     pressureProvenanceProviderDispatchOverrideFollowupReceiptContract?: any;
     pressure_provenance_provider_dispatch_override_followup_receipt_contract?: any;
+    providerRankingCompactRepairReceiptMemoryContract?: any;
+    provider_ranking_compact_repair_receipt_memory_contract?: any;
+    postCompactReinjectionRepairReceiptMemoryContract?: any;
+    post_compact_reinjection_repair_receipt_memory_contract?: any;
+    providerSwitchDecisionReceipt?: any;
+    provider_switch_decision_receipt?: any;
     verification?: any;
     contextUsageOptions?: any;
 }): any;

@@ -1,6 +1,8 @@
 import {
   BrowserActionSpec,
   BrowserAssertionSpec,
+  BrowserExistingSessionProvider,
+  BrowserRecoveryEvidence,
   BrowserStepResult,
   NormalizedTestAgentProjectTarget,
 } from "../types";
@@ -23,6 +25,11 @@ import {
 } from "./console-assertions";
 import { isBrowserAriaStateAssertion } from "./aria-state-assertions";
 import { browserTargetDetail } from "./semantic-locator";
+import {
+  browserRecoveryFailureMessage,
+  browserRecoveryTrigger,
+  BrowserRecoveryTracker,
+} from "./recovery";
 
 export type McpBrowserAdapterId = "playwright-mcp" | "claude-in-chrome" | "chrome-devtools" | "computer-use";
 
@@ -38,6 +45,15 @@ export interface McpBrowserAdapter {
   readNetworkRequests: () => Promise<string[]>;
   readNetworkErrors: () => Promise<string[]>;
   captureScreenshot: (name: string) => Promise<string[]>;
+  prepareExistingSession?: (url?: string) => Promise<void>;
+  existingSessionContextEvidence?: () => {
+    provider: Exclude<BrowserExistingSessionProvider, "auto">;
+    tabContextChecked: boolean;
+    tabCount?: number;
+    createdNewTab: boolean;
+  };
+  browserRecoveryEvidence?: () => BrowserRecoveryEvidence | undefined;
+  pageText?: () => Promise<string>;
 }
 
 export interface McpBrowserSignals {
@@ -89,6 +105,23 @@ function extractTabId(output: any): number | string | undefined {
     if (output.tab && (typeof output.tab.id === "number" || typeof output.tab.id === "string")) return output.tab.id;
   }
   return undefined;
+}
+
+function extractTabCount(output: any): number | undefined {
+  if (Array.isArray(output)) return output.length;
+  if (output && typeof output === "object") {
+    for (const key of ["tabs", "pages", "openTabs", "open_tabs"]) {
+      if (Array.isArray(output[key])) return output[key].length;
+    }
+  }
+  const text = extractToolText(output).trim();
+  if (!text) return undefined;
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed !== output) return extractTabCount(parsed);
+  } catch {}
+  const matches = text.match(/\btab(?:Id|_id)?\b/gi);
+  return matches?.length || undefined;
 }
 
 function emptyLike(text: string) {
@@ -714,20 +747,129 @@ class ClaudeChromeAdapter implements McpBrowserAdapter {
   label = "Claude in Chrome";
   currentUrl = "";
   private tabId: number | string | undefined;
+  private tabReady = false;
+  private tabContextChecked = false;
+  private tabCount: number | undefined;
+  private createdNewTab = false;
+  private recoveryTracker = new BrowserRecoveryTracker("claude-in-chrome");
   constructor(public tools: string[], private call: Caller) {}
 
+  private async readTabContext(required: boolean, force = false) {
+    if (this.tabContextChecked && !force) return;
+    const contextTool = pick(this.tools, [/__tabs_context_mcp$/]);
+    if (!contextTool) {
+      if (required) throw new Error("Existing authenticated Chrome verification requires tabs_context_mcp.");
+      return;
+    }
+    const output = await this.call(contextTool, {});
+    this.tabContextChecked = true;
+    this.tabCount = extractTabCount(output);
+  }
+
+  async prepareExistingSession(url?: string) {
+    await this.readTabContext(true);
+    if (!pick(this.tools, [/__tabs_create_mcp$/])) {
+      throw new Error("Existing authenticated Chrome verification requires tabs_create_mcp so TestAgent can avoid reusing the user's current tab.");
+    }
+    await this.ensureTab(url);
+  }
+
+  existingSessionContextEvidence() {
+    return {
+      provider: "claude-in-chrome" as const,
+      tabContextChecked: this.tabContextChecked,
+      ...(this.tabCount !== undefined ? { tabCount: this.tabCount } : {}),
+      createdNewTab: this.createdNewTab,
+    };
+  }
+
+  browserRecoveryEvidence() {
+    return this.recoveryTracker.evidence();
+  }
+
   private async ensureTab(url?: string) {
-    if (this.tabId !== undefined) return this.tabId;
+    if (this.tabReady) return this.tabId;
+    await this.readTabContext(false);
     const createTool = pick(this.tools, [/__tabs_create_mcp$/]);
     if (createTool) {
       const output = await this.call(createTool, url ? { url } : {});
       this.tabId = extractTabId(output);
+      this.tabReady = true;
+      this.createdNewTab = true;
     }
     return this.tabId;
   }
 
   private withTab(input: Record<string, any>) {
     return this.tabId !== undefined ? { ...input, tabId: this.tabId } : input;
+  }
+
+  private async recoverTab(
+    url?: string,
+    onProgress?: (state: { contextRefreshed: boolean; createdNewTab: boolean }) => void,
+  ) {
+    this.tabId = undefined;
+    this.tabReady = false;
+    await this.readTabContext(true, true);
+    onProgress?.({ contextRefreshed: true, createdNewTab: false });
+    await this.ensureTab(url || this.currentUrl);
+    if (!this.tabReady) throw new Error("Browser recovery could not create a new tab.");
+    onProgress?.({ contextRefreshed: true, createdNewTab: true });
+    return { contextRefreshed: true, createdNewTab: true };
+  }
+
+  private async callTabTool(
+    tool: string,
+    input: Record<string, any>,
+    operation: string,
+    retrySafe: boolean,
+    recoveryUrl?: string,
+  ) {
+    try {
+      return await this.call(tool, this.withTab(input));
+    } catch (error: any) {
+      const trigger = browserRecoveryTrigger(error);
+      if (!trigger) throw error;
+      if (!retrySafe) {
+        this.recoveryTracker.record({
+          operation,
+          trigger,
+          retrySafe: false,
+          status: "not_retried",
+          contextRefreshed: false,
+          createdNewTab: false,
+        });
+        throw new Error(browserRecoveryFailureMessage(trigger, "not_retried"));
+      }
+      let contextRefreshed = false;
+      let createdNewTab = false;
+      try {
+        await this.recoverTab(recoveryUrl, recovery => {
+          contextRefreshed = recovery.contextRefreshed;
+          createdNewTab = recovery.createdNewTab;
+        });
+        const output = await this.call(tool, this.withTab(input));
+        this.recoveryTracker.record({
+          operation,
+          trigger,
+          retrySafe: true,
+          status: "recovered",
+          contextRefreshed,
+          createdNewTab,
+        });
+        return output;
+      } catch {
+        this.recoveryTracker.record({
+          operation,
+          trigger,
+          retrySafe: true,
+          status: "failed",
+          contextRefreshed,
+          createdNewTab,
+        });
+        throw new Error(browserRecoveryFailureMessage(trigger, "failed"));
+      }
+    }
   }
 
   async runAction(project: NormalizedTestAgentProjectTarget, action: BrowserActionSpec, defaultTimeout: number) {
@@ -750,13 +892,13 @@ class ClaudeChromeAdapter implements McpBrowserAdapter {
       if (isCookieAction(action)) {
         const tool = pick(this.tools, [/__javascript_tool$/]);
         if (!tool) throw new Error("Missing javascript_tool.");
-        await this.call(tool, this.withTab({ text: cookieActionScript(action) }));
+        await this.callTabTool(tool, { text: cookieActionScript(action) }, `action:${action.type}`, false);
         return step("action", `claude-in-chrome:${action.type}`, "passed", cookieActionDetail(action));
       }
       if (isStorageAction(action)) {
         const tool = pick(this.tools, [/__javascript_tool$/]);
         if (!tool) throw new Error("Missing javascript_tool.");
-        await this.call(tool, this.withTab({ text: storageActionScript(action) }));
+        await this.callTabTool(tool, { text: storageActionScript(action) }, `action:${action.type}`, false);
         return step("action", `claude-in-chrome:${action.type}`, "passed", storageActionDetail(action));
       }
       if (isNetworkStateAction(action)) {
@@ -766,7 +908,7 @@ class ClaudeChromeAdapter implements McpBrowserAdapter {
         const url = resolveUrl(project.targetUrl, action.url || "");
         await this.ensureTab(url);
         const tool = pick(this.tools, [/__navigate$/]);
-        if (tool) await this.call(tool, this.withTab({ url }));
+        if (tool) await this.callTabTool(tool, { url }, "action:goto", true, url);
         this.currentUrl = url;
         return step("action", "claude-in-chrome:goto", "passed", url);
       }
@@ -776,14 +918,14 @@ class ClaudeChromeAdapter implements McpBrowserAdapter {
         const tool = pick(this.tools, [/__navigate$/]);
         if (!tool) throw new Error("Missing navigate tool.");
         if (!url) throw new Error("Cannot reload without a current URL or project targetUrl.");
-        await this.call(tool, this.withTab({ url }));
+        await this.callTabTool(tool, { url }, "action:reload", false, url);
         this.currentUrl = url;
         return step("action", "claude-in-chrome:reload", "passed", url);
       }
       if (action.type === "click") {
         const tool = pick(this.tools, [/__computer$/]);
         if (!tool) throw new Error("Missing computer tool.");
-        await this.call(tool, this.withTab({ action: "left_click", ref: action.selector || action.text || action.value }));
+        await this.callTabTool(tool, { action: "left_click", ref: action.selector || action.text || action.value }, "action:click", false);
         return step("action", "claude-in-chrome:click", "passed", action.selector || action.text || "");
       }
       if (action.type === "fill") {
@@ -792,7 +934,7 @@ class ClaudeChromeAdapter implements McpBrowserAdapter {
         const payload = tool.endsWith("__computer")
           ? { action: "type", text: String(action.value ?? action.text ?? "") }
           : targetInput(action);
-        await this.call(tool, this.withTab(payload));
+        await this.callTabTool(tool, payload, "action:fill", false);
         return step("action", "claude-in-chrome:fill", "passed", action.selector || action.text || "");
       }
       if (action.type === "typeText") {
@@ -801,7 +943,7 @@ class ClaudeChromeAdapter implements McpBrowserAdapter {
         const payload = tool.endsWith("__computer")
           ? { action: "type", text: typedText(action) }
           : targetInput(action);
-        await this.call(tool, this.withTab(payload));
+        await this.callTabTool(tool, payload, "action:typeText", false);
         return step("action", "claude-in-chrome:typeText", "passed", typedTextDetail(action));
       }
       if (action.type === "waitForTimeout") {
@@ -814,7 +956,7 @@ class ClaudeChromeAdapter implements McpBrowserAdapter {
       if (action.type === "evaluate") {
         const tool = pick(this.tools, [/__javascript_tool$/]);
         if (!tool) throw new Error("Missing javascript_tool.");
-        await this.call(tool, this.withTab({ text: String(action.text || action.value || "undefined") }));
+        await this.callTabTool(tool, { text: String(action.text || action.value || "undefined") }, "action:evaluate", false);
         return step("action", "claude-in-chrome:evaluate", "passed");
       }
       return step("action", `claude-in-chrome:${action.type}`, "failed", "", `Action ${action.type} is not mapped for Claude in Chrome.`);
@@ -833,7 +975,7 @@ class ClaudeChromeAdapter implements McpBrowserAdapter {
   async readConsoleMessages() {
     const tool = pick(this.tools, [/__read_console_messages$/]);
     if (!tool) return [];
-    const text = extractToolText(await this.call(tool, this.withTab({})));
+    const text = extractToolText(await this.callTabTool(tool, {}, "telemetry:console", true));
     return text && !emptyLike(text) ? normalizeBrowserConsoleLines(compactText(text, 4000).split(/\r?\n/)) : [];
   }
 
@@ -844,27 +986,27 @@ class ClaudeChromeAdapter implements McpBrowserAdapter {
   async readNetworkErrors() {
     const tool = pick(this.tools, [/__read_network_requests$/]);
     if (!tool) return [];
-    const text = extractToolText(await this.call(tool, this.withTab({})));
+    const text = extractToolText(await this.callTabTool(tool, {}, "telemetry:network", true));
     return text && /\b(4\d\d|5\d\d|failed|error)\b/i.test(text) ? [compactText(text, 1000)] : [];
   }
 
   async readNetworkRequests() {
     const tool = pick(this.tools, [/__read_network_requests$/]);
     if (!tool) return [];
-    const text = extractToolText(await this.call(tool, this.withTab({})));
+    const text = extractToolText(await this.callTabTool(tool, {}, "telemetry:network", true));
     return text && !emptyLike(text) ? compactText(text, 4000).split(/\r?\n/).filter(Boolean) : [];
   }
 
   async captureScreenshot(name: string) {
     const tool = pick(this.tools, [/__gif_creator$/]);
     if (!tool) return [];
-    return [await this.call(tool, this.withTab({ action: "capture_frame", name }))];
+    return [await this.callTabTool(tool, { action: "capture_frame", name }, "evidence:screenshot", true)];
   }
 
   async pageText() {
     const tool = pick(this.tools, [/__get_page_text$/, /__read_page$/]);
     if (!tool) return "";
-    return extractToolText(await this.call(tool, this.withTab({})));
+    return extractToolText(await this.callTabTool(tool, {}, "observation:page_text", true));
   }
 }
 
@@ -872,7 +1014,111 @@ class ChromeDevtoolsAdapter implements McpBrowserAdapter {
   id: McpBrowserAdapterId = "chrome-devtools";
   label = "Chrome DevTools MCP";
   currentUrl = "";
+  private tabContextChecked = false;
+  private tabCount: number | undefined;
+  private createdNewTab = false;
+  private recoveryTracker = new BrowserRecoveryTracker("chrome-devtools");
   constructor(public tools: string[], private call: Caller) {}
+
+  private async readPageContext() {
+    const listTool = pick(this.tools, [/__list_pages$/]);
+    if (!listTool) throw new Error("Existing authenticated Chrome DevTools verification requires list_pages.");
+    const output = await this.call(listTool, {});
+    this.tabContextChecked = true;
+    this.tabCount = extractTabCount(output);
+  }
+
+  private async createPage(url?: string) {
+    if (!pick(this.tools, [/__new_page$/])) {
+      throw new Error("Existing authenticated Chrome DevTools verification requires new_page so TestAgent can avoid reusing the user's current page.");
+    }
+    await this.call(pick(this.tools, [/__new_page$/])!, url ? { url } : {});
+    this.createdNewTab = true;
+    this.currentUrl = url || "";
+  }
+
+  async prepareExistingSession(url?: string) {
+    await this.readPageContext();
+    await this.createPage(url);
+  }
+
+  existingSessionContextEvidence() {
+    return {
+      provider: "chrome-devtools" as const,
+      tabContextChecked: this.tabContextChecked,
+      ...(this.tabCount !== undefined ? { tabCount: this.tabCount } : {}),
+      createdNewTab: this.createdNewTab,
+    };
+  }
+
+  browserRecoveryEvidence() {
+    return this.recoveryTracker.evidence();
+  }
+
+  private async recoverPage(
+    url?: string,
+    onProgress?: (state: { contextRefreshed: boolean; createdNewTab: boolean }) => void,
+  ) {
+    await this.readPageContext();
+    onProgress?.({ contextRefreshed: true, createdNewTab: false });
+    await this.createPage(url || this.currentUrl);
+    onProgress?.({ contextRefreshed: true, createdNewTab: true });
+    return { contextRefreshed: true, createdNewTab: true };
+  }
+
+  private async callPageTool(
+    tool: string,
+    input: Record<string, any>,
+    operation: string,
+    retrySafe: boolean,
+    recoveryUrl?: string,
+  ) {
+    try {
+      return await this.call(tool, input);
+    } catch (error: any) {
+      const trigger = browserRecoveryTrigger(error);
+      if (!trigger) throw error;
+      if (!retrySafe) {
+        this.recoveryTracker.record({
+          operation,
+          trigger,
+          retrySafe: false,
+          status: "not_retried",
+          contextRefreshed: false,
+          createdNewTab: false,
+        });
+        throw new Error(browserRecoveryFailureMessage(trigger, "not_retried"));
+      }
+      let contextRefreshed = false;
+      let createdNewTab = false;
+      try {
+        await this.recoverPage(recoveryUrl, recovery => {
+          contextRefreshed = recovery.contextRefreshed;
+          createdNewTab = recovery.createdNewTab;
+        });
+        const output = await this.call(tool, input);
+        this.recoveryTracker.record({
+          operation,
+          trigger,
+          retrySafe: true,
+          status: "recovered",
+          contextRefreshed,
+          createdNewTab,
+        });
+        return output;
+      } catch {
+        this.recoveryTracker.record({
+          operation,
+          trigger,
+          retrySafe: true,
+          status: "failed",
+          contextRefreshed,
+          createdNewTab,
+        });
+        throw new Error(browserRecoveryFailureMessage(trigger, "failed"));
+      }
+    }
+  }
 
   async runAction(project: NormalizedTestAgentProjectTarget, action: BrowserActionSpec, defaultTimeout: number) {
     try {
@@ -894,13 +1140,13 @@ class ChromeDevtoolsAdapter implements McpBrowserAdapter {
       if (isCookieAction(action)) {
         const tool = pick(this.tools, [/__evaluate_script$/]);
         if (!tool) throw new Error("Missing evaluate_script.");
-        await this.call(tool, { function: cookieActionScript(action) });
+        await this.callPageTool(tool, { function: cookieActionScript(action) }, `action:${action.type}`, false);
         return step("action", `chrome-devtools:${action.type}`, "passed", cookieActionDetail(action));
       }
       if (isStorageAction(action)) {
         const tool = pick(this.tools, [/__evaluate_script$/]);
         if (!tool) throw new Error("Missing evaluate_script.");
-        await this.call(tool, { function: storageActionScript(action) });
+        await this.callPageTool(tool, { function: storageActionScript(action) }, `action:${action.type}`, false);
         return step("action", `chrome-devtools:${action.type}`, "passed", storageActionDetail(action));
       }
       if (isNetworkStateAction(action)) {
@@ -910,9 +1156,12 @@ class ChromeDevtoolsAdapter implements McpBrowserAdapter {
         const url = resolveUrl(project.targetUrl, action.url || "");
         const createTool = pick(this.tools, [/__new_page$/]);
         const navTool = pick(this.tools, [/__navigate_page$/]);
-        if (createTool) await this.call(createTool, { url });
-        else if (navTool) await this.call(navTool, { url });
-        else throw new Error("Missing new_page/navigate_page.");
+        if (!this.createdNewTab && createTool) {
+          await this.call(createTool, { url });
+          this.createdNewTab = true;
+        }
+        else if (navTool && this.currentUrl !== url) await this.callPageTool(navTool, { url }, "action:goto", true, url);
+        else if (this.currentUrl !== url) throw new Error("Missing navigate_page.");
         this.currentUrl = url;
         return step("action", "chrome-devtools:goto", "passed", url);
       }
@@ -921,32 +1170,32 @@ class ChromeDevtoolsAdapter implements McpBrowserAdapter {
         const navTool = pick(this.tools, [/__navigate_page$/]);
         if (!navTool) throw new Error("Missing navigate_page.");
         if (!url) throw new Error("Cannot reload without a current URL or project targetUrl.");
-        await this.call(navTool, { url });
+        await this.callPageTool(navTool, { url }, "action:reload", false, url);
         this.currentUrl = url;
         return step("action", "chrome-devtools:reload", "passed", url);
       }
       if (action.type === "click") {
         const tool = pick(this.tools, [/__click$/]);
         if (!tool) throw new Error("Missing click tool.");
-        await this.call(tool, targetInput(action));
+        await this.callPageTool(tool, targetInput(action), "action:click", false);
         return step("action", "chrome-devtools:click", "passed", action.selector || action.text || "");
       }
       if (action.type === "fill") {
         const tool = pick(this.tools, [/__fill$/, /__type$/]);
         if (!tool) throw new Error("Missing fill/type tool.");
-        await this.call(tool, targetInput(action));
+        await this.callPageTool(tool, targetInput(action), "action:fill", false);
         return step("action", "chrome-devtools:fill", "passed", action.selector || action.text || "");
       }
       if (action.type === "typeText") {
         const tool = pick(this.tools, [/__type$/]);
         if (!tool) throw new Error("Missing type tool.");
-        await this.call(tool, targetInput(action));
+        await this.callPageTool(tool, targetInput(action), "action:typeText", false);
         return step("action", "chrome-devtools:typeText", "passed", typedTextDetail(action));
       }
       if (action.type === "evaluate") {
         const tool = pick(this.tools, [/__evaluate_script$/]);
         if (!tool) throw new Error("Missing evaluate_script.");
-        await this.call(tool, { function: String(action.text || action.value || "() => undefined") });
+        await this.callPageTool(tool, { function: String(action.text || action.value || "() => undefined") }, "action:evaluate", false);
         return step("action", "chrome-devtools:evaluate", "passed");
       }
       if (action.type === "waitForTimeout") {
@@ -972,7 +1221,7 @@ class ChromeDevtoolsAdapter implements McpBrowserAdapter {
   async readConsoleMessages() {
     const tool = pick(this.tools, [/__list_console_messages$/]);
     if (!tool) return [];
-    const text = extractToolText(await this.call(tool, {}));
+    const text = extractToolText(await this.callPageTool(tool, {}, "telemetry:console", true));
     return text && !emptyLike(text) ? normalizeBrowserConsoleLines(compactText(text, 4000).split(/\r?\n/)) : [];
   }
 
@@ -983,27 +1232,27 @@ class ChromeDevtoolsAdapter implements McpBrowserAdapter {
   async readNetworkErrors() {
     const tool = pick(this.tools, [/__list_network_requests$/]);
     if (!tool) return [];
-    const text = extractToolText(await this.call(tool, {}));
+    const text = extractToolText(await this.callPageTool(tool, {}, "telemetry:network", true));
     return text && /\b(4\d\d|5\d\d|failed|error)\b/i.test(text) ? [compactText(text, 1000)] : [];
   }
 
   async readNetworkRequests() {
     const tool = pick(this.tools, [/__list_network_requests$/]);
     if (!tool) return [];
-    const text = extractToolText(await this.call(tool, {}));
+    const text = extractToolText(await this.callPageTool(tool, {}, "telemetry:network", true));
     return text && !emptyLike(text) ? compactText(text, 4000).split(/\r?\n/).filter(Boolean) : [];
   }
 
   async captureScreenshot(name: string) {
     const tool = pick(this.tools, [/__take_screenshot$/]);
     if (!tool) return [];
-    return [await this.call(tool, { filePath: name })];
+    return [await this.callPageTool(tool, { filePath: name }, "evidence:screenshot", true)];
   }
 
   async pageText() {
     const tool = pick(this.tools, [/__take_snapshot$/]);
     if (!tool) return "";
-    return extractToolText(await this.call(tool, {}));
+    return extractToolText(await this.callPageTool(tool, {}, "observation:page_text", true));
   }
 }
 
@@ -1231,9 +1480,32 @@ class ComputerUseAdapter implements McpBrowserAdapter {
   }
 }
 
-export function createMcpBrowserAdapter(tools: string[], call: Caller): McpBrowserAdapter | null {
+export function createMcpBrowserAdapter(
+  tools: string[],
+  call: Caller,
+  options: {
+    existingSession?: boolean;
+    preferredAdapter?: BrowserExistingSessionProvider;
+  } = {},
+): McpBrowserAdapter | null {
   const browserTools = tools.filter(tool => /mcp__(playwright|claude-in-chrome|chrome|chrome-devtools|chromedevtools|computer-use)__/.test(tool));
   if (!browserTools.length) return null;
+  if (options.existingSession) {
+    const preferred = options.preferredAdapter || "auto";
+    if (
+      (preferred === "auto" || preferred === "claude-in-chrome")
+      && has(browserTools, /mcp__claude-in-chrome__/)
+    ) {
+      return new ClaudeChromeAdapter(browserTools, call);
+    }
+    if (
+      (preferred === "auto" || preferred === "chrome-devtools")
+      && has(browserTools, /mcp__(chrome-devtools|chromedevtools|chrome)__(new_page|navigate_page|take_snapshot|click|fill|evaluate_script|list_pages)/)
+    ) {
+      return new ChromeDevtoolsAdapter(browserTools, call);
+    }
+    return null;
+  }
   if (has(browserTools, /mcp__playwright__browser_/)) return new PlaywrightMcpAdapter(browserTools, call);
   if (has(browserTools, /mcp__claude-in-chrome__/)) return new ClaudeChromeAdapter(browserTools, call);
   if (has(browserTools, /mcp__(chrome-devtools|chromedevtools|chrome)__(new_page|navigate_page|take_snapshot|click|fill|evaluate_script)/)) return new ChromeDevtoolsAdapter(browserTools, call);

@@ -4,6 +4,9 @@ exports.runTestAgent = runTestAgent;
 const browser_verifier_1 = require("./browser-verifier");
 const registry_1 = require("./browser/registry");
 const tool_executor_1 = require("./browser/tool-executor");
+const authentication_summary_1 = require("./browser/authentication-summary");
+const existing_session_1 = require("./browser/existing-session");
+const shared_1 = require("./browser/shared");
 const artifacts_1 = require("./artifacts");
 const command_planner_1 = require("./command-planner");
 const command_runner_1 = require("./command-runner");
@@ -17,15 +20,10 @@ async function runTestAgent(input, options = {}) {
     const normalized = (0, work_order_1.normalizeTestAgentWorkOrder)(input, options);
     const planned = (0, command_planner_1.planVerificationCommands)(normalized.workOrder, normalized.issues);
     const { workOrder, issues } = planned;
+    const suppressBrowserToolDetails = workOrder.projects.some(project => (0, shared_1.checksForProject)(project, workOrder.acceptanceCriteria).some(existing_session_1.browserExistingSessionUsesMinimalEvidence));
     const browserToolRecorder = options.browserToolExecutor
-        ? (0, tool_executor_1.createRecordingBrowserToolExecutor)(options.browserToolExecutor, workOrder.options.artifactDir)
+        ? (0, tool_executor_1.createRecordingBrowserToolExecutor)(options.browserToolExecutor, workOrder.options.artifactDir, { suppressDetails: suppressBrowserToolDetails })
         : null;
-    if (browserToolRecorder?.transcriptPath) {
-        workOrder.metadata = {
-            ...workOrder.metadata,
-            browserToolTranscriptPath: browserToolRecorder.transcriptPath,
-        };
-    }
     const runtimeOptions = browserToolRecorder
         ? { ...options, browserToolExecutor: browserToolRecorder.executor }
         : options;
@@ -44,6 +42,10 @@ async function runTestAgent(input, options = {}) {
         devServers = await (0, dev_server_1.startDevServersForBrowserChecks)(workOrder);
         httpResults = await (0, http_verifier_1.runHttpVerification)(workOrder);
         browserResults = await (0, browser_verifier_1.runBrowserVerification)(workOrder, runtimeOptions);
+        workOrder.metadata = {
+            ...workOrder.metadata,
+            browserAuthenticationSummary: (0, authentication_summary_1.buildBrowserAuthenticationSummary)(browserResults),
+        };
     }
     catch (error) {
         issues.push({ severity: "error", code: "test_agent_runtime_error", message: error.message || String(error) });
@@ -56,6 +58,13 @@ async function runTestAgent(input, options = {}) {
             catch { }
         }
     }
+    const browserToolCalls = browserToolRecorder?.getRecords() || [];
+    if (browserToolCalls.length && browserToolRecorder?.transcriptPath) {
+        workOrder.metadata = {
+            ...workOrder.metadata,
+            browserToolTranscriptPath: browserToolRecorder.transcriptPath,
+        };
+    }
     const report = (0, result_builder_1.buildTestAgentReport)({
         workOrder,
         startedAt,
@@ -64,7 +73,7 @@ async function runTestAgent(input, options = {}) {
         devServerResults: devServers.map(server => server.result),
         httpResults,
         browserResults,
-        browserToolCalls: browserToolRecorder?.getRecords() || [],
+        browserToolCalls,
     });
     return (0, artifacts_1.writeTestAgentArtifacts)(report);
 }

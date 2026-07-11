@@ -3,6 +3,7 @@ import {
   sanitizeUserFacingProtocolTerms,
   sanitizeUserFacingTerminology,
 } from "./user-facing-text";
+import { buildPostReviewSpotCheckSummary } from "./post-review-spot-check";
 
 const INTERNAL_DELIVERY_TEXT_PATTERN = /CCM_AGENT_RECEIPT|CCM_AGENT_REQUESTS|scratchpad|trace_id|session_ids|session_id|run_id|native_session|task_agent_session|shouldDelegate|Runtime Kernel|Coordinator|Pipeline|Trace Replay|WorkerContextPacket|task-notification|receipt[-_\s]*status|raw[_\s-]*payload|回执要求|任务级原生会话|execution_lease|workchain/i;
 const FINAL_SUMMARY_PROTOCOL_LEAK_PATTERN = /CCM_AGENT_RECEIPT|CCM_AGENT_REQUESTS|scratchpad|trace_id|session_ids|session_id|run_id|native_session|task_agent_session|shouldDelegate|Runtime Kernel|Trace Replay|WorkerContextPacket|task-notification|receipt[-_\s]*status|raw[_\s-]*payload|回执要求|任务级原生会话|execution_lease/i;
@@ -45,7 +46,7 @@ export function sanitizeMainAgentDeliveryText(value: any, fallback = "处理结�
   let text = compactDeliveryText(value, max);
   if (!text) text = fallback;
   if (INTERNAL_DELIVERY_TEXT_PATTERN.test(text)) {
-    if (/error|失败|denied|invalid|权限|门禁/i.test(text)) text = "执行过程中遇到需要处理的问题，排障信息已放入技术详情。";
+    if (/error|失败|denied|invalid|权限|门禁/i.test(text)) text = "执行过程中遇到待排查的问题，我会继续定位；排障信息已放入技术详情。";
     else if (/done|完成|receipt|回执/i.test(text)) text = "执行成员已提交结果说明，我已完成汇总。";
     else text = fallback;
   }
@@ -204,6 +205,44 @@ function hasBlockingDeliveryCompletionGap(input: MainAgentDeliveryReportInput) {
     gate?.pass,
     gate?.passed,
   );
+  const postReviewSpotCheckGate = firstObject(
+    report.post_review_spot_check_gate,
+    report.postReviewSpotCheckGate,
+    summary.post_review_spot_check_gate,
+    summary.postReviewSpotCheckGate,
+    completion.post_review_spot_check_gate,
+    completion.postReviewSpotCheckGate,
+    workchainSummary.post_review_spot_check_gate,
+    workchainSummary.postReviewSpotCheckGate,
+    task.delivery_summary?.post_review_spot_check_gate,
+    task.delivery_summary?.postReviewSpotCheckGate,
+  );
+  const postReviewSpotCheckRequired = firstBoolean(
+    report.post_review_spot_check_required,
+    report.postReviewSpotCheckRequired,
+    summary.post_review_spot_check_required,
+    summary.postReviewSpotCheckRequired,
+    completion.post_review_spot_check_required,
+    completion.postReviewSpotCheckRequired,
+    workchainSummary.post_review_spot_check_required,
+    workchainSummary.postReviewSpotCheckRequired,
+    task.delivery_summary?.post_review_spot_check_required,
+    task.delivery_summary?.postReviewSpotCheckRequired,
+    postReviewSpotCheckGate?.required,
+  );
+  const postReviewSpotCheckPassed = firstBoolean(
+    report.post_review_spot_check_gate_passed,
+    report.postReviewSpotCheckGatePassed,
+    summary.post_review_spot_check_gate_passed,
+    summary.postReviewSpotCheckGatePassed,
+    completion.post_review_spot_check_gate_passed,
+    completion.postReviewSpotCheckGatePassed,
+    workchainSummary.post_review_spot_check_gate_passed,
+    workchainSummary.postReviewSpotCheckGatePassed,
+    task.delivery_summary?.post_review_spot_check_gate_passed,
+    task.delivery_summary?.postReviewSpotCheckGatePassed,
+    postReviewSpotCheckGate?.pass,
+  );
   const gateStatus = String(gate?.status || "").toLowerCase();
   const acceptancePassed = firstBoolean(
     report.acceptance_gate_passed,
@@ -271,6 +310,7 @@ function hasBlockingDeliveryCompletionGap(input: MainAgentDeliveryReportInput) {
     || collectIncompleteIndependentReviewEvidence(input).length > 0
     || weakPassedIndependentReviewEvidence.length > 0
     || (independentReviewRequired === true && independentReviewPassed !== true)
+    || (postReviewSpotCheckRequired === true && postReviewSpotCheckPassed !== true)
     || /failed|rejected|blocked/i.test(gateStatus)
     || ["deviated", "needs_evidence", "failed"].includes(planStatus);
 }
@@ -365,7 +405,7 @@ function firstDeliveryNumber(...values: any[]) {
 
 function formatDeliveryMissingVerification(item: any) {
   if (!item || typeof item !== "object") return sanitizeMainAgentDeliveryText(item, "未提供项目验证命令执行证据", 260);
-  const agent = sanitizeMainAgentDeliveryText(item.agent || item.project || item.target || "未知 Agent", "未知 Agent", 80);
+  const agent = sanitizeMainAgentDeliveryText(item.agent || item.project || item.target || "未识别执行成员", "未识别执行成员", 80);
   const required = uniqueDeliveryStrings(item.required, item.commands, item.command, item.expected).slice(0, 3);
   const reason = sanitizeMainAgentDeliveryText(item.reason || item.detail || "", "", 160);
   return sanitizeMainAgentDeliveryText(`${agent}：${required.length ? required.join(" / ") : "未提供项目验证命令执行证据"}${reason ? `（${reason}）` : ""}`, "", 320);
@@ -1081,7 +1121,7 @@ function collectDeliveryIndependentReview(input: MainAgentDeliveryReportInput, s
   const evidence = collectRawDeliveryIndependentReviewEvidence(input).map(formatDeliveryIndependentReviewEvidence).filter(Boolean);
   if (required !== true && !evidence.length) return [];
   const headline = failedEvidence.length || passed === false || /failed|rejected|blocked/i.test(gateStatus)
-    ? "独立复核：未通过，仍需处理复核意见"
+    ? "独立复核：未通过，仍需按复核意见返工"
     : incompleteEvidence.length || /partial|incomplete|inconclusive|unable[_-]?to[_-]?verify|skipped/i.test(gateStatus)
       ? "独立复核：部分完成，仍有内容需要补齐"
       : weakPassedEvidence.length
@@ -1099,6 +1139,75 @@ function collectDeliveryIndependentReview(input: MainAgentDeliveryReportInput, s
     required === true && reason ? `触发原因：${reason}` : "",
     evidence.slice(0, 4),
   ).slice(0, 8);
+}
+
+function collectDeliveryPostReviewSpotCheck(input: MainAgentDeliveryReportInput) {
+  const { report, summary, completion, workchainSummary } = getNestedReport(input);
+  const task = input.task || {};
+  const gate = firstObject(
+    report.post_review_spot_check_gate,
+    report.postReviewSpotCheckGate,
+    summary.post_review_spot_check_gate,
+    summary.postReviewSpotCheckGate,
+    completion.post_review_spot_check_gate,
+    completion.postReviewSpotCheckGate,
+    workchainSummary.post_review_spot_check_gate,
+    workchainSummary.postReviewSpotCheckGate,
+    task.delivery_summary?.post_review_spot_check_gate,
+    task.delivery_summary?.postReviewSpotCheckGate,
+  );
+  const spotCheck = firstObject(
+    report.post_review_spot_check,
+    report.postReviewSpotCheck,
+    summary.post_review_spot_check,
+    summary.postReviewSpotCheck,
+    completion.post_review_spot_check,
+    completion.postReviewSpotCheck,
+    workchainSummary.post_review_spot_check,
+    workchainSummary.postReviewSpotCheck,
+    task.delivery_summary?.post_review_spot_check,
+    task.delivery_summary?.postReviewSpotCheck,
+    gate?.latest,
+  );
+  const visibleSummary = firstObject(
+    report.post_review_spot_check_summary,
+    report.postReviewSpotCheckSummary,
+    summary.post_review_spot_check_summary,
+    summary.postReviewSpotCheckSummary,
+    completion.post_review_spot_check_summary,
+    completion.postReviewSpotCheckSummary,
+    workchainSummary.post_review_spot_check_summary,
+    workchainSummary.postReviewSpotCheckSummary,
+    task.delivery_summary?.post_review_spot_check_summary,
+    task.delivery_summary?.postReviewSpotCheckSummary,
+    gate?.summary,
+    buildPostReviewSpotCheckSummary(spotCheck),
+  );
+  const required = firstBoolean(
+    report.post_review_spot_check_required,
+    report.postReviewSpotCheckRequired,
+    summary.post_review_spot_check_required,
+    summary.postReviewSpotCheckRequired,
+    completion.post_review_spot_check_required,
+    completion.postReviewSpotCheckRequired,
+    workchainSummary.post_review_spot_check_required,
+    workchainSummary.postReviewSpotCheckRequired,
+    task.delivery_summary?.post_review_spot_check_required,
+    task.delivery_summary?.postReviewSpotCheckRequired,
+    gate?.required,
+    spotCheck?.required,
+  );
+  if (required !== true && !visibleSummary) return [];
+  return uniqueDeliveryLines(
+    sanitizeMainAgentDeliveryText(
+      visibleSummary?.headline || gate?.reason || "",
+      required === true ? "TestAgent 通过后的完成前抽查仍在进行。" : "完成前抽查已记录。",
+      260,
+    ),
+    ...(Array.isArray(visibleSummary?.rows)
+      ? visibleSummary.rows.map((item: any) => sanitizeMainAgentDeliveryText(item, "抽查状态已记录。", 220))
+      : []),
+  ).slice(0, 6);
 }
 
 function collectDeliveryRisks(input: MainAgentDeliveryReportInput) {
@@ -1149,6 +1258,38 @@ function collectDeliveryRisks(input: MainAgentDeliveryReportInput) {
   const independentReviewRisk = failedIndependentReviewRisk || (independentReviewRequired === true && independentReviewPassed !== true
     ? `复杂变更缺少独立复核${independentReviewGate?.reason ? `：${independentReviewGate.reason}` : ""}`
     : incompleteIndependentReviewRisk || weakPassedIndependentReviewRisk);
+  const postReviewSpotCheckGate = firstObject(
+    report.post_review_spot_check_gate,
+    report.postReviewSpotCheckGate,
+    summary.post_review_spot_check_gate,
+    summary.postReviewSpotCheckGate,
+    completion.post_review_spot_check_gate,
+    completion.postReviewSpotCheckGate,
+    workchainSummary.post_review_spot_check_gate,
+    workchainSummary.postReviewSpotCheckGate,
+    task.delivery_summary?.post_review_spot_check_gate,
+    task.delivery_summary?.postReviewSpotCheckGate,
+  );
+  const postReviewSpotCheckRequired = firstBoolean(
+    report.post_review_spot_check_required,
+    summary.post_review_spot_check_required,
+    completion.post_review_spot_check_required,
+    workchainSummary.post_review_spot_check_required,
+    task.delivery_summary?.post_review_spot_check_required,
+    postReviewSpotCheckGate?.required,
+  );
+  const postReviewSpotCheckPassed = firstBoolean(
+    report.post_review_spot_check_gate_passed,
+    summary.post_review_spot_check_gate_passed,
+    completion.post_review_spot_check_gate_passed,
+    workchainSummary.post_review_spot_check_gate_passed,
+    task.delivery_summary?.post_review_spot_check_gate_passed,
+    postReviewSpotCheckGate?.pass,
+  );
+  const postReviewSpotCheckLines = collectDeliveryPostReviewSpotCheck(input);
+  const postReviewSpotCheckRisk = postReviewSpotCheckRequired === true && postReviewSpotCheckPassed !== true
+    ? `完成前抽查尚未通过：${postReviewSpotCheckLines[0] || postReviewSpotCheckGate?.reason || "需要重新运行 TestAgent 并再次抽查关键验证"}`
+    : "";
   const failedVerificationEvidence = collectFailedDeliveryVerificationEvidence(input);
   const failedVerificationRisk = failedVerificationEvidence.length
     ? `验证失败：${failedVerificationEvidence[0]}`
@@ -1186,6 +1327,7 @@ function collectDeliveryRisks(input: MainAgentDeliveryReportInput) {
     incompleteVerificationRisk,
     weakMissingVerificationRisk,
     independentReviewRisk,
+    postReviewSpotCheckRisk,
     task.receipt?.blockers,
     task.receipt?.needs,
     completion.risks,
@@ -1409,7 +1551,7 @@ function formatDeliveryAcceptanceCheck(item: any) {
   const label = item.label || item.title || item.name || item.id || "验收项";
   const ok = firstBoolean(item.ok, item.pass, item.passed, item.status);
   const detail = sanitizeMainAgentDeliveryText(item.detail || item.reason || item.summary || item.message || "", "", 160);
-  const prefix = ok === true ? "通过" : ok === false ? "待处理" : "核对";
+  const prefix = ok === true ? "通过" : ok === false ? "未通过" : "核对";
   return sanitizeMainAgentDeliveryText(`${prefix}：${label}${detail && !String(label).includes(detail) ? `（${detail}）` : ""}`, "", 260);
 }
 
@@ -1451,8 +1593,8 @@ function collectDeliveryAcceptance(input: MainAgentDeliveryReportInput, status: 
   const blockingRisk = risks.some(item => /独立复核|复核未通过|未通过|验证失败|失败验证|验证未完成|未完成验证|验证证据不足|无法确认.*验证|必需验证|缺少.*验证|验收.*缺口|仍需处理缺口|计划缺口/i.test(String(item || "")));
   const items: string[] = [];
   if (passed === true && !(status === "failed" && blockingRisk)) items.push("最终验收：已通过");
-  else if (passed === true && status === "failed" && blockingRisk) items.push("最终验收：未通过，仍需处理缺口");
-  else if (passed === false) items.push("最终验收：未通过，仍需处理缺口");
+  else if (passed === true && status === "failed" && blockingRisk) items.push("最终验收：未通过，仍有待补齐项");
+  else if (passed === false) items.push("最终验收：未通过，仍有待补齐项");
   else if (status === "done") items.push(verification.length && !risks.length ? "最终验收：已完成交付复核" : "最终验收：待核对验证明细");
   else if (status === "failed") items.push("最终验收：未通过，原因已整理在未完成原因里");
   else if (status === "cancelled") items.push("最终验收：任务已停止，未继续验收");
@@ -1497,7 +1639,7 @@ function collectDeliveryCompleted(input: MainAgentDeliveryReportInput, files: st
         : "任务仍在处理中，我会继续跟进并在完成后总结。";
     return uniqueDeliveryStrings(
       statusLine,
-      risks.slice(0, 3).map(item => status === "cancelled" ? `停止原因：${item}` : `待处理：${item}`),
+      risks.slice(0, 3).map(item => status === "cancelled" ? `停止原因：${item}` : status === "failed" ? `待排查：${item}` : `待确认：${item}`),
       status === "failed" && files.length ? `已整理 ${files.length} 个文件变更，需继续修复或复核。` : "",
       status === "failed" && verification.length ? `已整理 ${verification.length} 项验证记录，需继续核对。` : "",
     ).slice(0, 6);
@@ -1527,8 +1669,9 @@ function collectDeliveryNextAction(input: MainAgentDeliveryReportInput, status: 
   const { report, summary, completion, workchainSummary } = getNestedReport(input);
   const planGaps = collectDeliveryPlanReviewGaps(planReview);
   if (planGaps.length) return [`先补齐计划缺口：${planGaps[0]}`];
-  const blockingRisk = risks.find(item => /独立复核|复核未通过|未通过|验证失败|失败验证|验证未完成|未完成验证|验证证据不足|无法确认.*验证|必需验证|缺少.*验证|验收.*缺口|仍需处理缺口/i.test(String(item || "")));
+  const blockingRisk = risks.find(item => /完成前抽查|独立复核|复核未通过|未通过|验证失败|失败验证|验证未完成|未完成验证|验证证据不足|无法确认.*验证|必需验证|缺少.*验证|验收.*缺口|仍需处理缺口/i.test(String(item || "")));
   if (blockingRisk) {
+    if (/完成前抽查/i.test(blockingRisk)) return ["先沿用原复核工作单重新运行 TestAgent，并再次抽查关键验证；结论一致后再给出最终总结。"];
     if (/独立复核.*证据不足/i.test(blockingRisk)) return ["先补齐独立复核的命令、截图或文件复核证据；证据充分后再给出最终总结。"];
     if (/独立复核.*(未完全|无法确认|部分|待补齐)/i.test(blockingRisk)) return ["先补齐独立复核无法确认的内容；必要时让原执行成员补充后重新运行 TestAgent/独立复核，再给出最终总结。"];
     if (/独立复核|复核未通过/i.test(blockingRisk)) return ["先让原执行成员按复核意见返工；修复后重新运行 TestAgent/独立复核，再给出最终总结。"];
@@ -1805,7 +1948,7 @@ function buildDeliveryCompletionCard(
   const cancelled = status === "cancelled";
   const riskText = risks.length
     ? `${risks.length} 项`
-    : done ? "无待处理风险" : failed ? "已整理原因" : cancelled ? "已停止" : "等待复核";
+    : done ? "暂无需要额外关注的风险" : failed ? "已整理原因" : cancelled ? "已停止" : "等待复核";
   const highlights = uniqueDeliveryStrings(completed).slice(0, 4);
   const acceptanceValue = acceptance.some(item => /未通过|待处理|缺口/.test(item))
     ? "未通过"
@@ -1911,7 +2054,7 @@ function buildDeliveryUserHandoff(
     title: "接下来建议",
     surface: input.surface,
     status: handoffStatus,
-    status_label: handoffStatus === "ready" ? "可验收" : handoffStatus === "failed" ? "未完成" : handoffStatus === "cancelled" ? "已停止" : handoffStatus === "needs_attention" ? "需处理" : "跟踪中",
+    status_label: handoffStatus === "ready" ? "可验收" : handoffStatus === "failed" ? "未完成" : handoffStatus === "cancelled" ? "已停止" : handoffStatus === "needs_attention" ? "待补齐" : "跟踪中",
     headline: handoffStatus === "ready"
       ? "这轮任务已经收尾，建议先核对交付总结和改动明细。"
       : handoffStatus === "failed"
@@ -1919,7 +2062,7 @@ function buildDeliveryUserHandoff(
         : handoffStatus === "cancelled"
           ? "任务已经停止；需要继续时可以重新发起或恢复需求。"
           : handoffStatus === "needs_attention"
-            ? planGaps.length ? "还有计划缺口需要处理，建议先补齐这些内容再继续。" : "还有风险或待确认项，建议先处理这些内容再继续。"
+            ? planGaps.length ? "还有计划缺口待补齐，建议补齐后再继续。" : "还有风险或待确认项，建议先核对这些内容再继续。"
             : "任务仍在推进，我会继续整理进展和最终总结。",
     primary_action: actions[0],
     primaryAction: actions[0],
@@ -1982,6 +2125,7 @@ export function buildMainAgentDeliveryReport(input: MainAgentDeliveryReportInput
   const planReview = collectDeliveryPlanReview(input, status);
   const acceptance = collectDeliveryAcceptance(input, status, verification, risks);
   const independentReview = collectDeliveryIndependentReview(input, status);
+  const postReviewSpotCheck = collectDeliveryPostReviewSpotCheck(input);
   const completed = collectDeliveryCompleted(input, files, verification, status, risks);
   const nextAction = collectDeliveryNextAction(input, status, risks, planReview);
   const pickupSummary = buildDeliveryPickupSummary(input, status, completed, planReview, files, verification, acceptance, independentReview, risks, nextAction);
@@ -1998,6 +2142,7 @@ export function buildMainAgentDeliveryReport(input: MainAgentDeliveryReportInput
     buildDeliverySection("verification_evidence", "验收证据", verificationEvidence.items, "验证证据仍在收集。"),
     buildDeliverySection("acceptance", "验收结论", acceptance, "我仍在等待最终复核。"),
     ...(independentReview.length ? [buildDeliverySection("independent_review", "复核结论", independentReview, "本次未触发独立复核。")] : []),
+    ...(postReviewSpotCheck.length ? [buildDeliverySection("post_review_spot_check", "完成前抽查", postReviewSpotCheck, "本次未触发完成前抽查。")] : []),
     buildDeliverySection("risks", status === "failed" ? "未完成原因" : status === "cancelled" ? "停止原因" : "风险与待确认", risks, deliveryRiskSectionEmpty(status)),
     buildDeliverySection("user_handoff", "接下来建议", deliveryUserHandoffSectionItems(userHandoff), nextAction[0] || "可以继续补充新的要求。"),
     buildDeliverySection("next_action", "下一步", nextAction, "可以继续补充新的要求。"),
@@ -2034,6 +2179,14 @@ export function buildMainAgentDeliveryReport(input: MainAgentDeliveryReportInput
     acceptance,
     independent_review: independentReview,
     independentReview,
+    post_review_spot_check: postReviewSpotCheck,
+    postReviewSpotCheck,
+    post_review_spot_check_gate: input.summary?.post_review_spot_check_gate || input.completion?.post_review_spot_check_gate || null,
+    postReviewSpotCheckGate: input.summary?.postReviewSpotCheckGate || input.summary?.post_review_spot_check_gate || input.completion?.postReviewSpotCheckGate || input.completion?.post_review_spot_check_gate || null,
+    post_review_spot_check_summary: input.summary?.post_review_spot_check_summary || input.completion?.post_review_spot_check_summary || null,
+    postReviewSpotCheckSummary: input.summary?.postReviewSpotCheckSummary || input.summary?.post_review_spot_check_summary || input.completion?.postReviewSpotCheckSummary || input.completion?.post_review_spot_check_summary || null,
+    post_review_spot_check_required: input.summary?.post_review_spot_check_required === true || input.completion?.post_review_spot_check_required === true,
+    post_review_spot_check_gate_passed: input.summary?.post_review_spot_check_gate_passed === true || input.completion?.post_review_spot_check_gate_passed === true,
     risks,
     next_action: nextAction[0] || "",
     final_summary_quality: finalSummaryQuality,
@@ -2318,6 +2471,87 @@ export function runMainAgentDeliveryReportSelfTest() {
     },
     executed: true,
   });
+  const passedPostReviewSpotCheckDone = buildMainAgentDeliveryReport({
+    surface: "group",
+    status: "done",
+    title: "完成登录恢复交付",
+    summary: {
+      headline: "登录恢复交付已经完成。",
+      actual_file_changes: [{ project: "web", path: "src/session.ts", additions: 8, deletions: 2 }],
+      verification_executed: ["npm test"],
+      verification_required_gate_passed: true,
+      verification_source_gate_passed: true,
+      acceptance_gate_passed: true,
+      acceptance_gate: { checks: [{ id: "login", label: "登录恢复可用", ok: true }] },
+      independent_review_required: true,
+      independent_review_gate_passed: true,
+      independent_review_gate: {
+        required: true,
+        pass: true,
+        status: "passed",
+        evidence: [{ reviewer: "TestAgent", verdict: "passed", summary: "TestAgent 已通过独立复核。", evidence: ["npm test"] }],
+      },
+      post_review_spot_check_required: true,
+      post_review_spot_check_gate_passed: true,
+      post_review_spot_check_gate: {
+        required: true,
+        pass: true,
+        status: "passed",
+        reason: "TestAgent 通过后，我已完成关键验证抽查",
+      },
+      post_review_spot_check_summary: {
+        schema: "ccm-main-agent-post-review-spot-check-summary-v1",
+        title: "完成前抽查",
+        status: "passed",
+        status_label: "已通过",
+        headline: "我已抽查 2 项验证，结果与 TestAgent 的通过结论一致。",
+        rows: ["已抽查 2 项验证，2 项结果一致"],
+        next_action: "继续完成最终验收。",
+      },
+    },
+    executed: true,
+  });
+  const failedPostReviewSpotCheckDone = buildMainAgentDeliveryReport({
+    surface: "global",
+    status: "done",
+    title: "完成登录恢复交付",
+    summary: {
+      headline: "登录恢复交付已提交，但完成前抽查尚未一致。",
+      next_action: "可以查看改动详情，或继续补充新的要求。",
+      actual_file_changes: [{ project: "web", path: "src/session.ts", additions: 8, deletions: 2 }],
+      verification_executed: ["npm test"],
+      verification_required_gate_passed: true,
+      verification_source_gate_passed: true,
+      acceptance_gate_passed: true,
+      acceptance_gate: { checks: [{ id: "login", label: "登录恢复可用", ok: true }] },
+      independent_review_required: true,
+      independent_review_gate_passed: true,
+      independent_review_gate: {
+        required: true,
+        pass: true,
+        status: "passed",
+        evidence: [{ reviewer: "TestAgent", verdict: "passed", summary: "TestAgent 已通过独立复核。", evidence: ["npm test"] }],
+      },
+      post_review_spot_check_required: true,
+      post_review_spot_check_gate_passed: false,
+      post_review_spot_check_gate: {
+        required: true,
+        pass: false,
+        status: "needs_recheck",
+        reason: "TestAgent 已通过，但我的完成前抽查有 1 项结果不一致。",
+      },
+      post_review_spot_check_summary: {
+        schema: "ccm-main-agent-post-review-spot-check-summary-v1",
+        title: "完成前抽查",
+        status: "needs_recheck",
+        status_label: "需复验",
+        headline: "TestAgent 已通过，但我的完成前抽查有 1 项结果不一致。",
+        rows: ["已抽查 2 项验证，1 项结果一致，1 项不一致"],
+        next_action: "沿用原复核工作单重新运行 TestAgent，并再次抽查关键验证。",
+      },
+    },
+    executed: true,
+  });
   const cancelled = buildMainAgentDeliveryReport({
     surface: "global",
     status: "cancelled",
@@ -2367,7 +2601,12 @@ export function runMainAgentDeliveryReportSelfTest() {
     }],
   });
   const formattedGroup = formatMainAgentDeliveryReply(group);
+  const protectedFailureCopy = sanitizeMainAgentDeliveryText("CCM_AGENT_RECEIPT failed raw payload trace_id=hidden denied");
   const checks = {
+    protectedFailureCopyUsesInvestigationLanguage: protectedFailureCopy.includes("我会继续定位")
+      && protectedFailureCopy.includes("技术详情")
+      && !protectedFailureCopy.includes("需要处理")
+      && !INTERNAL_DELIVERY_TEXT_PATTERN.test(protectedFailureCopy),
     groupHasFriendlySections: group.markdown.includes("完成内容") && group.markdown.includes("计划回顾") && group.markdown.includes("验证结果") && group.markdown.includes("验收证据") && group.markdown.includes("验收结论") && group.markdown.includes("下一步"),
     groupKeepsFilesReadable: group.files.some(file => file.includes("src/Tickets.vue")),
     groupHasPlanReview: group.plan_review?.some((item: string) => item.includes("执行前计划"))
@@ -2516,6 +2755,21 @@ export function runMainAgentDeliveryReportSelfTest() {
       && noVerificationEvidenceDone.next_action?.includes("补齐失败、未完成、缺失或不足的验证证据")
       && noVerificationEvidenceDone.headline?.includes("任务没有完成")
       && !noVerificationEvidenceDone.markdown.includes("状态：已完成"),
+    passedPostReviewSpotCheckAllowsCompletion: passedPostReviewSpotCheckDone.status === "done"
+      && passedPostReviewSpotCheckDone.post_review_spot_check?.some((item: string) => item.includes("2 项结果一致"))
+      && passedPostReviewSpotCheckDone.markdown.includes("完成前抽查")
+      && passedPostReviewSpotCheckDone.markdown.includes("状态：已完成")
+      && !passedPostReviewSpotCheckDone.markdown.includes("主 Agent"),
+    failedPostReviewSpotCheckDoneBlocksCompletion: failedPostReviewSpotCheckDone.status === "failed"
+      && failedPostReviewSpotCheckDone.status_label === "未完成"
+      && failedPostReviewSpotCheckDone.post_review_spot_check?.some((item: string) => item.includes("1 项不一致"))
+      && failedPostReviewSpotCheckDone.risks?.some((item: string) => item.includes("完成前抽查尚未通过"))
+      && failedPostReviewSpotCheckDone.next_action?.includes("沿用原复核工作单重新运行 TestAgent")
+      && failedPostReviewSpotCheckDone.pickup_summary?.resume_action?.includes("沿用原复核工作单重新运行 TestAgent")
+      && failedPostReviewSpotCheckDone.completion_card?.next_action?.includes("沿用原复核工作单重新运行 TestAgent")
+      && failedPostReviewSpotCheckDone.markdown.includes("状态：未完成")
+      && !failedPostReviewSpotCheckDone.markdown.includes("状态：已完成")
+      && !failedPostReviewSpotCheckDone.markdown.includes("主 Agent"),
     bareDoneQualityRequiresEvidence: bareDone.status === "done"
       && bareDone.final_summary_quality?.passed === false
       && bareDone.final_summary_quality?.checks?.some((item: any) => item.id === "done_evidence_present" && item.passed === false)
@@ -2536,5 +2790,5 @@ export function runMainAgentDeliveryReportSelfTest() {
     legacyProtocolTextSanitized: !INTERNAL_DELIVERY_TEXT_PATTERN.test(legacy.markdown) && legacy.markdown.includes("结果说明") && !legacy.markdown.includes("raw payload"),
     noInternalLeak: !INTERNAL_DELIVERY_TEXT_PATTERN.test(group.markdown) && !INTERNAL_DELIVERY_TEXT_PATTERN.test(global.markdown),
   };
-  return { pass: Object.values(checks).every(Boolean), checks, group, global, failed, cancelled, legacy, bareDone, structuredLeakQuality, falseDoneFailedQuality, failedIndependentReviewEvidenceOnlyDone, failedVerificationResultDone, partialIndependentReviewDone, weakPassedIndependentReviewDone, incompleteVerificationResultDone, noVerificationEvidenceDone };
+  return { pass: Object.values(checks).every(Boolean), checks, group, global, failed, cancelled, legacy, bareDone, structuredLeakQuality, falseDoneFailedQuality, failedIndependentReviewEvidenceOnlyDone, failedVerificationResultDone, partialIndependentReviewDone, weakPassedIndependentReviewDone, incompleteVerificationResultDone, noVerificationEvidenceDone, passedPostReviewSpotCheckDone, failedPostReviewSpotCheckDone };
 }

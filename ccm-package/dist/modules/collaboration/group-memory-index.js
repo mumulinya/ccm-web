@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.GROUP_CLAUDE_INSTRUCTIONS_LOADED_HOOK_LEDGER = exports.GROUP_CLAUDE_MEMORY_EXTERNAL_INCLUDE_APPROVAL_LEDGER = exports.GROUP_PTL_EMERGENCY_TYPED_MEMORY_DISTILLATION_VERSION = exports.GROUP_COMPACT_STRATEGY_TYPED_MEMORY_DISTILLATION_VERSION = exports.GROUP_CONTEXT_USAGE_REPAIR_DISTILLATION_VERSION = exports.GROUP_PRESSURE_PROVENANCE_PROVIDER_DISPATCH_OVERRIDE_FOLLOWUP_DISTILLATION_VERSION = exports.GROUP_PRESSURE_PROVENANCE_PRE_DISPATCH_COMPLIANCE_DISTILLATION_VERSION = exports.GROUP_PRESSURE_MEMORY_PROVENANCE_RECEIPT_REPAIR_DISTILLATION_VERSION = exports.GROUP_IGNORE_MEMORY_RECEIPT_REPAIR_DISTILLATION_VERSION = exports.GROUP_PROVIDER_REPROOF_RECEIPT_CONSUMPTION_DISTILLATION_VERSION = exports.GROUP_TYPED_MEMORY_DISTILLATION_QUALITY_VERSION = exports.GROUP_TYPED_MEMORY_DISTILLATION_FACT_LIMIT = exports.GROUP_TYPED_MEMORY_DISTILLATION_MAX_MESSAGES = exports.GROUP_TYPED_MEMORY_DISTILLATION_LEDGER = exports.GROUP_TYPED_MEMORY_DISTILLATION_VERSION = exports.GROUP_CLAUDE_INSTRUCTIONS_LOADED_HOOK_VERSION = exports.GROUP_CLAUDE_MEMORY_SETTING_SOURCE_POLICY_VERSION = exports.GROUP_CLAUDE_MEMORY_EXTERNAL_INCLUDE_APPROVAL_VERSION = exports.GROUP_CLAUDE_MEMORY_INCLUDE_AUDIT_VERSION = exports.GROUP_GLOBAL_CLAUDE_MEMORY_IMPORT_VERSION = exports.GROUP_PROJECT_MEMORY_IMPORT_VERSION = exports.GROUP_TYPED_MEMORY_LOAD_PLAN_MAX_INCLUDE_DEPTH = exports.GROUP_TYPED_MEMORY_LOAD_PLAN_MAX_ENTRIES = exports.GROUP_TYPED_MEMORY_LOAD_PLAN_VERSION = exports.GROUP_TYPED_MEMORY_PRESSURE_RECALL_USAGE_CROSS_GROUP_MAX_GROUPS = exports.GROUP_TYPED_MEMORY_PRESSURE_RECALL_USAGE_STALE_AFTER_DAYS = exports.GROUP_TYPED_MEMORY_PRESSURE_RECALL_USAGE_HALF_LIFE_DAYS = exports.GROUP_TYPED_MEMORY_PRESSURE_RECALL_USAGE_LEDGER = exports.GROUP_TYPED_MEMORY_RECALL_LEDGER = exports.GROUP_TYPED_MEMORY_MAX_RECALL = exports.GROUP_TYPED_MEMORY_MAX_INDEX_BYTES = exports.GROUP_TYPED_MEMORY_MAX_INDEX_LINES = exports.GROUP_TYPED_MEMORY_ENTRYPOINT = exports.GROUP_TYPED_MEMORY_VERSION = void 0;
+exports.GROUP_CLAUDE_INSTRUCTIONS_LOADED_HOOK_LEDGER = exports.GROUP_CLAUDE_MEMORY_EXTERNAL_INCLUDE_APPROVAL_LEDGER = exports.GROUP_PTL_EMERGENCY_TYPED_MEMORY_DISTILLATION_VERSION = exports.GROUP_COMPACT_STRATEGY_TYPED_MEMORY_DISTILLATION_VERSION = exports.GROUP_CONTEXT_USAGE_REPAIR_DISTILLATION_VERSION = exports.GLOBAL_PROVIDER_DISPATCH_RELIABILITY_SNAPSHOT_TTL_MS = exports.GLOBAL_PROVIDER_DISPATCH_RELIABILITY_SNAPSHOT_VERSION = exports.GROUP_PROVIDER_DISPATCH_RELIABILITY_MAX_SOURCE_GROUPS = exports.GROUP_PROVIDER_DISPATCH_RELIABILITY_HALF_LIFE_DAYS = exports.GROUP_PROVIDER_SWITCH_EXECUTION_DISTILLATION_VERSION = exports.GROUP_PRESSURE_PROVENANCE_PROVIDER_DISPATCH_OVERRIDE_FOLLOWUP_RECEIPT_VALIDATION_DISTILLATION_VERSION = exports.GROUP_PRESSURE_PROVENANCE_PROVIDER_DISPATCH_OVERRIDE_FOLLOWUP_DISTILLATION_VERSION = exports.GROUP_PRESSURE_PROVENANCE_PRE_DISPATCH_COMPLIANCE_DISTILLATION_VERSION = exports.GROUP_PRESSURE_MEMORY_PROVENANCE_RECEIPT_REPAIR_DISTILLATION_VERSION = exports.GROUP_IGNORE_MEMORY_RECEIPT_REPAIR_DISTILLATION_VERSION = exports.GROUP_PROVIDER_RANKING_MEMORY_USAGE_RECEIPT_REPAIR_DISTILLATION_VERSION = exports.GROUP_POST_COMPACT_RECEIPT_MEMORY_USAGE_REPAIR_COMPLETION_DISTILLATION_VERSION = exports.GROUP_POST_COMPACT_REINJECTION_REPAIR_RECEIPT_CONSUMPTION_DISTILLATION_VERSION = exports.GROUP_PROVIDER_RANKING_PROVENANCE_COMPACT_REPAIR_RECEIPT_CONSUMPTION_DISTILLATION_VERSION = exports.GROUP_PROVIDER_REPROOF_RECEIPT_CONSUMPTION_DISTILLATION_VERSION = exports.GROUP_TYPED_MEMORY_DISTILLATION_QUALITY_VERSION = exports.GROUP_TYPED_MEMORY_DISTILLATION_FACT_LIMIT = exports.GROUP_TYPED_MEMORY_DISTILLATION_MAX_MESSAGES = exports.GROUP_TYPED_MEMORY_DISTILLATION_LEDGER = exports.GROUP_TYPED_MEMORY_DISTILLATION_VERSION = exports.GROUP_CLAUDE_INSTRUCTIONS_LOADED_HOOK_VERSION = exports.GROUP_CLAUDE_MEMORY_SETTING_SOURCE_POLICY_VERSION = exports.GROUP_CLAUDE_MEMORY_EXTERNAL_INCLUDE_APPROVAL_VERSION = exports.GROUP_CLAUDE_MEMORY_INCLUDE_AUDIT_VERSION = exports.GROUP_GLOBAL_CLAUDE_MEMORY_IMPORT_VERSION = exports.GROUP_PROJECT_MEMORY_IMPORT_VERSION = exports.GROUP_TYPED_MEMORY_LOAD_PLAN_MAX_INCLUDE_DEPTH = exports.GROUP_TYPED_MEMORY_LOAD_PLAN_MAX_ENTRIES = exports.GROUP_TYPED_MEMORY_LOAD_PLAN_VERSION = exports.GROUP_TYPED_MEMORY_PRESSURE_RECALL_USAGE_CROSS_GROUP_MAX_GROUPS = exports.GROUP_TYPED_MEMORY_PRESSURE_RECALL_USAGE_STALE_AFTER_DAYS = exports.GROUP_TYPED_MEMORY_PRESSURE_RECALL_USAGE_HALF_LIFE_DAYS = exports.GROUP_TYPED_MEMORY_PRESSURE_RECALL_USAGE_LEDGER = exports.GROUP_TYPED_MEMORY_RECALL_LEDGER = exports.GROUP_TYPED_MEMORY_MAX_RECALL = exports.GROUP_TYPED_MEMORY_MAX_INDEX_BYTES = exports.GROUP_TYPED_MEMORY_MAX_INDEX_LINES = exports.GROUP_TYPED_MEMORY_ENTRYPOINT = exports.GROUP_TYPED_MEMORY_VERSION = void 0;
 exports.buildClaudeMemorySettingSourcePolicy = buildClaudeMemorySettingSourcePolicy;
 exports.deriveGroupTypedMemoryTargetPaths = deriveGroupTypedMemoryTargetPaths;
 exports.readGroupTypedMemoryPressureRecallUsageLedger = readGroupTypedMemoryPressureRecallUsageLedger;
@@ -65,11 +65,23 @@ exports.buildGroupTypedMemoryLoadPlan = buildGroupTypedMemoryLoadPlan;
 exports.renderGroupTypedMemoryLoadPlan = renderGroupTypedMemoryLoadPlan;
 exports.readGroupTypedMemoryDistillationLedger = readGroupTypedMemoryDistillationLedger;
 exports.distillProviderReproofReceiptConsumptionToTypedMemory = distillProviderReproofReceiptConsumptionToTypedMemory;
+exports.distillProviderRankingProvenanceCompactRepairReceiptConsumptionToTypedMemory = distillProviderRankingProvenanceCompactRepairReceiptConsumptionToTypedMemory;
+exports.distillPostCompactReinjectionRepairReceiptConsumptionToTypedMemory = distillPostCompactReinjectionRepairReceiptConsumptionToTypedMemory;
+exports.distillPostCompactReceiptMemoryUsageRepairCompletionToTypedMemory = distillPostCompactReceiptMemoryUsageRepairCompletionToTypedMemory;
+exports.distillProviderRankingMemoryUsageReceiptRepairToTypedMemory = distillProviderRankingMemoryUsageReceiptRepairToTypedMemory;
 exports.distillProviderDispatchOverrideFollowupToTypedMemory = distillProviderDispatchOverrideFollowupToTypedMemory;
+exports.distillProviderSwitchExecutionToTypedMemory = distillProviderSwitchExecutionToTypedMemory;
+exports.distillProviderDispatchOverrideFollowupReceiptValidationToTypedMemory = distillProviderDispatchOverrideFollowupReceiptValidationToTypedMemory;
 exports.distillIgnoreMemoryReceiptRepairToTypedMemory = distillIgnoreMemoryReceiptRepairToTypedMemory;
 exports.distillPressureMemoryProvenanceReceiptRepairToTypedMemory = distillPressureMemoryProvenanceReceiptRepairToTypedMemory;
 exports.distillPressureProvenancePreDispatchComplianceToTypedMemory = distillPressureProvenancePreDispatchComplianceToTypedMemory;
 exports.distillPressureProvenancePreDispatchComplianceRecoveryToTypedMemory = distillPressureProvenancePreDispatchComplianceRecoveryToTypedMemory;
+exports.buildCrossGroupProviderDispatchReliabilitySignal = buildCrossGroupProviderDispatchReliabilitySignal;
+exports.buildGlobalProviderDispatchReliabilitySignals = buildGlobalProviderDispatchReliabilitySignals;
+exports.getGlobalProviderDispatchReliabilitySnapshotFile = getGlobalProviderDispatchReliabilitySnapshotFile;
+exports.writeGlobalProviderDispatchReliabilitySnapshot = writeGlobalProviderDispatchReliabilitySnapshot;
+exports.readGlobalProviderDispatchReliabilitySnapshot = readGlobalProviderDispatchReliabilitySnapshot;
+exports.getOrRefreshGlobalProviderDispatchReliabilitySnapshot = getOrRefreshGlobalProviderDispatchReliabilitySnapshot;
 exports.buildPressureProvenancePreDispatchComplianceDispatchPolicy = buildPressureProvenancePreDispatchComplianceDispatchPolicy;
 exports.distillContextUsageRepairToTypedMemory = distillContextUsageRepairToTypedMemory;
 exports.distillCompactStrategyToTypedMemory = distillCompactStrategyToTypedMemory;
@@ -98,6 +110,8 @@ exports.runGroupInstructionsLoadedHookPipelineSelfTest = runGroupInstructionsLoa
 exports.runGroupTypedMemoryLogDistillationSelfTest = runGroupTypedMemoryLogDistillationSelfTest;
 exports.runGroupTypedMemoryPostCompactUsageDistillationSelfTest = runGroupTypedMemoryPostCompactUsageDistillationSelfTest;
 exports.runGroupTypedMemoryProviderReproofReceiptConsumptionDistillationSelfTest = runGroupTypedMemoryProviderReproofReceiptConsumptionDistillationSelfTest;
+exports.runGroupTypedMemoryProviderRankingProvenanceCompactRepairReceiptConsumptionDistillationSelfTest = runGroupTypedMemoryProviderRankingProvenanceCompactRepairReceiptConsumptionDistillationSelfTest;
+exports.runGroupTypedMemoryPostCompactReinjectionRepairReceiptConsumptionDistillationSelfTest = runGroupTypedMemoryPostCompactReinjectionRepairReceiptConsumptionDistillationSelfTest;
 exports.runGroupTypedMemoryDistillationQualitySelfTest = runGroupTypedMemoryDistillationQualitySelfTest;
 const crypto = __importStar(require("crypto"));
 const fs = __importStar(require("fs"));
@@ -129,16 +143,27 @@ exports.GROUP_TYPED_MEMORY_DISTILLATION_MAX_MESSAGES = 1200;
 exports.GROUP_TYPED_MEMORY_DISTILLATION_FACT_LIMIT = 100;
 exports.GROUP_TYPED_MEMORY_DISTILLATION_QUALITY_VERSION = 1;
 exports.GROUP_PROVIDER_REPROOF_RECEIPT_CONSUMPTION_DISTILLATION_VERSION = 1;
+exports.GROUP_PROVIDER_RANKING_PROVENANCE_COMPACT_REPAIR_RECEIPT_CONSUMPTION_DISTILLATION_VERSION = 1;
+exports.GROUP_POST_COMPACT_REINJECTION_REPAIR_RECEIPT_CONSUMPTION_DISTILLATION_VERSION = 1;
+exports.GROUP_POST_COMPACT_RECEIPT_MEMORY_USAGE_REPAIR_COMPLETION_DISTILLATION_VERSION = 1;
+exports.GROUP_PROVIDER_RANKING_MEMORY_USAGE_RECEIPT_REPAIR_DISTILLATION_VERSION = 1;
 exports.GROUP_IGNORE_MEMORY_RECEIPT_REPAIR_DISTILLATION_VERSION = 1;
 exports.GROUP_PRESSURE_MEMORY_PROVENANCE_RECEIPT_REPAIR_DISTILLATION_VERSION = 1;
 exports.GROUP_PRESSURE_PROVENANCE_PRE_DISPATCH_COMPLIANCE_DISTILLATION_VERSION = 1;
 exports.GROUP_PRESSURE_PROVENANCE_PROVIDER_DISPATCH_OVERRIDE_FOLLOWUP_DISTILLATION_VERSION = 1;
+exports.GROUP_PRESSURE_PROVENANCE_PROVIDER_DISPATCH_OVERRIDE_FOLLOWUP_RECEIPT_VALIDATION_DISTILLATION_VERSION = 1;
+exports.GROUP_PROVIDER_SWITCH_EXECUTION_DISTILLATION_VERSION = 1;
+exports.GROUP_PROVIDER_DISPATCH_RELIABILITY_HALF_LIFE_DAYS = 14;
+exports.GROUP_PROVIDER_DISPATCH_RELIABILITY_MAX_SOURCE_GROUPS = 32;
+exports.GLOBAL_PROVIDER_DISPATCH_RELIABILITY_SNAPSHOT_VERSION = 1;
+exports.GLOBAL_PROVIDER_DISPATCH_RELIABILITY_SNAPSHOT_TTL_MS = 15 * 60 * 1000;
 exports.GROUP_CONTEXT_USAGE_REPAIR_DISTILLATION_VERSION = 1;
 exports.GROUP_COMPACT_STRATEGY_TYPED_MEMORY_DISTILLATION_VERSION = 1;
 exports.GROUP_PTL_EMERGENCY_TYPED_MEMORY_DISTILLATION_VERSION = 1;
 exports.GROUP_CLAUDE_MEMORY_EXTERNAL_INCLUDE_APPROVAL_LEDGER = ".claude-external-include-approvals.json";
 exports.GROUP_CLAUDE_INSTRUCTIONS_LOADED_HOOK_LEDGER = ".instructions-loaded-hooks.json";
 const GROUP_TYPED_MEMORY_DIR = path.join(utils_1.CCM_DIR, "group-memory-md");
+const GLOBAL_PROVIDER_DISPATCH_RELIABILITY_DIR = path.join(utils_1.CCM_DIR, "global-provider-reliability");
 const GROUP_MEMORY_REPLAY_REPAIR_WORK_ITEMS_DIR = path.join(utils_1.CCM_DIR, "group-memory-replay-repair-work-items");
 const VALID_TYPES = new Set(["user", "feedback", "project", "reference"]);
 const CLAUDE_EDITABLE_SETTING_SOURCES = ["userSettings", "projectSettings", "localSettings"];
@@ -3100,6 +3125,10 @@ function preservedGroupTypedMemoryDistillationArchives(...ledgers) {
         "pressureProvenancePreDispatchComplianceArchive",
         "pressureProvenancePreDispatchComplianceRecoveryArchive",
         "pressureProvenanceProviderDispatchOverrideFollowupArchive",
+        "providerSwitchExecutionArchive",
+        "providerRankingProvenanceCompactRepairReceiptConsumptionArchive",
+        "postCompactReinjectionRepairReceiptConsumptionArchive",
+        "providerRankingMemoryUsageReceiptRepairArchive",
         "contextUsageRepairArchive",
         "compactStrategyTypedArchive",
         "ptlEmergencyTypedArchive",
@@ -3360,6 +3389,1062 @@ function distillProviderReproofReceiptConsumptionToTypedMemory(groupId, input = 
         promotedCount: archive.promoted_count,
         cautionCount: archive.caution_count,
         strongReceiptClaimCount: archive.strong_receipt_claim_count,
+        newRowCount: merged.newRowCount,
+        updatedRowCount: merged.updatedRowCount,
+        prunedRowCount: merged.prunedRowCount,
+        writeCount: writes.length,
+        writes,
+        index,
+        archive,
+        distilledAt: updatedAt,
+    };
+}
+function providerRankingProvenanceCompactRepairReceiptConsumptionInputRows(input = {}) {
+    if (Array.isArray(input))
+        return input;
+    const rows = [
+        ...(Array.isArray(input.rows) ? input.rows : []),
+        ...(Array.isArray(input.entries) ? input.entries : []),
+        ...(Array.isArray(input.bindings) ? input.bindings : []),
+    ];
+    if (rows.length)
+        return rows;
+    const reportGroups = Array.isArray(input.report?.groups) ? input.report.groups : Array.isArray(input.groups) ? input.groups : [];
+    return reportGroups.flatMap((group) => Array.isArray(group.bindings) ? group.bindings : []);
+}
+function providerRankingProvenanceStringList(...values) {
+    return uniqueStrings(values.flatMap(value => {
+        if (Array.isArray(value))
+            return value;
+        if (value === undefined || value === null || value === "")
+            return [];
+        return [value];
+    }).map((item) => String(item || "").trim()).filter(Boolean), 48);
+}
+function providerRankingProvenanceCompactRepairReceiptConsumptionRowId(row = {}) {
+    return `provider-ranking-compact-repair-receipt:${checksum([
+        row.timeline_binding_id,
+        row.brief_id,
+        row.work_item_id,
+        row.task_id,
+        row.project,
+        row.provider_switch_decision_receipt_id,
+        row.provider_switch_decision_receipt_checksum,
+        row.typed_memory_rel_paths,
+        row.typed_memory_row_ids,
+    ], 24)}`;
+}
+function normalizeProviderRankingProvenanceCompactRepairReceiptConsumptionRows(input = {}, options = {}) {
+    const fallbackGroupId = String(options.groupId || options.group_id || input.groupId || input.group_id || "").trim();
+    return providerRankingProvenanceCompactRepairReceiptConsumptionInputRows(input).map((raw, index) => {
+        const entry = raw?.entry || raw?.binding || raw || {};
+        const source = String(entry.source || entry.dispatch_source || raw?.source || "").trim();
+        const status = normalizeProviderReproofReceiptConsumptionStatus(entry.replay_repair_consumption_status
+            || entry.replayRepairConsumptionStatus
+            || entry.usage_state
+            || entry.usageState
+            || raw?.status);
+        const relPaths = providerRankingProvenanceStringList(entry.provider_ranking_provenance_rel_paths, entry.providerRankingProvenanceRelPaths, entry.typed_memory_rel_paths, entry.typedMemoryRelPaths, raw?.provider_ranking_provenance_rel_paths, raw?.typed_memory_rel_paths);
+        const rowIds = providerRankingProvenanceStringList(entry.provider_ranking_provenance_row_ids, entry.providerRankingProvenanceRowIds, entry.typed_memory_row_ids, entry.typedMemoryRowIds, raw?.provider_ranking_provenance_row_ids, raw?.typed_memory_row_ids);
+        const preserved = entry.provider_ranking_provenance_preserved === true
+            || entry.providerRankingProvenancePreserved === true
+            || raw?.provider_ranking_provenance_preserved === true
+            || raw?.providerRankingProvenancePreserved === true;
+        const verified = entry.provider_ranking_provenance_receipt_consumption_verified === true
+            || entry.providerRankingProvenanceReceiptConsumptionVerified === true
+            || raw?.provider_ranking_provenance_receipt_consumption_verified === true;
+        const repairStatus = String(entry.provider_ranking_provenance_repair_status || entry.repairStatus || entry.repair_status || raw?.provider_ranking_provenance_repair_status || "").trim().toLowerCase();
+        const repairGapType = String(entry.provider_ranking_provenance_repair_gap_type || entry.repairGapType || entry.repair_gap_type || raw?.provider_ranking_provenance_repair_gap_type || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+        const row = {
+            schema: "ccm-provider-ranking-provenance-compact-repair-receipt-consumption-distilled-row-v1",
+            version: exports.GROUP_PROVIDER_RANKING_PROVENANCE_COMPACT_REPAIR_RECEIPT_CONSUMPTION_DISTILLATION_VERSION,
+            groupId: String(entry.groupId || entry.group_id || raw?.groupId || raw?.group_id || fallbackGroupId || "").trim(),
+            timeline_binding_id: String(entry.timeline_binding_id || entry.timelineBindingId || raw?.timeline_binding_id || "").trim(),
+            brief_id: String(entry.brief_id || entry.briefId || raw?.brief_id || "").trim(),
+            work_item_id: String(entry.work_item_id || entry.workItemId || raw?.work_item_id || "").trim(),
+            task_id: String(entry.task_id || entry.taskId || raw?.task_id || "").trim(),
+            project: String(entry.project || entry.target_project || entry.targetProject || raw?.project || "").trim(),
+            dispatch_source: source,
+            status,
+            consumption_source: String(entry.replay_repair_consumption_source || entry.replayRepairConsumptionSource || raw?.replay_repair_consumption_source || raw?.consumption_source || "").trim(),
+            consumption_state: String(entry.replay_repair_consumption_state || entry.replayRepairConsumptionState || raw?.replay_repair_consumption_state || raw?.usage_state || raw?.usageState || "").trim(),
+            reason: compactText(entry.replay_repair_consumption_reason || entry.replayRepairConsumptionReason || raw?.reason || raw?.summary || "", 900),
+            receipt_status: String(entry.receipt_status || entry.receiptStatus || raw?.receipt_status || "").trim().toLowerCase(),
+            provider_switch_decision_receipt_id: String(entry.provider_switch_decision_receipt_id || entry.providerSwitchDecisionReceiptId || raw?.provider_switch_decision_receipt_id || "").trim(),
+            provider_switch_decision_receipt_checksum: String(entry.provider_switch_decision_receipt_checksum || entry.providerSwitchDecisionReceiptChecksum || raw?.provider_switch_decision_receipt_checksum || "").trim(),
+            typed_memory_rel_paths: relPaths,
+            typed_memory_row_ids: rowIds,
+            provider_ranking_provenance_preserved: preserved,
+            provider_ranking_provenance_receipt_consumption_verified: verified,
+            provider_ranking_provenance_repair_status: repairStatus,
+            provider_ranking_provenance_repair_gap_type: repairGapType,
+            worker_context_packet_id: String(entry.worker_context_packet_id || entry.workerContextPacketId || raw?.worker_context_packet_id || "").trim(),
+            task_agent_session_id: String(entry.task_agent_session_id || entry.taskAgentSessionId || raw?.task_agent_session_id || "").trim(),
+            memory_context_snapshot_id: String(entry.memory_context_snapshot_id || entry.memoryContextSnapshotId || raw?.memory_context_snapshot_id || "").trim(),
+            execution_id: String(entry.execution_id || entry.executionId || raw?.execution_id || "").trim(),
+            first_seen_at: String(entry.first_seen_at || entry.firstSeenAt || entry.at || raw?.first_seen_at || raw?.at || options.updatedAt || now()),
+            last_seen_at: String(entry.updated_at || entry.updatedAt || entry.at || raw?.updated_at || raw?.at || options.updatedAt || now()),
+            source_index: Number(raw?.source_index || raw?.sourceIndex || index),
+        };
+        return { ...row, row_id: providerRankingProvenanceCompactRepairReceiptConsumptionRowId(row) };
+    }).filter((row) => row.groupId || fallbackGroupId)
+        .filter((row) => row.dispatch_source === "worker_context_provider_ranking_provenance_compact_repair")
+        .filter((row) => row.status === "verified")
+        .filter((row) => row.provider_ranking_provenance_receipt_consumption_verified === true)
+        .filter((row) => row.provider_ranking_provenance_preserved === true)
+        .filter((row) => row.provider_ranking_provenance_repair_status === "completed")
+        .filter((row) => row.provider_ranking_provenance_repair_gap_type === "provider_ranking_provenance_compact")
+        .filter((row) => row.provider_switch_decision_receipt_id && row.provider_switch_decision_receipt_checksum)
+        .filter((row) => row.typed_memory_rel_paths.length > 0 && row.typed_memory_row_ids.length > 0);
+}
+function mergeProviderRankingProvenanceCompactRepairReceiptConsumptionRows(existing = [], incoming = [], options = {}) {
+    const updatedAt = String(options.updatedAt || now());
+    const merged = new Map();
+    for (const row of existing || []) {
+        const id = String(row.row_id || providerRankingProvenanceCompactRepairReceiptConsumptionRowId(row));
+        merged.set(id, { ...row, row_id: id });
+    }
+    const previousIds = new Set(merged.keys());
+    const incomingIds = new Set();
+    for (const row of incoming || []) {
+        const id = String(row.row_id || providerRankingProvenanceCompactRepairReceiptConsumptionRowId(row));
+        incomingIds.add(id);
+        const previous = merged.get(id);
+        merged.set(id, {
+            ...(previous || {}),
+            ...row,
+            row_id: id,
+            first_seen_at: previous?.first_seen_at || row.first_seen_at || updatedAt,
+            last_seen_at: updatedAt,
+            seen_count: Number(previous?.seen_count || 0) + 1,
+        });
+    }
+    const limit = Math.max(1, Math.min(300, Number(options.limit || options.maxRows || options.max_rows || 120)));
+    const rows = [...merged.values()]
+        .sort((a, b) => String(a.last_seen_at || "").localeCompare(String(b.last_seen_at || "")) || Number(a.source_index || 0) - Number(b.source_index || 0))
+        .slice(-limit);
+    const currentIds = new Set(rows.map((row) => row.row_id));
+    return {
+        rows,
+        newRowCount: rows.filter((row) => !previousIds.has(row.row_id)).length,
+        updatedRowCount: rows.filter((row) => previousIds.has(row.row_id) && incomingIds.has(row.row_id)).length,
+        prunedRowCount: Math.max(0, merged.size - currentIds.size),
+    };
+}
+function providerRankingProvenanceCompactRepairReceiptConsumptionArchive(rows = [], options = {}) {
+    const updatedAt = String(options.updatedAt || now());
+    const relPaths = uniqueStrings(rows.flatMap((row) => row.typed_memory_rel_paths || []), 80);
+    const rowIds = uniqueStrings(rows.flatMap((row) => row.typed_memory_row_ids || []), 120);
+    return {
+        schema: "ccm-provider-ranking-provenance-compact-repair-receipt-consumption-distillation-v1",
+        version: exports.GROUP_PROVIDER_RANKING_PROVENANCE_COMPACT_REPAIR_RECEIPT_CONSUMPTION_DISTILLATION_VERSION,
+        archived_count: rows.length,
+        verified_count: rows.filter((row) => row.status === "verified").length,
+        preserved_count: rows.filter((row) => row.provider_ranking_provenance_preserved === true).length,
+        receipt_count: uniqueStrings(rows.map((row) => row.provider_switch_decision_receipt_id).filter(Boolean), 120).length,
+        rel_path_count: relPaths.length,
+        row_id_count: rowIds.length,
+        typed_memory_rel_paths: relPaths,
+        typed_memory_row_ids: rowIds,
+        rows,
+        updatedAt,
+    };
+}
+function renderProviderRankingProvenanceCompactRepairReceiptConsumptionBody(archive = {}, options = {}) {
+    const rows = Array.isArray(archive.rows) ? archive.rows : [];
+    const lines = [
+        "# Provider Ranking Provenance Compact Repair Receipt Memory",
+        "",
+        `Generated by CCM provider ranking provenance compact repair receipt distillation at ${options.updatedAt || now()}.`,
+        "Each row came from a verified replayRepairDispatchBriefUsage receipt after a provider ranking provenance compact repair brief was injected into a child Agent WorkerContextPacket.",
+        "Stable rule: provider switch execution history is ranking evidence only, not authorization. These rows help future Agents recall how to preserve typed MEMORY.md provider ranking provenance through compact retry; they do not authorize provider switches.",
+        "",
+        "## Verified Repair Receipts",
+    ];
+    for (const row of rows.slice(-80).reverse()) {
+        const ids = [
+            row.project ? `project=${row.project}` : "",
+            row.task_id ? `task=${row.task_id}` : "",
+            row.brief_id ? `brief=${row.brief_id}` : "",
+            row.work_item_id ? `work_item=${row.work_item_id}` : "",
+            row.provider_switch_decision_receipt_id ? `providerReceipt=${row.provider_switch_decision_receipt_id}` : "",
+            row.worker_context_packet_id ? `packet=${row.worker_context_packet_id}` : "",
+        ].filter(Boolean).join("; ");
+        lines.push(`- [verified] ${ids || row.row_id}; preserved=${row.provider_ranking_provenance_preserved === true}; repair=${row.provider_ranking_provenance_repair_gap_type || "provider_ranking_provenance_compact"}.`);
+        if (row.typed_memory_rel_paths?.length)
+            lines.push(`  Typed MEMORY.md relPaths: ${row.typed_memory_rel_paths.slice(0, 8).join(", ")}.`);
+        if (row.typed_memory_row_ids?.length)
+            lines.push(`  Typed MEMORY.md rowIds: ${row.typed_memory_row_ids.slice(0, 10).join(", ")}.`);
+        if (row.provider_switch_decision_receipt_checksum)
+            lines.push(`  Provider switch receipt checksum: ${row.provider_switch_decision_receipt_checksum}.`);
+        if (row.reason)
+            lines.push(`  Receipt reason: ${compactText(row.reason, 700).replace(/\n/g, " ")}`);
+    }
+    lines.push("");
+    lines.push("## Dispatch Reminder");
+    lines.push("- For future compact retries, keep provider ranking provenance compact-safe by preserving typed MEMORY.md rel paths, row ids, and the matching provider switch decision receipt checksum in the WorkerContextPacket and compact outcome ledger.");
+    lines.push("- Never use this memory as provider-switch authority; require a fresh valid provider switch decision receipt for each explicit switch.");
+    return lines.join("\n").trim() + "\n";
+}
+function distillProviderRankingProvenanceCompactRepairReceiptConsumptionToTypedMemory(groupId, input = {}, options = {}) {
+    if (options.disabled === true || options.disableDistillation === true || options.disable_distillation === true) {
+        return {
+            schema: "ccm-provider-ranking-provenance-compact-repair-receipt-consumption-distillation-v1",
+            version: exports.GROUP_PROVIDER_RANKING_PROVENANCE_COMPACT_REPAIR_RECEIPT_CONSUMPTION_DISTILLATION_VERSION,
+            groupId,
+            skipped: true,
+            reason: "disabled",
+        };
+    }
+    const updatedAt = String(options.updatedAt || options.updated_at || now());
+    const ledger = readGroupTypedMemoryDistillationLedger(groupId);
+    const incomingRows = normalizeProviderRankingProvenanceCompactRepairReceiptConsumptionRows(input, { ...options, groupId, updatedAt });
+    const previousArchive = ledger.providerRankingProvenanceCompactRepairReceiptConsumptionArchive || {};
+    const previousRows = Array.isArray(previousArchive.rows) ? previousArchive.rows : [];
+    const merged = mergeProviderRankingProvenanceCompactRepairReceiptConsumptionRows(previousRows, incomingRows, { ...options, updatedAt });
+    const archive = providerRankingProvenanceCompactRepairReceiptConsumptionArchive(merged.rows, { updatedAt });
+    const writes = [];
+    if (archive.rows.length) {
+        writes.push(upsertGroupTypedMemoryDocument(groupId, {
+            type: "reference",
+            slug: "provider-ranking-provenance-compact-repair-receipt-memory",
+            name: "Provider ranking provenance compact repair receipt memory",
+            description: "Verified child Agent receipts proving provider ranking provenance compact repair consumed typed MEMORY.md and provider switch receipt context.",
+            source: "auto:provider-ranking-provenance-compact-repair-receipt-consumption-distillation",
+            updatedAt,
+            body: renderProviderRankingProvenanceCompactRepairReceiptConsumptionBody(archive, { updatedAt }),
+            maxBodyChars: Number(options.maxBodyChars || options.max_body_chars || 20_000),
+        }));
+    }
+    const ledgerState = { ...ledger };
+    delete ledgerState.file;
+    writeJsonAtomic(ledger.file, {
+        ...ledgerState,
+        schema: "ccm-group-typed-memory-distillation-ledger-v1",
+        version: exports.GROUP_TYPED_MEMORY_DISTILLATION_VERSION,
+        groupId,
+        facts: ledger.facts || {},
+        providerRankingProvenanceCompactRepairReceiptConsumptionArchive: archive,
+        updatedAt,
+    });
+    const index = buildGroupTypedMemoryIndex(groupId);
+    return {
+        schema: "ccm-provider-ranking-provenance-compact-repair-receipt-consumption-distillation-v1",
+        version: exports.GROUP_PROVIDER_RANKING_PROVENANCE_COMPACT_REPAIR_RECEIPT_CONSUMPTION_DISTILLATION_VERSION,
+        groupId,
+        skipped: false,
+        reason: compactText(options.reason || "", 220),
+        ledgerFile: ledger.file,
+        incomingRowCount: incomingRows.length,
+        archivedCount: archive.archived_count,
+        verifiedCount: archive.verified_count,
+        preservedCount: archive.preserved_count,
+        receiptCount: archive.receipt_count,
+        relPathCount: archive.rel_path_count,
+        rowIdCount: archive.row_id_count,
+        newRowCount: merged.newRowCount,
+        updatedRowCount: merged.updatedRowCount,
+        prunedRowCount: merged.prunedRowCount,
+        writeCount: writes.length,
+        writes,
+        index,
+        archive,
+        distilledAt: updatedAt,
+    };
+}
+function postCompactReinjectionRepairReceiptConsumptionInputRows(input = {}) {
+    if (Array.isArray(input))
+        return input;
+    const rows = [
+        ...(Array.isArray(input.rows) ? input.rows : []),
+        ...(Array.isArray(input.entries) ? input.entries : []),
+        ...(Array.isArray(input.bindings) ? input.bindings : []),
+    ];
+    if (rows.length)
+        return rows;
+    const groups = Array.isArray(input.report?.groups) ? input.report.groups : Array.isArray(input.groups) ? input.groups : [];
+    return groups.flatMap((group) => [
+        ...(Array.isArray(group.rows) ? group.rows : []),
+        ...(Array.isArray(group.bindings) ? group.bindings : []),
+    ].map((row) => ({ ...row, groupId: row.groupId || group.groupId || group.group_id || "" })));
+}
+function normalizePostCompactReinjectionRepairReceiptUsageState(value) {
+    const state = String(value || "").trim().toLowerCase();
+    if (["used", "consumed", "applied"].includes(state))
+        return "used";
+    if (["verified", "checked", "rechecked", "reviewed", "validated", "confirmed"].includes(state))
+        return "verified";
+    if (["ignored", "skipped", "unused", "not_used", "not-used", "not used"].includes(state))
+        return "ignored";
+    return "";
+}
+function postCompactReinjectionRepairReceiptConsumptionRowId(row = {}) {
+    return `post-compact-reinjection-repair-receipt:${checksum([
+        row.timeline_binding_id,
+        row.brief_id,
+        row.work_item_id,
+        row.reinjection_gate_id,
+        row.post_compact_candidate_id,
+        row.task_agent_session_id,
+        row.native_session_id,
+        row.completion_source,
+        row.resolution_reason,
+    ], 24)}`;
+}
+function normalizePostCompactReinjectionRepairReceiptConsumptionRows(input = {}, options = {}) {
+    const fallbackGroupId = String(options.groupId || options.group_id || input.groupId || input.group_id || "").trim();
+    return postCompactReinjectionRepairReceiptConsumptionInputRows(input).map((raw, index) => {
+        const entry = raw?.entry || raw?.binding || raw || {};
+        const workItem = raw?.work_item || raw?.workItem || {};
+        const usageState = normalizePostCompactReinjectionRepairReceiptUsageState(entry.post_compact_reinjection_receipt_usage_state
+            || entry.postCompactReinjectionReceiptUsageState
+            || raw?.usage_state
+            || raw?.usageState);
+        const completionSource = String(raw?.completion_source
+            || raw?.completionSource
+            || workItem.completion_source
+            || workItem.completionSource
+            || entry.completion_source
+            || entry.completionSource
+            || "").trim();
+        const resolutionReason = String(raw?.resolution_reason
+            || raw?.resolutionReason
+            || workItem.resolution_reason
+            || workItem.resolutionReason
+            || entry.resolution_reason
+            || entry.resolutionReason
+            || "").trim();
+        const row = {
+            schema: "ccm-post-compact-reinjection-repair-receipt-consumption-distilled-row-v1",
+            version: exports.GROUP_POST_COMPACT_REINJECTION_REPAIR_RECEIPT_CONSUMPTION_DISTILLATION_VERSION,
+            groupId: String(entry.groupId || entry.group_id || raw?.groupId || raw?.group_id || fallbackGroupId || "").trim(),
+            timeline_binding_id: String(entry.timeline_binding_id || entry.timelineBindingId || raw?.timeline_binding_id || "").trim(),
+            brief_id: String(entry.brief_id || entry.briefId || raw?.brief_id || "").trim(),
+            work_item_id: String(entry.work_item_id || entry.workItemId || workItem.work_item_id || workItem.id || raw?.work_item_id || "").trim(),
+            task_id: String(entry.task_id || entry.taskId || raw?.task_id || "").trim(),
+            project: String(entry.project || entry.target_project || entry.targetProject || raw?.project || "").trim(),
+            dispatch_source: String(entry.source || entry.dispatch_source || raw?.source || "").trim(),
+            component: String(entry.component || raw?.component || "").trim(),
+            assignment_id: String(entry.assignment_id || entry.assignmentId || raw?.assignment_id || "").trim(),
+            dispatch_key: String(entry.dispatch_key || entry.dispatchKey || raw?.dispatch_key || "").trim(),
+            reinjection_gate_id: String(entry.reinjection_gate_id || entry.reinjectionGateId || raw?.reinjection_gate_id || workItem.reinjection_gate_id || "").trim(),
+            post_compact_candidate_id: String(entry.post_compact_candidate_id || entry.postCompactCandidateId || raw?.post_compact_candidate_id || workItem.post_compact_candidate_id || "").trim(),
+            post_compact_candidate_kind: String(entry.post_compact_candidate_kind || entry.postCompactCandidateKind || raw?.post_compact_candidate_kind || workItem.post_compact_candidate_kind || "").trim(),
+            post_compact_candidate_value: compactText(entry.post_compact_candidate_value || entry.postCompactCandidateValue || raw?.post_compact_candidate_value || workItem.post_compact_candidate_value || "", 1200),
+            post_compact_candidate_source_message_id: String(entry.post_compact_candidate_source_message_id || entry.postCompactCandidateSourceMessageId || raw?.post_compact_candidate_source_message_id || workItem.post_compact_candidate_source_message_id || "").trim(),
+            usage_state: usageState,
+            category: usageState === "ignored" ? "caution" : "restored",
+            current_source_verified: entry.post_compact_reinjection_current_source_verified === true
+                || entry.postCompactReinjectionCurrentSourceVerified === true
+                || raw?.current_source_verified === true
+                || raw?.currentSourceVerified === true,
+            receipt_reason: compactText(entry.post_compact_reinjection_receipt_reason || entry.postCompactReinjectionReceiptReason || raw?.receipt_reason || raw?.reason || "", 900),
+            memory_receipt_matched: entry.post_compact_reinjection_memory_receipt_matched === true
+                || entry.postCompactReinjectionMemoryReceiptMatched === true
+                || raw?.memory_receipt_matched === true,
+            task_session_matched: entry.post_compact_reinjection_task_session_matched === true
+                || entry.postCompactReinjectionTaskSessionMatched === true
+                || raw?.task_session_matched === true,
+            native_session_matched: entry.post_compact_reinjection_native_session_matched === true
+                || entry.postCompactReinjectionNativeSessionMatched === true
+                || raw?.native_session_matched === true,
+            receipt_verified: entry.post_compact_reinjection_receipt_verified === true
+                || entry.postCompactReinjectionReceiptVerified === true
+                || raw?.receipt_verified === true,
+            receipt_status: String(entry.receipt_status || entry.receiptStatus || raw?.receipt_status || "").trim().toLowerCase(),
+            consumption_status: String(entry.replay_repair_consumption_status || entry.replayRepairConsumptionStatus || raw?.consumption_status || "").trim().toLowerCase(),
+            consumption_source: String(entry.replay_repair_consumption_source || entry.replayRepairConsumptionSource || raw?.consumption_source || "").trim(),
+            worker_context_packet_id: String(entry.worker_context_packet_id || entry.workerContextPacketId || raw?.worker_context_packet_id || "").trim(),
+            worker_handoff_id: String(entry.worker_handoff_id || entry.workerHandoffId || raw?.worker_handoff_id || "").trim(),
+            memory_context_snapshot_id: String(entry.memory_context_snapshot_id || entry.memoryContextSnapshotId || raw?.memory_context_snapshot_id || "").trim(),
+            memory_context_snapshot_checksum: String(entry.memory_context_snapshot_checksum || entry.memoryContextSnapshotChecksum || raw?.memory_context_snapshot_checksum || "").trim(),
+            task_agent_session_id: String(entry.task_agent_session_id || entry.taskAgentSessionId || raw?.task_agent_session_id || "").trim(),
+            native_session_id: String(entry.native_session_id || entry.nativeSessionId || raw?.native_session_id || "").trim(),
+            execution_id: String(entry.execution_id || entry.executionId || raw?.execution_id || "").trim(),
+            event_types: uniqueStrings(Array.isArray(entry.event_types) ? entry.event_types : Array.isArray(raw?.event_types) ? raw.event_types : [], 24),
+            completion_source: completionSource,
+            resolution_reason: resolutionReason,
+            completed_at: String(raw?.completed_at || raw?.completedAt || workItem.completedAt || workItem.completed_at || entry.completed_at || entry.updated_at || options.updatedAt || now()),
+            first_seen_at: String(entry.first_seen_at || entry.firstSeenAt || entry.at || raw?.first_seen_at || raw?.at || options.updatedAt || now()),
+            last_seen_at: String(entry.updated_at || entry.updatedAt || entry.at || raw?.updated_at || raw?.at || options.updatedAt || now()),
+            reuse_policy: "historical_repair_evidence_requires_current_source_reverification",
+            source_index: Number(raw?.source_index || raw?.sourceIndex || index),
+        };
+        return { ...row, row_id: postCompactReinjectionRepairReceiptConsumptionRowId(row) };
+    }).filter((row) => row.groupId || fallbackGroupId)
+        .filter((row) => row.dispatch_source === "compact_boundary_replay_repair")
+        .filter((row) => row.component === "post_compact_reinject")
+        .filter((row) => ["used", "verified", "ignored"].includes(row.usage_state))
+        .filter((row) => row.receipt_verified === true)
+        .filter((row) => row.memory_receipt_matched === true)
+        .filter((row) => row.task_session_matched === true && row.native_session_matched === true)
+        .filter((row) => row.reinjection_gate_id && row.post_compact_candidate_id && row.post_compact_candidate_kind)
+        .filter((row) => row.brief_id && row.work_item_id && row.task_agent_session_id && row.native_session_id)
+        .filter((row) => row.usage_state === "ignored" ? !!row.receipt_reason : row.current_source_verified === true)
+        .filter((row) => row.completion_source === "post_compact_reinjection_replay_repair_receipt_consumption")
+        .filter((row) => row.resolution_reason === "post_compact_reinjection_repair_receipt_verified");
+}
+function mergePostCompactReinjectionRepairReceiptConsumptionRows(existing = [], incoming = [], options = {}) {
+    const updatedAt = String(options.updatedAt || now());
+    const merged = new Map();
+    for (const row of existing || []) {
+        const id = String(row.row_id || postCompactReinjectionRepairReceiptConsumptionRowId(row));
+        merged.set(id, { ...row, row_id: id });
+    }
+    const previousIds = new Set(merged.keys());
+    const incomingIds = new Set();
+    for (const row of incoming || []) {
+        const id = String(row.row_id || postCompactReinjectionRepairReceiptConsumptionRowId(row));
+        incomingIds.add(id);
+        const previous = merged.get(id);
+        merged.set(id, {
+            ...(previous || {}),
+            ...row,
+            row_id: id,
+            first_seen_at: previous?.first_seen_at || row.first_seen_at || updatedAt,
+            last_seen_at: updatedAt,
+            seen_count: Number(previous?.seen_count || 0) + 1,
+        });
+    }
+    const limit = Math.max(1, Math.min(300, Number(options.limit || options.maxRows || options.max_rows || 160)));
+    const rows = [...merged.values()]
+        .sort((a, b) => String(a.last_seen_at || "").localeCompare(String(b.last_seen_at || "")) || Number(a.source_index || 0) - Number(b.source_index || 0))
+        .slice(-limit);
+    const currentIds = new Set(rows.map((row) => row.row_id));
+    return {
+        rows,
+        newRowCount: rows.filter((row) => !previousIds.has(row.row_id)).length,
+        updatedRowCount: rows.filter((row) => previousIds.has(row.row_id) && incomingIds.has(row.row_id)).length,
+        prunedRowCount: Math.max(0, merged.size - currentIds.size),
+    };
+}
+function postCompactReinjectionRepairReceiptConsumptionArchive(rows = [], options = {}) {
+    const updatedAt = String(options.updatedAt || now());
+    return {
+        schema: "ccm-post-compact-reinjection-repair-receipt-consumption-distillation-v1",
+        version: exports.GROUP_POST_COMPACT_REINJECTION_REPAIR_RECEIPT_CONSUMPTION_DISTILLATION_VERSION,
+        archived_count: rows.length,
+        restored_count: rows.filter((row) => row.category === "restored").length,
+        caution_count: rows.filter((row) => row.category === "caution").length,
+        used_count: rows.filter((row) => row.usage_state === "used").length,
+        verified_count: rows.filter((row) => row.usage_state === "verified").length,
+        ignored_count: rows.filter((row) => row.usage_state === "ignored").length,
+        current_source_verified_count: rows.filter((row) => row.current_source_verified === true).length,
+        task_session_count: uniqueStrings(rows.map((row) => row.task_agent_session_id).filter(Boolean), 240).length,
+        native_session_count: uniqueStrings(rows.map((row) => row.native_session_id).filter(Boolean), 240).length,
+        rows,
+        updatedAt,
+    };
+}
+function renderPostCompactReinjectionRepairReceiptConsumptionBody(title, rows = [], options = {}) {
+    const lines = [
+        `# ${title}`,
+        "",
+        `Generated by CCM post-compact reinjection repair receipt distillation at ${options.updatedAt || now()}.`,
+        "Each row is a verified completion from the exact bound child Agent task/native session after the exact reinjection gate and candidate were classified with postCompactCandidateUsage plus matching memoryUsed or memoryIgnored evidence.",
+        "Stable boundary: historical repair completion is recovery evidence, not permanent repository truth. Future use must reverify the current source before treating the recovered candidate as fresh task context.",
+        "",
+        "## Verified Completion Rows",
+    ];
+    for (const row of rows.slice(-100).reverse()) {
+        const ids = [
+            row.project ? `project=${row.project}` : "",
+            row.task_id ? `task=${row.task_id}` : "",
+            row.work_item_id ? `work_item=${row.work_item_id}` : "",
+            row.brief_id ? `brief=${row.brief_id}` : "",
+            row.timeline_binding_id ? `timeline=${row.timeline_binding_id}` : "",
+        ].filter(Boolean).join("; ");
+        lines.push(`- [${row.usage_state}] ${ids || row.row_id}; completion_source=${row.completion_source}; resolution_reason=${row.resolution_reason}.`);
+        lines.push(`  Candidate: gate=${row.reinjection_gate_id}; id=${row.post_compact_candidate_id}; kind=${row.post_compact_candidate_kind}; value=${row.post_compact_candidate_value || ""}; source_message=${row.post_compact_candidate_source_message_id || ""}.`);
+        lines.push(`  Bound session: task_agent_session=${row.task_agent_session_id}; native_session=${row.native_session_id}; execution=${row.execution_id || ""}; packet=${row.worker_context_packet_id || ""}; handoff=${row.worker_handoff_id || ""}; snapshot=${row.memory_context_snapshot_id || ""}.`);
+        lines.push(`  Receipt: currentSourceVerified=${row.current_source_verified === true}; memoryReceiptMatched=${row.memory_receipt_matched === true}; taskSessionMatched=${row.task_session_matched === true}; nativeSessionMatched=${row.native_session_matched === true}.`);
+        if (row.receipt_reason)
+            lines.push(`  Receipt reason: ${compactText(row.receipt_reason, 900).replace(/\n/g, " ")}`);
+    }
+    lines.push("");
+    lines.push("## Reuse Rule");
+    lines.push("- Recall this memory to avoid reopening an already-proven identical repair without evidence.");
+    lines.push("- Before injecting the candidate into a future child Agent session, re-read or revalidate the current repository/source state and obtain a new usage receipt for that session.");
+    return lines.join("\n").trim() + "\n";
+}
+function distillPostCompactReinjectionRepairReceiptConsumptionToTypedMemory(groupId, input = {}, options = {}) {
+    if (options.disabled === true || options.disableDistillation === true || options.disable_distillation === true) {
+        return {
+            schema: "ccm-post-compact-reinjection-repair-receipt-consumption-distillation-v1",
+            version: exports.GROUP_POST_COMPACT_REINJECTION_REPAIR_RECEIPT_CONSUMPTION_DISTILLATION_VERSION,
+            groupId,
+            skipped: true,
+            reason: "disabled",
+        };
+    }
+    const updatedAt = String(options.updatedAt || options.updated_at || now());
+    const ledger = readGroupTypedMemoryDistillationLedger(groupId);
+    const incomingRows = normalizePostCompactReinjectionRepairReceiptConsumptionRows(input, { ...options, groupId, updatedAt });
+    const previousArchive = ledger.postCompactReinjectionRepairReceiptConsumptionArchive || {};
+    const previousRows = Array.isArray(previousArchive.rows) ? previousArchive.rows : [];
+    const merged = mergePostCompactReinjectionRepairReceiptConsumptionRows(previousRows, incomingRows, { ...options, updatedAt });
+    const archive = postCompactReinjectionRepairReceiptConsumptionArchive(merged.rows, { updatedAt });
+    const writes = [];
+    const restoredRows = archive.rows.filter((row) => row.category === "restored");
+    const cautionRows = archive.rows.filter((row) => row.category === "caution");
+    if (restoredRows.length) {
+        writes.push(upsertGroupTypedMemoryDocument(groupId, {
+            type: "reference",
+            slug: "post-compact-reinjection-repair-receipt-memory",
+            name: "Post-compact reinjection repair receipt memory",
+            description: "Verified exact gate/candidate repair completions bound to child Agent task and native sessions; historical recovery evidence requires current-source revalidation before reuse.",
+            source: "auto:post-compact-reinjection-repair-receipt-consumption-distillation",
+            updatedAt,
+            body: renderPostCompactReinjectionRepairReceiptConsumptionBody("Post-Compact Reinjection Repair Receipt Memory", restoredRows, { updatedAt }),
+            maxBodyChars: Number(options.maxBodyChars || options.max_body_chars || 24_000),
+        }));
+    }
+    if (cautionRows.length) {
+        writes.push(upsertGroupTypedMemoryDocument(groupId, {
+            type: "feedback",
+            slug: "post-compact-reinjection-repair-receipt-cautions",
+            name: "Post-compact reinjection repair receipt cautions",
+            description: "Verified ignored post-compact reinjection candidates; retain the closure evidence without promoting the ignored candidate into future task context.",
+            source: "auto:post-compact-reinjection-repair-receipt-consumption-distillation",
+            updatedAt,
+            body: renderPostCompactReinjectionRepairReceiptConsumptionBody("Post-Compact Reinjection Repair Receipt Cautions", cautionRows, { updatedAt }),
+            maxBodyChars: Number(options.maxBodyChars || options.max_body_chars || 24_000),
+        }));
+    }
+    const ledgerState = { ...ledger };
+    delete ledgerState.file;
+    writeJsonAtomic(ledger.file, {
+        ...ledgerState,
+        schema: "ccm-group-typed-memory-distillation-ledger-v1",
+        version: exports.GROUP_TYPED_MEMORY_DISTILLATION_VERSION,
+        groupId,
+        facts: ledger.facts || {},
+        postCompactReinjectionRepairReceiptConsumptionArchive: archive,
+        updatedAt,
+    });
+    const index = buildGroupTypedMemoryIndex(groupId);
+    return {
+        schema: "ccm-post-compact-reinjection-repair-receipt-consumption-distillation-v1",
+        version: exports.GROUP_POST_COMPACT_REINJECTION_REPAIR_RECEIPT_CONSUMPTION_DISTILLATION_VERSION,
+        groupId,
+        skipped: false,
+        reason: compactText(options.reason || "", 220),
+        ledgerFile: ledger.file,
+        incomingRowCount: incomingRows.length,
+        archivedCount: archive.archived_count,
+        restoredCount: archive.restored_count,
+        cautionCount: archive.caution_count,
+        usedCount: archive.used_count,
+        verifiedCount: archive.verified_count,
+        ignoredCount: archive.ignored_count,
+        currentSourceVerifiedCount: archive.current_source_verified_count,
+        taskSessionCount: archive.task_session_count,
+        nativeSessionCount: archive.native_session_count,
+        newRowCount: merged.newRowCount,
+        updatedRowCount: merged.updatedRowCount,
+        prunedRowCount: merged.prunedRowCount,
+        writeCount: writes.length,
+        writes,
+        index,
+        archive,
+        distilledAt: updatedAt,
+    };
+}
+function postCompactReceiptMemoryUsageRepairCompletionInputRows(input = {}) {
+    if (Array.isArray(input))
+        return input;
+    const rows = [
+        ...(Array.isArray(input.rows) ? input.rows : []),
+        ...(Array.isArray(input.items) ? input.items : []),
+        ...(Array.isArray(input.entries) ? input.entries : []),
+    ];
+    return rows.length ? rows : input && typeof input === "object" ? [input] : [];
+}
+function postCompactReceiptMemoryUsageRepairCompletionRowId(row = {}) {
+    return `post-compact-receipt-memory-usage-repair-completion:${checksum([
+        row.groupId,
+        row.work_item_id,
+        row.brief_id,
+        row.timeline_binding_id,
+        row.original_worker_context_packet_id,
+        row.repair_task_agent_session_id,
+        row.repair_native_session_id,
+        row.required_doc_rel_paths,
+        row.completion_source,
+    ], 24)}`;
+}
+function normalizePostCompactReceiptMemoryUsageRepairCompletionRows(input = {}, options = {}) {
+    const fallbackGroupId = String(options.groupId || options.group_id || input.groupId || input.group_id || "").trim();
+    const requiredEvents = ["dispatch", "child_agent_start", "worker_handoff_ready", "task_agent_memory_context_snapshot", "child_agent_receipt"];
+    return postCompactReceiptMemoryUsageRepairCompletionInputRows(input).map((raw, index) => {
+        const item = raw?.work_item || raw?.workItem || raw?.item || raw || {};
+        const entry = raw?.entry || raw?.binding || raw?.timeline_binding || item.replay_repair_timeline_binding || raw || {};
+        const proof = raw?.proof || item.post_compact_receipt_memory_usage_repair_receipt || entry.post_compact_receipt_memory_usage_repair_receipt || {};
+        const requiredDocRelPaths = uniqueStrings([
+            ...(Array.isArray(proof.required_doc_rel_paths) ? proof.required_doc_rel_paths : []),
+            ...(Array.isArray(proof.requiredDocRelPaths) ? proof.requiredDocRelPaths : []),
+            ...(Array.isArray(entry.post_compact_receipt_memory_usage_repair_required_doc_rel_paths) ? entry.post_compact_receipt_memory_usage_repair_required_doc_rel_paths : []),
+            ...(Array.isArray(item.post_compact_receipt_memory_required_doc_rel_paths) ? item.post_compact_receipt_memory_required_doc_rel_paths : []),
+        ], 40);
+        const coveredDocRelPaths = uniqueStrings([
+            ...(Array.isArray(proof.covered_doc_rel_paths) ? proof.covered_doc_rel_paths : []),
+            ...(Array.isArray(proof.coveredDocRelPaths) ? proof.coveredDocRelPaths : []),
+            ...(Array.isArray(entry.post_compact_receipt_memory_usage_repair_covered_doc_rel_paths) ? entry.post_compact_receipt_memory_usage_repair_covered_doc_rel_paths : []),
+        ], 40);
+        const rawCoverageRows = Array.isArray(proof.coverage_rows)
+            ? proof.coverage_rows
+            : Array.isArray(proof.coverageRows)
+                ? proof.coverageRows
+                : Array.isArray(entry.post_compact_receipt_memory_usage_repair_coverage_rows)
+                    ? entry.post_compact_receipt_memory_usage_repair_coverage_rows
+                    : [];
+        const coverageRows = rawCoverageRows.map((coverage) => ({
+            rel_path: String(coverage.rel_path || coverage.relPath || "").trim(),
+            usage_state: String(coverage.usage_state || coverage.usageState || (coverage.ignoredCovered === true || coverage.ignored_covered === true ? "ignored" : coverage.usedCovered === true || coverage.used_covered === true ? "verified" : "missing")).trim().toLowerCase(),
+            covered: coverage.covered === true,
+            compliant: coverage.compliant === true,
+            current_source_verified: coverage.current_source_verified === true || coverage.currentSourceVerified === true,
+            ignored_reason_covered: coverage.ignored_reason_covered === true || coverage.ignoredReasonCovered === true,
+            reason: compactText(coverage.reason || coverage.ignored_reason || coverage.ignoredReason || "", 700),
+        })).filter((coverage) => coverage.rel_path);
+        const eventTypes = uniqueStrings([
+            ...(Array.isArray(entry.event_types) ? entry.event_types : []),
+            ...(Array.isArray(proof.event_types) ? proof.event_types : []),
+        ], 24);
+        const originalTaskAgentSessionId = String(entry.original_task_agent_session_id || item.original_task_agent_session_id || proof.original_task_agent_session_id || proof.originalTaskAgentSessionId || "").trim();
+        const originalNativeSessionId = String(entry.original_native_session_id || item.original_native_session_id || proof.original_native_session_id || proof.originalNativeSessionId || "").trim();
+        const repairTaskAgentSessionId = String(proof.task_agent_session_id || proof.taskAgentSessionId || entry.task_agent_session_id || "").trim();
+        const repairNativeSessionId = String(proof.native_session_id || proof.nativeSessionId || entry.native_session_id || "").trim();
+        const completionSource = String(raw?.completion_source || item.completion_source || entry.completion_source || "").trim();
+        const resolutionReason = String(raw?.resolution_reason || raw?.resolutionReason || item.resolutionReason || item.resolution_reason || entry.resolution_reason || "").trim();
+        const row = {
+            schema: "ccm-post-compact-receipt-memory-usage-repair-completion-distilled-row-v1",
+            version: exports.GROUP_POST_COMPACT_RECEIPT_MEMORY_USAGE_REPAIR_COMPLETION_DISTILLATION_VERSION,
+            groupId: String(entry.groupId || entry.group_id || item.groupId || item.group_id || fallbackGroupId || "").trim(),
+            source: String(entry.source || item.source || "").trim(),
+            project: String(entry.project || item.target_project || item.project || "").trim(),
+            task_id: String(entry.task_id || "").trim(),
+            work_item_id: String(entry.work_item_id || item.work_item_id || item.id || proof.work_item_id || "").trim(),
+            brief_id: String(entry.brief_id || proof.brief_id || "").trim(),
+            timeline_binding_id: String(entry.timeline_binding_id || proof.timeline_binding_id || "").trim(),
+            assignment_id: String(entry.assignment_id || item.assignment_id || "").trim(),
+            dispatch_key: String(entry.dispatch_key || item.dispatch_key || "").trim(),
+            original_worker_context_packet_id: String(entry.original_worker_context_packet_id || item.original_worker_context_packet_id || proof.original_worker_context_packet_id || "").trim(),
+            original_binding_id: String(entry.original_binding_id || item.original_binding_id || proof.original_binding_id || "").trim(),
+            original_assignment_id: String(entry.original_assignment_id || item.original_assignment_id || proof.original_assignment_id || "").trim(),
+            original_dispatch_key: String(entry.original_dispatch_key || item.original_dispatch_key || proof.original_dispatch_key || "").trim(),
+            original_task_agent_session_id: originalTaskAgentSessionId,
+            original_native_session_id: originalNativeSessionId,
+            repair_task_agent_session_id: repairTaskAgentSessionId,
+            repair_native_session_id: repairNativeSessionId,
+            repair_execution_id: String(proof.execution_id || entry.execution_id || "").trim(),
+            required_doc_rel_paths: requiredDocRelPaths,
+            covered_doc_rel_paths: coveredDocRelPaths,
+            coverage_rows: coverageRows,
+            original_gap_codes: uniqueStrings([
+                ...(Array.isArray(entry.post_compact_receipt_memory_gap_codes) ? entry.post_compact_receipt_memory_gap_codes : []),
+                ...(Array.isArray(item.post_compact_receipt_memory_gap_codes) ? item.post_compact_receipt_memory_gap_codes : []),
+            ], 24),
+            all_docs_compliant: proof.all_docs_compliant === true || proof.allDocsCompliant === true || entry.post_compact_receipt_memory_usage_repair_all_docs_compliant === true,
+            historical_boundary_covered: proof.historical_boundary_covered === true || proof.historicalBoundaryCovered === true || entry.post_compact_receipt_memory_usage_repair_historical_boundary_covered === true,
+            task_session_matched: proof.task_session_matched === true || entry.post_compact_receipt_memory_usage_repair_task_session_matched === true,
+            native_session_matched: proof.native_session_matched === true || entry.post_compact_receipt_memory_usage_repair_native_session_matched === true,
+            receipt_verified: proof.verified === true || entry.post_compact_receipt_memory_usage_repair_verified === true,
+            receipt_status: String(entry.receipt_status || "").trim().toLowerCase(),
+            consumption_status: String(entry.replay_repair_consumption_status || "").trim().toLowerCase(),
+            consumption_source: String(entry.replay_repair_consumption_source || "").trim(),
+            event_types: eventTypes,
+            completion_source: completionSource,
+            resolution_reason: resolutionReason,
+            completed_at: String(proof.completed_at || item.completedAt || item.completed_at || raw?.completed_at || options.updatedAt || now()),
+            reuse_policy: "historical_corrected_receipt_evidence_requires_new_session_current_source_reverification",
+            source_index: Number(raw?.source_index || raw?.sourceIndex || index),
+        };
+        return { ...row, row_id: postCompactReceiptMemoryUsageRepairCompletionRowId(row) };
+    }).filter((row) => row.groupId || fallbackGroupId)
+        .filter((row) => row.source === "post_compact_reinjection_repair_receipt_memory_usage_receipt_repair")
+        .filter((row) => row.completion_source === "post_compact_reinjection_receipt_memory_usage_repair_receipt_consumption")
+        .filter((row) => row.resolution_reason === "post_compact_reinjection_receipt_memory_usage_corrected_receipt_verified")
+        .filter((row) => row.receipt_verified === true && row.all_docs_compliant === true && row.historical_boundary_covered === true)
+        .filter((row) => row.task_session_matched === true && row.native_session_matched === true)
+        .filter((row) => row.work_item_id && row.brief_id && row.timeline_binding_id)
+        .filter((row) => row.original_worker_context_packet_id && row.original_binding_id)
+        .filter((row) => row.repair_task_agent_session_id && row.repair_native_session_id)
+        .filter((row) => row.repair_task_agent_session_id !== row.original_task_agent_session_id && row.repair_native_session_id !== row.original_native_session_id)
+        .filter((row) => row.required_doc_rel_paths.length > 0 && row.required_doc_rel_paths.every((relPath) => row.covered_doc_rel_paths.includes(relPath)))
+        .filter((row) => row.required_doc_rel_paths.every((relPath) => row.coverage_rows.some((coverage) => coverage.rel_path === relPath && coverage.covered === true && coverage.compliant === true)))
+        .filter((row) => requiredEvents.every(eventType => row.event_types.includes(eventType)));
+}
+function mergePostCompactReceiptMemoryUsageRepairCompletionRows(existing = [], incoming = [], options = {}) {
+    const updatedAt = String(options.updatedAt || now());
+    const merged = new Map();
+    for (const row of existing || []) {
+        const id = String(row.row_id || postCompactReceiptMemoryUsageRepairCompletionRowId(row));
+        merged.set(id, { ...row, row_id: id });
+    }
+    const previousIds = new Set(merged.keys());
+    const incomingIds = new Set();
+    for (const row of incoming || []) {
+        const id = String(row.row_id || postCompactReceiptMemoryUsageRepairCompletionRowId(row));
+        incomingIds.add(id);
+        const previous = merged.get(id);
+        merged.set(id, {
+            ...(previous || {}),
+            ...row,
+            row_id: id,
+            first_seen_at: previous?.first_seen_at || row.completed_at || updatedAt,
+            last_seen_at: updatedAt,
+            seen_count: Number(previous?.seen_count || 0) + 1,
+        });
+    }
+    const limit = Math.max(1, Math.min(300, Number(options.limit || options.maxRows || options.max_rows || 160)));
+    const rows = [...merged.values()]
+        .sort((a, b) => String(a.last_seen_at || "").localeCompare(String(b.last_seen_at || "")) || Number(a.source_index || 0) - Number(b.source_index || 0))
+        .slice(-limit);
+    return {
+        rows,
+        newRowCount: rows.filter((row) => !previousIds.has(row.row_id)).length,
+        updatedRowCount: rows.filter((row) => previousIds.has(row.row_id) && incomingIds.has(row.row_id)).length,
+        prunedRowCount: Math.max(0, merged.size - rows.length),
+    };
+}
+function postCompactReceiptMemoryUsageRepairCompletionArchive(rows = [], options = {}) {
+    const updatedAt = String(options.updatedAt || now());
+    return {
+        schema: "ccm-post-compact-receipt-memory-usage-repair-completion-distillation-v1",
+        version: exports.GROUP_POST_COMPACT_RECEIPT_MEMORY_USAGE_REPAIR_COMPLETION_DISTILLATION_VERSION,
+        archived_count: rows.length,
+        verified_count: rows.filter((row) => row.receipt_verified === true).length,
+        original_session_count: uniqueStrings(rows.flatMap((row) => [row.original_task_agent_session_id, row.original_native_session_id]).filter(Boolean), 480).length,
+        repair_session_count: uniqueStrings(rows.flatMap((row) => [row.repair_task_agent_session_id, row.repair_native_session_id]).filter(Boolean), 480).length,
+        required_doc_count: uniqueStrings(rows.flatMap((row) => row.required_doc_rel_paths || []), 240).length,
+        rows,
+        updatedAt,
+    };
+}
+function renderPostCompactReceiptMemoryUsageRepairCompletionBody(archive = {}, options = {}) {
+    const rows = Array.isArray(archive.rows) ? archive.rows : [];
+    const lines = [
+        "# Post-Compact Receipt Memory Usage Repair Completions",
+        "",
+        `Generated by CCM corrected-receipt completion distillation at ${options.updatedAt || now()}.`,
+        "Each row proves that a child Agent receipt-memory usage gap was corrected in a newly bound repair task/native session after the complete dispatch timeline was observed.",
+        "Stable boundary: historical repair completion is recovery evidence, not permanent repository truth. Every future child Agent session must independently classify recalled memory in memoryUsed or memoryIgnored and reverify the current source before used/verified memory is accepted.",
+        "Historical task/native session ids are evidence only and never authorize a future session.",
+        "",
+        "## Verified Corrected-Receipt Rows",
+    ];
+    for (const row of rows.slice(-100).reverse()) {
+        lines.push(`- [verified] work_item=${row.work_item_id}; brief=${row.brief_id}; timeline=${row.timeline_binding_id}; completion_source=${row.completion_source}; resolution_reason=${row.resolution_reason}.`);
+        lines.push(`  Original evidence: packet=${row.original_worker_context_packet_id}; binding=${row.original_binding_id}; assignment=${row.original_assignment_id || ""}; dispatch=${row.original_dispatch_key || ""}; task_agent_session=${row.original_task_agent_session_id || ""}; native_session=${row.original_native_session_id || ""}.`);
+        lines.push(`  Corrected receipt session: task_agent_session=${row.repair_task_agent_session_id}; native_session=${row.repair_native_session_id}; execution=${row.repair_execution_id || ""}; allDocsCompliant=${row.all_docs_compliant === true}; historicalBoundaryCovered=${row.historical_boundary_covered === true}.`);
+        for (const coverage of row.coverage_rows || []) {
+            lines.push(`  Memory doc: ${coverage.rel_path}; usageState=${coverage.usage_state}; currentSourceVerified=${coverage.current_source_verified === true}; ignoredReasonCovered=${coverage.ignored_reason_covered === true}; compliant=${coverage.compliant === true}${coverage.reason ? `; reason=${compactText(coverage.reason, 500).replace(/\n/g, " ")}` : ""}.`);
+        }
+        if (row.original_gap_codes?.length)
+            lines.push(`  Original gaps: ${row.original_gap_codes.join(", ")}.`);
+    }
+    lines.push("");
+    lines.push("## Reuse Rule");
+    lines.push("- Use this memory to avoid reopening an identical corrected-receipt repair when the exact completion proof still applies.");
+    lines.push("- Do not reuse the historical repair session as current authority; bind any future use to the new task/native session and produce a new memory usage receipt.");
+    return lines.join("\n").trim() + "\n";
+}
+function distillPostCompactReceiptMemoryUsageRepairCompletionToTypedMemory(groupId, input = {}, options = {}) {
+    if (options.disabled === true || options.disableDistillation === true || options.disable_distillation === true) {
+        return {
+            schema: "ccm-post-compact-receipt-memory-usage-repair-completion-distillation-v1",
+            version: exports.GROUP_POST_COMPACT_RECEIPT_MEMORY_USAGE_REPAIR_COMPLETION_DISTILLATION_VERSION,
+            groupId,
+            skipped: true,
+            reason: "disabled",
+        };
+    }
+    const updatedAt = String(options.updatedAt || options.updated_at || now());
+    const ledger = readGroupTypedMemoryDistillationLedger(groupId);
+    const incomingRows = normalizePostCompactReceiptMemoryUsageRepairCompletionRows(input, { ...options, groupId, updatedAt });
+    const previousArchive = ledger.postCompactReceiptMemoryUsageRepairCompletionArchive || {};
+    const previousRows = Array.isArray(previousArchive.rows) ? previousArchive.rows : [];
+    const merged = mergePostCompactReceiptMemoryUsageRepairCompletionRows(previousRows, incomingRows, { ...options, updatedAt });
+    const archive = postCompactReceiptMemoryUsageRepairCompletionArchive(merged.rows, { updatedAt });
+    const writes = [];
+    if (archive.rows.length) {
+        writes.push(upsertGroupTypedMemoryDocument(groupId, {
+            type: "reference",
+            slug: "post-compact-receipt-memory-usage-repair-completions",
+            name: "Post-compact receipt memory usage repair completions",
+            description: "Verified corrected-receipt completions from new repair sessions, with per-document usage evidence and mandatory future current-source reverification.",
+            source: "auto:post-compact-receipt-memory-usage-repair-completion-distillation",
+            updatedAt,
+            body: renderPostCompactReceiptMemoryUsageRepairCompletionBody(archive, { updatedAt }),
+            maxBodyChars: Number(options.maxBodyChars || options.max_body_chars || 24_000),
+        }));
+    }
+    const ledgerState = { ...ledger };
+    delete ledgerState.file;
+    writeJsonAtomic(ledger.file, {
+        ...ledgerState,
+        schema: "ccm-group-typed-memory-distillation-ledger-v1",
+        version: exports.GROUP_TYPED_MEMORY_DISTILLATION_VERSION,
+        groupId,
+        facts: ledger.facts || {},
+        postCompactReceiptMemoryUsageRepairCompletionArchive: archive,
+        updatedAt,
+    });
+    const index = buildGroupTypedMemoryIndex(groupId);
+    return {
+        schema: "ccm-post-compact-receipt-memory-usage-repair-completion-distillation-v1",
+        version: exports.GROUP_POST_COMPACT_RECEIPT_MEMORY_USAGE_REPAIR_COMPLETION_DISTILLATION_VERSION,
+        groupId,
+        skipped: false,
+        reason: compactText(options.reason || "", 220),
+        ledgerFile: ledger.file,
+        incomingRowCount: incomingRows.length,
+        archivedCount: archive.archived_count,
+        verifiedCount: archive.verified_count,
+        originalSessionCount: archive.original_session_count,
+        repairSessionCount: archive.repair_session_count,
+        requiredDocCount: archive.required_doc_count,
+        newRowCount: merged.newRowCount,
+        updatedRowCount: merged.updatedRowCount,
+        prunedRowCount: merged.prunedRowCount,
+        writeCount: writes.length,
+        writes,
+        index,
+        archive,
+        distilledAt: updatedAt,
+    };
+}
+function providerRankingMemoryUsageReceiptRepairInputRows(input = {}) {
+    if (Array.isArray(input))
+        return input;
+    const rows = [
+        ...(Array.isArray(input.rows) ? input.rows : []),
+        ...(Array.isArray(input.items) ? input.items : []),
+        ...(Array.isArray(input.candidates) ? input.candidates : []),
+        ...(Array.isArray(input.briefs) ? input.briefs : []),
+        ...(Array.isArray(input.gaps) ? input.gaps : []),
+    ];
+    if (rows.length)
+        return rows;
+    const groups = Array.isArray(input.report?.groups) ? input.report.groups : Array.isArray(input.groups) ? input.groups : [];
+    return groups.flatMap((group) => [
+        ...(Array.isArray(group.items) ? group.items : []),
+        ...(Array.isArray(group.candidates) ? group.candidates : []),
+        ...(Array.isArray(group.briefs) ? group.briefs : []),
+        ...(Array.isArray(group.gaps) ? group.gaps : []),
+    ].map((row) => ({ ...row, groupId: row.groupId || group.groupId || group.group_id || "" })));
+}
+function providerRankingMemoryUsageReceiptRepairRowId(row = {}) {
+    return `provider-ranking-memory-usage-receipt-repair:${checksum([
+        row.groupId,
+        row.work_item_id,
+        row.brief_id,
+        row.worker_context_packet_id,
+        row.binding_id,
+        row.project,
+        row.doc_rel_paths,
+        row.gap_signature,
+    ], 24)}`;
+}
+function normalizeProviderRankingMemoryUsageReceiptRepairRows(input = {}, options = {}) {
+    const fallbackGroupId = String(options.groupId || options.group_id || input.groupId || input.group_id || "").trim();
+    return providerRankingMemoryUsageReceiptRepairInputRows(input).map((raw, index) => {
+        const entry = raw?.entry || raw?.item || raw?.candidate || raw?.brief || raw || {};
+        const source = String(entry.source || raw?.source || "").trim();
+        const docRelPaths = providerRankingProvenanceStringList(entry.provider_ranking_provenance_rel_paths, entry.providerRankingProvenanceRelPaths, entry.provider_ranking_compact_repair_receipt_memory_usage_doc_rel_path, entry.providerRankingCompactRepairReceiptMemoryUsageDocRelPath, entry.docRelPath, entry.doc_rel_path, raw?.provider_ranking_provenance_rel_paths, raw?.docRelPath, raw?.doc_rel_path);
+        const gapCodes = providerRankingProvenanceStringList(entry.provider_ranking_provenance_gap_codes, entry.providerRankingProvenanceGapCodes, Array.isArray(entry.gaps) ? entry.gaps.map((gap) => typeof gap === "string" ? gap : gap?.code || gap?.reason || gap?.type || JSON.stringify(gap)) : [], Array.isArray(raw?.gaps) ? raw.gaps.map((gap) => typeof gap === "string" ? gap : gap?.code || gap?.reason || gap?.type || JSON.stringify(gap)) : []);
+        const text = [
+            entry.reason,
+            entry.source_reason,
+            entry.description,
+            entry.instruction,
+            entry.expected,
+            entry.prompt_patch,
+            entry.promptPatch,
+            entry.worker_task,
+            entry.workerTask,
+            raw?.reason,
+        ].filter(Boolean).join("\n");
+        const row = {
+            schema: "ccm-provider-ranking-memory-usage-receipt-repair-distilled-row-v1",
+            version: exports.GROUP_PROVIDER_RANKING_MEMORY_USAGE_RECEIPT_REPAIR_DISTILLATION_VERSION,
+            groupId: String(entry.groupId || entry.group_id || raw?.groupId || raw?.group_id || fallbackGroupId || "").trim(),
+            work_item_id: String(entry.work_item_id || entry.workItemId || entry.id || raw?.work_item_id || raw?.id || "").trim(),
+            brief_id: String(entry.brief_id || entry.briefId || raw?.brief_id || raw?.briefId || "").trim(),
+            candidate_id: String(entry.candidate_id || entry.candidateId || raw?.candidate_id || raw?.candidateId || "").trim(),
+            worker_context_packet_id: String(entry.worker_context_packet_id || entry.workerContextPacketId || entry.packet_id || raw?.worker_context_packet_id || "").trim(),
+            binding_id: String(entry.worker_context_packet_binding_id || entry.binding_id || entry.bindingId || raw?.binding_id || "").trim(),
+            assignment_id: String(entry.assignment_id || entry.assignmentId || raw?.assignment_id || "").trim(),
+            dispatch_key: String(entry.dispatch_key || entry.dispatchKey || raw?.dispatch_key || "").trim(),
+            project: String(entry.project || entry.target_project || entry.targetProject || raw?.project || "").trim(),
+            source,
+            status: String(entry.status || raw?.status || "pending").trim().toLowerCase(),
+            priority: String(entry.priority || raw?.priority || "").trim(),
+            component: String(entry.component || raw?.component || "worker_context_provider_ranking_compact_repair_receipt_memory_usage_receipt_contract").trim(),
+            doc_rel_paths: docRelPaths,
+            gap_codes: gapCodes,
+            gap_signature: gapCodes.join("|"),
+            reason: compactText(entry.reason || entry.source_reason || entry.description || entry.instruction || raw?.reason || gapCodes.join("; ") || "provider ranking memory usage receipt repair required", 1000),
+            expected: compactText(entry.expected || raw?.expected || "Corrected CCM_AGENT_RECEIPT.memoryUsed or memoryIgnored cites provider-ranking-provenance-compact-repair-receipt-memory.md and preserves the authorization boundary.", 900),
+            prompt_patch: compactText(entry.prompt_patch || entry.promptPatch || raw?.prompt_patch || "", 1500),
+            worker_task: compactText(entry.worker_task || entry.workerTask || raw?.worker_task || "", 1800),
+            has_memory_used_prompt: /memoryUsed/i.test(text),
+            has_memory_ignored_prompt: /memoryIgnored/i.test(text),
+            has_usage_state_prompt: /usageState|usage_state/i.test(text),
+            has_authorization_boundary_prompt: /ranking evidence only, not authorization/i.test(text),
+            has_fresh_receipt_prompt: /fresh valid provider switch decision receipt/i.test(text),
+            first_seen_at: String(entry.first_seen_at || entry.createdAt || entry.created_at || entry.at || raw?.first_seen_at || raw?.at || options.updatedAt || now()),
+            last_seen_at: String(entry.updated_at || entry.updatedAt || entry.lastSeenAt || entry.at || raw?.updated_at || raw?.at || options.updatedAt || now()),
+            source_index: Number(raw?.source_index || raw?.sourceIndex || index),
+        };
+        return { ...row, row_id: providerRankingMemoryUsageReceiptRepairRowId(row) };
+    })
+        .filter((row) => row.groupId || fallbackGroupId)
+        .filter((row) => row.source === "worker_context_provider_ranking_compact_repair_receipt_memory_usage_receipt_repair"
+        || row.component === "worker_context_provider_ranking_compact_repair_receipt_memory_usage_receipt_contract"
+        || /provider ranking.*memory usage|memoryUsed|memoryIgnored|fresh valid provider switch decision receipt|ranking evidence only, not authorization/i.test(`${row.reason}\n${row.expected}\n${row.prompt_patch}\n${row.worker_task}`));
+}
+function mergeProviderRankingMemoryUsageReceiptRepairRows(existing = [], incoming = [], options = {}) {
+    const updatedAt = String(options.updatedAt || now());
+    const merged = new Map();
+    for (const row of existing || []) {
+        const id = String(row.row_id || providerRankingMemoryUsageReceiptRepairRowId(row));
+        merged.set(id, { ...row, row_id: id });
+    }
+    const previousIds = new Set(merged.keys());
+    for (const row of incoming || []) {
+        const id = String(row.row_id || providerRankingMemoryUsageReceiptRepairRowId(row));
+        const previous = merged.get(id);
+        merged.set(id, {
+            ...(previous || {}),
+            ...row,
+            row_id: id,
+            first_seen_at: previous?.first_seen_at || row.first_seen_at || updatedAt,
+            last_seen_at: updatedAt,
+            seen_count: Number(previous?.seen_count || 0) + 1,
+        });
+    }
+    const limit = Math.max(1, Math.min(260, Number(options.limit || options.maxRows || options.max_rows || 100)));
+    const rows = [...merged.values()]
+        .sort((a, b) => String(a.last_seen_at || "").localeCompare(String(b.last_seen_at || "")) || Number(a.source_index || 0) - Number(b.source_index || 0))
+        .slice(-limit);
+    return {
+        rows,
+        newRowCount: rows.filter((row) => !previousIds.has(row.row_id)).length,
+        updatedRowCount: rows.filter((row) => previousIds.has(row.row_id) && incoming.some((item) => String(item.row_id || "") === row.row_id)).length,
+        prunedRowCount: Math.max(0, merged.size - rows.length),
+    };
+}
+function providerRankingMemoryUsageReceiptRepairArchive(rows = [], options = {}) {
+    const updatedAt = String(options.updatedAt || now());
+    const docRelPaths = uniqueStrings(rows.flatMap((row) => Array.isArray(row.doc_rel_paths) ? row.doc_rel_paths : []), 80);
+    return {
+        schema: "ccm-provider-ranking-memory-usage-receipt-repair-distillation-v1",
+        version: exports.GROUP_PROVIDER_RANKING_MEMORY_USAGE_RECEIPT_REPAIR_DISTILLATION_VERSION,
+        archived_count: rows.length,
+        open_count: rows.filter((row) => ["pending", "in_progress", "blocked", "warn", "fail", "ready"].includes(String(row.status || ""))).length,
+        completed_count: rows.filter((row) => ["completed", "done", "ok"].includes(String(row.status || ""))).length,
+        packet_bound_count: rows.filter((row) => row.worker_context_packet_id).length,
+        doc_rel_path_count: docRelPaths.length,
+        corrected_prompt_count: rows.filter((row) => row.has_memory_used_prompt === true && row.has_memory_ignored_prompt === true).length,
+        usage_state_prompt_count: rows.filter((row) => row.has_usage_state_prompt === true).length,
+        authorization_boundary_prompt_count: rows.filter((row) => row.has_authorization_boundary_prompt === true).length,
+        fresh_receipt_prompt_count: rows.filter((row) => row.has_fresh_receipt_prompt === true).length,
+        doc_rel_paths: docRelPaths,
+        rows,
+        updatedAt,
+    };
+}
+function renderProviderRankingMemoryUsageReceiptRepairBody(archive = {}, options = {}) {
+    const rows = Array.isArray(archive.rows) ? archive.rows : [];
+    const lines = [
+        "# Provider Ranking Memory Usage Receipt Discipline",
+        "",
+        `Generated by CCM provider ranking memory usage receipt repair distillation at ${options.updatedAt || now()}.`,
+        "This feedback memory records corrected-receipt repair briefs for child Agents that received provider ranking compact repair typed memory but failed to cite it in CCM_AGENT_RECEIPT.memoryUsed or memoryIgnored.",
+        "Stable rule: if provider-ranking-provenance-compact-repair-receipt-memory.md is present in WorkerContextPacket, the final receipt must explicitly mention it in memoryUsed or memoryIgnored, declare usageState, and restate that provider ranking history is ranking evidence only, not authorization.",
+        "Any explicit provider switch still requires a fresh valid provider switch decision receipt.",
+        "",
+        "## Corrected Receipt Rows",
+    ];
+    for (const row of rows.slice(-80).reverse()) {
+        const ids = [
+            row.project ? `project=${row.project}` : "",
+            row.worker_context_packet_id ? `packet=${row.worker_context_packet_id}` : "",
+            row.binding_id ? `binding=${row.binding_id}` : "",
+            row.work_item_id ? `work_item=${row.work_item_id}` : "",
+            row.brief_id ? `brief=${row.brief_id}` : "",
+        ].filter(Boolean).join("; ");
+        const docs = Array.isArray(row.doc_rel_paths) && row.doc_rel_paths.length ? row.doc_rel_paths.slice(0, 6).join(", ") : "provider-ranking-provenance-compact-repair-receipt-memory.md";
+        lines.push(`- [${row.status || "pending"}] ${ids || row.row_id}; memory_doc=${docs}.`);
+        lines.push("  Rule: corrected CCM_AGENT_RECEIPT must include memoryUsed or memoryIgnored for this doc, include usageState, include ranking evidence only, not authorization, and require a fresh valid provider switch decision receipt for explicit switches.");
+        if (row.gap_codes?.length)
+            lines.push(`  Gaps: ${row.gap_codes.slice(0, 8).join(", ")}.`);
+        if (row.reason)
+            lines.push(`  Evidence: ${compactText(row.reason, 700).replace(/\n/g, " ")}`);
+    }
+    return lines.join("\n").trim() + "\n";
+}
+function distillProviderRankingMemoryUsageReceiptRepairToTypedMemory(groupId, input = {}, options = {}) {
+    if (options.disabled === true || options.disableDistillation === true || options.disable_distillation === true) {
+        return {
+            schema: "ccm-provider-ranking-memory-usage-receipt-repair-distillation-v1",
+            version: exports.GROUP_PROVIDER_RANKING_MEMORY_USAGE_RECEIPT_REPAIR_DISTILLATION_VERSION,
+            groupId,
+            skipped: true,
+            reason: "disabled",
+        };
+    }
+    const updatedAt = String(options.updatedAt || options.updated_at || now());
+    const ledger = readGroupTypedMemoryDistillationLedger(groupId);
+    const incomingRows = normalizeProviderRankingMemoryUsageReceiptRepairRows(input, { ...options, groupId, updatedAt });
+    const previousArchive = ledger.providerRankingMemoryUsageReceiptRepairArchive || {};
+    const previousRows = Array.isArray(previousArchive.rows) ? previousArchive.rows : [];
+    const merged = mergeProviderRankingMemoryUsageReceiptRepairRows(previousRows, incomingRows, { ...options, updatedAt });
+    const archive = providerRankingMemoryUsageReceiptRepairArchive(merged.rows, { updatedAt });
+    const writes = [];
+    if (archive.rows.length) {
+        writes.push(upsertGroupTypedMemoryDocument(groupId, {
+            type: "feedback",
+            slug: "provider-ranking-memory-usage-receipt-discipline",
+            name: "Provider ranking memory usage receipt discipline",
+            description: "Child Agent receipt discipline for provider ranking compact repair typed memory usage.",
+            source: "auto:provider-ranking-memory-usage-receipt-repair-distillation",
+            updatedAt,
+            body: renderProviderRankingMemoryUsageReceiptRepairBody(archive, { updatedAt }),
+            maxBodyChars: Number(options.maxBodyChars || options.max_body_chars || 18_000),
+        }));
+    }
+    const ledgerState = { ...ledger };
+    delete ledgerState.file;
+    writeJsonAtomic(ledger.file, {
+        ...ledgerState,
+        schema: "ccm-group-typed-memory-distillation-ledger-v1",
+        version: exports.GROUP_TYPED_MEMORY_DISTILLATION_VERSION,
+        groupId,
+        facts: ledger.facts || {},
+        providerRankingMemoryUsageReceiptRepairArchive: archive,
+        updatedAt,
+    });
+    const index = buildGroupTypedMemoryIndex(groupId);
+    return {
+        schema: "ccm-provider-ranking-memory-usage-receipt-repair-distillation-v1",
+        version: exports.GROUP_PROVIDER_RANKING_MEMORY_USAGE_RECEIPT_REPAIR_DISTILLATION_VERSION,
+        groupId,
+        skipped: false,
+        reason: compactText(options.reason || "", 220),
+        ledgerFile: ledger.file,
+        incomingRowCount: incomingRows.length,
+        archivedCount: archive.archived_count,
+        openCount: archive.open_count,
+        completedCount: archive.completed_count,
+        packetBoundCount: archive.packet_bound_count,
+        docRelPathCount: archive.doc_rel_path_count,
+        correctedPromptCount: archive.corrected_prompt_count,
+        usageStatePromptCount: archive.usage_state_prompt_count,
+        authorizationBoundaryPromptCount: archive.authorization_boundary_prompt_count,
+        freshReceiptPromptCount: archive.fresh_receipt_prompt_count,
         newRowCount: merged.newRowCount,
         updatedRowCount: merged.updatedRowCount,
         prunedRowCount: merged.prunedRowCount,
@@ -3689,6 +4774,627 @@ function distillProviderDispatchOverrideFollowupToTypedMemory(groupId, input = {
         completedCount: archive.completed_count,
         attributionCount: archive.attribution_count,
         relPathCount: archive.rel_path_count,
+        newRowCount: merged.newRowCount,
+        updatedRowCount: merged.updatedRowCount,
+        prunedRowCount: merged.prunedRowCount,
+        writeCount: writes.length,
+        writes,
+        index,
+        archive,
+        distilledAt: updatedAt,
+    };
+}
+function providerSwitchExecutionInputRows(input = {}) {
+    if (Array.isArray(input))
+        return input;
+    const rows = [
+        ...(Array.isArray(input.rows) ? input.rows : []),
+        ...(Array.isArray(input.items) ? input.items : []),
+        ...(Array.isArray(input.entries) ? input.entries : []),
+        ...(Array.isArray(input.executions) ? input.executions : []),
+        ...(Array.isArray(input.receipts) ? input.receipts : []),
+        ...(Array.isArray(input.bindings) ? input.bindings : []),
+    ];
+    return rows.length ? rows : input && typeof input === "object" ? [input] : [];
+}
+function providerSwitchExecutionReceiptFromInput(entry = {}, raw = {}) {
+    if (entry.schema === "ccm-provider-switch-execution-receipt-v1")
+        return entry;
+    return entry.worker_context_provider_switch_execution_receipt
+        || entry.workerContextProviderSwitchExecutionReceipt
+        || entry.provider_switch_execution_receipt
+        || entry.providerSwitchExecutionReceipt
+        || raw.executionReceipt
+        || raw.execution_receipt
+        || raw.providerSwitchExecutionReceipt
+        || raw.provider_switch_execution_receipt
+        || raw.receipt
+        || {};
+}
+function providerSwitchDecisionReceiptFromInput(entry = {}, raw = {}, executionReceipt = {}) {
+    if (entry.schema === "ccm-provider-switch-decision-receipt-v1")
+        return entry;
+    return entry.worker_context_provider_switch_decision_receipt
+        || entry.workerContextProviderSwitchDecisionReceipt
+        || entry.provider_switch_decision_receipt
+        || entry.providerSwitchDecisionReceipt
+        || raw.providerSwitchDecisionReceipt
+        || raw.provider_switch_decision_receipt
+        || executionReceipt.provider_switch_decision_receipt
+        || executionReceipt.providerSwitchDecisionReceipt
+        || {};
+}
+function providerSwitchExecutionSessionBindingFromInput(entry = {}, raw = {}) {
+    return entry.worker_context_provider_switch_session_binding
+        || entry.workerContextProviderSwitchSessionBinding
+        || entry.provider_switch_session_binding
+        || entry.providerSwitchSessionBinding
+        || raw.sessionBinding
+        || raw.session_binding
+        || {};
+}
+function providerSwitchExecutionRowId(row = {}) {
+    return `provider-switch-execution:${checksum([
+        row.groupId,
+        row.execution_receipt_id,
+        row.provider_switch_decision_receipt_id,
+        row.task_agent_session_id,
+        row.execution_id,
+        row.expected_provider,
+        row.actually_executed_provider,
+        row.status,
+    ], 24)}`;
+}
+function normalizeProviderSwitchExecutionRows(input = {}, options = {}) {
+    const fallbackGroupId = String(options.groupId || options.group_id || input.groupId || input.group_id || "").trim();
+    return providerSwitchExecutionInputRows(input).map((raw, index) => {
+        raw = raw || {};
+        const entry = raw?.entry || raw?.binding || raw || {};
+        const executionReceipt = providerSwitchExecutionReceiptFromInput(entry, raw);
+        const decisionReceipt = providerSwitchDecisionReceiptFromInput(entry, raw, executionReceipt);
+        const sessionBinding = providerSwitchExecutionSessionBindingFromInput(entry, raw);
+        const ledgerState = entry.provider_switch_ledger_state || entry.providerSwitchLedgerState || raw.provider_switch_ledger_state || {};
+        const expectedProvider = String(executionReceipt.expected_provider
+            || executionReceipt.expectedProvider
+            || decisionReceipt.new_provider?.agent_type
+            || decisionReceipt.newProvider?.agentType
+            || sessionBinding.expected_provider
+            || sessionBinding.expectedProvider
+            || "").trim();
+        const actualProvider = String(executionReceipt.actually_executed_provider
+            || executionReceipt.actuallyExecutedProvider
+            || executionReceipt.executed_provider
+            || executionReceipt.executedProvider
+            || ledgerState.actually_executed_provider
+            || ledgerState.actuallyExecutedProvider
+            || sessionBinding.session_provider
+            || sessionBinding.sessionProvider
+            || "").trim();
+        const gaps = uniqueStrings([
+            ...(Array.isArray(executionReceipt.gaps) ? executionReceipt.gaps : []),
+            ...(Array.isArray(raw.gaps) ? raw.gaps : []),
+        ], 24);
+        const status = String(executionReceipt.status || raw.status || "").trim().toLowerCase() === "passed"
+            || executionReceipt.executed_as_approved === true
+            ? "passed"
+            : "failed";
+        const mismatch = gaps.includes("executed_provider_mismatch")
+            || (!!expectedProvider && !!actualProvider && expectedProvider.toLowerCase() !== actualProvider.toLowerCase());
+        const at = String(executionReceipt.at || raw.at || entry.at || options.updatedAt || now());
+        const row = {
+            schema: "ccm-provider-switch-execution-distilled-row-v1",
+            version: exports.GROUP_PROVIDER_SWITCH_EXECUTION_DISTILLATION_VERSION,
+            groupId: String(executionReceipt.groupId || executionReceipt.group_id || entry.groupId || entry.group_id || raw.groupId || raw.group_id || fallbackGroupId || "").trim(),
+            project: String(executionReceipt.project || decisionReceipt.project || entry.project || raw.project || "").trim(),
+            agent_type: expectedProvider || "unknown",
+            old_provider: String(decisionReceipt.old_provider?.agent_type || decisionReceipt.oldProvider?.agentType || entry.original_agent_type || entry.originalAgentType || "").trim(),
+            expected_provider: expectedProvider || "unknown",
+            actually_executed_provider: actualProvider || "unknown",
+            provider_switch_decision_receipt_id: String(executionReceipt.provider_switch_decision_receipt_id || executionReceipt.providerSwitchDecisionReceiptId || decisionReceipt.receipt_id || raw.provider_switch_decision_receipt_id || "").trim(),
+            provider_switch_decision_receipt_checksum: String(executionReceipt.provider_switch_decision_receipt_checksum || executionReceipt.providerSwitchDecisionReceiptChecksum || decisionReceipt.receipt_checksum || raw.provider_switch_decision_receipt_checksum || "").trim(),
+            provider_reliability_snapshot_id: String(decisionReceipt.provider_reliability_snapshot?.snapshot_id || decisionReceipt.providerReliabilitySnapshot?.snapshotId || "").trim(),
+            execution_receipt_id: String(executionReceipt.execution_receipt_id || executionReceipt.executionReceiptId || raw.execution_receipt_id || "").trim(),
+            assignment_id: String(entry.assignment_id || entry.assignmentId || raw.assignment_id || raw.assignmentId || "").trim(),
+            dispatch_key: String(entry.dispatch_key || entry.dispatchKey || raw.dispatch_key || raw.dispatchKey || "").trim(),
+            worker_context_packet_id: String(executionReceipt.worker_context_packet_id || executionReceipt.workerContextPacketId || entry.worker_context_packet_id || entry.workerContextPacketId || raw.worker_context_packet_id || "").trim(),
+            task_agent_session_id: String(executionReceipt.task_agent_session_id || executionReceipt.taskAgentSessionId || entry.task_agent_session_id || raw.task_agent_session_id || "").trim(),
+            native_session_id: String(executionReceipt.native_session_id || executionReceipt.nativeSessionId || entry.native_session_id || raw.native_session_id || "").trim(),
+            execution_id: String(executionReceipt.execution_id || executionReceipt.executionId || entry.execution_id || raw.execution_id || "").trim(),
+            receipt_status: String(executionReceipt.receipt_status || executionReceipt.receiptStatus || entry.receipt_status || raw.receipt_status || "").trim().toLowerCase(),
+            advised_alternative: executionReceipt.advised_alternative === true || decisionReceipt.advised_alternative === true,
+            approved_switch: executionReceipt.approved_switch === true || decisionReceipt.approved_switch === true,
+            system_attested: executionReceipt.system_attested === true,
+            child_declared: executionReceipt.child_declared === true,
+            final_child_receipt_present: executionReceipt.final_child_receipt_present === true,
+            status,
+            executed_as_approved: executionReceipt.executed_as_approved === true && !mismatch && status === "passed",
+            mismatch,
+            gaps,
+            reason: compactText(raw.reason || executionReceipt.reason || executionReceipt.child_declaration?.reason || "", 500),
+            first_seen_at: String(entry.first_seen_at || entry.firstSeenAt || at),
+            last_seen_at: at,
+            source_index: Number(raw?.source_index || raw?.sourceIndex || index),
+        };
+        return { ...row, row_id: providerSwitchExecutionRowId(row) };
+    }).filter((row) => row.groupId)
+        .filter((row) => row.provider_switch_decision_receipt_id || row.execution_receipt_id || row.execution_id)
+        .filter((row) => row.expected_provider && row.actually_executed_provider);
+}
+function mergeProviderSwitchExecutionRows(existing = [], incoming = [], options = {}) {
+    const updatedAt = String(options.updatedAt || now());
+    const merged = new Map();
+    for (const row of existing || []) {
+        const id = String(row.row_id || providerSwitchExecutionRowId(row));
+        merged.set(id, { ...row, row_id: id });
+    }
+    const previousIds = new Set(merged.keys());
+    const incomingIds = new Set();
+    for (const row of incoming || []) {
+        const id = String(row.row_id || providerSwitchExecutionRowId(row));
+        incomingIds.add(id);
+        const previous = merged.get(id);
+        merged.set(id, {
+            ...(previous || {}),
+            ...row,
+            row_id: id,
+            first_seen_at: previous?.first_seen_at || row.first_seen_at || updatedAt,
+            last_seen_at: updatedAt,
+            seen_count: Number(previous?.seen_count || 0) + 1,
+        });
+    }
+    const limit = Math.max(1, Math.min(300, Number(options.limit || options.maxRows || options.max_rows || 120)));
+    const rows = [...merged.values()]
+        .sort((a, b) => String(a.last_seen_at || "").localeCompare(String(b.last_seen_at || "")) || Number(a.source_index || 0) - Number(b.source_index || 0))
+        .slice(-limit);
+    const currentIds = new Set(rows.map((row) => row.row_id));
+    return {
+        rows,
+        newRowCount: rows.filter((row) => !previousIds.has(row.row_id)).length,
+        updatedRowCount: rows.filter((row) => previousIds.has(row.row_id) && incomingIds.has(row.row_id)).length,
+        prunedRowCount: Math.max(0, merged.size - currentIds.size),
+    };
+}
+function providerSwitchExecutionArchive(rows = [], options = {}) {
+    const updatedAt = String(options.updatedAt || now());
+    const attributionMap = new Map();
+    for (const row of rows || []) {
+        const key = `${String(row.expected_provider || row.agent_type || "unknown").toLowerCase()}|${String(row.project || "unknown").toLowerCase()}`;
+        const current = attributionMap.get(key) || {
+            agent_type: row.expected_provider || row.agent_type || "unknown",
+            project: row.project || "unknown",
+            expected_provider: row.expected_provider || row.agent_type || "unknown",
+            approved_count: 0,
+            executed_count: 0,
+            passed_count: 0,
+            failed_count: 0,
+            mismatch_count: 0,
+            actual_providers: [],
+            execution_receipt_ids: [],
+            decision_receipt_ids: [],
+            task_agent_session_ids: [],
+            row_ids: [],
+            memory_rel_paths: ["provider-switch-execution-memory.md"],
+            gap_codes: [],
+            first_executed_at: "",
+            last_executed_at: "",
+            last_failed_at: "",
+            last_passed_at: "",
+        };
+        current.approved_count += row.approved_switch === true ? 1 : 0;
+        current.executed_count += 1;
+        current.passed_count += row.status === "passed" ? 1 : 0;
+        current.failed_count += row.status === "failed" ? 1 : 0;
+        current.mismatch_count += row.mismatch === true ? 1 : 0;
+        current.actual_providers = uniqueStrings([...(current.actual_providers || []), row.actually_executed_provider].filter(Boolean), 12);
+        current.execution_receipt_ids = uniqueStrings([...(current.execution_receipt_ids || []), row.execution_receipt_id].filter(Boolean), 24);
+        current.decision_receipt_ids = uniqueStrings([...(current.decision_receipt_ids || []), row.provider_switch_decision_receipt_id].filter(Boolean), 24);
+        current.task_agent_session_ids = uniqueStrings([...(current.task_agent_session_ids || []), row.task_agent_session_id].filter(Boolean), 24);
+        current.row_ids = uniqueStrings([...(current.row_ids || []), row.row_id].filter(Boolean), 32);
+        current.memory_rel_paths = uniqueStrings([...(current.memory_rel_paths || []), "provider-switch-execution-memory.md"], 8);
+        current.gap_codes = uniqueStrings([...(current.gap_codes || []), ...(Array.isArray(row.gaps) ? row.gaps : [])], 32);
+        const executedAt = String(row.last_seen_at || row.first_seen_at || "");
+        current.first_executed_at = current.first_executed_at
+            ? [current.first_executed_at, executedAt].filter(Boolean).sort()[0]
+            : executedAt;
+        current.last_executed_at = [current.last_executed_at, executedAt].filter(Boolean).sort().slice(-1)[0] || "";
+        if (row.status === "failed")
+            current.last_failed_at = [current.last_failed_at, executedAt].filter(Boolean).sort().slice(-1)[0] || "";
+        if (row.status === "passed")
+            current.last_passed_at = [current.last_passed_at, executedAt].filter(Boolean).sort().slice(-1)[0] || "";
+        attributionMap.set(key, current);
+    }
+    const attributions = [...attributionMap.values()]
+        .sort((a, b) => Number(b.mismatch_count || 0) - Number(a.mismatch_count || 0)
+        || Number(b.failed_count || 0) - Number(a.failed_count || 0)
+        || String(a.agent_type || "").localeCompare(String(b.agent_type || "")));
+    return {
+        schema: "ccm-provider-switch-execution-distillation-v1",
+        version: exports.GROUP_PROVIDER_SWITCH_EXECUTION_DISTILLATION_VERSION,
+        archived_count: rows.length,
+        approved_count: rows.filter((row) => row.approved_switch === true).length,
+        executed_count: rows.length,
+        passed_count: rows.filter((row) => row.status === "passed").length,
+        failed_count: rows.filter((row) => row.status === "failed").length,
+        mismatch_count: rows.filter((row) => row.mismatch === true).length,
+        attribution_count: attributions.length,
+        attributions,
+        rows,
+        updatedAt,
+    };
+}
+function renderProviderSwitchExecutionBody(archive = {}, options = {}) {
+    const rows = Array.isArray(archive.rows) ? archive.rows : [];
+    const attributions = Array.isArray(archive.attributions) ? archive.attributions : [];
+    const lines = [
+        "# Provider Switch Execution Memory",
+        "",
+        `Generated by CCM provider switch execution distillation at ${options.updatedAt || now()}.`,
+        "This feedback memory records approved provider switches after the child Agent session finished, including the system-attested executed provider and the child receipt declaration.",
+        "Stable rule: passed switch history does not authorize future switches by itself. Failed or mismatched execution history must be treated as local dispatch caution until the runner/session cause is repaired and reverified.",
+        "",
+        "## Provider / Project Execution Attributions",
+    ];
+    for (const row of attributions.slice(0, 24)) {
+        lines.push(`- expected=${row.expected_provider || row.agent_type || "unknown"}; project=${row.project || "unknown"}; executed=${row.executed_count || 0}; passed=${row.passed_count || 0}; failed=${row.failed_count || 0}; mismatch=${row.mismatch_count || 0}; actualProviders=${(row.actual_providers || []).slice(0, 6).join(",") || "unknown"}; last=${row.last_executed_at || ""}.`);
+        if (row.gap_codes?.length)
+            lines.push(`  Gaps: ${row.gap_codes.slice(0, 8).join(", ")}.`);
+    }
+    lines.push("");
+    lines.push("## Recent Provider Switch Executions");
+    for (const row of rows.slice(-40).reverse()) {
+        const ids = [
+            row.project ? `project=${row.project}` : "",
+            row.expected_provider ? `expected=${row.expected_provider}` : "",
+            row.actually_executed_provider ? `actual=${row.actually_executed_provider}` : "",
+            row.provider_switch_decision_receipt_id ? `decision=${row.provider_switch_decision_receipt_id}` : "",
+            row.execution_receipt_id ? `receipt=${row.execution_receipt_id}` : "",
+            row.task_agent_session_id ? `session=${row.task_agent_session_id}` : "",
+            row.execution_id ? `execution=${row.execution_id}` : "",
+        ].filter(Boolean).join("; ");
+        lines.push(`- [${row.status || "unknown"}] ${ids || row.row_id}; approved=${row.approved_switch === true}; systemAttested=${row.system_attested === true}; childDeclared=${row.child_declared === true}; mismatch=${row.mismatch === true}.`);
+        if (row.gaps?.length)
+            lines.push(`  Gaps: ${row.gaps.slice(0, 8).join(", ")}.`);
+        if (row.reason)
+            lines.push(`  Reason: ${compactText(row.reason, 400).replace(/\n/g, " ")}`);
+    }
+    lines.push("");
+    lines.push("## Dispatch Reminder");
+    lines.push("- Use these rows as local execution feedback for the same expected provider and project. Passed history is monitoring evidence only; repeated mismatch history should require receipt sampling or a hold until the runner binding is repaired.");
+    return lines.join("\n").trim() + "\n";
+}
+function distillProviderSwitchExecutionToTypedMemory(groupId, input = {}, options = {}) {
+    if (options.disabled === true || options.disableDistillation === true || options.disable_distillation === true) {
+        return {
+            schema: "ccm-provider-switch-execution-distillation-v1",
+            version: exports.GROUP_PROVIDER_SWITCH_EXECUTION_DISTILLATION_VERSION,
+            groupId,
+            skipped: true,
+            reason: "disabled",
+        };
+    }
+    const updatedAt = String(options.updatedAt || options.updated_at || now());
+    const ledger = readGroupTypedMemoryDistillationLedger(groupId);
+    const incomingRows = normalizeProviderSwitchExecutionRows(input, { ...options, groupId, updatedAt });
+    const previousArchive = ledger.providerSwitchExecutionArchive || {};
+    const previousRows = Array.isArray(previousArchive.rows) ? previousArchive.rows : [];
+    const merged = mergeProviderSwitchExecutionRows(previousRows, incomingRows, { ...options, updatedAt });
+    const archive = providerSwitchExecutionArchive(merged.rows, { ...options, updatedAt });
+    const writes = [];
+    if (archive.rows.length) {
+        writes.push(upsertGroupTypedMemoryDocument(groupId, {
+            type: "feedback",
+            slug: "provider-switch-execution-memory",
+            name: "Provider switch execution memory",
+            description: "System-attested provider switch executions and mismatch feedback from child Agent completion receipts.",
+            source: "auto:provider-switch-execution-distillation",
+            updatedAt,
+            body: renderProviderSwitchExecutionBody(archive, { updatedAt }),
+            maxBodyChars: Number(options.maxBodyChars || options.max_body_chars || 18_000),
+        }));
+    }
+    const ledgerState = { ...ledger };
+    delete ledgerState.file;
+    writeJsonAtomic(ledger.file, {
+        ...ledgerState,
+        schema: "ccm-group-typed-memory-distillation-ledger-v1",
+        version: exports.GROUP_TYPED_MEMORY_DISTILLATION_VERSION,
+        groupId,
+        facts: ledger.facts || {},
+        providerSwitchExecutionArchive: archive,
+        updatedAt,
+    });
+    const index = buildGroupTypedMemoryIndex(groupId);
+    return {
+        schema: "ccm-provider-switch-execution-distillation-v1",
+        version: exports.GROUP_PROVIDER_SWITCH_EXECUTION_DISTILLATION_VERSION,
+        groupId,
+        skipped: false,
+        reason: compactText(options.reason || "", 220),
+        ledgerFile: ledger.file,
+        incomingRowCount: incomingRows.length,
+        archivedCount: archive.archived_count,
+        approvedCount: archive.approved_count,
+        executedCount: archive.executed_count,
+        passedCount: archive.passed_count,
+        failedCount: archive.failed_count,
+        mismatchCount: archive.mismatch_count,
+        attributionCount: archive.attribution_count,
+        newRowCount: merged.newRowCount,
+        updatedRowCount: merged.updatedRowCount,
+        prunedRowCount: merged.prunedRowCount,
+        writeCount: writes.length,
+        writes,
+        index,
+        archive,
+        distilledAt: updatedAt,
+    };
+}
+function providerDispatchOverrideFollowupReceiptValidationInputRows(input = {}) {
+    if (Array.isArray(input))
+        return input;
+    const rows = [
+        ...(Array.isArray(input.rows) ? input.rows : []),
+        ...(Array.isArray(input.items) ? input.items : []),
+        ...(Array.isArray(input.entries) ? input.entries : []),
+        ...(Array.isArray(input.validations) ? input.validations : []),
+    ];
+    return rows.length ? rows : input && typeof input === "object" ? [input] : [];
+}
+function providerDispatchOverrideFollowupReceiptValidationRowId(row = {}) {
+    return `provider-dispatch-override-followup-receipt-validation:${checksum([
+        row.groupId,
+        row.validation_id,
+        row.binding_id,
+        row.execution_id,
+        row.attempt_status,
+    ], 24)}`;
+}
+function normalizeProviderDispatchOverrideFollowupReceiptValidationRows(input = {}, options = {}) {
+    const fallbackGroupId = String(options.groupId || options.group_id || input.groupId || input.group_id || "").trim();
+    return providerDispatchOverrideFollowupReceiptValidationInputRows(input).map((raw, index) => {
+        const entry = raw?.entry || raw?.binding || raw || {};
+        const validation = raw?.validation
+            || raw?.receipt_validation
+            || entry.worker_context_provider_dispatch_override_followup_receipt_contract_validation
+            || entry.provider_dispatch_override_followup_receipt_contract_validation
+            || {};
+        const contract = validation.contract
+            || entry.worker_context_packet_pressure_provenance_provider_dispatch_override_followup_receipt_contract
+            || entry.workerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptContract
+            || {};
+        const gaps = Array.isArray(validation.gaps) ? validation.gaps : [];
+        const receiptEvidenceRows = providerDispatchOverrideFollowupUsageRows(validation.receipt || {});
+        const status = validation.contract_satisfied === true
+            ? "passed"
+            : String(validation.status || "failed").trim().toLowerCase() === "passed"
+                ? "passed"
+                : "failed";
+        const attemptAt = String(validation.at || validation.validated_at || validation.validatedAt || raw?.at || entry.at || options.updatedAt || now());
+        const row = {
+            schema: "ccm-pressure-provenance-provider-dispatch-override-followup-receipt-validation-distilled-row-v1",
+            version: exports.GROUP_PRESSURE_PROVENANCE_PROVIDER_DISPATCH_OVERRIDE_FOLLOWUP_RECEIPT_VALIDATION_DISTILLATION_VERSION,
+            groupId: String(validation.groupId || validation.group_id || entry.groupId || entry.group_id || raw?.groupId || raw?.group_id || fallbackGroupId || "").trim(),
+            project: String(validation.project || entry.project || raw?.project || "").trim(),
+            agent_type: String(validation.agent_type || validation.agentType || entry.agent_type || entry.agentType || raw?.agent_type || raw?.agentType || "unknown").trim() || "unknown",
+            validation_id: String(validation.validation_id || validation.validationId || raw?.validation_id || raw?.validationId || "").trim(),
+            binding_id: String(validation.binding_id || validation.bindingId || entry.binding_id || entry.bindingId || raw?.binding_id || raw?.bindingId || "").trim(),
+            assignment_id: String(validation.assignment_id || validation.assignmentId || entry.assignment_id || entry.assignmentId || "").trim(),
+            dispatch_key: String(validation.dispatch_key || validation.dispatchKey || entry.dispatch_key || entry.dispatchKey || "").trim(),
+            worker_context_packet_id: String(validation.worker_context_packet_id || validation.workerContextPacketId || entry.worker_context_packet_id || entry.workerContextPacketId || "").trim(),
+            task_id: String(validation.task_id || validation.taskId || entry.task_id || entry.taskId || "").trim(),
+            worker_handoff_id: String(validation.worker_handoff_id || validation.workerHandoffId || entry.worker_handoff_id || entry.workerHandoffId || "").trim(),
+            task_agent_session_id: String(validation.task_agent_session_id || validation.taskAgentSessionId || entry.task_agent_session_id || entry.taskAgentSessionId || "").trim(),
+            native_session_id: String(validation.native_session_id || validation.nativeSessionId || entry.native_session_id || entry.nativeSessionId || "").trim(),
+            execution_id: String(validation.execution_id || validation.executionId || entry.execution_id || entry.executionId || "").trim(),
+            receipt_status: String(validation.receipt_status || validation.receiptStatus || "").trim().toLowerCase(),
+            attempt_status: status,
+            contract_satisfied: status === "passed",
+            repair_work_item_id: String(validation.repair_work_item_id || validation.repairWorkItemId || validation.repair_work_item?.work_item_id || "").trim(),
+            repair_work_item_status: String(validation.repair_work_item_status || validation.repairWorkItemStatus || validation.repair_work_item?.status || "").trim().toLowerCase(),
+            required_rel_paths: uniqueStrings(contract.rel_paths || contract.relPaths || [], 24),
+            required_followup_work_item_ids: uniqueStrings(contract.followup_work_item_ids || contract.followupWorkItemIds || [], 24),
+            required_override_ids: uniqueStrings(contract.override_ids || contract.overrideIds || [], 24),
+            gap_codes: uniqueStrings(gaps.map((gap) => gap.code || gap.gap_code || gap.gapCode).filter(Boolean), 24),
+            gap_reasons: uniqueStrings(gaps.map((gap) => gap.reason || gap.message).filter(Boolean), 16),
+            receipt_evidence_reasons: uniqueStrings(receiptEvidenceRows.map((row) => row.reason || row.summary || row.note).filter(Boolean), 16),
+            memory_provenance_usage_count: Number(validation.memory_provenance_usage_count || validation.memoryProvenanceUsageCount || 0),
+            provider_override_followup_reverified_row_count: Number(validation.provider_override_followup_reverified_row_count || validation.providerOverrideFollowupReverifiedRowCount || 0),
+            current_source_verified_count: Number(validation.current_source_verified_count || validation.currentSourceVerifiedCount || 0),
+            reason: compactText(validation.reason || raw?.reason || "", 700),
+            attempt_at: attemptAt,
+            first_seen_at: attemptAt,
+            last_seen_at: attemptAt,
+            source_index: Number(raw?.source_index || raw?.sourceIndex || index),
+        };
+        return { ...row, row_id: providerDispatchOverrideFollowupReceiptValidationRowId(row) };
+    }).filter((row) => !!row.validation_id)
+        .filter((row) => row.attempt_status === "failed" || row.attempt_status === "passed");
+}
+function mergeProviderDispatchOverrideFollowupReceiptValidationRows(existing = [], incoming = [], options = {}) {
+    const updatedAt = String(options.updatedAt || now());
+    const merged = new Map();
+    for (const row of existing || []) {
+        const id = String(row.row_id || providerDispatchOverrideFollowupReceiptValidationRowId(row));
+        merged.set(id, { ...row, row_id: id });
+    }
+    const previousIds = new Set(merged.keys());
+    const incomingIds = new Set();
+    for (const row of incoming || []) {
+        const id = String(row.row_id || providerDispatchOverrideFollowupReceiptValidationRowId(row));
+        incomingIds.add(id);
+        const previous = merged.get(id);
+        merged.set(id, {
+            ...(previous || {}),
+            ...row,
+            row_id: id,
+            first_seen_at: previous?.first_seen_at || row.first_seen_at || updatedAt,
+            last_seen_at: row.attempt_at || updatedAt,
+            seen_count: Number(previous?.seen_count || 0) + 1,
+        });
+    }
+    const limit = Math.max(1, Math.min(600, Number(options.limit || options.maxRows || options.max_rows || 240)));
+    const rows = [...merged.values()]
+        .sort((a, b) => String(a.attempt_at || a.last_seen_at || "").localeCompare(String(b.attempt_at || b.last_seen_at || "")) || String(a.row_id || "").localeCompare(String(b.row_id || "")))
+        .slice(-limit);
+    return {
+        rows,
+        newRowCount: rows.filter((row) => !previousIds.has(row.row_id)).length,
+        updatedRowCount: rows.filter((row) => previousIds.has(row.row_id) && incomingIds.has(row.row_id)).length,
+        prunedRowCount: Math.max(0, merged.size - rows.length),
+    };
+}
+function pressureProvenanceProviderDispatchOverrideFollowupReceiptValidationArchive(rows = [], options = {}) {
+    const updatedAt = String(options.updatedAt || now());
+    const attributionRows = new Map();
+    for (const row of rows || []) {
+        const key = `${String(row.agent_type || "unknown").toLowerCase()}|${String(row.project || "unknown").toLowerCase()}`;
+        attributionRows.set(key, [...(attributionRows.get(key) || []), row]);
+    }
+    const attributions = [...attributionRows.entries()].map(([, sourceRows]) => {
+        const ordered = [...sourceRows].sort((a, b) => String(a.attempt_at || "").localeCompare(String(b.attempt_at || "")) || String(a.row_id || "").localeCompare(String(b.row_id || "")));
+        const failed = ordered.filter((row) => row.attempt_status === "failed");
+        const passed = ordered.filter((row) => row.attempt_status === "passed");
+        let consecutiveFailureCount = 0;
+        for (let index = ordered.length - 1; index >= 0; index -= 1) {
+            if (ordered[index].attempt_status !== "failed")
+                break;
+            consecutiveFailureCount += 1;
+        }
+        const latest = ordered[ordered.length - 1] || {};
+        const lastFailedAt = failed.map((row) => row.attempt_at || "").filter(Boolean).sort().slice(-1)[0] || "";
+        const lastPassedAt = passed.map((row) => row.attempt_at || "").filter(Boolean).sort().slice(-1)[0] || "";
+        const repairVerified = failed.length > 0
+            && latest.attempt_status === "passed"
+            && !!lastPassedAt
+            && (!lastFailedAt || lastPassedAt.localeCompare(lastFailedAt) >= 0);
+        return {
+            agent_type: latest.agent_type || "unknown",
+            project: latest.project || "unknown",
+            attempt_count: ordered.length,
+            failed_count: failed.length,
+            passed_count: passed.length,
+            consecutive_failure_count: consecutiveFailureCount,
+            latest_status: latest.attempt_status || "",
+            repair_verified: repairVerified,
+            first_attempt_at: ordered[0]?.attempt_at || "",
+            last_attempt_at: latest.attempt_at || "",
+            last_failed_at: lastFailedAt,
+            last_passed_at: lastPassedAt,
+            validation_ids: uniqueStrings(ordered.map((row) => row.validation_id).filter(Boolean), 32),
+            repair_work_item_ids: uniqueStrings(ordered.map((row) => row.repair_work_item_id).filter(Boolean), 24),
+            rel_paths: uniqueStrings(ordered.flatMap((row) => row.required_rel_paths || []), 32),
+            followup_work_item_ids: uniqueStrings(ordered.flatMap((row) => row.required_followup_work_item_ids || []), 32),
+            override_ids: uniqueStrings(ordered.flatMap((row) => row.required_override_ids || []), 32),
+            gap_codes: uniqueStrings(ordered.flatMap((row) => row.gap_codes || []), 32),
+        };
+    }).sort((a, b) => Number(b.consecutive_failure_count || 0) - Number(a.consecutive_failure_count || 0) || Number(b.failed_count || 0) - Number(a.failed_count || 0));
+    return {
+        schema: "ccm-pressure-provenance-provider-dispatch-override-followup-receipt-validation-distillation-v1",
+        version: exports.GROUP_PRESSURE_PROVENANCE_PROVIDER_DISPATCH_OVERRIDE_FOLLOWUP_RECEIPT_VALIDATION_DISTILLATION_VERSION,
+        archived_count: rows.length,
+        attempt_count: rows.length,
+        failed_count: rows.filter((row) => row.attempt_status === "failed").length,
+        passed_count: rows.filter((row) => row.attempt_status === "passed").length,
+        attribution_count: attributions.length,
+        escalated_attribution_count: attributions.filter((row) => Number(row.consecutive_failure_count || 0) >= 2).length,
+        repaired_attribution_count: attributions.filter((row) => row.repair_verified === true).length,
+        attributions,
+        rows,
+        updatedAt,
+    };
+}
+function renderPressureProvenanceProviderDispatchOverrideFollowupReceiptValidationBody(archive = {}, options = {}) {
+    const rows = Array.isArray(archive.rows) ? archive.rows : [];
+    const attributions = Array.isArray(archive.attributions) ? archive.attributions : [];
+    const lines = [
+        "# Provider Dispatch Override Follow-up Receipt Validation History",
+        "",
+        `Generated by CCM corrected-receipt validation distillation at ${options.updatedAt || now()}.`,
+        "This feedback memory preserves every provider override follow-up receipt validation attempt across child Agent sessions.",
+        "Stable rule: repeated failed corrected receipts for the same agentType/project must escalate the next provider dispatch from sampling to hold. A later verified receipt clears the active failure streak and returns the provider to monitored sampling, while the failed attempts remain auditable.",
+        "",
+        "## Executor / Project Validation State",
+    ];
+    for (const row of attributions.slice(0, 24)) {
+        lines.push(`- agentType=${row.agent_type || "unknown"}; project=${row.project || "unknown"}; attempts=${row.attempt_count || 0}; failed=${row.failed_count || 0}; passed=${row.passed_count || 0}; consecutiveFailures=${row.consecutive_failure_count || 0}; latest=${row.latest_status || "unknown"}; repairVerified=${row.repair_verified === true}; lastAttemptAt=${row.last_attempt_at || ""}.`);
+        if (row.gap_codes?.length)
+            lines.push(`  Gap codes: ${row.gap_codes.slice(0, 12).join(", ")}.`);
+        if (row.repair_work_item_ids?.length)
+            lines.push(`  Validation repair work items: ${row.repair_work_item_ids.slice(0, 8).join(", ")}.`);
+    }
+    lines.push("");
+    lines.push("## Validation Attempts");
+    for (const row of rows.slice(-80).reverse()) {
+        lines.push(`- [${row.attempt_status || "unknown"}] agentType=${row.agent_type || "unknown"}; project=${row.project || "unknown"}; validation=${row.validation_id || "unknown"}; execution=${row.execution_id || "unknown"}; repairWorkItem=${row.repair_work_item_id || "unknown"}; at=${row.attempt_at || ""}.`);
+        if (row.gap_codes?.length)
+            lines.push(`  Missing evidence: ${row.gap_codes.slice(0, 12).join(", ")}.`);
+        if (row.required_rel_paths?.length)
+            lines.push(`  Required relPath: ${row.required_rel_paths.slice(0, 8).join(", ")}.`);
+        if (row.receipt_evidence_reasons?.length)
+            lines.push(`  Receipt evidence: ${row.receipt_evidence_reasons.slice(0, 4).map((item) => compactText(item, 500).replace(/\n/g, " ")).join(" | ")}`);
+    }
+    lines.push("");
+    lines.push("## Dispatch Reminder");
+    lines.push("- Use the latest consecutive failure streak for the active gate, but never delete older failures or successful repairs from audit history.");
+    return lines.join("\n").trim() + "\n";
+}
+function distillProviderDispatchOverrideFollowupReceiptValidationToTypedMemory(groupId, input = {}, options = {}) {
+    if (options.disabled === true || options.disableDistillation === true || options.disable_distillation === true) {
+        return {
+            schema: "ccm-pressure-provenance-provider-dispatch-override-followup-receipt-validation-distillation-v1",
+            version: exports.GROUP_PRESSURE_PROVENANCE_PROVIDER_DISPATCH_OVERRIDE_FOLLOWUP_RECEIPT_VALIDATION_DISTILLATION_VERSION,
+            groupId,
+            skipped: true,
+            reason: "disabled",
+        };
+    }
+    const updatedAt = String(options.updatedAt || options.updated_at || now());
+    const ledger = readGroupTypedMemoryDistillationLedger(groupId);
+    const incomingRows = normalizeProviderDispatchOverrideFollowupReceiptValidationRows(input, { ...options, groupId, updatedAt });
+    const previousArchive = ledger.pressureProvenanceProviderDispatchOverrideFollowupReceiptValidationArchive || {};
+    const previousRows = Array.isArray(previousArchive.rows) ? previousArchive.rows : [];
+    const merged = mergeProviderDispatchOverrideFollowupReceiptValidationRows(previousRows, incomingRows, { ...options, updatedAt });
+    const archive = pressureProvenanceProviderDispatchOverrideFollowupReceiptValidationArchive(merged.rows, { ...options, updatedAt });
+    const writes = [];
+    if (archive.rows.length) {
+        writes.push(upsertGroupTypedMemoryDocument(groupId, {
+            type: "feedback",
+            slug: "provider-dispatch-override-followup-receipt-validation-history",
+            name: "Provider dispatch override follow-up receipt validation history",
+            description: "Append-only failed and repaired corrected-receipt validation attempts used by provider-specific pre-dispatch policy.",
+            source: "auto:pressure-provenance-provider-dispatch-override-followup-receipt-validation-distillation",
+            updatedAt,
+            body: renderPressureProvenanceProviderDispatchOverrideFollowupReceiptValidationBody(archive, { updatedAt }),
+            maxBodyChars: Number(options.maxBodyChars || options.max_body_chars || 24_000),
+        }));
+    }
+    const ledgerState = { ...ledger };
+    delete ledgerState.file;
+    writeJsonAtomic(ledger.file, {
+        ...ledgerState,
+        schema: "ccm-group-typed-memory-distillation-ledger-v1",
+        version: exports.GROUP_TYPED_MEMORY_DISTILLATION_VERSION,
+        groupId,
+        facts: ledger.facts || {},
+        pressureProvenanceProviderDispatchOverrideFollowupReceiptValidationArchive: archive,
+        updatedAt,
+    });
+    const index = buildGroupTypedMemoryIndex(groupId);
+    return {
+        schema: "ccm-pressure-provenance-provider-dispatch-override-followup-receipt-validation-distillation-v1",
+        version: exports.GROUP_PRESSURE_PROVENANCE_PROVIDER_DISPATCH_OVERRIDE_FOLLOWUP_RECEIPT_VALIDATION_DISTILLATION_VERSION,
+        groupId,
+        skipped: false,
+        reason: compactText(options.reason || "", 220),
+        ledgerFile: ledger.file,
+        incomingRowCount: incomingRows.length,
+        archivedCount: archive.archived_count,
+        attemptCount: archive.attempt_count,
+        failedCount: archive.failed_count,
+        passedCount: archive.passed_count,
+        attributionCount: archive.attribution_count,
+        escalatedAttributionCount: archive.escalated_attribution_count,
+        repairedAttributionCount: archive.repaired_attribution_count,
         newRowCount: merged.newRowCount,
         updatedRowCount: merged.updatedRowCount,
         prunedRowCount: merged.prunedRowCount,
@@ -4705,6 +6411,525 @@ function summarizeProviderDispatchOverrideFollowupPolicyAttributions(attribution
         overrideIds: uniqueStrings(attributions.flatMap((row) => Array.isArray(row.override_ids || row.overrideIds) ? (row.override_ids || row.overrideIds) : []), 16),
     };
 }
+function summarizeProviderDispatchOverrideFollowupReceiptValidationPolicyAttributions(attributions = []) {
+    const ordered = [...(attributions || [])]
+        .sort((a, b) => String(a.last_attempt_at || a.lastAttemptAt || "").localeCompare(String(b.last_attempt_at || b.lastAttemptAt || "")));
+    const latest = ordered[ordered.length - 1] || {};
+    return {
+        attemptCount: attributions.reduce((sum, row) => sum + Number(row.attempt_count || row.attemptCount || 0), 0),
+        failedCount: attributions.reduce((sum, row) => sum + Number(row.failed_count || row.failedCount || 0), 0),
+        passedCount: attributions.reduce((sum, row) => sum + Number(row.passed_count || row.passedCount || 0), 0),
+        consecutiveFailureCount: Number(latest.consecutive_failure_count || latest.consecutiveFailureCount || 0),
+        latestStatus: String(latest.latest_status || latest.latestStatus || ""),
+        repairVerified: latest.repair_verified === true || latest.repairVerified === true,
+        lastAttemptAt: String(latest.last_attempt_at || latest.lastAttemptAt || ""),
+        lastFailedAt: String(latest.last_failed_at || latest.lastFailedAt || ""),
+        lastPassedAt: String(latest.last_passed_at || latest.lastPassedAt || ""),
+        validationIds: uniqueStrings(attributions.flatMap((row) => row.validation_ids || row.validationIds || []), 32),
+        repairWorkItemIds: uniqueStrings(attributions.flatMap((row) => row.repair_work_item_ids || row.repairWorkItemIds || []), 24),
+        relPaths: uniqueStrings(attributions.flatMap((row) => row.rel_paths || row.relPaths || []), 32),
+        followupWorkItemIds: uniqueStrings(attributions.flatMap((row) => row.followup_work_item_ids || row.followupWorkItemIds || []), 32),
+        overrideIds: uniqueStrings(attributions.flatMap((row) => row.override_ids || row.overrideIds || []), 32),
+        gapCodes: uniqueStrings(attributions.flatMap((row) => row.gap_codes || row.gapCodes || []), 32),
+    };
+}
+function summarizeProviderSwitchExecutionPolicyAttributions(attributions = []) {
+    const ordered = [...(attributions || [])]
+        .sort((a, b) => String(a.last_executed_at || a.lastExecutedAt || "").localeCompare(String(b.last_executed_at || b.lastExecutedAt || "")));
+    const latest = ordered[ordered.length - 1] || {};
+    return {
+        executedCount: attributions.reduce((sum, row) => sum + Number(row.executed_count || row.executedCount || 0), 0),
+        approvedCount: attributions.reduce((sum, row) => sum + Number(row.approved_count || row.approvedCount || 0), 0),
+        passedCount: attributions.reduce((sum, row) => sum + Number(row.passed_count || row.passedCount || 0), 0),
+        failedCount: attributions.reduce((sum, row) => sum + Number(row.failed_count || row.failedCount || 0), 0),
+        mismatchCount: attributions.reduce((sum, row) => sum + Number(row.mismatch_count || row.mismatchCount || 0), 0),
+        expectedProvider: String(latest.expected_provider || latest.expectedProvider || latest.agent_type || latest.agentType || ""),
+        actualProviders: uniqueStrings(attributions.flatMap((row) => row.actual_providers || row.actualProviders || []), 24),
+        lastExecutedAt: String(latest.last_executed_at || latest.lastExecutedAt || ""),
+        lastFailedAt: attributions.map((row) => row.last_failed_at || row.lastFailedAt || "").filter(Boolean).sort().slice(-1)[0] || "",
+        lastPassedAt: attributions.map((row) => row.last_passed_at || row.lastPassedAt || "").filter(Boolean).sort().slice(-1)[0] || "",
+        executionReceiptIds: uniqueStrings(attributions.flatMap((row) => row.execution_receipt_ids || row.executionReceiptIds || []), 24),
+        decisionReceiptIds: uniqueStrings(attributions.flatMap((row) => row.decision_receipt_ids || row.decisionReceiptIds || []), 24),
+        taskAgentSessionIds: uniqueStrings(attributions.flatMap((row) => row.task_agent_session_ids || row.taskAgentSessionIds || []), 24),
+        rowIds: uniqueStrings(attributions.flatMap((row) => row.row_ids || row.rowIds || []), 32),
+        memoryRelPaths: uniqueStrings(attributions.flatMap((row) => row.memory_rel_paths || row.memoryRelPaths || []), 8),
+        gapCodes: uniqueStrings(attributions.flatMap((row) => row.gap_codes || row.gapCodes || []), 32),
+    };
+}
+function scoreProviderSwitchExecutionRows(rows = [], options = {}) {
+    const passedCredit = Math.max(0, Number(options.providerSwitchExecutionPassedCredit
+        || options.provider_switch_execution_passed_credit
+        || 1));
+    const mismatchPenalty = Math.max(1, Number(options.providerSwitchExecutionMismatchPenalty
+        || options.provider_switch_execution_mismatch_penalty
+        || 1.5));
+    let weightedMismatchScore = 0;
+    let weightedFailedScore = 0;
+    let weightedPassedScore = 0;
+    let newestAttemptAt = "";
+    let oldestAttemptAt = "";
+    for (const row of rows || []) {
+        const at = String(row.last_seen_at || row.last_executed_at || row.lastExecutedAt || row.first_seen_at || row.at || "");
+        const decay = providerDispatchReliabilityDecayWeight(at, options);
+        const status = String(row.status || "").trim().toLowerCase();
+        const gaps = Array.isArray(row.gaps || row.gap_codes || row.gapCodes) ? (row.gaps || row.gap_codes || row.gapCodes) : [];
+        const mismatch = row.mismatch === true
+            || row.provider_switch_execution_mismatch === true
+            || row.providerSwitchExecutionMismatch === true
+            || gaps.includes("executed_provider_mismatch");
+        if (mismatch)
+            weightedMismatchScore += decay.weight;
+        if (status === "failed")
+            weightedFailedScore += decay.weight;
+        if (status === "passed")
+            weightedPassedScore += decay.weight;
+        if (at) {
+            newestAttemptAt = [newestAttemptAt, at].filter(Boolean).sort().slice(-1)[0] || "";
+            oldestAttemptAt = oldestAttemptAt ? [oldestAttemptAt, at].sort()[0] : at;
+        }
+    }
+    const weightedRiskScore = weightedFailedScore + weightedMismatchScore * (mismatchPenalty - 1);
+    const weightedEvidence = weightedRiskScore + weightedPassedScore;
+    const adjustedEvidence = weightedRiskScore + weightedPassedScore * passedCredit;
+    const riskScore = adjustedEvidence > 0 ? weightedRiskScore / adjustedEvidence : 0;
+    const confidence = weightedEvidence > 0 ? 1 - Math.exp(-weightedEvidence / 3) : 0;
+    return {
+        attemptCount: rows.length,
+        failedCount: rows.filter((row) => String(row.status || "").trim().toLowerCase() === "failed").length,
+        passedCount: rows.filter((row) => String(row.status || "").trim().toLowerCase() === "passed").length,
+        mismatchCount: rows.filter((row) => row.mismatch === true).length,
+        weightedMismatchScore: providerDispatchReliabilityRound(weightedMismatchScore),
+        weightedFailedScore: providerDispatchReliabilityRound(weightedFailedScore),
+        weightedPassedScore: providerDispatchReliabilityRound(weightedPassedScore),
+        weightedRiskScore: providerDispatchReliabilityRound(weightedRiskScore),
+        weightedEvidence: providerDispatchReliabilityRound(weightedEvidence),
+        riskScore: providerDispatchReliabilityRound(riskScore),
+        confidence: providerDispatchReliabilityRound(confidence),
+        passedCredit,
+        mismatchPenalty,
+        halfLifeDays: Math.max(1, Math.min(365, Number(options.halfLifeDays || options.half_life_days || options.providerReliabilityHalfLifeDays || options.provider_reliability_half_life_days || exports.GROUP_PROVIDER_DISPATCH_RELIABILITY_HALF_LIFE_DAYS))),
+        newestAttemptAt,
+        oldestAttemptAt,
+    };
+}
+function providerDispatchReliabilityNowMs(options = {}) {
+    const explicit = Number(options.nowMs || options.now_ms || 0);
+    if (Number.isFinite(explicit) && explicit > 0)
+        return explicit;
+    const parsed = Date.parse(String(options.generatedAt || options.generated_at || options.now || ""));
+    return Number.isFinite(parsed) ? parsed : Date.now();
+}
+function providerDispatchReliabilityRound(value, digits = 4) {
+    const number = Number(value || 0);
+    const scale = 10 ** digits;
+    return Math.round(number * scale) / scale;
+}
+function providerDispatchReliabilityDecayWeight(at, options = {}) {
+    const nowMs = providerDispatchReliabilityNowMs(options);
+    const atMs = Date.parse(String(at || ""));
+    const ageDays = Number.isFinite(atMs) ? Math.max(0, (nowMs - atMs) / 86_400_000) : 0;
+    const halfLifeDays = Math.max(1, Math.min(365, Number(options.halfLifeDays || options.half_life_days || options.providerReliabilityHalfLifeDays || options.provider_reliability_half_life_days || exports.GROUP_PROVIDER_DISPATCH_RELIABILITY_HALF_LIFE_DAYS)));
+    return {
+        ageDays,
+        weight: 2 ** (-ageDays / halfLifeDays),
+        halfLifeDays,
+    };
+}
+function scoreProviderDispatchReliabilityRows(rows = [], options = {}) {
+    const recoveryCredit = Math.max(0, Number(options.recoveryCredit || options.recovery_credit || 1.25));
+    let weightedFailureScore = 0;
+    let weightedPassedScore = 0;
+    let newestAttemptAt = "";
+    let oldestAttemptAt = "";
+    for (const row of rows || []) {
+        const at = String(row.attempt_at || row.last_seen_at || row.first_seen_at || "");
+        const decay = providerDispatchReliabilityDecayWeight(at, options);
+        if (row.attempt_status === "failed")
+            weightedFailureScore += decay.weight;
+        if (row.attempt_status === "passed")
+            weightedPassedScore += decay.weight;
+        if (at) {
+            newestAttemptAt = [newestAttemptAt, at].filter(Boolean).sort().slice(-1)[0] || "";
+            oldestAttemptAt = oldestAttemptAt ? [oldestAttemptAt, at].sort()[0] : at;
+        }
+    }
+    const weightedEvidence = weightedFailureScore + weightedPassedScore;
+    const adjustedEvidence = weightedFailureScore + weightedPassedScore * recoveryCredit;
+    const riskScore = adjustedEvidence > 0 ? weightedFailureScore / adjustedEvidence : 0;
+    const confidence = weightedEvidence > 0 ? 1 - Math.exp(-weightedEvidence / 3) : 0;
+    return {
+        attemptCount: rows.length,
+        failedCount: rows.filter((row) => row.attempt_status === "failed").length,
+        passedCount: rows.filter((row) => row.attempt_status === "passed").length,
+        weightedFailureScore: providerDispatchReliabilityRound(weightedFailureScore),
+        weightedPassedScore: providerDispatchReliabilityRound(weightedPassedScore),
+        weightedEvidence: providerDispatchReliabilityRound(weightedEvidence),
+        riskScore: providerDispatchReliabilityRound(riskScore),
+        confidence: providerDispatchReliabilityRound(confidence),
+        recoveryCredit,
+        halfLifeDays: Math.max(1, Math.min(365, Number(options.halfLifeDays || options.half_life_days || options.providerReliabilityHalfLifeDays || options.provider_reliability_half_life_days || exports.GROUP_PROVIDER_DISPATCH_RELIABILITY_HALF_LIFE_DAYS))),
+        newestAttemptAt,
+        oldestAttemptAt,
+    };
+}
+function listProviderDispatchReliabilityDistillationLedgers(options = {}) {
+    const explicitGroupIds = Array.isArray(options.crossGroupProviderReliabilityGroupIds || options.cross_group_provider_reliability_group_ids)
+        ? (options.crossGroupProviderReliabilityGroupIds || options.cross_group_provider_reliability_group_ids)
+            .map((item) => String(item || "").trim()).filter(Boolean)
+        : [];
+    const excluded = new Set((Array.isArray(options.excludeGroupIds || options.exclude_group_ids) ? (options.excludeGroupIds || options.exclude_group_ids) : [])
+        .flatMap((item) => [String(item || "").trim().toLowerCase(), safeSegment(item).toLowerCase()])
+        .filter(Boolean));
+    const maxGroups = Math.max(1, Math.min(200, Number(options.maxGroups || options.max_groups || exports.GROUP_PROVIDER_DISPATCH_RELIABILITY_MAX_SOURCE_GROUPS)));
+    const candidates = explicitGroupIds.length
+        ? explicitGroupIds.map((groupId) => ({ groupId, file: getGroupTypedMemoryDistillationLedgerFile(groupId) }))
+        : (() => {
+            try {
+                return fs.readdirSync(GROUP_TYPED_MEMORY_DIR, { withFileTypes: true })
+                    .filter(entry => entry.isDirectory())
+                    .map(entry => ({ groupId: entry.name, file: path.join(GROUP_TYPED_MEMORY_DIR, entry.name, exports.GROUP_TYPED_MEMORY_DISTILLATION_LEDGER) }));
+            }
+            catch {
+                return [];
+            }
+        })();
+    return candidates
+        .filter((item) => item.file && fs.existsSync(item.file))
+        .map((item) => {
+        try {
+            const stat = fs.statSync(item.file);
+            return { ...item, mtimeMs: Number(stat.mtimeMs || 0) };
+        }
+        catch {
+            return { ...item, mtimeMs: 0 };
+        }
+    })
+        .filter((item) => !excluded.has(String(item.groupId || "").toLowerCase()))
+        .sort((a, b) => Number(b.mtimeMs || 0) - Number(a.mtimeMs || 0))
+        .slice(0, maxGroups);
+}
+function loadProviderDispatchReliabilitySources(options = {}) {
+    const targetGroupId = String(options.targetGroupId || options.target_group_id || options.groupId || options.group_id || "").trim();
+    const targetKeys = new Set([targetGroupId, safeSegment(targetGroupId)].map(item => item.toLowerCase()).filter(Boolean));
+    const ledgers = listProviderDispatchReliabilityDistillationLedgers({
+        ...options,
+        excludeGroupIds: [
+            ...(Array.isArray(options.excludeGroupIds || options.exclude_group_ids) ? (options.excludeGroupIds || options.exclude_group_ids) : []),
+            ...(targetGroupId ? [targetGroupId] : []),
+        ],
+    });
+    const sources = [];
+    for (const item of ledgers) {
+        try {
+            const parsed = readJson(item.file, {});
+            const ledgerGroupId = String(parsed.groupId || parsed.group_id || item.groupId || "").trim();
+            if (targetKeys.has(ledgerGroupId.toLowerCase()) || targetKeys.has(safeSegment(ledgerGroupId).toLowerCase()))
+                continue;
+            const archive = parsed.pressureProvenanceProviderDispatchOverrideFollowupReceiptValidationArchive || {};
+            const rows = Array.isArray(archive.rows) ? archive.rows : [];
+            if (!rows.length)
+                continue;
+            sources.push({
+                sourceKey: checksum([ledgerGroupId || item.groupId, item.file], 18),
+                rows,
+                attributions: Array.isArray(archive.attributions) ? archive.attributions : [],
+                updatedAt: archive.updatedAt || parsed.updatedAt || "",
+            });
+        }
+        catch { }
+    }
+    return sources;
+}
+function buildProviderDispatchReliabilitySignalFromSources(sources = [], options = {}) {
+    const agentType = String(options.agentType || options.agent_type || "unknown").trim().toLowerCase() || "unknown";
+    const failureThreshold = Math.max(1, Number(options.failureThreshold || options.failure_threshold || options.providerOverrideFollowupReceiptValidationFailureThreshold || options.provider_override_followup_receipt_validation_failure_threshold || 2));
+    const minSourceGroups = Math.max(1, Number(options.minSourceGroups || options.min_source_groups || 2));
+    const matchingSources = (sources || []).map((source) => {
+        const rows = (Array.isArray(source.rows) ? source.rows : []).filter((row) => String(row.agent_type || row.agentType || "unknown").trim().toLowerCase() === agentType);
+        const attributions = (Array.isArray(source.attributions) ? source.attributions : []).filter((row) => String(row.agent_type || row.agentType || "unknown").trim().toLowerCase() === agentType);
+        return { ...source, rows, attributions };
+    }).filter((source) => source.rows.length > 0);
+    const score = scoreProviderDispatchReliabilityRows(matchingSources.flatMap((source) => source.rows), options);
+    const activeFailureSourceCount = matchingSources.filter((source) => source.attributions.some((row) => Number(row.consecutive_failure_count || row.consecutiveFailureCount || 0) >= failureThreshold)).length;
+    const sourceGroupCount = matchingSources.length;
+    const actionable = sourceGroupCount >= minSourceGroups && score.weightedEvidence >= 0.5;
+    const riskStatus = !score.attemptCount
+        ? "empty"
+        : actionable && (activeFailureSourceCount >= 2 || score.riskScore >= 0.67 && score.confidence >= 0.35)
+            ? "high"
+            : actionable && (activeFailureSourceCount >= 1 || score.riskScore >= 0.4)
+                ? "medium"
+                : "low";
+    return {
+        schema: "ccm-cross-group-provider-dispatch-reliability-signal-v1",
+        version: 1,
+        source: "privacy-redacted:cross-group-provider-receipt-validation-aggregate",
+        agent_type: agentType,
+        risk_status: riskStatus,
+        risk_score: score.riskScore,
+        confidence: score.confidence,
+        weighted_failure_score: score.weightedFailureScore,
+        weighted_passed_score: score.weightedPassedScore,
+        weighted_evidence: score.weightedEvidence,
+        attempt_count: score.attemptCount,
+        failed_count: score.failedCount,
+        passed_count: score.passedCount,
+        source_group_count: sourceGroupCount,
+        active_failure_source_count: activeFailureSourceCount,
+        half_life_days: score.halfLifeDays,
+        recovery_credit: score.recoveryCredit,
+        minimum_source_groups: minSourceGroups,
+        actionable,
+        guidance_only: true,
+        local_policy_override_allowed: false,
+        contains_private_memory: false,
+        recommendation: riskStatus === "high"
+            ? "increase_receipt_sampling_and_prefer_safer_provider_when_local_policy_allows"
+            : riskStatus === "medium"
+                ? "sample_receipts_and_monitor_provider_reliability"
+                : riskStatus === "low"
+                    ? "observe_provider_reliability_without_changing_local_gate"
+                    : "no_cross_group_provider_reliability_evidence",
+        privacy: {
+            group_ids_included: false,
+            project_names_included: false,
+            memory_paths_included: false,
+            task_or_execution_ids_included: false,
+            receipt_evidence_included: false,
+        },
+        generated_at: new Date(providerDispatchReliabilityNowMs(options)).toISOString(),
+    };
+}
+function buildCrossGroupProviderDispatchReliabilitySignal(groupId, options = {}) {
+    const sources = loadProviderDispatchReliabilitySources({ ...options, targetGroupId: groupId });
+    return buildProviderDispatchReliabilitySignalFromSources(sources, options);
+}
+function providerDispatchReliabilitySourceProvenance(sources = []) {
+    const rows = (sources || []).map((source) => ({
+        source_key: source.sourceKey || "",
+        updated_at: source.updatedAt || "",
+        attempt_count: Array.isArray(source.rows) ? source.rows.length : 0,
+        content_checksum: checksum((source.rows || []).map((row) => ({
+            row_id: row.row_id || "",
+            attempt_status: row.attempt_status || "",
+            attempt_at: row.attempt_at || "",
+            agent_type: row.agent_type || "",
+        })), 32),
+    })).sort((a, b) => String(a.source_key || "").localeCompare(String(b.source_key || "")));
+    return {
+        schema: "ccm-provider-dispatch-reliability-source-provenance-v1",
+        source_ledger_count: rows.length,
+        attempt_count: rows.reduce((sum, row) => sum + Number(row.attempt_count || 0), 0),
+        latest_source_updated_at: rows.map((row) => row.updated_at).filter(Boolean).sort().slice(-1)[0] || "",
+        generation_checksum: checksum(rows, 40),
+        group_ids_included: false,
+        project_names_included: false,
+        private_evidence_included: false,
+    };
+}
+function buildGlobalProviderDispatchReliabilitySignals(options = {}) {
+    const sources = loadProviderDispatchReliabilitySources({ ...options, targetGroupId: "" });
+    const agentTypes = uniqueStrings(sources.flatMap((source) => source.rows.map((row) => String(row.agent_type || row.agentType || "unknown").trim().toLowerCase()).filter(Boolean)), 64);
+    const signals = agentTypes.map(agentType => buildProviderDispatchReliabilitySignalFromSources(sources, { ...options, agentType }));
+    return {
+        schema: "ccm-global-provider-dispatch-reliability-signals-v1",
+        version: 1,
+        source: "privacy-redacted:global-provider-receipt-validation-aggregate",
+        signal_count: signals.length,
+        actionable_signal_count: signals.filter((signal) => signal.actionable).length,
+        high_risk_signal_count: signals.filter((signal) => signal.risk_status === "high").length,
+        guidance_only: true,
+        local_policy_override_allowed: false,
+        contains_private_memory: false,
+        source_provenance: providerDispatchReliabilitySourceProvenance(sources),
+        signals,
+        privacy: {
+            group_ids_included: false,
+            project_names_included: false,
+            memory_paths_included: false,
+            task_or_execution_ids_included: false,
+            receipt_evidence_included: false,
+        },
+        generated_at: new Date(providerDispatchReliabilityNowMs(options)).toISOString(),
+    };
+}
+function getGlobalProviderDispatchReliabilitySnapshotFile(options = {}) {
+    return String(options.snapshotFile || options.snapshot_file || path.join(GLOBAL_PROVIDER_DISPATCH_RELIABILITY_DIR, "snapshot.json"));
+}
+function globalProviderDispatchReliabilitySnapshotPayloadChecksum(snapshot = {}) {
+    return checksum({
+        signals: snapshot.signals || null,
+        source_provenance: snapshot.source_provenance || null,
+        generated_at: snapshot.generated_at || "",
+        expires_at: snapshot.expires_at || "",
+        ttl_ms: Number(snapshot.ttl_ms || 0),
+    }, 48);
+}
+function globalProviderDispatchReliabilitySnapshotChecksum(snapshot = {}) {
+    const comparable = { ...snapshot };
+    delete comparable.snapshot_checksum;
+    delete comparable.file;
+    delete comparable.validation;
+    return checksum(comparable, 48);
+}
+function writeGlobalProviderDispatchReliabilitySnapshot(options = {}) {
+    const file = getGlobalProviderDispatchReliabilitySnapshotFile(options);
+    const generatedAtMs = providerDispatchReliabilityNowMs(options);
+    const ttlMs = Math.max(30_000, Math.min(24 * 60 * 60 * 1000, Number(options.ttlMs || options.ttl_ms || exports.GLOBAL_PROVIDER_DISPATCH_RELIABILITY_SNAPSHOT_TTL_MS)));
+    const signals = buildGlobalProviderDispatchReliabilitySignals({
+        ...options,
+        generatedAt: new Date(generatedAtMs).toISOString(),
+        nowMs: generatedAtMs,
+    });
+    const sourceProvenance = signals.source_provenance || {};
+    const snapshotBase = {
+        schema: "ccm-global-provider-dispatch-reliability-snapshot-v1",
+        version: exports.GLOBAL_PROVIDER_DISPATCH_RELIABILITY_SNAPSHOT_VERSION,
+        snapshot_id: `provider-reliability-snapshot:${checksum([
+            generatedAtMs,
+            sourceProvenance.generation_checksum || "",
+            signals.signals || [],
+        ], 20)}`,
+        generation_id: `provider-reliability-generation:${String(sourceProvenance.generation_checksum || "empty").slice(0, 24)}`,
+        generated_at: new Date(generatedAtMs).toISOString(),
+        expires_at: new Date(generatedAtMs + ttlMs).toISOString(),
+        ttl_ms: ttlMs,
+        source: "privacy-redacted:global-provider-reliability-snapshot",
+        guidance_only: true,
+        local_policy_override_allowed: false,
+        contains_private_memory: false,
+        source_provenance: sourceProvenance,
+        signals,
+    };
+    snapshotBase.payload_checksum = globalProviderDispatchReliabilitySnapshotPayloadChecksum(snapshotBase);
+    snapshotBase.snapshot_checksum = globalProviderDispatchReliabilitySnapshotChecksum(snapshotBase);
+    try {
+        if (fs.existsSync(file))
+            fs.copyFileSync(file, `${file}.bak`);
+    }
+    catch { }
+    writeJsonAtomic(file, snapshotBase);
+    return { ...snapshotBase, file };
+}
+function validateGlobalProviderDispatchReliabilitySnapshot(snapshot = {}, options = {}) {
+    const nowMs = providerDispatchReliabilityNowMs(options);
+    const gaps = [];
+    if (snapshot.schema !== "ccm-global-provider-dispatch-reliability-snapshot-v1")
+        gaps.push("schema");
+    if (Number(snapshot.version || 0) !== exports.GLOBAL_PROVIDER_DISPATCH_RELIABILITY_SNAPSHOT_VERSION)
+        gaps.push("version");
+    if (!snapshot.snapshot_id)
+        gaps.push("snapshot_id");
+    if (!snapshot.generation_id)
+        gaps.push("generation_id");
+    if (snapshot.guidance_only !== true)
+        gaps.push("guidance_only");
+    if (snapshot.local_policy_override_allowed !== false)
+        gaps.push("local_policy_override_allowed");
+    if (snapshot.contains_private_memory !== false)
+        gaps.push("contains_private_memory");
+    const payloadChecksum = globalProviderDispatchReliabilitySnapshotPayloadChecksum(snapshot);
+    if (!snapshot.payload_checksum || snapshot.payload_checksum !== payloadChecksum)
+        gaps.push("payload_checksum");
+    const snapshotChecksum = globalProviderDispatchReliabilitySnapshotChecksum(snapshot);
+    if (!snapshot.snapshot_checksum || snapshot.snapshot_checksum !== snapshotChecksum)
+        gaps.push("snapshot_checksum");
+    const expiresMs = Date.parse(String(snapshot.expires_at || ""));
+    const expired = !Number.isFinite(expiresMs) || expiresMs <= nowMs;
+    if (expired)
+        gaps.push("expired");
+    let sourceGenerationMatches = true;
+    let currentSourceProvenance = null;
+    if (options.verifySourceGeneration !== false && options.verify_source_generation !== false && snapshot.source_provenance?.generation_checksum) {
+        const current = buildGlobalProviderDispatchReliabilitySignals({
+            ...options,
+            generatedAt: new Date(nowMs).toISOString(),
+            nowMs,
+        });
+        currentSourceProvenance = current.source_provenance || {};
+        sourceGenerationMatches = currentSourceProvenance.generation_checksum === snapshot.source_provenance.generation_checksum;
+        if (!sourceGenerationMatches)
+            gaps.push("source_generation");
+    }
+    const integrityGaps = gaps.filter(gap => !["expired", "source_generation"].includes(gap));
+    const status = integrityGaps.length
+        ? "tampered"
+        : expired
+            ? "expired"
+            : !sourceGenerationMatches
+                ? "stale_source_generation"
+                : "fresh";
+    return {
+        schema: "ccm-global-provider-dispatch-reliability-snapshot-validation-v1",
+        status,
+        usable: status === "fresh",
+        integrity_ok: integrityGaps.length === 0,
+        freshness_ok: !expired,
+        source_generation_matches: sourceGenerationMatches,
+        gaps,
+        checked_at: new Date(nowMs).toISOString(),
+        current_source_provenance: currentSourceProvenance,
+    };
+}
+function readGlobalProviderDispatchReliabilitySnapshot(options = {}) {
+    const file = getGlobalProviderDispatchReliabilitySnapshotFile(options);
+    const candidates = options.allowBackupRecovery === false || options.allow_backup_recovery === false
+        ? [{ file, recoveredFromBackup: false }]
+        : [{ file, recoveredFromBackup: false }, { file: `${file}.bak`, recoveredFromBackup: true }];
+    let firstInvalid = null;
+    for (const candidate of candidates) {
+        if (!fs.existsSync(candidate.file))
+            continue;
+        const snapshot = readJson(candidate.file, null);
+        if (!snapshot || typeof snapshot !== "object") {
+            if (!firstInvalid)
+                firstInvalid = { status: "tampered", usable: false, gaps: ["parse"], file: candidate.file };
+            continue;
+        }
+        const validation = validateGlobalProviderDispatchReliabilitySnapshot(snapshot, options);
+        const result = {
+            schema: "ccm-global-provider-dispatch-reliability-snapshot-read-v1",
+            file: candidate.file,
+            recovered_from_backup: candidate.recoveredFromBackup,
+            status: validation.status,
+            usable: validation.usable,
+            validation,
+            snapshot,
+        };
+        if (validation.usable)
+            return result;
+        if (!firstInvalid)
+            firstInvalid = result;
+    }
+    return firstInvalid || {
+        schema: "ccm-global-provider-dispatch-reliability-snapshot-read-v1",
+        file,
+        recovered_from_backup: false,
+        status: "missing",
+        usable: false,
+        validation: { status: "missing", usable: false, gaps: ["missing"] },
+        snapshot: null,
+    };
+}
+function getOrRefreshGlobalProviderDispatchReliabilitySnapshot(options = {}) {
+    const current = readGlobalProviderDispatchReliabilitySnapshot(options);
+    if (current.usable)
+        return { ...current, refreshed: false };
+    if (options.allowRefresh === false || options.allow_refresh === false)
+        return { ...current, refreshed: false };
+    const written = writeGlobalProviderDispatchReliabilitySnapshot(options);
+    const verified = readGlobalProviderDispatchReliabilitySnapshot({
+        ...options,
+        allowBackupRecovery: false,
+    });
+    return {
+        ...verified,
+        refreshed: true,
+        refresh_reason: current.status || "missing",
+        previous_status: current.status || "missing",
+        written_snapshot_id: written.snapshot_id || "",
+    };
+}
 function buildPressureProvenancePreDispatchComplianceDispatchPolicy(groupId, options = {}) {
     const disabled = options.disabled === true
         || options.disablePolicy === true
@@ -4718,6 +6943,11 @@ function buildPressureProvenancePreDispatchComplianceDispatchPolicy(groupId, opt
     const archive = ledger.pressureProvenancePreDispatchComplianceArchive || {};
     const recoveryArchive = ledger.pressureProvenancePreDispatchComplianceRecoveryArchive || {};
     const providerOverrideFollowupArchive = ledger.pressureProvenanceProviderDispatchOverrideFollowupArchive || {};
+    const providerOverrideFollowupReceiptValidationArchive = ledger.pressureProvenanceProviderDispatchOverrideFollowupReceiptValidationArchive || {};
+    const providerSwitchExecutionArchive = ledger.providerSwitchExecutionArchive || {};
+    const providerOverrideFollowupReceiptValidationRows = Array.isArray(providerOverrideFollowupReceiptValidationArchive.rows)
+        ? providerOverrideFollowupReceiptValidationArchive.rows
+        : [];
     const attributions = Array.isArray(archive.attributions) ? archive.attributions : [];
     const violationRows = Array.isArray(archive.rows) ? archive.rows : [];
     const recoveryAttributions = Array.isArray(recoveryArchive.attributions) ? recoveryArchive.attributions : [];
@@ -4733,6 +6963,48 @@ function buildPressureProvenancePreDispatchComplianceDispatchPolicy(groupId, opt
     const matchingProviderOverrideFollowupAttributions = providerOverrideFollowupAttributions
         .filter((row) => pressureProvenanceDispatchPolicyAttributionMatches(row, { targetProject, agentType }));
     const threshold = Math.max(1, Number(options.frequentThreshold || options.frequent_threshold || archive.frequent_threshold || 2));
+    const providerOverrideFollowupReceiptValidationDisabled = options.disableProviderDispatchOverrideFollowupReceiptValidationHistory === true
+        || options.disable_provider_dispatch_override_followup_receipt_validation_history === true;
+    const providerOverrideFollowupReceiptValidationAttributions = providerOverrideFollowupReceiptValidationDisabled
+        ? []
+        : Array.isArray(providerOverrideFollowupReceiptValidationArchive.attributions)
+            ? providerOverrideFollowupReceiptValidationArchive.attributions
+            : [];
+    const matchingProviderOverrideFollowupReceiptValidationAttributions = providerOverrideFollowupReceiptValidationAttributions
+        .filter((row) => pressureProvenanceDispatchPolicyAttributionMatches(row, { targetProject, agentType }));
+    const providerSwitchExecutionDisabled = options.disableProviderSwitchExecutionHistory === true
+        || options.disable_provider_switch_execution_history === true;
+    const providerSwitchExecutionAttributions = providerSwitchExecutionDisabled
+        ? []
+        : Array.isArray(providerSwitchExecutionArchive.attributions)
+            ? providerSwitchExecutionArchive.attributions
+            : [];
+    const providerSwitchExecutionRows = providerSwitchExecutionDisabled
+        ? []
+        : Array.isArray(providerSwitchExecutionArchive.rows)
+            ? providerSwitchExecutionArchive.rows
+            : [];
+    const matchingProviderSwitchExecutionAttributions = providerSwitchExecutionAttributions
+        .filter((row) => pressureProvenanceDispatchPolicyAttributionMatches(row, { targetProject, agentType }));
+    const providerSwitchExecutionMismatchThreshold = Math.max(1, Number(options.providerSwitchExecutionMismatchThreshold
+        || options.provider_switch_execution_mismatch_threshold
+        || 2));
+    const providerOverrideFollowupReceiptValidationFailureThreshold = Math.max(1, Number(options.providerOverrideFollowupReceiptValidationFailureThreshold
+        || options.provider_override_followup_receipt_validation_failure_threshold
+        || 2));
+    const crossGroupProviderReliabilityDisabled = disabled
+        || options.disableCrossGroupProviderReliability === true
+        || options.disable_cross_group_provider_reliability === true
+        || options.crossGroupProviderReliability === false
+        || options.cross_group_provider_reliability === false;
+    const crossGroupProviderReliabilitySignal = crossGroupProviderReliabilityDisabled
+        ? null
+        : buildCrossGroupProviderDispatchReliabilitySignal(groupId, {
+            ...options,
+            agentType,
+            generatedAt,
+            failureThreshold: providerOverrideFollowupReceiptValidationFailureThreshold,
+        });
     const recoveryDisabled = options.disablePressureProvenanceFeedbackRecovery === true
         || options.disable_pressure_provenance_feedback_recovery === true
         || options.disableRecovery === true
@@ -4847,7 +7119,240 @@ function buildPressureProvenancePreDispatchComplianceDispatchPolicy(groupId, opt
             gap_codes: ["provider_dispatch_override_followup_repaired"],
         };
     });
-    const matching = [...violationPolicyRows, ...providerOverrideFollowupOnlyRows]
+    const basePolicyRows = [...violationPolicyRows, ...providerOverrideFollowupOnlyRows];
+    const basePolicyKeys = new Set(basePolicyRows.map((row) => pressureProvenanceDispatchPolicyAttributionKey(row)));
+    const providerOverrideFollowupReceiptValidationOnlyRows = matchingProviderOverrideFollowupReceiptValidationAttributions
+        .filter((row) => !basePolicyKeys.has(pressureProvenanceDispatchPolicyAttributionKey(row)))
+        .map((row) => ({
+        agent_type: row.agent_type || row.agentType || "unknown",
+        project: row.project || row.target_project || row.targetProject || "unknown",
+        violation_count: 0,
+        effective_violation_count: 0,
+        recovered_violation_count: 0,
+        recovery_compliant_count: 0,
+        recovery_credit: 0,
+        recovery_last_compliant_at: "",
+        recovery_disabled: recoveryDisabled,
+        post_recovery_violation_count: 0,
+        recovery_streak_broken_at: "",
+        relapsed: false,
+        recovered: false,
+        provider_override_followup_only: true,
+        provider_override_followup_repaired: false,
+        provider_override_followup_repaired_count: 0,
+        provider_override_followup_memory_provenance_usage_count: 0,
+        provider_override_followup_current_source_verified_count: 0,
+        provider_override_followup_last_completed_at: "",
+        provider_override_followup_fresh_after_last_violation: false,
+        provider_override_followup_rel_paths: [],
+        provider_override_followup_work_item_ids: [],
+        provider_override_followup_override_ids: [],
+        packet_count: 0,
+        missing_receipt_count: 0,
+        missing_memory_provenance_usage_count: 0,
+        current_source_verified_gap_count: 0,
+        frequent: false,
+        raw_frequent: false,
+        first_violation_at: "",
+        last_violation_at: "",
+        rel_paths: [],
+        repair_work_item_ids: [],
+        gap_codes: [],
+    }));
+    const validationPolicyRows = [...basePolicyRows, ...providerOverrideFollowupReceiptValidationOnlyRows];
+    const validationPolicyKeys = new Set(validationPolicyRows.map((row) => pressureProvenanceDispatchPolicyAttributionKey(row)));
+    const providerSwitchExecutionOnlyRows = matchingProviderSwitchExecutionAttributions
+        .filter((row) => !validationPolicyKeys.has(pressureProvenanceDispatchPolicyAttributionKey(row)))
+        .map((row) => {
+        const execution = summarizeProviderSwitchExecutionPolicyAttributions([row]);
+        return {
+            agent_type: row.agent_type || row.agentType || row.expected_provider || row.expectedProvider || "unknown",
+            project: row.project || row.target_project || row.targetProject || "unknown",
+            violation_count: 0,
+            effective_violation_count: 0,
+            recovered_violation_count: 0,
+            recovery_compliant_count: 0,
+            recovery_credit: 0,
+            recovery_last_compliant_at: "",
+            recovery_disabled: recoveryDisabled,
+            post_recovery_violation_count: 0,
+            recovery_streak_broken_at: "",
+            relapsed: false,
+            recovered: false,
+            provider_switch_execution_only: true,
+            packet_count: 0,
+            missing_receipt_count: 0,
+            missing_memory_provenance_usage_count: 0,
+            current_source_verified_gap_count: 0,
+            frequent: execution.mismatchCount >= providerSwitchExecutionMismatchThreshold,
+            raw_frequent: execution.mismatchCount >= providerSwitchExecutionMismatchThreshold,
+            first_violation_at: "",
+            last_violation_at: "",
+            rel_paths: [],
+            repair_work_item_ids: [],
+            gap_codes: execution.gapCodes,
+        };
+    });
+    const localPolicyRows = [...validationPolicyRows, ...providerSwitchExecutionOnlyRows];
+    const crossGroupProviderReliabilityOnlyRows = !localPolicyRows.length && crossGroupProviderReliabilitySignal?.actionable === true
+        ? [{
+                agent_type: agentType,
+                project: targetProject || "unknown",
+                violation_count: 0,
+                effective_violation_count: 0,
+                recovered_violation_count: 0,
+                recovery_compliant_count: 0,
+                recovery_credit: 0,
+                recovery_last_compliant_at: "",
+                recovery_disabled: recoveryDisabled,
+                post_recovery_violation_count: 0,
+                recovery_streak_broken_at: "",
+                relapsed: false,
+                recovered: false,
+                cross_group_provider_reliability_only: true,
+                provider_override_followup_only: false,
+                provider_override_followup_repaired: false,
+                provider_override_followup_repaired_count: 0,
+                provider_override_followup_memory_provenance_usage_count: 0,
+                provider_override_followup_current_source_verified_count: 0,
+                provider_override_followup_last_completed_at: "",
+                provider_override_followup_fresh_after_last_violation: false,
+                provider_override_followup_rel_paths: [],
+                provider_override_followup_work_item_ids: [],
+                provider_override_followup_override_ids: [],
+                packet_count: 0,
+                missing_receipt_count: 0,
+                missing_memory_provenance_usage_count: 0,
+                current_source_verified_gap_count: 0,
+                frequent: false,
+                raw_frequent: false,
+                first_violation_at: "",
+                last_violation_at: "",
+                rel_paths: [],
+                repair_work_item_ids: [],
+                gap_codes: [],
+            }]
+        : [];
+    const matching = [...localPolicyRows, ...crossGroupProviderReliabilityOnlyRows]
+        .map((row) => {
+        const validationMatches = matchingProviderOverrideFollowupReceiptValidationAttributions
+            .filter((candidate) => pressureProvenanceDispatchPolicyAttributionMatches(candidate, {
+            targetProject: row.project || row.target_project || row.targetProject || targetProject,
+            agentType: row.agent_type || row.agentType || agentType,
+        }));
+        const validation = summarizeProviderDispatchOverrideFollowupReceiptValidationPolicyAttributions(validationMatches);
+        const validationEscalated = validation.consecutiveFailureCount >= providerOverrideFollowupReceiptValidationFailureThreshold;
+        const validationRepairVerified = !validationEscalated && validation.repairVerified;
+        const localValidationRisk = scoreProviderDispatchReliabilityRows(providerOverrideFollowupReceiptValidationRows.filter((candidate) => pressureProvenanceDispatchPolicyAttributionMatches(candidate, {
+            targetProject: row.project || row.target_project || row.targetProject || targetProject,
+            agentType: row.agent_type || row.agentType || agentType,
+        })), {
+            ...options,
+            generatedAt,
+        });
+        const providerSwitchExecutionMatches = matchingProviderSwitchExecutionAttributions
+            .filter((candidate) => pressureProvenanceDispatchPolicyAttributionMatches(candidate, {
+            targetProject: row.project || row.target_project || row.targetProject || targetProject,
+            agentType: row.agent_type || row.agentType || agentType,
+        }));
+        const providerSwitchExecution = summarizeProviderSwitchExecutionPolicyAttributions(providerSwitchExecutionMatches);
+        const providerSwitchExecutionEvidenceRows = providerSwitchExecutionRows
+            .filter((candidate) => pressureProvenanceDispatchPolicyAttributionMatches(candidate, {
+            targetProject: row.project || row.target_project || row.targetProject || targetProject,
+            agentType: row.agent_type || row.agentType || agentType,
+        }));
+        const providerSwitchExecutionRisk = scoreProviderSwitchExecutionRows(providerSwitchExecutionEvidenceRows, {
+            ...options,
+            generatedAt,
+        });
+        const providerSwitchExecutionRowIds = uniqueStrings([
+            ...providerSwitchExecution.rowIds,
+            ...providerSwitchExecutionEvidenceRows.map((candidate) => candidate.row_id || candidate.rowId || "").filter(Boolean),
+        ], 32);
+        const providerSwitchExecutionMemoryRelPaths = providerSwitchExecution.executedCount > 0 || providerSwitchExecutionEvidenceRows.length
+            ? uniqueStrings([
+                ...providerSwitchExecution.memoryRelPaths,
+                "provider-switch-execution-memory.md",
+            ], 8)
+            : [];
+        const providerSwitchExecutionEscalated = providerSwitchExecution.mismatchCount >= providerSwitchExecutionMismatchThreshold;
+        return {
+            ...row,
+            frequent: row.frequent === true || validationEscalated || providerSwitchExecutionEscalated,
+            recovered: row.relapsed !== true && (row.recovered === true || validationRepairVerified),
+            provider_override_followup_repaired: row.provider_override_followup_repaired === true || validationRepairVerified,
+            provider_override_followup_repaired_count: Math.max(Number(row.provider_override_followup_repaired_count || 0), validationRepairVerified ? validation.passedCount : 0),
+            provider_override_followup_last_completed_at: validationRepairVerified ? validation.lastPassedAt : row.provider_override_followup_last_completed_at || "",
+            provider_override_followup_fresh_after_last_violation: validationRepairVerified || row.provider_override_followup_fresh_after_last_violation === true,
+            provider_override_followup_rel_paths: uniqueStrings([
+                ...(Array.isArray(row.provider_override_followup_rel_paths) ? row.provider_override_followup_rel_paths : []),
+                ...validation.relPaths,
+            ], 16),
+            provider_override_followup_work_item_ids: uniqueStrings([
+                ...(Array.isArray(row.provider_override_followup_work_item_ids) ? row.provider_override_followup_work_item_ids : []),
+                ...validation.followupWorkItemIds,
+            ], 16),
+            provider_override_followup_override_ids: uniqueStrings([
+                ...(Array.isArray(row.provider_override_followup_override_ids) ? row.provider_override_followup_override_ids : []),
+                ...validation.overrideIds,
+            ], 16),
+            provider_override_followup_receipt_validation_attempt_count: validation.attemptCount,
+            provider_override_followup_receipt_validation_failed_count: validation.failedCount,
+            provider_override_followup_receipt_validation_passed_count: validation.passedCount,
+            provider_override_followup_receipt_validation_consecutive_failure_count: validation.consecutiveFailureCount,
+            provider_override_followup_receipt_validation_latest_status: validation.latestStatus,
+            provider_override_followup_receipt_validation_escalated: validationEscalated,
+            provider_override_followup_receipt_validation_repair_verified: validationRepairVerified,
+            provider_override_followup_receipt_validation_last_attempt_at: validation.lastAttemptAt,
+            provider_override_followup_receipt_validation_last_failed_at: validation.lastFailedAt,
+            provider_override_followup_receipt_validation_last_passed_at: validation.lastPassedAt,
+            provider_override_followup_receipt_validation_ids: validation.validationIds,
+            provider_override_followup_receipt_validation_repair_work_item_ids: validation.repairWorkItemIds,
+            provider_override_followup_receipt_validation_rel_paths: validation.relPaths,
+            provider_override_followup_receipt_validation_followup_work_item_ids: validation.followupWorkItemIds,
+            provider_override_followup_receipt_validation_override_ids: validation.overrideIds,
+            provider_override_followup_receipt_validation_gap_codes: validation.gapCodes,
+            provider_override_followup_receipt_validation_decayed_failure_score: localValidationRisk.weightedFailureScore,
+            provider_override_followup_receipt_validation_decayed_passed_score: localValidationRisk.weightedPassedScore,
+            provider_override_followup_receipt_validation_risk_score: localValidationRisk.riskScore,
+            provider_override_followup_receipt_validation_risk_confidence: localValidationRisk.confidence,
+            provider_override_followup_receipt_validation_half_life_days: localValidationRisk.halfLifeDays,
+            provider_switch_execution_history_present: providerSwitchExecution.executedCount > 0,
+            provider_switch_execution_executed_count: providerSwitchExecution.executedCount,
+            provider_switch_execution_approved_count: providerSwitchExecution.approvedCount,
+            provider_switch_execution_passed_count: providerSwitchExecution.passedCount,
+            provider_switch_execution_failed_count: providerSwitchExecution.failedCount,
+            provider_switch_execution_mismatch_count: providerSwitchExecution.mismatchCount,
+            provider_switch_execution_mismatch_escalated: providerSwitchExecutionEscalated,
+            provider_switch_execution_mismatch_threshold: providerSwitchExecutionMismatchThreshold,
+            provider_switch_execution_expected_provider: providerSwitchExecution.expectedProvider,
+            provider_switch_execution_actual_providers: providerSwitchExecution.actualProviders,
+            provider_switch_execution_last_executed_at: providerSwitchExecution.lastExecutedAt,
+            provider_switch_execution_last_failed_at: providerSwitchExecution.lastFailedAt,
+            provider_switch_execution_last_passed_at: providerSwitchExecution.lastPassedAt,
+            provider_switch_execution_receipt_ids: providerSwitchExecution.executionReceiptIds,
+            provider_switch_execution_decision_receipt_ids: providerSwitchExecution.decisionReceiptIds,
+            provider_switch_execution_task_agent_session_ids: providerSwitchExecution.taskAgentSessionIds,
+            provider_switch_execution_row_ids: providerSwitchExecutionRowIds,
+            provider_switch_execution_memory_rel_paths: providerSwitchExecutionMemoryRelPaths,
+            provider_switch_execution_gap_codes: providerSwitchExecution.gapCodes,
+            provider_switch_execution_decayed_mismatch_score: providerSwitchExecutionRisk.weightedMismatchScore,
+            provider_switch_execution_decayed_failed_score: providerSwitchExecutionRisk.weightedFailedScore,
+            provider_switch_execution_decayed_passed_score: providerSwitchExecutionRisk.weightedPassedScore,
+            provider_switch_execution_weighted_risk_score: providerSwitchExecutionRisk.weightedRiskScore,
+            provider_switch_execution_risk_score: providerSwitchExecutionRisk.riskScore,
+            provider_switch_execution_risk_confidence: providerSwitchExecutionRisk.confidence,
+            provider_switch_execution_half_life_days: providerSwitchExecutionRisk.halfLifeDays,
+            provider_switch_execution_passed_credit: providerSwitchExecutionRisk.passedCredit,
+            provider_switch_execution_mismatch_penalty: providerSwitchExecutionRisk.mismatchPenalty,
+            cross_group_provider_reliability_guidance: crossGroupProviderReliabilitySignal?.schema ? crossGroupProviderReliabilitySignal : null,
+            cross_group_provider_reliability_actionable: crossGroupProviderReliabilitySignal?.actionable === true,
+            cross_group_provider_reliability_risk_status: crossGroupProviderReliabilitySignal?.risk_status || "empty",
+            cross_group_provider_reliability_risk_score: Number(crossGroupProviderReliabilitySignal?.risk_score || 0),
+            cross_group_provider_reliability_confidence: Number(crossGroupProviderReliabilitySignal?.confidence || 0),
+            cross_group_provider_reliability_source_group_count: Number(crossGroupProviderReliabilitySignal?.source_group_count || 0),
+        };
+    })
         .sort((a, b) => Number(b.effective_violation_count || 0) - Number(a.effective_violation_count || 0) || Number(b.violation_count || 0) - Number(a.violation_count || 0));
     const frequent = matching.filter((row) => row.frequent);
     const recovered = matching.filter((row) => row.recovered);
@@ -4877,6 +7382,10 @@ function buildPressureProvenancePreDispatchComplianceDispatchPolicy(groupId, opt
         recoveryArchiveUpdatedAt: recoveryArchive.updatedAt || "",
         providerOverrideFollowupArchiveSchema: providerOverrideFollowupArchive.schema || "",
         providerOverrideFollowupArchiveUpdatedAt: providerOverrideFollowupArchive.updatedAt || "",
+        providerOverrideFollowupReceiptValidationArchiveSchema: providerOverrideFollowupReceiptValidationArchive.schema || "",
+        providerOverrideFollowupReceiptValidationArchiveUpdatedAt: providerOverrideFollowupReceiptValidationArchive.updatedAt || "",
+        providerSwitchExecutionArchiveSchema: providerSwitchExecutionArchive.schema || "",
+        providerSwitchExecutionArchiveUpdatedAt: providerSwitchExecutionArchive.updatedAt || "",
         sourceLedgerFile: ledger.file || getGroupTypedMemoryDistillationLedgerFile(groupId),
         frequentThreshold: threshold,
         recoveryEnabled: !recoveryDisabled,
@@ -4892,15 +7401,52 @@ function buildPressureProvenancePreDispatchComplianceDispatchPolicy(groupId, opt
         providerOverrideFollowupAttributionCount: providerOverrideFollowupAttributions.length,
         matchingProviderOverrideFollowupAttributionCount: matchingProviderOverrideFollowupAttributions.length,
         providerOverrideFollowupRepairedAttributionCount: matching.filter((row) => row.provider_override_followup_repaired === true).length,
+        providerOverrideFollowupReceiptValidationHistoryEnabled: !providerOverrideFollowupReceiptValidationDisabled,
+        providerOverrideFollowupReceiptValidationFailureThreshold,
+        providerOverrideFollowupReceiptValidationAttributionCount: providerOverrideFollowupReceiptValidationAttributions.length,
+        matchingProviderOverrideFollowupReceiptValidationAttributionCount: matchingProviderOverrideFollowupReceiptValidationAttributions.length,
+        providerOverrideFollowupReceiptValidationEscalatedAttributionCount: matching.filter((row) => row.provider_override_followup_receipt_validation_escalated === true).length,
+        providerOverrideFollowupReceiptValidationRepairedAttributionCount: matching.filter((row) => row.provider_override_followup_receipt_validation_repair_verified === true).length,
+        providerSwitchExecutionHistoryEnabled: !providerSwitchExecutionDisabled,
+        providerSwitchExecutionMismatchThreshold,
+        providerSwitchExecutionAttributionCount: providerSwitchExecutionAttributions.length,
+        matchingProviderSwitchExecutionAttributionCount: matchingProviderSwitchExecutionAttributions.length,
+        providerSwitchExecutionMismatchAttributionCount: matching.filter((row) => Number(row.provider_switch_execution_mismatch_count || 0) > 0).length,
+        providerSwitchExecutionEscalatedAttributionCount: matching.filter((row) => row.provider_switch_execution_mismatch_escalated === true).length,
+        providerSwitchExecutionPassedCount: matching.reduce((sum, row) => sum + Number(row.provider_switch_execution_passed_count || 0), 0),
+        providerSwitchExecutionFailedCount: matching.reduce((sum, row) => sum + Number(row.provider_switch_execution_failed_count || 0), 0),
+        providerSwitchExecutionMismatchCount: matching.reduce((sum, row) => sum + Number(row.provider_switch_execution_mismatch_count || 0), 0),
+        providerSwitchExecutionDecayedMismatchScore: providerDispatchReliabilityRound(matching.reduce((sum, row) => sum + Number(row.provider_switch_execution_decayed_mismatch_score || 0), 0)),
+        providerSwitchExecutionDecayedFailedScore: providerDispatchReliabilityRound(matching.reduce((sum, row) => sum + Number(row.provider_switch_execution_decayed_failed_score || 0), 0)),
+        providerSwitchExecutionDecayedPassedScore: providerDispatchReliabilityRound(matching.reduce((sum, row) => sum + Number(row.provider_switch_execution_decayed_passed_score || 0), 0)),
+        providerSwitchExecutionWeightedRiskScore: providerDispatchReliabilityRound(matching.reduce((sum, row) => sum + Number(row.provider_switch_execution_weighted_risk_score || 0), 0)),
+        crossGroupProviderReliabilityEnabled: !crossGroupProviderReliabilityDisabled,
+        crossGroupProviderReliabilityActionable: crossGroupProviderReliabilitySignal?.actionable === true,
+        crossGroupProviderReliabilityRiskStatus: crossGroupProviderReliabilitySignal?.risk_status || "empty",
+        crossGroupProviderReliabilityRiskScore: Number(crossGroupProviderReliabilitySignal?.risk_score || 0),
+        crossGroupProviderReliabilityConfidence: Number(crossGroupProviderReliabilitySignal?.confidence || 0),
+        crossGroupProviderReliabilitySourceGroupCount: Number(crossGroupProviderReliabilitySignal?.source_group_count || 0),
+        crossGroupProviderReliabilityGuidance: crossGroupProviderReliabilitySignal?.schema ? crossGroupProviderReliabilitySignal : null,
         pressureMemoryProvenanceDisciplineActive: pressureDisciplineActive,
         action: active
-            ? relapsed.length
-                ? "reactivate_pressure_memory_provenance_receipt_contract_after_recovery_relapse"
-                : "strengthen_pressure_memory_provenance_receipt_contract"
+            ? matching.some((row) => row.provider_switch_execution_mismatch_escalated === true)
+                ? "hold_provider_after_repeated_provider_switch_execution_mismatches"
+                : matching.some((row) => row.provider_override_followup_receipt_validation_escalated === true)
+                    ? "hold_provider_after_repeated_override_followup_receipt_validation_failures"
+                    : relapsed.length
+                        ? "reactivate_pressure_memory_provenance_receipt_contract_after_recovery_relapse"
+                        : "strengthen_pressure_memory_provenance_receipt_contract"
             : recovered.length
-                ? "monitor_recovered_pressure_memory_provenance_receipt_contract"
-                : "monitor_pressure_memory_provenance_receipt_contract",
-        severity: active && Number(top.effective_violation_count || top.violation_count || 0) >= threshold * 2 ? "high" : active ? "medium" : "none",
+                ? matching.some((row) => row.provider_override_followup_receipt_validation_repair_verified === true)
+                    ? "monitor_repaired_provider_override_followup_receipt_validation"
+                    : "monitor_recovered_pressure_memory_provenance_receipt_contract"
+                : matching.some((row) => Number(row.provider_switch_execution_mismatch_count || 0) > 0)
+                    ? "monitor_provider_switch_execution_mismatch_history"
+                    : crossGroupProviderReliabilitySignal?.actionable === true
+                        ? "monitor_cross_group_provider_reliability_guidance"
+                        : "monitor_pressure_memory_provenance_receipt_contract",
+        severity: active && (Number(top.effective_violation_count || top.violation_count || 0) >= threshold * 2
+            || Number(top.provider_switch_execution_mismatch_count || 0) >= providerSwitchExecutionMismatchThreshold * 2) ? "high" : active ? "medium" : "none",
         receiptContractMode: pressureDisciplineActive ? "strict_required_for_pressure_memory" : active ? "preemptive_ack_and_empty_usage_allowed" : "default",
         ackRequired: active,
         finalReceiptVerificationRequired: active,
@@ -4914,23 +7460,40 @@ function buildPressureProvenancePreDispatchComplianceDispatchPolicy(groupId, opt
         relPaths: uniqueStrings(policyRows.flatMap((row) => [
             ...(Array.isArray(row.rel_paths) ? row.rel_paths : []),
             ...(Array.isArray(row.provider_override_followup_rel_paths) ? row.provider_override_followup_rel_paths : []),
+            ...(Array.isArray(row.provider_override_followup_receipt_validation_rel_paths) ? row.provider_override_followup_receipt_validation_rel_paths : []),
+            ...(Array.isArray(row.provider_switch_execution_memory_rel_paths) ? row.provider_switch_execution_memory_rel_paths : []),
         ]), 16),
         repairWorkItemIds: uniqueStrings(policyRows.flatMap((row) => [
             ...(Array.isArray(row.repair_work_item_ids) ? row.repair_work_item_ids : []),
             ...(Array.isArray(row.provider_override_followup_work_item_ids) ? row.provider_override_followup_work_item_ids : []),
+            ...(Array.isArray(row.provider_override_followup_receipt_validation_repair_work_item_ids) ? row.provider_override_followup_receipt_validation_repair_work_item_ids : []),
         ]), 16),
-        gapCodes: uniqueStrings(policyRows.flatMap((row) => row.gap_codes || []), 16),
+        gapCodes: uniqueStrings(policyRows.flatMap((row) => [
+            ...(Array.isArray(row.gap_codes) ? row.gap_codes : []),
+            ...(Array.isArray(row.provider_override_followup_receipt_validation_gap_codes) ? row.provider_override_followup_receipt_validation_gap_codes : []),
+            ...(Array.isArray(row.provider_switch_execution_gap_codes) ? row.provider_switch_execution_gap_codes : []),
+        ]), 16),
         reason: active
-            ? compactText(`Phase 137 feedback memory found repeated pressure provenance receipt violations for agentType=${agentType} project=${targetProject || "unknown"}; effective violations=${top.effective_violation_count ?? top.violation_count ?? 0} after recovery credits${top.relapsed ? `; recovered attribution relapsed with ${top.post_recovery_violation_count || 0} post-recovery violation(s)` : ""}; require stricter ACK and final receipt verification before child Agent closure.`, 700)
+            ? top.provider_switch_execution_mismatch_escalated === true
+                ? compactText(`Provider switch execution typed memory found ${top.provider_switch_execution_mismatch_count || 0} mismatch(es) for expected provider=${agentType} project=${targetProject || "unknown"}; hold new approved switches for this provider/project until runner/session binding repair is verified.`, 700)
+                : top.provider_override_followup_receipt_validation_escalated === true
+                    ? compactText(`Corrected provider override follow-up receipts failed ${top.provider_override_followup_receipt_validation_consecutive_failure_count || 0} consecutive validation attempt(s) for agentType=${agentType} project=${targetProject || "unknown"}; hold new child Agent dispatch until a receipt satisfies the full relPath/work-item/override-id/current-source contract.`, 700)
+                    : compactText(`Phase 137 feedback memory found repeated pressure provenance receipt violations for agentType=${agentType} project=${targetProject || "unknown"}; effective violations=${top.effective_violation_count ?? top.violation_count ?? 0} after recovery credits${top.relapsed ? `; recovered attribution relapsed with ${top.post_recovery_violation_count || 0} post-recovery violation(s)` : ""}; require stricter ACK and final receipt verification before child Agent closure.`, 700)
             : disabled
                 ? "pressure provenance feedback dispatch policy disabled"
                 : recovered.length
-                    ? matching.some((row) => row.provider_override_followup_repaired === true)
-                        ? "matching attribution has verified provider dispatch override follow-up repair history; allow only with receipt sampling and current evidence checks"
-                        : "matching attribution recovered below frequent violation threshold after compliant pressure provenance receipts"
-                    : matching.length
-                        ? "matching attribution exists but has not reached frequent violation threshold"
-                        : "no matching pressure provenance pre-dispatch compliance feedback attribution",
+                    ? matching.some((row) => row.provider_override_followup_receipt_validation_repair_verified === true)
+                        ? "corrected provider override follow-up receipt passed after prior failures; clear the active failure streak, retain audit history, and allow monitored receipt sampling"
+                        : matching.some((row) => row.provider_override_followup_repaired === true)
+                            ? "matching attribution has verified provider dispatch override follow-up repair history; allow only with receipt sampling and current evidence checks"
+                            : "matching attribution recovered below frequent violation threshold after compliant pressure provenance receipts"
+                    : matching.some((row) => Number(row.provider_switch_execution_mismatch_count || 0) > 0)
+                        ? "provider switch execution mismatch history exists; keep future switches under receipt sampling and do not treat past passed switch executions as authorization"
+                        : crossGroupProviderReliabilitySignal?.actionable === true
+                            ? `privacy-redacted cross-group provider reliability is ${crossGroupProviderReliabilitySignal.risk_status || "unknown"} for agentType=${agentType}; this is receipt-sampling guidance only and cannot override this group's local hold/allow policy`
+                            : matching.length
+                                ? "matching attribution exists but has not reached frequent violation threshold"
+                                : "no matching pressure provenance pre-dispatch compliance feedback attribution",
     };
 }
 function contextUsageRepairInputRows(input = {}) {
@@ -6028,8 +8591,10 @@ function shouldIgnoreGroupMemoryRequest(query, options = {}) {
         return false;
     if (options.ignoreMemory === true || options.ignore_memory === true)
         return true;
-    return /(忽略|不要|不使用|别用|ignore|do not use|don't use)[^\n]{0,20}(记忆|memory)/i.test(query)
-        || /(记忆|memory)[^\n]{0,20}(忽略|不要|不使用|ignore)/i.test(query);
+    const text = String(query || "")
+        .replace(/\bmemoryIgnored\b|\bmemory_ignored\b|\bmemoryUsed\b|\bmemory_used\b|\bmemoryUsed\s*\/\s*memoryIgnored\b|\bmemoryProvenanceUsage\b/gi, "receipt_field");
+    return /(忽略|不要|不使用|别用|\bignore\b|\bignored\b|do not use|don't use)[^\n]{0,20}(记忆|\bmemory\b)/i.test(text)
+        || /(记忆|\bmemory\b)[^\n]{0,20}(忽略|不要|不使用|\bignore\b|\bignored\b)/i.test(text);
 }
 function normalizeRecallScope(value) {
     return safeSegment(value || "global", "global");
@@ -6098,6 +8663,9 @@ function buildGroupTypedMemoryRecall(groupId, query, options = {}) {
     const queryTokens = tokens(text);
     const targetPaths = deriveGroupTypedMemoryTargetPaths(text, options.targetPaths || options.target_paths || []);
     const already = new Set((options.alreadySurfaced || options.already_surfaced || []).map((item) => String(item || "").toLowerCase()));
+    const requiredRelPaths = new Set((options.requiredRelPaths || options.required_rel_paths || [])
+        .map((item) => String(item || "").trim().toLowerCase())
+        .filter(Boolean));
     const recentTools = new Set((options.recentTools || options.recent_tools || []).map((item) => String(item || "").toLowerCase()).filter(Boolean));
     const postCompactUsageHints = normalizePostCompactCandidateUsageHints(options);
     const workerContextPressureSignals = normalizeWorkerContextPressureRecallSignals(options);
@@ -6105,7 +8673,8 @@ function buildGroupTypedMemoryRecall(groupId, query, options = {}) {
     const pressureProvenanceDispatchFeedbackPolicy = normalizePressureProvenanceDispatchFeedbackPolicyForRecall(options);
     const diagnostics = [];
     const scored = index.docs.map(doc => {
-        if (already.has(doc.relPath.toLowerCase()) || already.has(doc.file.toLowerCase())) {
+        const requiredRecall = requiredRelPaths.has(String(doc.relPath || "").toLowerCase());
+        if (!requiredRecall && (already.has(doc.relPath.toLowerCase()) || already.has(doc.file.toLowerCase()))) {
             diagnostics.push({ relPath: doc.relPath, skipped: true, reason: "already_surfaced" });
             return null;
         }
@@ -6134,6 +8703,8 @@ function buildGroupTypedMemoryRecall(groupId, query, options = {}) {
             score += 2;
         if (pathCondition.conditional && pathCondition.matched)
             score += 8;
+        if (requiredRecall)
+            score += 100;
         for (const tool of recentTools) {
             if (!tool || !corpus.includes(tool))
                 continue;
@@ -6154,7 +8725,7 @@ function buildGroupTypedMemoryRecall(groupId, query, options = {}) {
         const workerContextPressureFeedbackPolicy = scoreWorkerContextPressureFeedbackPolicyRecallRisk(doc, corpus, workerContextPressureUsage, pressureProvenanceDispatchFeedbackPolicy, text, queryTokens);
         if (workerContextPressureFeedbackPolicy.adjustment)
             score += workerContextPressureFeedbackPolicy.adjustment;
-        if (score <= 0 && queryTokens.length && !(pathCondition.conditional && pathCondition.matched)) {
+        if (!requiredRecall && score <= 0 && queryTokens.length && !(pathCondition.conditional && pathCondition.matched)) {
             const reason = workerContextPressureFeedbackPolicy.active === true
                 && workerContextPressureFeedbackPolicy.risk_doc === true
                 && Number(workerContextPressureFeedbackPolicy.adjustment || 0) < 0
@@ -6172,6 +8743,7 @@ function buildGroupTypedMemoryRecall(groupId, query, options = {}) {
             workerContextPressureRecall,
             workerContextPressureUsage,
             workerContextPressureFeedbackPolicy,
+            requiredRecall,
             snippet: extractSnippet(doc.body, queryTokens, Number(options.snippetChars || options.snippet_chars || 800)),
         };
     }).filter(Boolean).sort((a, b) => b.score - a.score || b.mtimeMs - a.mtimeMs);
@@ -7685,6 +10257,246 @@ function runGroupTypedMemoryProviderReproofReceiptConsumptionDistillationSelfTes
             second: { archivedCount: second.archivedCount, newRowCount: second.newRowCount, updatedRowCount: second.updatedRowCount },
             recalled: recall.recalled.map((item) => item.relPath),
             cautionRecalled: cautionRecall.recalled.map((item) => `${item.type}:${item.relPath}`),
+        };
+    }
+    finally {
+        try {
+            fs.rmSync(dir, { recursive: true, force: true });
+        }
+        catch { }
+    }
+}
+function runGroupTypedMemoryProviderRankingProvenanceCompactRepairReceiptConsumptionDistillationSelfTest() {
+    const groupId = `typed-memory-provider-ranking-compact-repair-receipt-selftest-${process.pid}-${Date.now().toString(36)}`;
+    const dir = getGroupTypedMemoryDir(groupId);
+    const row = {
+        groupId,
+        timeline_binding_id: "timeline-provider-ranking-compact-repair-receipt",
+        brief_id: "brief-provider-ranking-compact-repair-receipt",
+        work_item_id: "work-provider-ranking-compact-repair-receipt",
+        source: "worker_context_provider_ranking_provenance_compact_repair",
+        project: "api",
+        task_id: "task-provider-ranking-compact-repair-receipt",
+        receipt_status: "completed",
+        replay_repair_consumption_status: "verified",
+        replay_repair_consumption_source: "receipt.replayRepairDispatchBriefUsage",
+        replay_repair_consumption_reason: "PROVIDER_RANKING_COMPACT_REPAIR_RECEIPT_SENTINEL verified provider ranking compact repair consumed typed MEMORY.md row provider-switch-execution:phase165-typed-memory.",
+        provider_switch_decision_receipt_id: "provider-switch-decision:phase165-typed-memory",
+        provider_switch_decision_receipt_checksum: "provider-switch-receipt-checksum-phase165",
+        provider_ranking_provenance_rel_paths: ["provider-switch-execution-memory.md"],
+        provider_ranking_provenance_row_ids: ["provider-switch-execution:phase165-typed-memory"],
+        provider_ranking_provenance_preserved: true,
+        provider_ranking_provenance_receipt_consumption_verified: true,
+        provider_ranking_provenance_repair_status: "completed",
+        provider_ranking_provenance_repair_gap_type: "provider_ranking_provenance_compact",
+        worker_context_packet_id: "wcp-provider-ranking-compact-repair-receipt",
+        task_agent_session_id: "tas-provider-ranking-compact-repair-receipt",
+        memory_context_snapshot_id: "snapshot-provider-ranking-compact-repair-receipt",
+        execution_id: "execution-provider-ranking-compact-repair-receipt",
+    };
+    try {
+        const first = distillProviderRankingProvenanceCompactRepairReceiptConsumptionToTypedMemory(groupId, { rows: [row] }, {
+            reason: "provider-ranking-compact-repair-receipt-consumption-selftest",
+            updatedAt: "2026-07-10T17:40:00.000Z",
+        });
+        const second = distillProviderRankingProvenanceCompactRepairReceiptConsumptionToTypedMemory(groupId, { rows: [row] }, {
+            reason: "provider-ranking-compact-repair-receipt-consumption-selftest-repeat",
+            updatedAt: "2026-07-10T17:41:00.000Z",
+        });
+        const ledger = readGroupTypedMemoryDistillationLedger(groupId);
+        const docs = scanGroupTypedMemoryDocuments(groupId);
+        const docFile = path.join(dir, "provider-ranking-provenance-compact-repair-receipt-memory.md");
+        const docText = fs.readFileSync(docFile, "utf-8");
+        const indexText = fs.readFileSync(getGroupTypedMemoryIndexFile(groupId), "utf-8");
+        const recall = buildGroupTypedMemoryRecall(groupId, "PROVIDER_RANKING_COMPACT_REPAIR_RECEIPT_SENTINEL provider-switch-execution:phase165-typed-memory provider-switch-decision:phase165-typed-memory", {
+            disableLedger: true,
+            forceMemory: true,
+            max: 8,
+        });
+        const recallText = JSON.stringify(recall.recalled || []);
+        const archiveRows = ledger.providerRankingProvenanceCompactRepairReceiptConsumptionArchive?.rows || [];
+        const checks = {
+            archiveCountsVerifiedReceipt: first.archivedCount === 1
+                && first.verifiedCount === 1
+                && first.preservedCount === 1
+                && first.relPathCount === 1
+                && first.rowIdCount === 1,
+            repeatDoesNotDuplicateRows: second.archivedCount === 1 && second.newRowCount === 0,
+            ledgerPersistsArchive: ledger.providerRankingProvenanceCompactRepairReceiptConsumptionArchive?.archived_count === 1
+                && archiveRows.some((item) => item.provider_switch_decision_receipt_id === "provider-switch-decision:phase165-typed-memory"),
+            typedDocWritten: docs.some(item => item.relPath === "provider-ranking-provenance-compact-repair-receipt-memory.md" && item.type === "reference")
+                && docText.includes("PROVIDER_RANKING_COMPACT_REPAIR_RECEIPT_SENTINEL")
+                && docText.includes("provider-switch-execution:phase165-typed-memory"),
+            indexLinksTypedDoc: indexText.includes("provider-ranking-provenance-compact-repair-receipt-memory.md"),
+            recallFindsVerifiedRepair: recallText.includes("provider-ranking-provenance-compact-repair-receipt-memory.md")
+                && recallText.includes("PROVIDER_RANKING_COMPACT_REPAIR_RECEIPT_SENTINEL"),
+            authorizationBoundaryPreserved: /ranking evidence only, not authorization/i.test(docText)
+                && /do not authorize provider switches|Never use this memory as provider-switch authority/i.test(docText),
+        };
+        return {
+            pass: Object.values(checks).every(Boolean),
+            checks,
+            first: {
+                archivedCount: first.archivedCount,
+                verifiedCount: first.verifiedCount,
+                preservedCount: first.preservedCount,
+                relPathCount: first.relPathCount,
+                rowIdCount: first.rowIdCount,
+            },
+            second: { archivedCount: second.archivedCount, newRowCount: second.newRowCount, updatedRowCount: second.updatedRowCount },
+            recalled: recall.recalled.map((item) => item.relPath),
+        };
+    }
+    finally {
+        try {
+            fs.rmSync(dir, { recursive: true, force: true });
+        }
+        catch { }
+    }
+}
+function runGroupTypedMemoryPostCompactReinjectionRepairReceiptConsumptionDistillationSelfTest() {
+    const groupId = `typed-memory-post-compact-reinjection-repair-receipt-selftest-${process.pid}-${Date.now().toString(36)}`;
+    const dir = getGroupTypedMemoryDir(groupId);
+    const row = {
+        groupId,
+        timeline_binding_id: "replay-repair-brief-timeline:phase179-distillation",
+        brief_id: "replay-repair-dispatch-brief:phase179-distillation",
+        work_item_id: "post-compact-reinjection-repair:phase179-distillation",
+        source: "compact_boundary_replay_repair",
+        component: "post_compact_reinject",
+        project: "api",
+        task_id: "task-phase179-distillation",
+        assignment_id: "assignment-phase179-distillation",
+        dispatch_key: "dispatch-phase179-distillation",
+        reinjection_gate_id: "pcrg-phase179-distillation",
+        post_compact_candidate_id: "pcrc-phase179-distillation",
+        post_compact_candidate_kind: "file",
+        post_compact_candidate_value: "src/phase179-distillation-memory.ts",
+        post_compact_candidate_source_message_id: "message-phase179-distillation",
+        post_compact_reinjection_receipt_usage_state: "verified",
+        post_compact_reinjection_receipt_reason: "PHASE179_POST_COMPACT_REINJECTION_TYPED_MEMORY_SENTINEL re-read current source before accepting the recovered candidate.",
+        post_compact_reinjection_current_source_verified: true,
+        post_compact_reinjection_memory_receipt_matched: true,
+        post_compact_reinjection_task_session_matched: true,
+        post_compact_reinjection_native_session_matched: true,
+        post_compact_reinjection_receipt_verified: true,
+        receipt_status: "done",
+        replay_repair_consumption_status: "verified",
+        replay_repair_consumption_source: "receipt.replayRepairDispatchBriefUsage",
+        worker_context_packet_id: "wcp-phase179-distillation",
+        worker_handoff_id: "handoff-phase179-distillation",
+        memory_context_snapshot_id: "snapshot-phase179-distillation",
+        memory_context_snapshot_checksum: "snapshot-checksum-phase179-distillation",
+        task_agent_session_id: "task-agent-session-phase179-distillation",
+        native_session_id: "native-session-phase179-distillation",
+        execution_id: "execution-phase179-distillation",
+        event_types: ["dispatch", "child_agent_start", "worker_handoff_ready", "task_agent_memory_context_snapshot", "child_agent_receipt"],
+        completion_source: "post_compact_reinjection_replay_repair_receipt_consumption",
+        resolution_reason: "post_compact_reinjection_repair_receipt_verified",
+        completed_at: "2026-07-10T23:20:00.000Z",
+    };
+    const ignoredRow = {
+        ...row,
+        timeline_binding_id: "replay-repair-brief-timeline:phase179-distillation-ignored",
+        brief_id: "replay-repair-dispatch-brief:phase179-distillation-ignored",
+        work_item_id: "post-compact-reinjection-repair:phase179-distillation-ignored",
+        task_id: "task-phase179-distillation-ignored",
+        assignment_id: "assignment-phase179-distillation-ignored",
+        dispatch_key: "dispatch-phase179-distillation-ignored",
+        reinjection_gate_id: "pcrg-phase179-distillation-ignored",
+        post_compact_candidate_id: "pcrc-phase179-distillation-ignored",
+        post_compact_candidate_value: "src/phase179-distillation-ignored.ts",
+        post_compact_candidate_source_message_id: "message-phase179-distillation-ignored",
+        post_compact_reinjection_receipt_usage_state: "ignored",
+        post_compact_reinjection_receipt_reason: "PHASE179_POST_COMPACT_REINJECTION_IGNORED_SENTINEL candidate was unrelated to the bound task.",
+        post_compact_reinjection_current_source_verified: false,
+        worker_context_packet_id: "wcp-phase179-distillation-ignored",
+        worker_handoff_id: "handoff-phase179-distillation-ignored",
+        memory_context_snapshot_id: "snapshot-phase179-distillation-ignored",
+        memory_context_snapshot_checksum: "snapshot-checksum-phase179-distillation-ignored",
+        task_agent_session_id: "task-agent-session-phase179-distillation-ignored",
+        native_session_id: "native-session-phase179-distillation-ignored",
+        execution_id: "execution-phase179-distillation-ignored",
+    };
+    try {
+        const first = distillPostCompactReinjectionRepairReceiptConsumptionToTypedMemory(groupId, { rows: [row, ignoredRow] }, {
+            reason: "post-compact-reinjection-repair-receipt-consumption-selftest",
+            updatedAt: "2026-07-10T23:20:00.000Z",
+        });
+        const second = distillPostCompactReinjectionRepairReceiptConsumptionToTypedMemory(groupId, { rows: [row, ignoredRow] }, {
+            reason: "post-compact-reinjection-repair-receipt-consumption-selftest-repeat",
+            updatedAt: "2026-07-10T23:20:00.000Z",
+        });
+        const ledger = readGroupTypedMemoryDistillationLedger(groupId);
+        const docs = scanGroupTypedMemoryDocuments(groupId);
+        const docFile = path.join(dir, "post-compact-reinjection-repair-receipt-memory.md");
+        const docText = fs.readFileSync(docFile, "utf-8");
+        const cautionFile = path.join(dir, "post-compact-reinjection-repair-receipt-cautions.md");
+        const cautionText = fs.readFileSync(cautionFile, "utf-8");
+        const indexText = fs.readFileSync(getGroupTypedMemoryIndexFile(groupId), "utf-8");
+        const recall = buildGroupTypedMemoryRecall(groupId, [
+            "PHASE179_POST_COMPACT_REINJECTION_TYPED_MEMORY_SENTINEL",
+            "pcrg-phase179-distillation",
+            "pcrc-phase179-distillation",
+            "native-session-phase179-distillation",
+        ].join(" "), {
+            disableLedger: true,
+            forceMemory: true,
+            max: 8,
+        });
+        const recallText = JSON.stringify(recall.recalled || []);
+        const archive = ledger.postCompactReinjectionRepairReceiptConsumptionArchive || {};
+        const archiveRows = Array.isArray(archive.rows) ? archive.rows : [];
+        const checks = {
+            archiveCountsVerifiedCompletion: first.archivedCount === 2
+                && first.restoredCount === 1
+                && first.cautionCount === 1
+                && first.verifiedCount === 1
+                && first.ignoredCount === 1
+                && first.currentSourceVerifiedCount === 1
+                && first.taskSessionCount === 2
+                && first.nativeSessionCount === 2,
+            repeatIsIdempotent: second.archivedCount === 2
+                && second.newRowCount === 0
+                && second.updatedRowCount === 2,
+            ledgerPersistsExactIdentity: archive.archived_count === 2
+                && archiveRows.some((item) => item.reinjection_gate_id === "pcrg-phase179-distillation"
+                    && item.post_compact_candidate_id === "pcrc-phase179-distillation"
+                    && item.task_agent_session_id === "task-agent-session-phase179-distillation"
+                    && item.native_session_id === "native-session-phase179-distillation"),
+            typedReferenceWritten: docs.some(item => item.relPath === "post-compact-reinjection-repair-receipt-memory.md" && item.type === "reference")
+                && docText.includes("PHASE179_POST_COMPACT_REINJECTION_TYPED_MEMORY_SENTINEL")
+                && docText.includes("post_compact_reinjection_replay_repair_receipt_consumption")
+                && docText.includes("post_compact_reinjection_repair_receipt_verified"),
+            ignoredCompletionStaysFeedback: docs.some(item => item.relPath === "post-compact-reinjection-repair-receipt-cautions.md" && item.type === "feedback")
+                && cautionText.includes("PHASE179_POST_COMPACT_REINJECTION_IGNORED_SENTINEL")
+                && cautionText.includes("[ignored]")
+                && !docText.includes("PHASE179_POST_COMPACT_REINJECTION_IGNORED_SENTINEL"),
+            indexLinksTypedMemory: indexText.includes("post-compact-reinjection-repair-receipt-memory.md"),
+            recallFindsVerifiedCompletion: recallText.includes("post-compact-reinjection-repair-receipt-memory.md")
+                && recallText.includes("PHASE179_POST_COMPACT_REINJECTION_TYPED_MEMORY_SENTINEL"),
+            freshnessBoundaryPreserved: /historical repair completion is recovery evidence, not permanent repository truth/i.test(docText)
+                && /Future use must reverify the current source/i.test(docText)
+                && /historical repair completion is recovery evidence, not permanent repository truth/i.test(cautionText),
+        };
+        return {
+            pass: Object.values(checks).every(Boolean),
+            checks,
+            first: {
+                archivedCount: first.archivedCount,
+                restoredCount: first.restoredCount,
+                cautionCount: first.cautionCount,
+                verifiedCount: first.verifiedCount,
+                ignoredCount: first.ignoredCount,
+                taskSessionCount: first.taskSessionCount,
+                nativeSessionCount: first.nativeSessionCount,
+            },
+            second: {
+                archivedCount: second.archivedCount,
+                newRowCount: second.newRowCount,
+                updatedRowCount: second.updatedRowCount,
+            },
+            recalled: recall.recalled.map((item) => item.relPath),
         };
     }
     finally {

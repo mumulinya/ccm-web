@@ -1,0 +1,21 @@
+export declare function runTestAgentAdversarialEvidenceGateSelfTest(): Promise<{
+    pass: boolean;
+    missingReport: import("./types").TestAgentReport;
+    passedHttpReport: import("./types").TestAgentReport;
+    unlinkedHttpReport: import("./types").TestAgentReport;
+    goalLinkedHttpReport: import("./types").TestAgentReport;
+    unknownExplicitCriterionReport: import("./types").TestAgentReport;
+    unlinkedPlan: import("./execution-plan").TestAgentExecutionPlan;
+    explicitPlan: import("./execution-plan").TestAgentExecutionPlan;
+    passedBrowserReport: import("./types").TestAgentReport;
+    failedHttpReport: import("./types").TestAgentReport;
+    blockedHttpReport: import("./types").TestAgentReport;
+    waivedReport: import("./types").TestAgentReport;
+    invalidWaiverValidation: import("./contract").TestAgentWorkOrderContractValidation;
+    snakeCaseWaiverValidation: import("./contract").TestAgentWorkOrderContractValidation;
+    summaryTamperedVerification: import("./artifact-verifier").TestAgentArtifactVerification;
+    relevanceTamperedVerification: import("./artifact-verifier").TestAgentArtifactVerification;
+    waiverTamperedVerification: import("./artifact-verifier").TestAgentArtifactVerification;
+    cliSummary: string;
+    markdown: string;
+}>;

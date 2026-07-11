@@ -3,6 +3,19 @@ import { type AgentReasoningState } from "../reasoning-loop";
 export type GlobalAgentRunStatus = "running" | "supervising" | "paused" | "waiting_confirmation" | "waiting_clarification" | "completed" | "failed" | "cancelled";
 export type GlobalAgentDecisionState = "answer" | "investigate" | "plan" | "execute" | "needs_confirmation" | "complete";
 export type GlobalAgentToolRisk = "read" | "write" | "high";
+export type GlobalAgentUserSteerKind = "supplement" | "revise_goal";
+export type GlobalAgentUserSteerStatus = "queued" | "applied";
+export interface GlobalAgentUserSteer {
+    id: string;
+    message: string;
+    kind: GlobalAgentUserSteerKind;
+    source: string;
+    request_id?: string;
+    at: string;
+    status: GlobalAgentUserSteerStatus;
+    applied_at?: string;
+    authorization_preserved: boolean;
+}
 export interface GlobalAgentToolSpec {
     name: string;
     description: string;
@@ -84,6 +97,8 @@ export interface GlobalAgentRun {
     final_report?: any;
     display_stream?: any;
     workchain?: any;
+    todo_plan?: any;
+    todoPlan?: any;
     test_agent_execution_plan?: any;
     testAgentExecutionPlan?: any;
     test_agent_execution_plan_summary?: any;
@@ -122,6 +137,12 @@ export interface GlobalAgentRun {
         at: string;
         status: string;
     }>;
+    pending_user_messages?: GlobalAgentUserSteer[];
+    pendingUserMessages?: GlobalAgentUserSteer[];
+    user_steer_history?: GlobalAgentUserSteer[];
+    userSteerHistory?: GlobalAgentUserSteer[];
+    last_user_steer?: GlobalAgentUserSteer | null;
+    lastUserSteer?: GlobalAgentUserSteer | null;
     shadow_mode?: boolean;
     original_user_message?: string;
     reasoning_loop: AgentReasoningState;
@@ -245,6 +266,47 @@ export declare function findClarifyingGlobalAgentRun(sessionId: string, maxAgeMs
 export declare function getGlobalAgentToolSpec(name: string): GlobalAgentToolSpec;
 export declare function classifyGlobalAgentToolRisk(name: string, args: any): GlobalAgentToolRisk;
 export declare function parseGlobalAgentDecision(raw: string | GlobalAgentDecision): GlobalAgentDecision;
+export declare function classifyGlobalAgentUserSteer(message: string, requestedKind?: string): GlobalAgentUserSteerKind;
+export declare function steerGlobalAgentRun(id: string, message: string, options?: {
+    kind?: GlobalAgentUserSteerKind | "auto";
+    source?: string;
+    requestId?: string;
+}): {
+    run: GlobalAgentRun;
+    steering: GlobalAgentUserSteer;
+    duplicate: boolean;
+};
+export declare function applyGlobalAgentSupervisionSteer(id: string, message: string, options?: {
+    kind?: GlobalAgentUserSteerKind | "auto";
+    source?: string;
+    requestId?: string;
+    supervisorState?: string;
+    continuationSummary?: any;
+}): {
+    run: GlobalAgentRun;
+    steering: GlobalAgentUserSteer;
+    duplicate: boolean;
+    applied: boolean;
+    continuation?: undefined;
+} | {
+    run: GlobalAgentRun;
+    steering: GlobalAgentUserSteer;
+    duplicate: boolean;
+    applied: boolean;
+    continuation: {
+        schema: string;
+        kind: GlobalAgentUserSteerKind;
+        source: string;
+        affected_task_count: number;
+        queued_task_count: number;
+        deferred_task_count: number;
+        interrupted_task_count: number;
+        failed_task_count: number;
+        replan_required: boolean;
+        authorization_preserved: boolean;
+        at: string;
+    };
+};
 export declare function startGlobalAgentRun(input: {
     message: string;
     history?: any[];
@@ -275,16 +337,26 @@ export declare function recoverInterruptedGlobalAgentRuns(runtime: GlobalAgentLo
 }>;
 export declare function runGlobalAgentLoopSelfTest(): Promise<{
     workchain: {
+        protectedFailureCopyUsesInvestigationLanguage: boolean;
+        testAgentFailureFallbackUsesGapLanguage: boolean;
         simpleHasSummary: boolean;
         groupEvidenceVisible: boolean;
         groupCompletionSummaryIncludesReviewEvidence: boolean;
         finalSummaryQualityRequired: boolean;
+        passedPostReviewSpotCheckAllowsCompletion: boolean;
+        failedPostReviewSpotCheckBlocksFalseCompletion: boolean;
         failedReviewBlocksFalseCompletion: boolean;
         failedReviewShowsReworkNextAction: boolean;
         failedReviewKeepsTodoActive: any;
         testAgentFailureSummaryBlocksFalseCompletion: boolean;
         testAgentSummaryOnlyCoverageGapBlocksFalseCompletion: boolean;
         testAgentWeakAcceptanceSummaryNeedsConfirmation: boolean;
+        testAgentFailedBrowserFlowBlocksFalseCompletion: boolean;
+        testAgentFailedMultiSessionBrowserBlocksFalseCompletion: boolean;
+        testAgentFailedAuthenticationBlocksLegacyPass: boolean;
+        testAgentBlockedAuthenticationNeedsConfirmation: boolean;
+        testAgentFailedActionEffectAndAdversarialEvidenceBlockLegacyPass: boolean;
+        testAgentIncompleteLatestEvidenceRequiresRecheckWithoutImplementationRework: boolean;
         workchainQualityRequiresProtocolSanitizer: boolean;
         workchainVisibleProtocolLeakSanitized: boolean;
         legacyCompletionReplySanitizesVisibleSummary: boolean;
@@ -311,6 +383,7 @@ export declare function runGlobalAgentLoopSelfTest(): Promise<{
         progressCheckpointsHideRawProtocol: boolean;
     };
     deliveryReport: {
+        protectedFailureCopyUsesInvestigationLanguage: boolean;
         groupHasFriendlySections: boolean;
         groupKeepsFilesReadable: boolean;
         groupHasPlanReview: boolean;
@@ -351,6 +424,8 @@ export declare function runGlobalAgentLoopSelfTest(): Promise<{
         weakPassedReviewPrimarySummaryAvoidsOptimisticHeadline: boolean;
         incompleteVerificationResultDoneBlocksCompletion: boolean;
         noVerificationEvidenceDoneBlocksCompletion: boolean;
+        passedPostReviewSpotCheckAllowsCompletion: boolean;
+        failedPostReviewSpotCheckDoneBlocksCompletion: boolean;
         bareDoneQualityRequiresEvidence: boolean;
         failedFinalSummaryQualityRequiresPlanGapNextAction: boolean;
         cancelledReportHasStopSummary: boolean;
@@ -363,6 +438,7 @@ export declare function runGlobalAgentLoopSelfTest(): Promise<{
     finalGateCompletesOriginalRun: boolean;
     globalSupervisionWaitingRefreshesVisibleWorkchain: boolean;
     globalSupervisionReworkRefreshesVisibleWorkchain: any;
+    globalSupervisionGoalRevisionStopsOldRunAndReplans: boolean;
     modelObservesAndContinues: boolean;
     consultationDoesNotDispatch: boolean;
     globalVisibleReplySanitizesProtocol: boolean;
@@ -387,6 +463,10 @@ export declare function runGlobalAgentLoopSelfTest(): Promise<{
     duplicateLoopIsStopped: boolean;
     pauseAndResumeWorks: boolean;
     globalResumeCarriesFeedback: boolean;
+    globalMidTurnSteerUsesSameRun: boolean;
+    globalMidTurnSteerConsumesOnce: boolean;
+    globalMidTurnSteerStreamsFriendlyAppliedEvent: boolean;
+    globalMidTurnGoalRevisionForcesReplanAndRevokesAuthorization: boolean;
     fencedJsonParses: boolean;
     shadowModeHasNoSideEffect: boolean;
     completedRunsHaveWorkchain: boolean;

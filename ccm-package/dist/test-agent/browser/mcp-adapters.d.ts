@@ -1,4 +1,4 @@
-import { BrowserActionSpec, BrowserAssertionSpec, BrowserStepResult, NormalizedTestAgentProjectTarget } from "../types";
+import { BrowserActionSpec, BrowserAssertionSpec, BrowserExistingSessionProvider, BrowserRecoveryEvidence, BrowserStepResult, NormalizedTestAgentProjectTarget } from "../types";
 export type McpBrowserAdapterId = "playwright-mcp" | "claude-in-chrome" | "chrome-devtools" | "computer-use";
 export interface McpBrowserAdapter {
     id: McpBrowserAdapterId;
@@ -12,6 +12,15 @@ export interface McpBrowserAdapter {
     readNetworkRequests: () => Promise<string[]>;
     readNetworkErrors: () => Promise<string[]>;
     captureScreenshot: (name: string) => Promise<string[]>;
+    prepareExistingSession?: (url?: string) => Promise<void>;
+    existingSessionContextEvidence?: () => {
+        provider: Exclude<BrowserExistingSessionProvider, "auto">;
+        tabContextChecked: boolean;
+        tabCount?: number;
+        createdNewTab: boolean;
+    };
+    browserRecoveryEvidence?: () => BrowserRecoveryEvidence | undefined;
+    pageText?: () => Promise<string>;
 }
 export interface McpBrowserSignals {
     pageText: string;
@@ -21,5 +30,8 @@ export interface McpBrowserSignals {
     networkErrors: string[];
 }
 type Caller = (toolName: string, input: Record<string, any>) => Promise<any>;
-export declare function createMcpBrowserAdapter(tools: string[], call: Caller): McpBrowserAdapter | null;
+export declare function createMcpBrowserAdapter(tools: string[], call: Caller, options?: {
+    existingSession?: boolean;
+    preferredAdapter?: BrowserExistingSessionProvider;
+}): McpBrowserAdapter | null;
 export {};

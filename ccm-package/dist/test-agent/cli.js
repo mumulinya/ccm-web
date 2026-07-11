@@ -46,6 +46,16 @@ const contract_1 = require("./contract");
 const execution_plan_1 = require("./execution-plan");
 const provider_gaps_1 = require("./browser/provider-gaps");
 const provider_summary_1 = require("./browser/provider-summary");
+const flow_summary_1 = require("./browser/flow-summary");
+const multi_session_summary_1 = require("./browser/multi-session-summary");
+const stability_summary_1 = require("./browser/stability-summary");
+const authentication_summary_1 = require("./browser/authentication-summary");
+const recovery_summary_1 = require("./browser/recovery-summary");
+const action_effect_summary_1 = require("./browser/action-effect-summary");
+const adversarial_summary_1 = require("./adversarial-summary");
+const acceptance_gate_1 = require("./acceptance-gate");
+const http_concurrency_1 = require("./http-concurrency");
+const http_page_resources_1 = require("./http-page-resources");
 const acceptance_summary_1 = require("./acceptance-summary");
 const required_check_summary_1 = require("./required-check-summary");
 const self_test_matrix_1 = require("./self-test-matrix");
@@ -87,6 +97,7 @@ function formatTestAgentCliValidationSummary(validation) {
         lines.push(`Work order: ${validation.normalized.id}`);
         lines.push(`Projects: ${validation.normalized.projects.map(project => project.name).join(", ") || "none"}`);
         lines.push(`Browser provider: ${validation.normalized.options.browserProvider}`);
+        lines.push(`Adversarial gate: required=${validation.normalized.options.requireAdversarialProbe ? "yes" : "no"}${validation.normalized.options.adversarialProbeWaiver ? ` waiver=${validation.normalized.options.adversarialProbeWaiver}` : ""}`);
         lines.push(`Artifact dir: ${validation.normalized.options.artifactDir}`);
     }
     return `${lines.join("\n")}\n`;
@@ -101,9 +112,24 @@ function formatTestAgentCliReportSummary(report) {
         `TestAgent report: ${report.status} (${report.recommendation})`,
         `Summary: ${report.summary}`,
         `Work order: ${report.workOrderId}`,
+        `Original goal: ${report.originalUserGoal || "(none)"}`,
+        `Acceptance criteria: ${report.acceptanceCriteria.length}`,
+        `Acceptance evidence gate: ${(0, acceptance_gate_1.formatAcceptanceEvidenceGateSummaryLine)(report.acceptanceEvidenceGateSummary)}`,
         `Commands: ${statusCounts(report.commandResults)}`,
         `HTTP checks: ${statusCounts(report.httpResults)}`,
+        `HTTP page resources: ${(0, http_page_resources_1.formatHttpPageResourceSummary)(report.httpResults)}`,
+        `HTTP concurrency: ${(0, http_concurrency_1.formatHttpConcurrencySummaryLine)(report.httpConcurrencySummary)}`,
+        `Adversarial evidence: ${(0, adversarial_summary_1.formatAdversarialEvidenceSummaryLine)(report.adversarialEvidenceSummary)}`,
         `Browser checks: ${statusCounts(report.browserResults)}`,
+        `Browser multi-session: ${(0, multi_session_summary_1.formatBrowserMultiSessionSummaryLine)(report.browserMultiSessionSummary)}`,
+        ...(0, multi_session_summary_1.formatBrowserMultiSessionAttentionLines)(report.browserMultiSessionSummary, 5),
+        `Browser stability: ${(0, stability_summary_1.formatBrowserStabilitySummaryLine)(report.browserStabilitySummary)}`,
+        ...(0, stability_summary_1.formatBrowserStabilityAttentionLines)(report.browserStabilitySummary, 5),
+        `Browser authentication: ${(0, authentication_summary_1.formatBrowserAuthenticationSummaryLine)((0, authentication_summary_1.buildBrowserAuthenticationSummary)(report.browserResults))}`,
+        `Browser recovery: ${(0, recovery_summary_1.formatBrowserRecoverySummaryLine)(report.browserRecoverySummary)}`,
+        `Browser action effects: ${(0, action_effect_summary_1.formatBrowserActionEffectSummaryLine)(report.browserActionEffectSummary)}`,
+        `Browser acceptance flows: ${(0, flow_summary_1.formatBrowserFlowSummaryLine)(report.browserFlowSummary)}`,
+        ...(0, flow_summary_1.formatBrowserFlowAttentionLines)(report.browserFlowSummary, 5),
         `Browser network: errors:${networkErrors}${failedNetworkUrls.length ? ` failed:${failedNetworkUrls.join(", ")}` : ""}`,
         `Browser providers: ${(0, provider_summary_1.formatBrowserProviderSummaryLine)(report.browserProviderSummary)}`,
         `Browser provider gaps: ${browserProviderGaps.length}`,
@@ -145,7 +171,15 @@ function formatTestAgentCliExecutionPlanSummary(plan) {
         `Commands: ${plan.summary.commands} (auto-discovered ${plan.summary.autoDiscoveredCommands})`,
         `Dev servers: ${plan.summary.devServers}`,
         `HTTP checks: ${plan.summary.httpChecks} (adversarial ${plan.summary.adversarialHttpChecks})`,
+        `HTTP concurrency plan: checks:${plan.summary.httpConcurrencyChecks} requests:${plan.summary.httpConcurrentRequests}`,
+        `Adversarial gate: required=${plan.summary.adversarialProbeRequired ? "yes" : "no"} waived=${plan.summary.adversarialProbeWaived ? "yes" : "no"} configured=${plan.summary.adversarialProbeCount} linked=${plan.summary.adversarialLinkedProbeCount} unlinked=${plan.summary.adversarialUnlinkedProbeCount}${plan.summary.adversarialProbeWaiverReason ? ` waiver=${plan.summary.adversarialProbeWaiverReason}` : ""}`,
         `Browser checks: ${plan.summary.browserChecks} (auto ${plan.summary.autoBrowserChecks}, adversarial ${plan.summary.adversarialBrowserChecks})`,
+        `Browser provider routing plan: playwright:${plan.summary.browserPlannedPlaywrightChecks} mcp:${plan.summary.browserPlannedMcpChecks} capabilityFallback:${plan.summary.browserCapabilityRoutedChecks} existingSession:${plan.summary.browserExistingSessionRoutedChecks}`,
+        ...plan.projects.flatMap(project => project.browserChecks.map(check => `- Browser route: ${project.name} / ${check.name} -> ${check.plannedProvider} (${check.providerRoutingReason})`)).slice(0, 8),
+        `Browser multi-session plan: sessions:${plan.summary.browserSessions} steps:${plan.summary.browserSessionSteps} parallelGroups:${plan.summary.browserParallelGroups} comparisons:${plan.summary.browserSessionComparisons}`,
+        `Browser stability plan: checks:${plan.summary.browserStabilityChecks} runs:${plan.summary.browserStabilityRuns}`,
+        `Browser authentication plan: checks:${plan.summary.browserAuthenticationChecks} managed:${plan.summary.browserManagedAuthenticationChecks} existingSession:${plan.summary.browserExistingSessionChecks} sessionRecovery:${plan.summary.browserSessionRecoveryChecks} minimal:${plan.summary.browserExistingSessionMinimalEvidenceChecks} full:${plan.summary.browserExistingSessionFullEvidenceChecks} existingProviders:${plan.summary.browserExistingSessionProviders.join(",") || "none"} credentialEnvNames:${plan.summary.browserCredentialEnvBindings} storageStates:${plan.summary.browserStorageStateFiles} artifactSuppressions:${plan.summary.browserSensitiveArtifactSuppressions}`,
+        `Browser action effect plan: checks:${plan.summary.browserActionEffectChecks} actions:${plan.summary.browserActionEffectActions} crossSession:${plan.summary.browserCrossSessionActionEffectActions}`,
         `Browser provider: ${plan.browserProvider}`,
         `Browser provider warnings: ${plan.browserProviderWarnings?.length || 0}`,
         ...(plan.browserProviderWarnings || []).slice(0, 5).map(item => `- ${(0, provider_gaps_1.formatBrowserProviderPlanWarningLine)(item)}`),

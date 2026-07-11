@@ -31,6 +31,7 @@ const modeInfo = computed(() => {
   if (mode === 'project_analysis') return { label: '项目分析', tone: 'analysis', icon: '🔎', summary: '只读查看项目上下文并回答，不创建任务。' }
   if (mode === 'project_task') return { label: '项目任务', tone: 'task', icon: '🧩', summary: '已把明确需求转成项目任务，并进入执行队列。' }
   if (mode === 'delegation') return { label: '协调安排', tone: 'task', icon: '🧠', summary: '我正在拆分计划并安排执行成员。' }
+  if (mode === 'goal_revision') return { label: '目标调整', tone: 'task', icon: '🧭', summary: '旧方向已停止，我正在按新目标重新规划。' }
   if (mode === 'followup') return { label: '追加要求', tone: 'task', icon: '🔁', summary: '已并入原任务，我会基于当前状态继续。' }
   if (mode === 'governance') return { label: '任务治理', tone: 'govern', icon: '🛡️', summary: '停止、取消、归档等动作需要显式授权。' }
   return { label: '普通回复', tone: 'chat', icon: '💬', summary: '只处理当前对话，不创建任务。' }
@@ -167,16 +168,13 @@ const nextPlanStep = computed(() => {
   return visiblePlanSteps.value.find((step, index) => index > currentIndex && ['pending', 'in_progress', 'reviewing', 'reworking', 'needs_confirmation'].includes(step.status)) || null
 })
 const currentPlanActions = computed(() => Array.isArray(currentPlanStep.value?.actions) ? currentPlanStep.value.actions : [])
-const isLiveTodoPlan = computed(() => todoPlan.value?.source === 'ccm-live-task-todo')
 const livePlanActiveStatus = computed(() => visiblePlanSteps.value.find(step => ['failed', 'needs_confirmation', 'reworking', 'reviewing', 'in_progress'].includes(step.status))?.status || '')
 const verifyBadge = computed(() => {
   if (verify.value?.passed) return { label: '已检查', tone: 'ok' }
-  if (isLiveTodoPlan.value) {
-    if (['failed', 'needs_confirmation'].includes(livePlanActiveStatus.value)) return { label: '需处理', tone: 'warn' }
-    if (livePlanActiveStatus.value === 'reworking') return { label: '返工中', tone: 'work' }
-    if (livePlanActiveStatus.value === 'reviewing') return { label: '验收中', tone: 'work' }
-    if (livePlanActiveStatus.value === 'in_progress') return { label: '进行中', tone: 'work' }
-  }
+  if (['failed', 'needs_confirmation'].includes(livePlanActiveStatus.value)) return { label: '需处理', tone: 'warn' }
+  if (livePlanActiveStatus.value === 'reworking') return { label: '返工中', tone: 'work' }
+  if (livePlanActiveStatus.value === 'reviewing') return { label: '验收中', tone: 'work' }
+  if (livePlanActiveStatus.value === 'in_progress') return { label: '进行中', tone: 'work' }
   return { label: '需确认', tone: 'warn' }
 })
 const statusLabels = {

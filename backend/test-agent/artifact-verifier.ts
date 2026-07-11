@@ -10,6 +10,37 @@ import {
   TestAgentReport,
   TestAgentVerdict,
 } from "./types";
+import { buildBrowserMultiSessionSummary } from "./browser/multi-session-summary";
+import { browserStabilityMetadata, buildBrowserStabilitySummary } from "./browser/stability-summary";
+import { browserAuthenticationEvidenceErrors } from "./browser/authentication";
+import { buildBrowserAuthenticationSummary } from "./browser/authentication-summary";
+import {
+  browserRecoveryEvidenceErrors,
+  browserRecoverySummaryErrors,
+} from "./browser/recovery-validation";
+import { buildBrowserRecoverySummary } from "./browser/recovery-summary";
+import {
+  browserActionEffectResultErrors,
+} from "./browser/action-effects";
+import {
+  browserActionEffectSummaryErrors,
+  buildBrowserActionEffectSummary,
+} from "./browser/action-effect-summary";
+import {
+  adversarialEvidenceSummaryErrors,
+  buildAdversarialEvidenceSummary,
+} from "./adversarial-summary";
+import {
+  acceptanceEvidenceGateSummaryErrors,
+  buildAcceptanceEvidenceGateSummary,
+} from "./acceptance-gate";
+import {
+  buildHttpConcurrencySummary,
+  httpConcurrencyEvidenceErrors,
+  httpConcurrencyResultStatus,
+  httpConcurrencySummaryErrors,
+} from "./http-concurrency";
+import { httpPageResourceEvidenceErrors } from "./http-page-resources";
 
 export interface TestAgentArtifactVerificationItem {
   type: TestAgentArtifactManifestItem["type"] | string;
@@ -680,6 +711,385 @@ function browserInteractionCount(report: TestAgentReport, key: "actionCount" | "
     .reduce((sum, item: any) => sum + Number(item?.[key] || 0), 0);
 }
 
+function verifyBrowserAuthenticationEvidenceConsistency(report: TestAgentReport, errors: string[]) {
+  let hasMinimalExistingSession = false;
+  for (const [resultIndex, result] of (report?.browserResults || []).entries()) {
+    const label = `report.browserResults[${resultIndex}]`;
+    if (result.authentication) {
+      errors.push(...browserAuthenticationEvidenceErrors(result.authentication, `${label}.authentication`));
+    }
+    if (result.contextOptions?.storageState) {
+      errors.push(...browserAuthenticationEvidenceErrors({
+        credentialEnvNames: [],
+        storageState: result.contextOptions.storageState,
+      }, `${label}.contextOptions`));
+      if (!result.authentication?.storageState) {
+        errors.push(`${label}.contextOptions.storageState exists without matching authentication evidence.`);
+      } else {
+        expectEqual(
+          `${label}.authentication.storageState`,
+          result.authentication.storageState,
+          result.contextOptions.storageState,
+          errors,
+        );
+      }
+    }
+    const authenticationEvidence = [
+      ...(result.authentication ? [result.authentication] : []),
+      ...(result.browserSessions || []).flatMap(session => session.authentication ? [session.authentication] : []),
+    ];
+    for (const [sessionIndex, session] of (result.browserSessions || []).entries()) {
+      if (session.authentication) {
+        errors.push(...browserAuthenticationEvidenceErrors(
+          session.authentication,
+          `${label}.browserSessions[${sessionIndex}].authentication`,
+        ));
+      }
+    }
+    if (authenticationEvidence.some(item => item.sensitiveArtifactsSuppressed)) {
+      const forbidden = [
+        ...(result.browserArtifacts || []),
+        ...(result.browserSessions || []).flatMap(session => session.browserArtifacts || []),
+      ].filter(item => item.type === "trace" || item.type === "har" || item.type === "video");
+      if (forbidden.length) {
+        errors.push(`${label} contains trace/HAR/video artifacts even though authentication evidence says sensitive artifacts were suppressed.`);
+      }
+    }
+    const minimalExisting = result.authentication?.mode === "existing_session"
+      && result.authentication.existingSession?.evidencePolicy === "minimal";
+    if (minimalExisting) {
+      hasMinimalExistingSession = true;
+      const existing = result.authentication!.existingSession!;
+      if (result.status === "passed" && (!existing.tabContextChecked || !existing.createdNewTab)) {
+        errors.push(`${label} passed without proving tab context inspection and creation of a new tab.`);
+      }
+      for (const key of ["finalUrl", "title", "pageTextPreview", "consoleLogPath", "dialogLogPath", "popupLogPath", "networkLogPath"] as const) {
+        if (result[key]) errors.push(`${label}.${key} must be suppressed for minimal existing-session evidence.`);
+      }
+      for (const key of ["screenshots", "pageSnapshots", "browserArtifacts", "consoleMessages", "dialogMessages", "popupMessages", "networkRequests"] as const) {
+        const items = result[key] as any[] | undefined;
+        if (Array.isArray(items) && items.length) errors.push(`${label}.${key} must be empty for minimal existing-session evidence.`);
+      }
+      for (const [stepIndex, step] of (result.steps || []).entries()) {
+        if (step.detail && step.detail !== "authenticated browser step executed; raw detail suppressed") {
+          errors.push(`${label}.steps[${stepIndex}].detail was not suppressed.`);
+        }
+        if (step.error && step.error !== "Authenticated browser step failed; raw provider detail suppressed.") {
+          errors.push(`${label}.steps[${stepIndex}].error was not suppressed.`);
+        }
+      }
+    }
+  }
+  if (hasMinimalExistingSession) {
+    for (const [recordIndex, record] of (report.browserToolCalls || []).entries()) {
+      const input = record.input;
+      const keys = input && typeof input === "object" && !Array.isArray(input) ? Object.keys(input) : [];
+      if (!input || !Array.isArray((input as any).inputKeys) || keys.some(key => key !== "inputKeys" && key !== "action")) {
+        errors.push(`report.browserToolCalls[${recordIndex}].input contains more than suppressed metadata.`);
+      }
+      if (record.outputPreview && record.outputPreview !== "[suppressed for existing authenticated browser session]") {
+        errors.push(`report.browserToolCalls[${recordIndex}].outputPreview was not suppressed.`);
+      }
+      if (record.error && record.error !== "Browser tool call failed; raw provider error suppressed.") {
+        errors.push(`report.browserToolCalls[${recordIndex}].error was not suppressed.`);
+      }
+    }
+  }
+  if (report?.metadata?.browserAuthenticationSummary) {
+    expectEqual(
+      "report.metadata.browserAuthenticationSummary",
+      report.metadata.browserAuthenticationSummary,
+      buildBrowserAuthenticationSummary(report?.browserResults || []),
+      errors,
+    );
+  }
+}
+
+function verifyBrowserRecoveryEvidenceConsistency(report: TestAgentReport, errors: string[]) {
+  let hasRecoveryEvidence = false;
+  for (const [resultIndex, result] of (report?.browserResults || []).entries()) {
+    if (!result.recovery) continue;
+    hasRecoveryEvidence = true;
+    const label = `report.browserResults[${resultIndex}].recovery`;
+    errors.push(...browserRecoveryEvidenceErrors(result.recovery, label));
+    const existingProvider = result.authentication?.existingSession?.provider;
+    if (existingProvider) {
+      for (const [eventIndex, event] of result.recovery.events.entries()) {
+        if (event.provider !== existingProvider) {
+          errors.push(`${label}.events[${eventIndex}].provider does not match the authenticated browser provider.`);
+        }
+      }
+    }
+  }
+  if (hasRecoveryEvidence && !report.browserRecoverySummary) {
+    errors.push("report.browserRecoverySummary is missing even though browser recovery evidence exists.");
+  }
+  if (report.browserRecoverySummary) {
+    errors.push(...browserRecoverySummaryErrors(
+      report.browserRecoverySummary,
+      report.browserResults || [],
+      "report.browserRecoverySummary",
+    ));
+  }
+}
+
+function verifyBrowserActionEffectEvidenceConsistency(report: TestAgentReport, errors: string[]) {
+  let hasActionEffects = false;
+  for (const [resultIndex, result] of (report?.browserResults || []).entries()) {
+    const effects = result.actionEffects || [];
+    if (!effects.length) continue;
+    hasActionEffects = true;
+    const label = `report.browserResults[${resultIndex}]`;
+    errors.push(...browserActionEffectResultErrors(result, label));
+    for (const [effectIndex, effect] of effects.entries()) {
+      if (effect.provider !== result.provider) {
+        errors.push(`${label}.actionEffects[${effectIndex}].provider does not match the browser result provider.`);
+      }
+    }
+    const minimalExisting = result.authentication?.mode === "existing_session"
+      && result.authentication.existingSession?.evidencePolicy === "minimal";
+    if (minimalExisting && effects.some(effect =>
+      !effect.detailSuppressed
+      || Object.keys(effect.before || {}).length > 0
+      || Object.keys(effect.after || {}).length > 0
+    )) {
+      errors.push(`${label}.actionEffects retained detail under the minimal existing-session evidence policy.`);
+    }
+  }
+  if (hasActionEffects && !report.browserActionEffectSummary) {
+    errors.push("report.browserActionEffectSummary is missing even though browser action-effect evidence exists.");
+  }
+  if (report.browserActionEffectSummary) {
+    errors.push(...browserActionEffectSummaryErrors(
+      report.browserActionEffectSummary,
+      report.browserResults || [],
+      "report.browserActionEffectSummary",
+    ));
+  }
+}
+
+function verifyAdversarialEvidenceConsistency(report: TestAgentReport, errors: string[]) {
+  const summary = report.adversarialEvidenceSummary;
+  errors.push(...adversarialEvidenceSummaryErrors(
+    summary,
+    report.httpResults || [],
+    report.browserResults || [],
+    report.originalUserGoal || "",
+    report.acceptanceCriteria || [],
+    "report.adversarialEvidenceSummary",
+  ));
+  const requiredByCheck = (report.requiredChecks || [])
+    .some(check => /adversarial|boundary|orphan|idempot|concurr|race/i.test(String(check || "")));
+  if (requiredByCheck && summary?.required !== true) {
+    errors.push("report.adversarialEvidenceSummary.required must be true when requiredChecks includes an adversarial check.");
+  }
+  if (report.status === "passed" && !["verified", "waived"].includes(String(summary?.status || ""))) {
+    errors.push("A passed report requires verified adversarial evidence or an explicit waiver.");
+  }
+  if (summary?.status === "failed" && report.status !== "failed") {
+    errors.push("Failed adversarial evidence requires a failed report.");
+  }
+  if (summary?.status === "missing" && summary.required && report.status === "passed") {
+    errors.push("Missing required adversarial evidence cannot produce a passed report.");
+  }
+}
+
+function verifyAcceptanceEvidenceConsistency(report: TestAgentReport, errors: string[]) {
+  errors.push(...acceptanceEvidenceGateSummaryErrors(
+    report.acceptanceEvidenceGateSummary,
+    report.acceptanceCoverage || [],
+    "report.acceptanceEvidenceGateSummary",
+  ));
+  if (report.status === "passed" && report.acceptanceEvidenceGateSummary?.canAccept !== true) {
+    errors.push("A passed report requires criterion-linked acceptance evidence or no acceptance criteria.");
+  }
+}
+
+function verifyHttpConcurrencyConsistency(report: TestAgentReport, errors: string[]) {
+  let hasConcurrency = false;
+  for (const [index, result] of (report.httpResults || []).entries()) {
+    if (!result.concurrency) continue;
+    hasConcurrency = true;
+    const label = `report.httpResults[${index}].concurrency`;
+    errors.push(...httpConcurrencyEvidenceErrors(result.concurrency, label));
+    const expectedStatus = httpConcurrencyResultStatus(result.concurrency);
+    if (result.status !== expectedStatus) {
+      errors.push(`report.httpResults[${index}].status must be ${expectedStatus} for its concurrent HTTP evidence.`);
+    }
+    if (result.status === "passed") {
+      if (!result.concurrency.overlapObserved) {
+        errors.push(`${label} belongs to a passed result but does not prove overlapping requests.`);
+      }
+      if (result.concurrency.failed || result.concurrency.blocked) {
+        errors.push(`${label} belongs to a passed result but contains failed or blocked requests.`);
+      }
+      if (result.concurrency.aggregateAssertions.some(assertion => assertion.status !== "passed")) {
+        errors.push(`${label} belongs to a passed result but contains non-passing aggregate assertions.`);
+      }
+    }
+  }
+  if (hasConcurrency && !report.httpConcurrencySummary) {
+    errors.push("report.httpConcurrencySummary is missing even though concurrent HTTP evidence exists.");
+  }
+  if (report.httpConcurrencySummary) {
+    errors.push(...httpConcurrencySummaryErrors(
+      report.httpConcurrencySummary,
+      report.httpResults || [],
+      "report.httpConcurrencySummary",
+    ));
+  }
+}
+
+function verifyHttpPageResourceConsistency(report: TestAgentReport, errors: string[]) {
+  for (const [index, result] of (report.httpResults || []).entries()) {
+    errors.push(...httpPageResourceEvidenceErrors(result, `report.httpResults[${index}]`));
+  }
+}
+
+function verifyBrowserSessionEvidenceConsistency(report: TestAgentReport, errors: string[]) {
+  for (const [resultIndex, result] of (report?.browserResults || []).entries()) {
+    const sessions = result.browserSessions || [];
+    if (!sessions.length) continue;
+    const label = `report.browserResults[${resultIndex}]`;
+    if (sessions.length < 2) errors.push(`${label}.browserSessions must contain at least two sessions.`);
+    const names = sessions.map(session => String(session.name || "").trim());
+    const normalizedNames = names.map(name => name.toLowerCase());
+    if (new Set(normalizedNames).size !== normalizedNames.length) errors.push(`${label}.browserSessions contains duplicate session names.`);
+    expectEqual(`${label}.context.multiSession`, result.context?.multiSession, true, errors);
+    expectEqual(`${label}.context.sessionCount`, result.context?.sessionCount, sessions.length, errors);
+    const contextSessionNames = Array.isArray(result.context?.sessionNames) ? result.context.sessionNames.map(String) : [];
+    compareStringList(`${label}.context.sessionNames`, [...names].sort(), contextSessionNames.sort(), errors);
+    const parallelGroups = new Map<string, Set<string>>();
+    for (const step of result.steps) {
+      const group = /(?:^|;\s*)parallelGroup=(\d+)(?:;|$)/.exec(String(step.detail || ""))?.[1];
+      if (!group) continue;
+      const session = /^session:([^:]+):/.exec(step.name)?.[1] || "";
+      if (!parallelGroups.has(group)) parallelGroups.set(group, new Set<string>());
+      if (session) parallelGroups.get(group)!.add(session.toLowerCase());
+    }
+    if (result.context?.parallelGroupCount !== undefined || parallelGroups.size) {
+      expectEqual(`${label}.context.parallelGroupCount`, result.context?.parallelGroupCount, parallelGroups.size, errors);
+      for (const [group, groupSessions] of parallelGroups) {
+        if (groupSessions.size < 2) errors.push(`${label} parallel group ${group} does not contain steps from at least two sessions.`);
+      }
+    }
+
+    const comparisons = result.browserSessionComparisons || [];
+    const comparisonSteps = result.steps.filter(step => /(?:^|;\s*)compareSessions=([^;]+)(?:;|$)/.test(String(step.detail || "")));
+    if (result.context?.comparisonCount !== undefined || comparisons.length || comparisonSteps.length) {
+      expectEqual(`${label}.context.comparisonCount`, result.context?.comparisonCount, comparisons.length, errors);
+      expectEqual(`${label}.browserSessionComparisons.length`, comparisons.length, comparisonSteps.length, errors);
+      for (const [comparisonIndex, comparison] of comparisons.entries()) {
+        const comparisonLabel = `${label}.browserSessionComparisons[${comparisonIndex}]`;
+        const comparisonStep = comparisonSteps[comparisonIndex];
+        const left = String(comparison.leftSession || "").trim();
+        const right = String(comparison.rightSession || "").trim();
+        if (!normalizedNames.includes(left.toLowerCase())) errors.push(`${comparisonLabel}.leftSession references unknown session ${JSON.stringify(left)}.`);
+        if (!normalizedNames.includes(right.toLowerCase())) errors.push(`${comparisonLabel}.rightSession references unknown session ${JSON.stringify(right)}.`);
+        if (left && right && left.toLowerCase() === right.toLowerCase()) errors.push(`${comparisonLabel} must compare two distinct sessions.`);
+        if (!["equals", "notEquals", "includes"].includes(String(comparison.operator || ""))) errors.push(`${comparisonLabel}.operator is invalid.`);
+        if (!["passed", "failed"].includes(String(comparison.status || ""))) errors.push(`${comparisonLabel}.status is invalid.`);
+        for (const key of ["value", "values", "rawValue", "raw_value", "rawValues", "raw_values", "leftValue", "left_value", "rightValue", "right_value", "actual", "expected"]) {
+          if (Object.prototype.hasOwnProperty.call(comparison as any, key)) errors.push(`${comparisonLabel}.${key} must not contain raw compared values.`);
+        }
+        for (const side of ["left", "right"] as const) {
+          const summary = comparison[side];
+          if (!summary) continue;
+          if (!/^[a-f0-9]{64}$/i.test(String(summary.sha256 || ""))) errors.push(`${comparisonLabel}.${side}.sha256 is not a SHA-256 digest.`);
+          if (!Number.isFinite(Number(summary.serializedBytes)) || Number(summary.serializedBytes) < 0) errors.push(`${comparisonLabel}.${side}.serializedBytes must be non-negative.`);
+          for (const key of ["value", "values", "rawValue", "raw_value", "rawValues", "raw_values", "actual", "expected"]) {
+            if (Object.prototype.hasOwnProperty.call(summary as any, key)) errors.push(`${comparisonLabel}.${side}.${key} must not contain raw compared values.`);
+          }
+        }
+        if (comparison.status === "passed" && (!comparison.left || !comparison.right)) {
+          errors.push(`${comparisonLabel} passed without both comparison value summaries.`);
+        }
+        if (comparison.status === "passed" && comparison.operator === "equals" && comparison.left?.sha256 !== comparison.right?.sha256) {
+          errors.push(`${comparisonLabel} passed equals comparison has different value digests.`);
+        }
+        if (comparison.status === "passed" && comparison.operator === "notEquals" && comparison.left?.sha256 === comparison.right?.sha256) {
+          errors.push(`${comparisonLabel} passed notEquals comparison has identical value digests.`);
+        }
+        if (comparisonStep) {
+          const comparedSessions = /(?:^|;\s*)compareSessions=([^,;]+),([^;]+)(?:;|$)/.exec(String(comparisonStep.detail || ""));
+          const operator = /(?:^|;\s*)operator=([^;]+)(?:;|$)/.exec(String(comparisonStep.detail || ""))?.[1];
+          if (!comparedSessions || comparedSessions[1].trim().toLowerCase() !== left.toLowerCase() || comparedSessions[2].trim().toLowerCase() !== right.toLowerCase()) {
+            errors.push(`${comparisonLabel} does not match its comparison step session pair.`);
+          }
+          if (operator !== comparison.operator) errors.push(`${comparisonLabel} does not match its comparison step operator.`);
+          if (comparisonStep.status !== comparison.status) errors.push(`${comparisonLabel} does not match its comparison step status.`);
+        }
+      }
+    }
+
+    const screenshots = new Set((result.screenshots || []).map(String));
+    const pageSnapshots = new Set((result.pageSnapshots || []).map(String));
+    const artifactPaths = new Set((result.browserArtifacts || []).map(item => String(item.path || "")));
+    for (const session of sessions) {
+      for (const screenshot of session.screenshots || []) {
+        if (!screenshots.has(String(screenshot))) errors.push(`${label} session ${JSON.stringify(session.name)} screenshot is missing from the browser result aggregate: ${screenshot}.`);
+      }
+      for (const snapshot of session.pageSnapshots || []) {
+        if (!pageSnapshots.has(String(snapshot))) errors.push(`${label} session ${JSON.stringify(session.name)} page snapshot is missing from the browser result aggregate: ${snapshot}.`);
+      }
+      for (const artifact of session.browserArtifacts || []) {
+        if (!artifactPaths.has(String(artifact.path || ""))) errors.push(`${label} session ${JSON.stringify(session.name)} browser artifact is missing from the browser result aggregate: ${artifact.path}.`);
+      }
+      if (!result.steps.some(step => step.name.startsWith(`session:${session.name}:`))) {
+        errors.push(`${label} session ${JSON.stringify(session.name)} has no session-prefixed execution step.`);
+      }
+    }
+  }
+}
+
+function verifyBrowserStabilityEvidenceConsistency(report: TestAgentReport, errors: string[]) {
+  const groups = new Map<string, Array<{ index: number; result: TestAgentReport["browserResults"][number]; run: number; runs: number }>>();
+  for (const [index, result] of (report?.browserResults || []).entries()) {
+    const hasSignal = result.context?.browserStability === true
+      || result.context?.stabilityGroupId !== undefined
+      || result.context?.stabilityRun !== undefined
+      || Number(result.context?.stabilityRuns || 0) > 1;
+    if (!hasSignal) continue;
+    const metadata = browserStabilityMetadata(result);
+    if (!metadata) {
+      errors.push(`report.browserResults[${index}] has invalid browser stability metadata.`);
+      continue;
+    }
+    const group = groups.get(metadata.groupId) || [];
+    group.push({ index, result, run: metadata.run, runs: metadata.runs });
+    groups.set(metadata.groupId, group);
+  }
+
+  for (const [groupId, entries] of groups) {
+    const label = `browser stability group ${JSON.stringify(groupId)}`;
+    const expectedRuns = entries[0]?.runs || 0;
+    if (entries.some(entry => entry.runs !== expectedRuns)) errors.push(`${label} has inconsistent stabilityRuns values.`);
+    const runs = entries.map(entry => entry.run).sort((a, b) => a - b);
+    if (new Set(runs).size !== runs.length) errors.push(`${label} contains duplicate stabilityRun values.`);
+    if (runs.some(run => run < 1 || run > expectedRuns)) errors.push(`${label} contains a stabilityRun outside 1..${expectedRuns}.`);
+    if (entries.length !== expectedRuns) errors.push(`${label} expected ${expectedRuns} results but found ${entries.length}.`);
+    const first = entries[0]?.result;
+    for (const entry of entries.slice(1)) {
+      if (entry.result.project !== first?.project) errors.push(`${label} mixes projects.`);
+      if (entry.result.name !== first?.name) errors.push(`${label} mixes browser check names.`);
+      if (entry.result.provider !== first?.provider) errors.push(`${label} mixes browser providers.`);
+      if (entry.result.probeType !== first?.probeType) errors.push(`${label} mixes probe types.`);
+    }
+    const artifactPaths = entries.flatMap(entry => [
+      ...(entry.result.screenshots || []),
+      ...(entry.result.pageSnapshots || []),
+      entry.result.consoleLogPath || "",
+      entry.result.dialogLogPath || "",
+      entry.result.popupLogPath || "",
+      entry.result.networkLogPath || "",
+      ...(entry.result.browserArtifacts || []).map(artifact => artifact.path),
+    ].filter(Boolean).map(String));
+    if (new Set(artifactPaths).size !== artifactPaths.length) {
+      errors.push(`${label} reuses an artifact path across stability runs.`);
+    }
+  }
+}
+
 function verifyReportVerdictConsistency(
   manifest: TestAgentArtifactManifest,
   manifestPath: string,
@@ -733,6 +1143,8 @@ function verifyReportVerdictConsistency(
   expectEqual("manifest.workOrderId", manifest.workOrderId, report?.workOrderId, errors);
   expectEqual("manifest.taskId", manifest.taskId, report?.taskId, errors);
   expectEqual("manifest.groupId", manifest.groupId, report?.groupId, errors);
+  expectEqual("manifest.originalUserGoal", manifest.originalUserGoal, report?.originalUserGoal, errors);
+  expectEqual("manifest.acceptanceCriteria", manifest.acceptanceCriteria, report?.acceptanceCriteria, errors);
   expectEqual("manifest.status", manifest.status, report?.status, errors);
   expectEqual("verdict.reportId", verdict?.reportId, report?.id, errors);
   expectEqual("verdict.workOrderId", verdict?.workOrderId, report?.workOrderId, errors);
@@ -741,7 +1153,15 @@ function verifyReportVerdictConsistency(
   expectEqual("verdict.status", verdict?.status, report?.status, errors);
   expectEqual("verdict.recommendation", verdict?.recommendation, report?.recommendation, errors);
   expectEqual("verdict.summary", verdict?.summary, report?.summary, errors);
-  expectEqual("verdict.canAccept", verdict?.canAccept, report?.status === "passed" && report?.recommendation === "accept", errors);
+  expectEqual(
+    "verdict.canAccept",
+    verdict?.canAccept,
+    report?.status === "passed"
+      && report?.recommendation === "accept"
+      && ["verified", "waived"].includes(String(report?.adversarialEvidenceSummary?.status || ""))
+      && report?.acceptanceEvidenceGateSummary?.canAccept === true,
+    errors,
+  );
   expectEqual("verdict.needsRework", verdict?.needsRework, report?.recommendation === "rework", errors);
   expectEqual("verdict.needsHuman", verdict?.needsHuman, report?.recommendation === "need_human", errors);
 
@@ -762,6 +1182,21 @@ function verifyReportVerdictConsistency(
   expectEqual("verdict.acceptanceSummary.statusCounts", verdict?.acceptanceSummary?.statusCounts, coverageStatusCounts(report?.acceptanceCoverage), errors);
   expectEqual("verdict.acceptanceSummary.matchStrengthCounts", verdict?.acceptanceSummary?.matchStrengthCounts, acceptanceMatchStrengthCounts(report?.acceptanceCoverage), errors);
   expectEqual("verdict.acceptanceSummary.evidenceSourceCounts", verdict?.acceptanceSummary?.evidenceSourceCounts, acceptanceEvidenceSourceCounts(report?.acceptanceCoverage), errors);
+  const expectedAcceptanceGate = buildAcceptanceEvidenceGateSummary(report?.acceptanceCoverage || []);
+  expectEqual("report.acceptanceEvidenceGateSummary", report?.acceptanceEvidenceGateSummary, expectedAcceptanceGate, errors);
+  expectEqual("verdict.acceptanceEvidenceGateSummary", verdict?.acceptanceEvidenceGateSummary, expectedAcceptanceGate, errors);
+  expectEqual("verdict.evidenceSummary.acceptanceMatchedEvidence", verdict?.evidenceSummary?.acceptanceMatchedEvidence, expectedAcceptanceGate.matchedEvidence, errors);
+  expectEqual("verdict.evidenceSummary.acceptanceFallbackEvidence", verdict?.evidenceSummary?.acceptanceFallbackEvidence, expectedAcceptanceGate.fallbackEvidence, errors);
+  expectEqual("verdict.evidenceSummary.acceptanceMissingEvidence", verdict?.evidenceSummary?.acceptanceMissingEvidence, expectedAcceptanceGate.missingEvidence, errors);
+  if (report?.httpConcurrencySummary || verdict?.httpConcurrencySummary || (report?.httpResults || []).some(result => result.concurrency)) {
+    const expectedHttpConcurrencySummary = buildHttpConcurrencySummary(report?.httpResults || []);
+    expectEqual("report.httpConcurrencySummary", report?.httpConcurrencySummary || null, expectedHttpConcurrencySummary, errors);
+    expectEqual("verdict.httpConcurrencySummary", verdict?.httpConcurrencySummary || null, expectedHttpConcurrencySummary, errors);
+    expectEqual("verdict.evidenceSummary.httpConcurrencyChecks", verdict?.evidenceSummary?.httpConcurrencyChecks, expectedHttpConcurrencySummary.checks, errors);
+    expectEqual("verdict.evidenceSummary.httpConcurrentRequests", verdict?.evidenceSummary?.httpConcurrentRequests, expectedHttpConcurrencySummary.requests, errors);
+    expectEqual("verdict.evidenceSummary.httpConcurrentFailed", verdict?.evidenceSummary?.httpConcurrentFailed, expectedHttpConcurrencySummary.failed, errors);
+    expectEqual("verdict.evidenceSummary.httpConcurrentBlocked", verdict?.evidenceSummary?.httpConcurrentBlocked, expectedHttpConcurrencySummary.blocked, errors);
+  }
 
   if (Array.isArray(report?.browserNetworkSummary) || Array.isArray(verdict?.browserNetworkSummary)) {
     expectEqual("verdict.browserNetworkSummary", verdict?.browserNetworkSummary || [], report?.browserNetworkSummary || [], errors);
@@ -774,6 +1209,76 @@ function verifyReportVerdictConsistency(
     expectEqual("verdict.evidenceSummary.browserAssertions", verdict?.evidenceSummary?.browserAssertions, browserInteractionCount(report, "assertionCount"), errors);
     expectEqual("verdict.evidenceSummary.browserFailedAssertions", verdict?.evidenceSummary?.browserFailedAssertions, browserInteractionCount(report, "failedAssertions"), errors);
   }
+  if (report?.browserFlowSummary || verdict?.browserFlowSummary) {
+    expectEqual("verdict.browserFlowSummary", verdict?.browserFlowSummary || null, report?.browserFlowSummary || null, errors);
+    expectEqual("verdict.evidenceSummary.browserAcceptanceFlows", verdict?.evidenceSummary?.browserAcceptanceFlows, report?.browserFlowSummary?.total || 0, errors);
+    expectEqual("verdict.evidenceSummary.browserFailedAcceptanceFlows", verdict?.evidenceSummary?.browserFailedAcceptanceFlows, (report?.browserFlowSummary?.statusCounts?.failed || 0) + (report?.browserFlowSummary?.statusCounts?.blocked || 0), errors);
+  }
+  if (report?.browserMultiSessionSummary || verdict?.browserMultiSessionSummary) {
+    const expectedMultiSessionSummary = buildBrowserMultiSessionSummary(report?.browserResults || []);
+    expectEqual("report.browserMultiSessionSummary", report?.browserMultiSessionSummary || null, expectedMultiSessionSummary, errors);
+    expectEqual("verdict.browserMultiSessionSummary", verdict?.browserMultiSessionSummary || null, report?.browserMultiSessionSummary || null, errors);
+    expectEqual("verdict.evidenceSummary.browserMultiSessionScenarios", verdict?.evidenceSummary?.browserMultiSessionScenarios, expectedMultiSessionSummary.total, errors);
+    expectEqual("verdict.evidenceSummary.browserMultiSessionSessions", verdict?.evidenceSummary?.browserMultiSessionSessions, expectedMultiSessionSummary.sessionCount, errors);
+    expectEqual("verdict.evidenceSummary.browserMultiSessionParallelGroups", verdict?.evidenceSummary?.browserMultiSessionParallelGroups, expectedMultiSessionSummary.parallelGroupCount, errors);
+    expectEqual("verdict.evidenceSummary.browserMultiSessionComparisons", verdict?.evidenceSummary?.browserMultiSessionComparisons, expectedMultiSessionSummary.comparisonCount, errors);
+    expectEqual("verdict.evidenceSummary.browserFailedSessionComparisons", verdict?.evidenceSummary?.browserFailedSessionComparisons, expectedMultiSessionSummary.failedComparisonCount, errors);
+    expectEqual("verdict.evidenceSummary.browserFailedMultiSessionScenarios", verdict?.evidenceSummary?.browserFailedMultiSessionScenarios, expectedMultiSessionSummary.statusCounts.failed + expectedMultiSessionSummary.statusCounts.blocked, errors);
+  }
+  if (report?.browserStabilitySummary || verdict?.browserStabilitySummary) {
+    const expectedStabilitySummary = buildBrowserStabilitySummary(report?.browserResults || []);
+    expectEqual("report.browserStabilitySummary", report?.browserStabilitySummary || null, expectedStabilitySummary, errors);
+    expectEqual("verdict.browserStabilitySummary", verdict?.browserStabilitySummary || null, report?.browserStabilitySummary || null, errors);
+    expectEqual("verdict.evidenceSummary.browserStabilityGroups", verdict?.evidenceSummary?.browserStabilityGroups, expectedStabilitySummary.total, errors);
+    expectEqual("verdict.evidenceSummary.browserFlakyStabilityGroups", verdict?.evidenceSummary?.browserFlakyStabilityGroups, expectedStabilitySummary.statusCounts.flaky, errors);
+    expectEqual("verdict.evidenceSummary.browserStabilityRuns", verdict?.evidenceSummary?.browserStabilityRuns, expectedStabilitySummary.runCount, errors);
+    expectEqual("verdict.evidenceSummary.browserFailedStabilityRuns", verdict?.evidenceSummary?.browserFailedStabilityRuns, expectedStabilitySummary.failedRunCount, errors);
+  }
+  if (
+    report?.browserRecoverySummary
+    || verdict?.browserRecoverySummary
+    || (report?.browserResults || []).some(result => result.recovery)
+  ) {
+    const expectedRecoverySummary = buildBrowserRecoverySummary(report?.browserResults || []);
+    expectEqual("report.browserRecoverySummary", report?.browserRecoverySummary || null, expectedRecoverySummary, errors);
+    expectEqual("verdict.browserRecoverySummary", verdict?.browserRecoverySummary || null, report?.browserRecoverySummary || null, errors);
+    expectEqual("verdict.evidenceSummary.browserRecoveryAttempts", verdict?.evidenceSummary?.browserRecoveryAttempts, expectedRecoverySummary.attempted, errors);
+    expectEqual("verdict.evidenceSummary.browserRecoveredOperations", verdict?.evidenceSummary?.browserRecoveredOperations, expectedRecoverySummary.recovered, errors);
+    expectEqual("verdict.evidenceSummary.browserFailedRecoveries", verdict?.evidenceSummary?.browserFailedRecoveries, expectedRecoverySummary.failed, errors);
+    expectEqual("verdict.evidenceSummary.browserUnsafeRetriesPrevented", verdict?.evidenceSummary?.browserUnsafeRetriesPrevented, expectedRecoverySummary.notRetried, errors);
+  }
+  if (
+    report?.browserActionEffectSummary
+    || verdict?.browserActionEffectSummary
+    || (report?.browserResults || []).some(result => (result.actionEffects || []).length)
+  ) {
+    const expectedActionEffectSummary = buildBrowserActionEffectSummary(report?.browserResults || []);
+    expectEqual("report.browserActionEffectSummary", report?.browserActionEffectSummary || null, expectedActionEffectSummary, errors);
+    expectEqual("verdict.browserActionEffectSummary", verdict?.browserActionEffectSummary || null, report?.browserActionEffectSummary || null, errors);
+    expectEqual("verdict.evidenceSummary.browserActionEffectChecks", verdict?.evidenceSummary?.browserActionEffectChecks, expectedActionEffectSummary.checks, errors);
+    expectEqual("verdict.evidenceSummary.browserActionEffects", verdict?.evidenceSummary?.browserActionEffects, expectedActionEffectSummary.actions, errors);
+    expectEqual("verdict.evidenceSummary.browserFailedActionEffects", verdict?.evidenceSummary?.browserFailedActionEffects, expectedActionEffectSummary.failed, errors);
+    expectEqual("verdict.evidenceSummary.browserCrossSessionActionEffects", verdict?.evidenceSummary?.browserCrossSessionActionEffects, expectedActionEffectSummary.crossSession, errors);
+  }
+  if (report?.adversarialEvidenceSummary || verdict?.adversarialEvidenceSummary) {
+    const expectedAdversarialSummary = buildAdversarialEvidenceSummary({
+      required: report?.adversarialEvidenceSummary?.required === true,
+      waiverReason: report?.adversarialEvidenceSummary?.waiverReason,
+      originalUserGoal: report?.originalUserGoal || "",
+      acceptanceCriteria: report?.acceptanceCriteria || [],
+      httpResults: report?.httpResults || [],
+      browserResults: report?.browserResults || [],
+    });
+    expectEqual("report.adversarialEvidenceSummary", report?.adversarialEvidenceSummary || null, expectedAdversarialSummary, errors);
+    expectEqual("verdict.adversarialEvidenceSummary", verdict?.adversarialEvidenceSummary || null, report?.adversarialEvidenceSummary || null, errors);
+    expectEqual("verdict.evidenceSummary.adversarialProbes", verdict?.evidenceSummary?.adversarialProbes, expectedAdversarialSummary.total, errors);
+    expectEqual("verdict.evidenceSummary.adversarialPassed", verdict?.evidenceSummary?.adversarialPassed, expectedAdversarialSummary.passed, errors);
+    expectEqual("verdict.evidenceSummary.adversarialFailed", verdict?.evidenceSummary?.adversarialFailed, expectedAdversarialSummary.failed, errors);
+    expectEqual("verdict.evidenceSummary.adversarialBlocked", verdict?.evidenceSummary?.adversarialBlocked, expectedAdversarialSummary.blocked, errors);
+    expectEqual("verdict.evidenceSummary.adversarialRelevant", verdict?.evidenceSummary?.adversarialRelevant, expectedAdversarialSummary.relevant, errors);
+    expectEqual("verdict.evidenceSummary.adversarialUnlinked", verdict?.evidenceSummary?.adversarialUnlinked, expectedAdversarialSummary.unlinked, errors);
+    expectEqual("verdict.evidenceSummary.adversarialPassedRelevant", verdict?.evidenceSummary?.adversarialPassedRelevant, expectedAdversarialSummary.passedRelevant, errors);
+  }
   if (report?.browserProviderSummary || verdict?.browserProviderSummary) {
     expectEqual("verdict.browserProviderSummary", verdict?.browserProviderSummary || null, report?.browserProviderSummary || null, errors);
   }
@@ -781,6 +1286,15 @@ function verifyReportVerdictConsistency(
     expectEqual("verdict.browserProviderGaps", verdict?.browserProviderGaps || [], report?.browserProviderGaps || [], errors);
     expectEqual("verdict.evidenceSummary.browserProviderGaps", verdict?.evidenceSummary?.browserProviderGaps, (report?.browserProviderGaps || []).length, errors);
   }
+  verifyBrowserSessionEvidenceConsistency(report, errors);
+  verifyBrowserStabilityEvidenceConsistency(report, errors);
+  verifyBrowserAuthenticationEvidenceConsistency(report, errors);
+  verifyBrowserRecoveryEvidenceConsistency(report, errors);
+  verifyBrowserActionEffectEvidenceConsistency(report, errors);
+  verifyAdversarialEvidenceConsistency(report, errors);
+  verifyAcceptanceEvidenceConsistency(report, errors);
+  verifyHttpPageResourceConsistency(report, errors);
+  verifyHttpConcurrencyConsistency(report, errors);
 
   const artifactFiles = (report?.metadata?.artifactFiles || {}) as Record<string, string>;
   if (artifactFiles.reportJsonPath) expectEqual("verdict.artifacts.reportJsonPath", verdict?.artifacts?.reportJsonPath, artifactFiles.reportJsonPath, errors);
@@ -791,12 +1305,296 @@ function verifyReportVerdictConsistency(
   return [semanticItem(reportItem, verdictItem, "passed")];
 }
 
+function recoveryEvidenceItem(
+  reportItem: TestAgentArtifactManifestItem,
+  status: TestAgentArtifactVerificationItem["status"],
+  error?: string,
+): TestAgentArtifactVerificationItem {
+  return {
+    type: "browser_recovery_evidence",
+    title: "Browser session recovery evidence safety",
+    path: reportItem.path,
+    status,
+    ...(error ? { error } : {}),
+  };
+}
+
+function verifyReportRecoveryEvidence(
+  manifestPath: string,
+  manifestFiles: TestAgentArtifactManifestItem[],
+  integrityItems: TestAgentArtifactVerificationItem[],
+) {
+  const reportIndex = manifestFiles.findIndex(item => item.type === "report_json");
+  if (reportIndex < 0) return [] as TestAgentArtifactVerificationItem[];
+  const reportItem = manifestFiles[reportIndex];
+  if (integrityItems[reportIndex]?.status !== "passed") {
+    return [recoveryEvidenceItem(reportItem, "skipped", "Report artifact integrity did not pass, so browser recovery evidence could not be checked.")];
+  }
+  try {
+    const report = readJsonForSemantic(manifestPath, reportItem) as TestAgentReport;
+    const errors: string[] = [];
+    verifyBrowserRecoveryEvidenceConsistency(report, errors);
+    return [recoveryEvidenceItem(reportItem, errors.length ? "failed" : "passed", errors.join(" "))];
+  } catch (error: any) {
+    return [recoveryEvidenceItem(reportItem, "failed", `Unable to read browser recovery evidence: ${error.message || String(error)}`)];
+  }
+}
+
+function authenticationEvidenceItem(
+  reportItem: TestAgentArtifactManifestItem,
+  status: TestAgentArtifactVerificationItem["status"],
+  error?: string,
+): TestAgentArtifactVerificationItem {
+  return {
+    type: "browser_authentication_evidence",
+    title: "Browser authentication evidence safety",
+    path: reportItem.path,
+    status,
+    ...(error ? { error } : {}),
+  };
+}
+
+function verifyReportAuthenticationEvidence(
+  manifestPath: string,
+  manifestFiles: TestAgentArtifactManifestItem[],
+  integrityItems: TestAgentArtifactVerificationItem[],
+) {
+  const reportIndex = manifestFiles.findIndex(item => item.type === "report_json");
+  if (reportIndex < 0) return [] as TestAgentArtifactVerificationItem[];
+  const reportItem = manifestFiles[reportIndex];
+  if (integrityItems[reportIndex]?.status !== "passed") {
+    return [authenticationEvidenceItem(reportItem, "skipped", "Report artifact integrity did not pass, so browser authentication evidence could not be checked.")];
+  }
+  try {
+    const report = readJsonForSemantic(manifestPath, reportItem) as TestAgentReport;
+    const errors: string[] = [];
+    verifyBrowserAuthenticationEvidenceConsistency(report, errors);
+    const hasMinimalExistingSession = (report.browserResults || []).some(result =>
+      result.authentication?.mode === "existing_session"
+      && result.authentication.existingSession?.evidencePolicy === "minimal"
+    );
+    const transcriptItem = manifestFiles.find(item => item.type === "browser_tool_transcript");
+    if (hasMinimalExistingSession && report.browserToolCalls.length && !transcriptItem) {
+      errors.push("Minimal existing-session browser tool calls exist without a transcript artifact.");
+    }
+    if (hasMinimalExistingSession && transcriptItem) {
+      const transcriptPath = resolveArtifactPath(manifestPath, transcriptItem.path);
+      const transcriptRecords = fs.readFileSync(transcriptPath, "utf-8")
+        .split(/\r?\n/)
+        .filter(Boolean)
+        .map((line, index) => {
+          try {
+            return JSON.parse(line);
+          } catch {
+            errors.push(`Browser tool transcript line ${index + 1} is not valid JSON.`);
+            return null;
+          }
+        })
+        .filter(Boolean);
+      if (!sameJson(transcriptRecords, report.browserToolCalls || [])) {
+        errors.push("Browser tool transcript records do not match report.browserToolCalls.");
+      }
+    }
+    return [authenticationEvidenceItem(reportItem, errors.length ? "failed" : "passed", errors.join(" "))];
+  } catch (error: any) {
+    return [authenticationEvidenceItem(reportItem, "failed", `Unable to read browser authentication evidence: ${error.message || String(error)}`)];
+  }
+}
+
+function actionEffectEvidenceItem(
+  reportItem: TestAgentArtifactManifestItem,
+  status: TestAgentArtifactVerificationItem["status"],
+  error?: string,
+): TestAgentArtifactVerificationItem {
+  return {
+    type: "browser_action_effect_evidence",
+    title: "Browser action-effect evidence integrity",
+    path: reportItem.path,
+    status,
+    ...(error ? { error } : {}),
+  };
+}
+
+function verifyReportActionEffectEvidence(
+  manifestPath: string,
+  manifestFiles: TestAgentArtifactManifestItem[],
+  integrityItems: TestAgentArtifactVerificationItem[],
+) {
+  const reportIndex = manifestFiles.findIndex(item => item.type === "report_json");
+  if (reportIndex < 0) return [] as TestAgentArtifactVerificationItem[];
+  const reportItem = manifestFiles[reportIndex];
+  if (integrityItems[reportIndex]?.status !== "passed") {
+    return [actionEffectEvidenceItem(reportItem, "skipped", "Report artifact integrity did not pass, so browser action-effect evidence could not be checked.")];
+  }
+  try {
+    const report = readJsonForSemantic(manifestPath, reportItem) as TestAgentReport;
+    const errors: string[] = [];
+    verifyBrowserActionEffectEvidenceConsistency(report, errors);
+    return [actionEffectEvidenceItem(reportItem, errors.length ? "failed" : "passed", errors.join(" "))];
+  } catch (error: any) {
+    return [actionEffectEvidenceItem(reportItem, "failed", `Unable to read browser action-effect evidence: ${error.message || String(error)}`)];
+  }
+}
+
+function adversarialEvidenceItem(
+  reportItem: TestAgentArtifactManifestItem,
+  status: TestAgentArtifactVerificationItem["status"],
+  error?: string,
+): TestAgentArtifactVerificationItem {
+  return {
+    type: "adversarial_evidence",
+    title: "Adversarial evidence gate integrity",
+    path: reportItem.path,
+    status,
+    ...(error ? { error } : {}),
+  };
+}
+
+function verifyReportAdversarialEvidence(
+  manifestPath: string,
+  manifestFiles: TestAgentArtifactManifestItem[],
+  integrityItems: TestAgentArtifactVerificationItem[],
+) {
+  const reportIndex = manifestFiles.findIndex(item => item.type === "report_json");
+  if (reportIndex < 0) return [] as TestAgentArtifactVerificationItem[];
+  const reportItem = manifestFiles[reportIndex];
+  if (integrityItems[reportIndex]?.status !== "passed") {
+    return [adversarialEvidenceItem(reportItem, "skipped", "Report artifact integrity did not pass, so adversarial evidence could not be checked.")];
+  }
+  try {
+    const report = readJsonForSemantic(manifestPath, reportItem) as TestAgentReport;
+    const errors: string[] = [];
+    verifyAdversarialEvidenceConsistency(report, errors);
+    return [adversarialEvidenceItem(reportItem, errors.length ? "failed" : "passed", errors.join(" "))];
+  } catch (error: any) {
+    return [adversarialEvidenceItem(reportItem, "failed", `Unable to read adversarial evidence: ${error.message || String(error)}`)];
+  }
+}
+
+function acceptanceEvidenceItem(
+  reportItem: TestAgentArtifactManifestItem,
+  status: TestAgentArtifactVerificationItem["status"],
+  error?: string,
+): TestAgentArtifactVerificationItem {
+  return {
+    type: "acceptance_evidence",
+    title: "Required acceptance evidence gate integrity",
+    path: reportItem.path,
+    status,
+    ...(error ? { error } : {}),
+  };
+}
+
+function verifyReportAcceptanceEvidence(
+  manifestPath: string,
+  manifestFiles: TestAgentArtifactManifestItem[],
+  integrityItems: TestAgentArtifactVerificationItem[],
+) {
+  const reportIndex = manifestFiles.findIndex(item => item.type === "report_json");
+  if (reportIndex < 0) return [] as TestAgentArtifactVerificationItem[];
+  const reportItem = manifestFiles[reportIndex];
+  if (integrityItems[reportIndex]?.status !== "passed") {
+    return [acceptanceEvidenceItem(reportItem, "skipped", "Report artifact integrity did not pass, so acceptance evidence could not be checked.")];
+  }
+  try {
+    const report = readJsonForSemantic(manifestPath, reportItem) as TestAgentReport;
+    const errors: string[] = [];
+    verifyAcceptanceEvidenceConsistency(report, errors);
+    return [acceptanceEvidenceItem(reportItem, errors.length ? "failed" : "passed", errors.join(" "))];
+  } catch (error: any) {
+    return [acceptanceEvidenceItem(reportItem, "failed", `Unable to read acceptance evidence: ${error.message || String(error)}`)];
+  }
+}
+
+function httpConcurrencyEvidenceItem(
+  reportItem: TestAgentArtifactManifestItem,
+  status: TestAgentArtifactVerificationItem["status"],
+  error?: string,
+): TestAgentArtifactVerificationItem {
+  return {
+    type: "http_concurrency_evidence",
+    title: "Concurrent HTTP evidence integrity",
+    path: reportItem.path,
+    status,
+    ...(error ? { error } : {}),
+  };
+}
+
+function httpPageResourceEvidenceItem(
+  reportItem: TestAgentArtifactManifestItem,
+  status: TestAgentArtifactVerificationItem["status"],
+  error?: string,
+): TestAgentArtifactVerificationItem {
+  return {
+    type: "http_page_resource_evidence",
+    title: "HTTP page subresource evidence integrity",
+    path: reportItem.path,
+    status,
+    ...(error ? { error } : {}),
+  };
+}
+
+function verifyReportHttpPageResourceEvidence(
+  manifestPath: string,
+  manifestFiles: TestAgentArtifactManifestItem[],
+  integrityItems: TestAgentArtifactVerificationItem[],
+) {
+  const reportIndex = manifestFiles.findIndex(item => item.type === "report_json");
+  if (reportIndex < 0) return [] as TestAgentArtifactVerificationItem[];
+  const reportItem = manifestFiles[reportIndex];
+  if (integrityItems[reportIndex]?.status !== "passed") {
+    return [httpPageResourceEvidenceItem(reportItem, "skipped", "Report artifact integrity did not pass, so HTTP page resources could not be checked.")];
+  }
+  try {
+    const report = readJsonForSemantic(manifestPath, reportItem) as TestAgentReport;
+    if (!(report.httpResults || []).some(result => result.context?.pageResourceProbe === true)) {
+      return [] as TestAgentArtifactVerificationItem[];
+    }
+    const errors: string[] = [];
+    verifyHttpPageResourceConsistency(report, errors);
+    return [httpPageResourceEvidenceItem(reportItem, errors.length ? "failed" : "passed", errors.join(" "))];
+  } catch (error: any) {
+    return [httpPageResourceEvidenceItem(reportItem, "failed", `Unable to read HTTP page resource evidence: ${error.message || String(error)}`)];
+  }
+}
+
+function verifyReportHttpConcurrencyEvidence(
+  manifestPath: string,
+  manifestFiles: TestAgentArtifactManifestItem[],
+  integrityItems: TestAgentArtifactVerificationItem[],
+) {
+  const reportIndex = manifestFiles.findIndex(item => item.type === "report_json");
+  if (reportIndex < 0) return [] as TestAgentArtifactVerificationItem[];
+  const reportItem = manifestFiles[reportIndex];
+  if (integrityItems[reportIndex]?.status !== "passed") {
+    return [httpConcurrencyEvidenceItem(reportItem, "skipped", "Report artifact integrity did not pass, so concurrent HTTP evidence could not be checked.")];
+  }
+  try {
+    const report = readJsonForSemantic(manifestPath, reportItem) as TestAgentReport;
+    const hasConcurrency = (report.httpResults || []).some(result => result.concurrency)
+      || Number(report.httpConcurrencySummary?.checks || 0) > 0;
+    if (!hasConcurrency) return [] as TestAgentArtifactVerificationItem[];
+    const errors: string[] = [];
+    verifyHttpConcurrencyConsistency(report, errors);
+    return [httpConcurrencyEvidenceItem(reportItem, errors.length ? "failed" : "passed", errors.join(" "))];
+  } catch (error: any) {
+    return [httpConcurrencyEvidenceItem(reportItem, "failed", `Unable to read concurrent HTTP evidence: ${error.message || String(error)}`)];
+  }
+}
+
 export function verifyTestAgentArtifactManifest(manifest: TestAgentArtifactManifest, manifestPath = ""): TestAgentArtifactVerification {
   const resolvedManifestPath = manifestPath ? path.resolve(manifestPath) : "";
   const manifestFiles = manifest.files || [];
   const items = manifestFiles.map(item => verifyManifestItem(resolvedManifestPath || item.path, item));
   items.push(...verifyScreenshotMetadata(resolvedManifestPath, manifestFiles, items));
   items.push(...verifyBrowserEvidenceArtifactMetadata(resolvedManifestPath, manifestFiles, items));
+  items.push(...verifyReportAuthenticationEvidence(resolvedManifestPath, manifestFiles, items));
+  items.push(...verifyReportRecoveryEvidence(resolvedManifestPath, manifestFiles, items));
+  items.push(...verifyReportActionEffectEvidence(resolvedManifestPath, manifestFiles, items));
+  items.push(...verifyReportAdversarialEvidence(resolvedManifestPath, manifestFiles, items));
+  items.push(...verifyReportAcceptanceEvidence(resolvedManifestPath, manifestFiles, items));
+  items.push(...verifyReportHttpPageResourceEvidence(resolvedManifestPath, manifestFiles, items));
+  items.push(...verifyReportHttpConcurrencyEvidence(resolvedManifestPath, manifestFiles, items));
   items.push(...verifyReportVerdictConsistency(manifest, resolvedManifestPath, manifestFiles, items));
   const failed = items.filter(item => item.status === "failed").length;
   const passed = items.filter(item => item.status === "passed").length;

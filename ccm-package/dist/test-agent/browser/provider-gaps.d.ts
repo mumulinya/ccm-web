@@ -1,4 +1,4 @@
-import { BrowserCheckResult, BrowserProviderGapItem, NormalizedTestAgentWorkOrder } from "../types";
+import { BrowserCheckResult, BrowserCheckSpec, BrowserProviderGapItem, NormalizedTestAgentWorkOrder } from "../types";
 export interface BrowserProviderPlanWarning {
     provider: string;
     project: string;
@@ -11,5 +11,6 @@ export interface BrowserProviderPlanWarning {
 }
 export declare function buildBrowserProviderGaps(results: BrowserCheckResult[]): BrowserProviderGapItem[];
 export declare function formatBrowserProviderGapLine(item: BrowserProviderGapItem): string;
+export declare function browserCheckRequiresPlaywright(workOrder: NormalizedTestAgentWorkOrder, check: BrowserCheckSpec): boolean;
 export declare function buildBrowserProviderPlanWarnings(workOrder: NormalizedTestAgentWorkOrder): BrowserProviderPlanWarning[];
 export declare function formatBrowserProviderPlanWarningLine(item: BrowserProviderPlanWarning): string;

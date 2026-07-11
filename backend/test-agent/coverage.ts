@@ -174,13 +174,22 @@ function browserCandidate(result: BrowserCheckResult) {
   );
 }
 
-function toolCallCandidate(records: BrowserToolCallRecord[]) {
-  const failed = records.some(item => item.status === "failed");
+function toolCallCandidate(records: BrowserToolCallRecord[], browserResults: BrowserCheckResult[]) {
+  const failedCalls = records.filter(item => item.status === "failed").length;
+  const failedFinalResult = browserResults.some(item => item.status === "failed" || item.status === "blocked");
+  const passedFinalResult = browserResults.some(item => item.status === "passed");
+  const status = failedFinalResult
+    ? "failed"
+    : passedFinalResult
+      ? "passed"
+      : failedCalls
+        ? "failed"
+        : "passed";
   const haystack = records.map(item => `${item.status} ${item.toolName} ${JSON.stringify(item.input)} ${item.outputPreview || ""} ${item.error || ""}`).join("\n");
   return candidate(
     "Browser MCP tool call transcript",
-    failed ? "failed" : "passed",
-    `${records.length} browser tool calls recorded`,
+    status,
+    `${records.length} browser tool calls recorded; failedCalls=${failedCalls}; finalBrowserResults=${browserResults.map(item => item.status).join(",") || "none"}`,
     haystack,
   );
 }
@@ -277,7 +286,7 @@ export function buildAcceptanceCoverage(input: {
     ...input.issues.map(issueCandidate),
     ...input.evidence.map(evidenceCandidate),
   ];
-  if (input.browserToolCalls.length) candidates.push(toolCallCandidate(input.browserToolCalls));
+  if (input.browserToolCalls.length) candidates.push(toolCallCandidate(input.browserToolCalls, input.browserResults));
 
   const positiveCandidates = candidates.filter(item => item.status === "passed");
   const negativeCandidates = candidates.filter(item => item.status === "failed" || item.status === "blocked");

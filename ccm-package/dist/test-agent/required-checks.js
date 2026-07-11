@@ -2,6 +2,9 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.buildRequiredCheckCoverage = buildRequiredCheckCoverage;
 const console_assertions_1 = require("./browser/console-assertions");
+const stability_summary_1 = require("./browser/stability-summary");
+const authentication_summary_1 = require("./browser/authentication-summary");
+const adversarial_summary_1 = require("./adversarial-summary");
 function norm(value) {
     return String(value || "").toLowerCase().replace(/[\s:-]+/g, "_");
 }
@@ -66,27 +69,57 @@ function browserSignal(browserResults, missingReason) {
         return { status: "verified", evidence: passed.map(item => evidence(item.name, item.status, item.url)) };
     return { status: "unknown", evidence: browserResults.map(item => evidence(item.name, item.status)), missingReason };
 }
-function adversarialSignal(httpResults, browserResults, missingReason) {
-    const http = httpResults.filter(item => item.adversarial === true);
-    const browser = browserResults.filter(item => item.adversarial === true);
-    const failedHttp = http.filter(item => item.status === "failed" || item.status === "blocked");
-    const failedBrowser = browser.filter(item => item.status === "failed" || item.status === "blocked");
-    if (failedHttp.length || failedBrowser.length) {
+function adversarialItemEvidence(item) {
+    const linkage = [
+        `relevance=${item.relevance}`,
+        item.linkedCriteria.length ? `criteria=${item.linkedCriteria.join(" | ")}` : "",
+        item.goalLinked ? "goalLinked=yes" : "",
+        `score=${item.matchScore}`,
+        item.probeType ? `probe=${item.probeType}` : "",
+    ].filter(Boolean).join("; ");
+    return evidence(`${item.surface.toUpperCase()} ${item.name}`, item.status, `${item.target}; ${linkage}`);
+}
+function adversarialSignal(workOrder, httpResults, browserResults, missingReason) {
+    const summary = (0, adversarial_summary_1.buildAdversarialEvidenceSummary)({
+        required: true,
+        originalUserGoal: workOrder.originalUserGoal,
+        acceptanceCriteria: workOrder.acceptanceCriteria,
+        httpResults,
+        browserResults,
+    });
+    if (summary.status === "failed") {
         return {
             status: "not_verified",
-            evidence: [
-                ...failedHttp.map(item => evidence(`${item.method || "GET"} ${item.name || item.url}`, item.status, item.error || `status=${item.statusCode}`)),
-                ...failedBrowser.map(item => evidence(item.name, item.status, item.error || item.url)),
-            ],
+            evidence: summary.items.filter(item => item.status === "failed").map(adversarialItemEvidence),
         };
     }
-    const passed = [
-        ...http.filter(item => item.status === "passed").map(item => evidence(`${item.method || "GET"} ${item.name || item.url}`, item.status, item.probeType ? `probe=${item.probeType}` : `status=${item.statusCode}`)),
-        ...browser.filter(item => item.status === "passed").map(item => evidence(item.name, item.status, item.probeType ? `probe=${item.probeType}` : item.url)),
-    ];
-    if (passed.length)
-        return { status: "verified", evidence: passed };
-    return { status: "unknown", evidence: [], missingReason };
+    if (summary.status === "verified") {
+        return {
+            status: "verified",
+            evidence: summary.items
+                .filter(item => item.status === "passed" && item.relevance !== "none")
+                .map(adversarialItemEvidence),
+        };
+    }
+    if (summary.status === "blocked") {
+        return {
+            status: "unknown",
+            evidence: summary.items.filter(item => item.status === "blocked").map(adversarialItemEvidence),
+            missingReason: "Adversarial probes were blocked by the verification environment and did not produce product pass/fail evidence.",
+        };
+    }
+    if (summary.status === "unlinked") {
+        return {
+            status: "unknown",
+            evidence: summary.items.filter(item => item.status === "passed").map(adversarialItemEvidence),
+            missingReason: "Adversarial probes passed, but none were linked to the original user goal or a declared acceptance criterion.",
+        };
+    }
+    return {
+        status: "unknown",
+        evidence: summary.items.map(adversarialItemEvidence),
+        missingReason,
+    };
 }
 function stepText(step) {
     return `${step.name} ${step.detail || ""} ${step.error || ""}`;
@@ -420,6 +453,41 @@ function browserArtifactSignal(browserResults, kind) {
         return { status: "verified", evidence: artifacts };
     const label = kind === "any" ? "browser artifact" : `browser ${kind}`;
     return { status: "unknown", evidence: browserResults.map(item => evidence(item.name, item.status)), missingReason: `Browser checks ran but no ${label} artifact was recorded.` };
+}
+function browserAuthenticationSignal(browserResults) {
+    const matches = browserResults.filter(item => item.authentication
+        || (item.browserSessions || []).some(session => session.authentication));
+    if (!matches.length) {
+        return {
+            status: "unknown",
+            evidence: [],
+            missingReason: "No authenticated browser result with managed credentials, storage state, or existing-session evidence was recorded.",
+        };
+    }
+    const failed = matches.filter(item => item.status === "failed");
+    if (failed.length) {
+        return {
+            status: "not_verified",
+            evidence: failed.map(item => evidence(item.name, item.status, item.error || (0, authentication_summary_1.formatBrowserAuthenticationEvidence)(item.authentication))),
+        };
+    }
+    const passed = matches.filter(item => item.status === "passed");
+    if (passed.length) {
+        return {
+            status: "verified",
+            evidence: passed.map(item => evidence(item.name, item.status, [
+                (0, authentication_summary_1.formatBrowserAuthenticationEvidence)(item.authentication),
+                ...(item.browserSessions || [])
+                    .filter(session => session.authentication)
+                    .map(session => `${session.name}: ${(0, authentication_summary_1.formatBrowserAuthenticationEvidence)(session.authentication)}`),
+            ].filter(value => value && value !== "none").join(" | "))),
+        };
+    }
+    return {
+        status: "unknown",
+        evidence: matches.map(item => evidence(item.name, item.status, item.error || (0, authentication_summary_1.formatBrowserAuthenticationEvidence)(item.authentication))),
+        missingReason: "Authenticated browser verification was blocked or skipped and did not produce passing execution evidence.",
+    };
 }
 function browserDownloadSignal(browserResults) {
     if (!browserResults.length)
@@ -982,6 +1050,96 @@ function browserScrollSignal(browserResults) {
 function browserHistorySignal(browserResults) {
     return browserStepAssertionSignal(browserResults, /action:(?:reload|goBack|goForward)\b|(?:^|:)(?:reload|goBack|goForward)\b|browser history|history navigation|back forward navigation/i, "No browser history/reload action evidence was recorded.", "Browser history/reload checks ran but did not produce passing evidence.");
 }
+function browserMultiSessionSignal(browserResults) {
+    const matches = browserResults.filter(item => (item.browserSessions || []).length >= 2);
+    if (!matches.length) {
+        return { status: "unknown", evidence: [], missingReason: "No isolated multi-session browser scenario evidence was recorded." };
+    }
+    const failed = matches.filter(item => item.status === "failed" || item.status === "blocked");
+    if (failed.length) {
+        return {
+            status: "not_verified",
+            evidence: failed.map(item => evidence(item.name, item.status, item.error || `sessions=${(item.browserSessions || []).map(session => session.name).join(",")}`)),
+        };
+    }
+    const passed = matches.filter(item => item.status === "passed");
+    if (passed.length) {
+        return {
+            status: "verified",
+            evidence: passed.map(item => evidence(item.name, item.status, `sessions=${(item.browserSessions || []).map(session => session.name).join(",")}; steps=${item.steps.length}; screenshots=${item.screenshots.length}`)),
+        };
+    }
+    return { status: "unknown", evidence: matches.map(item => evidence(item.name, item.status)), missingReason: "Multi-session browser scenarios did not produce passing evidence." };
+}
+function browserSessionComparisonSignal(browserResults) {
+    const matches = browserResults.filter(item => (item.browserSessionComparisons || []).length > 0);
+    if (!matches.length) {
+        return { status: "unknown", evidence: [], missingReason: "No cross-session browser comparison evidence was recorded." };
+    }
+    const failed = matches.flatMap(item => (item.browserSessionComparisons || [])
+        .filter(comparison => comparison.status === "failed")
+        .map(comparison => evidence(item.name, "failed", `${comparison.leftSession} ${comparison.operator} ${comparison.rightSession}; attempts=${comparison.attempts}${comparison.error ? `; ${comparison.error}` : ""}`)));
+    if (failed.length)
+        return { status: "not_verified", evidence: failed };
+    const passed = matches.flatMap(item => (item.browserSessionComparisons || [])
+        .filter(comparison => comparison.status === "passed")
+        .map(comparison => evidence(item.name, item.status, `${comparison.leftSession} ${comparison.operator} ${comparison.rightSession}; attempts=${comparison.attempts}; left=${comparison.left?.sha256 || "n/a"}; right=${comparison.right?.sha256 || "n/a"}`)));
+    if (passed.length)
+        return { status: "verified", evidence: passed };
+    return { status: "unknown", evidence: matches.map(item => evidence(item.name, item.status)), missingReason: "Cross-session comparison checks did not produce passing evidence." };
+}
+function browserCrossSessionActionEffectSignal(browserResults) {
+    const matches = browserResults.flatMap(result => (result.actionEffects || [])
+        .filter(effect => Boolean(effect.session && effect.effectSession && effect.session !== effect.effectSession))
+        .map(effect => ({ result, effect })));
+    if (!matches.length) {
+        return { status: "unknown", evidence: [], missingReason: "No cross-session browser action-effect evidence was recorded." };
+    }
+    const failed = matches.filter(({ result, effect }) => effect.status !== "changed" || result.status === "failed" || result.status === "blocked");
+    if (failed.length) {
+        return {
+            status: "not_verified",
+            evidence: failed.map(({ result, effect }) => evidence(result.name, effect.status === "changed" ? result.status : effect.status, `actor=${effect.session}; effectSession=${effect.effectSession}; action=${effect.actionType}; changed=${effect.changedSignals.join(",") || "none"}`)),
+        };
+    }
+    const passed = matches.filter(({ result, effect }) => result.status === "passed" && effect.status === "changed");
+    if (passed.length) {
+        return {
+            status: "verified",
+            evidence: passed.map(({ result, effect }) => evidence(result.name, result.status, `actor=${effect.session}; effectSession=${effect.effectSession}; action=${effect.actionType}; changed=${effect.changedSignals.join(",") || "none"}`)),
+        };
+    }
+    return {
+        status: "unknown",
+        evidence: matches.map(({ result, effect }) => evidence(result.name, result.status, `actor=${effect.session}; effectSession=${effect.effectSession}`)),
+        missingReason: "Cross-session browser action effects did not produce passing evidence.",
+    };
+}
+function browserStabilitySignal(browserResults) {
+    const summary = (0, stability_summary_1.buildBrowserStabilitySummary)(browserResults);
+    if (!summary.total) {
+        return { status: "unknown", evidence: [], missingReason: "No repeated isolated browser stability runs were recorded." };
+    }
+    const failed = summary.items.filter(item => item.status === "flaky" || item.status === "stable_fail");
+    if (failed.length) {
+        return {
+            status: "not_verified",
+            evidence: failed.map(item => evidence(item.name, item.status, `runs=${item.runCount}/${item.expectedRuns}; failedRuns=${item.failedRuns.join(",") || "none"}${item.firstFailure ? `; ${item.firstFailure}` : ""}`)),
+        };
+    }
+    const blocked = summary.items.filter(item => item.status === "blocked");
+    if (blocked.length) {
+        return {
+            status: "unknown",
+            evidence: blocked.map(item => evidence(item.name, item.status, `runs=${item.runCount}/${item.expectedRuns}`)),
+            missingReason: "One or more browser stability groups did not complete every requested isolated run.",
+        };
+    }
+    return {
+        status: "verified",
+        evidence: summary.items.map(item => evidence(item.name, item.status, `runs=${item.runCount}/${item.expectedRuns}; screenshots=${item.screenshotCount}`)),
+    };
+}
 function browserScriptSignal(browserResults) {
     return browserStepAssertionSignal(browserResults, /jsTruthy|jsEquals|action:evaluate\b|(?:^|:)evaluate\b|browser script|javascript|js expression|page expression/i, "No browser JavaScript/action or expression assertion evidence was recorded.", "Browser JavaScript/expression checks ran but did not produce passing evidence.");
 }
@@ -1020,6 +1178,18 @@ function coverageFor(check, input) {
     else if (/build|unit|test|type|tsc|typescript|lint|eslint/.test(normalized)) {
         signal = commandSignal(input.commandResults, commandPatternsFor(normalized, input.workOrder), `No command evidence matched required check "${check}".`);
     }
+    else if (/browser_stability|stability_runs|browser_repeatability|browser_flakiness|flaky_browser/.test(normalized))
+        signal = browserStabilitySignal(input.browserResults);
+    else if (/adversarial|boundary|orphan|idempot|concurr|race/.test(normalized))
+        signal = adversarialSignal(input.workOrder, input.httpResults, input.browserResults, `No adversarial probe result was recorded for required check "${check}".`);
+    else if (/browser_auth|browser_authentication|authenticated_browser|login_session/.test(normalized))
+        signal = browserAuthenticationSignal(input.browserResults);
+    else if (/browser_cross_session_effect|cross_session_action_effect|remote_session_effect|browser_remote_effect/.test(normalized))
+        signal = browserCrossSessionActionEffectSignal(input.browserResults);
+    else if (/browser_session_convergence|session_convergence|cross_session_compare|browser_session_compare|session_compare|browser_state_convergence/.test(normalized))
+        signal = browserSessionComparisonSignal(input.browserResults);
+    else if (/browser_multi_session|multi_session_browser|cross_session|multi_user_browser|browser_collaboration/.test(normalized))
+        signal = browserMultiSessionSignal(input.browserResults);
     else if (/console_log|browser_console_log/.test(normalized))
         signal = browserLogSignal(input.browserResults, "console");
     else if (/console.*warnings?|warnings?.*console|no_console_warnings?|console_no_warnings?/.test(normalized))
@@ -1114,8 +1284,6 @@ function coverageFor(check, input) {
         signal = networkSignal(input.browserResults, input.httpResults);
     else if (/http|api/.test(normalized))
         signal = httpSignal(input.httpResults, item => !item.adversarial, `No HTTP/API result was recorded for required check "${check}".`);
-    else if (/adversarial|boundary|orphan|idempot/.test(normalized))
-        signal = adversarialSignal(input.httpResults, input.browserResults, `No adversarial probe result was recorded for required check "${check}".`);
     else {
         signal = {
             status: "unknown",

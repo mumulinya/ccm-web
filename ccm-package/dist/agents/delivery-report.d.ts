@@ -104,6 +104,14 @@ export declare function buildMainAgentDeliveryReport(input: MainAgentDeliveryRep
     acceptance: string[];
     independent_review: string[];
     independentReview: string[];
+    post_review_spot_check: string[];
+    postReviewSpotCheck: string[];
+    post_review_spot_check_gate: any;
+    postReviewSpotCheckGate: any;
+    post_review_spot_check_summary: any;
+    postReviewSpotCheckSummary: any;
+    post_review_spot_check_required: boolean;
+    post_review_spot_check_gate_passed: boolean;
     risks: string[];
     next_action: string;
     final_summary_quality: {
@@ -307,6 +315,7 @@ export declare function formatMainAgentDeliveryReply(report: any): any;
 export declare function runMainAgentDeliveryReportSelfTest(): {
     pass: boolean;
     checks: {
+        protectedFailureCopyUsesInvestigationLanguage: boolean;
         groupHasFriendlySections: boolean;
         groupKeepsFilesReadable: boolean;
         groupHasPlanReview: boolean;
@@ -347,6 +356,8 @@ export declare function runMainAgentDeliveryReportSelfTest(): {
         weakPassedReviewPrimarySummaryAvoidsOptimisticHeadline: boolean;
         incompleteVerificationResultDoneBlocksCompletion: boolean;
         noVerificationEvidenceDoneBlocksCompletion: boolean;
+        passedPostReviewSpotCheckAllowsCompletion: boolean;
+        failedPostReviewSpotCheckDoneBlocksCompletion: boolean;
         bareDoneQualityRequiresEvidence: boolean;
         failedFinalSummaryQualityRequiresPlanGapNextAction: boolean;
         cancelledReportHasStopSummary: boolean;
@@ -438,6 +449,14 @@ export declare function runMainAgentDeliveryReportSelfTest(): {
         acceptance: string[];
         independent_review: string[];
         independentReview: string[];
+        post_review_spot_check: string[];
+        postReviewSpotCheck: string[];
+        post_review_spot_check_gate: any;
+        postReviewSpotCheckGate: any;
+        post_review_spot_check_summary: any;
+        postReviewSpotCheckSummary: any;
+        post_review_spot_check_required: boolean;
+        post_review_spot_check_gate_passed: boolean;
         risks: string[];
         next_action: string;
         final_summary_quality: {
@@ -722,6 +741,14 @@ export declare function runMainAgentDeliveryReportSelfTest(): {
         acceptance: string[];
         independent_review: string[];
         independentReview: string[];
+        post_review_spot_check: string[];
+        postReviewSpotCheck: string[];
+        post_review_spot_check_gate: any;
+        postReviewSpotCheckGate: any;
+        post_review_spot_check_summary: any;
+        postReviewSpotCheckSummary: any;
+        post_review_spot_check_required: boolean;
+        post_review_spot_check_gate_passed: boolean;
         risks: string[];
         next_action: string;
         final_summary_quality: {
@@ -1006,6 +1033,14 @@ export declare function runMainAgentDeliveryReportSelfTest(): {
         acceptance: string[];
         independent_review: string[];
         independentReview: string[];
+        post_review_spot_check: string[];
+        postReviewSpotCheck: string[];
+        post_review_spot_check_gate: any;
+        postReviewSpotCheckGate: any;
+        post_review_spot_check_summary: any;
+        postReviewSpotCheckSummary: any;
+        post_review_spot_check_required: boolean;
+        post_review_spot_check_gate_passed: boolean;
         risks: string[];
         next_action: string;
         final_summary_quality: {
@@ -1290,6 +1325,14 @@ export declare function runMainAgentDeliveryReportSelfTest(): {
         acceptance: string[];
         independent_review: string[];
         independentReview: string[];
+        post_review_spot_check: string[];
+        postReviewSpotCheck: string[];
+        post_review_spot_check_gate: any;
+        postReviewSpotCheckGate: any;
+        post_review_spot_check_summary: any;
+        postReviewSpotCheckSummary: any;
+        post_review_spot_check_required: boolean;
+        post_review_spot_check_gate_passed: boolean;
         risks: string[];
         next_action: string;
         final_summary_quality: {
@@ -1574,6 +1617,14 @@ export declare function runMainAgentDeliveryReportSelfTest(): {
         acceptance: string[];
         independent_review: string[];
         independentReview: string[];
+        post_review_spot_check: string[];
+        postReviewSpotCheck: string[];
+        post_review_spot_check_gate: any;
+        postReviewSpotCheckGate: any;
+        post_review_spot_check_summary: any;
+        postReviewSpotCheckSummary: any;
+        post_review_spot_check_required: boolean;
+        post_review_spot_check_gate_passed: boolean;
         risks: string[];
         next_action: string;
         final_summary_quality: {
@@ -1858,6 +1909,14 @@ export declare function runMainAgentDeliveryReportSelfTest(): {
         acceptance: string[];
         independent_review: string[];
         independentReview: string[];
+        post_review_spot_check: string[];
+        postReviewSpotCheck: string[];
+        post_review_spot_check_gate: any;
+        postReviewSpotCheckGate: any;
+        post_review_spot_check_summary: any;
+        postReviewSpotCheckSummary: any;
+        post_review_spot_check_required: boolean;
+        post_review_spot_check_gate_passed: boolean;
         risks: string[];
         next_action: string;
         final_summary_quality: {
@@ -2168,6 +2227,14 @@ export declare function runMainAgentDeliveryReportSelfTest(): {
         acceptance: string[];
         independent_review: string[];
         independentReview: string[];
+        post_review_spot_check: string[];
+        postReviewSpotCheck: string[];
+        post_review_spot_check_gate: any;
+        postReviewSpotCheckGate: any;
+        post_review_spot_check_summary: any;
+        postReviewSpotCheckSummary: any;
+        post_review_spot_check_required: boolean;
+        post_review_spot_check_gate_passed: boolean;
         risks: string[];
         next_action: string;
         final_summary_quality: {
@@ -2452,6 +2519,14 @@ export declare function runMainAgentDeliveryReportSelfTest(): {
         acceptance: string[];
         independent_review: string[];
         independentReview: string[];
+        post_review_spot_check: string[];
+        postReviewSpotCheck: string[];
+        post_review_spot_check_gate: any;
+        postReviewSpotCheckGate: any;
+        post_review_spot_check_summary: any;
+        postReviewSpotCheckSummary: any;
+        post_review_spot_check_required: boolean;
+        post_review_spot_check_gate_passed: boolean;
         risks: string[];
         next_action: string;
         final_summary_quality: {
@@ -2736,6 +2811,14 @@ export declare function runMainAgentDeliveryReportSelfTest(): {
         acceptance: string[];
         independent_review: string[];
         independentReview: string[];
+        post_review_spot_check: string[];
+        postReviewSpotCheck: string[];
+        post_review_spot_check_gate: any;
+        postReviewSpotCheckGate: any;
+        post_review_spot_check_summary: any;
+        postReviewSpotCheckSummary: any;
+        post_review_spot_check_required: boolean;
+        post_review_spot_check_gate_passed: boolean;
         risks: string[];
         next_action: string;
         final_summary_quality: {
@@ -3020,6 +3103,14 @@ export declare function runMainAgentDeliveryReportSelfTest(): {
         acceptance: string[];
         independent_review: string[];
         independentReview: string[];
+        post_review_spot_check: string[];
+        postReviewSpotCheck: string[];
+        post_review_spot_check_gate: any;
+        postReviewSpotCheckGate: any;
+        post_review_spot_check_summary: any;
+        postReviewSpotCheckSummary: any;
+        post_review_spot_check_required: boolean;
+        post_review_spot_check_gate_passed: boolean;
         risks: string[];
         next_action: string;
         final_summary_quality: {
@@ -3304,6 +3395,14 @@ export declare function runMainAgentDeliveryReportSelfTest(): {
         acceptance: string[];
         independent_review: string[];
         independentReview: string[];
+        post_review_spot_check: string[];
+        postReviewSpotCheck: string[];
+        post_review_spot_check_gate: any;
+        postReviewSpotCheckGate: any;
+        post_review_spot_check_summary: any;
+        postReviewSpotCheckSummary: any;
+        post_review_spot_check_required: boolean;
+        post_review_spot_check_gate_passed: boolean;
         risks: string[];
         next_action: string;
         final_summary_quality: {
@@ -3588,6 +3687,598 @@ export declare function runMainAgentDeliveryReportSelfTest(): {
         acceptance: string[];
         independent_review: string[];
         independentReview: string[];
+        post_review_spot_check: string[];
+        postReviewSpotCheck: string[];
+        post_review_spot_check_gate: any;
+        postReviewSpotCheckGate: any;
+        post_review_spot_check_summary: any;
+        postReviewSpotCheckSummary: any;
+        post_review_spot_check_required: boolean;
+        post_review_spot_check_gate_passed: boolean;
+        risks: string[];
+        next_action: string;
+        final_summary_quality: {
+            schema: string;
+            source: string;
+            required: boolean;
+            passed: boolean;
+            checks: {
+                id: string;
+                label: string;
+                passed: any;
+            }[];
+            missing: string[];
+            technical_default_collapsed: boolean;
+        };
+        summary_quality: {
+            schema: string;
+            source: string;
+            required: boolean;
+            passed: boolean;
+            checks: {
+                id: string;
+                label: string;
+                passed: any;
+            }[];
+            missing: string[];
+            technical_default_collapsed: boolean;
+        };
+        completion_card: {
+            schema: string;
+            title: string;
+            surface: MainAgentDeliverySurface;
+            status: MainAgentDeliveryStatus;
+            status_label: string;
+            headline: string;
+            metrics: ({
+                id: string;
+                label: string;
+                value: string;
+                tone: string;
+                detail?: undefined;
+            } | {
+                id: string;
+                label: string;
+                value: string;
+                detail: string;
+                tone?: undefined;
+            } | {
+                id: string;
+                label: string;
+                value: any;
+                detail: any;
+                tone: any;
+            })[];
+            highlights: string[];
+            verification: any;
+            verification_evidence: any;
+            verificationEvidence: any;
+            acceptance: string[];
+            risks: string[];
+            next_action: string;
+            technical_hint: string;
+            display_policy: {
+                user_text_first: boolean;
+                technical_default_collapsed: boolean;
+                hide_internal_protocols: boolean;
+                show_for_ordinary_conversation: boolean;
+            };
+        };
+        completionCard: {
+            schema: string;
+            title: string;
+            surface: MainAgentDeliverySurface;
+            status: MainAgentDeliveryStatus;
+            status_label: string;
+            headline: string;
+            metrics: ({
+                id: string;
+                label: string;
+                value: string;
+                tone: string;
+                detail?: undefined;
+            } | {
+                id: string;
+                label: string;
+                value: string;
+                detail: string;
+                tone?: undefined;
+            } | {
+                id: string;
+                label: string;
+                value: any;
+                detail: any;
+                tone: any;
+            })[];
+            highlights: string[];
+            verification: any;
+            verification_evidence: any;
+            verificationEvidence: any;
+            acceptance: string[];
+            risks: string[];
+            next_action: string;
+            technical_hint: string;
+            display_policy: {
+                user_text_first: boolean;
+                technical_default_collapsed: boolean;
+                hide_internal_protocols: boolean;
+                show_for_ordinary_conversation: boolean;
+            };
+        };
+        pickup_summary: {
+            schema: string;
+            title: string;
+            status: MainAgentDeliveryStatus;
+            status_label: string;
+            headline: string;
+            current_state: string;
+            review_items: string[];
+            resume_action: string;
+            technical_hint: string;
+            display_policy: {
+                user_text_first: boolean;
+                technical_default_collapsed: boolean;
+                hide_internal_protocols: boolean;
+                show_for_ordinary_conversation: boolean;
+            };
+            source: MainAgentDeliverySurface;
+        };
+        pickupSummary: {
+            schema: string;
+            title: string;
+            status: MainAgentDeliveryStatus;
+            status_label: string;
+            headline: string;
+            current_state: string;
+            review_items: string[];
+            resume_action: string;
+            technical_hint: string;
+            display_policy: {
+                user_text_first: boolean;
+                technical_default_collapsed: boolean;
+                hide_internal_protocols: boolean;
+                show_for_ordinary_conversation: boolean;
+            };
+            source: MainAgentDeliverySurface;
+        };
+        user_handoff: {
+            schema: string;
+            title: string;
+            surface: MainAgentDeliverySurface;
+            status: string;
+            status_label: string;
+            headline: string;
+            primary_action: any;
+            primaryAction: any;
+            secondary_actions: any[];
+            secondaryActions: any[];
+            evidence: string[];
+            unresolved: string[];
+            next_action: any;
+            technical_hint: string;
+            display_policy: {
+                user_text_first: boolean;
+                technical_default_collapsed: boolean;
+                hide_internal_protocols: boolean;
+                show_for_ordinary_conversation: boolean;
+            };
+        };
+        userHandoff: {
+            schema: string;
+            title: string;
+            surface: MainAgentDeliverySurface;
+            status: string;
+            status_label: string;
+            headline: string;
+            primary_action: any;
+            primaryAction: any;
+            secondary_actions: any[];
+            secondaryActions: any[];
+            evidence: string[];
+            unresolved: string[];
+            next_action: any;
+            technical_hint: string;
+            display_policy: {
+                user_text_first: boolean;
+                technical_default_collapsed: boolean;
+                hide_internal_protocols: boolean;
+                show_for_ordinary_conversation: boolean;
+            };
+        };
+        display_policy: {
+            user_text_first: boolean;
+            technical_default_collapsed: boolean;
+            hide_internal_protocols: boolean;
+            show_for_ordinary_conversation: boolean;
+        };
+        technical_details: any[];
+        raw_report: any;
+    };
+    passedPostReviewSpotCheckDone: {
+        schema: string;
+        surface: MainAgentDeliverySurface;
+        status: MainAgentDeliveryStatus;
+        status_label: string;
+        title: string;
+        headline: string;
+        sections: {
+            id: string;
+            title: string;
+            items: string[];
+        }[];
+        user_text: string;
+        markdown: string;
+        files: string[];
+        plan_review: string[];
+        planReview: string[];
+        verification: string[];
+        verification_evidence: {
+            schema: string;
+            title: string;
+            status: string;
+            status_label: string;
+            metric_value: string;
+            metric_detail: string;
+            metric_tone: string;
+            executed_count: number;
+            failed_count: number;
+            incomplete_count: number;
+            weak_missing_count: number;
+            suggested_count: number;
+            missing_required_count: number;
+            external_runner_count: number;
+            required_gate_passed: boolean;
+            source_gate_passed: boolean;
+            executed: string[];
+            failed: string[];
+            incomplete: string[];
+            weak_missing: string[];
+            suggested: string[];
+            missing_required: string[];
+            items: string[];
+            next_action: string;
+            display_policy: {
+                user_text_first: boolean;
+                technical_default_collapsed: boolean;
+                hide_internal_protocols: boolean;
+                show_for_ordinary_conversation: boolean;
+            };
+        };
+        verificationEvidence: {
+            schema: string;
+            title: string;
+            status: string;
+            status_label: string;
+            metric_value: string;
+            metric_detail: string;
+            metric_tone: string;
+            executed_count: number;
+            failed_count: number;
+            incomplete_count: number;
+            weak_missing_count: number;
+            suggested_count: number;
+            missing_required_count: number;
+            external_runner_count: number;
+            required_gate_passed: boolean;
+            source_gate_passed: boolean;
+            executed: string[];
+            failed: string[];
+            incomplete: string[];
+            weak_missing: string[];
+            suggested: string[];
+            missing_required: string[];
+            items: string[];
+            next_action: string;
+            display_policy: {
+                user_text_first: boolean;
+                technical_default_collapsed: boolean;
+                hide_internal_protocols: boolean;
+                show_for_ordinary_conversation: boolean;
+            };
+        };
+        acceptance: string[];
+        independent_review: string[];
+        independentReview: string[];
+        post_review_spot_check: string[];
+        postReviewSpotCheck: string[];
+        post_review_spot_check_gate: any;
+        postReviewSpotCheckGate: any;
+        post_review_spot_check_summary: any;
+        postReviewSpotCheckSummary: any;
+        post_review_spot_check_required: boolean;
+        post_review_spot_check_gate_passed: boolean;
+        risks: string[];
+        next_action: string;
+        final_summary_quality: {
+            schema: string;
+            source: string;
+            required: boolean;
+            passed: boolean;
+            checks: {
+                id: string;
+                label: string;
+                passed: any;
+            }[];
+            missing: string[];
+            technical_default_collapsed: boolean;
+        };
+        summary_quality: {
+            schema: string;
+            source: string;
+            required: boolean;
+            passed: boolean;
+            checks: {
+                id: string;
+                label: string;
+                passed: any;
+            }[];
+            missing: string[];
+            technical_default_collapsed: boolean;
+        };
+        completion_card: {
+            schema: string;
+            title: string;
+            surface: MainAgentDeliverySurface;
+            status: MainAgentDeliveryStatus;
+            status_label: string;
+            headline: string;
+            metrics: ({
+                id: string;
+                label: string;
+                value: string;
+                tone: string;
+                detail?: undefined;
+            } | {
+                id: string;
+                label: string;
+                value: string;
+                detail: string;
+                tone?: undefined;
+            } | {
+                id: string;
+                label: string;
+                value: any;
+                detail: any;
+                tone: any;
+            })[];
+            highlights: string[];
+            verification: any;
+            verification_evidence: any;
+            verificationEvidence: any;
+            acceptance: string[];
+            risks: string[];
+            next_action: string;
+            technical_hint: string;
+            display_policy: {
+                user_text_first: boolean;
+                technical_default_collapsed: boolean;
+                hide_internal_protocols: boolean;
+                show_for_ordinary_conversation: boolean;
+            };
+        };
+        completionCard: {
+            schema: string;
+            title: string;
+            surface: MainAgentDeliverySurface;
+            status: MainAgentDeliveryStatus;
+            status_label: string;
+            headline: string;
+            metrics: ({
+                id: string;
+                label: string;
+                value: string;
+                tone: string;
+                detail?: undefined;
+            } | {
+                id: string;
+                label: string;
+                value: string;
+                detail: string;
+                tone?: undefined;
+            } | {
+                id: string;
+                label: string;
+                value: any;
+                detail: any;
+                tone: any;
+            })[];
+            highlights: string[];
+            verification: any;
+            verification_evidence: any;
+            verificationEvidence: any;
+            acceptance: string[];
+            risks: string[];
+            next_action: string;
+            technical_hint: string;
+            display_policy: {
+                user_text_first: boolean;
+                technical_default_collapsed: boolean;
+                hide_internal_protocols: boolean;
+                show_for_ordinary_conversation: boolean;
+            };
+        };
+        pickup_summary: {
+            schema: string;
+            title: string;
+            status: MainAgentDeliveryStatus;
+            status_label: string;
+            headline: string;
+            current_state: string;
+            review_items: string[];
+            resume_action: string;
+            technical_hint: string;
+            display_policy: {
+                user_text_first: boolean;
+                technical_default_collapsed: boolean;
+                hide_internal_protocols: boolean;
+                show_for_ordinary_conversation: boolean;
+            };
+            source: MainAgentDeliverySurface;
+        };
+        pickupSummary: {
+            schema: string;
+            title: string;
+            status: MainAgentDeliveryStatus;
+            status_label: string;
+            headline: string;
+            current_state: string;
+            review_items: string[];
+            resume_action: string;
+            technical_hint: string;
+            display_policy: {
+                user_text_first: boolean;
+                technical_default_collapsed: boolean;
+                hide_internal_protocols: boolean;
+                show_for_ordinary_conversation: boolean;
+            };
+            source: MainAgentDeliverySurface;
+        };
+        user_handoff: {
+            schema: string;
+            title: string;
+            surface: MainAgentDeliverySurface;
+            status: string;
+            status_label: string;
+            headline: string;
+            primary_action: any;
+            primaryAction: any;
+            secondary_actions: any[];
+            secondaryActions: any[];
+            evidence: string[];
+            unresolved: string[];
+            next_action: any;
+            technical_hint: string;
+            display_policy: {
+                user_text_first: boolean;
+                technical_default_collapsed: boolean;
+                hide_internal_protocols: boolean;
+                show_for_ordinary_conversation: boolean;
+            };
+        };
+        userHandoff: {
+            schema: string;
+            title: string;
+            surface: MainAgentDeliverySurface;
+            status: string;
+            status_label: string;
+            headline: string;
+            primary_action: any;
+            primaryAction: any;
+            secondary_actions: any[];
+            secondaryActions: any[];
+            evidence: string[];
+            unresolved: string[];
+            next_action: any;
+            technical_hint: string;
+            display_policy: {
+                user_text_first: boolean;
+                technical_default_collapsed: boolean;
+                hide_internal_protocols: boolean;
+                show_for_ordinary_conversation: boolean;
+            };
+        };
+        display_policy: {
+            user_text_first: boolean;
+            technical_default_collapsed: boolean;
+            hide_internal_protocols: boolean;
+            show_for_ordinary_conversation: boolean;
+        };
+        technical_details: any[];
+        raw_report: any;
+    };
+    failedPostReviewSpotCheckDone: {
+        schema: string;
+        surface: MainAgentDeliverySurface;
+        status: MainAgentDeliveryStatus;
+        status_label: string;
+        title: string;
+        headline: string;
+        sections: {
+            id: string;
+            title: string;
+            items: string[];
+        }[];
+        user_text: string;
+        markdown: string;
+        files: string[];
+        plan_review: string[];
+        planReview: string[];
+        verification: string[];
+        verification_evidence: {
+            schema: string;
+            title: string;
+            status: string;
+            status_label: string;
+            metric_value: string;
+            metric_detail: string;
+            metric_tone: string;
+            executed_count: number;
+            failed_count: number;
+            incomplete_count: number;
+            weak_missing_count: number;
+            suggested_count: number;
+            missing_required_count: number;
+            external_runner_count: number;
+            required_gate_passed: boolean;
+            source_gate_passed: boolean;
+            executed: string[];
+            failed: string[];
+            incomplete: string[];
+            weak_missing: string[];
+            suggested: string[];
+            missing_required: string[];
+            items: string[];
+            next_action: string;
+            display_policy: {
+                user_text_first: boolean;
+                technical_default_collapsed: boolean;
+                hide_internal_protocols: boolean;
+                show_for_ordinary_conversation: boolean;
+            };
+        };
+        verificationEvidence: {
+            schema: string;
+            title: string;
+            status: string;
+            status_label: string;
+            metric_value: string;
+            metric_detail: string;
+            metric_tone: string;
+            executed_count: number;
+            failed_count: number;
+            incomplete_count: number;
+            weak_missing_count: number;
+            suggested_count: number;
+            missing_required_count: number;
+            external_runner_count: number;
+            required_gate_passed: boolean;
+            source_gate_passed: boolean;
+            executed: string[];
+            failed: string[];
+            incomplete: string[];
+            weak_missing: string[];
+            suggested: string[];
+            missing_required: string[];
+            items: string[];
+            next_action: string;
+            display_policy: {
+                user_text_first: boolean;
+                technical_default_collapsed: boolean;
+                hide_internal_protocols: boolean;
+                show_for_ordinary_conversation: boolean;
+            };
+        };
+        acceptance: string[];
+        independent_review: string[];
+        independentReview: string[];
+        post_review_spot_check: string[];
+        postReviewSpotCheck: string[];
+        post_review_spot_check_gate: any;
+        postReviewSpotCheckGate: any;
+        post_review_spot_check_summary: any;
+        postReviewSpotCheckSummary: any;
+        post_review_spot_check_required: boolean;
+        post_review_spot_check_gate_passed: boolean;
         risks: string[];
         next_action: string;
         final_summary_quality: {

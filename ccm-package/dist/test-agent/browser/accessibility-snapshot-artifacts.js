@@ -151,7 +151,7 @@ async function readFallbackAccessibilityOutline(page) {
   })()`)) || "";
     return text.trim() ? { source: "playwright:fallback-accessibility-outline", text: text.trim() } : null;
 }
-async function writePlaywrightAccessibilitySnapshotArtifact(page, artifactDir, projectName, checkName, index) {
+async function writePlaywrightAccessibilitySnapshotArtifact(page, artifactDir, projectName, checkName, index, redactText = value => value) {
     if (!page)
         return [];
     let snapshot = null;
@@ -173,9 +173,9 @@ async function writePlaywrightAccessibilitySnapshotArtifact(page, artifactDir, p
     const body = [
         `# Accessibility Snapshot`,
         `source: ${snapshot.source}`,
-        `url: ${(0, utils_1.compactText)(String(page.url?.() || ""), 1000)}`,
+        `url: ${(0, utils_1.compactText)(redactText(String(page.url?.() || "")), 1000)}`,
         "",
-        (0, utils_1.compactText)(snapshot.text, 40_000),
+        (0, utils_1.compactText)(redactText(snapshot.text), 40_000),
         "",
     ].join("\n");
     fs.writeFileSync(snapshotPath, body, "utf-8");

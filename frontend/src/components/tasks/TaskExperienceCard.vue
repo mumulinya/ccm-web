@@ -246,7 +246,7 @@ const completionOverview = computed(() => {
       { id: 'scope', label: '涉及范围', value: files.length ? `${files.length} 个文件` : '未检测到文件变更' },
       { id: 'verification', label: '验证', value: verification.length ? `${verification.length} 项` : '暂无系统捕获' },
       { id: 'acceptance', label: '验收', value: acceptance.some(item => /未通过|待处理|缺口/.test(item)) ? '未通过' : acceptance.some(item => /已通过|已完成|已对齐/.test(item)) ? '已通过' : cancelled ? '已停止' : '待复核' },
-      { id: 'risk', label: failed ? '未完成原因' : cancelled ? '停止原因' : '风险', value: risks.length ? `${risks.length} 项` : cancelled ? '已停止' : '无待处理风险' },
+      { id: 'risk', label: failed ? '未完成原因' : cancelled ? '停止原因' : '风险', value: risks.length ? `${risks.length} 项` : cancelled ? '已停止' : '暂无需要额外关注的风险' },
     ],
     highlights: sectionItems('completed', failed ? '处理结果' : cancelled ? '停止说明' : '完成内容').slice(0, 4),
     verification: verification.length ? verification.slice(0, 4) : sectionItems('verification', '验证结果').slice(0, 4),
@@ -328,18 +328,21 @@ const independentReviewSummary = computed(() => {
     .replace(/没有(?:失败|错误|阻塞|风险|问题|网络错误|失败步骤|待处理缺口)/g, '')
     .replace(/无(?:失败|错误|阻塞|风险|问题|网络错误|失败步骤|待处理缺口)/g, '')
   const needsHuman = /人工|确认|needs[_\s-]*human|needs[_\s-]*user|manual/i.test(negativeSafeJoined)
+  const needsRecheck = /需复验|重新复验|needs[_\s-]*recheck/i.test(negativeSafeJoined)
   const needsRework = /返工|未通过|失败|缺口|待处理|受阻|needs[_\s-]*rework|blocked|failed/i.test(negativeSafeJoined)
   const passed = gate?.pass === true || gate?.passed === true || (/已通过|可以接受|passed|pass|accepted/i.test(joined) && !needsRework && !needsHuman)
-  const status = needsHuman ? 'needs_user' : needsRework ? 'needs_rework' : passed ? 'passed' : 'recorded'
+  const status = needsHuman ? 'needs_user' : needsRecheck ? 'needs_recheck' : needsRework ? 'needs_rework' : passed ? 'passed' : 'recorded'
   return {
     schema: 'ccm-main-agent-independent-review-summary-v1',
     title: '独立复核',
     status,
-    status_label: ({ passed: '已通过', needs_rework: '需返工', needs_user: '等你确认', recorded: '已记录' })[status],
+    status_label: ({ passed: '已通过', needs_rework: '需返工', needs_recheck: '需复验', needs_user: '等你确认', recorded: '已记录' })[status],
     headline: status === 'passed'
       ? 'TestAgent/独立复核已检查交付证据，我可以继续做最终验收。'
       : status === 'needs_rework'
-        ? '独立复核发现待处理缺口，我会先安排返工，再重新验收。'
+        ? '独立复核发现未通过项，我会先安排返工，再重新验收。'
+        : status === 'needs_recheck'
+          ? '独立复核还没有闭环，我会先补齐证据并重新复验。'
         : status === 'needs_user'
           ? '独立复核需要人工确认，我会先暂停最终验收。'
           : '独立复核证据已记录，我会纳入最终判断。',
@@ -348,13 +351,78 @@ const independentReviewSummary = computed(() => {
       ? '继续核对交付总结、改动和验证结果。'
       : status === 'needs_rework'
         ? '先处理复核指出的缺口，再重新执行验收。'
+        : status === 'needs_recheck'
+          ? '补齐复核证据后重新运行 TestAgent。'
         : status === 'needs_user'
           ? '等待你确认复核标记的问题。'
           : '继续等待完整复核证据或最终总结。',
     display_policy: { user_text_first: true, technical_default_collapsed: true, hide_internal_protocols: true, show_for_ordinary_conversation: false },
   }
 })
-const independentReviewRows = computed(() => asList(independentReviewSummary.value?.rows).slice(0, 7))
+const prioritizeIndependentReviewRows = (value, limit = 16) => {
+  const rows = asList(value)
+  if (rows.length <= limit) return rows
+  const priorityPatterns = [
+    /TestAgent[：:]|独立复核[：:]/i,
+    /登录态浏览器验收|测试账号|登录条件/i,
+    /操作结果验证|没有产生可见效果|暂时无法确认.*效果/i,
+    /浏览器会话恢复|没有自动重试|重新建立会话/i,
+    /边界与异常验证|边界检查|TestAgent 工作单/i,
+    /多人协作浏览器验收|跨会话/i,
+    /场景.*(?:未通过|受阻|未执行)|(?:发送方|接收方|操作方|观察方).*未通过/i,
+    /真实浏览器验收|浏览器验收流程/i,
+    /流程.*(?:未通过|受阻|未执行)/i,
+    /返工后.*(?:TestAgent|复核)|重新运行\s*TestAgent/i,
+    /交回|带回.*返工|原实现成员.*返工/i,
+    /验收条件.*(?:未通过|待确认)|必检项.*(?:未覆盖|待确认)/i,
+  ]
+  const selected = []
+  const add = (item) => {
+    if (item && !selected.includes(item)) selected.push(item)
+  }
+  priorityPatterns.forEach(pattern => rows.filter(item => pattern.test(String(item || ''))).forEach(add))
+  rows.forEach(add)
+  return selected.slice(0, limit)
+}
+const independentReviewRows = computed(() => prioritizeIndependentReviewRows(independentReviewSummary.value?.rows))
+const postReviewSpotCheckSummary = computed(() => {
+  const completion = workchain.value?.completion_summary || workchain.value?.completionSummary || {}
+  const raw = props.card.post_review_spot_check_summary
+    || props.card.postReviewSpotCheckSummary
+    || deliveryReport.value?.post_review_spot_check_summary
+    || deliveryReport.value?.postReviewSpotCheckSummary
+    || completion.post_review_spot_check_summary
+    || completion.postReviewSpotCheckSummary
+    || null
+  if (!raw) return null
+  const normalized = displayValue(raw, '完成前抽查状态已整理。')
+  const statusText = String(normalized.status || '').toLowerCase()
+  const status = statusText === 'passed'
+    ? 'passed'
+    : statusText === 'needs_user'
+      ? 'needs_user'
+      : statusText === 'needs_recheck' || statusText === 'needs_rework'
+        ? 'needs_recheck'
+        : 'recorded'
+  const rows = uniq(asList(normalized.rows)
+    .map(item => visibleReviewText(item, '抽查状态已整理。'))
+    .filter(Boolean))
+    .slice(0, 5)
+  return {
+    ...normalized,
+    title: normalized.title || '完成前抽查',
+    status,
+    status_label: normalized.status_label || ({ passed: '已通过', needs_recheck: '需复验', needs_user: '待确认', recorded: '已记录' })[status],
+    headline: visibleReviewText(normalized.headline, status === 'passed'
+      ? '我已抽查关键验证，结果与 TestAgent 结论一致。'
+      : '我的完成前抽查还没有通过。'),
+    rows,
+    next_action: visibleReviewText(normalized.next_action || normalized.nextAction, status === 'passed'
+      ? '继续完成最终验收。'
+      : '重新运行 TestAgent 并再次抽查关键验证。'),
+  }
+})
+const postReviewSpotCheckRows = computed(() => asList(postReviewSpotCheckSummary.value?.rows).slice(0, 5))
 const qualityFollowup = computed(() => {
   const summary = workchain.value?.completion_summary || workchain.value?.completionSummary || displayStream.value?.completion_summary || displayStream.value?.completionSummary || props.card.completion_summary || props.card.completionSummary || {}
   const raw = props.card.quality_followup
@@ -433,14 +501,16 @@ const workchainTodoDecision = computed(() => {
   if (!plan || !Array.isArray(plan.steps) || !plan.steps.length) return null
   if (policy.user_visible === false || policy.hide_for_ordinary_conversation === true || policy.hideForOrdinaryConversation === true) return null
   if (shouldArchiveCompletedTodoPlan(plan)) return null
+  const goalRevisionTodo = plan.source === 'global-supervision-steering'
+    || plan.steps.some(step => ['replan_supervised_mission', 'interrupt_previous_run'].includes(String(step?.id || '')))
   return {
     version: 2,
-    mode: workchain.value?.mode || props.card.mode || 'project_task',
+    mode: goalRevisionTodo ? 'goal_revision' : workchain.value?.mode || props.card.mode || (props.context === 'global' ? 'delegation' : 'project_task'),
     decision: {
       selected_actions: [],
       dispatch_policy: {
         action: 'track_workchain_todo',
-        reason: '我正在按计划推进任务。',
+        reason: goalRevisionTodo ? '旧执行已停止，正在按新目标重新规划。' : '我正在按计划推进任务。',
         nextStep: plan.next_action || plan.nextAction || '继续推进当前计划并等待验收结果。',
       },
     },
@@ -806,7 +876,7 @@ const formatRuntimePressure = (value) => {
 }
 const runtimeToolingLabel = (status) => ({
   ready: '已同步',
-  needs_attention: '需处理',
+  needs_attention: '待检查',
   not_recorded: '未记录',
 }[status] || status || '未记录')
 const recoveryStatusLabel = (status) => ({
@@ -863,7 +933,7 @@ const workItemActiveForm = (item) => {
   const status = String(item.status || '').toLowerCase()
   let fallback = ''
   if (/^(completed|done|succeeded)$/.test(status)) fallback = `已处理：${subject}`
-  else if (/^(pending|queued|waiting)$/.test(status)) fallback = `等待处理：${subject}`
+  else if (/^(pending|queued|waiting)$/.test(status)) fallback = `等待开始：${subject}`
   else if (/^blocked$/.test(status)) fallback = `待补齐：${subject}`
   else if (/^failed$/.test(status)) fallback = `待排查：${subject}`
   else if (/^(running|in_progress|active|reviewing|reworking)$/.test(status)) fallback = `正在处理：${subject.replace(/^正在[:：\s]*/, '')}`
@@ -969,7 +1039,7 @@ const handoffActionPayload = (action) => {
     <div v-if="recoverySummary" class="task-card-section recovery-summary" :class="recoverySummary.status">
       <div class="section-head">
         <label>{{ recoverySummary.title || '恢复接续' }}</label>
-        <span>{{ recoveryStatusLabel(recoverySummary.status) }}</span>
+        <span>{{ recoverySummary.status_label || recoveryStatusLabel(recoverySummary.status) }}</span>
       </div>
       <p v-if="recoverySummary.headline">{{ recoverySummary.headline }}</p>
       <div class="recovery-checks">
@@ -1749,6 +1819,18 @@ const handoffActionPayload = (action) => {
       <small v-if="independentReviewSummary.next_action">下一步：{{ independentReviewSummary.next_action }}</small>
     </div>
 
+    <div v-if="postReviewSpotCheckSummary" class="task-card-section post-review-spot-check-summary" :class="postReviewSpotCheckSummary.status">
+      <div class="section-head">
+        <label>{{ postReviewSpotCheckSummary.title || '完成前抽查' }}</label>
+        <span>{{ postReviewSpotCheckSummary.status_label || '已记录' }}</span>
+      </div>
+      <p v-if="postReviewSpotCheckSummary.headline">{{ postReviewSpotCheckSummary.headline }}</p>
+      <ul v-if="postReviewSpotCheckRows.length">
+        <li v-for="item in postReviewSpotCheckRows" :key="item">{{ item }}</li>
+      </ul>
+      <small v-if="postReviewSpotCheckSummary.next_action">下一步：{{ postReviewSpotCheckSummary.next_action }}</small>
+    </div>
+
     <div v-if="hasDelivery && !completionOverview" class="task-card-delivery">
       <span>{{ card.delivery?.headline || (card.delivery?.acceptance_passed ? '改动和检查均已完成' : '已有交付进展') }}</span>
       <strong>{{ card.delivery?.files?.length || 0 }} 个文件 · {{ card.delivery?.verification?.length || 0 }} 项检查</strong>
@@ -1894,12 +1976,20 @@ const handoffActionPayload = (action) => {
 .completion-readiness li em { color:#92400e; font-size:10.5px; font-style:normal; font-weight:800; white-space:nowrap; }
 .independent-review-summary { padding:12px; border:1px solid rgba(14,165,233,.2); border-radius:11px; background:rgba(240,249,255,.78); }
 .independent-review-summary.passed { border-color:rgba(34,197,94,.24); background:#f0fdf4; }
-.independent-review-summary.needs_rework,.independent-review-summary.needs_user { border-color:rgba(245,158,11,.28); background:#fffbeb; }
+.independent-review-summary.needs_rework,.independent-review-summary.needs_recheck,.independent-review-summary.needs_user { border-color:rgba(245,158,11,.28); background:#fffbeb; }
 .independent-review-summary p { margin:8px 0 0; color:#334155; font-size:12px; line-height:1.5; overflow-wrap:anywhere; }
 .independent-review-summary ul { display:grid; gap:5px; margin:9px 0 0; padding-left:18px; color:#475569; font-size:11.5px; line-height:1.45; }
 .independent-review-summary small { display:block; margin-top:8px; color:#0369a1; font-size:11px; font-weight:800; line-height:1.4; }
 .independent-review-summary.passed small { color:#166534; }
-.independent-review-summary.needs_rework small,.independent-review-summary.needs_user small { color:#92400e; }
+.independent-review-summary.needs_rework small,.independent-review-summary.needs_recheck small,.independent-review-summary.needs_user small { color:#92400e; }
+.post-review-spot-check-summary { padding:12px; border:1px solid rgba(14,165,233,.2); border-radius:11px; background:rgba(240,249,255,.78); }
+.post-review-spot-check-summary.passed { border-color:rgba(34,197,94,.24); background:#f0fdf4; }
+.post-review-spot-check-summary.needs_recheck,.post-review-spot-check-summary.needs_user { border-color:rgba(245,158,11,.28); background:#fffbeb; }
+.post-review-spot-check-summary p { margin:8px 0 0; color:#334155; font-size:12px; line-height:1.5; overflow-wrap:anywhere; }
+.post-review-spot-check-summary ul { display:grid; gap:5px; margin:9px 0 0; padding-left:18px; color:#475569; font-size:11.5px; line-height:1.45; }
+.post-review-spot-check-summary small { display:block; margin-top:8px; color:#0369a1; font-size:11px; font-weight:800; line-height:1.4; }
+.post-review-spot-check-summary.passed small { color:#166534; }
+.post-review-spot-check-summary.needs_recheck small,.post-review-spot-check-summary.needs_user small { color:#92400e; }
 .task-card-agents { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:7px; margin-top:12px; }.task-card-agent { display:grid; grid-template-columns:1fr auto; gap:3px 8px; padding:8px 10px; border-radius:9px; background:rgba(255,255,255,.82); border:1px solid #e2e8f0; font-size:12px; }.task-card-agent small { grid-column:1/-1; color:#64748b; }.task-card-section ul { margin:0; padding-left:18px; color:#475569; font-size:12px; line-height:1.65; }.task-card-section.completed li::marker { color:#16a34a; }.task-card-section.blockers { padding:10px; border-radius:9px; background:#fff7ed; }
 .task-card-flow ol { display:grid; gap:7px; margin:0; padding:0; list-style:none; }.task-card-flow li { display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:start; gap:8px; padding:8px 9px; border:1px solid #e2e8f0; border-radius:9px; background:rgba(255,255,255,.74); font-size:12px; }.task-card-flow strong { display:block; color:#334155; }.task-card-flow small { display:block; margin-top:2px; color:#64748b; line-height:1.45; }.task-card-flow em { align-self:center; font-style:normal; font-size:10px; color:#64748b; }.flow-dot { width:9px; height:9px; margin-top:4px; border-radius:999px; background:#cbd5e1; box-shadow:0 0 0 3px rgba(148,163,184,.16); }.task-card-flow li.done .flow-dot { background:#22c55e; box-shadow:0 0 0 3px rgba(34,197,94,.14); }.task-card-flow li.active .flow-dot { background:#2563eb; box-shadow:0 0 0 3px rgba(37,99,235,.16); }.task-card-flow li.warning .flow-dot { background:#f59e0b; box-shadow:0 0 0 3px rgba(245,158,11,.18); }.task-card-flow li.failed .flow-dot { background:#ef4444; box-shadow:0 0 0 3px rgba(239,68,68,.16); }
 .task-card-qa { display:grid; gap:7px; }.task-card-qa-row { display:grid; grid-template-columns:1fr auto; gap:3px 8px; padding:8px 9px; border-radius:9px; border:1px solid #e2e8f0; background:rgba(255,255,255,.72); font-size:12px; }.task-card-qa-row strong { color:#334155; }.task-card-qa-row span { color:#2563eb; font-weight:700; font-size:11px; }.task-card-qa-row small { grid-column:1/-1; color:#64748b; line-height:1.45; overflow-wrap:anywhere; }.task-card-qa-row .qa-summary { color:#334155; font-weight:700; }.task-card-qa-row .qa-next { color:#1d4ed8; font-weight:800; }.task-card-qa-row.waiting span { color:#92400e; }.task-card-qa-row.accepted span { color:#166534; }.qa-badges { grid-column:1/-1; display:flex; flex-wrap:wrap; gap:5px; margin-top:3px; }.qa-badges em { padding:2px 7px; border-radius:999px; background:#eff6ff; color:#1d4ed8; font-size:10.5px; font-style:normal; font-weight:800; }

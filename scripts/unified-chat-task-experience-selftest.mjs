@@ -104,6 +104,78 @@ checks.globalHistoryMergePreservesStructuredCompletion = restoredGlobalCard?.pha
   && restoredGlobalCard?.user_handoff?.evidence?.some(item => item.includes('复核：独立复核'))
   && __globalAgentSessionTestHooks.messagesChanged([plainGlobalHistoryMessage], mergedGlobalHistory)
 
+const staleSupervisingHistoryMessage = {
+  role: 'assistant',
+  type: 'global_stream',
+  content: '任务已派发，正在持续跟踪执行和验收。',
+  timestamp: '2026-07-07T11:00:00.000Z',
+  agenticRun: {
+    id: 'run_supervision_history_sync',
+    status: 'supervising',
+    phase: 'execute',
+    supervision_state: 'monitoring',
+    updated_at: '2026-07-07T11:00:00.000Z',
+    todo_plan: {
+      source: 'global-supervision',
+      steps: [{ id: 'track', label: '跟踪执行和验收', status: 'in_progress' }],
+    },
+  },
+}
+const revisedSupervisingHistoryMessage = {
+  ...staleSupervisingHistoryMessage,
+  content: '目标调整已接收。旧执行已停止，正在按新目标重新规划。',
+  agenticRun: {
+    ...staleSupervisingHistoryMessage.agenticRun,
+    phase: 'plan',
+    supervision_state: 'replanning',
+    updated_at: '2026-07-07T11:05:00.000Z',
+    todo_plan: {
+      source: 'global-supervision-steering',
+      steps: [{ id: 'replan', label: '按新目标重新规划', status: 'in_progress' }],
+    },
+  },
+}
+const mergedSupervisionHistory = __globalAgentSessionTestHooks.mergeHistoryMessages(
+  [revisedSupervisingHistoryMessage],
+  [staleSupervisingHistoryMessage],
+)
+checks.globalHistoryMergeDeduplicatesMutableRun = mergedSupervisionHistory.length === 1
+  && mergedSupervisionHistory[0]?.content === revisedSupervisingHistoryMessage.content
+  && mergedSupervisionHistory[0]?.agenticRun?.phase === 'plan'
+  && mergedSupervisionHistory[0]?.agenticRun?.supervision_state === 'replanning'
+  && mergedSupervisionHistory[0]?.agenticRun?.todo_plan?.source === 'global-supervision-steering'
+
+const ambiguousLegacyRunMessage = {
+  role: 'assistant',
+  type: 'global_stream',
+  content: '任务已派发，正在等待执行结果。',
+  timestamp: '2026-07-07T12:00:00.000Z',
+}
+const sameTextRunA = {
+  ...ambiguousLegacyRunMessage,
+  agenticRun: {
+    id: 'run_same_text_a',
+    status: 'running',
+    updated_at: '2026-07-07T12:01:00.000Z',
+  },
+}
+const sameTextRunB = {
+  ...ambiguousLegacyRunMessage,
+  agenticRun: {
+    id: 'run_same_text_b',
+    status: 'running',
+    updated_at: '2026-07-07T12:01:00.000Z',
+  },
+}
+const mergedAmbiguousLegacyRuns = __globalAgentSessionTestHooks.mergeHistoryMessages(
+  [ambiguousLegacyRunMessage],
+  [sameTextRunA, sameTextRunB],
+)
+checks.globalHistoryMergeKeepsDistinctStableRuns = mergedAmbiguousLegacyRuns.length === 2
+  && new Set(mergedAmbiguousLegacyRuns.map(message => message?.agenticRun?.id)).size === 2
+  && mergedAmbiguousLegacyRuns.some(message => message?.agenticRun?.id === 'run_same_text_a')
+  && mergedAmbiguousLegacyRuns.some(message => message?.agenticRun?.id === 'run_same_text_b')
+
 const deliveryReportHandoffCard = globalAgentRunTaskCard({
   role: 'assistant',
   type: 'global_agent_result',
@@ -160,6 +232,22 @@ checks.globalFailedTerminalHasFriendlyFallback = failedGlobalCard?.phase === 'fa
   && failedGlobalCard?.user_handoff?.status === 'failed'
   && failedGlobalCard?.user_handoff?.primary_action?.kind === 'retry'
   && failedGlobalCard?.actions?.some(action => action.kind === 'retry')
+
+const internalFailureCard = globalAgentRunTaskCard({
+  role: 'assistant',
+  content: '任务没有完成，排障信息已整理。',
+  agenticRun: {
+    id: 'run_internal_failure_terminal',
+    status: 'failed',
+    goal: '同步支付状态',
+    tool_calls: 1,
+    error: 'CCM_AGENT_RECEIPT failed raw payload trace_id=exec-hidden-failure denied',
+  },
+})
+const internalFailureRiskSection = internalFailureCard?.delivery_report?.sections?.find(section => section.title === '未完成原因')
+checks.globalInternalFailureUsesInvestigationCopy = internalFailureRiskSection?.items?.some(item => item.includes('待排查') && item.includes('我会继续定位'))
+  && !internalFailureRiskSection?.items?.some(item => item.includes('需要处理'))
+  && !internalFailureRiskSection?.items?.some(item => /CCM_AGENT_RECEIPT|trace_id|raw payload/i.test(item))
 
 const cancelledGlobalCard = globalAgentRunTaskCard({
   role: 'assistant',

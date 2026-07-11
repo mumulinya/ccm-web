@@ -28,6 +28,23 @@ function probeType(template: BrowserProbeTemplateSpec, fallback: string) {
   return text(template.probeType || template.probe_type || template.kind || template.type || template.template) || fallback;
 }
 
+function templateContext(template: BrowserProbeTemplateSpec) {
+  const raw = template as any;
+  const context = raw.context && typeof raw.context === "object" && !Array.isArray(raw.context)
+    ? { ...raw.context }
+    : {};
+  const acceptanceCriteria = asArray(
+    template.coversAcceptanceCriteria
+    || template.covers_acceptance_criteria
+    || template.acceptanceCriteria
+    || template.acceptance_criteria
+    || context.acceptanceCriteria
+    || context.acceptance_criteria,
+  ).map(String).map(item => item.trim()).filter(Boolean);
+  if (acceptanceCriteria.length) context.acceptanceCriteria = Array.from(new Set(acceptanceCriteria));
+  return Object.keys(context).length ? context : undefined;
+}
+
 function setupActions(template: BrowserProbeTemplateSpec): BrowserActionSpec[] {
   return asArray(template.setupActions || template.setup_actions || template.actions).filter(item => item && typeof item === "object") as BrowserActionSpec[];
 }
@@ -98,6 +115,7 @@ function invalidFormInput(template: BrowserProbeTemplateSpec): BrowserCheckSpec 
     adversarial: true,
     probeType: probeType(template, "invalid_form_input"),
     probe_type: probeType(template, "invalid_form_input"),
+    context: templateContext(template),
   };
 }
 
@@ -122,6 +140,7 @@ function repeatedClick(template: BrowserProbeTemplateSpec): BrowserCheckSpec {
     adversarial: true,
     probeType: probeType(template, "repeated_click"),
     probe_type: probeType(template, "repeated_click"),
+    context: templateContext(template),
   };
 }
 
@@ -145,6 +164,7 @@ function refreshPersistence(template: BrowserProbeTemplateSpec): BrowserCheckSpe
     adversarial: true,
     probeType: probeType(template, "refresh_persistence"),
     probe_type: probeType(template, "refresh_persistence"),
+    context: templateContext(template),
   };
 }
 

@@ -2,11 +2,15 @@ import * as path from "path";
 import * as fs from "fs";
 import * as zlib from "zlib";
 import {
+  BrowserAuthenticationEvidence,
   BrowserActionSpec,
   BrowserAssertionSpec,
   BrowserCheckResult,
   BrowserEvidenceArtifact,
   BrowserCheckSpec,
+  BrowserSessionLeafStepSpec,
+  BrowserSessionResult,
+  BrowserSessionSpec,
   BrowserStepResult,
   NormalizedTestAgentProjectTarget,
 } from "../types";
@@ -15,7 +19,47 @@ import { BrowserProvider, BrowserProviderContext, blockedBrowserResult } from ".
 import { browserTargetDetail, buildSemanticLocatorPlan, resolvePlaywrightLocator } from "./semantic-locator";
 import { writePlaywrightAccessibilitySnapshotArtifact } from "./accessibility-snapshot-artifacts";
 import { writePlaywrightFailureScreenshot } from "./failure-screenshots";
+import {
+  browserSessionInitialUrl,
+  browserSessionScenarioMetadata,
+  browserSessionSteps,
+  flattenBrowserSessionSteps,
+  hasMultiSessionBrowserScenario,
+  isBrowserSessionComparisonStep,
+  isBrowserSessionLeafStep,
+  isBrowserSessionParallelStep,
+  MULTI_SESSION_BROWSER_PROBE_TYPE,
+  prefixBrowserSessionStep,
+  validateMultiSessionBrowserScenario,
+} from "./multi-session";
+import { runBrowserSessionComparison } from "./session-comparison";
+import { browserCheckStabilityRuns, browserStabilityGroupId, withBrowserStabilityMetadata } from "./stability-summary";
 import { checksForProject } from "./shared";
+import {
+  BrowserSecretBinding,
+  browserActionSupportsEnvironmentValue,
+  browserAuthenticationEnvNames,
+  browserCheckAuthenticationActions,
+  browserCheckAuthenticationEnvNames,
+  browserCheckHasStorageState,
+  browserSessionAuthenticationActions,
+  browserStorageStatePath,
+  buildBrowserAuthenticationEvidence,
+  loadBrowserStorageState,
+  redactBrowserSensitiveText,
+  resolveBrowserActionValue,
+  resolveBrowserSecretBindings,
+  ResolvedBrowserActionValue,
+} from "./authentication";
+import {
+  browserCheckUsesExistingSession,
+} from "./existing-session";
+import {
+  BrowserActionEffectObservation,
+  browserActionEffectRequired,
+  browserActionEffectSession,
+  verifyBrowserActionEffect,
+} from "./action-effects";
 import {
   browserNetworkAssertionDetail,
   browserNetworkAssertionHasExpectation,
@@ -92,6 +136,31 @@ interface BrowserRuntimeSignals {
   };
 }
 
+interface PlaywrightMultiSessionRuntime extends BrowserRuntimeSignals {
+  name: string;
+  initialUrl: string;
+  browserContext: any;
+  page: any;
+  traceStarted: boolean;
+  tracePath: string;
+  harPath: string;
+  artifactBase: string;
+  screenshots: string[];
+  pageSnapshots: string[];
+  browserArtifacts: BrowserEvidenceArtifact[];
+  consoleLogPath?: string;
+  networkLogPath?: string;
+  consoleMessages: string[];
+  dialogMessages: string[];
+  popupMessages: string[];
+  pageErrors: string[];
+  popupCapturePromises: Promise<CapturedBrowserPopup>[];
+  monitoredOrigins: Set<string>;
+  authentication?: BrowserAuthenticationEvidence;
+  secretBindings: BrowserSecretBinding[];
+  collectBrowserVideo: boolean;
+}
+
 interface BrowserContextRuntimeOptions {
   userAgent?: string;
   locale?: string;
@@ -103,6 +172,49 @@ interface BrowserContextRuntimeOptions {
     latitude: number;
     longitude: number;
     accuracy?: number;
+  };
+  storageStatePath?: string;
+  storageState?: NonNullable<BrowserCheckResult["contextOptions"]>["storageState"];
+}
+
+function redactBrowserStepResult(step: BrowserStepResult, secretBindings: BrowserSecretBinding[]) {
+  if (!secretBindings.length) return step;
+  return {
+    ...step,
+    ...(step.detail ? { detail: redactBrowserSensitiveText(step.detail, secretBindings) } : {}),
+    ...(step.error ? { error: redactBrowserSensitiveText(step.error, secretBindings) } : {}),
+  };
+}
+
+async function capturePlaywrightActionEffectObservation(
+  page: any,
+  signals: Pick<BrowserRuntimeSignals, "networkRequests" | "dialogs" | "popups" | "downloads">,
+): Promise<BrowserActionEffectObservation> {
+  const documentState = await page.evaluate(() => {
+    const documentRef = (globalThis as any).document;
+    const controls = Array.from(documentRef.querySelectorAll("input, textarea, select")).map((element: any) => ({
+      tag: String(element.tagName || "").toLowerCase(),
+      type: String(element.type || ""),
+      name: String(element.name || ""),
+      value: String(element.value ?? ""),
+      checked: Boolean(element.checked),
+      selectedIndex: Number(element.selectedIndex ?? -1),
+    }));
+    return {
+      title: String(documentRef.title || ""),
+      pageText: String(documentRef.body?.innerText || ""),
+      dom: `${documentRef.documentElement?.outerHTML || ""}\n${JSON.stringify(controls)}`,
+    };
+  });
+  return {
+    url: String(page.url?.() || ""),
+    title: documentState.title,
+    pageText: documentState.pageText,
+    dom: documentState.dom,
+    networkCount: signals.networkRequests.length,
+    dialogCount: signals.dialogs.length,
+    popupCount: signals.popups.length,
+    downloadCount: signals.downloads.length,
   };
 }
 
@@ -561,7 +673,7 @@ function stateAssertionDetail(assertion: BrowserAssertionSpec) {
   return browserTargetDetail(assertion) || assertion.value || assertion.text || "";
 }
 
-async function capturePageFinalState(page: any) {
+async function capturePageFinalState(page: any, secretBindings: BrowserSecretBinding[] = []) {
   if (!page) return {};
   let finalUrl = "";
   let title = "";
@@ -574,8 +686,8 @@ async function capturePageFinalState(page: any) {
   } catch {}
   return {
     ...(finalUrl ? { finalUrl } : {}),
-    ...(title ? { title: compactText(title, 500) } : {}),
-    ...(pageText ? { pageTextPreview: compactText(pageText, 2000) } : {}),
+    ...(title ? { title: compactText(redactBrowserSensitiveText(title, secretBindings), 500) } : {}),
+    ...(pageText ? { pageTextPreview: compactText(redactBrowserSensitiveText(pageText, secretBindings), 2000) } : {}),
   };
 }
 
@@ -793,7 +905,7 @@ function browserPopupLogLine(record: CapturedBrowserPopup) {
   return parts.join("; ");
 }
 
-async function captureBrowserPopup(popup: any): Promise<CapturedBrowserPopup> {
+async function captureBrowserPopup(popup: any, secretBindings: BrowserSecretBinding[] = []): Promise<CapturedBrowserPopup> {
   const record: CapturedBrowserPopup = {
     url: "",
     title: "",
@@ -802,12 +914,12 @@ async function captureBrowserPopup(popup: any): Promise<CapturedBrowserPopup> {
   };
   try { await popup.waitForLoadState?.("domcontentloaded", { timeout: 5_000 }); } catch {}
   try { record.url = String(popup.url?.() || ""); } catch {}
-  try { record.title = compactText(String(await popup.title?.() || ""), 500); } catch {}
+  try { record.title = compactText(redactBrowserSensitiveText(String(await popup.title?.() || ""), secretBindings), 500); } catch {}
   try {
     const body = popup.locator?.("body");
-    record.textPreview = body ? compactText(String(await body.innerText({ timeout: 1_000 }) || ""), 2000) : "";
+    record.textPreview = body ? compactText(redactBrowserSensitiveText(String(await body.innerText({ timeout: 1_000 }) || ""), secretBindings), 2000) : "";
   } catch (error: any) {
-    record.error = error.message || String(error);
+    record.error = redactBrowserSensitiveText(error.message || String(error), secretBindings);
   }
   return record;
 }
@@ -1206,7 +1318,14 @@ async function waitForTableAssertion(page: any, assertion: BrowserAssertionSpec,
   return lastResult || { ok: false, reason: "Timed out waiting for table assertion." };
 }
 
-async function writePlaywrightPageSnapshots(page: any, artifactDir: string, projectName: string, checkName: string, index: number) {
+async function writePlaywrightPageSnapshots(
+  page: any,
+  artifactDir: string,
+  projectName: string,
+  checkName: string,
+  index: number,
+  secretBindings: BrowserSecretBinding[] = [],
+) {
   if (!page) return [];
   const snapshotDir = ensureDir(path.join(artifactDir, "page-snapshots"));
   const base = `${safeSegment(projectName)}-${safeSegment(checkName)}-${index + 1}`;
@@ -1215,7 +1334,7 @@ async function writePlaywrightPageSnapshots(page: any, artifactDir: string, proj
     const html = String(await page.content?.() || "");
     if (html) {
       const htmlPath = path.join(snapshotDir, `${base}.html`);
-      fs.writeFileSync(htmlPath, html, "utf-8");
+      fs.writeFileSync(htmlPath, redactBrowserSensitiveText(html, secretBindings), "utf-8");
       snapshots.push(htmlPath);
     }
   } catch {}
@@ -1224,7 +1343,7 @@ async function writePlaywrightPageSnapshots(page: any, artifactDir: string, proj
     const text = body ? String(await body.innerText({ timeout: 1_000 }) || "") : "";
     if (text) {
       const textPath = path.join(snapshotDir, `${base}.txt`);
-      fs.writeFileSync(textPath, `${text}\n`, "utf-8");
+      fs.writeFileSync(textPath, `${redactBrowserSensitiveText(text, secretBindings)}\n`, "utf-8");
       snapshots.push(textPath);
     }
   } catch {}
@@ -1295,6 +1414,31 @@ function browserCheckContextOptions(check: BrowserCheckSpec): BrowserContextRunt
     ...(reducedMotion ? { reducedMotion } : {}),
     ...(permissions.length ? { permissions } : {}),
     ...(geolocation ? { geolocation } : {}),
+  };
+}
+
+function browserContextEvidenceOptions(options: BrowserContextRuntimeOptions): BrowserCheckResult["contextOptions"] {
+  return {
+    ...(options.userAgent ? { userAgent: options.userAgent } : {}),
+    ...(options.locale ? { locale: options.locale } : {}),
+    ...(options.timezoneId ? { timezoneId: options.timezoneId } : {}),
+    ...(options.colorScheme ? { colorScheme: options.colorScheme } : {}),
+    ...(options.reducedMotion ? { reducedMotion: options.reducedMotion } : {}),
+    ...(options.permissions?.length ? { permissions: options.permissions } : {}),
+    ...(options.geolocation ? { geolocation: options.geolocation } : {}),
+    ...(options.storageState ? { storageState: options.storageState } : {}),
+  };
+}
+
+function browserContextLaunchOptions(options: BrowserContextRuntimeOptions) {
+  return {
+    ...(options.userAgent ? { userAgent: options.userAgent } : {}),
+    ...(options.locale ? { locale: options.locale } : {}),
+    ...(options.timezoneId ? { timezoneId: options.timezoneId } : {}),
+    ...(options.colorScheme ? { colorScheme: options.colorScheme } : {}),
+    ...(options.reducedMotion ? { reducedMotion: options.reducedMotion } : {}),
+    ...(options.geolocation ? { geolocation: options.geolocation } : {}),
+    ...(options.storageStatePath ? { storageState: options.storageStatePath } : {}),
   };
 }
 
@@ -1594,7 +1738,7 @@ function redactRequestHeaders(headers: Record<string, any>) {
   return redacted;
 }
 
-function requestDetailsLine(request: any) {
+function requestDetailsLine(request: any, secretBindings: BrowserSecretBinding[] = []) {
   const method = request.method?.() || "GET";
   const requestUrl = request.url?.() || "";
   let headers: Record<string, any> = {};
@@ -1602,7 +1746,10 @@ function requestDetailsLine(request: any) {
   try { headers = request.headers?.() || {}; } catch {}
   try { body = request.postData?.() || ""; } catch {}
   const headersText = JSON.stringify(redactRequestHeaders(headers));
-  return `request_details ${method} ${requestUrl} headers=${headersText}${body ? ` body=${compactNetworkPayload(body, 2000)}` : ""}`;
+  return redactBrowserSensitiveText(
+    `request_details ${method} ${requestUrl} headers=${headersText}${body ? ` body=${compactNetworkPayload(body, 2000)}` : ""}`,
+    secretBindings,
+  );
 }
 
 function shouldCaptureResponseBody(resourceType: string, headers: Record<string, any>) {
@@ -1613,7 +1760,13 @@ function shouldCaptureResponseBody(resourceType: string, headers: Record<string,
     || contentType.startsWith("text/");
 }
 
-async function responseDetailsLine(response: any, status: number, resourceType: string, responseUrl: string) {
+async function responseDetailsLine(
+  response: any,
+  status: number,
+  resourceType: string,
+  responseUrl: string,
+  secretBindings: BrowserSecretBinding[] = [],
+) {
   let headers: Record<string, any> = {};
   let body = "";
   try { headers = response.headers?.() || {}; } catch {}
@@ -1621,7 +1774,10 @@ async function responseDetailsLine(response: any, status: number, resourceType: 
     try { body = await response.text(); } catch {}
   }
   const headersText = JSON.stringify(redactRequestHeaders(headers));
-  return `response_details ${status} ${resourceType || "unknown"} ${responseUrl} headers=${headersText}${body ? ` body=${compactNetworkPayload(body, 4000)}` : ""}`;
+  return redactBrowserSensitiveText(
+    `response_details ${status} ${resourceType || "unknown"} ${responseUrl} headers=${headersText}${body ? ` body=${compactNetworkPayload(body, 4000)}` : ""}`,
+    secretBindings,
+  );
 }
 
 async function finalizePlaywrightBrowserArtifacts(input: {
@@ -1678,9 +1834,17 @@ function dragActionDetail(action: BrowserActionSpec) {
   return `${browserTargetDetail(action) || "source"} -> ${browserTargetDetail(destination) || "destination"}`;
 }
 
-function clipboardActionDetail(action: BrowserActionSpec) {
-  const value = clipboardExpectedText(action);
-  return value ? `clipboard text length=${value.length}` : "clipboard text";
+function resolvedValueDetail(resolved?: ResolvedBrowserActionValue) {
+  if (!resolved?.provided) return "";
+  return resolved.source === "environment"
+    ? `value source=env:${resolved.envName}; value length=${resolved.value.length}`
+    : `value length=${resolved.value.length}`;
+}
+
+function clipboardActionDetail(action: BrowserActionSpec, resolved?: ResolvedBrowserActionValue) {
+  const value = resolved?.provided ? resolved.value : clipboardExpectedText(action);
+  const source = resolvedValueDetail(resolved);
+  return source || (value ? `clipboard text length=${value.length}` : "clipboard text");
 }
 
 function cookieActionName(action: BrowserActionSpec) {
@@ -1723,21 +1887,28 @@ function cookieActionUrl(page: any, project: NormalizedTestAgentProjectTarget, a
   return resolveUrl(project.targetUrl, rawUrl);
 }
 
-function cookieActionDetail(action: BrowserActionSpec) {
+function cookieActionDetail(action: BrowserActionSpec, resolved?: ResolvedBrowserActionValue) {
   const names = cookieActionNames(action);
   if (action.type === "clearCookies") {
     return `${names.length ? `cookie count=${names.length}` : "all cookies"}${action.domain ? `; domain=${action.domain}` : ""}`;
   }
-  return `cookie=${cookieActionName(action) || "(missing)"}; value length=${cookieActionValue(action).length}${action.domain ? `; domain=${action.domain}` : ""}`;
+  const valueLength = resolved?.provided ? resolved.value.length : cookieActionValue(action).length;
+  const source = resolved?.source === "environment" ? `; value source=env:${resolved.envName}` : "";
+  return `cookie=${cookieActionName(action) || "(missing)"}; value length=${valueLength}${source}${action.domain ? `; domain=${action.domain}` : ""}`;
 }
 
-function buildPlaywrightCookie(page: any, project: NormalizedTestAgentProjectTarget, action: BrowserActionSpec) {
+function buildPlaywrightCookie(
+  page: any,
+  project: NormalizedTestAgentProjectTarget,
+  action: BrowserActionSpec,
+  resolved?: ResolvedBrowserActionValue,
+) {
   const name = cookieActionName(action);
   if (!name) throw new Error("setCookie requires key/cookieName/name.");
-  if (!cookieActionHasValue(action)) throw new Error("setCookie requires value/text/content.");
+  if (!resolved?.provided && !cookieActionHasValue(action)) throw new Error("setCookie requires value/text/content or valueEnv.");
   const cookie: Record<string, any> = {
     name,
-    value: cookieActionValue(action),
+    value: resolved?.provided ? resolved.value : cookieActionValue(action),
   };
   const domain = String(action.domain || "").trim();
   if (domain) {
@@ -1815,13 +1986,15 @@ function storageActionArea(action: BrowserActionSpec): "localStorage" | "session
   return "both";
 }
 
-function storageActionDetail(action: BrowserActionSpec) {
+function storageActionDetail(action: BrowserActionSpec, resolved?: ResolvedBrowserActionValue) {
   const area = storageActionArea(action);
   const keys = storageActionKeys(action);
   if (action.type === "clearStorage") {
     return `${area}; ${keys.length ? `key count=${keys.length}` : "clear all"}`;
   }
-  return `${area}; key=${storageActionKey(action) || "(missing)"}; value length=${storageActionValue(action).length}`;
+  const valueLength = resolved?.provided ? resolved.value.length : storageActionValue(action).length;
+  const source = resolved?.source === "environment" ? `; value source=env:${resolved.envName}` : "";
+  return `${area}; key=${storageActionKey(action) || "(missing)"}; value length=${valueLength}${source}`;
 }
 
 function scrollAmount(action: BrowserActionSpec) {
@@ -1874,32 +2047,38 @@ function typeTextDelay(action: BrowserActionSpec) {
   return Number.isFinite(delay) && delay > 0 ? delay : 0;
 }
 
-function typeTextActionDetail(action: BrowserActionSpec) {
+function typeTextActionDetail(action: BrowserActionSpec, resolved?: ResolvedBrowserActionValue) {
   const target = browserTargetDetail(action) || "focused element";
   const delay = typeTextDelay(action);
-  return `${target}; text length=${typeTextValue(action).length}${delay ? `; delay=${delay}ms` : ""}`;
+  const valueLength = resolved?.provided ? resolved.value.length : typeTextValue(action).length;
+  const source = resolved?.source === "environment" ? `; value source=env:${resolved.envName}` : "";
+  return `${target}; text length=${valueLength}${source}${delay ? `; delay=${delay}ms` : ""}`;
 }
 
 function browserNetworkStateActionDetail(action: BrowserActionSpec) {
   return action.type === "setOffline" ? "browser network offline" : "browser network online";
 }
 
-function browserActionDetail(action: BrowserActionSpec) {
+function browserActionDetail(action: BrowserActionSpec, resolved?: ResolvedBrowserActionValue) {
   if (action.type === "uploadFile") return uploadFileActionDetail(action);
   if (action.type === "dragTo") return dragActionDetail(action);
-  if (action.type === "setClipboard") return clipboardActionDetail(action);
-  if (action.type === "setCookie" || action.type === "clearCookies") return cookieActionDetail(action);
-  if (action.type === "setLocalStorage" || action.type === "setSessionStorage" || action.type === "clearStorage") return storageActionDetail(action);
+  if (action.type === "setClipboard") return clipboardActionDetail(action, resolved);
+  if (action.type === "setCookie" || action.type === "clearCookies") return cookieActionDetail(action, resolved);
+  if (action.type === "setLocalStorage" || action.type === "setSessionStorage" || action.type === "clearStorage") return storageActionDetail(action, resolved);
   if (action.type === "setOffline" || action.type === "setOnline") return browserNetworkStateActionDetail(action);
   if (action.type === "scroll") return scrollActionDetail(action);
-  if (action.type === "typeText") return typeTextActionDetail(action);
-  return browserTargetDetail(action);
+  if (action.type === "typeText") return typeTextActionDetail(action, resolved);
+  const target = browserTargetDetail(action);
+  const source = resolved?.source === "environment" ? resolvedValueDetail(resolved) : "";
+  return [target, source].filter(Boolean).join("; ");
 }
 
 async function runAction(page: any, project: NormalizedTestAgentProjectTarget, action: BrowserActionSpec, defaultTimeout: number): Promise<BrowserStepResult> {
   const timeout = Number(action.timeoutMs || action.timeout_ms || defaultTimeout);
   const name = `action:${action.type}`;
+  let resolvedValue: ResolvedBrowserActionValue | undefined;
   try {
+    if (browserActionSupportsEnvironmentValue(action)) resolvedValue = resolveBrowserActionValue(project, action);
     if (action.type === "goto") {
       const url = resolveUrl(project.targetUrl, action.url || "");
       await page.goto(url, { waitUntil: action.waitUntil || "domcontentloaded", timeout });
@@ -1916,9 +2095,9 @@ async function runAction(page: any, project: NormalizedTestAgentProjectTarget, a
     } else if (action.type === "rightClick") {
       await resolvePlaywrightLocator(page, action).click({ button: "right", timeout });
     } else if (action.type === "fill") {
-      await resolvePlaywrightLocator(page, action).fill(String(action.value ?? action.text ?? ""), { timeout });
+      await resolvePlaywrightLocator(page, action).fill(resolvedValue?.value ?? String(action.value ?? action.text ?? ""), { timeout });
     } else if (action.type === "selectOption") {
-      const expected = String(action.value ?? action.text ?? "");
+      const expected = resolvedValue?.value ?? String(action.value ?? action.text ?? "");
       const locator = resolvePlaywrightLocator(page, action).first();
       try {
         await locator.waitFor({ state: "attached", timeout });
@@ -1927,7 +2106,7 @@ async function runAction(page: any, project: NormalizedTestAgentProjectTarget, a
         }, expected);
         await locator.selectOption(matchesValue ? { value: expected } : { label: expected }, { timeout });
       } catch (error: any) {
-        throw new Error(`Could not select option value or label ${JSON.stringify(expected)}: ${error.message || String(error)}`);
+        throw new Error(`Could not select option using the configured value (length=${expected.length}): ${error.message || String(error)}`);
       }
     } else if (action.type === "check") {
       await resolvePlaywrightLocator(page, action).check({ timeout });
@@ -1944,9 +2123,9 @@ async function runAction(page: any, project: NormalizedTestAgentProjectTarget, a
       await destination.waitFor({ state: "visible", timeout });
       await source.dragTo(destination, { timeout });
     } else if (action.type === "setClipboard") {
-      await writeClipboardText(page, clipboardExpectedText(action));
+      await writeClipboardText(page, resolvedValue?.value ?? clipboardExpectedText(action));
     } else if (action.type === "setCookie") {
-      await page.context().addCookies([buildPlaywrightCookie(page, project, action)]);
+      await page.context().addCookies([buildPlaywrightCookie(page, project, action, resolvedValue)]);
     } else if (action.type === "clearCookies") {
       await clearBrowserCookies(page, action);
     } else if (action.type === "setLocalStorage" || action.type === "setSessionStorage") {
@@ -1954,10 +2133,10 @@ async function runAction(page: any, project: NormalizedTestAgentProjectTarget, a
       const key = storageActionKey(action);
       if (storageName === "both") throw new Error(`${action.type} requires a single storage area.`);
       if (!key) throw new Error(`${action.type} requires key/storageKey/text.`);
-      if (!storageActionHasValue(action)) throw new Error(`${action.type} requires value/text/content.`);
+      if (!resolvedValue?.provided && !storageActionHasValue(action)) throw new Error(`${action.type} requires value/text/content or valueEnv.`);
       await page.evaluate(({ storageName, key, value }: any) => {
         (globalThis as any)[storageName].setItem(key, value);
-      }, { storageName, key, value: storageActionValue(action) });
+      }, { storageName, key, value: resolvedValue?.value ?? storageActionValue(action) });
     } else if (action.type === "clearStorage") {
       const area = storageActionArea(action);
       const keys = storageActionKeys(action);
@@ -1980,8 +2159,8 @@ async function runAction(page: any, project: NormalizedTestAgentProjectTarget, a
     } else if (action.type === "focus") {
       await resolvePlaywrightLocator(page, action).focus({ timeout });
     } else if (action.type === "typeText") {
-      const value = typeTextValue(action);
-      if (!value) throw new Error("typeText requires value/text.");
+      const value = resolvedValue?.value ?? typeTextValue(action);
+      if (!value) throw new Error("typeText requires value/text or valueEnv.");
       const locatorPlan = buildSemanticLocatorPlan(action);
       if (locatorPlan) await resolvePlaywrightLocator(page, action).focus({ timeout });
       await page.keyboard.type(value, { delay: typeTextDelay(action) });
@@ -2023,9 +2202,17 @@ async function runAction(page: any, project: NormalizedTestAgentProjectTarget, a
     } else {
       throw new Error(`Action ${action.type} is not mapped for Playwright.`);
     }
-    return { kind: "action", name, status: "passed", detail: browserActionDetail(action) };
+    return { kind: "action", name, status: "passed", detail: browserActionDetail(action, resolvedValue) };
   } catch (error: any) {
-    return { kind: "action", name, status: "failed", detail: browserActionDetail(action), error: error.message || String(error) };
+    return {
+      kind: "action",
+      name,
+      status: "failed",
+      detail: browserActionDetail(action, resolvedValue),
+      error: redactBrowserSensitiveText(error.message || String(error), resolvedValue?.source === "environment"
+        ? [{ envName: resolvedValue.envName || "credential", value: resolvedValue.value }]
+        : []),
+    };
   }
 }
 
@@ -2311,35 +2498,57 @@ async function runBrowserCheck(browser: any, context: BrowserProviderContext, pr
   const popupCapturePromises: Promise<CapturedBrowserPopup>[] = [];
   const pageSnapshots: string[] = [];
   const browserArtifacts: BrowserCheckResult["browserArtifacts"] = [];
+  const actionEffects: NonNullable<BrowserCheckResult["actionEffects"]> = [];
   const steps: BrowserStepResult[] = [];
   const name = check.name || `Browser check ${index + 1}`;
   const url = resolveUrl(project.targetUrl, check.url || project.targetUrl);
   let page: any = null;
   let browserContext: any = null;
   let traceStarted = false;
-  const collectBrowserArtifacts = workOrder.options.collectBrowserArtifacts;
-  const collectBrowserVideo = workOrder.options.collectBrowserVideo;
+  const credentialEnvNames = browserCheckAuthenticationEnvNames(check);
+  const authenticationConfigured = credentialEnvNames.length > 0 || browserCheckHasStorageState(check);
+  const sensitiveArtifactsSuppressed = authenticationConfigured
+    && (workOrder.options.collectBrowserArtifacts || workOrder.options.collectBrowserVideo);
+  const collectBrowserArtifacts = workOrder.options.collectBrowserArtifacts && !authenticationConfigured;
+  const collectBrowserVideo = workOrder.options.collectBrowserVideo && !authenticationConfigured;
   const normalScreenshotRequested = check.screenshot !== false || hasRequiredCheck(workOrder.requiredChecks, /screenshot/i);
   const evidenceDir = collectBrowserArtifacts ? ensureDir(path.join(workOrder.options.artifactDir, "browser-artifacts")) : "";
   const downloadDir = ensureDir(path.join(workOrder.options.artifactDir, "browser-artifacts", "downloads"));
   const artifactBase = browserArtifactBase(project.name, name, index);
   const viewport = browserCheckViewport(check);
-  const contextOptions = browserCheckContextOptions(check);
+  let runtimeContextOptions = browserCheckContextOptions(check);
+  let contextOptions = browserContextEvidenceOptions(runtimeContextOptions);
+  let authentication = buildBrowserAuthenticationEvidence({
+    credentialEnvNames,
+    sensitiveArtifactsSuppressed,
+  });
+  let secretBindings: BrowserSecretBinding[] = [];
   const tracePath = collectBrowserArtifacts ? path.join(evidenceDir, `${artifactBase}.trace.zip`) : "";
   const harPath = collectBrowserArtifacts ? path.join(evidenceDir, `${artifactBase}.har`) : "";
   const monitoredOrigins = new Set([originOf(project.targetUrl), originOf(url)].filter(Boolean));
 
   try {
+    secretBindings = resolveBrowserSecretBindings(project, browserCheckAuthenticationActions(check));
+    const loadedStorageState = loadBrowserStorageState(project, check);
+    if (loadedStorageState) {
+      secretBindings = [...secretBindings, ...loadedStorageState.secretBindings];
+      runtimeContextOptions = {
+        ...runtimeContextOptions,
+        storageStatePath: loadedStorageState.path,
+        storageState: loadedStorageState.evidence,
+      };
+      contextOptions = browserContextEvidenceOptions(runtimeContextOptions);
+    }
+    authentication = buildBrowserAuthenticationEvidence({
+      credentialEnvNames,
+      storageState: loadedStorageState?.evidence,
+      sensitiveArtifactsSuppressed,
+    });
     browserContext = await browser.newContext({
       viewport: { width: viewport.width, height: viewport.height },
       isMobile: viewport.isMobile,
       deviceScaleFactor: viewport.deviceScaleFactor,
-      ...(contextOptions.userAgent ? { userAgent: contextOptions.userAgent } : {}),
-      ...(contextOptions.locale ? { locale: contextOptions.locale } : {}),
-      ...(contextOptions.timezoneId ? { timezoneId: contextOptions.timezoneId } : {}),
-      ...(contextOptions.colorScheme ? { colorScheme: contextOptions.colorScheme } : {}),
-      ...(contextOptions.reducedMotion ? { reducedMotion: contextOptions.reducedMotion } : {}),
-      ...(contextOptions.geolocation ? { geolocation: contextOptions.geolocation } : {}),
+      ...browserContextLaunchOptions(runtimeContextOptions),
       acceptDownloads: true,
       ...(collectBrowserArtifacts ? { recordHar: { path: harPath, content: "attach" } } : {}),
       ...(collectBrowserVideo ? { recordVideo: { dir: ensureDir(path.join(workOrder.options.artifactDir, "browser-videos")), size: { width: 1366, height: 900 } } } : {}),
@@ -2363,14 +2572,14 @@ async function runBrowserCheck(browser: any, context: BrowserProviderContext, pr
       };
       popups.push(pendingRecord);
       popupMessages.push(browserPopupLogLine(pendingRecord));
-      const promise = captureBrowserPopup(popup)
+      const promise = captureBrowserPopup(popup, secretBindings)
         .then(record => {
           popups[popupRecordIndex] = record;
           popupMessages[popupRecordIndex] = browserPopupLogLine(record);
           return record;
         })
         .catch((error: any) => {
-          pendingRecord.error = error.message || String(error);
+          pendingRecord.error = redactBrowserSensitiveText(error.message || String(error), secretBindings);
           popupMessages[popupRecordIndex] = browserPopupLogLine(pendingRecord);
           return pendingRecord;
         });
@@ -2378,17 +2587,17 @@ async function runBrowserCheck(browser: any, context: BrowserProviderContext, pr
     });
     page.on("console", (message: any) => {
       const type = message.type?.() || "console";
-      const text = message.text?.() || "";
+      const text = redactBrowserSensitiveText(message.text?.() || "", secretBindings);
       const line = `${type}: ${text}`;
       consoleMessages.push(line);
       if (type === "error") consoleErrors.push(text);
     });
-    page.on("pageerror", (error: any) => pageErrors.push(error.message || String(error)));
+    page.on("pageerror", (error: any) => pageErrors.push(redactBrowserSensitiveText(error.message || String(error), secretBindings)));
     page.on("dialog", (dialog: any) => {
       const record: CapturedBrowserDialog = {
         type: String(dialog.type?.() || "dialog"),
-        message: String(dialog.message?.() || ""),
-        defaultValue: dialog.defaultValue ? String(dialog.defaultValue()) : undefined,
+        message: redactBrowserSensitiveText(String(dialog.message?.() || ""), secretBindings),
+        defaultValue: dialog.defaultValue ? redactBrowserSensitiveText(String(dialog.defaultValue()), secretBindings) : undefined,
         accepted: false,
         occurredAt: nowIso(),
       };
@@ -2401,7 +2610,7 @@ async function runBrowserCheck(browser: any, context: BrowserProviderContext, pr
           dialogMessages[dialogIndex] = browserDialogLogLine(record);
         })
         .catch((error: any) => {
-          record.error = error.message || String(error);
+          record.error = redactBrowserSensitiveText(error.message || String(error), secretBindings);
           dialogMessages[dialogIndex] = browserDialogLogLine(record);
         });
     });
@@ -2415,11 +2624,11 @@ async function runBrowserCheck(browser: any, context: BrowserProviderContext, pr
       downloadPromises.push(promise);
     });
     page.on("request", (request: any) => {
-      networkRequests.push(`request ${request.method?.() || "GET"} ${request.url?.() || ""}`);
-      networkRequests.push(requestDetailsLine(request));
+      networkRequests.push(redactBrowserSensitiveText(`request ${request.method?.() || "GET"} ${request.url?.() || ""}`, secretBindings));
+      networkRequests.push(requestDetailsLine(request, secretBindings));
     });
     page.on("requestfailed", (request: any) => {
-      const line = `failed ${request.method?.() || "GET"} ${request.url?.() || ""}: ${request.failure?.()?.errorText || "request failed"}`;
+      const line = redactBrowserSensitiveText(`failed ${request.method?.() || "GET"} ${request.url?.() || ""}: ${request.failure?.()?.errorText || "request failed"}`, secretBindings);
       networkRequests.push(line);
       networkErrors.push(line);
     });
@@ -2427,9 +2636,9 @@ async function runBrowserCheck(browser: any, context: BrowserProviderContext, pr
       const status = Number(response.status?.() || 0);
       const responseUrl = response.url?.() || "";
       const resourceType = responseResourceType(response);
-      const line = `response ${status}${resourceType ? ` ${resourceType}` : ""} ${responseUrl}`;
+      const line = redactBrowserSensitiveText(`response ${status}${resourceType ? ` ${resourceType}` : ""} ${responseUrl}`, secretBindings);
       networkRequests.push(line);
-      responseDetailsLine(response, status, resourceType, responseUrl)
+      responseDetailsLine(response, status, resourceType, responseUrl, secretBindings)
         .then(detailLine => networkRequests.push(detailLine))
         .catch(() => {});
       if (resourceType === "document" && status < 400) {
@@ -2443,19 +2652,41 @@ async function runBrowserCheck(browser: any, context: BrowserProviderContext, pr
         monitoredOrigins,
         failOnHttpResourceError: workOrder.options.failOnHttpResourceError,
       });
-      if (networkError) networkErrors.push(networkError);
+      if (networkError) networkErrors.push(redactBrowserSensitiveText(networkError, secretBindings));
     });
 
     const actions = check.actions?.length ? check.actions : [{ type: "goto", url, waitUntil: "domcontentloaded" } as BrowserActionSpec];
-    for (const action of actions) {
-      const step = await runAction(page, project, action, timeout);
+    for (let actionIndex = 0; actionIndex < actions.length; actionIndex += 1) {
+      const action = actions[actionIndex];
+      const verifyEffect = browserActionEffectRequired(action);
+      const beforeObservation = verifyEffect
+        ? await capturePlaywrightActionEffectObservation(page, { networkRequests, dialogs, popups, downloads }).catch(() => ({}))
+        : {};
+      const step = redactBrowserStepResult(await runAction(page, project, action, timeout), secretBindings);
       steps.push(step);
       if (step.status === "failed") break;
+      if (verifyEffect) {
+        const verified = await verifyBrowserActionEffect({
+          provider: "playwright",
+          action,
+          actionIndex,
+          defaultTimeout: timeout,
+          beforeObservation,
+          capture: () => capturePlaywrightActionEffectObservation(page, { networkRequests, dialogs, popups, downloads }),
+        });
+        actionEffects.push(verified.evidence);
+        const effectStep = redactBrowserStepResult(verified.step, secretBindings);
+        steps.push(effectStep);
+        if (effectStep.status === "failed") break;
+      }
     }
 
     if (!steps.some(step => step.status === "failed")) {
       for (const assertion of check.assertions || []) {
-        const step = await runAssertion(page, assertion, { consoleMessages, consoleErrors, networkErrors, networkRequests, downloads, downloadPromises, dialogs, popups, viewport }, timeout);
+        const step = redactBrowserStepResult(
+          await runAssertion(page, assertion, { consoleMessages, consoleErrors, networkErrors, networkRequests, downloads, downloadPromises, dialogs, popups, viewport }, timeout),
+          secretBindings,
+        );
         steps.push(step);
       }
     }
@@ -2490,9 +2721,16 @@ async function runBrowserCheck(browser: any, context: BrowserProviderContext, pr
     }
 
     if (popupCapturePromises.length) await Promise.all(popupCapturePromises);
-    pageSnapshots.push(...await writePlaywrightPageSnapshots(page, workOrder.options.artifactDir, project.name, name, index));
-    browserArtifacts.push(...await writePlaywrightAccessibilitySnapshotArtifact(page, workOrder.options.artifactDir, project.name, name, index));
-    const finalState = await capturePageFinalState(page);
+    pageSnapshots.push(...await writePlaywrightPageSnapshots(page, workOrder.options.artifactDir, project.name, name, index, secretBindings));
+    browserArtifacts.push(...await writePlaywrightAccessibilitySnapshotArtifact(
+      page,
+      workOrder.options.artifactDir,
+      project.name,
+      name,
+      index,
+      value => redactBrowserSensitiveText(value, secretBindings),
+    ));
+    const finalState = await capturePageFinalState(page, secretBindings);
     const telemetryLogs = writeBrowserTelemetryLogs({
       artifactDir: workOrder.options.artifactDir,
       projectName: project.name,
@@ -2522,6 +2760,7 @@ async function runBrowserCheck(browser: any, context: BrowserProviderContext, pr
       ...finalState,
       viewport,
       contextOptions,
+      authentication,
       status: failed ? "failed" : "passed",
       startedAt,
       finishedAt: nowIso(),
@@ -2537,13 +2776,14 @@ async function runBrowserCheck(browser: any, context: BrowserProviderContext, pr
       networkRequests,
       networkErrors,
       browserArtifacts,
+      actionEffects,
       ...telemetryLogs,
       adversarial: check.adversarial === true,
       probeType: check.probeType || check.probe_type,
       context: check.context,
     };
   } catch (error: any) {
-    const finalState = await capturePageFinalState(page);
+    const finalState = await capturePageFinalState(page, secretBindings);
     if (popupCapturePromises.length) await Promise.all(popupCapturePromises).catch(() => []);
     if (!normalScreenshotRequested) {
       screenshots.push(...await writePlaywrightFailureScreenshot({
@@ -2555,8 +2795,15 @@ async function runBrowserCheck(browser: any, context: BrowserProviderContext, pr
         failedStep: steps.find(step => step.status === "failed"),
       }).catch(() => []));
     }
-    pageSnapshots.push(...await writePlaywrightPageSnapshots(page, context.workOrder.options.artifactDir, project.name, name, index).catch(() => []));
-    browserArtifacts.push(...await writePlaywrightAccessibilitySnapshotArtifact(page, context.workOrder.options.artifactDir, project.name, name, index).catch(() => []));
+    pageSnapshots.push(...await writePlaywrightPageSnapshots(page, context.workOrder.options.artifactDir, project.name, name, index, secretBindings).catch(() => []));
+    browserArtifacts.push(...await writePlaywrightAccessibilitySnapshotArtifact(
+      page,
+      context.workOrder.options.artifactDir,
+      project.name,
+      name,
+      index,
+      value => redactBrowserSensitiveText(value, secretBindings),
+    ).catch(() => []));
     const telemetryLogs = writeBrowserTelemetryLogs({
       artifactDir: context.workOrder.options.artifactDir,
       projectName: project.name,
@@ -2589,6 +2836,7 @@ async function runBrowserCheck(browser: any, context: BrowserProviderContext, pr
       ...finalState,
       viewport,
       contextOptions,
+      authentication,
       status: "blocked",
       startedAt,
       finishedAt: nowIso(),
@@ -2604,13 +2852,596 @@ async function runBrowserCheck(browser: any, context: BrowserProviderContext, pr
       networkRequests,
       networkErrors,
       browserArtifacts,
+      actionEffects,
       ...telemetryLogs,
       adversarial: check.adversarial === true,
       probeType: check.probeType || check.probe_type,
       context: check.context,
-      error: error.message || String(error),
+      error: redactBrowserSensitiveText(error.message || String(error), secretBindings),
     };
   }
+}
+
+async function createPlaywrightMultiSessionRuntime(input: {
+  browser: any;
+  providerContext: BrowserProviderContext;
+  project: NormalizedTestAgentProjectTarget;
+  check: BrowserCheckSpec;
+  checkName: string;
+  session: BrowserSessionSpec;
+  initialUrl: string;
+  index: number;
+  viewport: ReturnType<typeof browserCheckViewport>;
+  contextOptions: BrowserContextRuntimeOptions;
+  secretBindings: BrowserSecretBinding[];
+  credentialEnvNames: string[];
+  authenticationConfigured: boolean;
+}) {
+  const {
+    browser,
+    providerContext,
+    project,
+    check,
+    checkName,
+    session,
+    initialUrl,
+    index,
+    viewport,
+    contextOptions,
+    secretBindings,
+    credentialEnvNames,
+    authenticationConfigured,
+  } = input;
+  const { workOrder } = providerContext;
+  const sessionName = session.name;
+  const sensitiveArtifactsSuppressed = authenticationConfigured
+    && (workOrder.options.collectBrowserArtifacts || workOrder.options.collectBrowserVideo);
+  const collectBrowserArtifacts = workOrder.options.collectBrowserArtifacts && !authenticationConfigured;
+  const collectBrowserVideo = workOrder.options.collectBrowserVideo && !authenticationConfigured;
+  const evidenceDir = collectBrowserArtifacts ? ensureDir(path.join(workOrder.options.artifactDir, "browser-artifacts")) : "";
+  const downloadDir = ensureDir(path.join(workOrder.options.artifactDir, "browser-artifacts", "downloads"));
+  const artifactBase = browserArtifactBase(project.name, `${checkName}-${sessionName}`, index);
+  const tracePath = collectBrowserArtifacts ? path.join(evidenceDir, `${artifactBase}.trace.zip`) : "";
+  const harPath = collectBrowserArtifacts ? path.join(evidenceDir, `${artifactBase}.har`) : "";
+  const monitoredOrigins = new Set([originOf(project.targetUrl), originOf(initialUrl)].filter(Boolean));
+  let browserContext: any = null;
+  try {
+    const storageStateSource = browserStorageStatePath(session) ? session : check;
+    const loadedStorageState = loadBrowserStorageState(project, storageStateSource);
+    const runtimeContextOptions: BrowserContextRuntimeOptions = {
+      ...contextOptions,
+      ...(loadedStorageState ? {
+        storageStatePath: loadedStorageState.path,
+        storageState: loadedStorageState.evidence,
+      } : {}),
+    };
+    const sessionSecretBindings = [
+      ...secretBindings,
+      ...(loadedStorageState?.secretBindings || []),
+    ];
+    const authentication = buildBrowserAuthenticationEvidence({
+      credentialEnvNames,
+      storageState: loadedStorageState?.evidence,
+      sensitiveArtifactsSuppressed,
+    });
+    browserContext = await browser.newContext({
+      viewport: { width: viewport.width, height: viewport.height },
+      isMobile: viewport.isMobile,
+      deviceScaleFactor: viewport.deviceScaleFactor,
+      ...browserContextLaunchOptions(runtimeContextOptions),
+      acceptDownloads: true,
+      ...(collectBrowserArtifacts ? { recordHar: { path: harPath, content: "attach" } } : {}),
+      ...(collectBrowserVideo ? { recordVideo: { dir: ensureDir(path.join(workOrder.options.artifactDir, "browser-videos")), size: { width: viewport.width, height: viewport.height } } } : {}),
+    });
+    await grantClipboardPermissions(browserContext, monitoredOrigins);
+    await grantBrowserContextPermissions(browserContext, monitoredOrigins, contextOptions.permissions || []);
+    let traceStarted = false;
+    if (collectBrowserArtifacts && browserContext.tracing?.start) {
+      try {
+        await browserContext.tracing.start({ screenshots: true, snapshots: true, sources: true });
+        traceStarted = true;
+      } catch {}
+    }
+    const page = await browserContext.newPage();
+    const runtime: PlaywrightMultiSessionRuntime = {
+      name: sessionName,
+      initialUrl,
+      browserContext,
+      page,
+      traceStarted,
+      tracePath,
+      harPath,
+      artifactBase,
+      screenshots: [],
+      pageSnapshots: [],
+      browserArtifacts: [],
+      consoleMessages: [],
+      dialogMessages: [],
+      popupMessages: [],
+      consoleErrors: [],
+      pageErrors: [],
+      networkRequests: [],
+      networkErrors: [],
+      downloads: [],
+      downloadPromises: [],
+      dialogs: [],
+      popups: [],
+      popupCapturePromises: [],
+      viewport,
+      monitoredOrigins,
+      authentication,
+      secretBindings: sessionSecretBindings,
+      collectBrowserVideo,
+    };
+
+    page.on("popup", (popup: any) => {
+      const popupRecordIndex = runtime.popups.length;
+      const pendingRecord: CapturedBrowserPopup = { url: "", title: "", textPreview: "", openedAt: nowIso() };
+      runtime.popups.push(pendingRecord);
+      runtime.popupMessages.push(browserPopupLogLine(pendingRecord));
+      const promise = captureBrowserPopup(popup, runtime.secretBindings)
+        .then(record => {
+          runtime.popups[popupRecordIndex] = record;
+          runtime.popupMessages[popupRecordIndex] = browserPopupLogLine(record);
+          return record;
+        })
+        .catch((error: any) => {
+          pendingRecord.error = redactBrowserSensitiveText(error.message || String(error), runtime.secretBindings);
+          runtime.popupMessages[popupRecordIndex] = browserPopupLogLine(pendingRecord);
+          return pendingRecord;
+        });
+      runtime.popupCapturePromises.push(promise);
+    });
+    page.on("console", (message: any) => {
+      const type = message.type?.() || "console";
+      const text = redactBrowserSensitiveText(message.text?.() || "", runtime.secretBindings);
+      runtime.consoleMessages.push(`${type}: ${text}`);
+      if (type === "error") runtime.consoleErrors.push(text);
+    });
+    page.on("pageerror", (error: any) => runtime.pageErrors.push(redactBrowserSensitiveText(error.message || String(error), runtime.secretBindings)));
+    page.on("dialog", (dialog: any) => {
+      const record: CapturedBrowserDialog = {
+        type: String(dialog.type?.() || "dialog"),
+        message: redactBrowserSensitiveText(String(dialog.message?.() || ""), runtime.secretBindings),
+        defaultValue: dialog.defaultValue
+          ? redactBrowserSensitiveText(String(dialog.defaultValue()), runtime.secretBindings)
+          : undefined,
+        accepted: false,
+        occurredAt: nowIso(),
+      };
+      const dialogIndex = runtime.dialogs.length;
+      runtime.dialogs.push(record);
+      runtime.dialogMessages.push(browserDialogLogLine(record));
+      Promise.resolve(dialog.accept?.())
+        .then(() => {
+          record.accepted = true;
+          runtime.dialogMessages[dialogIndex] = browserDialogLogLine(record);
+        })
+        .catch((error: any) => {
+          record.error = redactBrowserSensitiveText(error.message || String(error), runtime.secretBindings);
+          runtime.dialogMessages[dialogIndex] = browserDialogLogLine(record);
+        });
+    });
+    page.on("download", (download: any) => {
+      const downloadIndex = runtime.downloadPromises.length;
+      const promise = savePlaywrightDownload(download, downloadDir, artifactBase, downloadIndex)
+        .then(record => {
+          runtime.downloads.push(record);
+          return record;
+        });
+      runtime.downloadPromises.push(promise);
+    });
+    page.on("request", (request: any) => {
+      runtime.networkRequests.push(redactBrowserSensitiveText(
+        `request ${request.method?.() || "GET"} ${request.url?.() || ""}`,
+        runtime.secretBindings,
+      ));
+      runtime.networkRequests.push(requestDetailsLine(request, runtime.secretBindings));
+    });
+    page.on("requestfailed", (request: any) => {
+      const line = redactBrowserSensitiveText(
+        `failed ${request.method?.() || "GET"} ${request.url?.() || ""}: ${request.failure?.()?.errorText || "request failed"}`,
+        runtime.secretBindings,
+      );
+      runtime.networkRequests.push(line);
+      runtime.networkErrors.push(line);
+    });
+    page.on("response", (response: any) => {
+      const status = Number(response.status?.() || 0);
+      const responseUrl = response.url?.() || "";
+      const resourceType = responseResourceType(response);
+      runtime.networkRequests.push(redactBrowserSensitiveText(
+        `response ${status}${resourceType ? ` ${resourceType}` : ""} ${responseUrl}`,
+        runtime.secretBindings,
+      ));
+      responseDetailsLine(response, status, resourceType, responseUrl, runtime.secretBindings)
+        .then(detailLine => runtime.networkRequests.push(detailLine))
+        .catch(() => {});
+      if (resourceType === "document" && status < 400) {
+        const origin = originOf(responseUrl);
+        if (origin) runtime.monitoredOrigins.add(origin);
+      }
+      const networkError = playwrightNetworkErrorForResponse({
+        status,
+        responseUrl,
+        resourceType,
+        monitoredOrigins: runtime.monitoredOrigins,
+        failOnHttpResourceError: workOrder.options.failOnHttpResourceError,
+      });
+      if (networkError) runtime.networkErrors.push(redactBrowserSensitiveText(networkError, runtime.secretBindings));
+    });
+    return runtime;
+  } catch (error) {
+    try { await browserContext?.close?.(); } catch {}
+    throw error;
+  }
+}
+
+async function finalizePlaywrightMultiSessionRuntime(input: {
+  runtime: PlaywrightMultiSessionRuntime;
+  providerContext: BrowserProviderContext;
+  project: NormalizedTestAgentProjectTarget;
+  checkName: string;
+  index: number;
+  normalScreenshotRequested: boolean;
+  steps: BrowserStepResult[];
+}) {
+  const { runtime, providerContext, project, checkName, index, normalScreenshotRequested, steps } = input;
+  const { workOrder } = providerContext;
+  const failedStep = steps.find(step => step.status === "failed" && step.name.startsWith(`session:${runtime.name}:`));
+  if (failedStep && !normalScreenshotRequested) {
+    runtime.screenshots.push(...await writePlaywrightFailureScreenshot({
+      page: runtime.page,
+      artifactDir: workOrder.options.artifactDir,
+      projectName: project.name,
+      checkName: `${checkName}-${runtime.name}`,
+      index,
+      failedStep,
+    }).catch(() => []));
+  }
+  if (normalScreenshotRequested) {
+    try {
+      const screenshotDir = ensureDir(path.join(workOrder.options.artifactDir, "screenshots"));
+      const screenshotPath = path.join(screenshotDir, `${safeSegment(project.name)}-${safeSegment(checkName)}-${index + 1}-${safeSegment(runtime.name)}.png`);
+      await runtime.page.screenshot({ path: screenshotPath, fullPage: true });
+      runtime.screenshots.push(screenshotPath);
+    } catch (error: any) {
+      steps.push(prefixBrowserSessionStep(runtime.name, {
+        kind: "assertion",
+        name: "assert:screenshot",
+        status: "failed",
+        error: redactBrowserSensitiveText(error.message || String(error), runtime.secretBindings),
+      }));
+    }
+  }
+  if (runtime.popupCapturePromises.length) await Promise.all(runtime.popupCapturePromises).catch(() => []);
+  if (runtime.downloadPromises.length) await Promise.all(runtime.downloadPromises).catch(() => []);
+  runtime.pageSnapshots.push(...await writePlaywrightPageSnapshots(
+    runtime.page,
+    workOrder.options.artifactDir,
+    project.name,
+    `${checkName}-${runtime.name}`,
+    index,
+    runtime.secretBindings,
+  ).catch(() => []));
+  runtime.browserArtifacts.push(...await writePlaywrightAccessibilitySnapshotArtifact(
+    runtime.page,
+    workOrder.options.artifactDir,
+    project.name,
+    `${checkName}-${runtime.name}`,
+    index,
+    value => redactBrowserSensitiveText(value, runtime.secretBindings),
+  ).catch(() => []));
+  runtime.browserArtifacts.push(...downloadArtifacts(runtime.downloads));
+  const finalState = await capturePageFinalState(runtime.page, runtime.secretBindings);
+  const telemetryLogs = writeBrowserTelemetryLogs({
+    artifactDir: workOrder.options.artifactDir,
+    projectName: project.name,
+    checkName: `${checkName}-${runtime.name}`,
+    index,
+    consoleMessages: runtime.consoleMessages,
+    dialogMessages: runtime.dialogMessages,
+    popupMessages: runtime.popupMessages,
+    networkRequests: runtime.networkRequests,
+  });
+  runtime.consoleLogPath = telemetryLogs.consoleLogPath;
+  runtime.networkLogPath = telemetryLogs.networkLogPath;
+  runtime.browserArtifacts.push(...await finalizePlaywrightBrowserArtifacts({
+    browserContext: runtime.browserContext,
+    page: runtime.page,
+    traceStarted: runtime.traceStarted,
+    tracePath: runtime.tracePath,
+    harPath: runtime.harPath,
+    collectVideo: runtime.collectBrowserVideo,
+  }));
+  return {
+    name: runtime.name,
+    url: runtime.initialUrl,
+    ...finalState,
+    screenshots: runtime.screenshots,
+    pageSnapshots: runtime.pageSnapshots,
+    browserArtifacts: runtime.browserArtifacts,
+    consoleErrors: runtime.consoleErrors,
+    pageErrors: runtime.pageErrors,
+    networkErrors: runtime.networkErrors,
+    consoleLogPath: runtime.consoleLogPath,
+    networkLogPath: runtime.networkLogPath,
+    authentication: runtime.authentication,
+  } as BrowserSessionResult;
+}
+
+async function runPlaywrightMultiSessionAction(input: {
+  runtime: PlaywrightMultiSessionRuntime;
+  effectRuntime?: PlaywrightMultiSessionRuntime;
+  project: NormalizedTestAgentProjectTarget;
+  action: BrowserActionSpec;
+  actionIndex: number;
+  timeout: number;
+}) {
+  const { runtime, project, action, actionIndex, timeout } = input;
+  const effectRuntime = input.effectRuntime || runtime;
+  const verifyEffect = browserActionEffectRequired(action);
+  const beforeObservation = verifyEffect
+    ? await capturePlaywrightActionEffectObservation(effectRuntime.page, effectRuntime).catch(() => ({}))
+    : {};
+  const actionStep = prefixBrowserSessionStep(runtime.name, redactBrowserStepResult(
+    await runAction(runtime.page, project, action, timeout),
+    runtime.secretBindings,
+  ));
+  const steps = [actionStep];
+  if (actionStep.status === "failed" || !verifyEffect) return { steps };
+  const verified = await verifyBrowserActionEffect({
+    provider: "playwright",
+    action,
+    actionIndex,
+    session: runtime.name,
+    ...(effectRuntime.name !== runtime.name ? { effectSession: effectRuntime.name } : {}),
+    defaultTimeout: timeout,
+    beforeObservation,
+    capture: () => capturePlaywrightActionEffectObservation(effectRuntime.page, effectRuntime),
+  });
+  steps.push(prefixBrowserSessionStep(runtime.name, redactBrowserStepResult(
+    verified.step,
+    runtime.secretBindings,
+  )));
+  return {
+    steps,
+    effect: verified.evidence,
+  };
+}
+
+async function runMultiSessionBrowserCheck(browser: any, context: BrowserProviderContext, project: NormalizedTestAgentProjectTarget, check: BrowserCheckSpec, index: number): Promise<BrowserCheckResult> {
+  const startedAt = nowIso();
+  const started = Date.now();
+  const name = check.name || `Multi-session browser check ${index + 1}`;
+  const timeout = Number(check.timeoutMs || check.timeout_ms || context.workOrder.options.browserTimeoutMs);
+  const viewport = browserCheckViewport(check);
+  const contextOptions = browserCheckContextOptions(check);
+  const normalScreenshotRequested = check.screenshot !== false || hasRequiredCheck(context.workOrder.requiredChecks, /screenshot/i);
+  const steps: BrowserStepResult[] = [];
+  const runtimes: PlaywrightMultiSessionRuntime[] = [];
+  const browserSessions: BrowserSessionResult[] = [];
+  const browserSessionComparisons: NonNullable<BrowserCheckResult["browserSessionComparisons"]> = [];
+  const actionEffects: NonNullable<BrowserCheckResult["actionEffects"]> = [];
+  let nextActionIndex = 0;
+  const credentialEnvNames = browserCheckAuthenticationEnvNames(check);
+  const authenticationConfigured = credentialEnvNames.length > 0 || browserCheckHasStorageState(check);
+  const sensitiveArtifactsSuppressed = authenticationConfigured
+    && (context.workOrder.options.collectBrowserArtifacts || context.workOrder.options.collectBrowserVideo);
+  let secretBindings: BrowserSecretBinding[] = [];
+  let authentication = buildBrowserAuthenticationEvidence({
+    credentialEnvNames,
+    sensitiveArtifactsSuppressed,
+  });
+  let infrastructureError = "";
+
+  const validationErrors = validateMultiSessionBrowserScenario(check);
+  if (validationErrors.length) infrastructureError = validationErrors.join(" ");
+
+  try {
+    if (!infrastructureError) {
+      secretBindings = resolveBrowserSecretBindings(project, browserCheckAuthenticationActions(check));
+      for (const session of check.sessions || []) {
+        const initialUrl = resolveUrl(project.targetUrl, browserSessionInitialUrl(session, check.url || project.targetUrl));
+        const runtime = await createPlaywrightMultiSessionRuntime({
+          browser,
+          providerContext: context,
+          project,
+          check,
+          checkName: name,
+          session,
+          initialUrl,
+          index,
+          viewport,
+          contextOptions,
+          secretBindings,
+          credentialEnvNames: browserAuthenticationEnvNames(browserSessionAuthenticationActions(check, session)),
+          authenticationConfigured,
+        });
+        runtimes.push(runtime);
+      }
+      authentication = buildBrowserAuthenticationEvidence({
+        credentialEnvNames,
+        storageState: browserStorageStatePath(check)
+          ? runtimes.find(runtime => runtime.authentication?.storageState)?.authentication?.storageState
+          : undefined,
+        sensitiveArtifactsSuppressed,
+      });
+
+      for (const session of check.sessions || []) {
+        const runtime = runtimes.find(item => item.name.toLowerCase() === session.name.toLowerCase())!;
+        const setupActions: BrowserActionSpec[] = [
+          { type: "goto", url: runtime.initialUrl, waitUntil: "domcontentloaded" },
+          ...(session.setupActions || session.setup_actions || []),
+        ];
+        for (const action of setupActions) {
+          const effectSession = browserActionEffectSession(action);
+          const effectRuntime = effectSession
+            ? runtimes.find(item => item.name.toLowerCase() === effectSession.toLowerCase())
+            : runtime;
+          const executed = await runPlaywrightMultiSessionAction({
+            runtime,
+            effectRuntime,
+            project,
+            action,
+            actionIndex: nextActionIndex,
+            timeout,
+          });
+          nextActionIndex += 1;
+          steps.push(...executed.steps);
+          if (executed.effect) actionEffects.push(executed.effect);
+          if (executed.steps.some(step => step.status === "failed")) break;
+        }
+        if (steps.some(step => step.status === "failed")) break;
+      }
+
+      if (!steps.some(step => step.status === "failed")) {
+        const runScenarioStep = async (
+          scenarioStep: BrowserSessionLeafStepSpec,
+          actionIndex?: number,
+        ) => {
+          const runtime = runtimes.find(item => item.name.toLowerCase() === scenarioStep.session.toLowerCase())!;
+          if (scenarioStep.action) {
+            const effectSession = browserActionEffectSession(scenarioStep.action);
+            const effectRuntime = effectSession
+              ? runtimes.find(item => item.name.toLowerCase() === effectSession.toLowerCase())
+              : runtime;
+            return runPlaywrightMultiSessionAction({
+              runtime,
+              effectRuntime,
+              project,
+              action: scenarioStep.action,
+              actionIndex: actionIndex!,
+              timeout,
+            });
+          }
+          const step = await runAssertion(runtime.page, scenarioStep.assertion!, runtime, timeout);
+          return {
+            steps: [prefixBrowserSessionStep(runtime.name, redactBrowserStepResult(step, runtime.secretBindings))],
+          };
+        };
+        let parallelGroupIndex = 0;
+        for (const scenarioStep of browserSessionSteps(check)) {
+          const isParallel = isBrowserSessionParallelStep(scenarioStep);
+          const isComparison = isBrowserSessionComparisonStep(scenarioStep);
+          if (isParallel) parallelGroupIndex += 1;
+          if (isParallel) {
+            const planned = scenarioStep.parallel.map(step => ({
+              step,
+              actionIndex: step.action ? nextActionIndex++ : undefined,
+            }));
+            const executions = await Promise.all(planned.map(item => runScenarioStep(item.step, item.actionIndex)));
+            const executedSteps = executions.flatMap(execution => execution.steps.map(step => ({
+              ...step,
+              detail: [`parallelGroup=${parallelGroupIndex}`, step.detail || ""].filter(Boolean).join("; "),
+            })));
+            steps.push(...executedSteps);
+            actionEffects.push(...executions.map(execution => execution.effect).filter(Boolean));
+            if (executedSteps.some(step => step.status === "failed")) break;
+            continue;
+          }
+          if (isComparison) {
+            const left = runtimes.find(item => item.name.toLowerCase() === scenarioStep.compare.leftSession.toLowerCase())!;
+            const right = runtimes.find(item => item.name.toLowerCase() === scenarioStep.compare.rightSession.toLowerCase())!;
+            const comparison = await runBrowserSessionComparison({
+              spec: scenarioStep.compare,
+              left,
+              right,
+              defaultTimeoutMs: timeout,
+            });
+            browserSessionComparisons.push(comparison.result);
+            const comparisonStep = prefixBrowserSessionStep(left.name, redactBrowserStepResult(comparison.step, secretBindings));
+            steps.push(comparisonStep);
+            if (comparisonStep.status === "failed") break;
+            continue;
+          }
+          const execution = await runScenarioStep(
+            scenarioStep,
+            scenarioStep.action ? nextActionIndex++ : undefined,
+          );
+          steps.push(...execution.steps);
+          if (execution.effect) actionEffects.push(execution.effect);
+          if (execution.steps.some(step => step.status === "failed")) break;
+        }
+      }
+
+      for (const runtime of runtimes) {
+        const sessionAssertions = flattenBrowserSessionSteps(check)
+          .filter(isBrowserSessionLeafStep)
+          .filter(step => step.session.toLowerCase() === runtime.name.toLowerCase())
+          .map(step => step.assertion)
+          .filter(Boolean) as BrowserAssertionSpec[];
+        if (context.workOrder.options.failOnConsoleError && runtime.consoleErrors.length && !sessionAssertions.some(item => item.type === "consoleNoErrors")) {
+          steps.push(prefixBrowserSessionStep(runtime.name, { kind: "assertion", name: "assert:consoleNoErrors", status: "failed", error: runtime.consoleErrors.slice(0, 3).join(" | ") }));
+        }
+        if (runtime.networkErrors.length && !sessionAssertions.some(item => item.type === "networkNoErrors")) {
+          steps.push(prefixBrowserSessionStep(runtime.name, { kind: "assertion", name: "assert:networkNoErrors", status: "failed", error: runtime.networkErrors.slice(0, 3).join(" | ") }));
+        }
+        if (runtime.pageErrors.length) {
+          steps.push(prefixBrowserSessionStep(runtime.name, { kind: "assertion", name: "assert:pageErrors", status: "failed", error: runtime.pageErrors.slice(0, 3).join(" | ") }));
+        }
+      }
+    }
+  } catch (error: any) {
+    infrastructureError = redactBrowserSensitiveText(error.message || String(error), secretBindings);
+  }
+
+  for (const runtime of runtimes) {
+    try {
+      browserSessions.push(await finalizePlaywrightMultiSessionRuntime({ runtime, providerContext: context, project, checkName: name, index, normalScreenshotRequested, steps }));
+    } catch (error: any) {
+      infrastructureError ||= error.message || String(error);
+      try { await runtime.browserContext?.close?.(); } catch {}
+    }
+  }
+
+  const consoleMessages = runtimes.flatMap(runtime => runtime.consoleMessages.map(item => `[${runtime.name}] ${item}`));
+  const dialogMessages = runtimes.flatMap(runtime => runtime.dialogMessages.map(item => `[${runtime.name}] ${item}`));
+  const popupMessages = runtimes.flatMap(runtime => runtime.popupMessages.map(item => `[${runtime.name}] ${item}`));
+  const consoleErrors = runtimes.flatMap(runtime => runtime.consoleErrors.map(item => `[${runtime.name}] ${item}`));
+  const pageErrors = runtimes.flatMap(runtime => runtime.pageErrors.map(item => `[${runtime.name}] ${item}`));
+  const networkRequests = runtimes.flatMap(runtime => runtime.networkRequests.map(item => `[${runtime.name}] ${item}`));
+  const networkErrors = runtimes.flatMap(runtime => runtime.networkErrors.map(item => `[${runtime.name}] ${item}`));
+  const screenshots = browserSessions.flatMap(session => session.screenshots);
+  const pageSnapshots = browserSessions.flatMap(session => session.pageSnapshots || []);
+  const browserArtifacts = browserSessions.flatMap(session => session.browserArtifacts || []);
+  const firstSession = browserSessions[0];
+  const failed = steps.some(step => step.status === "failed");
+  const status: BrowserCheckResult["status"] = infrastructureError ? "blocked" : failed ? "failed" : "passed";
+  return {
+    provider: "playwright",
+    project: project.name,
+    name,
+    url: firstSession?.url || resolveUrl(project.targetUrl, check.url || project.targetUrl),
+    ...(firstSession?.finalUrl ? { finalUrl: firstSession.finalUrl } : {}),
+    ...(firstSession?.title ? { title: firstSession.title } : {}),
+    pageTextPreview: compactText(browserSessions.map(session => `[${session.name}]\n${session.pageTextPreview || ""}`).join("\n\n"), 4000),
+    viewport,
+    contextOptions,
+    authentication,
+    status,
+    startedAt,
+    finishedAt: nowIso(),
+    durationMs: Date.now() - started,
+    steps,
+    screenshots,
+    pageSnapshots,
+    consoleMessages,
+    dialogMessages,
+    popupMessages,
+    consoleErrors,
+    pageErrors,
+    networkRequests,
+    networkErrors,
+    browserArtifacts,
+    browserSessions,
+    browserSessionComparisons,
+    actionEffects,
+    adversarial: check.adversarial === true,
+    probeType: check.probeType || check.probe_type || MULTI_SESSION_BROWSER_PROBE_TYPE,
+    context: { ...(check.context || {}), ...browserSessionScenarioMetadata(check) },
+    ...(infrastructureError ? { error: redactBrowserSensitiveText(infrastructureError, secretBindings) } : {}),
+  };
 }
 
 export const PlaywrightBrowserProvider: BrowserProvider = {
@@ -2620,6 +3451,30 @@ export const PlaywrightBrowserProvider: BrowserProvider = {
     return checkPlaywrightAvailability();
   },
   async run(context) {
+    const routedChecks = context.workOrder.projects.flatMap(project =>
+      checksForProject(project, context.workOrder.acceptanceCriteria)
+        .map((check, index) => ({ project, check, index }))
+        .filter(item => !context.checkFilter || context.checkFilter(item.project, item.check, item.index))
+    );
+    if (!routedChecks.length) return [];
+    const existingSessionChecks = routedChecks.filter(item => browserCheckUsesExistingSession(item.check));
+    const executableChecks = routedChecks.filter(item => !browserCheckUsesExistingSession(item.check));
+    const existingSessionBlocked = existingSessionChecks.map(({ project, check, index }) => {
+      const name = check.name || `Browser check ${index + 1}`;
+      const result = blockedBrowserResult(
+        "playwright",
+        name,
+        `Browser check "${name}" requires an existing authenticated Chrome session. Playwright launches an isolated browser profile; use the Claude in Chrome or Chrome DevTools MCP provider.`,
+      );
+      result.project = project.name;
+      result.url = resolveUrl(project.targetUrl, check.url || project.targetUrl);
+      result.adversarial = check.adversarial === true;
+      result.probeType = check.probeType || check.probe_type;
+      result.context = check.context;
+      return result;
+    });
+    if (!executableChecks.length) return existingSessionBlocked;
+
     let playwright: any;
     try {
       playwright = require("playwright");
@@ -2646,13 +3501,24 @@ export const PlaywrightBrowserProvider: BrowserProvider = {
     try {
       for (const project of context.workOrder.projects) {
         const checks = checksForProject(project, context.workOrder.acceptanceCriteria);
+        let artifactIndex = 0;
         for (let i = 0; i < checks.length; i += 1) {
-          results.push(await runBrowserCheck(browser, context, project, checks[i], i));
+          if (context.checkFilter && !context.checkFilter(project, checks[i], i)) continue;
+          if (browserCheckUsesExistingSession(checks[i])) continue;
+          const runs = browserCheckStabilityRuns(checks[i]);
+          const groupId = browserStabilityGroupId(project.name, checks[i], i);
+          for (let run = 1; run <= runs; run += 1) {
+            const result = hasMultiSessionBrowserScenario(checks[i])
+              ? await runMultiSessionBrowserCheck(browser, context, project, checks[i], artifactIndex)
+              : await runBrowserCheck(browser, context, project, checks[i], artifactIndex);
+            artifactIndex += 1;
+            results.push(withBrowserStabilityMetadata({ result, groupId, run, runs }));
+          }
         }
       }
     } finally {
       try { await browser.close(); } catch {}
     }
-    return results;
+    return [...results, ...existingSessionBlocked];
   },
 };

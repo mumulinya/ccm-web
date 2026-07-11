@@ -21,6 +21,8 @@ exports.TEST_AGENT_MINIMAL_WORK_ORDER_EXAMPLE = {
     options: {
         verificationOnly: true,
         browserProvider: "none",
+        requireAdversarialProbe: false,
+        adversarialProbeWaiver: "Minimal contract example only demonstrates command execution wiring.",
     },
     metadata: {
         handoffSource: "group-main-agent",
@@ -75,6 +77,7 @@ exports.TEST_AGENT_WEB_APP_WORK_ORDER_EXAMPLE = {
             adversarialHttpChecks: [{
                     name: "Invalid login",
                     probeType: "negative_auth",
+                    coversAcceptanceCriteria: ["An invalid login is rejected without a server error."],
                     method: "POST",
                     url: "http://127.0.0.1:5173/api/login",
                     json: { email: "bad@example.test", password: "wrong-password" },
@@ -87,6 +90,7 @@ exports.TEST_AGENT_WEB_APP_WORK_ORDER_EXAMPLE = {
                     name: "Invalid login stays on login page",
                     kind: "invalid_form_input",
                     probeType: "negative_auth_ui",
+                    coversAcceptanceCriteria: ["An invalid login is rejected without a server error."],
                     url: "http://127.0.0.1:5173/login",
                     fields: [
                         { label: "Email", value: "bad@example.test" },
@@ -163,6 +167,8 @@ exports.TEST_AGENT_MINIMAL_HANDOFF_EXAMPLE = {
     options: {
         verificationOnly: true,
         browserProvider: "none",
+        requireAdversarialProbe: false,
+        adversarialProbeWaiver: "Minimal handoff example only demonstrates command execution wiring.",
     },
     metadata: {
         handoffSource: "group-main-agent-example",
@@ -222,6 +228,7 @@ exports.TEST_AGENT_WEB_APP_HANDOFF_EXAMPLE = {
             adversarialHttpChecks: [{
                     name: "Invalid login",
                     probeType: "negative_auth",
+                    coversAcceptanceCriteria: ["An invalid login is rejected without a server error."],
                     method: "POST",
                     url: "http://127.0.0.1:5173/api/login",
                     json: { email: "bad@example.test", password: "wrong-password" },
@@ -234,6 +241,7 @@ exports.TEST_AGENT_WEB_APP_HANDOFF_EXAMPLE = {
                     name: "Invalid login stays on login page",
                     kind: "invalid_form_input",
                     probeType: "negative_auth_ui",
+                    coversAcceptanceCriteria: ["An invalid login is rejected without a server error."],
                     url: "http://127.0.0.1:5173/login",
                     fields: [
                         { label: "Email", value: "bad@example.test", exact: true },

@@ -650,7 +650,13 @@ const resumeQueue = async () => {
   const res = await fetch('/api/tasks/queue/resume', { method: 'POST' })
   const data = await res.json()
   if (data.success) {
-    toast.success(`已恢复 ${data.resumed || 0}/${data.total || 0} 个自动任务`)
+    const resumed = Number(data.auto_resumed ?? data.resumed ?? 0)
+    const manualPending = Number(data.manual_pending || 0)
+    const skipped = Number(data.skipped || 0)
+    const parts = [`已自动接上 ${resumed} 个任务`]
+    if (manualPending) parts.push(`${manualPending} 个仍等待确认`)
+    if (skipped) parts.push(`${skipped} 个已跳过`)
+    toast.success(parts.join('，'))
     queueStatus.value = data.queue_status || queueStatus.value
     refreshTaskWork()
   } else {

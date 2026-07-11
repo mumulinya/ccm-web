@@ -128,6 +128,7 @@ export async function writePlaywrightAccessibilitySnapshotArtifact(
   projectName: string,
   checkName: string,
   index: number,
+  redactText: (value: string) => string = value => value,
 ): Promise<BrowserEvidenceArtifact[]> {
   if (!page) return [];
   let snapshot: AccessibilitySnapshotReadResult | null = null;
@@ -143,9 +144,9 @@ export async function writePlaywrightAccessibilitySnapshotArtifact(
   const body = [
     `# Accessibility Snapshot`,
     `source: ${snapshot.source}`,
-    `url: ${compactText(String(page.url?.() || ""), 1000)}`,
+    `url: ${compactText(redactText(String(page.url?.() || "")), 1000)}`,
     "",
-    compactText(snapshot.text, 40_000),
+    compactText(redactText(snapshot.text), 40_000),
     "",
   ].join("\n");
   fs.writeFileSync(snapshotPath, body, "utf-8");

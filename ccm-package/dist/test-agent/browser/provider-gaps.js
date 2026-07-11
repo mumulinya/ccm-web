@@ -2,10 +2,15 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.buildBrowserProviderGaps = buildBrowserProviderGaps;
 exports.formatBrowserProviderGapLine = formatBrowserProviderGapLine;
+exports.browserCheckRequiresPlaywright = browserCheckRequiresPlaywright;
 exports.buildBrowserProviderPlanWarnings = buildBrowserProviderPlanWarnings;
 exports.formatBrowserProviderPlanWarningLine = formatBrowserProviderPlanWarningLine;
 const utils_1 = require("../utils");
+const multi_session_1 = require("./multi-session");
 const shared_1 = require("./shared");
+const stability_summary_1 = require("./stability-summary");
+const authentication_1 = require("./authentication");
+const existing_session_1 = require("./existing-session");
 const GAP_PATTERNS = [
     /use (the )?playwright provider/i,
     /use playwright/i,
@@ -211,7 +216,9 @@ function hasBrowserContextOptions(check) {
         || check.reducedMotion
         || check.reduced_motion
         || (check.permissions || []).length
-        || check.geolocation);
+        || check.geolocation
+        || (0, authentication_1.browserStorageStatePath)(check)
+        || (check.sessions || []).some(session => (0, authentication_1.browserStorageStatePath)(session)));
 }
 function browserProviderPlanWarningKey(item) {
     return [
@@ -267,6 +274,23 @@ function assertionPlanWarning(provider, project, check, assertion) {
         reason: `Browser assertion ${assertion.type} needs DOM/browser-state evidence that MCP providers cannot verify deterministically.`,
     });
 }
+function browserCheckRequiresPlaywright(workOrder, check) {
+    if ((0, existing_session_1.browserCheckUsesExistingSession)(check))
+        return false;
+    if ((0, multi_session_1.hasMultiSessionBrowserScenario)(check))
+        return true;
+    if ((0, stability_summary_1.browserCheckStabilityRuns)(check) > 1)
+        return true;
+    if ((0, authentication_1.browserCheckRequiresManagedAuthentication)(check))
+        return true;
+    if (hasBrowserContextOptions(check))
+        return true;
+    if (workOrder.options.collectBrowserVideo)
+        return true;
+    if ((check.actions || []).some(action => Boolean(actionPlanWarning("mcp", "", "", action))))
+        return true;
+    return (check.assertions || []).some(assertion => Boolean(assertionPlanWarning("mcp", "", "", assertion)));
+}
 function buildBrowserProviderPlanWarnings(workOrder) {
     const provider = workOrder.options.browserProvider || "auto";
     const warnings = [];
@@ -285,10 +309,58 @@ function buildBrowserProviderPlanWarnings(workOrder) {
         }
         return warnings.slice(0, 50);
     }
-    if (provider !== "mcp")
+    if (provider !== "mcp" && !browserChecks.some(item => (0, existing_session_1.browserCheckUsesExistingSession)(item.check)))
         return [];
     for (const { project, check } of browserChecks) {
         const checkName = check.name || "Browser check";
+        const existingSession = (0, existing_session_1.browserCheckUsesExistingSession)(check);
+        if (existingSession && provider === "playwright") {
+            warnings.push(planWarning({
+                provider,
+                project: project.name,
+                check: checkName,
+                kind: "provider",
+                item: "existingSession",
+                category: "provider_dependent",
+                reason: "Existing authenticated Chrome sessions cannot be attached to Playwright's isolated browser profile.",
+                recommendation: "Expose Claude in Chrome or Chrome DevTools MCP tools; TestAgent will route this check to the authenticated MCP provider.",
+            }));
+        }
+        if (provider !== "mcp" && !existingSession)
+            continue;
+        if ((0, multi_session_1.hasMultiSessionBrowserScenario)(check)) {
+            warnings.push(planWarning({
+                provider,
+                project: project.name,
+                check: checkName,
+                kind: "provider",
+                item: "multiSession",
+                category: "requires_playwright",
+                reason: "Isolated multi-session browser scenarios require multiple Playwright browser contexts and ordered cross-session steps.",
+            }));
+        }
+        if ((0, stability_summary_1.browserCheckStabilityRuns)(check) > 1) {
+            warnings.push(planWarning({
+                provider,
+                project: project.name,
+                check: checkName,
+                kind: "provider",
+                item: "stabilityRuns",
+                category: "requires_playwright",
+                reason: "Browser stability runs require a fresh isolated browser context for every run.",
+            }));
+        }
+        if ((0, authentication_1.browserCheckRequiresManagedAuthentication)(check)) {
+            warnings.push(planWarning({
+                provider,
+                project: project.name,
+                check: checkName,
+                kind: "provider",
+                item: "browserAuthentication",
+                category: "requires_playwright",
+                reason: "Credential environment bindings and storage-state files are intentionally kept inside isolated Playwright contexts and are not sent through MCP browser tool calls.",
+            }));
+        }
         if (hasBrowserContextOptions(check)) {
             warnings.push(planWarning({
                 provider,

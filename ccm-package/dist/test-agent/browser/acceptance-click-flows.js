@@ -209,9 +209,25 @@ function flowActions(flow) {
     const waits = flow.expectedUrlPath && flow.expectedUrlPath !== flow.path
         ? [{ type: "waitForUrl", text: flow.expectedUrlPath }]
         : [];
+    const effectSignals = [
+        "url",
+        "title",
+        "page_text",
+        "dom",
+        "dialog",
+        "popup",
+        "download",
+    ];
     return [
         { type: "goto", url: flow.url, waitUntil: "domcontentloaded" },
-        ...flow.targets.map(target => ({ type: "click", role: target.targetRole, name: target.targetName, exact: true })),
+        ...flow.targets.map(target => ({
+            type: "click",
+            role: target.targetRole,
+            name: target.targetName,
+            exact: true,
+            verifyEffect: true,
+            effectSignals,
+        })),
         ...waits,
         { type: "waitForTimeout", value: "250" },
     ];

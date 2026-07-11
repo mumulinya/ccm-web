@@ -44,6 +44,7 @@ export declare function runGlobalAgentIntentSelfTest(): {
     actionBlockHidden: boolean;
     fallbackDelegationCannotWrite: boolean;
     localGroupDispatchUsesSchema: boolean;
+    localDispatchRepliesFriendly: boolean;
     fallbackCronCannotWrite: boolean;
     ambiguousFallbackCannotWrite: boolean;
     fallbackObservationFriendly: boolean;
@@ -78,10 +79,14 @@ export declare function runGlobalAgentIntentSelfTest(): {
         projectInternalWorkOrderSelfContained: boolean;
         directDispatchHandoffSummary: boolean;
         verificationOnlyCanAvoidCodeChanges: boolean;
+        singleProjectDispatchUsesPersistentMission: boolean;
+        singleProjectDispatchCarriesReviewAcceptance: boolean;
         dispatchLaunchUiFriendly: boolean;
         dispatchLaunchUiHidesProtocol: boolean;
     };
     testAgentRelayChecks: {
+        globalTestAgentPassedSpotCheckAllowsAcceptance: boolean;
+        globalTestAgentSpotCheckMismatchOverridesLegacyPass: boolean;
         globalTestAgentUnknownCoverageRelayNeedsUser: boolean;
         globalTestAgentUnknownCoverageUiWaits: boolean;
         globalTestAgentNotVerifiedCoverageRelayNeedsRework: boolean;
@@ -89,6 +94,11 @@ export declare function runGlobalAgentIntentSelfTest(): {
         globalTestAgentSummaryOnlyGapRelayNeedsRework: boolean;
         globalTestAgentWeakSummaryRelayNeedsUser: boolean;
         globalTestAgentWeakSummaryUiWaits: boolean;
+        globalTestAgentFailedBrowserFlowRelayNeedsRework: boolean;
+        globalTestAgentFailedMultiSessionRelayNeedsRework: boolean;
+        globalTestAgentIncompleteLatestEvidenceNeedsRecheck: boolean;
+        globalTestAgentFailedAuthenticationOverridesLegacyPass: boolean;
+        globalTestAgentBlockedAuthenticationNeedsUser: boolean;
         globalTestAgentFailureSummaryRelayNeedsRework: boolean;
         globalTestAgentFailureSummaryUiWaits: boolean;
     };

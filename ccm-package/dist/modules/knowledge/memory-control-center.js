@@ -87,6 +87,7 @@ exports.runMemoryCenterWorkerContextPacketContextUsageRepairTypedMemorySelfTest 
 exports.runMemoryCenterWorkerContextPacketPressureRecallTypedMemoryUsageSelfTest = runMemoryCenterWorkerContextPacketPressureRecallTypedMemoryUsageSelfTest;
 exports.runMemoryCenterWorkerContextPacketPressureMemoryProvenanceReceiptSelfTest = runMemoryCenterWorkerContextPacketPressureMemoryProvenanceReceiptSelfTest;
 exports.runMemoryCenterWorkerContextPacketPressureMemoryProvenanceReceiptRepairDispatchSelfTest = runMemoryCenterWorkerContextPacketPressureMemoryProvenanceReceiptRepairDispatchSelfTest;
+exports.runMemoryCenterWorkerContextPacketPressureMemoryProvenanceReceiptRepairDispatchBriefRequiredDocsSelfTest = runMemoryCenterWorkerContextPacketPressureMemoryProvenanceReceiptRepairDispatchBriefRequiredDocsSelfTest;
 exports.runMemoryCenterWorkerContextPacketPressureMemoryProvenanceReceiptRepairTypedMemorySelfTest = runMemoryCenterWorkerContextPacketPressureMemoryProvenanceReceiptRepairTypedMemorySelfTest;
 exports.runMemoryCenterWorkerContextPacketPressureMemoryProvenanceReceiptPreDispatchDisciplineSelfTest = runMemoryCenterWorkerContextPacketPressureMemoryProvenanceReceiptPreDispatchDisciplineSelfTest;
 exports.runMemoryCenterWorkerContextPacketPressureMemoryProvenanceReceiptPostDispatchComplianceSelfTest = runMemoryCenterWorkerContextPacketPressureMemoryProvenanceReceiptPostDispatchComplianceSelfTest;
@@ -104,6 +105,13 @@ exports.runMemoryCenterWorkerContextPacketPressureProvenanceProviderDispatchOver
 exports.runMemoryCenterWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupPreDispatchPolicySelfTest = runMemoryCenterWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupPreDispatchPolicySelfTest;
 exports.runMemoryCenterWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptContractSelfTest = runMemoryCenterWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptContractSelfTest;
 exports.runMemoryCenterWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptContractValidationSelfTest = runMemoryCenterWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptContractValidationSelfTest;
+exports.runMemoryCenterWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptValidationRepairSelfTest = runMemoryCenterWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptValidationRepairSelfTest;
+exports.runMemoryCenterWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptValidationTypedMemoryPolicySelfTest = runMemoryCenterWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptValidationTypedMemoryPolicySelfTest;
+exports.runMemoryCenterWorkerContextPacketCrossGroupProviderReliabilityGuidanceSelfTest = runMemoryCenterWorkerContextPacketCrossGroupProviderReliabilityGuidanceSelfTest;
+exports.runMemoryCenterWorkerContextPacketProviderReliabilitySnapshotRankingSelfTest = runMemoryCenterWorkerContextPacketProviderReliabilitySnapshotRankingSelfTest;
+exports.runMemoryCenterWorkerContextPacketProviderSwitchDecisionReceiptSelfTest = runMemoryCenterWorkerContextPacketProviderSwitchDecisionReceiptSelfTest;
+exports.runMemoryCenterWorkerContextPacketProviderSwitchExecutionTypedMemorySelfTest = runMemoryCenterWorkerContextPacketProviderSwitchExecutionTypedMemorySelfTest;
+exports.runMemoryCenterWorkerContextPacketProviderSwitchExecutionRankingSelfTest = runMemoryCenterWorkerContextPacketProviderSwitchExecutionRankingSelfTest;
 exports.runMemoryCenterWorkerContextPacketCrossGroupPressureRecallUsageSelfTest = runMemoryCenterWorkerContextPacketCrossGroupPressureRecallUsageSelfTest;
 exports.runMemoryCenterWorkerContextPacketCrossGroupPressureRecallUsageRepairWorkItemsSelfTest = runMemoryCenterWorkerContextPacketCrossGroupPressureRecallUsageRepairWorkItemsSelfTest;
 exports.runMemoryCenterWorkerContextPacketPreDispatchGateSelfTest = runMemoryCenterWorkerContextPacketPreDispatchGateSelfTest;
@@ -113,6 +121,19 @@ exports.runMemoryCenterWorkerContextPacketPartialCompactRetrySelfTest = runMemor
 exports.runMemoryCenterWorkerContextPacketMetadataPartialCompactRetrySelfTest = runMemoryCenterWorkerContextPacketMetadataPartialCompactRetrySelfTest;
 exports.runMemoryCenterWorkerContextPacketPartialCompactPolicySelfTest = runMemoryCenterWorkerContextPacketPartialCompactPolicySelfTest;
 exports.runMemoryCenterWorkerContextPacketCompactOutcomeLedgerSelfTest = runMemoryCenterWorkerContextPacketCompactOutcomeLedgerSelfTest;
+exports.runMemoryCenterWorkerContextProviderRankingProvenanceCompactRepairWorkItemsSelfTest = runMemoryCenterWorkerContextProviderRankingProvenanceCompactRepairWorkItemsSelfTest;
+exports.runMemoryCenterWorkerContextProviderRankingProvenanceCompactRepairDispatchBriefSelfTest = runMemoryCenterWorkerContextProviderRankingProvenanceCompactRepairDispatchBriefSelfTest;
+exports.runMemoryCenterWorkerContextProviderRankingProvenanceCompactRepairReceiptConsumptionSelfTest = runMemoryCenterWorkerContextProviderRankingProvenanceCompactRepairReceiptConsumptionSelfTest;
+exports.runMemoryCenterWorkerContextProviderRankingProvenanceCompactRepairReceiptTypedMemorySelfTest = runMemoryCenterWorkerContextProviderRankingProvenanceCompactRepairReceiptTypedMemorySelfTest;
+exports.runMemoryCenterWorkerContextProviderRankingProvenanceCompactRepairReceiptWorkerContextRecallSelfTest = runMemoryCenterWorkerContextProviderRankingProvenanceCompactRepairReceiptWorkerContextRecallSelfTest;
+exports.runMemoryCenterWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageContractSelfTest = runMemoryCenterWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageContractSelfTest;
+exports.runMemoryCenterWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptSelfTest = runMemoryCenterWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptSelfTest;
+exports.runMemoryCenterWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairSelfTest = runMemoryCenterWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairSelfTest;
+exports.runMemoryCenterWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairDispatchBriefSelfTest = runMemoryCenterWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairDispatchBriefSelfTest;
+exports.runMemoryCenterWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairTypedMemorySelfTest = runMemoryCenterWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairTypedMemorySelfTest;
+exports.runMemoryCenterWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairWorkerContextInjectionSelfTest = runMemoryCenterWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairWorkerContextInjectionSelfTest;
+exports.runMemoryCenterWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRequiredDocsSelfTest = runMemoryCenterWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRequiredDocsSelfTest;
+exports.runMemoryCenterWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairDispatchBriefRequiredDocsSelfTest = runMemoryCenterWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairDispatchBriefRequiredDocsSelfTest;
 exports.runMemoryCenterWorkerContextPacketCompactStrategyMemorySelfTest = runMemoryCenterWorkerContextPacketCompactStrategyMemorySelfTest;
 exports.runMemoryCenterWorkerContextPacketCompactStrategyTypedMemorySelfTest = runMemoryCenterWorkerContextPacketCompactStrategyTypedMemorySelfTest;
 exports.runMemoryCenterWorkerContextPacketPtlEmergencyDowngradeSelfTest = runMemoryCenterWorkerContextPacketPtlEmergencyDowngradeSelfTest;
@@ -147,6 +168,13 @@ exports.runMemoryCenterCompactFileReferenceReadPlanUsageDisciplineSelfTest = run
 exports.runMemoryCenterCompactFileReferenceReadPlanFreshnessSelfTest = runMemoryCenterCompactFileReferenceReadPlanFreshnessSelfTest;
 exports.runMemoryCenterCompactFileReferenceReadPlanRevalidationGateSelfTest = runMemoryCenterCompactFileReferenceReadPlanRevalidationGateSelfTest;
 exports.runMemoryCenterCompactFileReferenceReadPlanRevalidationRepairWorkItemsSelfTest = runMemoryCenterCompactFileReferenceReadPlanRevalidationRepairWorkItemsSelfTest;
+exports.runMemoryCenterCompactFileReferenceReadPlanRevalidationRepairDispatchSelfTest = runMemoryCenterCompactFileReferenceReadPlanRevalidationRepairDispatchSelfTest;
+exports.runMemoryCenterPostCompactReinjectionRepairDispatchSelfTest = runMemoryCenterPostCompactReinjectionRepairDispatchSelfTest;
+exports.runMemoryCenterPostCompactReinjectionRepairReceiptConsumptionSelfTest = runMemoryCenterPostCompactReinjectionRepairReceiptConsumptionSelfTest;
+exports.runMemoryCenterPostCompactReinjectionRepairReceiptTypedMemorySelfTest = runMemoryCenterPostCompactReinjectionRepairReceiptTypedMemorySelfTest;
+exports.runMemoryCenterPostCompactReinjectionRepairReceiptWorkerContextUsageSelfTest = runMemoryCenterPostCompactReinjectionRepairReceiptWorkerContextUsageSelfTest;
+exports.runMemoryCenterPostCompactReinjectionRepairReceiptMemoryUsageRepairSelfTest = runMemoryCenterPostCompactReinjectionRepairReceiptMemoryUsageRepairSelfTest;
+exports.runMemoryCenterPostCompactReceiptMemoryUsageRepairCompletionTypedMemorySelfTest = runMemoryCenterPostCompactReceiptMemoryUsageRepairCompletionTypedMemorySelfTest;
 exports.runMemoryCenterCompactFileReferenceUsageDisciplineSelfTest = runMemoryCenterCompactFileReferenceUsageDisciplineSelfTest;
 exports.runMemoryCenterHistoricalCompactBoundaryReplaySelfTest = runMemoryCenterHistoricalCompactBoundaryReplaySelfTest;
 exports.runMemoryCenterChildAgentTypeReplayMatrixSelfTest = runMemoryCenterChildAgentTypeReplayMatrixSelfTest;
@@ -4369,11 +4397,11 @@ function replayNeedleMatches(rendered, value) {
     const matched = tokens.filter(token => text.includes(token)).length;
     return matched >= Math.max(1, Math.ceil(tokens.length * 0.55));
 }
-function addReplayNeedle(needles, type, label, value, required = true) {
+function addReplayNeedle(needles, type, label, value, required = true, metadata = {}) {
     const text = compactMemoryCenterText(value, 520);
     if (!text)
         return;
-    needles.push({ type, label, value: text, required });
+    needles.push({ type, label, value: text, required, ...metadata });
 }
 function getGroupCompactBoundaryReplayRepairLedgerFile(groupId) {
     return path.join(GROUP_MEMORY_REPLAY_REPAIR_DIR, `${sidecarFileId(groupId)}.json`);
@@ -4688,6 +4716,30 @@ function readGroupWorkerContextCompactHookLedger(groupId) {
 function normalizeWorkerContextCompactOutcomeEntryForCenter(raw = {}) {
     const policy = raw.partial_compact_policy || raw.partialCompactPolicy || null;
     const ptlHint = raw.ptl_emergency_hint || raw.ptlEmergencyHint || null;
+    const rawProviderRankingProvenance = raw.provider_ranking_provenance_preservation || raw.providerRankingProvenancePreservation || null;
+    const providerRankingSummary = (value = {}) => ({
+        present: value.present === true,
+        compact_safe: value.compact_safe === true || value.compactSafe === true,
+        provider_switch_decision_receipt_present: value.provider_switch_decision_receipt_present === true || value.providerSwitchDecisionReceiptPresent === true,
+        provider_switch_decision_receipt_id: String(value.provider_switch_decision_receipt_id || value.providerSwitchDecisionReceiptId || ""),
+        provider_switch_decision_receipt_checksum: String(value.provider_switch_decision_receipt_checksum || value.providerSwitchDecisionReceiptChecksum || ""),
+        typed_memory_rel_paths: uniqueStrings(Array.isArray(value.typed_memory_rel_paths || value.typedMemoryRelPaths) ? (value.typed_memory_rel_paths || value.typedMemoryRelPaths) : [], 16),
+        typed_memory_row_ids: uniqueStrings(Array.isArray(value.typed_memory_row_ids || value.typedMemoryRowIds) ? (value.typed_memory_row_ids || value.typedMemoryRowIds) : [], 32),
+    });
+    const providerRankingProvenancePreservation = rawProviderRankingProvenance?.schema === "ccm-provider-ranking-provenance-preservation-v1"
+        ? {
+            schema: "ccm-provider-ranking-provenance-preservation-v1",
+            required: rawProviderRankingProvenance.required === true,
+            preserved: rawProviderRankingProvenance.preserved === true,
+            compact_safe_preserved: rawProviderRankingProvenance.compact_safe_preserved === true || rawProviderRankingProvenance.compactSafePreserved === true,
+            retry_id: String(rawProviderRankingProvenance.retry_id || rawProviderRankingProvenance.retryId || ""),
+            before: providerRankingSummary(rawProviderRankingProvenance.before || {}),
+            after: providerRankingSummary(rawProviderRankingProvenance.after || {}),
+            missing_typed_memory_rel_paths: uniqueStrings(Array.isArray(rawProviderRankingProvenance.missing_typed_memory_rel_paths || rawProviderRankingProvenance.missingTypedMemoryRelPaths) ? (rawProviderRankingProvenance.missing_typed_memory_rel_paths || rawProviderRankingProvenance.missingTypedMemoryRelPaths) : [], 16),
+            missing_typed_memory_row_ids: uniqueStrings(Array.isArray(rawProviderRankingProvenance.missing_typed_memory_row_ids || rawProviderRankingProvenance.missingTypedMemoryRowIds) ? (rawProviderRankingProvenance.missing_typed_memory_row_ids || rawProviderRankingProvenance.missingTypedMemoryRowIds) : [], 32),
+            gaps: uniqueStrings(Array.isArray(rawProviderRankingProvenance.gaps) ? rawProviderRankingProvenance.gaps : [], 16),
+        }
+        : null;
     return {
         schema: "ccm-worker-context-compact-outcome-entry-v1",
         outcome_id: String(raw.outcome_id || raw.outcomeId || ""),
@@ -4746,6 +4798,10 @@ function normalizeWorkerContextCompactOutcomeEntryForCenter(raw = {}) {
                 ? (ptlHint.repeated_failed_categories || ptlHint.repeatedFailedCategories).map((item) => String(item || "")).filter(Boolean)
                 : [],
         } : null,
+        provider_ranking_provenance_preservation: providerRankingProvenancePreservation,
+        provider_ranking_provenance_preserved: providerRankingProvenancePreservation
+            ? providerRankingProvenancePreservation.preserved === true
+            : raw.provider_ranking_provenance_preserved === true || raw.providerRankingProvenancePreserved === true,
         distillation_candidate: raw.distillation_candidate === false || raw.distillationCandidate === false ? false : true,
         at: String(raw.at || ""),
     };
@@ -4764,6 +4820,8 @@ function buildWorkerContextCompactOutcomeStatsForCenter(entries = []) {
         partialCompactPolicy: entries.filter((item) => item.partial_compact_policy?.schema === "ccm-worker-context-partial-compact-policy-v1").length,
         taskPreserved: entries.filter((item) => item.task_hash_unchanged === true).length,
         taskCompacted: entries.filter((item) => item.task_compacted === true).length,
+        providerRankingProvenanceRequired: entries.filter((item) => item.provider_ranking_provenance_preservation?.required === true).length,
+        providerRankingProvenancePreserved: entries.filter((item) => item.provider_ranking_provenance_preservation?.required === true && item.provider_ranking_provenance_preservation?.preserved === true).length,
         totalOmittedChars: entries.reduce((sum, item) => sum + Number(item.omitted_chars || 0), 0),
         partialOmittedChars: entries.reduce((sum, item) => sum + Number(item.partial_omitted_chars || 0), 0),
         selectedCategoryCounts,
@@ -5131,6 +5189,10 @@ function replayRepairWorkItemSignature(item = {}) {
         targetProject: item.target_project || "",
         revalidationGateId: item.revalidation_gate_id || "",
         readPlanId: item.read_plan_id || "",
+        reinjectionGateId: item.reinjection_gate_id || "",
+        postCompactCandidateId: item.post_compact_candidate_id || "",
+        postCompactCandidateKind: item.post_compact_candidate_kind || "",
+        postCompactCandidateValue: item.post_compact_candidate_value || "",
         expectedTaskAgentSessionId: item.expected_task_agent_session_id || "",
         proofEntryId: item.proof_entry_id || "",
         planChecksum: item.plan_checksum || "",
@@ -5190,6 +5252,11 @@ function buildReplayRepairPendingWorkItem(groupId, replay = {}, action = {}, ind
         target_project: targetProject,
         boundary_checksum: String(boundary.summaryChecksum || ""),
         summarized_through_message_id: String(boundary.summarizedThroughMessageId || ""),
+        reinjection_gate_id: String(action.reinjection_gate_id || action.reinjectionGateId || ""),
+        post_compact_candidate_id: String(action.post_compact_candidate_id || action.candidate_id || action.candidateId || ""),
+        post_compact_candidate_kind: String(action.post_compact_candidate_kind || action.candidate_kind || action.kind || action.gap_type || ""),
+        post_compact_candidate_value: compactMemoryCenterText(action.post_compact_candidate_value || action.candidate_value || action.expected || "", 420),
+        post_compact_candidate_source_message_id: String(action.post_compact_candidate_source_message_id || action.source_message_id || action.sourceMessageId || ""),
         prompt_patch: compactMemoryCenterText(repairPlan.promptPatch || "", 1800),
         dispatch_hint: {
             claim_policy: "group_main_agent_before_child_dispatch",
@@ -5202,6 +5269,8 @@ function buildReplayRepairPendingWorkItem(groupId, replay = {}, action = {}, ind
             replayAttemptId ? `replay_attempt=${replayAttemptId}` : "",
             renderedHash ? `rendered_hash=${renderedHash}` : "",
             boundary.summaryChecksum ? `summary_checksum=${boundary.summaryChecksum}` : "",
+            action.reinjection_gate_id ? `reinjection_gate_id=${action.reinjection_gate_id}` : "",
+            action.post_compact_candidate_id ? `post_compact_candidate_id=${action.post_compact_candidate_id}` : "",
             action.source_reason ? compactMemoryCenterText(action.source_reason, 180) : "",
         ].filter(Boolean),
         filesChanged: [],
@@ -5616,6 +5685,11 @@ function summarizeReplayRepairPendingWorkItems(groupId, ledgerInput = null) {
             target_project: item.target_project || "",
             revalidation_gate_id: item.revalidation_gate_id || "",
             read_plan_id: item.read_plan_id || "",
+            reinjection_gate_id: item.reinjection_gate_id || "",
+            post_compact_candidate_id: item.post_compact_candidate_id || "",
+            post_compact_candidate_kind: item.post_compact_candidate_kind || "",
+            post_compact_candidate_value: item.post_compact_candidate_value || "",
+            post_compact_candidate_source_message_id: item.post_compact_candidate_source_message_id || "",
             proof_entry_id: item.proof_entry_id || "",
             plan_checksum: item.plan_checksum || "",
             request_patch_checksum: item.request_patch_checksum || "",
@@ -5652,6 +5726,11 @@ function summarizeReplayRepairPendingWorkItems(groupId, ledgerInput = null) {
             target_project: item.target_project || "",
             revalidation_gate_id: item.revalidation_gate_id || "",
             read_plan_id: item.read_plan_id || "",
+            reinjection_gate_id: item.reinjection_gate_id || "",
+            post_compact_candidate_id: item.post_compact_candidate_id || "",
+            post_compact_candidate_kind: item.post_compact_candidate_kind || "",
+            post_compact_candidate_value: item.post_compact_candidate_value || "",
+            post_compact_candidate_source_message_id: item.post_compact_candidate_source_message_id || "",
             proof_entry_id: item.proof_entry_id || "",
             plan_checksum: item.plan_checksum || "",
             request_patch_checksum: item.request_patch_checksum || "",
@@ -5732,6 +5811,12 @@ function buildReplayRepairDispatchCandidate(groupId, item = {}, index = 0) {
         boundary_checksum: item.boundary_checksum || "",
         revalidation_gate_id: item.revalidation_gate_id || "",
         read_plan_id: item.read_plan_id || "",
+        reference_id: item.reference_id || "",
+        reinjection_gate_id: item.reinjection_gate_id || "",
+        post_compact_candidate_id: item.post_compact_candidate_id || "",
+        post_compact_candidate_kind: item.post_compact_candidate_kind || "",
+        post_compact_candidate_value: item.post_compact_candidate_value || "",
+        post_compact_candidate_source_message_id: item.post_compact_candidate_source_message_id || "",
         proof_entry_id: item.proof_entry_id || "",
         plan_checksum: item.plan_checksum || "",
         apply_plan_checksum: item.apply_plan_checksum || "",
@@ -5745,6 +5830,35 @@ function buildReplayRepairDispatchCandidate(groupId, item = {}, index = 0) {
         pressure_memory_provenance_gap_codes: item.pressure_memory_provenance_gap_codes || [],
         pressure_memory_provenance_repair_work_item_ids: item.pressure_memory_provenance_repair_work_item_ids || [],
         pressure_memory_provenance_rel_paths: item.pressure_memory_provenance_rel_paths || [],
+        provider_override_followup_contract_validation_id: item.provider_override_followup_contract_validation_id || "",
+        provider_override_followup_contract_rel_paths: item.provider_override_followup_contract_rel_paths || [],
+        provider_override_followup_contract_work_item_ids: item.provider_override_followup_contract_work_item_ids || [],
+        provider_override_followup_contract_override_ids: item.provider_override_followup_contract_override_ids || [],
+        provider_override_followup_contract_gap_codes: item.provider_override_followup_contract_gap_codes || [],
+        provider_switch_decision_receipt_id: item.provider_switch_decision_receipt_id || "",
+        provider_switch_decision_receipt_checksum: item.provider_switch_decision_receipt_checksum || "",
+        provider_ranking_provenance_gap_codes: item.provider_ranking_provenance_gap_codes || [],
+        provider_ranking_provenance_rel_paths: item.provider_ranking_provenance_rel_paths || [],
+        provider_ranking_provenance_row_ids: item.provider_ranking_provenance_row_ids || [],
+        provider_ranking_provenance_missing_rel_paths: item.provider_ranking_provenance_missing_rel_paths || [],
+        provider_ranking_provenance_missing_row_ids: item.provider_ranking_provenance_missing_row_ids || [],
+        provider_ranking_memory_receipt_required_doc_rel_paths: item.provider_ranking_memory_receipt_required_doc_rel_paths || [],
+        provider_ranking_memory_receipt_missing_doc_rel_paths: item.provider_ranking_memory_receipt_missing_doc_rel_paths || [],
+        provider_ranking_memory_receipt_missing_usage_state_doc_rel_paths: item.provider_ranking_memory_receipt_missing_usage_state_doc_rel_paths || [],
+        post_compact_receipt_memory_gap_codes: item.post_compact_receipt_memory_gap_codes || [],
+        post_compact_receipt_memory_required_doc_rel_paths: item.post_compact_receipt_memory_required_doc_rel_paths || [],
+        post_compact_receipt_memory_missing_doc_rel_paths: item.post_compact_receipt_memory_missing_doc_rel_paths || [],
+        post_compact_receipt_memory_missing_current_source_verified_doc_rel_paths: item.post_compact_receipt_memory_missing_current_source_verified_doc_rel_paths || [],
+        post_compact_receipt_memory_missing_ignored_reason_doc_rel_paths: item.post_compact_receipt_memory_missing_ignored_reason_doc_rel_paths || [],
+        original_worker_context_packet_id: item.original_worker_context_packet_id || "",
+        original_binding_id: item.original_binding_id || "",
+        original_assignment_id: item.original_assignment_id || "",
+        original_dispatch_key: item.original_dispatch_key || "",
+        original_task_agent_session_id: item.original_task_agent_session_id || "",
+        original_native_session_id: item.original_native_session_id || "",
+        compact_outcome_id: item.compact_outcome_id || "",
+        compact_retry_id: item.compact_retry_id || "",
+        compact_hook_run_id: item.compact_hook_run_id || "",
         request_telemetry_entry_id: item.request_telemetry_entry_id || "",
         request_telemetry_status: item.request_telemetry_status || "",
         request_telemetry_source: item.request_telemetry_source || "",
@@ -6335,13 +6449,30 @@ function compactReplayRepairAction(groupId, gap = {}, index = 0) {
         };
     }
     if (["file", "skill", "verification", "blocker"].includes(type)) {
+        const reinjectionGateId = String(gap.reinjection_gate_id || gap.reinjectionGateId || "").trim();
+        const candidateId = String(gap.post_compact_candidate_id || gap.candidate_id || gap.candidateId || label || "").trim();
+        const candidateKind = String(gap.post_compact_candidate_kind || gap.candidate_kind || gap.kind || type).trim();
+        const candidateValue = compactMemoryCenterText(gap.post_compact_candidate_value || gap.candidate_value || value, 420);
+        const sourceMessageId = String(gap.post_compact_candidate_source_message_id || gap.source_message_id || gap.sourceMessageId || "").trim();
         return {
             ...base,
-            priority: "medium",
+            priority: "high",
             component: "post_compact_reinject",
             title: "补回压缩后重注入候选",
             repair_target: `postCompactReinject.${type}`,
-            instruction: "把该候选从 raw transcript 或 typed MEMORY.md 恢复到 postCompactReinject，并在下一次子 Agent 派发时要求核验当前仓库状态。",
+            instruction: [
+                `把 post-compact 候选 ${candidateId || candidateValue || type} 从 raw transcript 或 typed MEMORY.md 恢复到 postCompactReinject。`,
+                reinjectionGateId ? `下一次子 Agent 回执必须引用 reinjection_gate_id=${reinjectionGateId}。` : "",
+                candidateId ? `postCompactCandidateUsage 必须引用 candidate_id=${candidateId} 并声明 used / ignored / verified。` : "",
+                "memoryUsed 或 memoryIgnored 必须引用同一 gate/candidate，不能只写自由文本摘要。",
+                "used/verified 时必须核验当前仓库或当前源并声明 currentSourceVerified=true；ignored 时必须给出原因。",
+                "CCM_AGENT_RECEIPT 必须回传 task_agent_session_id 与 native_session_id，证明分类来自实际执行会话。",
+            ].filter(Boolean).join(" "),
+            reinjection_gate_id: reinjectionGateId,
+            post_compact_candidate_id: candidateId,
+            post_compact_candidate_kind: candidateKind,
+            post_compact_candidate_value: candidateValue,
+            post_compact_candidate_source_message_id: sourceMessageId,
         };
     }
     return {
@@ -6359,8 +6490,12 @@ function buildCompactBoundaryReplayRepairPlan(groupId, memory = {}, options = {}
     const boundary = options.boundary || compactMemoryHasPostCompactBoundary(memory);
     const candidates = Array.isArray(options.candidates) ? options.candidates : [];
     const targetProject = String(options.targetProject || options.target_project || "");
+    const reinjectionGateId = String(options.reinjectionGateId || options.reinjection_gate_id || "").trim();
     const actions = gaps
-        .map((gap, index) => compactReplayRepairAction(groupId, gap, index))
+        .map((gap, index) => compactReplayRepairAction(groupId, {
+        ...gap,
+        reinjection_gate_id: gap.reinjection_gate_id || gap.reinjectionGateId || reinjectionGateId,
+    }, index))
         .sort((a, b) => replayRepairPriorityRank(a.priority) - replayRepairPriorityRank(b.priority));
     const hasReplay = replayStatus && replayStatus !== "empty";
     const promptPatch = actions.length ? [
@@ -6373,6 +6508,8 @@ function buildCompactBoundaryReplayRepairPlan(groupId, memory = {}, options = {}
         schema: "ccm-compact-boundary-replay-repair-plan-v1",
         groupId,
         targetProject,
+        reinjectionGateId,
+        reinjection_gate_id: reinjectionGateId,
         status: actions.length ? "rework_required" : hasReplay ? "ok" : "empty",
         action: actions.length ? "refresh_and_replay_child_agent_memory" : "none",
         generatedAt: now(),
@@ -6426,6 +6563,9 @@ function buildGroupCompactBoundaryReplayGate(groupId, memory = {}, options = {})
         };
     }
     const candidates = collectPostCompactReplayCandidates(memory);
+    const reinjectionGateId = candidates.length
+        ? `replay:${hash([groupId, boundary.summaryChecksum, candidates.map(item => item.value)], 12)}`
+        : "";
     const targetProject = String(options.targetProject || options.target_project || Object.keys(memory?.agentMemories || {})[0] || "api");
     const replayTask = [
         memory.goal,
@@ -6492,7 +6632,7 @@ function buildGroupCompactBoundaryReplayGate(groupId, memory = {}, options = {})
             },
             post_compact_reinjection_gate: {
                 schema: candidates.length ? "ccm-child-agent-post-compact-reinjection-gate-v1" : "",
-                reinjection_gate_id: candidates.length ? `replay:${hash([groupId, boundary.summaryChecksum, candidates.map(item => item.value)], 12)}` : "",
+                reinjection_gate_id: reinjectionGateId,
                 status: candidates.length ? "required" : "not_required",
                 candidate_count: candidates.length,
                 candidates,
@@ -6528,7 +6668,13 @@ function buildGroupCompactBoundaryReplayGate(groupId, memory = {}, options = {})
         addReplayNeedle(needles, "constraint", item.messageId || "persistentRequirement", item.text || item.value || item, true);
     }
     for (const candidate of candidates) {
-        addReplayNeedle(needles, candidate.kind, candidate.candidate_id || candidate.kind, candidate.value, true);
+        addReplayNeedle(needles, candidate.kind, candidate.candidate_id || candidate.kind, candidate.value, true, {
+            reinjection_gate_id: reinjectionGateId,
+            post_compact_candidate_id: candidate.candidate_id || "",
+            post_compact_candidate_kind: candidate.kind || "",
+            post_compact_candidate_value: candidate.value || "",
+            post_compact_candidate_source_message_id: candidate.sourceMessageId || "",
+        });
     }
     if (compaction.hookLedger?.hookRunId || hookLedger.hookRunIds?.length) {
         addReplayNeedle(needles, "hook", "hook ledger", compaction.hookLedger?.hookRunId || hookLedger.hookRunIds?.[hookLedger.hookRunIds.length - 1], true);
@@ -6552,6 +6698,11 @@ function buildGroupCompactBoundaryReplayGate(groupId, memory = {}, options = {})
         type: check.type,
         label: check.label,
         value: compactMemoryCenterText(check.value, 220),
+        reinjection_gate_id: check.reinjection_gate_id || "",
+        post_compact_candidate_id: check.post_compact_candidate_id || "",
+        post_compact_candidate_kind: check.post_compact_candidate_kind || "",
+        post_compact_candidate_value: compactMemoryCenterText(check.post_compact_candidate_value || check.value || "", 420),
+        post_compact_candidate_source_message_id: check.post_compact_candidate_source_message_id || "",
         reason: `${check.type} 未进入子 Agent replay 上下文：${compactMemoryCenterText(check.value, 120)}`,
     }));
     const status = score === null ? "empty" : score >= 95 ? "ok" : score >= 75 ? "warn" : "fail";
@@ -6564,6 +6715,7 @@ function buildGroupCompactBoundaryReplayGate(groupId, memory = {}, options = {})
         boundary,
         hookLedger,
         targetProject,
+        reinjectionGateId,
         renderedHash,
     });
     const replay = {
@@ -6582,6 +6734,8 @@ function buildGroupCompactBoundaryReplayGate(groupId, memory = {}, options = {})
             summarizedThroughMessageId: boundary.summarizedThroughMessageId,
         },
         candidateCount: candidates.length,
+        reinjectionGateId,
+        reinjection_gate_id: reinjectionGateId,
         hookLedgerVisible: replayNeedleMatches(rendered, compaction.hookLedger?.hookRunId || hookLedger.hookRunIds?.[hookLedger.hookRunIds.length - 1] || ""),
         receiptContractVisible: contractChecks[0].matched,
         candidateContractVisible: contractChecks[1].matched,
@@ -12200,6 +12354,1087 @@ function evaluateWorkerContextPacketPressureProvenanceProviderDispatchOverrideFo
     check.report = report;
     return check;
 }
+function isProviderDispatchOverrideFollowupReceiptValidationRepairSource(source) {
+    return String(source || "").trim() === "worker_context_provider_dispatch_override_followup_receipt_contract_validation_repair";
+}
+function buildWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptValidationRepairReport(options = {}) {
+    const groupIds = replayRepairDispatchBindingGroupIds(options);
+    const rows = groupIds.map((groupId) => {
+        const bindingLedger = readGroupReplayRepairDispatchBindingLedger(groupId);
+        const workLedger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+        const validations = (Array.isArray(bindingLedger.entries) ? bindingLedger.entries : [])
+            .filter((entry) => workerContextPacketProviderDispatchOverrideFollowupReceiptContractRequired(entry))
+            .map((entry) => ({ entry, validation: workerContextProviderDispatchOverrideFollowupReceiptContractValidationFromEntry(entry) || {} }))
+            .filter((row) => row.validation.schema === "ccm-worker-context-provider-dispatch-override-followup-receipt-contract-validation-v1");
+        const repairItems = (Array.isArray(workLedger.items) ? workLedger.items : []).filter((item) => isProviderDispatchOverrideFollowupReceiptValidationRepairSource(item.source));
+        const candidateSummary = buildReplayRepairMainAgentDispatchCandidates(groupId, { limit: options.limit || 12, ledger: workLedger });
+        const planLedger = syncReplayRepairDispatchPlanLedgerForCenter(groupId, candidateSummary, {
+            ...options,
+            at: options.generatedAt || options.generated_at || now(),
+        });
+        const candidates = Array.isArray(candidateSummary.candidates) ? candidateSummary.candidates : [];
+        const briefs = Array.isArray(planLedger.briefs) ? planLedger.briefs : [];
+        const checks = validations.map(({ entry, validation }) => {
+            const workItemId = String(validation.repair_work_item_id || validation.repair_work_item?.work_item_id || "").trim();
+            const item = repairItems.find((candidate) => String(candidate.work_item_id || candidate.id || "") === workItemId) || {};
+            const candidate = candidates.find((candidate) => String(candidate.work_item_id || "") === workItemId) || {};
+            const brief = briefs.find((candidate) => String(candidate.work_item_id || "") === workItemId && String(candidate.status || "") === "ready") || {};
+            const validationPassed = validation.contract_satisfied === true && validation.status === "passed";
+            const itemOpen = replayRepairWorkItemOpen(item.status);
+            const itemCompleted = replayRepairWorkItemStatus(item.status) === "completed";
+            const briefText = String(brief.worker_task || "");
+            const failedCovered = !validationPassed
+                && !!workItemId
+                && itemOpen
+                && !!candidate.candidate_id
+                && !!brief.brief_id
+                && brief.source === "worker_context_provider_dispatch_override_followup_receipt_contract_validation_repair"
+                && brief.should_create_real_task === false
+                && briefText.includes("providerDispatchOverrideFollowupHistoryReverified=true")
+                && briefText.includes("providerDispatchOverrideId");
+            const passedCovered = validationPassed
+                && !!workItemId
+                && itemCompleted
+                && !brief.brief_id;
+            const covered = validationPassed ? passedCovered : failedCovered;
+            return {
+                schema: "ccm-worker-context-provider-dispatch-override-followup-receipt-validation-repair-check-v1",
+                groupId,
+                binding_id: entry.binding_id || "",
+                packet_id: entry.worker_context_packet_id || "",
+                project: entry.project || "",
+                agent_type: entry.agent_type || "unknown",
+                validation_id: validation.validation_id || "",
+                validation_status: validation.status || "",
+                validation_passed: validationPassed,
+                repair_work_item_id: workItemId,
+                repair_work_item_status: item.status || "",
+                candidate_id: candidate.candidate_id || "",
+                brief_id: brief.brief_id || "",
+                failed_repair_ready: failedCovered,
+                passed_repair_closed: passedCovered,
+                covered,
+            };
+        });
+        const failed = checks.filter((check) => !check.covered);
+        const status = checks.length === 0 ? "empty" : failed.length === 0 ? "ok" : checks.length > failed.length ? "warn" : "fail";
+        return {
+            schema: "ccm-worker-context-provider-dispatch-override-followup-receipt-validation-repair-group-v1",
+            groupId,
+            status,
+            bindingFile: bindingLedger.file || getGroupReplayRepairDispatchBindingLedgerFile(groupId),
+            workItemsFile: workLedger.file || getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId),
+            dispatchPlanFile: planLedger.file || getGroupReplayRepairDispatchPlanLedgerFile(groupId),
+            checkedValidationCount: checks.length,
+            coveredValidationCount: checks.filter((check) => check.covered).length,
+            failedValidationRepairCount: failed.length,
+            openRepairItemCount: repairItems.filter((item) => replayRepairWorkItemOpen(item.status)).length,
+            completedRepairItemCount: repairItems.filter((item) => replayRepairWorkItemStatus(item.status) === "completed").length,
+            readyCandidateCount: candidates.filter((candidate) => isProviderDispatchOverrideFollowupReceiptValidationRepairSource(candidate.source)).length,
+            readyBriefCount: briefs.filter((brief) => isProviderDispatchOverrideFollowupReceiptValidationRepairSource(brief.source) && String(brief.status || "") === "ready").length,
+            checks,
+            gaps: failed.slice(0, 12).map((check) => ({
+                binding_id: check.binding_id || "",
+                packet_id: check.packet_id || "",
+                project: check.project || "",
+                agent_type: check.agent_type || "",
+                reason: check.validation_passed
+                    ? "passed receipt validation did not close repair work item or retire ready retry brief"
+                    : "failed receipt validation missing open repair work item, dispatch candidate, or self-contained retry brief",
+            })),
+        };
+    });
+    const checkedRows = rows.filter((row) => Number(row.checkedValidationCount || 0) > 0);
+    const passedRows = checkedRows.filter((row) => row.status === "ok");
+    const coverageRate = checkedRows.length ? Math.round((passedRows.length / checkedRows.length) * 1000) / 10 : null;
+    const status = coverageRate === null ? "empty" : coverageRate >= 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail";
+    return {
+        schema: "ccm-worker-context-provider-dispatch-override-followup-receipt-validation-repair-report-v1",
+        generatedAt: now(),
+        overall: {
+            status,
+            coverageRate,
+            groupCount: rows.length,
+            checkedGroupCount: checkedRows.length,
+            groupsCovered: passedRows.length,
+            checkedValidationCount: checkedRows.reduce((sum, row) => sum + Number(row.checkedValidationCount || 0), 0),
+            coveredValidationCount: checkedRows.reduce((sum, row) => sum + Number(row.coveredValidationCount || 0), 0),
+            failedValidationRepairCount: checkedRows.reduce((sum, row) => sum + Number(row.failedValidationRepairCount || 0), 0),
+            openRepairItemCount: checkedRows.reduce((sum, row) => sum + Number(row.openRepairItemCount || 0), 0),
+            completedRepairItemCount: checkedRows.reduce((sum, row) => sum + Number(row.completedRepairItemCount || 0), 0),
+            readyCandidateCount: checkedRows.reduce((sum, row) => sum + Number(row.readyCandidateCount || 0), 0),
+            readyBriefCount: checkedRows.reduce((sum, row) => sum + Number(row.readyBriefCount || 0), 0),
+        },
+        groups: rows.sort((a, b) => Number(b.failedValidationRepairCount || 0) - Number(a.failedValidationRepairCount || 0)).slice(0, 50),
+        weakGroups: rows.filter((row) => row.status === "fail" || row.status === "warn").slice(0, 20),
+    };
+}
+function evaluateWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptValidationRepair(options = {}) {
+    const report = buildWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptValidationRepairReport(options);
+    const checked = Number(report.overall.checkedValidationCount || 0);
+    const passed = Number(report.overall.coveredValidationCount || 0);
+    const evidence = (report.groups || []).flatMap((row) => (row.checks || []).filter((check) => check.covered).slice(0, 4).map((check) => ({
+        groupId: row.groupId,
+        validation_id: check.validation_id,
+        repair_work_item_id: check.repair_work_item_id,
+        candidate_id: check.candidate_id,
+        brief_id: check.brief_id,
+        validation_passed: check.validation_passed,
+    }))).slice(0, 12);
+    const gaps = (report.weakGroups || []).flatMap((row) => (row.gaps || []).map((gap) => ({
+        groupId: row.groupId,
+        binding_id: gap.binding_id || "",
+        packet_id: gap.packet_id || "",
+        project: gap.project || "",
+        reason: gap.reason || "provider override follow-up receipt validation repair pipeline incomplete",
+    }))).slice(0, 12);
+    const check = makeQualityCheck("worker_context_packet_pressure_provenance_provider_dispatch_override_followup_receipt_validation_repair", "WorkerContextPacket Provider Dispatch Override Follow-up Receipt Validation Repair", checked, passed, evidence, gaps, "Phase 152 validation 失败必须自动生成 open repair work item、dispatch candidate 和自包含 corrected-receipt retry brief；验证通过后必须关闭同一 work item 并退出 ready brief。");
+    check.report = report;
+    return check;
+}
+function buildWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptValidationTypedMemoryPolicyReport(options = {}) {
+    const groupIds = replayRepairDispatchBindingGroupIds(options);
+    const { buildGroupTypedMemoryRecall, buildPressureProvenancePreDispatchComplianceDispatchPolicy, readGroupTypedMemoryDistillationLedger, scanGroupTypedMemoryDocuments, } = require("../collaboration/group-memory-index");
+    const failureThreshold = Math.max(1, Number(options.providerOverrideFollowupReceiptValidationFailureThreshold
+        || options.provider_override_followup_receipt_validation_failure_threshold
+        || 2));
+    const rows = groupIds.map((groupId) => {
+        const bindingLedger = readGroupReplayRepairDispatchBindingLedger(groupId);
+        const typedLedger = readGroupTypedMemoryDistillationLedger(groupId);
+        const archive = typedLedger.pressureProvenanceProviderDispatchOverrideFollowupReceiptValidationArchive || {};
+        const archiveRows = Array.isArray(archive.rows) ? archive.rows : [];
+        const attributions = Array.isArray(archive.attributions) ? archive.attributions : [];
+        const docs = scanGroupTypedMemoryDocuments(groupId);
+        const historyDoc = docs.find((doc) => doc.relPath === "provider-dispatch-override-followup-receipt-validation-history.md");
+        const latestBindingValidations = (Array.isArray(bindingLedger.entries) ? bindingLedger.entries : [])
+            .map((entry) => ({
+            entry,
+            validation: workerContextProviderDispatchOverrideFollowupReceiptContractValidationFromEntry(entry) || {},
+        }))
+            .filter((item) => item.validation.schema === "ccm-worker-context-provider-dispatch-override-followup-receipt-contract-validation-v1");
+        const missingLatestBindingValidations = latestBindingValidations.filter((item) => !archiveRows.some((row) => String(row.validation_id || "") === String(item.validation.validation_id || "")));
+        const probes = attributions.map((attribution) => {
+            const agentType = String(attribution.agent_type || attribution.agentType || "unknown").trim() || "unknown";
+            const project = String(attribution.project || attribution.target_project || attribution.targetProject || "unknown").trim() || "unknown";
+            const policy = buildPressureProvenancePreDispatchComplianceDispatchPolicy(groupId, {
+                targetProject: project,
+                agentType,
+                providerOverrideFollowupReceiptValidationFailureThreshold: failureThreshold,
+                generatedAt: options.generatedAt || options.generated_at || now(),
+            });
+            const policyRows = Array.isArray(policy.policyRows || policy.policy_rows) ? (policy.policyRows || policy.policy_rows) : [];
+            const policyRow = policyRows.find((row) => String(row.agent_type || row.agentType || "unknown").toLowerCase() === agentType.toLowerCase()
+                && String(row.project || row.target_project || row.targetProject || "unknown").toLowerCase() === project.toLowerCase()) || policyRows[0] || {};
+            const attemptCount = Number(attribution.attempt_count || attribution.attemptCount || 0);
+            const failedCount = Number(attribution.failed_count || attribution.failedCount || 0);
+            const passedCount = Number(attribution.passed_count || attribution.passedCount || 0);
+            const consecutiveFailureCount = Number(attribution.consecutive_failure_count || attribution.consecutiveFailureCount || 0);
+            const expectedEscalated = consecutiveFailureCount >= failureThreshold;
+            const expectedRepairVerified = attribution.repair_verified === true || attribution.repairVerified === true;
+            const countsCovered = Number(policyRow.provider_override_followup_receipt_validation_attempt_count || 0) === attemptCount
+                && Number(policyRow.provider_override_followup_receipt_validation_failed_count || 0) === failedCount
+                && Number(policyRow.provider_override_followup_receipt_validation_passed_count || 0) === passedCount
+                && Number(policyRow.provider_override_followup_receipt_validation_consecutive_failure_count || 0) === consecutiveFailureCount;
+            const escalationCovered = !expectedEscalated || (policy.active === true
+                && policy.action === "hold_provider_after_repeated_override_followup_receipt_validation_failures"
+                && policyRow.provider_override_followup_receipt_validation_escalated === true);
+            const repairCovered = !expectedRepairVerified || (policyRow.provider_override_followup_receipt_validation_repair_verified === true
+                && policyRow.provider_override_followup_receipt_validation_escalated !== true
+                && policyRow.provider_override_followup_repaired === true);
+            const covered = countsCovered && escalationCovered && repairCovered;
+            return {
+                schema: "ccm-worker-context-provider-dispatch-override-followup-receipt-validation-typed-memory-policy-probe-v1",
+                agent_type: agentType,
+                project,
+                attemptCount,
+                failedCount,
+                passedCount,
+                consecutiveFailureCount,
+                expectedEscalated,
+                expectedRepairVerified,
+                policyActive: policy.active === true,
+                policyAction: policy.action || "",
+                policyEscalated: policyRow.provider_override_followup_receipt_validation_escalated === true,
+                policyRepairVerified: policyRow.provider_override_followup_receipt_validation_repair_verified === true,
+                policyProviderFollowupRepaired: policyRow.provider_override_followup_repaired === true,
+                countsCovered,
+                escalationCovered,
+                repairCovered,
+                covered,
+            };
+        });
+        const recall = archiveRows.length
+            ? buildGroupTypedMemoryRecall(groupId, "provider override follow-up corrected receipt validation consecutive failures repaired audit history", {
+                max: 8,
+                disableLedger: true,
+                forceMemory: true,
+                snippetChars: 320,
+            })
+            : { recalled: [] };
+        const recallCovered = JSON.stringify(recall.recalled || []).includes("provider-dispatch-override-followup-receipt-validation-history.md");
+        const failedProbes = probes.filter((probe) => !probe.covered);
+        const gaps = [];
+        if (archiveRows.length && (!historyDoc || historyDoc.type !== "feedback")) {
+            gaps.push({ reason: "corrected-receipt validation attempts missing feedback typed memory document" });
+        }
+        if (archiveRows.length && !recallCovered) {
+            gaps.push({ reason: "corrected-receipt validation typed memory cannot be recalled by policy evidence query" });
+        }
+        if (missingLatestBindingValidations.length) {
+            gaps.push({ reason: `${missingLatestBindingValidations.length} latest binding validation(s) missing from append-only typed archive` });
+        }
+        for (const probe of failedProbes.slice(0, 8)) {
+            gaps.push({
+                agent_type: probe.agent_type,
+                project: probe.project,
+                reason: `typed validation history not consumed by provider policy: counts=${probe.countsCovered} escalation=${probe.escalationCovered} repair=${probe.repairCovered}`,
+            });
+        }
+        const status = archiveRows.length === 0 ? "empty" : gaps.length === 0 ? "ok" : failedProbes.length < probes.length ? "warn" : "fail";
+        return {
+            schema: "ccm-worker-context-provider-dispatch-override-followup-receipt-validation-typed-memory-policy-group-v1",
+            groupId,
+            status,
+            bindingFile: bindingLedger.file || getGroupReplayRepairDispatchBindingLedgerFile(groupId),
+            typedMemoryLedgerFile: typedLedger.file || "",
+            typedMemoryDocFile: historyDoc?.file || "",
+            archivedAttemptCount: Number(archive.attempt_count || archiveRows.length || 0),
+            failedAttemptCount: Number(archive.failed_count || 0),
+            passedAttemptCount: Number(archive.passed_count || 0),
+            attributionCount: attributions.length,
+            coveredAttributionCount: probes.filter((probe) => probe.covered).length,
+            escalatedAttributionCount: probes.filter((probe) => probe.expectedEscalated && probe.escalationCovered).length,
+            repairedAttributionCount: probes.filter((probe) => probe.expectedRepairVerified && probe.repairCovered).length,
+            latestBindingValidationCount: latestBindingValidations.length,
+            archivedLatestBindingValidationCount: latestBindingValidations.length - missingLatestBindingValidations.length,
+            typedDocCount: Number(!!historyDoc),
+            recallCovered,
+            probes,
+            gaps: gaps.slice(0, 12),
+        };
+    });
+    const checkedRows = rows.filter((row) => Number(row.archivedAttemptCount || 0) > 0);
+    const passedRows = checkedRows.filter((row) => row.status === "ok");
+    const coverageRate = checkedRows.length ? Math.round((passedRows.length / checkedRows.length) * 1000) / 10 : null;
+    const status = coverageRate === null ? "empty" : coverageRate >= 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail";
+    return {
+        schema: "ccm-worker-context-provider-dispatch-override-followup-receipt-validation-typed-memory-policy-report-v1",
+        generatedAt: now(),
+        failureThreshold,
+        overall: {
+            status,
+            coverageRate,
+            groupCount: rows.length,
+            checkedGroupCount: checkedRows.length,
+            groupsCovered: passedRows.length,
+            archivedAttemptCount: checkedRows.reduce((sum, row) => sum + Number(row.archivedAttemptCount || 0), 0),
+            failedAttemptCount: checkedRows.reduce((sum, row) => sum + Number(row.failedAttemptCount || 0), 0),
+            passedAttemptCount: checkedRows.reduce((sum, row) => sum + Number(row.passedAttemptCount || 0), 0),
+            attributionCount: checkedRows.reduce((sum, row) => sum + Number(row.attributionCount || 0), 0),
+            coveredAttributionCount: checkedRows.reduce((sum, row) => sum + Number(row.coveredAttributionCount || 0), 0),
+            escalatedAttributionCount: checkedRows.reduce((sum, row) => sum + Number(row.escalatedAttributionCount || 0), 0),
+            repairedAttributionCount: checkedRows.reduce((sum, row) => sum + Number(row.repairedAttributionCount || 0), 0),
+            typedDocCount: checkedRows.reduce((sum, row) => sum + Number(row.typedDocCount || 0), 0),
+            recallCoveredCount: checkedRows.filter((row) => row.recallCovered).length,
+        },
+        groups: rows.sort((a, b) => Number(b.archivedAttemptCount || 0) - Number(a.archivedAttemptCount || 0)).slice(0, 50),
+        weakGroups: rows.filter((row) => row.status === "fail" || row.status === "warn").slice(0, 20),
+    };
+}
+function evaluateWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptValidationTypedMemoryPolicy(options = {}) {
+    const report = buildWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptValidationTypedMemoryPolicyReport(options);
+    const checked = Number(report.overall.attributionCount || 0);
+    const passed = (report.groups || [])
+        .filter((row) => row.status === "ok")
+        .reduce((sum, row) => sum + Number(row.coveredAttributionCount || 0), 0);
+    const evidence = (report.groups || []).flatMap((row) => (row.probes || []).filter((probe) => probe.covered).slice(0, 4).map((probe) => ({
+        groupId: row.groupId,
+        agent_type: probe.agent_type,
+        project: probe.project,
+        attemptCount: probe.attemptCount,
+        consecutiveFailureCount: probe.consecutiveFailureCount,
+        policyAction: probe.policyAction,
+        repairVerified: probe.policyRepairVerified,
+    }))).slice(0, 12);
+    const gaps = (report.weakGroups || []).flatMap((row) => (row.gaps || []).map((gap) => ({
+        groupId: row.groupId,
+        agent_type: gap.agent_type || "",
+        project: gap.project || "",
+        reason: gap.reason || "corrected-receipt validation typed memory or provider policy coverage missing",
+    }))).slice(0, 12);
+    const check = makeQualityCheck("worker_context_packet_pressure_provenance_provider_dispatch_override_followup_receipt_validation_typed_memory_policy", "WorkerContextPacket Provider Override Follow-up Receipt Validation Typed Memory Policy", checked, passed, evidence, gaps, "每次 corrected-receipt validation 必须追加到 feedback typed MEMORY.md；连续失败必须升级 provider hold，验证修复必须清零 active streak、恢复 monitored sampling，并保留全部失败审计历史。");
+    check.report = report;
+    return check;
+}
+function crossGroupProviderReliabilityForbiddenKeys(value, pathParts = [], out = []) {
+    if (!value || typeof value !== "object")
+        return out;
+    if (Array.isArray(value)) {
+        for (const item of value)
+            crossGroupProviderReliabilityForbiddenKeys(item, pathParts, out);
+        return out;
+    }
+    const forbidden = new Set([
+        "groupid", "group_id", "project", "project_name", "project_names",
+        "relpath", "rel_path", "memory_path", "memory_paths", "validation_id", "validation_ids",
+        "work_item_id", "work_item_ids", "task_id", "task_ids", "execution_id", "execution_ids",
+        "receipt", "receipt_evidence", "receipt_evidence_reasons", "gap_reason", "gap_reasons",
+    ]);
+    for (const [key, child] of Object.entries(value)) {
+        const normalized = String(key || "").trim().toLowerCase();
+        const nextPath = [...pathParts, key];
+        if (forbidden.has(normalized))
+            out.push(nextPath.join("."));
+        crossGroupProviderReliabilityForbiddenKeys(child, nextPath, out);
+    }
+    return out;
+}
+function buildWorkerContextPacketCrossGroupProviderReliabilityGuidanceReport(options = {}) {
+    const { buildGlobalProviderDispatchReliabilitySignals } = require("../collaboration/group-memory-index");
+    const globalSignals = buildGlobalProviderDispatchReliabilitySignals({
+        crossGroupProviderReliabilityGroupIds: options.crossGroupProviderReliabilityGroupIds || options.cross_group_provider_reliability_group_ids,
+        minSourceGroups: options.minSourceGroups || options.min_source_groups || options.crossGroupProviderReliabilityMinSourceGroups || options.cross_group_provider_reliability_min_source_groups || 2,
+        providerReliabilityHalfLifeDays: options.providerReliabilityHalfLifeDays || options.provider_reliability_half_life_days || 14,
+        providerOverrideFollowupReceiptValidationFailureThreshold: options.providerOverrideFollowupReceiptValidationFailureThreshold || options.provider_override_followup_receipt_validation_failure_threshold || 2,
+        generatedAt: options.generatedAt || options.generated_at || now(),
+        nowMs: options.nowMs || options.now_ms,
+    });
+    const forbiddenKeys = crossGroupProviderReliabilityForbiddenKeys(globalSignals);
+    const signals = (Array.isArray(globalSignals.signals) ? globalSignals.signals : []).map((signal) => {
+        const privacy = signal.privacy || {};
+        const guidanceSafe = signal.guidance_only === true
+            && signal.local_policy_override_allowed === false
+            && signal.contains_private_memory === false;
+        const privacySafe = privacy.group_ids_included === false
+            && privacy.project_names_included === false
+            && privacy.memory_paths_included === false
+            && privacy.task_or_execution_ids_included === false
+            && privacy.receipt_evidence_included === false;
+        const scoringComplete = Number(signal.half_life_days || 0) > 0
+            && Number(signal.risk_score || 0) >= 0
+            && Number(signal.confidence || 0) >= 0
+            && Number(signal.weighted_evidence || 0) >= 0;
+        const actionableSafe = signal.actionable !== true
+            || (Number(signal.source_group_count || 0) >= Number(signal.minimum_source_groups || 2)
+                && ["high", "medium", "low"].includes(String(signal.risk_status || "")));
+        return {
+            schema: "ccm-worker-context-cross-group-provider-reliability-guidance-probe-v1",
+            agent_type: signal.agent_type || "unknown",
+            risk_status: signal.risk_status || "empty",
+            risk_score: Number(signal.risk_score || 0),
+            confidence: Number(signal.confidence || 0),
+            source_group_count: Number(signal.source_group_count || 0),
+            active_failure_source_count: Number(signal.active_failure_source_count || 0),
+            attempt_count: Number(signal.attempt_count || 0),
+            half_life_days: Number(signal.half_life_days || 0),
+            actionable: signal.actionable === true,
+            recommendation: signal.recommendation || "",
+            guidanceSafe,
+            privacySafe,
+            scoringComplete,
+            actionableSafe,
+            covered: guidanceSafe && privacySafe && scoringComplete && actionableSafe,
+        };
+    });
+    const gaps = [];
+    if (globalSignals.guidance_only !== true || globalSignals.local_policy_override_allowed !== false || globalSignals.contains_private_memory !== false) {
+        gaps.push({ reason: "global provider reliability envelope does not enforce guidance-only local-first semantics" });
+    }
+    if (forbiddenKeys.length) {
+        gaps.push({ reason: `privacy-redacted provider reliability output exposes forbidden field(s): ${forbiddenKeys.slice(0, 8).join(", ")}` });
+    }
+    for (const signal of signals.filter((item) => !item.covered).slice(0, 8)) {
+        gaps.push({
+            agent_type: signal.agent_type,
+            reason: `provider reliability signal incomplete: guidance=${signal.guidanceSafe} privacy=${signal.privacySafe} scoring=${signal.scoringComplete} actionable=${signal.actionableSafe}`,
+        });
+    }
+    const status = signals.length === 0 ? "empty" : gaps.length === 0 ? "ok" : signals.some((signal) => signal.covered) ? "warn" : "fail";
+    return {
+        schema: "ccm-worker-context-cross-group-provider-reliability-guidance-report-v1",
+        generatedAt: now(),
+        overall: {
+            status,
+            coverageRate: signals.length ? Math.round((signals.filter((signal) => signal.covered).length / signals.length) * 1000) / 10 : null,
+            signalCount: signals.length,
+            coveredSignalCount: signals.filter((signal) => signal.covered).length,
+            actionableSignalCount: signals.filter((signal) => signal.actionable).length,
+            highRiskSignalCount: signals.filter((signal) => signal.risk_status === "high").length,
+            privacyGapCount: forbiddenKeys.length + gaps.filter((gap) => /privacy|guidance-only|local-first/i.test(gap.reason || "")).length,
+            forbiddenFieldCount: forbiddenKeys.length,
+        },
+        guidance: {
+            guidance_only: globalSignals.guidance_only === true,
+            local_policy_override_allowed: globalSignals.local_policy_override_allowed === true,
+            contains_private_memory: globalSignals.contains_private_memory === true,
+        },
+        signals,
+        highRiskSignals: signals.filter((signal) => signal.risk_status === "high" && signal.actionable).slice(0, 16),
+        gaps: gaps.slice(0, 12),
+    };
+}
+function evaluateWorkerContextPacketCrossGroupProviderReliabilityGuidance(options = {}) {
+    const report = buildWorkerContextPacketCrossGroupProviderReliabilityGuidanceReport(options);
+    const checked = Number(report.overall.signalCount || 0);
+    const passed = Number(report.overall.coveredSignalCount || 0);
+    const evidence = (report.signals || []).filter((signal) => signal.covered).slice(0, 12).map((signal) => ({
+        agent_type: signal.agent_type,
+        risk_status: signal.risk_status,
+        risk_score: signal.risk_score,
+        confidence: signal.confidence,
+        source_group_count: signal.source_group_count,
+        half_life_days: signal.half_life_days,
+        actionable: signal.actionable,
+    }));
+    const gaps = (report.gaps || []).slice(0, 12).map((gap) => ({
+        agent_type: gap.agent_type || "",
+        reason: gap.reason || "cross-group provider reliability privacy/local-first invariant missing",
+    }));
+    const check = makeQualityCheck("worker_context_packet_cross_group_provider_reliability_guidance", "WorkerContextPacket Cross-Group Provider Reliability Guidance", checked, passed, evidence, gaps, "全局/跨群 provider reliability 只允许输出时间衰减后的脱敏聚合值；不得包含群、项目或回执证据，且只能增加 sampling/monitoring，不能覆盖本群 local-first hold/allow 决策。");
+    check.report = report;
+    return check;
+}
+function buildWorkerContextPacketProviderReliabilitySnapshotRankingReport(options = {}) {
+    const { readGlobalProviderDispatchReliabilitySnapshot } = require("../collaboration/group-memory-index");
+    const snapshotRead = readGlobalProviderDispatchReliabilitySnapshot({
+        snapshotFile: options.providerReliabilitySnapshotFile || options.provider_reliability_snapshot_file,
+        crossGroupProviderReliabilityGroupIds: options.crossGroupProviderReliabilityGroupIds || options.cross_group_provider_reliability_group_ids,
+        minSourceGroups: options.minSourceGroups || options.min_source_groups || options.crossGroupProviderReliabilityMinSourceGroups || options.cross_group_provider_reliability_min_source_groups || 2,
+        providerReliabilityHalfLifeDays: options.providerReliabilityHalfLifeDays || options.provider_reliability_half_life_days || 14,
+        providerOverrideFollowupReceiptValidationFailureThreshold: options.providerOverrideFollowupReceiptValidationFailureThreshold || options.provider_override_followup_receipt_validation_failure_threshold || 2,
+        nowMs: options.nowMs || options.now_ms || options.providerReliabilitySnapshotNowMs || options.provider_reliability_snapshot_now_ms,
+        generatedAt: options.generatedAt || options.generated_at || now(),
+        allowRefresh: false,
+    });
+    const snapshot = snapshotRead.snapshot || {};
+    const snapshotPrivacyGaps = snapshot?.signals ? crossGroupProviderReliabilityForbiddenKeys(snapshot.signals) : [];
+    const snapshotCovered = snapshotRead.usable === true
+        && snapshotRead.status === "fresh"
+        && snapshot.guidance_only === true
+        && snapshot.local_policy_override_allowed === false
+        && snapshot.contains_private_memory === false
+        && !!snapshot.snapshot_checksum
+        && !!snapshot.payload_checksum
+        && !!snapshot.generation_id
+        && snapshotPrivacyGaps.length === 0;
+    const groupIds = replayRepairDispatchBindingGroupIds(options);
+    const groups = groupIds.map((groupId) => {
+        const ledger = readGroupReplayRepairDispatchBindingLedger(groupId);
+        const checks = (Array.isArray(ledger.entries) ? ledger.entries : [])
+            .map((entry) => {
+            const advisory = entry.worker_context_packet_pressure_provenance_provider_dispatch_advisory
+                || entry.worker_context_provider_dispatch_decision?.pressure_provenance_provider_dispatch_advisory
+                || entry.worker_context_pre_dispatch_gate?.pressure_provenance_provider_dispatch_advisory
+                || {};
+            const snapshotRef = advisory.provider_reliability_snapshot || advisory.providerReliabilitySnapshot || {};
+            const alternatives = Array.isArray(advisory.safer_alternatives || advisory.saferAlternatives)
+                ? (advisory.safer_alternatives || advisory.saferAlternatives)
+                : [];
+            const selected = advisory.selected_candidate || advisory.selectedCandidate || {};
+            const decision = entry.worker_context_provider_dispatch_decision || {};
+            const gate = entry.worker_context_pre_dispatch_gate || {};
+            if (!snapshotRef.snapshot_id && !alternatives.length)
+                return null;
+            const snapshotMatches = snapshotCovered
+                && snapshotRef.snapshot_id === snapshot.snapshot_id
+                && snapshotRef.snapshot_checksum === snapshot.snapshot_checksum
+                && snapshotRef.generation_id === snapshot.generation_id
+                && snapshotRef.status === "fresh";
+            const alternativesSafe = alternatives.every((candidate) => candidate.configured === true
+                && candidate.safer_than_selected === true
+                && String(candidate.project || "").toLowerCase() === String(selected.project || entry.project || "").toLowerCase()
+                && candidate.snapshot_id === snapshot.snapshot_id
+                && candidate.snapshot_checksum === snapshot.snapshot_checksum);
+            const assignmentUnchanged = String(decision.agent_type || decision.selected_provider?.agent_type || entry.agent_type || "").toLowerCase()
+                === String(selected.agent_type || entry.agent_type || "").toLowerCase()
+                && decision.auto_switch_provider_allowed !== true;
+            const localFirstCovered = gate.provider_dispatch_hold !== true
+                || (gate.dispatch_ready === false && decision.action === "hold_until_repair");
+            const covered = snapshotMatches && alternativesSafe && assignmentUnchanged && localFirstCovered;
+            return {
+                schema: "ccm-worker-context-provider-reliability-snapshot-ranking-check-v1",
+                groupId,
+                binding_id: entry.binding_id || "",
+                project: entry.project || selected.project || "",
+                selected_agent_type: selected.agent_type || entry.agent_type || "unknown",
+                snapshot_id: snapshotRef.snapshot_id || "",
+                snapshot_status: snapshotRef.status || "",
+                safer_alternative_count: alternatives.length,
+                safer_alternative_agent_types: alternatives.map((candidate) => candidate.agent_type || "").filter(Boolean),
+                snapshotMatches,
+                alternativesSafe,
+                assignmentUnchanged,
+                localFirstCovered,
+                covered,
+            };
+        })
+            .filter(Boolean);
+        const failed = checks.filter((check) => !check.covered);
+        return {
+            schema: "ccm-worker-context-provider-reliability-snapshot-ranking-group-v1",
+            groupId,
+            status: checks.length === 0 ? "empty" : failed.length === 0 ? "ok" : checks.length > failed.length ? "warn" : "fail",
+            bindingFile: ledger.file || getGroupReplayRepairDispatchBindingLedgerFile(groupId),
+            checkedBindingCount: checks.length,
+            coveredBindingCount: checks.filter((check) => check.covered).length,
+            saferAlternativeCount: checks.reduce((sum, check) => sum + Number(check.safer_alternative_count || 0), 0),
+            checks,
+            gaps: failed.slice(0, 12).map((check) => ({
+                binding_id: check.binding_id,
+                project: check.project,
+                reason: `provider snapshot/ranking invariant missing: snapshot=${check.snapshotMatches} alternatives=${check.alternativesSafe} assignment=${check.assignmentUnchanged} localFirst=${check.localFirstCovered}`,
+            })),
+        };
+    });
+    const checkedGroups = groups.filter((group) => Number(group.checkedBindingCount || 0) > 0);
+    const coveredGroups = checkedGroups.filter((group) => group.status === "ok");
+    const gaps = [];
+    if (snapshotRead.status !== "missing" && !snapshotCovered) {
+        gaps.push({
+            reason: `global provider reliability snapshot is not usable: status=${snapshotRead.status || "unknown"} gaps=${(snapshotRead.validation?.gaps || []).join(",")}`,
+        });
+    }
+    if (snapshotPrivacyGaps.length)
+        gaps.push({ reason: `snapshot exposes forbidden private field(s): ${snapshotPrivacyGaps.slice(0, 8).join(", ")}` });
+    for (const group of groups.filter((row) => row.status === "fail" || row.status === "warn"))
+        gaps.push(...(group.gaps || []));
+    const checked = Number(snapshotRead.status !== "missing") + checkedGroups.reduce((sum, group) => sum + Number(group.checkedBindingCount || 0), 0);
+    const passed = Number(snapshotCovered) + checkedGroups.reduce((sum, group) => sum + Number(group.coveredBindingCount || 0), 0);
+    const status = checked === 0 ? "empty" : gaps.length === 0 && passed === checked ? "ok" : passed > 0 ? "warn" : "fail";
+    return {
+        schema: "ccm-worker-context-provider-reliability-snapshot-ranking-report-v1",
+        generatedAt: now(),
+        overall: {
+            status,
+            coverageRate: checked ? Math.round((passed / checked) * 1000) / 10 : null,
+            checked,
+            passed,
+            snapshotStatus: snapshotRead.status || "missing",
+            snapshotCovered,
+            checkedGroupCount: checkedGroups.length,
+            coveredGroupCount: coveredGroups.length,
+            checkedBindingCount: checkedGroups.reduce((sum, group) => sum + Number(group.checkedBindingCount || 0), 0),
+            coveredBindingCount: checkedGroups.reduce((sum, group) => sum + Number(group.coveredBindingCount || 0), 0),
+            saferAlternativeCount: checkedGroups.reduce((sum, group) => sum + Number(group.saferAlternativeCount || 0), 0),
+            privacyGapCount: snapshotPrivacyGaps.length,
+        },
+        snapshot: snapshotRead.snapshot ? {
+            snapshot_id: snapshot.snapshot_id || "",
+            generation_id: snapshot.generation_id || "",
+            snapshot_checksum: snapshot.snapshot_checksum || "",
+            payload_checksum: snapshot.payload_checksum || "",
+            status: snapshotRead.status || "",
+            usable: snapshotRead.usable === true,
+            generated_at: snapshot.generated_at || "",
+            expires_at: snapshot.expires_at || "",
+            source_generation_checksum: snapshot.source_provenance?.generation_checksum || "",
+            source_ledger_count: Number(snapshot.source_provenance?.source_ledger_count || 0),
+        } : null,
+        groups,
+        weakGroups: groups.filter((group) => group.status === "fail" || group.status === "warn").slice(0, 20),
+        gaps: gaps.slice(0, 16),
+    };
+}
+function evaluateWorkerContextPacketProviderReliabilitySnapshotRanking(options = {}) {
+    const report = buildWorkerContextPacketProviderReliabilitySnapshotRankingReport(options);
+    const checked = Number(report.overall.checked || 0);
+    const passed = Number(report.overall.passed || 0);
+    const evidence = [
+        ...(report.overall.snapshotCovered && report.snapshot ? [{
+                snapshot_id: report.snapshot.snapshot_id,
+                generation_id: report.snapshot.generation_id,
+                snapshot_checksum: report.snapshot.snapshot_checksum,
+                expires_at: report.snapshot.expires_at,
+            }] : []),
+        ...(report.groups || []).flatMap((group) => (group.checks || []).filter((check) => check.covered).slice(0, 4).map((check) => ({
+            groupId: group.groupId,
+            binding_id: check.binding_id,
+            selected_agent_type: check.selected_agent_type,
+            safer_alternative_agent_types: check.safer_alternative_agent_types,
+            snapshot_id: check.snapshot_id,
+        }))),
+    ].slice(0, 12);
+    const gaps = (report.gaps || []).slice(0, 12).map((gap) => ({
+        groupId: gap.groupId || "",
+        binding_id: gap.binding_id || "",
+        reason: gap.reason || "provider reliability snapshot freshness/ranking invariant missing",
+    }));
+    const check = makeQualityCheck("worker_context_packet_provider_reliability_snapshot_ranking", "WorkerContextPacket Provider Reliability Snapshot Ranking", checked, passed, evidence, gaps, "全局 provider reliability 快照必须通过 TTL、payload/snapshot checksum 和来源代次校验；只有 fresh 快照可以排序显式配置的同项目 runner，排序不得自动替换当前 assignment，也不得绕过本群 hold。");
+    check.report = report;
+    return check;
+}
+function buildWorkerContextPacketProviderSwitchDecisionReceiptReport(options = {}) {
+    const { validateProviderSwitchDecisionReceiptForCoordinator } = require("../collaboration/group-orchestrator");
+    const groupIds = replayRepairDispatchBindingGroupIds(options);
+    const groups = groupIds.map((groupId) => {
+        const ledger = readGroupReplayRepairDispatchBindingLedger(groupId);
+        const checks = (Array.isArray(ledger.entries) ? ledger.entries : [])
+            .map((entry) => {
+            const decision = entry.worker_context_provider_dispatch_decision || entry.provider_dispatch_decision || {};
+            const advisory = entry.worker_context_packet_pressure_provenance_provider_dispatch_advisory
+                || decision.pressure_provenance_provider_dispatch_advisory
+                || {};
+            const receipt = entry.worker_context_provider_switch_decision_receipt
+                || entry.provider_switch_decision_receipt
+                || {};
+            const sessionBinding = entry.worker_context_provider_switch_session_binding
+                || entry.provider_switch_session_binding
+                || {};
+            const executionReceipt = entry.worker_context_provider_switch_execution_receipt
+                || entry.provider_switch_execution_receipt
+                || {};
+            const ledgerState = entry.provider_switch_ledger_state || {};
+            const saferAlternatives = Array.isArray(advisory.safer_alternatives || advisory.saferAlternatives)
+                ? (advisory.safer_alternatives || advisory.saferAlternatives)
+                : [];
+            const advisedAlternative = ledgerState.advised_alternative === true
+                || decision.advised_alternative === true
+                || receipt.advised_alternative === true
+                || Number(advisory.safer_alternative_count || advisory.saferAlternativeCount || 0) > 0
+                || saferAlternatives.length > 0;
+            const approvedSwitch = receipt.schema === "ccm-provider-switch-decision-receipt-v1"
+                && receipt.valid === true
+                && receipt.status === "approved"
+                && receipt.approved_switch === true;
+            const actuallyExecutedProvider = String(executionReceipt.actually_executed_provider
+                || ledgerState.actually_executed_provider
+                || "").trim();
+            const hasSessionBinding = sessionBinding.schema === "ccm-provider-switch-child-session-binding-v1";
+            const hasExecutionReceipt = executionReceipt.schema === "ccm-provider-switch-execution-receipt-v1"
+                || !!actuallyExecutedProvider;
+            if (!advisedAlternative && !receipt.schema && !hasSessionBinding && !hasExecutionReceipt)
+                return null;
+            const expectedProvider = String(receipt.new_provider?.agent_type || receipt.newProvider?.agentType || "").trim();
+            const validation = approvedSwitch
+                ? validateProviderSwitchDecisionReceiptForCoordinator(receipt, {
+                    verifySnapshot: false,
+                    groupId,
+                    project: entry.project || receipt.project || "",
+                    assignmentId: entry.assignment_id || "",
+                    dispatchKey: entry.dispatch_key || "",
+                    nowMs: Date.parse(String(receipt.decided_at || "")) || Date.now(),
+                })
+                : null;
+            const gaps = [];
+            if (!advisedAlternative)
+                gaps.push("advised_alternative_missing");
+            if (decision.schema && decision.advised_alternative !== advisedAlternative)
+                gaps.push("decision_advised_state_mismatch");
+            if (decision.schema && decision.approved_switch !== approvedSwitch)
+                gaps.push("decision_approved_state_mismatch");
+            if (ledgerState.advised_alternative !== undefined && ledgerState.advised_alternative !== advisedAlternative)
+                gaps.push("ledger_advised_state_mismatch");
+            if (ledgerState.approved_switch !== undefined && ledgerState.approved_switch !== approvedSwitch)
+                gaps.push("ledger_approved_state_mismatch");
+            if (receipt.schema === "ccm-provider-switch-decision-receipt-v1" && receipt.status === "rejected") {
+                if (receipt.approved_switch === true || receipt.valid === true)
+                    gaps.push("rejected_receipt_claims_approval");
+                if (!Array.isArray(receipt.gaps) || receipt.gaps.length === 0)
+                    gaps.push("rejected_receipt_gaps_missing");
+            }
+            if (approvedSwitch) {
+                if (validation?.valid !== true)
+                    gaps.push(...(validation?.gaps || ["decision_receipt_validation_failed"]));
+                if (decision.action && decision.action !== "dispatch_with_provider_switch")
+                    gaps.push("provider_switch_dispatch_action_missing");
+                if (!entry.worker_context_packet_render_probe?.rendered_flags?.has_provider_switch_decision_receipt)
+                    gaps.push("decision_receipt_not_rendered");
+                if (hasSessionBinding) {
+                    if (sessionBinding.status !== "bound" || sessionBinding.valid !== true)
+                        gaps.push("session_binding_not_bound");
+                    if (sessionBinding.provider_switch_decision_receipt_id !== receipt.receipt_id)
+                        gaps.push("session_decision_receipt_id_mismatch");
+                    if (sessionBinding.provider_switch_decision_receipt_checksum !== receipt.receipt_checksum)
+                        gaps.push("session_decision_receipt_checksum_mismatch");
+                    if (String(sessionBinding.expected_provider || "").toLowerCase() !== expectedProvider.toLowerCase())
+                        gaps.push("session_expected_provider_mismatch");
+                    if (String(sessionBinding.session_provider || "").toLowerCase() !== expectedProvider.toLowerCase())
+                        gaps.push("session_provider_mismatch");
+                    if (!sessionBinding.task_agent_session_id)
+                        gaps.push("session_task_agent_session_id_missing");
+                }
+                else if (entry.task_agent_session_id || entry.native_session_id || entry.execution_id || hasExecutionReceipt) {
+                    gaps.push("approved_switch_session_binding_missing");
+                }
+                if (hasExecutionReceipt) {
+                    if (executionReceipt.status !== "passed" || executionReceipt.executed_as_approved !== true)
+                        gaps.push("execution_receipt_not_passed");
+                    if (executionReceipt.system_attested !== true)
+                        gaps.push("execution_receipt_not_system_attested");
+                    if (executionReceipt.child_declared !== true)
+                        gaps.push("execution_child_declaration_missing");
+                    if (executionReceipt.provider_switch_decision_receipt_id !== receipt.receipt_id)
+                        gaps.push("execution_decision_receipt_id_mismatch");
+                    if (executionReceipt.provider_switch_decision_receipt_checksum !== receipt.receipt_checksum)
+                        gaps.push("execution_decision_receipt_checksum_mismatch");
+                    if (String(executionReceipt.expected_provider || "").toLowerCase() !== expectedProvider.toLowerCase())
+                        gaps.push("execution_expected_provider_mismatch");
+                    if (String(executionReceipt.actually_executed_provider || "").toLowerCase() !== expectedProvider.toLowerCase())
+                        gaps.push("execution_provider_mismatch");
+                    if (hasSessionBinding && executionReceipt.task_agent_session_id !== sessionBinding.task_agent_session_id)
+                        gaps.push("execution_task_agent_session_id_mismatch");
+                    if (hasSessionBinding && sessionBinding.native_session_id && executionReceipt.native_session_id !== sessionBinding.native_session_id)
+                        gaps.push("execution_native_session_id_mismatch");
+                    if (!executionReceipt.execution_id)
+                        gaps.push("execution_id_missing");
+                }
+                else if (entry.receipt_status && ["done", "partial", "failed", "blocked"].includes(String(entry.receipt_status).toLowerCase())) {
+                    gaps.push("approved_switch_execution_receipt_missing");
+                }
+            }
+            else {
+                if (decision.approved_switch === true || ledgerState.approved_switch === true)
+                    gaps.push("approval_claim_without_valid_receipt");
+                if (hasSessionBinding)
+                    gaps.push("session_binding_without_approved_switch");
+                if (hasExecutionReceipt)
+                    gaps.push("execution_without_approved_switch");
+            }
+            const lifecycle = hasExecutionReceipt
+                ? "executed"
+                : hasSessionBinding
+                    ? "session_bound"
+                    : approvedSwitch
+                        ? "approved_pending_session"
+                        : receipt.status === "rejected"
+                            ? "rejected"
+                            : "advised_only";
+            return {
+                schema: "ccm-worker-context-provider-switch-decision-receipt-check-v1",
+                groupId,
+                binding_id: entry.binding_id || "",
+                assignment_id: entry.assignment_id || "",
+                project: entry.project || receipt.project || "",
+                old_provider: receipt.old_provider?.agent_type || entry.agent_type || "",
+                expected_provider: expectedProvider,
+                actually_executed_provider: actuallyExecutedProvider,
+                receipt_id: receipt.receipt_id || "",
+                snapshot_id: receipt.provider_reliability_snapshot?.snapshot_id || "",
+                advised_alternative: advisedAlternative,
+                approved_switch: approvedSwitch,
+                session_bound: hasSessionBinding && sessionBinding.status === "bound",
+                execution_recorded: hasExecutionReceipt,
+                execution_passed: executionReceipt.status === "passed",
+                lifecycle,
+                gaps: [...new Set(gaps)],
+                covered: gaps.length === 0,
+            };
+        })
+            .filter(Boolean);
+        const failed = checks.filter((check) => !check.covered);
+        return {
+            schema: "ccm-worker-context-provider-switch-decision-receipt-group-v1",
+            groupId,
+            status: checks.length === 0 ? "empty" : failed.length === 0 ? "ok" : checks.length > failed.length ? "warn" : "fail",
+            bindingFile: ledger.file || getGroupReplayRepairDispatchBindingLedgerFile(groupId),
+            checkedBindingCount: checks.length,
+            coveredBindingCount: checks.filter((check) => check.covered).length,
+            advisedAlternativeCount: checks.filter((check) => check.advised_alternative).length,
+            approvedSwitchCount: checks.filter((check) => check.approved_switch).length,
+            sessionBoundCount: checks.filter((check) => check.session_bound).length,
+            executedProviderCount: checks.filter((check) => check.execution_recorded).length,
+            executionPassedCount: checks.filter((check) => check.execution_passed).length,
+            checks,
+            gaps: failed.slice(0, 12).map((check) => ({
+                groupId,
+                binding_id: check.binding_id,
+                assignment_id: check.assignment_id,
+                project: check.project,
+                lifecycle: check.lifecycle,
+                reason: `provider switch decision receipt invariant missing: ${check.gaps.join(", ")}`,
+            })),
+        };
+    });
+    const checkedGroups = groups.filter((group) => Number(group.checkedBindingCount || 0) > 0);
+    const checked = checkedGroups.reduce((sum, group) => sum + Number(group.checkedBindingCount || 0), 0);
+    const passed = checkedGroups.reduce((sum, group) => sum + Number(group.coveredBindingCount || 0), 0);
+    const gaps = groups.flatMap((group) => group.gaps || []).slice(0, 20);
+    return {
+        schema: "ccm-worker-context-provider-switch-decision-receipt-report-v1",
+        generatedAt: now(),
+        overall: {
+            status: checked === 0 ? "empty" : passed === checked ? "ok" : passed > 0 ? "warn" : "fail",
+            coverageRate: checked ? Math.round((passed / checked) * 1000) / 10 : null,
+            checkedBindingCount: checked,
+            coveredBindingCount: passed,
+            advisedAlternativeCount: checkedGroups.reduce((sum, group) => sum + Number(group.advisedAlternativeCount || 0), 0),
+            approvedSwitchCount: checkedGroups.reduce((sum, group) => sum + Number(group.approvedSwitchCount || 0), 0),
+            sessionBoundCount: checkedGroups.reduce((sum, group) => sum + Number(group.sessionBoundCount || 0), 0),
+            executedProviderCount: checkedGroups.reduce((sum, group) => sum + Number(group.executedProviderCount || 0), 0),
+            executionPassedCount: checkedGroups.reduce((sum, group) => sum + Number(group.executionPassedCount || 0), 0),
+        },
+        groups,
+        weakGroups: groups.filter((group) => group.status === "fail" || group.status === "warn").slice(0, 20),
+        gaps,
+    };
+}
+function evaluateWorkerContextPacketProviderSwitchDecisionReceipt(options = {}) {
+    const report = buildWorkerContextPacketProviderSwitchDecisionReceiptReport(options);
+    const checked = Number(report.overall.checkedBindingCount || 0);
+    const passed = Number(report.overall.coveredBindingCount || 0);
+    const evidence = (report.groups || []).flatMap((group) => (group.checks || []).filter((check) => check.covered).slice(0, 4).map((check) => ({
+        groupId: group.groupId,
+        binding_id: check.binding_id,
+        lifecycle: check.lifecycle,
+        receipt_id: check.receipt_id,
+        expected_provider: check.expected_provider,
+        actually_executed_provider: check.actually_executed_provider,
+    }))).slice(0, 12);
+    const gaps = (report.gaps || []).slice(0, 12).map((gap) => ({
+        groupId: gap.groupId || "",
+        binding_id: gap.binding_id || "",
+        lifecycle: gap.lifecycle || "",
+        reason: gap.reason || "provider switch decision receipt invariant missing",
+    }));
+    const check = makeQualityCheck("worker_context_packet_provider_switch_decision_receipt", "WorkerContextPacket Provider Switch Decision Receipt", checked, passed, evidence, gaps, "Provider reliability 只能提出 advised alternative；只有 fresh/checksummed decision receipt 加本地权限和任务兼容证据才能批准切换。批准后必须绑定实际子 Agent session，最终由 CCM 真实 runner/session 与子 Agent providerSwitchExecution 双重证明 executed provider。");
+    check.report = report;
+    return check;
+}
+function providerSwitchExecutionReceiptFromMemoryCenterEntry(entry = {}) {
+    return entry.worker_context_provider_switch_execution_receipt
+        || entry.workerContextProviderSwitchExecutionReceipt
+        || entry.provider_switch_execution_receipt
+        || entry.providerSwitchExecutionReceipt
+        || {};
+}
+function providerSwitchExecutionTypedMemoryArchiveMatchesEntry(row = {}, entry = {}) {
+    const receipt = providerSwitchExecutionReceiptFromMemoryCenterEntry(entry);
+    const receiptId = String(receipt.execution_receipt_id || receipt.executionReceiptId || "").trim();
+    const decisionId = String(receipt.provider_switch_decision_receipt_id || receipt.providerSwitchDecisionReceiptId || "").trim();
+    const executionId = String(receipt.execution_id || receipt.executionId || entry.execution_id || entry.executionId || "").trim();
+    if (receiptId && receiptId === String(row.execution_receipt_id || row.executionReceiptId || "").trim())
+        return true;
+    if (decisionId && decisionId === String(row.provider_switch_decision_receipt_id || row.providerSwitchDecisionReceiptId || "").trim()
+        && executionId && executionId === String(row.execution_id || row.executionId || "").trim())
+        return true;
+    return false;
+}
+function providerSwitchExecutionTypedMemoryProbeQuery(entries = []) {
+    return compactMemoryCenterText(entries.map((entry) => {
+        const receipt = providerSwitchExecutionReceiptFromMemoryCenterEntry(entry);
+        return [
+            entry.project,
+            receipt.project,
+            receipt.expected_provider,
+            receipt.actually_executed_provider,
+            receipt.provider_switch_decision_receipt_id,
+            receipt.execution_receipt_id,
+            receipt.task_agent_session_id,
+            receipt.execution_id,
+            ...(Array.isArray(receipt.gaps) ? receipt.gaps : []),
+            "provider switch execution typed memory mismatch history",
+        ].filter(Boolean).join(" ");
+    }).filter(Boolean).join("\n") || "provider switch execution typed memory", 4200);
+}
+function buildWorkerContextPacketProviderSwitchExecutionTypedMemoryReport(options = {}) {
+    const groupIds = replayRepairDispatchBindingGroupIds(options);
+    const { buildGroupTypedMemoryRecall, buildPressureProvenancePreDispatchComplianceDispatchPolicy, distillProviderSwitchExecutionToTypedMemory, readGroupTypedMemoryDistillationLedger, scanGroupTypedMemoryDocuments, } = require("../collaboration/group-memory-index");
+    const rows = groupIds.map((groupId) => {
+        const bindingLedger = readGroupReplayRepairDispatchBindingLedger(groupId);
+        const entries = (Array.isArray(bindingLedger.entries) ? bindingLedger.entries : [])
+            .filter((entry) => providerSwitchExecutionReceiptFromMemoryCenterEntry(entry).schema === "ccm-provider-switch-execution-receipt-v1");
+        const distillation = entries.length
+            ? distillProviderSwitchExecutionToTypedMemory(groupId, { rows: entries }, {
+                reason: "memory-center-provider-switch-execution-typed-memory-report",
+                updatedAt: options.generatedAt || options.generated_at || now(),
+            })
+            : null;
+        const typedLedger = readGroupTypedMemoryDistillationLedger(groupId);
+        const archive = typedLedger.providerSwitchExecutionArchive || {};
+        const archiveRows = Array.isArray(archive.rows) ? archive.rows : [];
+        const archivedEntries = entries.filter((entry) => archiveRows.some((row) => providerSwitchExecutionTypedMemoryArchiveMatchesEntry(row, entry)));
+        const docs = scanGroupTypedMemoryDocuments(groupId);
+        const recallDoc = docs.find((doc) => doc.relPath === "provider-switch-execution-memory.md");
+        const recall = entries.length
+            ? buildGroupTypedMemoryRecall(groupId, providerSwitchExecutionTypedMemoryProbeQuery(entries), {
+                max: 8,
+                disableLedger: true,
+                forceMemory: true,
+                snippetChars: 320,
+            })
+            : { recalled: [] };
+        const recalledText = JSON.stringify(recall.recalled || []);
+        const attributions = Array.isArray(archive.attributions) ? archive.attributions : [];
+        const probes = attributions.map((attribution) => {
+            const agentType = String(attribution.agent_type || attribution.agentType || attribution.expected_provider || "unknown").trim() || "unknown";
+            const project = String(attribution.project || attribution.target_project || attribution.targetProject || "unknown").trim() || "unknown";
+            const policy = buildPressureProvenancePreDispatchComplianceDispatchPolicy(groupId, {
+                targetProject: project,
+                agentType,
+                providerSwitchExecutionMismatchThreshold: Math.max(1, Number(options.providerSwitchExecutionMismatchThreshold || options.provider_switch_execution_mismatch_threshold || 1)),
+                disableCrossGroupProviderReliability: true,
+                generatedAt: options.generatedAt || options.generated_at || now(),
+            });
+            const policyRows = Array.isArray(policy.policyRows || policy.policy_rows) ? (policy.policyRows || policy.policy_rows) : [];
+            const policyRow = policyRows.find((row) => String(row.agent_type || row.agentType || "unknown").toLowerCase() === agentType.toLowerCase()
+                && String(row.project || row.target_project || row.targetProject || "unknown").toLowerCase() === project.toLowerCase()) || policyRows[0] || {};
+            const covered = policy.providerSwitchExecutionHistoryEnabled !== false
+                && Number(policyRow.provider_switch_execution_executed_count || 0) >= Number(attribution.executed_count || attribution.executedCount || 0)
+                && Number(policyRow.provider_switch_execution_mismatch_count || 0) >= Number(attribution.mismatch_count || attribution.mismatchCount || 0);
+            const rankingSignalCovered = Number(attribution.mismatch_count || attribution.mismatchCount || 0) > 0
+                ? Number(policyRow.provider_switch_execution_weighted_risk_score || 0) > 0
+                    && Number(policyRow.provider_switch_execution_decayed_mismatch_score || 0) > 0
+                : Number(policyRow.provider_switch_execution_decayed_passed_score || 0) > 0
+                    || Number(attribution.executed_count || attribution.executedCount || 0) === 0;
+            const rowIds = Array.isArray(policyRow.provider_switch_execution_row_ids || policyRow.providerSwitchExecutionRowIds)
+                ? (policyRow.provider_switch_execution_row_ids || policyRow.providerSwitchExecutionRowIds)
+                : [];
+            const memoryRelPaths = Array.isArray(policyRow.provider_switch_execution_memory_rel_paths || policyRow.providerSwitchExecutionMemoryRelPaths)
+                ? (policyRow.provider_switch_execution_memory_rel_paths || policyRow.providerSwitchExecutionMemoryRelPaths)
+                : [];
+            const provenanceCovered = memoryRelPaths.includes("provider-switch-execution-memory.md")
+                && rowIds.some((id) => String(id || "").startsWith("provider-switch-execution:"));
+            return {
+                schema: "ccm-worker-context-provider-switch-execution-typed-memory-policy-probe-v1",
+                agent_type: agentType,
+                project,
+                executedCount: Number(attribution.executed_count || attribution.executedCount || 0),
+                mismatchCount: Number(attribution.mismatch_count || attribution.mismatchCount || 0),
+                policyAction: policy.action || "",
+                policyActive: policy.active === true,
+                rowExecutedCount: Number(policyRow.provider_switch_execution_executed_count || 0),
+                rowMismatchCount: Number(policyRow.provider_switch_execution_mismatch_count || 0),
+                rowMismatchEscalated: policyRow.provider_switch_execution_mismatch_escalated === true,
+                rowDecayedMismatchScore: Number(policyRow.provider_switch_execution_decayed_mismatch_score || 0),
+                rowDecayedPassedScore: Number(policyRow.provider_switch_execution_decayed_passed_score || 0),
+                rowWeightedRiskScore: Number(policyRow.provider_switch_execution_weighted_risk_score || 0),
+                rowRiskScore: Number(policyRow.provider_switch_execution_risk_score || 0),
+                rowIds: rowIds.slice(0, 8),
+                memoryRelPaths: memoryRelPaths.slice(0, 8),
+                rankingSignalCovered,
+                provenanceCovered,
+                covered,
+            };
+        });
+        const gaps = [];
+        if (entries.length && archivedEntries.length < entries.length) {
+            gaps.push({
+                reason: `provider switch execution typed archive missing ${entries.length - archivedEntries.length} execution receipt row(s)`,
+                missing: entries.length - archivedEntries.length,
+            });
+        }
+        if (entries.length && (!recallDoc || recallDoc.type !== "feedback")) {
+            gaps.push({ reason: "provider switch execution receipts were not written as feedback typed memory", required: entries.length });
+        }
+        if (entries.length && !recalledText.includes("provider-switch-execution-memory.md")) {
+            gaps.push({ reason: "provider switch execution typed memory cannot be recalled by execution evidence probe" });
+        }
+        const missingPolicy = probes.filter((probe) => probe.covered !== true);
+        if (missingPolicy.length) {
+            gaps.push({
+                reason: "provider switch execution typed archive not surfaced in pre-dispatch policy",
+                missing: missingPolicy.length,
+            });
+        }
+        const missingRankingSignal = probes.filter((probe) => probe.covered === true && probe.rankingSignalCovered !== true);
+        if (missingRankingSignal.length) {
+            gaps.push({
+                reason: "provider switch execution typed memory is not exposed as decayed provider ranking signal",
+                missing: missingRankingSignal.length,
+            });
+        }
+        const missingProvenance = probes.filter((probe) => probe.covered === true && probe.provenanceCovered !== true);
+        if (missingProvenance.length) {
+            gaps.push({
+                reason: "provider switch execution typed memory policy lacks compact-safe typed memory provenance",
+                missing: missingProvenance.length,
+            });
+        }
+        const status = entries.length === 0 ? "empty" : gaps.length ? "fail" : "ok";
+        return {
+            schema: "ccm-worker-context-provider-switch-execution-typed-memory-group-v1",
+            groupId,
+            status,
+            bindingFile: bindingLedger.file || getGroupReplayRepairDispatchBindingLedgerFile(groupId),
+            typedMemoryLedgerFile: typedLedger.file || "",
+            executionReceiptCount: entries.length,
+            archivedExecutionReceiptCount: archivedEntries.length,
+            typedArchiveCount: Number(archive.archived_count || archiveRows.length || 0),
+            typedExecutedCount: Number(archive.executed_count || 0),
+            typedPassedCount: Number(archive.passed_count || 0),
+            typedFailedCount: Number(archive.failed_count || 0),
+            typedMismatchCount: Number(archive.mismatch_count || 0),
+            typedAttributionCount: Number(archive.attribution_count || 0),
+            typedDocCount: Number(!!recallDoc),
+            recallProbeCovered: recalledText.includes("provider-switch-execution-memory.md"),
+            policyCoveredAttributionCount: probes.filter((probe) => probe.covered === true).length,
+            policyRankingSignalCoveredCount: probes.filter((probe) => probe.rankingSignalCovered === true).length,
+            policyProvenanceCoveredCount: probes.filter((probe) => probe.provenanceCovered === true).length,
+            policyProbeCount: probes.length,
+            distillation: distillation ? {
+                incomingRowCount: distillation.incomingRowCount || 0,
+                archivedCount: distillation.archivedCount || 0,
+                executedCount: distillation.executedCount || 0,
+                passedCount: distillation.passedCount || 0,
+                failedCount: distillation.failedCount || 0,
+                mismatchCount: distillation.mismatchCount || 0,
+                writeCount: distillation.writeCount || 0,
+            } : null,
+            docs: [recallDoc].filter(Boolean).map((doc) => ({
+                relPath: doc.relPath,
+                type: doc.type,
+                source: doc.source,
+                file: doc.file,
+            })),
+            probes,
+            gaps: gaps.slice(0, 8),
+        };
+    });
+    const checkedRows = rows.filter((row) => Number(row.executionReceiptCount || 0) > 0);
+    const passedRows = checkedRows.filter((row) => row.status === "ok");
+    const coverageRate = checkedRows.length ? Math.round((passedRows.length / checkedRows.length) * 1000) / 10 : null;
+    const status = coverageRate === null ? "empty" : coverageRate >= 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail";
+    return {
+        schema: "ccm-worker-context-provider-switch-execution-typed-memory-report-v1",
+        generatedAt: now(),
+        overall: {
+            status,
+            coverageRate,
+            groupCount: rows.length,
+            checkedGroupCount: checkedRows.length,
+            groupsCovered: passedRows.length,
+            executionReceiptCount: checkedRows.reduce((sum, row) => sum + Number(row.executionReceiptCount || 0), 0),
+            archivedExecutionReceiptCount: checkedRows.reduce((sum, row) => sum + Number(row.archivedExecutionReceiptCount || 0), 0),
+            typedExecutedCount: checkedRows.reduce((sum, row) => sum + Number(row.typedExecutedCount || 0), 0),
+            typedPassedCount: checkedRows.reduce((sum, row) => sum + Number(row.typedPassedCount || 0), 0),
+            typedFailedCount: checkedRows.reduce((sum, row) => sum + Number(row.typedFailedCount || 0), 0),
+            typedMismatchCount: checkedRows.reduce((sum, row) => sum + Number(row.typedMismatchCount || 0), 0),
+            typedDocCount: checkedRows.reduce((sum, row) => sum + Number(row.typedDocCount || 0), 0),
+            recallProbeCoveredCount: checkedRows.filter((row) => row.recallProbeCovered === true).length,
+            policyCoveredAttributionCount: checkedRows.reduce((sum, row) => sum + Number(row.policyCoveredAttributionCount || 0), 0),
+            policyRankingSignalCoveredCount: checkedRows.reduce((sum, row) => sum + Number(row.policyRankingSignalCoveredCount || 0), 0),
+            policyProvenanceCoveredCount: checkedRows.reduce((sum, row) => sum + Number(row.policyProvenanceCoveredCount || 0), 0),
+            policyProbeCount: checkedRows.reduce((sum, row) => sum + Number(row.policyProbeCount || 0), 0),
+            metadataGapCount: checkedRows.reduce((sum, row) => sum + Number((row.gaps || []).length), 0),
+        },
+        groups: rows.sort((a, b) => Number(b.executionReceiptCount || 0) - Number(a.executionReceiptCount || 0)).slice(0, 50),
+        weakGroups: rows.filter((row) => row.status === "fail" || row.status === "warn").slice(0, 20),
+    };
+}
+function evaluateWorkerContextPacketProviderSwitchExecutionTypedMemory(options = {}) {
+    const report = buildWorkerContextPacketProviderSwitchExecutionTypedMemoryReport(options);
+    const checked = Number(report.overall.checkedGroupCount || 0);
+    const passed = Number(report.overall.groupsCovered || 0);
+    const evidence = (report.groups || []).filter((row) => row.status === "ok").slice(0, 12).map((row) => ({
+        groupId: row.groupId,
+        executionReceiptCount: row.executionReceiptCount,
+        archivedExecutionReceiptCount: row.archivedExecutionReceiptCount,
+        typedMismatchCount: row.typedMismatchCount,
+        recallProbeCovered: row.recallProbeCovered,
+        policyCoveredAttributionCount: row.policyCoveredAttributionCount,
+        policyRankingSignalCoveredCount: row.policyRankingSignalCoveredCount,
+        policyProvenanceCoveredCount: row.policyProvenanceCoveredCount,
+    }));
+    const gaps = (report.weakGroups || []).flatMap((row) => (row.gaps || []).slice(0, 3).map((gap) => ({
+        groupId: row.groupId,
+        reason: gap.reason || "provider switch execution typed memory missing",
+        executionReceiptCount: row.executionReceiptCount || 0,
+        archivedExecutionReceiptCount: row.archivedExecutionReceiptCount || 0,
+    }))).slice(0, 12);
+    const check = makeQualityCheck("worker_context_packet_provider_switch_execution_typed_memory", "WorkerContextPacket Provider Switch Execution Typed Memory", checked, passed, evidence, gaps, "provider switch 的系统执行回执必须沉淀为 feedback typed MEMORY.md，并在后续子 Agent 新会话 pre-dispatch policy 中作为本地执行反馈使用；passed 历史不能自动授权未来切换，mismatch 历史必须进入采样/hold。");
+    check.report = report;
+    return check;
+}
 function buildWorkerContextPacketPressureProvenanceFeedbackRecallRiskGatingReport(options = {}) {
     const groupIds = replayRepairDispatchBindingGroupIds(options);
     const rows = groupIds.map((groupId) => {
@@ -12512,7 +13747,9 @@ function buildWorkerContextPacketPressureMemoryProvenanceReceiptRepairWorkItem(g
         relPaths.join("|"),
     ], 14)}`;
     const previousStatus = replayRepairWorkItemStatus(existing.status);
-    const status = ["in_progress", "blocked"].includes(previousStatus) ? previousStatus : "pending";
+    const status = previousStatus === "completed"
+        ? "completed"
+        : ["in_progress", "blocked"].includes(previousStatus) ? previousStatus : "pending";
     const reason = compactMemoryCenterText(`pressure memory provenance receipt gaps: ${gapCodes.join(",") || "missing_memoryProvenanceUsage"}`, 360);
     const instruction = [
         `要求 ${targetProject || "目标子 Agent"} 补齐 pressure memory provenance 回执。`,
@@ -13077,9 +14314,13 @@ function workerContextPressureMemoryProvenanceReceiptDispatchBriefMetadataGaps(c
         gaps.push("worker_task_currentSourceVerified");
     if (candidate.worker_context_packet_id && !workerTask.includes(String(candidate.worker_context_packet_id)))
         gaps.push("worker_task_packet_id");
-    for (const relPath of expectedRelPaths.slice(0, 4)) {
+    for (const relPath of expectedRelPaths) {
         if (relPath && !workerTask.includes(String(relPath)))
             gaps.push("worker_task_rel_path");
+    }
+    for (const repairId of expectedRepairIds) {
+        if (repairId && !workerTask.includes(String(repairId)))
+            gaps.push("worker_task_repair_work_item_id");
     }
     return [...new Set(gaps)];
 }
@@ -13135,6 +14376,8 @@ function buildWorkerContextPacketPressureMemoryProvenanceReceiptRepairDispatchBr
             readyBriefCount: readyBriefs.length,
             metadataGapCount: metadataGaps.length,
             packetBoundBriefCount: readyBriefs.filter((brief) => brief.worker_context_packet_id).length,
+            provenanceRelPathBriefCount: readyBriefs.filter((brief) => (brief.pressure_memory_provenance_rel_paths || []).length > 0).length,
+            repairWorkItemIdBriefCount: readyBriefs.filter((brief) => (brief.pressure_memory_provenance_repair_work_item_ids || []).length > 0).length,
             memoryProvenanceUsagePromptBriefCount: readyBriefs.filter((brief) => /memoryProvenanceUsage/i.test(String(brief.worker_task || ""))).length,
             currentSourceVerifiedPromptBriefCount: readyBriefs.filter((brief) => /currentSourceVerified|current_source_verified/i.test(String(brief.worker_task || ""))).length,
             shouldCreateRealTask: ledger.shouldCreateRealTask === false || ledger.should_create_real_task === false,
@@ -13147,7 +14390,7 @@ function buildWorkerContextPacketPressureMemoryProvenanceReceiptRepairDispatchBr
                 worker_context_packet_binding_id: brief.worker_context_packet_binding_id || brief.binding_id || "",
                 pressure_memory_provenance_rel_paths: brief.pressure_memory_provenance_rel_paths || [],
                 pressure_memory_provenance_repair_work_item_ids: brief.pressure_memory_provenance_repair_work_item_ids || [],
-                worker_task: compactMemoryCenterText(brief.worker_task || "", 520),
+                worker_task: compactMemoryCenterText(brief.worker_task || "", 2600),
             })),
             missingBriefs: missing.slice(0, 8).map((candidate) => ({
                 work_item_id: candidate.work_item_id || "",
@@ -13196,6 +14439,8 @@ function buildWorkerContextPacketPressureMemoryProvenanceReceiptRepairDispatchBr
             readyBriefCount: checkedRows.reduce((sum, row) => sum + Number(row.readyBriefCount || 0), 0),
             metadataGapCount: checkedRows.reduce((sum, row) => sum + Number(row.metadataGapCount || 0), 0),
             packetBoundBriefCount: checkedRows.reduce((sum, row) => sum + Number(row.packetBoundBriefCount || 0), 0),
+            provenanceRelPathBriefCount: checkedRows.reduce((sum, row) => sum + Number(row.provenanceRelPathBriefCount || 0), 0),
+            repairWorkItemIdBriefCount: checkedRows.reduce((sum, row) => sum + Number(row.repairWorkItemIdBriefCount || 0), 0),
             memoryProvenanceUsagePromptBriefCount: checkedRows.reduce((sum, row) => sum + Number(row.memoryProvenanceUsagePromptBriefCount || 0), 0),
             currentSourceVerifiedPromptBriefCount: checkedRows.reduce((sum, row) => sum + Number(row.currentSourceVerifiedPromptBriefCount || 0), 0),
         },
@@ -13224,6 +14469,125 @@ function evaluateWorkerContextPacketPressureMemoryProvenanceReceiptRepairDispatc
         brief_id: gap.brief_id || "",
     }))).slice(0, 12);
     const check = makeQualityCheck("worker_context_packet_pressure_memory_provenance_receipt_repair_dispatch_briefs", "WorkerContextPacket Pressure Memory Provenance Receipt Repair Dispatch Briefs", checked, passed, evidence, gaps, "把 pressure memory provenance receipt repair candidates 编译成主 Agent 可复制给子 Agent 的 corrected-receipt worker brief；brief 必须包含 CCM_AGENT_RECEIPT.memoryProvenanceUsage、repairWorkItemId、provenanceStatus 和 currentSourceVerified 约束。");
+    check.report = report;
+    return check;
+}
+function buildWorkerContextPacketPressureMemoryProvenanceReceiptRepairDispatchBriefRequiredDocsReport(options = {}) {
+    const briefReport = options.briefReport
+        || options.brief_report
+        || buildWorkerContextPacketPressureMemoryProvenanceReceiptRepairDispatchBriefReport(options);
+    const rows = (briefReport.groups || []).map((group) => {
+        const briefs = Array.isArray(group.briefs) ? group.briefs : [];
+        const checkedBriefs = briefs.map((brief) => {
+            const relPaths = normalizeQualityStringList(brief.pressure_memory_provenance_rel_paths || brief.pressureMemoryProvenanceRelPaths || []);
+            const repairIds = normalizeQualityStringList(brief.pressure_memory_provenance_repair_work_item_ids || brief.pressureMemoryProvenanceRepairWorkItemIds || []);
+            const workerTask = String(brief.worker_task || "");
+            const gaps = [];
+            if (!relPaths.length)
+                gaps.push({ reason: "dispatch brief missing pressure_memory_provenance_rel_paths" });
+            if (!repairIds.length)
+                gaps.push({ reason: "dispatch brief missing pressure_memory_provenance_repair_work_item_ids" });
+            for (const relPath of relPaths) {
+                if (relPath && !workerTask.includes(relPath)) {
+                    gaps.push({ relPath, reason: `pressure provenance dispatch brief worker_task missing required relPath：${relPath}` });
+                }
+            }
+            for (const repairId of repairIds) {
+                if (repairId && !workerTask.includes(repairId)) {
+                    gaps.push({ repairId, reason: `pressure provenance dispatch brief worker_task missing repairWorkItemId：${repairId}` });
+                }
+            }
+            if (!/memoryProvenanceUsage/i.test(workerTask))
+                gaps.push({ reason: "dispatch brief worker_task missing memoryProvenanceUsage" });
+            if (!/provenanceStatus|provenance_status/i.test(workerTask))
+                gaps.push({ reason: "dispatch brief worker_task missing provenanceStatus" });
+            if (!/repairWorkItemId|repair_work_item_id/i.test(workerTask))
+                gaps.push({ reason: "dispatch brief worker_task missing repairWorkItemId field" });
+            if (!/currentSourceVerified|current_source_verified/i.test(workerTask))
+                gaps.push({ reason: "dispatch brief worker_task missing currentSourceVerified" });
+            if (!/CCM_AGENT_RECEIPT/i.test(workerTask))
+                gaps.push({ reason: "dispatch brief worker_task missing CCM_AGENT_RECEIPT" });
+            return {
+                brief_id: brief.brief_id || "",
+                work_item_id: brief.work_item_id || "",
+                worker_context_packet_id: brief.worker_context_packet_id || "",
+                relPaths,
+                repairIds,
+                gaps,
+            };
+        });
+        const requiredBriefs = checkedBriefs.filter((brief) => brief.relPaths.length > 0 || brief.repairIds.length > 0);
+        const coveredBriefs = requiredBriefs.filter((brief) => brief.gaps.length === 0);
+        const gaps = requiredBriefs.flatMap((brief) => brief.gaps.map((gap) => ({
+            brief_id: brief.brief_id || "",
+            work_item_id: brief.work_item_id || "",
+            worker_context_packet_id: brief.worker_context_packet_id || "",
+            relPath: gap.relPath || "",
+            repairId: gap.repairId || "",
+            reason: gap.reason || "pressure provenance required doc dispatch brief gap",
+        })));
+        const status = requiredBriefs.length === 0 ? "empty" : gaps.length ? "fail" : "ok";
+        return {
+            schema: "ccm-worker-context-packet-pressure-memory-provenance-receipt-repair-dispatch-brief-required-docs-group-v1",
+            groupId: group.groupId || "",
+            status,
+            file: group.file || "",
+            requiredDocBriefCount: requiredBriefs.length,
+            coveredRequiredDocBriefCount: coveredBriefs.length,
+            requiredRelPathCount: uniqueStrings(requiredBriefs.flatMap((brief) => brief.relPaths), 40).length,
+            requiredRepairWorkItemIdCount: uniqueStrings(requiredBriefs.flatMap((brief) => brief.repairIds), 40).length,
+            relPaths: uniqueStrings(requiredBriefs.flatMap((brief) => brief.relPaths), 40),
+            repairIds: uniqueStrings(requiredBriefs.flatMap((brief) => brief.repairIds), 40),
+            briefs: requiredBriefs.slice(0, 12),
+            gaps: gaps.slice(0, 12),
+        };
+    });
+    const checkedRows = rows.filter(row => Number(row.requiredDocBriefCount || 0) > 0);
+    const passedRows = checkedRows.filter(row => row.status === "ok");
+    const coverageRate = checkedRows.length ? Math.round((passedRows.length / checkedRows.length) * 1000) / 10 : null;
+    const status = coverageRate === null ? "empty" : coverageRate >= 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail";
+    return {
+        schema: "ccm-worker-context-packet-pressure-memory-provenance-receipt-repair-dispatch-brief-required-docs-report-v1",
+        generatedAt: now(),
+        briefReport: { schema: briefReport.schema || "", overall: briefReport.overall || {} },
+        overall: {
+            status,
+            coverageRate,
+            groupCount: rows.length,
+            checkedGroupCount: checkedRows.length,
+            groupsCovered: passedRows.length,
+            requiredDocBriefCount: checkedRows.reduce((sum, row) => sum + Number(row.requiredDocBriefCount || 0), 0),
+            coveredRequiredDocBriefCount: checkedRows.reduce((sum, row) => sum + Number(row.coveredRequiredDocBriefCount || 0), 0),
+            requiredRelPathCount: checkedRows.reduce((sum, row) => sum + Number(row.requiredRelPathCount || 0), 0),
+            requiredRepairWorkItemIdCount: checkedRows.reduce((sum, row) => sum + Number(row.requiredRepairWorkItemIdCount || 0), 0),
+            metadataGapCount: checkedRows.reduce((sum, row) => sum + Number((row.gaps || []).length), 0),
+        },
+        groups: rows.sort((a, b) => Number(b.requiredDocBriefCount || 0) - Number(a.requiredDocBriefCount || 0)).slice(0, 50),
+        weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn").slice(0, 20),
+    };
+}
+function evaluateWorkerContextPacketPressureMemoryProvenanceReceiptRepairDispatchBriefRequiredDocs(options = {}) {
+    const report = buildWorkerContextPacketPressureMemoryProvenanceReceiptRepairDispatchBriefRequiredDocsReport(options);
+    const checked = Number(report.overall.checkedGroupCount || 0);
+    const passed = Number(report.overall.groupsCovered || 0);
+    const evidence = (report.groups || []).filter((row) => row.status === "ok").slice(0, 12).map((row) => ({
+        groupId: row.groupId,
+        requiredDocBriefCount: row.requiredDocBriefCount,
+        coveredRequiredDocBriefCount: row.coveredRequiredDocBriefCount,
+        requiredRelPathCount: row.requiredRelPathCount,
+        requiredRepairWorkItemIdCount: row.requiredRepairWorkItemIdCount,
+        relPaths: row.relPaths,
+        repairIds: row.repairIds,
+    }));
+    const gaps = (report.weakGroups || []).flatMap((row) => (row.gaps || []).slice(0, 3).map((gap) => ({
+        groupId: row.groupId,
+        reason: gap.reason || "pressure provenance required docs dispatch brief coverage 缺失",
+        brief_id: gap.brief_id || "",
+        work_item_id: gap.work_item_id || "",
+        relPath: gap.relPath || "",
+        repairId: gap.repairId || "",
+    }))).slice(0, 12);
+    const check = makeQualityCheck("worker_context_packet_pressure_memory_provenance_receipt_repair_dispatch_brief_required_docs", "WorkerContextPacket Pressure Memory Provenance Receipt Repair Dispatch Brief Required Docs", checked, passed, evidence, gaps, "Corrected-receipt dispatch briefs for pressure memory provenance must carry every required pressure MEMORY.md relPath and repairWorkItemId into metadata and worker_task before the main Agent asks a child Agent to correct CCM_AGENT_RECEIPT.memoryProvenanceUsage.");
     check.report = report;
     return check;
 }
@@ -13863,6 +15227,9 @@ function workerContextPacketCompactOutcomeGaps(entry = {}, outcomeLedger = {}) {
     const gaps = [];
     const retry = workerContextPacketCompactionRetry(entry) || {};
     const hookRunId = workerContextPacketCompactHookRunId(entry);
+    const retryProviderRankingProvenancePreservation = retry.provider_ranking_provenance_preservation
+        || retry.providerRankingProvenancePreservation
+        || null;
     if (!entry.binding_id)
         gaps.push("binding_id");
     if (!entry.assignment_id)
@@ -13898,6 +15265,45 @@ function workerContextPacketCompactOutcomeGaps(entry = {}, outcomeLedger = {}) {
         gaps.push("outcome_partial_compact_policy");
     if (retry.original_task_hash && retry.original_task_hash === retry.compacted_task_hash && outcome.task_hash_unchanged !== true)
         gaps.push("outcome_task_preserved");
+    if (retryProviderRankingProvenancePreservation?.schema === "ccm-provider-ranking-provenance-preservation-v1"
+        && retryProviderRankingProvenancePreservation.required === true) {
+        const outcomeProviderRankingProvenancePreservation = outcome.provider_ranking_provenance_preservation
+            || outcome.providerRankingProvenancePreservation
+            || null;
+        if (outcomeProviderRankingProvenancePreservation?.schema !== "ccm-provider-ranking-provenance-preservation-v1") {
+            gaps.push("outcome_provider_ranking_provenance_preservation");
+        }
+        else {
+            if (outcomeProviderRankingProvenancePreservation.required !== true)
+                gaps.push("outcome_provider_ranking_provenance_required");
+            if (outcomeProviderRankingProvenancePreservation.preserved !== true || outcome.provider_ranking_provenance_preserved !== true) {
+                gaps.push("outcome_provider_ranking_provenance_lost");
+            }
+            for (const providerGap of outcomeProviderRankingProvenancePreservation.gaps || []) {
+                gaps.push(`outcome_${String(providerGap || "")}`.slice(0, 160));
+            }
+            const retryRelPaths = Array.isArray(retryProviderRankingProvenancePreservation.before?.typed_memory_rel_paths)
+                ? retryProviderRankingProvenancePreservation.before.typed_memory_rel_paths
+                : [];
+            const retryRowIds = Array.isArray(retryProviderRankingProvenancePreservation.before?.typed_memory_row_ids)
+                ? retryProviderRankingProvenancePreservation.before.typed_memory_row_ids
+                : [];
+            const outcomeRelPaths = uniqueStrings([
+                ...(Array.isArray(outcomeProviderRankingProvenancePreservation.before?.typed_memory_rel_paths) ? outcomeProviderRankingProvenancePreservation.before.typed_memory_rel_paths : []),
+                ...(Array.isArray(outcomeProviderRankingProvenancePreservation.after?.typed_memory_rel_paths) ? outcomeProviderRankingProvenancePreservation.after.typed_memory_rel_paths : []),
+            ], 32);
+            const outcomeRowIds = uniqueStrings([
+                ...(Array.isArray(outcomeProviderRankingProvenancePreservation.before?.typed_memory_row_ids) ? outcomeProviderRankingProvenancePreservation.before.typed_memory_row_ids : []),
+                ...(Array.isArray(outcomeProviderRankingProvenancePreservation.after?.typed_memory_row_ids) ? outcomeProviderRankingProvenancePreservation.after.typed_memory_row_ids : []),
+            ], 64);
+            if (retryRelPaths.some((item) => !outcomeRelPaths.includes(String(item || "")))) {
+                gaps.push("outcome_provider_ranking_provenance_rel_paths");
+            }
+            if (retryRowIds.some((item) => !outcomeRowIds.includes(String(item || "")))) {
+                gaps.push("outcome_provider_ranking_provenance_row_ids");
+            }
+        }
+    }
     return [...new Set(gaps)];
 }
 function buildWorkerContextPacketCompactOutcomeLedgerReport(options = {}) {
@@ -13934,24 +15340,47 @@ function buildWorkerContextPacketCompactOutcomeLedgerReport(options = {}) {
             blockedOutcomeCount: outcomeRows.filter((row) => row.outcome?.status === "blocked" || row.outcome?.dispatch_ready === false).length,
             partialCompactPolicyOutcomeCount: outcomeRows.filter((row) => row.outcome?.partial_compact_policy?.schema === "ccm-worker-context-partial-compact-policy-v1").length,
             taskPreservedOutcomeCount: outcomeRows.filter((row) => row.outcome?.task_hash_unchanged === true).length,
+            providerRankingProvenanceRequiredCount: checked.filter((row) => (row.retry?.provider_ranking_provenance_preservation || row.retry?.providerRankingProvenancePreservation)?.required === true).length,
+            providerRankingProvenancePreservedCount: outcomeRows.filter((row) => row.outcome?.provider_ranking_provenance_preservation?.required === true
+                && row.outcome?.provider_ranking_provenance_preservation?.preserved === true).length,
             totalTokenDelta: outcomeRows.reduce((sum, row) => sum + Number(row.outcome?.token_delta || 0), 0),
             totalFreeTokenDelta: outcomeRows.reduce((sum, row) => sum + Number(row.outcome?.free_token_delta || 0), 0),
             selectedCategoryCounts: outcomeLedger.stats?.selectedCategoryCounts || {},
-            outcomes: checked.slice(-12).reverse().map((row) => ({
-                binding_id: row.entry.binding_id || "",
-                assignment_id: row.entry.assignment_id || "",
-                project: row.entry.project || "",
-                retry_status: row.retry?.status || "",
-                retry_method: row.retry?.method || "",
-                hook_run_id: row.hookRunId || "",
-                outcome_id: row.outcome?.outcome_id || "",
-                outcome_status: row.outcome?.status || "",
-                dispatch_ready: row.outcome?.dispatch_ready === true,
-                token_delta: row.outcome?.token_delta || 0,
-                free_token_delta: row.outcome?.free_token_delta || 0,
-                selected_categories: row.outcome?.partial_compact_policy?.selected_categories || [],
-                task_hash_unchanged: row.outcome?.task_hash_unchanged === true,
-            })),
+            outcomes: checked.slice(-12).reverse().map((row) => {
+                const providerRankingProvenancePreservation = row.outcome?.provider_ranking_provenance_preservation
+                    || row.retry?.provider_ranking_provenance_preservation
+                    || row.retry?.providerRankingProvenancePreservation
+                    || null;
+                const before = providerRankingProvenancePreservation?.before || {};
+                const after = providerRankingProvenancePreservation?.after || {};
+                return {
+                    binding_id: row.entry.binding_id || "",
+                    assignment_id: row.entry.assignment_id || "",
+                    project: row.entry.project || "",
+                    retry_status: row.retry?.status || "",
+                    retry_method: row.retry?.method || "",
+                    hook_run_id: row.hookRunId || "",
+                    outcome_id: row.outcome?.outcome_id || "",
+                    outcome_status: row.outcome?.status || "",
+                    dispatch_ready: row.outcome?.dispatch_ready === true,
+                    token_delta: row.outcome?.token_delta || 0,
+                    free_token_delta: row.outcome?.free_token_delta || 0,
+                    selected_categories: row.outcome?.partial_compact_policy?.selected_categories || [],
+                    task_hash_unchanged: row.outcome?.task_hash_unchanged === true,
+                    provider_ranking_provenance_required: providerRankingProvenancePreservation?.required === true,
+                    provider_ranking_provenance_preserved: providerRankingProvenancePreservation?.required === true
+                        ? providerRankingProvenancePreservation?.preserved === true
+                        : row.outcome?.provider_ranking_provenance_preserved === true,
+                    provider_ranking_provenance_rel_paths: uniqueStrings([
+                        ...(Array.isArray(after.typed_memory_rel_paths) ? after.typed_memory_rel_paths : []),
+                        ...(Array.isArray(before.typed_memory_rel_paths) ? before.typed_memory_rel_paths : []),
+                    ], 16),
+                    provider_ranking_provenance_row_ids: uniqueStrings([
+                        ...(Array.isArray(after.typed_memory_row_ids) ? after.typed_memory_row_ids : []),
+                        ...(Array.isArray(before.typed_memory_row_ids) ? before.typed_memory_row_ids : []),
+                    ], 32),
+                };
+            }),
             gaps: gapRows.slice(0, 8).map((row) => ({
                 binding_id: row.entry.binding_id || "",
                 assignment_id: row.entry.assignment_id || "",
@@ -13983,6 +15412,8 @@ function buildWorkerContextPacketCompactOutcomeLedgerReport(options = {}) {
             blockedOutcomeCount: checkedRows.reduce((sum, row) => sum + Number(row.blockedOutcomeCount || 0), 0),
             partialCompactPolicyOutcomeCount: checkedRows.reduce((sum, row) => sum + Number(row.partialCompactPolicyOutcomeCount || 0), 0),
             taskPreservedOutcomeCount: checkedRows.reduce((sum, row) => sum + Number(row.taskPreservedOutcomeCount || 0), 0),
+            providerRankingProvenanceRequiredCount: checkedRows.reduce((sum, row) => sum + Number(row.providerRankingProvenanceRequiredCount || 0), 0),
+            providerRankingProvenancePreservedCount: checkedRows.reduce((sum, row) => sum + Number(row.providerRankingProvenancePreservedCount || 0), 0),
             totalTokenDelta: checkedRows.reduce((sum, row) => sum + Number(row.totalTokenDelta || 0), 0),
             totalFreeTokenDelta: checkedRows.reduce((sum, row) => sum + Number(row.totalFreeTokenDelta || 0), 0),
         },
@@ -14001,6 +15432,8 @@ function evaluateWorkerContextPacketCompactOutcomeLedger(options = {}) {
         recoveredOutcomeCount: row.recoveredOutcomeCount,
         partialCompactPolicyOutcomeCount: row.partialCompactPolicyOutcomeCount,
         taskPreservedOutcomeCount: row.taskPreservedOutcomeCount,
+        providerRankingProvenanceRequiredCount: row.providerRankingProvenanceRequiredCount,
+        providerRankingProvenancePreservedCount: row.providerRankingProvenancePreservedCount,
         totalTokenDelta: row.totalTokenDelta,
         file: row.file,
     }));
@@ -14012,7 +15445,2998 @@ function evaluateWorkerContextPacketCompactOutcomeLedger(options = {}) {
         packet_id: gap.packet_id || "",
         project: gap.project || "",
     }))).slice(0, 12);
-    const check = makeQualityCheck("worker_context_packet_compact_outcome_ledger", "WorkerContextPacket Compact Outcome Ledger", checked, passed, evidence, gaps, "每次 WorkerContextPacket 自动 compact retry 完成后，都应写入 outcome ledger，保存 token 恢复、policy 选择、任务正文是否保留等长期策略样本，供后续日志蒸馏使用。");
+    const check = makeQualityCheck("worker_context_packet_compact_outcome_ledger", "WorkerContextPacket Compact Outcome Ledger", checked, passed, evidence, gaps, "每次 WorkerContextPacket 自动 compact retry 完成后，都应写入 outcome ledger，保存 token 恢复、policy 选择、任务正文是否保留，以及 provider ranking provenance 是否保全等长期策略样本，供后续日志蒸馏使用。");
+    check.report = report;
+    return check;
+}
+function providerRankingProvenanceCompactRepairGapCodes(gaps = []) {
+    return uniqueStrings((Array.isArray(gaps) ? gaps : []).filter((gap) => /^outcome_provider_ranking_provenance/.test(String(gap || ""))
+        || /^outcome_provider_switch_decision_receipt/.test(String(gap || ""))
+        || /^outcome_typed_memory_(rel_paths|row_ids)/.test(String(gap || ""))), 24);
+}
+function workerContextPacketProviderRankingProvenanceCompactRepairRows(groupId) {
+    const bindingLedger = readGroupReplayRepairDispatchBindingLedger(groupId);
+    const outcomeLedger = readGroupWorkerContextCompactOutcomeLedger(groupId);
+    return (Array.isArray(bindingLedger.entries) ? bindingLedger.entries : [])
+        .filter((entry) => workerContextPacketCompactionRetry(entry))
+        .map((entry) => {
+        const retry = workerContextPacketCompactionRetry(entry) || {};
+        const hookRunId = workerContextPacketCompactHookRunId(entry);
+        const outcomes = (Array.isArray(outcomeLedger.entries) ? outcomeLedger.entries : []).filter((item) => (hookRunId && item.hook_run_id === hookRunId)
+            || (retry.retry_id && item.retry_id === retry.retry_id));
+        const outcome = outcomes[0] || null;
+        const gaps = workerContextPacketCompactOutcomeGaps(entry, outcomeLedger);
+        const providerGaps = providerRankingProvenanceCompactRepairGapCodes(gaps);
+        const preservation = outcome?.provider_ranking_provenance_preservation
+            || retry.provider_ranking_provenance_preservation
+            || retry.providerRankingProvenancePreservation
+            || null;
+        return {
+            entry,
+            retry,
+            hookRunId,
+            outcome,
+            gaps,
+            providerGaps,
+            preservation,
+        };
+    })
+        .filter((row) => row.preservation?.schema === "ccm-provider-ranking-provenance-preservation-v1"
+        && row.preservation.required === true
+        && row.providerGaps.length > 0);
+}
+function buildWorkerContextProviderRankingProvenanceCompactRepairWorkItem(groupId, row = {}, index = 0, existing = {}, at = now()) {
+    const entry = row.entry || {};
+    const retry = row.retry || {};
+    const outcome = row.outcome || {};
+    const preservation = row.preservation || {};
+    const before = preservation.before || {};
+    const after = preservation.after || {};
+    const relPaths = uniqueStrings([
+        ...(Array.isArray(before.typed_memory_rel_paths) ? before.typed_memory_rel_paths : []),
+        ...(Array.isArray(after.typed_memory_rel_paths) ? after.typed_memory_rel_paths : []),
+        ...(Array.isArray(preservation.missing_typed_memory_rel_paths) ? preservation.missing_typed_memory_rel_paths : []),
+    ], 16);
+    const rowIds = uniqueStrings([
+        ...(Array.isArray(before.typed_memory_row_ids) ? before.typed_memory_row_ids : []),
+        ...(Array.isArray(after.typed_memory_row_ids) ? after.typed_memory_row_ids : []),
+        ...(Array.isArray(preservation.missing_typed_memory_row_ids) ? preservation.missing_typed_memory_row_ids : []),
+    ], 32);
+    const providerGaps = providerRankingProvenanceCompactRepairGapCodes(row.providerGaps || row.gaps || preservation.gaps || []);
+    const targetProject = String(entry.project || outcome.project || "").trim();
+    const retryId = String(retry.retry_id || retry.retryId || outcome.retry_id || "").trim();
+    const hookRunId = String(row.hookRunId || retry.compact_hook_run_id || retry.compactHookRunId || outcome.hook_run_id || "").trim();
+    const receiptId = String(before.provider_switch_decision_receipt_id || after.provider_switch_decision_receipt_id || "").trim();
+    const receiptChecksum = String(before.provider_switch_decision_receipt_checksum || after.provider_switch_decision_receipt_checksum || "").trim();
+    const packetId = String(outcome.retry_packet_id || retry.retry_packet_id || entry.worker_context_packet_id || "").trim();
+    const lostReceipt = providerGaps.some((gap) => /provider_switch_decision_receipt/.test(gap));
+    const id = `provider-ranking-provenance-compact-repair:${hash([
+        groupId,
+        entry.assignment_id || entry.assignmentId || "",
+        retryId || hookRunId,
+        receiptId,
+        relPaths.join("|"),
+    ], 14)}`;
+    const previousStatus = replayRepairWorkItemStatus(existing.status);
+    const status = ["in_progress", "blocked"].includes(previousStatus) ? previousStatus : "pending";
+    const reason = compactMemoryCenterText([
+        "WorkerContextPacket compact retry lost provider ranking provenance.",
+        receiptId ? `receipt=${receiptId}` : "",
+        receiptChecksum ? `receipt_checksum=${receiptChecksum}` : "",
+        retryId ? `retry=${retryId}` : "",
+        providerGaps.length ? `gaps=${providerGaps.join(",")}` : "",
+    ].filter(Boolean).join(" "), 420);
+    const instruction = [
+        `重新生成 ${targetProject || "目标项目"} 的 WorkerContextPacket compact retry，恢复 provider ranking provenance。`,
+        retryId ? `retry_id=${retryId}` : "",
+        hookRunId ? `compact_hook_run_id=${hookRunId}` : "",
+        receiptId ? `provider_switch_decision_receipt_id=${receiptId}` : "",
+        receiptChecksum ? `provider_switch_decision_receipt_checksum=${receiptChecksum}` : "",
+        relPaths.length ? `typed_memory_rel_paths=${relPaths.join(";")}` : "",
+        rowIds.length ? `typed_memory_row_ids=${rowIds.slice(0, 8).join(";")}` : "",
+        "必须从 typed MEMORY.md 和 provider switch decision receipt 重新注入 ranking provenance。",
+        "修复后 context_compaction_retry.provider_ranking_provenance_preservation.required=true 且 preserved=true，compact outcome ledger 也必须记录 preserved=true。",
+    ].filter(Boolean).join(" ");
+    const expected = [
+        "provider_ranking_provenance_preservation.required=true",
+        "provider_ranking_provenance_preservation.preserved=true",
+        "compact outcome provider_ranking_provenance_preserved=true",
+        receiptId ? `receipt=${receiptId}` : "",
+        receiptChecksum ? `receiptChecksum=${receiptChecksum}` : "",
+        relPaths.length ? `relPaths=${relPaths.join(";")}` : "",
+    ].filter(Boolean).join("; ");
+    return {
+        id,
+        work_item_id: id,
+        taskId: String(entry.assignment_id || entry.assignmentId || ""),
+        scopeId: groupId,
+        group_id: groupId,
+        subject: compactMemoryCenterText(lostReceipt ? "修复 provider switch receipt compact 丢失" : "修复 provider ranking provenance compact 丢失", 150),
+        description: reason,
+        activeForm: compactMemoryCenterText(`修复 provider ranking provenance compact：${targetProject || "memory-context"}`, 180),
+        owner: existing.owner && previousStatus !== "pending" ? existing.owner : "group-main-agent",
+        target: compactMemoryCenterText(targetProject || "memory-context", 120),
+        agentType: "group-main-agent",
+        status,
+        priority: lostReceipt ? "critical" : "high",
+        component: "worker_context_provider_ranking_provenance_compact",
+        source: "worker_context_provider_ranking_provenance_compact_repair",
+        source_action_id: `provider-ranking-provenance-compact:${retryId || hookRunId || index}`,
+        repair_target: packetId || retryId || hookRunId || "worker_context_packet",
+        target_project: targetProject,
+        dispatch_target: targetProject,
+        instruction: compactMemoryCenterText(instruction, 1200),
+        expected: compactMemoryCenterText(expected, 520),
+        source_reason: reason,
+        attempt: Math.max(1, Number(existing.attempt || 1) || 1),
+        replay_attempt_id: "",
+        replay_status: String(retry.status || outcome.status || ""),
+        replay_score: null,
+        replay_rendered_hash: "",
+        boundary_checksum: "",
+        summarized_through_message_id: "",
+        prompt_patch: compactMemoryCenterText([
+            "Provider ranking provenance compact repair:",
+            `- group=${groupId}`,
+            targetProject ? `- target_project=${targetProject}` : "",
+            entry.binding_id ? `- binding_id=${entry.binding_id}` : "",
+            entry.assignment_id ? `- assignment_id=${entry.assignment_id}` : "",
+            packetId ? `- worker_context_packet_id=${packetId}` : "",
+            retryId ? `- retry_id=${retryId}` : "",
+            hookRunId ? `- compact_hook_run_id=${hookRunId}` : "",
+            receiptId ? `- provider_switch_decision_receipt_id=${receiptId}` : "",
+            receiptChecksum ? `- provider_switch_decision_receipt_checksum=${receiptChecksum}` : "",
+            relPaths.length ? `- typed_memory_rel_paths=${relPaths.join(", ")}` : "",
+            rowIds.length ? `- typed_memory_row_ids=${rowIds.slice(0, 12).join(", ")}` : "",
+            providerGaps.length ? `- gaps=${providerGaps.join(", ")}` : "",
+            "- Rebuild/rerender the WorkerContextPacket from current typed MEMORY.md plus the provider switch decision receipt.",
+            "- Do not treat provider switch execution history as authorization; it remains ranking evidence only.",
+        ].filter(Boolean).join("\n"), 1800),
+        dispatch_hint: {
+            claim_policy: "group_main_agent_before_child_dispatch",
+            next_step: "regenerate_worker_context_packet_with_provider_ranking_provenance",
+            should_create_real_task: false,
+            reason: "Memory Center diagnostic sidecar; main Agent may claim and rerender before child dispatch.",
+        },
+        raw_recovery: {
+            rule: "provider_ranking_provenance_compact_preservation",
+            retry_id: retryId,
+            hook_run_id: hookRunId,
+            outcome_id: outcome.outcome_id || "",
+            provider_switch_decision_receipt_id: receiptId,
+            provider_switch_decision_receipt_checksum: receiptChecksum,
+            provider_gaps: providerGaps,
+            preservation,
+        },
+        worker_context_packet_id: packetId,
+        worker_context_packet_binding_id: entry.binding_id || "",
+        binding_id: entry.binding_id || "",
+        assignment_id: entry.assignment_id || "",
+        dispatch_key: entry.dispatch_key || "",
+        compact_outcome_id: outcome.outcome_id || "",
+        compact_retry_id: retryId,
+        compact_hook_run_id: hookRunId,
+        provider_switch_decision_receipt_id: receiptId,
+        provider_switch_decision_receipt_checksum: receiptChecksum,
+        provider_ranking_provenance_gap_codes: providerGaps,
+        provider_ranking_provenance_rel_paths: relPaths,
+        provider_ranking_provenance_row_ids: rowIds,
+        provider_ranking_provenance_missing_rel_paths: preservation.missing_typed_memory_rel_paths || [],
+        provider_ranking_provenance_missing_row_ids: preservation.missing_typed_memory_row_ids || [],
+        evidence: [
+            receiptId ? `provider_switch_decision_receipt_id=${receiptId}` : "",
+            receiptChecksum ? `provider_switch_decision_receipt_checksum=${receiptChecksum}` : "",
+            retryId ? `retry_id=${retryId}` : "",
+            packetId ? `worker_context_packet_id=${packetId}` : "",
+            relPaths.length ? `rel_paths=${relPaths.join(";")}` : "",
+            providerGaps.length ? `gaps=${providerGaps.join(";")}` : "",
+        ].filter(Boolean),
+        filesChanged: [],
+        verification: [
+            "重新运行 WorkerContextPacket compact outcome ledger check",
+            "确认 providerRankingProvenanceRequiredCount == providerRankingProvenancePreservedCount",
+            "确认 rerender 后子 Agent packet 仍包含 provider-switch-execution-memory.md 和 provider switch decision receipt",
+        ],
+        blockers: [],
+        needs: ["typed MEMORY.md provider switch execution rows", "provider switch decision receipt", "重新渲染 WorkerContextPacket"],
+        requeueReason: "",
+        createdAt: existing.createdAt || existing.created_at || at,
+        updatedAt: existing.updatedAt || existing.updated_at || at,
+        lastSeenAt: existing.lastSeenAt || existing.last_seen_at || at,
+        completedAt: existing.completedAt || existing.completed_at || "",
+        seenCount: Math.max(1, Number(existing.seenCount || existing.seen_count || 1) || 1),
+    };
+}
+function syncWorkerContextProviderRankingProvenanceCompactRepairWorkItems(groupId, repairRows = [], options = {}) {
+    if (!groupId)
+        return summarizeReplayRepairPendingWorkItems(groupId);
+    const at = String(options.at || options.generatedAt || options.generated_at || now());
+    const ledger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+    const previousItems = Array.isArray(ledger.items) ? ledger.items : [];
+    const previousById = new Map(previousItems.map((item) => [String(item.id || item.work_item_id || ""), item]));
+    const currentIds = new Set();
+    const nextRepairItems = [];
+    let changed = false;
+    for (const [index, row] of repairRows.entries()) {
+        const draft = buildWorkerContextProviderRankingProvenanceCompactRepairWorkItem(groupId, row, index, {}, at);
+        const existing = previousById.get(draft.id) || {};
+        let item = buildWorkerContextProviderRankingProvenanceCompactRepairWorkItem(groupId, row, index, existing, at);
+        const previousSignature = replayRepairWorkItemSignature(existing);
+        const nextSignature = replayRepairWorkItemSignature(item);
+        if (existing.id && previousSignature === nextSignature) {
+            item = {
+                ...existing,
+                ...item,
+                createdAt: existing.createdAt || item.createdAt,
+                updatedAt: existing.updatedAt || item.updatedAt,
+                lastSeenAt: existing.lastSeenAt || item.lastSeenAt,
+                seenCount: Number(existing.seenCount || 1),
+            };
+        }
+        else {
+            item = {
+                ...item,
+                updatedAt: at,
+                lastSeenAt: at,
+                seenCount: existing.id ? Number(existing.seenCount || 1) + 1 : 1,
+            };
+            changed = true;
+        }
+        currentIds.add(item.id);
+        nextRepairItems.push(item);
+    }
+    const untouchedItems = [];
+    for (const existing of previousItems) {
+        const id = String(existing.id || existing.work_item_id || "");
+        const source = String(existing.source || "");
+        if (source !== "worker_context_provider_ranking_provenance_compact_repair") {
+            untouchedItems.push(existing);
+            continue;
+        }
+        if (!id || currentIds.has(id))
+            continue;
+        const currentStatus = replayRepairWorkItemStatus(existing.status);
+        if (!replayRepairWorkItemOpen(currentStatus)) {
+            nextRepairItems.push(existing);
+            continue;
+        }
+        const resolved = repairRows.length === 0;
+        nextRepairItems.push({
+            ...existing,
+            status: resolved ? "completed" : "cancelled",
+            updatedAt: at,
+            completedAt: resolved ? (existing.completedAt || at) : existing.completedAt || "",
+            resolutionReason: resolved ? "provider_ranking_provenance_compact_preserved" : "superseded_by_latest_provider_ranking_provenance_compact_report",
+            latestProviderRankingProvenanceCompactRepair: {
+                activeLossCount: repairRows.length,
+            },
+        });
+        changed = true;
+    }
+    const nextItems = [...untouchedItems, ...nextRepairItems]
+        .sort((a, b) => {
+        const statusRank = replayRepairWorkItemOpen(a.status) === replayRepairWorkItemOpen(b.status) ? 0 : replayRepairWorkItemOpen(a.status) ? -1 : 1;
+        if (statusRank)
+            return statusRank;
+        const priority = replayRepairPriorityRank(a.priority) - replayRepairPriorityRank(b.priority);
+        if (priority)
+            return priority;
+        return String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""));
+    })
+        .slice(0, 160);
+    const stats = replayRepairWorkItemStats(nextItems);
+    const nextLedger = {
+        ...ledger,
+        items: nextItems,
+        stats,
+        updatedAt: changed || !ledger.updatedAt ? at : ledger.updatedAt,
+    };
+    const currentComparable = JSON.stringify({
+        items: previousItems.filter((item) => String(item.source || "") === "worker_context_provider_ranking_provenance_compact_repair"),
+    });
+    const nextComparable = JSON.stringify({
+        items: nextItems.filter((item) => String(item.source || "") === "worker_context_provider_ranking_provenance_compact_repair"),
+    });
+    if (changed || currentComparable !== nextComparable || !fs.existsSync(ledger.file || getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId))) {
+        return summarizeReplayRepairPendingWorkItems(groupId, writeGroupCompactBoundaryReplayRepairWorkItems(groupId, nextLedger));
+    }
+    return summarizeReplayRepairPendingWorkItems(groupId, ledger);
+}
+function buildWorkerContextProviderRankingProvenanceCompactRepairWorkItemReport(options = {}) {
+    const groupIds = replayRepairDispatchBindingGroupIds(options);
+    const rows = groupIds.map((groupId) => {
+        const repairRows = workerContextPacketProviderRankingProvenanceCompactRepairRows(groupId);
+        const workItems = syncWorkerContextProviderRankingProvenanceCompactRepairWorkItems(groupId, repairRows, { at: options.generatedAt || options.generated_at || now() });
+        const ledger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+        const repairItems = (Array.isArray(ledger.items) ? ledger.items : [])
+            .filter((item) => String(item.source || "") === "worker_context_provider_ranking_provenance_compact_repair");
+        const expectedIds = new Set(repairRows.map((row, index) => buildWorkerContextProviderRankingProvenanceCompactRepairWorkItem(groupId, row, index, {}, options.generatedAt || options.generated_at || now()).id));
+        const currentRepairItems = repairItems.filter((item) => expectedIds.has(String(item.id || item.work_item_id || "")));
+        const openItems = currentRepairItems.filter((item) => replayRepairWorkItemOpen(item.status));
+        const receiptVerifiedCompletedItems = currentRepairItems.filter((item) => replayRepairWorkItemStatus(item.status) === "completed"
+            && item.resolutionReason === "provider_ranking_provenance_compact_repair_receipt_verified");
+        const staleOpenItems = repairItems.filter((item) => replayRepairWorkItemOpen(item.status) && !expectedIds.has(String(item.id || item.work_item_id || "")));
+        const completedItems = repairItems.filter((item) => replayRepairWorkItemStatus(item.status) === "completed");
+        const requiredActionCount = repairRows.length;
+        const coveredItemCount = openItems.length + receiptVerifiedCompletedItems.length;
+        const status = requiredActionCount > 0
+            ? coveredItemCount >= requiredActionCount ? "ok" : "fail"
+            : staleOpenItems.length > 0 ? "warn" : "empty";
+        return {
+            schema: "ccm-worker-context-provider-ranking-provenance-compact-repair-work-item-group-v1",
+            groupId,
+            status,
+            requiredActionCount,
+            coveredItemCount,
+            openItemCount: openItems.length + staleOpenItems.length,
+            currentOpenItemCount: openItems.length,
+            staleOpenItemCount: staleOpenItems.length,
+            completedCount: completedItems.length,
+            receiptVerifiedCompletedCount: receiptVerifiedCompletedItems.length,
+            pendingCount: repairItems.filter((item) => replayRepairWorkItemStatus(item.status) === "pending").length,
+            inProgressCount: repairItems.filter((item) => replayRepairWorkItemStatus(item.status) === "in_progress").length,
+            blockedCount: repairItems.filter((item) => replayRepairWorkItemStatus(item.status) === "blocked").length,
+            file: workItems.file || getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId),
+            losses: repairRows.slice(0, 12).map((row) => ({
+                binding_id: row.entry?.binding_id || "",
+                assignment_id: row.entry?.assignment_id || "",
+                project: row.entry?.project || "",
+                retry_id: row.retry?.retry_id || "",
+                hook_run_id: row.hookRunId || "",
+                outcome_id: row.outcome?.outcome_id || "",
+                provider_switch_decision_receipt_id: row.preservation?.before?.provider_switch_decision_receipt_id || "",
+                provider_switch_decision_receipt_checksum: row.preservation?.before?.provider_switch_decision_receipt_checksum || "",
+                typed_memory_rel_paths: row.preservation?.before?.typed_memory_rel_paths || [],
+                typed_memory_row_ids: row.preservation?.before?.typed_memory_row_ids || [],
+                gaps: row.providerGaps || [],
+            })),
+            items: repairItems.slice(0, 12).map((item) => ({
+                id: item.id || item.work_item_id || "",
+                status: replayRepairWorkItemStatus(item.status),
+                priority: item.priority || "",
+                target_project: item.target_project || "",
+                packet_id: item.worker_context_packet_id || "",
+                binding_id: item.worker_context_packet_binding_id || item.binding_id || "",
+                compact_retry_id: item.compact_retry_id || "",
+                provider_switch_decision_receipt_id: item.provider_switch_decision_receipt_id || "",
+                provider_switch_decision_receipt_checksum: item.provider_switch_decision_receipt_checksum || "",
+                provider_ranking_provenance_rel_paths: item.provider_ranking_provenance_rel_paths || [],
+                provider_ranking_provenance_gap_codes: item.provider_ranking_provenance_gap_codes || [],
+                resolutionReason: item.resolutionReason || "",
+                instruction: compactMemoryCenterText(item.instruction || "", 260),
+            })),
+            gaps: status === "fail" ? [{
+                    reason: `Provider ranking provenance compact losses=${requiredActionCount} 但 current open repair work items=${coveredItemCount}`,
+                }] : status === "warn" ? [{
+                    reason: `Provider ranking provenance compact loss 已解除但仍有 stale open repair work items=${staleOpenItems.length}`,
+                }] : [],
+        };
+    });
+    const checkedRows = rows.filter(row => Number(row.requiredActionCount || 0) > 0 || Number(row.openItemCount || 0) > 0);
+    const groupsNeedingWork = checkedRows.filter(row => Number(row.requiredActionCount || 0) > 0);
+    const groupsCovered = groupsNeedingWork.filter(row => Number(row.coveredItemCount || 0) >= Number(row.requiredActionCount || 0));
+    const coverageRate = groupsNeedingWork.length ? Math.round((groupsCovered.length / groupsNeedingWork.length) * 1000) / 10 : null;
+    const status = coverageRate === null
+        ? checkedRows.some(row => row.status === "warn") ? "warn" : "empty"
+        : coverageRate >= 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail";
+    return {
+        schema: "ccm-worker-context-provider-ranking-provenance-compact-repair-work-item-report-v1",
+        generatedAt: now(),
+        overall: {
+            status,
+            coverageRate,
+            groupCount: rows.length,
+            checkedGroupCount: checkedRows.length,
+            groupsNeedingWork: groupsNeedingWork.length,
+            groupsCovered: groupsCovered.length,
+            requiredActionCount: checkedRows.reduce((sum, row) => sum + Number(row.requiredActionCount || 0), 0),
+            coveredItemCount: checkedRows.reduce((sum, row) => sum + Number(row.coveredItemCount || 0), 0),
+            openItemCount: checkedRows.reduce((sum, row) => sum + Number(row.openItemCount || 0), 0),
+            currentOpenItemCount: checkedRows.reduce((sum, row) => sum + Number(row.currentOpenItemCount || 0), 0),
+            completedCount: checkedRows.reduce((sum, row) => sum + Number(row.completedCount || 0), 0),
+        },
+        groups: rows.sort((a, b) => Number(b.requiredActionCount || 0) - Number(a.requiredActionCount || 0)
+            || Number(b.openItemCount || 0) - Number(a.openItemCount || 0)).slice(0, 50),
+        weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn").slice(0, 20),
+    };
+}
+function evaluateWorkerContextProviderRankingProvenanceCompactRepairWorkItems(options = {}) {
+    const report = buildWorkerContextProviderRankingProvenanceCompactRepairWorkItemReport(options);
+    const checked = Number(report.overall.checkedGroupCount || 0);
+    const passed = checked === 0
+        ? 0
+        : (report.groups || []).filter((row) => (Number(row.requiredActionCount || 0) > 0 || Number(row.openItemCount || 0) > 0) && row.status === "ok").length;
+    const evidence = (report.groups || []).filter((row) => row.status === "ok" && Number(row.requiredActionCount || 0) > 0).slice(0, 12).map((row) => ({
+        groupId: row.groupId,
+        requiredActionCount: row.requiredActionCount,
+        coveredItemCount: row.coveredItemCount,
+        currentOpenItemCount: row.currentOpenItemCount,
+        file: row.file,
+        losses: (row.losses || []).slice(0, 3),
+    }));
+    const gaps = (report.weakGroups || []).slice(0, 12).map((row) => ({
+        groupId: row.groupId,
+        reason: row.gaps?.[0]?.reason || "provider ranking provenance compact repair work items 未覆盖",
+        requiredActionCount: row.requiredActionCount,
+        openItemCount: row.openItemCount,
+        coveredItemCount: row.coveredItemCount,
+    }));
+    const check = makeQualityCheck("worker_context_provider_ranking_provenance_compact_repair_work_items", "WorkerContext Provider Ranking Provenance Compact Repair Work Items", checked, passed, evidence, gaps, "当 WorkerContextPacket compact outcome ledger 发现 provider ranking provenance 或 provider switch decision receipt 在压缩后丢失时，必须物化为群聊主 Agent 可读 repair work item，重新从 typed MEMORY.md 和 receipt 生成子 Agent 可用上下文。");
+    check.report = report;
+    return check;
+}
+function isWorkerContextProviderRankingProvenanceCompactRepairSource(source) {
+    return String(source || "").trim() === "worker_context_provider_ranking_provenance_compact_repair";
+}
+function workerContextProviderRankingProvenanceCompactRepairDispatchBriefMetadataGaps(candidate = {}, brief = {}) {
+    const gaps = replayRepairDispatchBriefMetadataGaps(candidate, brief);
+    if (!brief || !brief.brief_id)
+        return gaps;
+    if (!isWorkerContextProviderRankingProvenanceCompactRepairSource(brief.source))
+        gaps.push("source");
+    const mirroredFields = [
+        "worker_context_packet_id",
+        "worker_context_packet_binding_id",
+        "binding_id",
+        "assignment_id",
+        "dispatch_key",
+        "provider_switch_decision_receipt_id",
+        "provider_switch_decision_receipt_checksum",
+        "compact_outcome_id",
+        "compact_retry_id",
+        "compact_hook_run_id",
+    ];
+    for (const field of mirroredFields) {
+        const expected = String(candidate[field] || "").trim();
+        if (expected && String(brief[field] || "").trim() !== expected)
+            gaps.push(field);
+    }
+    const arrayFields = [
+        "provider_ranking_provenance_rel_paths",
+        "provider_ranking_provenance_row_ids",
+        "provider_ranking_provenance_gap_codes",
+    ];
+    for (const field of arrayFields) {
+        const expected = Array.isArray(candidate[field]) ? candidate[field].map((item) => String(item || "")).filter(Boolean) : [];
+        const actual = Array.isArray(brief[field]) ? brief[field].map((item) => String(item || "")).filter(Boolean) : [];
+        for (const value of expected) {
+            if (value && !actual.includes(value))
+                gaps.push(field);
+        }
+    }
+    const workerTask = String(brief.worker_task || "");
+    if (!/replayRepairDispatchBriefUsage/i.test(workerTask))
+        gaps.push("worker_task_replayRepairDispatchBriefUsage");
+    if (!/providerRankingProvenancePreserved|provider_ranking_provenance_preserved/i.test(workerTask))
+        gaps.push("worker_task_providerRankingProvenancePreserved");
+    if (!/providerSwitchDecisionReceiptId|provider_switch_decision_receipt_id/i.test(workerTask))
+        gaps.push("worker_task_providerSwitchDecisionReceiptId");
+    if (!/providerSwitchDecisionReceiptChecksum|provider_switch_decision_receipt_checksum/i.test(workerTask))
+        gaps.push("worker_task_providerSwitchDecisionReceiptChecksum");
+    if (!/provider_ranking_provenance_preservation\.preserved=true/i.test(workerTask))
+        gaps.push("worker_task_preservation_contract");
+    if (!/ranking evidence|不能作为授权|not.*authorization/i.test(workerTask))
+        gaps.push("worker_task_authorization_boundary");
+    if (candidate.provider_switch_decision_receipt_id && !workerTask.includes(String(candidate.provider_switch_decision_receipt_id)))
+        gaps.push("worker_task_receipt_id");
+    if (candidate.provider_switch_decision_receipt_checksum && !workerTask.includes(String(candidate.provider_switch_decision_receipt_checksum)))
+        gaps.push("worker_task_receipt_checksum");
+    for (const relPath of (Array.isArray(candidate.provider_ranking_provenance_rel_paths) ? candidate.provider_ranking_provenance_rel_paths : []).slice(0, 4)) {
+        if (relPath && !workerTask.includes(String(relPath)))
+            gaps.push("worker_task_rel_path");
+    }
+    for (const rowId of (Array.isArray(candidate.provider_ranking_provenance_row_ids) ? candidate.provider_ranking_provenance_row_ids : []).slice(0, 4)) {
+        if (rowId && !workerTask.includes(String(rowId)))
+            gaps.push("worker_task_row_id");
+    }
+    return [...new Set(gaps)];
+}
+function buildWorkerContextProviderRankingProvenanceCompactRepairDispatchBriefReport(options = {}) {
+    const workItemReport = options.workItemReport
+        || options.work_item_report
+        || buildWorkerContextProviderRankingProvenanceCompactRepairWorkItemReport(options);
+    const rows = (workItemReport.groups || []).map((workItemGroup) => {
+        const groupId = String(workItemGroup.groupId || "");
+        const candidateSummaryRaw = buildReplayRepairMainAgentDispatchCandidates(groupId, { limit: options.limit || 24 });
+        const providerCandidates = Array.isArray(candidateSummaryRaw.candidates)
+            ? candidateSummaryRaw.candidates.filter((candidate) => isWorkerContextProviderRankingProvenanceCompactRepairSource(candidate.source))
+            : [];
+        const candidateSummary = {
+            ...candidateSummaryRaw,
+            candidateCount: providerCandidates.length,
+            candidates: providerCandidates,
+            shouldCreateRealTask: false,
+        };
+        const ledger = syncReplayRepairDispatchPlanLedgerForCenter(groupId, candidateSummary, options);
+        const readyBriefs = (Array.isArray(ledger.briefs) ? ledger.briefs : [])
+            .filter((brief) => String(brief.status || "") === "ready" && isWorkerContextProviderRankingProvenanceCompactRepairSource(brief.source));
+        const briefByWorkId = new Map(readyBriefs.map((brief) => [String(brief.work_item_id || ""), brief]));
+        const requiredCandidates = providerCandidates.filter((candidate) => candidate.work_item_id);
+        const missing = requiredCandidates.filter((candidate) => !briefByWorkId.has(String(candidate.work_item_id || "")));
+        const metadataGaps = requiredCandidates
+            .map((candidate) => {
+            const brief = briefByWorkId.get(String(candidate.work_item_id || "")) || null;
+            return {
+                work_item_id: candidate.work_item_id || "",
+                candidate_id: candidate.candidate_id || "",
+                brief_id: brief?.brief_id || "",
+                gaps: workerContextProviderRankingProvenanceCompactRepairDispatchBriefMetadataGaps(candidate, brief),
+            };
+        })
+            .filter((entry) => entry.gaps.length > 0);
+        const status = requiredCandidates.length === 0
+            ? "empty"
+            : missing.length > 0 ? "fail" : metadataGaps.length > 0 ? "warn" : "ok";
+        return {
+            schema: "ccm-worker-context-provider-ranking-provenance-compact-repair-dispatch-brief-group-v1",
+            groupId,
+            status,
+            file: ledger.file || getGroupReplayRepairDispatchPlanLedgerFile(groupId),
+            sourceCandidateFile: ledger.sourceCandidateFile || candidateSummaryRaw.file || "",
+            expectedBriefCount: requiredCandidates.length,
+            coveredBriefCount: requiredCandidates.length - missing.length,
+            readyBriefCount: readyBriefs.length,
+            metadataGapCount: metadataGaps.length,
+            receiptBoundBriefCount: readyBriefs.filter((brief) => brief.provider_switch_decision_receipt_id && brief.provider_switch_decision_receipt_checksum).length,
+            typedMemoryBriefCount: readyBriefs.filter((brief) => (brief.provider_ranking_provenance_rel_paths || []).length > 0 && (brief.provider_ranking_provenance_row_ids || []).length > 0).length,
+            preservationContractBriefCount: readyBriefs.filter((brief) => /provider_ranking_provenance_preservation\.preserved=true/i.test(String(brief.worker_task || ""))).length,
+            authorizationBoundaryBriefCount: readyBriefs.filter((brief) => /ranking evidence|不能作为授权|not.*authorization/i.test(String(brief.worker_task || ""))).length,
+            shouldCreateRealTask: ledger.shouldCreateRealTask === false || ledger.should_create_real_task === false,
+            briefs: readyBriefs.slice(0, 12).map((brief) => ({
+                brief_id: brief.brief_id || "",
+                work_item_id: brief.work_item_id || "",
+                source: brief.source || "",
+                target_project: brief.target_project || "",
+                worker_context_packet_id: brief.worker_context_packet_id || "",
+                compact_retry_id: brief.compact_retry_id || "",
+                compact_outcome_id: brief.compact_outcome_id || "",
+                provider_switch_decision_receipt_id: brief.provider_switch_decision_receipt_id || "",
+                provider_switch_decision_receipt_checksum: brief.provider_switch_decision_receipt_checksum || "",
+                provider_ranking_provenance_rel_paths: brief.provider_ranking_provenance_rel_paths || [],
+                provider_ranking_provenance_row_ids: brief.provider_ranking_provenance_row_ids || [],
+                provider_ranking_provenance_gap_codes: brief.provider_ranking_provenance_gap_codes || [],
+                worker_task: compactMemoryCenterText(brief.worker_task || "", 620),
+            })),
+            missingBriefs: missing.slice(0, 8).map((candidate) => ({
+                work_item_id: candidate.work_item_id || "",
+                candidate_id: candidate.candidate_id || "",
+                reason: "provider ranking provenance compact repair candidate 缺少 rerender 派发简报",
+            })),
+            metadataGaps: metadataGaps.slice(0, 8),
+            gaps: [
+                ...missing.slice(0, 8).map((candidate) => ({
+                    work_item_id: candidate.work_item_id || "",
+                    candidate_id: candidate.candidate_id || "",
+                    reason: "provider ranking provenance compact repair candidate 缺少主 Agent rerender worker brief",
+                })),
+                ...metadataGaps.slice(0, 8).map((gap) => ({
+                    work_item_id: gap.work_item_id || "",
+                    candidate_id: gap.candidate_id || "",
+                    brief_id: gap.brief_id || "",
+                    reason: `provider ranking provenance compact repair dispatch brief 缺少字段：${gap.gaps.join(",")}`,
+                })),
+            ].slice(0, 12),
+        };
+    });
+    const checkedRows = rows.filter(row => Number(row.expectedBriefCount || 0) > 0 || Number(row.readyBriefCount || 0) > 0);
+    const requiredRows = checkedRows.filter(row => Number(row.expectedBriefCount || 0) > 0);
+    const coveredRows = requiredRows.filter(row => Number(row.coveredBriefCount || 0) >= Number(row.expectedBriefCount || 0));
+    const metadataCompleteRows = requiredRows.filter(row => Number(row.metadataGapCount || 0) === 0);
+    const coverageRate = requiredRows.length ? Math.round((coveredRows.length / requiredRows.length) * 1000) / 10 : null;
+    const metadataCoverageRate = requiredRows.length ? Math.round((metadataCompleteRows.length / requiredRows.length) * 1000) / 10 : null;
+    const status = coverageRate === null
+        ? "empty"
+        : coverageRate < 100 ? coverageRate >= 75 ? "warn" : "fail" : metadataCoverageRate === 100 ? "ok" : "warn";
+    return {
+        schema: "ccm-worker-context-provider-ranking-provenance-compact-repair-dispatch-brief-report-v1",
+        generatedAt: now(),
+        workItemReport: {
+            schema: workItemReport.schema || "",
+            overall: workItemReport.overall || {},
+        },
+        overall: {
+            status,
+            coverageRate,
+            metadataCoverageRate,
+            groupCount: rows.length,
+            checkedGroupCount: checkedRows.length,
+            groupsNeedingBriefs: requiredRows.length,
+            groupsCovered: coveredRows.length,
+            groupsMetadataComplete: metadataCompleteRows.length,
+            expectedBriefCount: checkedRows.reduce((sum, row) => sum + Number(row.expectedBriefCount || 0), 0),
+            coveredBriefCount: checkedRows.reduce((sum, row) => sum + Number(row.coveredBriefCount || 0), 0),
+            readyBriefCount: checkedRows.reduce((sum, row) => sum + Number(row.readyBriefCount || 0), 0),
+            metadataGapCount: checkedRows.reduce((sum, row) => sum + Number(row.metadataGapCount || 0), 0),
+            receiptBoundBriefCount: checkedRows.reduce((sum, row) => sum + Number(row.receiptBoundBriefCount || 0), 0),
+            typedMemoryBriefCount: checkedRows.reduce((sum, row) => sum + Number(row.typedMemoryBriefCount || 0), 0),
+            preservationContractBriefCount: checkedRows.reduce((sum, row) => sum + Number(row.preservationContractBriefCount || 0), 0),
+            authorizationBoundaryBriefCount: checkedRows.reduce((sum, row) => sum + Number(row.authorizationBoundaryBriefCount || 0), 0),
+        },
+        groups: rows.sort((a, b) => Number(b.expectedBriefCount || 0) - Number(a.expectedBriefCount || 0) || Number(b.readyBriefCount || 0) - Number(a.readyBriefCount || 0)).slice(0, 50),
+        weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn").slice(0, 20),
+    };
+}
+function evaluateWorkerContextProviderRankingProvenanceCompactRepairDispatchBriefs(options = {}) {
+    const report = buildWorkerContextProviderRankingProvenanceCompactRepairDispatchBriefReport(options);
+    const checked = Number(report.overall.groupsNeedingBriefs || 0);
+    const passed = (report.groups || []).filter((row) => Number(row.expectedBriefCount || 0) > 0 && row.status === "ok").length;
+    const evidence = (report.groups || []).filter((row) => row.status === "ok").slice(0, 12).map((row) => ({
+        groupId: row.groupId,
+        expectedBriefCount: row.expectedBriefCount,
+        coveredBriefCount: row.coveredBriefCount,
+        readyBriefCount: row.readyBriefCount,
+        receiptBoundBriefCount: row.receiptBoundBriefCount,
+        typedMemoryBriefCount: row.typedMemoryBriefCount,
+        preservationContractBriefCount: row.preservationContractBriefCount,
+        authorizationBoundaryBriefCount: row.authorizationBoundaryBriefCount,
+        file: row.file,
+    }));
+    const gaps = (report.weakGroups || []).flatMap((row) => (row.gaps || []).slice(0, 3).map((gap) => ({
+        groupId: row.groupId,
+        reason: gap.reason || "provider ranking provenance compact repair dispatch brief 缺失",
+        work_item_id: gap.work_item_id || "",
+        candidate_id: gap.candidate_id || "",
+        brief_id: gap.brief_id || "",
+    }))).slice(0, 12);
+    const check = makeQualityCheck("worker_context_provider_ranking_provenance_compact_repair_dispatch_briefs", "WorkerContext Provider Ranking Provenance Compact Repair Dispatch Briefs", checked, passed, evidence, gaps, "把 provider ranking provenance compact repair candidates 编译成主 Agent 可执行 rerender brief；brief 必须携带 typed MEMORY.md row/path、provider switch receipt checksum、compact retry/outcome/hook id，并明确 execution history 只是 ranking evidence 不是授权。");
+    check.report = report;
+    return check;
+}
+function providerRankingProvenanceCompactRepairReceiptConsumptionGaps(entry = {}, item = null) {
+    const gaps = [];
+    if (!isWorkerContextProviderRankingProvenanceCompactRepairSource(entry.source))
+        gaps.push("source");
+    if (!replayRepairTimelineBindingHasReceiptEvent(entry))
+        gaps.push("child_agent_receipt_event");
+    for (const eventType of REPLAY_REPAIR_TIMELINE_REQUIRED_EVENTS) {
+        const eventTypes = new Set((Array.isArray(entry.event_types) ? entry.event_types : []).map((value) => String(value || "").trim()).filter(Boolean));
+        if (!eventTypes.has(eventType))
+            gaps.push(`event:${eventType}`);
+    }
+    for (const field of [
+        "timeline_binding_id",
+        "brief_id",
+        "work_item_id",
+        "task_id",
+        "project",
+        "assignment_id",
+        "dispatch_key",
+        "worker_context_packet_id",
+        "task_agent_session_id",
+        "memory_context_snapshot_id",
+        "execution_id",
+        "receipt_status",
+    ]) {
+        if (!entry[field])
+            gaps.push(field);
+    }
+    if (!["done", "completed", "ok", "success"].includes(String(entry.receipt_status || "").trim().toLowerCase())) {
+        gaps.push("receipt_status_not_completed");
+    }
+    if (replayRepairReceiptConsumptionStatus(entry.replay_repair_consumption_status || entry.replayRepairConsumptionStatus) !== "verified") {
+        gaps.push("replay_repair_consumption_status_verified");
+    }
+    if (entry.replay_repair_consumption_source !== "receipt.replayRepairDispatchBriefUsage") {
+        gaps.push("replay_repair_consumption_source");
+    }
+    if (entry.provider_ranking_provenance_receipt_consumption_verified !== true) {
+        gaps.push("provider_ranking_provenance_receipt_consumption_verified");
+    }
+    if (!entry.provider_switch_decision_receipt_id)
+        gaps.push("provider_switch_decision_receipt_id");
+    if (!entry.provider_switch_decision_receipt_checksum)
+        gaps.push("provider_switch_decision_receipt_checksum");
+    if (!Array.isArray(entry.provider_ranking_provenance_rel_paths) || entry.provider_ranking_provenance_rel_paths.length === 0) {
+        gaps.push("provider_ranking_provenance_rel_paths");
+    }
+    if (!Array.isArray(entry.provider_ranking_provenance_row_ids) || entry.provider_ranking_provenance_row_ids.length === 0) {
+        gaps.push("provider_ranking_provenance_row_ids");
+    }
+    if (entry.provider_ranking_provenance_preserved !== true)
+        gaps.push("provider_ranking_provenance_preserved");
+    if (entry.provider_ranking_provenance_repair_status !== "completed")
+        gaps.push("provider_ranking_provenance_repair_status");
+    if (entry.provider_ranking_provenance_repair_gap_type !== "provider_ranking_provenance_compact") {
+        gaps.push("provider_ranking_provenance_repair_gap_type");
+    }
+    if (item) {
+        if (String(item.work_item_id || item.id || "") !== String(entry.work_item_id || ""))
+            gaps.push("work_item_match");
+        if (item.provider_switch_decision_receipt_id && item.provider_switch_decision_receipt_id !== entry.provider_switch_decision_receipt_id) {
+            gaps.push("provider_switch_decision_receipt_id_match");
+        }
+        if (item.provider_switch_decision_receipt_checksum && item.provider_switch_decision_receipt_checksum !== entry.provider_switch_decision_receipt_checksum) {
+            gaps.push("provider_switch_decision_receipt_checksum_match");
+        }
+        const entryRelPaths = new Set((Array.isArray(entry.provider_ranking_provenance_rel_paths) ? entry.provider_ranking_provenance_rel_paths : []).map((value) => String(value || "")));
+        const entryRowIds = new Set((Array.isArray(entry.provider_ranking_provenance_row_ids) ? entry.provider_ranking_provenance_row_ids : []).map((value) => String(value || "")));
+        for (const relPath of (Array.isArray(item.provider_ranking_provenance_rel_paths) ? item.provider_ranking_provenance_rel_paths : [])) {
+            if (relPath && !entryRelPaths.has(String(relPath)))
+                gaps.push("provider_ranking_provenance_rel_path_match");
+        }
+        for (const rowId of (Array.isArray(item.provider_ranking_provenance_row_ids) ? item.provider_ranking_provenance_row_ids : [])) {
+            if (rowId && !entryRowIds.has(String(rowId)))
+                gaps.push("provider_ranking_provenance_row_id_match");
+        }
+        if (replayRepairWorkItemStatus(item.status) !== "completed")
+            gaps.push("repair_work_item_completed");
+        if (item.resolutionReason !== "provider_ranking_provenance_compact_repair_receipt_verified") {
+            gaps.push("repair_work_item_resolution_reason");
+        }
+    }
+    else {
+        gaps.push("repair_work_item_match");
+    }
+    return [...new Set(gaps)];
+}
+function buildWorkerContextProviderRankingProvenanceCompactRepairReceiptConsumptionReport(options = {}) {
+    const groupIds = replayRepairDispatchTimelineBindingGroupIds(options);
+    const rows = groupIds.map((groupId) => {
+        const timelineLedger = readGroupReplayRepairDispatchTimelineBindingLedger(groupId);
+        const entries = Array.isArray(timelineLedger.entries) ? timelineLedger.entries : [];
+        const providerEntries = entries
+            .filter((entry) => isWorkerContextProviderRankingProvenanceCompactRepairSource(entry.source))
+            .filter(replayRepairTimelineBindingHasReceiptEvent);
+        const workItemLedger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+        const providerItems = (Array.isArray(workItemLedger.items) ? workItemLedger.items : [])
+            .filter((item) => isWorkerContextProviderRankingProvenanceCompactRepairSource(item.source));
+        const consumptionRows = providerEntries.map((entry) => {
+            const item = providerItems.find((candidate) => String(candidate.work_item_id || candidate.id || "") === String(entry.work_item_id || "")) || null;
+            const gaps = providerRankingProvenanceCompactRepairReceiptConsumptionGaps(entry, item);
+            return { entry, item, gaps };
+        });
+        const gapRows = consumptionRows.filter((row) => row.gaps.length > 0);
+        const status = providerEntries.length === 0
+            ? "empty"
+            : gapRows.length === 0 ? "ok" : "fail";
+        return {
+            schema: "ccm-worker-context-provider-ranking-provenance-compact-repair-receipt-consumption-group-v1",
+            groupId,
+            status,
+            file: timelineLedger.file || getGroupReplayRepairDispatchTimelineBindingLedgerFile(groupId),
+            workItemsFile: workItemLedger.file || getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId),
+            receiptBindingCount: providerEntries.length,
+            validConsumptionCount: providerEntries.length - gapRows.length,
+            metadataGapCount: gapRows.length,
+            verifiedUsageCount: consumptionRows.filter((row) => replayRepairReceiptConsumptionStatus(row.entry.replay_repair_consumption_status || row.entry.replayRepairConsumptionStatus) === "verified").length,
+            preservedCount: consumptionRows.filter((row) => row.entry.provider_ranking_provenance_preserved === true).length,
+            receiptBoundCount: consumptionRows.filter((row) => row.entry.provider_switch_decision_receipt_id && row.entry.provider_switch_decision_receipt_checksum).length,
+            typedMemoryBoundCount: consumptionRows.filter((row) => (row.entry.provider_ranking_provenance_rel_paths || []).length > 0
+                && (row.entry.provider_ranking_provenance_row_ids || []).length > 0).length,
+            completedRepairItemCount: consumptionRows.filter((row) => replayRepairWorkItemStatus(row.item?.status) === "completed").length,
+            bindings: consumptionRows.slice(-12).reverse().map((row) => ({
+                timeline_binding_id: row.entry.timeline_binding_id || "",
+                brief_id: row.entry.brief_id || "",
+                work_item_id: row.entry.work_item_id || "",
+                source: row.entry.source || "",
+                project: row.entry.project || "",
+                task_id: row.entry.task_id || "",
+                receipt_status: row.entry.receipt_status || "",
+                replay_repair_consumption_status: row.entry.replay_repair_consumption_status || "",
+                replay_repair_consumption_source: row.entry.replay_repair_consumption_source || "",
+                provider_switch_decision_receipt_id: row.entry.provider_switch_decision_receipt_id || "",
+                provider_switch_decision_receipt_checksum: row.entry.provider_switch_decision_receipt_checksum || "",
+                provider_ranking_provenance_rel_paths: row.entry.provider_ranking_provenance_rel_paths || [],
+                provider_ranking_provenance_row_ids: row.entry.provider_ranking_provenance_row_ids || [],
+                provider_ranking_provenance_preserved: row.entry.provider_ranking_provenance_preserved === true,
+                provider_ranking_provenance_repair_status: row.entry.provider_ranking_provenance_repair_status || "",
+                provider_ranking_provenance_repair_gap_type: row.entry.provider_ranking_provenance_repair_gap_type || "",
+                repair_work_item_status: replayRepairWorkItemStatus(row.item?.status),
+                repair_work_item_resolution_reason: row.item?.resolutionReason || "",
+            })),
+            gaps: gapRows.slice(0, 8).map((row) => ({
+                timeline_binding_id: row.entry.timeline_binding_id || "",
+                brief_id: row.entry.brief_id || "",
+                work_item_id: row.entry.work_item_id || "",
+                task_id: row.entry.task_id || "",
+                reason: `provider ranking provenance compact repair receipt consumption 缺少字段/闭环：${row.gaps.join(",")}`,
+            })),
+        };
+    });
+    const checkedRows = rows.filter(row => Number(row.receiptBindingCount || 0) > 0);
+    const passedRows = checkedRows.filter(row => row.status === "ok");
+    const coverageRate = checkedRows.length ? Math.round((passedRows.length / checkedRows.length) * 1000) / 10 : null;
+    const status = coverageRate === null ? "empty" : coverageRate >= 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail";
+    return {
+        schema: "ccm-worker-context-provider-ranking-provenance-compact-repair-receipt-consumption-report-v1",
+        generatedAt: now(),
+        overall: {
+            status,
+            coverageRate,
+            groupCount: rows.length,
+            checkedGroupCount: checkedRows.length,
+            groupsCovered: passedRows.length,
+            receiptBindingCount: checkedRows.reduce((sum, row) => sum + Number(row.receiptBindingCount || 0), 0),
+            validConsumptionCount: checkedRows.reduce((sum, row) => sum + Number(row.validConsumptionCount || 0), 0),
+            metadataGapCount: checkedRows.reduce((sum, row) => sum + Number(row.metadataGapCount || 0), 0),
+            verifiedUsageCount: checkedRows.reduce((sum, row) => sum + Number(row.verifiedUsageCount || 0), 0),
+            preservedCount: checkedRows.reduce((sum, row) => sum + Number(row.preservedCount || 0), 0),
+            receiptBoundCount: checkedRows.reduce((sum, row) => sum + Number(row.receiptBoundCount || 0), 0),
+            typedMemoryBoundCount: checkedRows.reduce((sum, row) => sum + Number(row.typedMemoryBoundCount || 0), 0),
+            completedRepairItemCount: checkedRows.reduce((sum, row) => sum + Number(row.completedRepairItemCount || 0), 0),
+        },
+        groups: rows.sort((a, b) => Number(b.receiptBindingCount || 0) - Number(a.receiptBindingCount || 0)).slice(0, 50),
+        weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn").slice(0, 20),
+    };
+}
+function evaluateWorkerContextProviderRankingProvenanceCompactRepairReceiptConsumption(options = {}) {
+    const report = buildWorkerContextProviderRankingProvenanceCompactRepairReceiptConsumptionReport(options);
+    const checked = Number(report.overall.checkedGroupCount || 0);
+    const passed = Number(report.overall.groupsCovered || 0);
+    const evidence = (report.groups || []).filter((row) => row.status === "ok").slice(0, 12).map((row) => ({
+        groupId: row.groupId,
+        receiptBindingCount: row.receiptBindingCount,
+        validConsumptionCount: row.validConsumptionCount,
+        verifiedUsageCount: row.verifiedUsageCount,
+        preservedCount: row.preservedCount,
+        receiptBoundCount: row.receiptBoundCount,
+        typedMemoryBoundCount: row.typedMemoryBoundCount,
+        completedRepairItemCount: row.completedRepairItemCount,
+        file: row.file,
+    }));
+    const gaps = (report.weakGroups || []).flatMap((row) => (row.gaps || []).slice(0, 3).map((gap) => ({
+        groupId: row.groupId,
+        reason: gap.reason || "provider ranking provenance compact repair receipt consumption 缺失",
+        timeline_binding_id: gap.timeline_binding_id || "",
+        brief_id: gap.brief_id || "",
+        work_item_id: gap.work_item_id || "",
+        task_id: gap.task_id || "",
+    }))).slice(0, 12);
+    const check = makeQualityCheck("worker_context_provider_ranking_provenance_compact_repair_receipt_consumption", "WorkerContext Provider Ranking Provenance Compact Repair Receipt Consumption", checked, passed, evidence, gaps, "provider ranking provenance compact repair brief 进入子 Agent 后，child_agent_receipt 必须用 replayRepairDispatchBriefUsage verified 声明 receipt/checksum、typed MEMORY.md row/path、preserved=true、repairStatus=completed、repairGapType=provider_ranking_provenance_compact，且只在该强证据下关闭 repair work item。");
+    check.report = report;
+    return check;
+}
+function providerRankingProvenanceCompactRepairReceiptTypedMemoryProbeQuery(entries = []) {
+    return compactMemoryCenterText(entries.map((entry) => [
+        entry.brief_id,
+        entry.work_item_id,
+        entry.task_id,
+        entry.project,
+        entry.provider_switch_decision_receipt_id,
+        entry.provider_switch_decision_receipt_checksum,
+        ...(Array.isArray(entry.provider_ranking_provenance_rel_paths) ? entry.provider_ranking_provenance_rel_paths : []),
+        ...(Array.isArray(entry.provider_ranking_provenance_row_ids) ? entry.provider_ranking_provenance_row_ids : []),
+        entry.replay_repair_consumption_reason,
+    ].filter(Boolean).join(" ")).filter(Boolean).join("\n") || "provider ranking provenance compact repair receipt typed MEMORY.md", 4200);
+}
+function providerRankingProvenanceCompactRepairReceiptTypedMemoryEntryKey(entry = {}) {
+    return [
+        String(entry.timeline_binding_id || "").trim(),
+        String(entry.brief_id || "").trim(),
+        String(entry.work_item_id || "").trim(),
+        String(entry.provider_switch_decision_receipt_id || "").trim(),
+        String(entry.provider_switch_decision_receipt_checksum || "").trim(),
+    ].filter(Boolean).join("|").toLowerCase();
+}
+function providerRankingProvenanceCompactRepairReceiptArchiveMatchesEntry(row = {}, entry = {}) {
+    const rowKey = providerRankingProvenanceCompactRepairReceiptTypedMemoryEntryKey(row);
+    const entryKey = providerRankingProvenanceCompactRepairReceiptTypedMemoryEntryKey(entry);
+    if (rowKey && entryKey && rowKey === entryKey)
+        return true;
+    const briefId = String(entry.brief_id || "").trim();
+    const workItemId = String(entry.work_item_id || "").trim();
+    const receiptId = String(entry.provider_switch_decision_receipt_id || "").trim();
+    return (!!briefId && briefId === String(row.brief_id || "").trim())
+        || (!!workItemId && workItemId === String(row.work_item_id || "").trim())
+        || (!!receiptId && receiptId === String(row.provider_switch_decision_receipt_id || "").trim());
+}
+function buildWorkerContextProviderRankingProvenanceCompactRepairReceiptTypedMemoryReport(options = {}) {
+    const groupIds = replayRepairDispatchTimelineBindingGroupIds(options);
+    const { buildGroupTypedMemoryRecall, distillProviderRankingProvenanceCompactRepairReceiptConsumptionToTypedMemory, readGroupTypedMemoryDistillationLedger, scanGroupTypedMemoryDocuments, } = require("../collaboration/group-memory-index");
+    const rows = groupIds.map((groupId) => {
+        const timelineLedger = readGroupReplayRepairDispatchTimelineBindingLedger(groupId);
+        const entries = Array.isArray(timelineLedger.entries) ? timelineLedger.entries : [];
+        const providerEntries = entries
+            .filter((entry) => isWorkerContextProviderRankingProvenanceCompactRepairSource(entry.source))
+            .filter(replayRepairTimelineBindingHasReceiptEvent)
+            .filter((entry) => replayRepairReceiptConsumptionStatus(entry.replay_repair_consumption_status || entry.replayRepairConsumptionStatus) === "verified")
+            .filter((entry) => entry.provider_ranking_provenance_receipt_consumption_verified === true)
+            .filter((entry) => entry.provider_ranking_provenance_preserved === true);
+        const distillation = providerEntries.length
+            ? distillProviderRankingProvenanceCompactRepairReceiptConsumptionToTypedMemory(groupId, { rows: providerEntries }, {
+                reason: "memory-center-provider-ranking-provenance-compact-repair-receipt-typed-memory-report",
+                updatedAt: options.generatedAt || options.generated_at || now(),
+            })
+            : null;
+        const distillationLedger = readGroupTypedMemoryDistillationLedger(groupId);
+        const archive = distillationLedger.providerRankingProvenanceCompactRepairReceiptConsumptionArchive || {};
+        const archiveRows = Array.isArray(archive.rows) ? archive.rows : [];
+        const docs = scanGroupTypedMemoryDocuments(groupId);
+        const receiptDoc = docs.find((doc) => doc.relPath === "provider-ranking-provenance-compact-repair-receipt-memory.md");
+        const receiptDocText = (() => {
+            try {
+                return receiptDoc?.file ? fs.readFileSync(receiptDoc.file, "utf-8") : "";
+            }
+            catch {
+                return "";
+            }
+        })();
+        const archivedEntries = providerEntries.filter((entry) => archiveRows.some((row) => providerRankingProvenanceCompactRepairReceiptArchiveMatchesEntry(row, entry)));
+        const recall = providerEntries.length
+            ? buildGroupTypedMemoryRecall(groupId, providerRankingProvenanceCompactRepairReceiptTypedMemoryProbeQuery(providerEntries), {
+                max: 8,
+                disableLedger: true,
+                forceMemory: true,
+                snippetChars: 320,
+            })
+            : { recalled: [] };
+        const recalledText = JSON.stringify(recall.recalled || []);
+        const gaps = [];
+        if (providerEntries.length && archivedEntries.length < providerEntries.length) {
+            gaps.push({
+                reason: `provider ranking compact repair receipt archive 缺少 ${providerEntries.length - archivedEntries.length} 个 verified receipt 行`,
+                missing: providerEntries.length - archivedEntries.length,
+            });
+        }
+        if (providerEntries.length && (!receiptDoc || receiptDoc.type !== "reference")) {
+            gaps.push({ reason: "verified provider ranking compact repair receipt 未写入 reference typed memory", required: providerEntries.length });
+        }
+        if (providerEntries.length && !recalledText.includes("provider-ranking-provenance-compact-repair-receipt-memory.md")) {
+            gaps.push({ reason: "provider ranking compact repair receipt typed memory 无法通过 recall probe 召回" });
+        }
+        if (providerEntries.length && !/ranking evidence only, not authorization/i.test(receiptDocText)) {
+            gaps.push({ reason: "typed memory 未保留 ranking evidence only / not authorization 边界" });
+        }
+        if (providerEntries.length && !/fresh valid provider switch decision receipt/i.test(receiptDocText)) {
+            gaps.push({ reason: "typed memory 未声明未来 provider switch 仍需 fresh valid receipt" });
+        }
+        const status = providerEntries.length === 0 ? "empty" : gaps.length ? "fail" : "ok";
+        return {
+            schema: "ccm-worker-context-provider-ranking-provenance-compact-repair-receipt-typed-memory-group-v1",
+            groupId,
+            status,
+            file: timelineLedger.file || getGroupReplayRepairDispatchTimelineBindingLedgerFile(groupId),
+            typedMemoryLedgerFile: distillationLedger.file || "",
+            verifiedReceiptCount: providerEntries.length,
+            archivedReceiptCount: archivedEntries.length,
+            typedArchiveCount: Number(archive.archived_count || archiveRows.length || 0),
+            typedDocCount: Number(!!receiptDoc),
+            recallProbeCount: Array.isArray(recall.recalled) ? recall.recalled.length : 0,
+            recallProbeCovered: recalledText.includes("provider-ranking-provenance-compact-repair-receipt-memory.md"),
+            authorizationBoundaryCovered: /ranking evidence only, not authorization/i.test(receiptDocText)
+                && /fresh valid provider switch decision receipt/i.test(receiptDocText),
+            distillation: distillation ? {
+                incomingRowCount: distillation.incomingRowCount || 0,
+                archivedCount: distillation.archivedCount || 0,
+                verifiedCount: distillation.verifiedCount || 0,
+                preservedCount: distillation.preservedCount || 0,
+                writeCount: distillation.writeCount || 0,
+            } : null,
+            docs: [receiptDoc].filter(Boolean).map((doc) => ({
+                relPath: doc.relPath,
+                type: doc.type,
+                source: doc.source,
+                file: doc.file,
+            })),
+            bindings: providerEntries.slice(-12).reverse().map((entry) => ({
+                timeline_binding_id: entry.timeline_binding_id || "",
+                brief_id: entry.brief_id || "",
+                work_item_id: entry.work_item_id || "",
+                project: entry.project || "",
+                task_id: entry.task_id || "",
+                provider_switch_decision_receipt_id: entry.provider_switch_decision_receipt_id || "",
+                provider_switch_decision_receipt_checksum: entry.provider_switch_decision_receipt_checksum || "",
+                provider_ranking_provenance_rel_paths: entry.provider_ranking_provenance_rel_paths || [],
+                provider_ranking_provenance_row_ids: entry.provider_ranking_provenance_row_ids || [],
+            })),
+            gaps: gaps.slice(0, 8),
+        };
+    });
+    const checkedRows = rows.filter(row => Number(row.verifiedReceiptCount || 0) > 0);
+    const passedRows = checkedRows.filter(row => row.status === "ok");
+    const coverageRate = checkedRows.length ? Math.round((passedRows.length / checkedRows.length) * 1000) / 10 : null;
+    const status = coverageRate === null ? "empty" : coverageRate >= 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail";
+    return {
+        schema: "ccm-worker-context-provider-ranking-provenance-compact-repair-receipt-typed-memory-report-v1",
+        generatedAt: now(),
+        overall: {
+            status,
+            coverageRate,
+            groupCount: rows.length,
+            checkedGroupCount: checkedRows.length,
+            groupsCovered: passedRows.length,
+            verifiedReceiptCount: checkedRows.reduce((sum, row) => sum + Number(row.verifiedReceiptCount || 0), 0),
+            archivedReceiptCount: checkedRows.reduce((sum, row) => sum + Number(row.archivedReceiptCount || 0), 0),
+            typedArchiveCount: checkedRows.reduce((sum, row) => sum + Number(row.typedArchiveCount || 0), 0),
+            typedDocCount: checkedRows.reduce((sum, row) => sum + Number(row.typedDocCount || 0), 0),
+            recallProbeCoveredCount: checkedRows.filter(row => row.recallProbeCovered === true).length,
+            authorizationBoundaryCoveredCount: checkedRows.filter(row => row.authorizationBoundaryCovered === true).length,
+            metadataGapCount: checkedRows.reduce((sum, row) => sum + Number((row.gaps || []).length), 0),
+        },
+        groups: rows.sort((a, b) => Number(b.verifiedReceiptCount || 0) - Number(a.verifiedReceiptCount || 0)).slice(0, 50),
+        weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn").slice(0, 20),
+    };
+}
+function evaluateWorkerContextProviderRankingProvenanceCompactRepairReceiptTypedMemory(options = {}) {
+    const report = buildWorkerContextProviderRankingProvenanceCompactRepairReceiptTypedMemoryReport(options);
+    const checked = Number(report.overall.checkedGroupCount || 0);
+    const passed = Number(report.overall.groupsCovered || 0);
+    const evidence = (report.groups || []).filter((row) => row.status === "ok").slice(0, 12).map((row) => ({
+        groupId: row.groupId,
+        verifiedReceiptCount: row.verifiedReceiptCount,
+        archivedReceiptCount: row.archivedReceiptCount,
+        typedDocCount: row.typedDocCount,
+        recallProbeCovered: row.recallProbeCovered,
+        authorizationBoundaryCovered: row.authorizationBoundaryCovered,
+        typedMemoryLedgerFile: row.typedMemoryLedgerFile,
+    }));
+    const gaps = (report.weakGroups || []).flatMap((row) => (row.gaps || []).slice(0, 3).map((gap) => ({
+        groupId: row.groupId,
+        reason: gap.reason || "provider ranking provenance compact repair receipt typed memory 缺失",
+        verifiedReceiptCount: row.verifiedReceiptCount || 0,
+        archivedReceiptCount: row.archivedReceiptCount || 0,
+    }))).slice(0, 12);
+    const check = makeQualityCheck("worker_context_provider_ranking_provenance_compact_repair_receipt_typed_memory", "WorkerContext Provider Ranking Provenance Compact Repair Receipt Typed Memory", checked, passed, evidence, gaps, "verified provider ranking provenance compact repair receipts must be distilled into typed MEMORY.md so future child Agent sessions can recall compact-safe provider ranking preservation patterns without treating execution history as authorization.");
+    check.report = report;
+    return check;
+}
+function buildWorkerContextProviderRankingProvenanceCompactRepairReceiptWorkerContextRecallReport(options = {}) {
+    const groupIds = replayRepairDispatchTimelineBindingGroupIds(options);
+    const { readGroupTypedMemoryDistillationLedger, } = require("../collaboration/group-memory-index");
+    const { buildAgentMemoryContextBundle, } = require("../collaboration/memory");
+    const { buildWorkerContextPacket, renderWorkerContextPacket, } = require("../../agents/runtime-kernel");
+    const targetProject = String(options.targetProject || options.target_project || "api");
+    const task = String(options.task || options.query || "continue provider ranking provenance compact repair receipt provider-switch-execution-memory.md provider switch decision receipt checksum ranking evidence only not authorization");
+    const rows = groupIds.map((groupId) => {
+        const distillationLedger = readGroupTypedMemoryDistillationLedger(groupId);
+        const archive = distillationLedger.providerRankingProvenanceCompactRepairReceiptConsumptionArchive || {};
+        const archiveRows = Array.isArray(archive.rows) ? archive.rows : [];
+        const archivedCount = Number(archive.archived_count || archiveRows.length || 0);
+        if (archivedCount <= 0) {
+            return {
+                schema: "ccm-worker-context-provider-ranking-provenance-compact-repair-receipt-worker-context-recall-group-v1",
+                groupId,
+                status: "empty",
+                archivedReceiptCount: 0,
+                gaps: [],
+            };
+        }
+        const firstBundle = buildAgentMemoryContextBundle(groupId, targetProject, task, {
+            includeGlobalClaudeMemory: false,
+            includeProjectMemory: false,
+            maxTypedMemory: Number(options.maxTypedMemory || options.max_typed_memory || 8),
+            maxRenderedChars: Number(options.maxRenderedChars || options.max_rendered_chars || 11000),
+        });
+        const secondBundle = buildAgentMemoryContextBundle(groupId, targetProject, task, {
+            includeGlobalClaudeMemory: false,
+            includeProjectMemory: false,
+            maxTypedMemory: Number(options.maxTypedMemory || options.max_typed_memory || 8),
+            maxRenderedChars: Number(options.maxRenderedChars || options.max_rendered_chars || 11000),
+        });
+        const firstRecall = firstBundle.group_state?.typedMemory?.recall || {};
+        const secondRecall = secondBundle.group_state?.typedMemory?.recall || {};
+        const providerRecall = firstBundle.group_state?.typedMemory?.providerRankingCompactRepairReceiptRecall
+            || firstBundle.provider_ranking_compact_repair_receipt_recall
+            || {};
+        const firstRecalledText = JSON.stringify(firstRecall.recalled || []);
+        const secondRecalledText = JSON.stringify(secondRecall.recalled || []);
+        const renderedText = String(firstBundle.rendered_text || "");
+        const packet = buildWorkerContextPacket({
+            group: { id: groupId, name: "Provider Ranking Recall", members: [{ project: targetProject }] },
+            project: targetProject,
+            task,
+            agentType: String(options.agentType || options.agent_type || "codex"),
+            memory: firstBundle,
+            contextUsageOptions: {
+                maxTokens: Number(options.maxContextTokens || options.max_context_tokens || 90000),
+            },
+        });
+        const packetText = renderWorkerContextPacket(packet);
+        const usageCategories = new Map((packet.context_usage?.categories || []).map((item) => [item.id, item]));
+        const typedRecallCategory = usageCategories.get("typed_memory_recall") || {};
+        const loadEntries = firstBundle.group_state?.typedMemory?.loadPlan?.entries || [];
+        const gaps = [];
+        if (providerRecall.active !== true)
+            gaps.push({ reason: "provider ranking compact repair receipt recall summary inactive" });
+        if (providerRecall.recalledThisTurn !== true)
+            gaps.push({ reason: "provider ranking compact repair receipt summary did not mark recalledThisTurn" });
+        if (!firstRecalledText.includes("provider-ranking-provenance-compact-repair-receipt-memory.md")) {
+            gaps.push({ reason: "memory bundle typed recall did not include provider-ranking-provenance-compact-repair-receipt-memory.md" });
+        }
+        if (!secondRecalledText.includes("provider-ranking-provenance-compact-repair-receipt-memory.md")) {
+            gaps.push({ reason: "repeat child session recall was suppressed by already-surfaced ledger" });
+        }
+        if (!renderedText.includes("provider-ranking-provenance-compact-repair-receipt-memory.md")) {
+            gaps.push({ reason: "rendered group memory context omitted provider ranking receipt doc relPath" });
+        }
+        if (!/ranking evidence only, not authorization/i.test(renderedText)) {
+            gaps.push({ reason: "rendered group memory context omitted ranking evidence only / not authorization boundary" });
+        }
+        if (!/fresh valid provider switch decision receipt/i.test(renderedText)) {
+            gaps.push({ reason: "rendered group memory context omitted fresh valid provider switch decision receipt requirement" });
+        }
+        if (!packetText.includes("provider-ranking-provenance-compact-repair-receipt-memory.md")) {
+            gaps.push({ reason: "WorkerContextPacket rendered text omitted provider ranking receipt typed memory" });
+        }
+        if (!packetText.includes("provider-switch-execution-memory.md")) {
+            gaps.push({ reason: "WorkerContextPacket rendered text omitted compact-safe provider-switch-execution-memory.md anchor" });
+        }
+        if (!/ranking evidence only, not authorization/i.test(packetText)) {
+            gaps.push({ reason: "WorkerContextPacket omitted ranking evidence only / not authorization boundary" });
+        }
+        if (Number(typedRecallCategory.tokens || 0) <= 0) {
+            gaps.push({ reason: "WorkerContextPacket context_usage did not count typed_memory_recall as its own category" });
+        }
+        if (!loadEntries.some((entry) => entry.relPath === "provider-ranking-provenance-compact-repair-receipt-memory.md")) {
+            gaps.push({ reason: "typed MEMORY.md load plan did not include provider ranking receipt memory doc" });
+        }
+        const status = gaps.length ? "fail" : "ok";
+        return {
+            schema: "ccm-worker-context-provider-ranking-provenance-compact-repair-receipt-worker-context-recall-group-v1",
+            groupId,
+            status,
+            archivedReceiptCount: archivedCount,
+            typedArchiveCount: Number(archive.archived_count || 0),
+            recalledThisTurn: providerRecall.recalledThisTurn === true,
+            repeatChildSessionRecalled: secondRecalledText.includes("provider-ranking-provenance-compact-repair-receipt-memory.md"),
+            renderedContextCovered: renderedText.includes("provider-ranking-provenance-compact-repair-receipt-memory.md")
+                && /ranking evidence only, not authorization/i.test(renderedText)
+                && /fresh valid provider switch decision receipt/i.test(renderedText),
+            workerContextPacketCovered: packetText.includes("provider-ranking-provenance-compact-repair-receipt-memory.md")
+                && packetText.includes("provider-switch-execution-memory.md")
+                && /ranking evidence only, not authorization/i.test(packetText),
+            typedRecallUsageTokens: Number(typedRecallCategory.tokens || 0),
+            loadPlanIncludesDoc: loadEntries.some((entry) => entry.relPath === "provider-ranking-provenance-compact-repair-receipt-memory.md"),
+            providerRecall: {
+                active: providerRecall.active === true,
+                reason: providerRecall.reason || "",
+                docRelPath: providerRecall.docRelPath || "",
+                archivedCount: providerRecall.archivedCount || 0,
+                recalledThisTurn: providerRecall.recalledThisTurn === true,
+            },
+            packet: {
+                packet_id: packet.packet_id || "",
+                usage_status: packet.context_usage?.status || "",
+                typed_memory_recall_tokens: Number(typedRecallCategory.tokens || 0),
+            },
+            gaps: gaps.slice(0, 12),
+        };
+    });
+    const checkedRows = rows.filter(row => Number(row.archivedReceiptCount || 0) > 0);
+    const passedRows = checkedRows.filter(row => row.status === "ok");
+    const coverageRate = checkedRows.length ? Math.round((passedRows.length / checkedRows.length) * 1000) / 10 : null;
+    const status = coverageRate === null ? "empty" : coverageRate >= 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail";
+    return {
+        schema: "ccm-worker-context-provider-ranking-provenance-compact-repair-receipt-worker-context-recall-report-v1",
+        generatedAt: now(),
+        overall: {
+            status,
+            coverageRate,
+            groupCount: rows.length,
+            checkedGroupCount: checkedRows.length,
+            groupsCovered: passedRows.length,
+            archivedReceiptCount: checkedRows.reduce((sum, row) => sum + Number(row.archivedReceiptCount || 0), 0),
+            recalledGroupCount: checkedRows.filter(row => row.recalledThisTurn === true).length,
+            repeatChildSessionRecallCount: checkedRows.filter(row => row.repeatChildSessionRecalled === true).length,
+            renderedContextCoveredCount: checkedRows.filter(row => row.renderedContextCovered === true).length,
+            workerContextPacketCoveredCount: checkedRows.filter(row => row.workerContextPacketCovered === true).length,
+            loadPlanDocCount: checkedRows.filter(row => row.loadPlanIncludesDoc === true).length,
+            metadataGapCount: checkedRows.reduce((sum, row) => sum + Number((row.gaps || []).length), 0),
+        },
+        groups: rows.sort((a, b) => Number(b.archivedReceiptCount || 0) - Number(a.archivedReceiptCount || 0)).slice(0, 50),
+        weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn").slice(0, 20),
+    };
+}
+function evaluateWorkerContextProviderRankingProvenanceCompactRepairReceiptWorkerContextRecall(options = {}) {
+    const report = buildWorkerContextProviderRankingProvenanceCompactRepairReceiptWorkerContextRecallReport(options);
+    const checked = Number(report.overall.checkedGroupCount || 0);
+    const passed = Number(report.overall.groupsCovered || 0);
+    const evidence = (report.groups || []).filter((row) => row.status === "ok").slice(0, 12).map((row) => ({
+        groupId: row.groupId,
+        archivedReceiptCount: row.archivedReceiptCount,
+        recalledThisTurn: row.recalledThisTurn,
+        repeatChildSessionRecalled: row.repeatChildSessionRecalled,
+        workerContextPacketCovered: row.workerContextPacketCovered,
+        typedRecallUsageTokens: row.typedRecallUsageTokens,
+    }));
+    const gaps = (report.weakGroups || []).flatMap((row) => (row.gaps || []).slice(0, 3).map((gap) => ({
+        groupId: row.groupId,
+        reason: gap.reason || "provider ranking compact repair receipt worker context recall 缺失",
+        archivedReceiptCount: row.archivedReceiptCount || 0,
+    }))).slice(0, 12);
+    const check = makeQualityCheck("worker_context_provider_ranking_provenance_compact_repair_receipt_worker_context_recall", "WorkerContext Provider Ranking Provenance Compact Repair Receipt Worker Context Recall", checked, passed, evidence, gaps, "verified provider ranking provenance compact repair receipt typed MEMORY.md must be injected back into every relevant child Agent WorkerContextPacket, including repeat new sessions after recall-ledger surfacing, while preserving the ranking-evidence-not-authorization boundary.");
+    check.report = report;
+    return check;
+}
+function providerRankingCompactRepairReceiptMemoryUsageReceiptCoverage(contract = {}, receipt = {}) {
+    const docRelPath = String(contract.doc_rel_path || contract.docRelPath || "provider-ranking-provenance-compact-repair-receipt-memory.md").trim();
+    const requiredDocRelPaths = uniqueStrings([
+        docRelPath,
+        ...normalizeQualityStringList(contract.memory_receipt_required_doc_rel_paths || contract.memoryReceiptRequiredDocRelPaths || []),
+    ], 12);
+    const memoryUsed = normalizeQualityStringList(receipt.memoryUsed || receipt.memory_used || []);
+    const memoryIgnored = normalizeQualityStringList(receipt.memoryIgnored || receipt.memory_ignored || []);
+    const all = [...memoryUsed, ...memoryIgnored];
+    const requiredDocCoverages = requiredDocRelPaths.map((relPath) => {
+        const usedCovered = memoryUsed.some((item) => item.includes(relPath) && /used|verified|background/i.test(item));
+        const ignoredCovered = memoryIgnored.some((item) => item.includes(relPath) && /ignored|not used|not_used|unused/i.test(item));
+        const covered = all.some((item) => item.includes(relPath));
+        return {
+            relPath,
+            covered,
+            usedCovered,
+            ignoredCovered,
+            usageStateCovered: usedCovered || ignoredCovered,
+        };
+    });
+    const missingDocRelPaths = requiredDocCoverages.filter((row) => row.covered !== true).map((row) => row.relPath);
+    const missingUsageStateDocRelPaths = requiredDocCoverages.filter((row) => row.covered === true && row.usageStateCovered !== true).map((row) => row.relPath);
+    const coveredDocRelPaths = requiredDocCoverages.filter((row) => row.covered === true).map((row) => row.relPath);
+    const docCovered = requiredDocRelPaths.length > 0 && missingDocRelPaths.length === 0;
+    const usedCovered = requiredDocCoverages.some((row) => row.usedCovered === true);
+    const ignoredCovered = requiredDocCoverages.some((row) => row.ignoredCovered === true);
+    const usageStateCovered = requiredDocCoverages.length > 0 && requiredDocCoverages.every((row) => row.usageStateCovered === true);
+    const boundaryCovered = all.some((item) => /ranking evidence only|not authorization|not authorisation/i.test(item))
+        && all.some((item) => /fresh valid provider switch decision receipt|fresh.*provider switch|valid.*receipt/i.test(item));
+    const pass = docCovered && usageStateCovered && boundaryCovered;
+    const gaps = [
+        missingDocRelPaths.length ? "doc_rel_path_missing_from_memoryUsed_memoryIgnored" : "",
+        missingUsageStateDocRelPaths.length ? "usage_state_missing" : "",
+        !boundaryCovered ? "authorization_boundary_missing" : "",
+    ].filter(Boolean);
+    return {
+        schema: "ccm-provider-ranking-compact-repair-receipt-memory-usage-receipt-coverage-v1",
+        pass,
+        docRelPath,
+        requiredDocRelPaths,
+        requiredDocCoverages,
+        coveredDocRelPaths,
+        missingDocRelPaths,
+        missingUsageStateDocRelPaths,
+        docCovered,
+        usedCovered,
+        ignoredCovered,
+        usageStateCovered,
+        boundaryCovered,
+        memoryUsed,
+        memoryIgnored,
+        gaps,
+    };
+}
+function workerContextPacketBindingPacketId(entry = {}) {
+    return String(entry.worker_context_packet_id
+        || entry.workerContextPacketId
+        || entry.packet_id
+        || entry.packetId
+        || entry.worker_context_packet?.packet_id
+        || entry.worker_context_packet?.packetId
+        || entry.workerContextPacket?.packet_id
+        || entry.workerContextPacket?.packetId
+        || "").trim();
+}
+function workerContextPacketBindingProject(entry = {}) {
+    return String(entry.project
+        || entry.target_project
+        || entry.targetProject
+        || entry.agent
+        || entry.worker_context_packet?.project
+        || entry.worker_context_packet?.target_project
+        || entry.workerContextPacket?.project
+        || entry.workerContextPacket?.targetProject
+        || "").trim();
+}
+function workerContextPacketProviderRankingCompactRepairReceiptMemoryUsageContract(entry = {}) {
+    return entry.provider_ranking_compact_repair_receipt_memory_contract
+        || entry.providerRankingCompactRepairReceiptMemoryContract
+        || entry.worker_context_packet_provider_ranking_compact_repair_receipt_memory_contract
+        || entry.workerContextPacketProviderRankingCompactRepairReceiptMemoryContract
+        || entry.worker_context_packet?.provider_ranking_compact_repair_receipt_memory_contract
+        || entry.worker_context_packet?.providerRankingCompactRepairReceiptMemoryContract
+        || entry.workerContextPacket?.provider_ranking_compact_repair_receipt_memory_contract
+        || entry.workerContextPacket?.providerRankingCompactRepairReceiptMemoryContract
+        || null;
+}
+function workerContextPacketRequiresProviderRankingCompactRepairReceiptMemoryUsageReceipt(entry = {}) {
+    const contract = workerContextPacketProviderRankingCompactRepairReceiptMemoryUsageContract(entry) || {};
+    const acceptance = workerContextPacketAcceptance(entry) || {};
+    const categoryIds = workerContextPacketUsageCategoryIds(entry);
+    return contract.active === true
+        || acceptance.provider_ranking_compact_repair_receipt_memory_usage_required === true
+        || acceptance.providerRankingCompactRepairReceiptMemoryUsageRequired === true
+        || acceptance.provider_ranking_compact_repair_receipt_memory_authorization_boundary_required === true
+        || acceptance.providerRankingCompactRepairReceiptMemoryAuthorizationBoundaryRequired === true
+        || categoryIds.has("provider_ranking_compact_repair_receipt_memory_contract");
+}
+function buildWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageContractReport(options = {}) {
+    const groupIds = replayRepairDispatchTimelineBindingGroupIds(options);
+    const { readGroupTypedMemoryDistillationLedger, } = require("../collaboration/group-memory-index");
+    const { buildAgentMemoryContextBundle, } = require("../collaboration/memory");
+    const { buildWorkerContextPacket, renderWorkerContextPacket, } = require("../../agents/runtime-kernel");
+    const targetProject = String(options.targetProject || options.target_project || "api");
+    const task = String(options.task || options.query || "continue provider ranking provenance compact repair receipt memory usage contract provider-switch-execution-memory.md ranking evidence only not authorization");
+    const rows = groupIds.map((groupId) => {
+        const distillationLedger = readGroupTypedMemoryDistillationLedger(groupId);
+        const archive = distillationLedger.providerRankingProvenanceCompactRepairReceiptConsumptionArchive || {};
+        const archiveRows = Array.isArray(archive.rows) ? archive.rows : [];
+        const archivedCount = Number(archive.archived_count || archiveRows.length || 0);
+        if (archivedCount <= 0) {
+            return {
+                schema: "ccm-worker-context-provider-ranking-provenance-compact-repair-receipt-memory-usage-contract-group-v1",
+                groupId,
+                status: "empty",
+                archivedReceiptCount: 0,
+                gaps: [],
+            };
+        }
+        const bundle = buildAgentMemoryContextBundle(groupId, targetProject, task, {
+            includeGlobalClaudeMemory: false,
+            includeProjectMemory: false,
+            maxTypedMemory: Number(options.maxTypedMemory || options.max_typed_memory || 8),
+            maxRenderedChars: Number(options.maxRenderedChars || options.max_rendered_chars || 11000),
+        });
+        const packet = buildWorkerContextPacket({
+            group: { id: groupId, name: "Provider Ranking Receipt Contract", members: [{ project: targetProject }] },
+            project: targetProject,
+            task,
+            agentType: String(options.agentType || options.agent_type || "codex"),
+            memory: bundle,
+            contextUsageOptions: {
+                maxTokens: Number(options.maxContextTokens || options.max_context_tokens || 90000),
+            },
+        });
+        const contract = packet.provider_ranking_compact_repair_receipt_memory_contract || {};
+        const acceptance = packet.acceptance || {};
+        const rendered = renderWorkerContextPacket(packet);
+        const usageCategories = new Map((packet.context_usage?.categories || []).map((item) => [item.id, item]));
+        const contractCategory = usageCategories.get("provider_ranking_compact_repair_receipt_memory_contract") || {};
+        const contractRequiredDocRelPaths = uniqueStrings([
+            String(contract.doc_rel_path || contract.docRelPath || "provider-ranking-provenance-compact-repair-receipt-memory.md").trim(),
+            ...normalizeQualityStringList(contract.memory_receipt_required_doc_rel_paths || contract.memoryReceiptRequiredDocRelPaths || []),
+        ], 12);
+        const goodReceiptCoverage = providerRankingCompactRepairReceiptMemoryUsageReceiptCoverage(contract, {
+            memoryUsed: contractRequiredDocRelPaths.map((relPath) => `${relPath}; usageState=verified; ranking evidence only, not authorization; fresh valid provider switch decision receipt required for any explicit switch`),
+            memoryIgnored: [],
+        });
+        const badReceiptCoverage = providerRankingCompactRepairReceiptMemoryUsageReceiptCoverage(contract, {
+            memoryUsed: [],
+            memoryIgnored: [],
+        });
+        const gaps = [];
+        if (contract.schema !== "ccm-provider-ranking-compact-repair-receipt-memory-usage-contract-v1" || contract.active !== true) {
+            gaps.push({ reason: "WorkerContextPacket missing active provider ranking compact repair receipt memory usage contract" });
+        }
+        if (contract.doc_rel_path !== "provider-ranking-provenance-compact-repair-receipt-memory.md") {
+            gaps.push({ reason: "contract doc_rel_path mismatch" });
+        }
+        if (!Array.isArray(contract.required_receipt_fields) || !contract.required_receipt_fields.includes("memoryUsed") || !contract.required_receipt_fields.includes("memoryIgnored")) {
+            gaps.push({ reason: "contract missing required memoryUsed/memoryIgnored receipt fields" });
+        }
+        if (!/ranking evidence only, not authorization/i.test(String(contract.authorization_boundary || ""))) {
+            gaps.push({ reason: "contract missing ranking evidence only / not authorization boundary" });
+        }
+        if (acceptance.provider_ranking_compact_repair_receipt_memory_usage_required !== true
+            || acceptance.provider_ranking_compact_repair_receipt_memory_authorization_boundary_required !== true) {
+            gaps.push({ reason: "WorkerContextPacket acceptance missing provider ranking receipt memory usage requirement" });
+        }
+        if (contractCategory.id !== "provider_ranking_compact_repair_receipt_memory_contract"
+            || contractCategory.required !== true
+            || Number(contractCategory.tokens || 0) <= 0) {
+            gaps.push({ reason: "context_usage missing required provider ranking compact repair receipt memory contract category" });
+        }
+        if (!rendered.includes("Provider ranking compact repair receipt memory usage contract")
+            || !rendered.includes("provider-ranking-provenance-compact-repair-receipt-memory.md")
+            || !/memoryUsed/i.test(rendered)
+            || !/memoryIgnored/i.test(rendered)) {
+            gaps.push({ reason: "rendered WorkerContextPacket missing provider ranking memory usage contract and memoryUsed/memoryIgnored instructions" });
+        }
+        if (!/ranking evidence only, not authorization/i.test(rendered) || !/fresh valid provider switch decision receipt/i.test(rendered)) {
+            gaps.push({ reason: "rendered WorkerContextPacket missing provider switch authorization boundary" });
+        }
+        if (goodReceiptCoverage.pass !== true || badReceiptCoverage.pass === true) {
+            gaps.push({ reason: "provider ranking memory usage receipt coverage validator does not distinguish good/bad receipts" });
+        }
+        const status = gaps.length ? "fail" : "ok";
+        return {
+            schema: "ccm-worker-context-provider-ranking-provenance-compact-repair-receipt-memory-usage-contract-group-v1",
+            groupId,
+            status,
+            archivedReceiptCount: archivedCount,
+            contractActive: contract.active === true,
+            docRelPath: contract.doc_rel_path || "",
+            acceptanceRequiresUsage: acceptance.provider_ranking_compact_repair_receipt_memory_usage_required === true,
+            acceptanceRequiresBoundary: acceptance.provider_ranking_compact_repair_receipt_memory_authorization_boundary_required === true,
+            contextUsageTokens: Number(contractCategory.tokens || 0),
+            renderedContractCovered: rendered.includes("Provider ranking compact repair receipt memory usage contract")
+                && rendered.includes("provider-ranking-provenance-compact-repair-receipt-memory.md")
+                && /memoryUsed/i.test(rendered)
+                && /memoryIgnored/i.test(rendered)
+                && /ranking evidence only, not authorization/i.test(rendered)
+                && /fresh valid provider switch decision receipt/i.test(rendered),
+            goodReceiptCoverage,
+            badReceiptCoverage,
+            packet: {
+                packet_id: packet.packet_id || "",
+                usage_status: packet.context_usage?.status || "",
+                contract_tokens: Number(contractCategory.tokens || 0),
+            },
+            gaps: gaps.slice(0, 12),
+        };
+    });
+    const checkedRows = rows.filter(row => Number(row.archivedReceiptCount || 0) > 0);
+    const passedRows = checkedRows.filter(row => row.status === "ok");
+    const coverageRate = checkedRows.length ? Math.round((passedRows.length / checkedRows.length) * 1000) / 10 : null;
+    const status = coverageRate === null ? "empty" : coverageRate >= 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail";
+    return {
+        schema: "ccm-worker-context-provider-ranking-provenance-compact-repair-receipt-memory-usage-contract-report-v1",
+        generatedAt: now(),
+        overall: {
+            status,
+            coverageRate,
+            groupCount: rows.length,
+            checkedGroupCount: checkedRows.length,
+            groupsCovered: passedRows.length,
+            archivedReceiptCount: checkedRows.reduce((sum, row) => sum + Number(row.archivedReceiptCount || 0), 0),
+            contractActiveCount: checkedRows.filter(row => row.contractActive === true).length,
+            acceptanceUsageCount: checkedRows.filter(row => row.acceptanceRequiresUsage === true).length,
+            renderedContractCoveredCount: checkedRows.filter(row => row.renderedContractCovered === true).length,
+            validatorCoveredCount: checkedRows.filter(row => row.goodReceiptCoverage?.pass === true && row.badReceiptCoverage?.pass === false).length,
+            metadataGapCount: checkedRows.reduce((sum, row) => sum + Number((row.gaps || []).length), 0),
+        },
+        groups: rows.sort((a, b) => Number(b.archivedReceiptCount || 0) - Number(a.archivedReceiptCount || 0)).slice(0, 50),
+        weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn").slice(0, 20),
+    };
+}
+function evaluateWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageContract(options = {}) {
+    const report = buildWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageContractReport(options);
+    const checked = Number(report.overall.checkedGroupCount || 0);
+    const passed = Number(report.overall.groupsCovered || 0);
+    const evidence = (report.groups || []).filter((row) => row.status === "ok").slice(0, 12).map((row) => ({
+        groupId: row.groupId,
+        archivedReceiptCount: row.archivedReceiptCount,
+        contractActive: row.contractActive,
+        acceptanceRequiresUsage: row.acceptanceRequiresUsage,
+        renderedContractCovered: row.renderedContractCovered,
+        contextUsageTokens: row.contextUsageTokens,
+    }));
+    const gaps = (report.weakGroups || []).flatMap((row) => (row.gaps || []).slice(0, 3).map((gap) => ({
+        groupId: row.groupId,
+        reason: gap.reason || "provider ranking compact repair receipt memory usage contract 缺失",
+        archivedReceiptCount: row.archivedReceiptCount || 0,
+    }))).slice(0, 12);
+    const check = makeQualityCheck("worker_context_provider_ranking_provenance_compact_repair_receipt_memory_usage_contract", "WorkerContext Provider Ranking Provenance Compact Repair Receipt Memory Usage Contract", checked, passed, evidence, gaps, "When provider ranking compact repair receipt typed memory is recalled, WorkerContextPacket must require memoryUsed/memoryIgnored coverage and preserve the ranking-evidence-not-authorization boundary before child Agent dispatch.");
+    check.report = report;
+    return check;
+}
+function workerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRow(groupId, entry = {}, options = {}) {
+    const contract = workerContextPacketProviderRankingCompactRepairReceiptMemoryUsageContract(entry) || {};
+    const packetId = workerContextPacketBindingPacketId(entry);
+    const project = workerContextPacketBindingProject(entry);
+    const sources = collectWorkerContextPacketReceiptSources(groupId, entry, options);
+    const matchingReceipts = sources.filter(source => workerContextPacketReceiptMatchesBinding(source, entry));
+    const projectReceipts = matchingReceipts.length ? matchingReceipts : sources.filter(source => {
+        const receiptProject = String(source.project || source.agent || "").trim().toLowerCase();
+        return project && receiptProject && receiptProject === project.toLowerCase();
+    });
+    const coverages = projectReceipts.map((source) => ({
+        source: source.source || "",
+        project: source.project || source.agent || "",
+        status: source.status || "",
+        worker_context_packet_id: source.worker_context_packet_id || "",
+        coverage: providerRankingCompactRepairReceiptMemoryUsageReceiptCoverage(contract, source),
+        memoryUsed: source.memoryUsed || [],
+        memoryIgnored: source.memoryIgnored || [],
+    }));
+    const passingCoverage = coverages.find((row) => row.coverage?.pass === true) || null;
+    const gaps = [];
+    if (!packetId)
+        gaps.push("worker_context_packet_id");
+    if (!projectReceipts.length) {
+        gaps.push("child_agent_receipt");
+    }
+    else {
+        if (!coverages.some((row) => row.coverage?.docCovered === true))
+            gaps.push("receipt_memoryUsed_memoryIgnored_doc");
+        if (!coverages.some((row) => row.coverage?.usedCovered === true || row.coverage?.ignoredCovered === true))
+            gaps.push("receipt_usage_state");
+        if (!coverages.some((row) => row.coverage?.boundaryCovered === true))
+            gaps.push("receipt_authorization_boundary");
+    }
+    const coverage = passingCoverage?.coverage || coverages[0]?.coverage || providerRankingCompactRepairReceiptMemoryUsageReceiptCoverage(contract, {});
+    return {
+        schema: "ccm-worker-context-provider-ranking-provenance-compact-repair-receipt-memory-usage-receipt-row-v1",
+        entry,
+        groupId,
+        binding_id: entry.binding_id || entry.bindingId || "",
+        assignment_id: entry.assignment_id || entry.assignmentId || "",
+        packet_id: packetId,
+        project,
+        contractActive: contract.active === true,
+        docRelPath: coverage.docRelPath || contract.doc_rel_path || contract.docRelPath || "provider-ranking-provenance-compact-repair-receipt-memory.md",
+        requiredDocRelPaths: coverage.requiredDocRelPaths || [],
+        coveredDocRelPaths: coverage.coveredDocRelPaths || [],
+        missingDocRelPaths: coverage.missingDocRelPaths || [],
+        missingUsageStateDocRelPaths: coverage.missingUsageStateDocRelPaths || [],
+        receiptCount: projectReceipts.length,
+        matchingReceiptCount: matchingReceipts.length,
+        covered: passingCoverage !== null,
+        compliant: passingCoverage !== null && gaps.length === 0,
+        coverage,
+        coverages,
+        receipt: passingCoverage || coverages[0] || null,
+        gaps: [...new Set(gaps)],
+    };
+}
+function buildWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptReport(options = {}) {
+    const groupIds = replayRepairDispatchBindingGroupIds(options);
+    const rows = groupIds.map((groupId) => {
+        const ledger = readGroupReplayRepairDispatchBindingLedger(groupId);
+        const entries = (Array.isArray(ledger.entries) ? ledger.entries : [])
+            .filter((entry) => workerContextPacketRequiresProviderRankingCompactRepairReceiptMemoryUsageReceipt(entry));
+        const receiptRows = entries.map((entry) => workerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRow(groupId, entry, options));
+        const gapRows = receiptRows.filter((row) => row.compliant !== true);
+        const workItems = syncWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairWorkItems(groupId, gapRows, {
+            at: options.generatedAt || options.generated_at || now(),
+        });
+        const workLedger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+        const repairItems = (Array.isArray(workLedger.items) ? workLedger.items : [])
+            .filter((item) => isWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairWorkItem(item));
+        const openRepairItems = repairItems.filter((item) => replayRepairWorkItemOpen(item.status));
+        const status = receiptRows.length === 0 ? "empty" : gapRows.length === 0 ? "ok" : gapRows.length < receiptRows.length ? "warn" : "fail";
+        return {
+            schema: "ccm-worker-context-provider-ranking-provenance-compact-repair-receipt-memory-usage-receipt-group-v1",
+            groupId,
+            status,
+            file: ledger.file || getGroupReplayRepairDispatchBindingLedgerFile(groupId),
+            workItemsFile: workItems.file || workLedger.file || getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId),
+            receiptContractCount: receiptRows.length,
+            coveredReceiptCount: receiptRows.filter((row) => row.covered === true).length,
+            compliantReceiptCount: receiptRows.filter((row) => row.compliant === true).length,
+            missingReceiptCoverageCount: gapRows.length,
+            repairItemCount: repairItems.length,
+            openRepairItemCount: openRepairItems.length,
+            missingReceiptCount: receiptRows.filter((row) => row.gaps.includes("child_agent_receipt")).length,
+            missingDocCoverageCount: receiptRows.filter((row) => row.gaps.includes("receipt_memoryUsed_memoryIgnored_doc")).length,
+            missingUsageStateCount: receiptRows.filter((row) => row.gaps.includes("receipt_usage_state")).length,
+            missingAuthorizationBoundaryCount: receiptRows.filter((row) => row.gaps.includes("receipt_authorization_boundary")).length,
+            receipts: receiptRows.slice(-12).reverse().map((row) => ({
+                binding_id: row.binding_id || "",
+                assignment_id: row.assignment_id || "",
+                packet_id: row.packet_id || "",
+                project: row.project || "",
+                receipt_source: row.receipt?.source || "",
+                receipt_status: row.receipt?.status || "",
+                docRelPath: row.docRelPath || "",
+                requiredDocRelPaths: row.requiredDocRelPaths || [],
+                coveredDocRelPaths: row.coveredDocRelPaths || [],
+                missingDocRelPaths: row.missingDocRelPaths || [],
+                missingUsageStateDocRelPaths: row.missingUsageStateDocRelPaths || [],
+                covered: row.covered === true,
+                compliant: row.compliant === true,
+                memoryUsed: row.receipt?.memoryUsed || [],
+                memoryIgnored: row.receipt?.memoryIgnored || [],
+                gaps: row.gaps || [],
+            })),
+            gaps: gapRows.slice(0, 8).map((row) => ({
+                binding_id: row.binding_id || "",
+                assignment_id: row.assignment_id || "",
+                packet_id: row.packet_id || "",
+                project: row.project || "",
+                docRelPath: row.docRelPath || "",
+                requiredDocRelPaths: row.requiredDocRelPaths || [],
+                missingDocRelPaths: row.missingDocRelPaths || [],
+                missingUsageStateDocRelPaths: row.missingUsageStateDocRelPaths || [],
+                reason: `Provider ranking compact repair receipt memory usage receipt 缺少/异常：${(row.gaps || []).join(",")}`,
+                gaps: row.gaps || [],
+            })),
+        };
+    });
+    const checkedRows = rows.filter(row => Number(row.receiptContractCount || 0) > 0);
+    const passedRows = checkedRows.filter(row => row.status === "ok");
+    const receiptContractCount = checkedRows.reduce((sum, row) => sum + Number(row.receiptContractCount || 0), 0);
+    const coveredReceiptCount = checkedRows.reduce((sum, row) => sum + Number(row.compliantReceiptCount || 0), 0);
+    const coverageRate = receiptContractCount ? Math.round((coveredReceiptCount / receiptContractCount) * 1000) / 10 : null;
+    const status = coverageRate === null ? "empty" : coverageRate >= 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail";
+    return {
+        schema: "ccm-worker-context-provider-ranking-provenance-compact-repair-receipt-memory-usage-receipt-report-v1",
+        generatedAt: now(),
+        overall: {
+            status,
+            coverageRate,
+            groupCount: rows.length,
+            checkedGroupCount: checkedRows.length,
+            groupsCovered: passedRows.length,
+            receiptContractCount,
+            coveredReceiptCount,
+            missingReceiptCoverageCount: Math.max(0, receiptContractCount - coveredReceiptCount),
+            missingReceiptCount: checkedRows.reduce((sum, row) => sum + Number(row.missingReceiptCount || 0), 0),
+            missingDocCoverageCount: checkedRows.reduce((sum, row) => sum + Number(row.missingDocCoverageCount || 0), 0),
+            missingUsageStateCount: checkedRows.reduce((sum, row) => sum + Number(row.missingUsageStateCount || 0), 0),
+            missingAuthorizationBoundaryCount: checkedRows.reduce((sum, row) => sum + Number(row.missingAuthorizationBoundaryCount || 0), 0),
+            repairItemCount: checkedRows.reduce((sum, row) => sum + Number(row.repairItemCount || 0), 0),
+            openRepairItemCount: checkedRows.reduce((sum, row) => sum + Number(row.openRepairItemCount || 0), 0),
+            metadataGapCount: checkedRows.reduce((sum, row) => sum + Number(row.missingReceiptCoverageCount || 0), 0),
+        },
+        groups: rows.sort((a, b) => Number(b.receiptContractCount || 0) - Number(a.receiptContractCount || 0)).slice(0, 50),
+        weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn").slice(0, 20),
+    };
+}
+function evaluateWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceipt(options = {}) {
+    const report = buildWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptReport(options);
+    const checked = Number(report.overall.receiptContractCount || 0);
+    const passed = Number(report.overall.coveredReceiptCount || 0);
+    const evidence = (report.groups || []).flatMap((row) => (row.receipts || [])
+        .filter((receipt) => receipt.compliant === true)
+        .map((receipt) => ({
+        groupId: row.groupId,
+        binding_id: receipt.binding_id || "",
+        packet_id: receipt.packet_id || "",
+        project: receipt.project || "",
+        docRelPath: receipt.docRelPath || "",
+        receipt_source: receipt.receipt_source || "",
+    }))).slice(0, 12);
+    const gaps = (report.weakGroups || []).flatMap((row) => (row.gaps || []).slice(0, 3).map((gap) => ({
+        groupId: row.groupId,
+        reason: gap.reason || "provider ranking compact repair receipt memory usage receipt 缺失",
+        binding_id: gap.binding_id || "",
+        assignment_id: gap.assignment_id || "",
+        packet_id: gap.packet_id || "",
+        project: gap.project || "",
+        docRelPath: gap.docRelPath || "",
+    }))).slice(0, 12);
+    const check = makeQualityCheck("worker_context_provider_ranking_provenance_compact_repair_receipt_memory_usage_receipt", "WorkerContext Provider Ranking Provenance Compact Repair Receipt Memory Usage Receipt", checked, passed, evidence, gaps, "After provider ranking compact repair receipt typed memory is injected, the child Agent final receipt must cite provider-ranking-provenance-compact-repair-receipt-memory.md in memoryUsed or memoryIgnored and restate that ranking evidence is not authorization.");
+    check.report = report;
+    return check;
+}
+function buildWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRequiredDocsReport(options = {}) {
+    const receiptReport = options.receiptReport
+        || options.receipt_report
+        || buildWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptReport(options);
+    const rows = (receiptReport.groups || []).map((group) => {
+        const receipts = Array.isArray(group.receipts) ? group.receipts : [];
+        const requiredReceipts = receipts.filter((receipt) => {
+            const requiredDocRelPaths = normalizeQualityStringList(receipt.requiredDocRelPaths || receipt.required_doc_rel_paths || []);
+            return requiredDocRelPaths.length > 1 || requiredDocRelPaths.includes("provider-ranking-memory-usage-receipt-discipline.md");
+        });
+        const gaps = requiredReceipts.flatMap((receipt) => {
+            const missingDocRelPaths = normalizeQualityStringList(receipt.missingDocRelPaths || receipt.missing_doc_rel_paths || []);
+            const missingUsageStateDocRelPaths = normalizeQualityStringList(receipt.missingUsageStateDocRelPaths || receipt.missing_usage_state_doc_rel_paths || []);
+            return [
+                ...missingDocRelPaths.map((relPath) => ({
+                    binding_id: receipt.binding_id || "",
+                    packet_id: receipt.packet_id || "",
+                    project: receipt.project || "",
+                    relPath,
+                    reason: `provider ranking receipt required doc 未出现在 memoryUsed/memoryIgnored：${relPath}`,
+                })),
+                ...missingUsageStateDocRelPaths.map((relPath) => ({
+                    binding_id: receipt.binding_id || "",
+                    packet_id: receipt.packet_id || "",
+                    project: receipt.project || "",
+                    relPath,
+                    reason: `provider ranking receipt required doc 缺少 usageState：${relPath}`,
+                })),
+                ...(receipt.gaps || []).includes("receipt_authorization_boundary") ? [{
+                        binding_id: receipt.binding_id || "",
+                        packet_id: receipt.packet_id || "",
+                        project: receipt.project || "",
+                        relPath: "",
+                        reason: "provider ranking receipt required docs 覆盖缺少 ranking evidence only / fresh valid provider switch decision receipt 边界",
+                    }] : [],
+            ];
+        });
+        const coveredReceipts = requiredReceipts.filter((receipt) => receipt.compliant === true
+            && normalizeQualityStringList(receipt.missingDocRelPaths || receipt.missing_doc_rel_paths || []).length === 0
+            && normalizeQualityStringList(receipt.missingUsageStateDocRelPaths || receipt.missing_usage_state_doc_rel_paths || []).length === 0);
+        const status = requiredReceipts.length === 0 ? "empty" : gaps.length ? "fail" : "ok";
+        const requiredDocRelPaths = uniqueStrings(requiredReceipts.flatMap((receipt) => normalizeQualityStringList(receipt.requiredDocRelPaths || receipt.required_doc_rel_paths || [])), 20);
+        return {
+            schema: "ccm-worker-context-provider-ranking-provenance-compact-repair-receipt-memory-usage-receipt-required-docs-group-v1",
+            groupId: group.groupId || "",
+            status,
+            file: group.file || "",
+            requiredDocReceiptCount: requiredReceipts.length,
+            coveredRequiredDocReceiptCount: coveredReceipts.length,
+            requiredDocRelPaths,
+            disciplineDocReceiptCount: requiredReceipts.filter((receipt) => normalizeQualityStringList(receipt.requiredDocRelPaths || []).includes("provider-ranking-memory-usage-receipt-discipline.md")).length,
+            missingRequiredDocCount: requiredReceipts.reduce((sum, receipt) => sum + normalizeQualityStringList(receipt.missingDocRelPaths || []).length, 0),
+            missingUsageStateDocCount: requiredReceipts.reduce((sum, receipt) => sum + normalizeQualityStringList(receipt.missingUsageStateDocRelPaths || []).length, 0),
+            receipts: requiredReceipts.slice(0, 12).map((receipt) => ({
+                binding_id: receipt.binding_id || "",
+                packet_id: receipt.packet_id || "",
+                project: receipt.project || "",
+                receipt_source: receipt.receipt_source || "",
+                requiredDocRelPaths: receipt.requiredDocRelPaths || [],
+                coveredDocRelPaths: receipt.coveredDocRelPaths || [],
+                missingDocRelPaths: receipt.missingDocRelPaths || [],
+                missingUsageStateDocRelPaths: receipt.missingUsageStateDocRelPaths || [],
+                compliant: receipt.compliant === true,
+            })),
+            gaps: gaps.slice(0, 12),
+        };
+    });
+    const checkedRows = rows.filter(row => Number(row.requiredDocReceiptCount || 0) > 0);
+    const passedRows = checkedRows.filter(row => row.status === "ok");
+    const coverageRate = checkedRows.length ? Math.round((passedRows.length / checkedRows.length) * 1000) / 10 : null;
+    const status = coverageRate === null ? "empty" : coverageRate >= 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail";
+    return {
+        schema: "ccm-worker-context-provider-ranking-provenance-compact-repair-receipt-memory-usage-receipt-required-docs-report-v1",
+        generatedAt: now(),
+        receiptReport: { schema: receiptReport.schema || "", overall: receiptReport.overall || {} },
+        overall: {
+            status,
+            coverageRate,
+            groupCount: rows.length,
+            checkedGroupCount: checkedRows.length,
+            groupsCovered: passedRows.length,
+            requiredDocReceiptCount: checkedRows.reduce((sum, row) => sum + Number(row.requiredDocReceiptCount || 0), 0),
+            coveredRequiredDocReceiptCount: checkedRows.reduce((sum, row) => sum + Number(row.coveredRequiredDocReceiptCount || 0), 0),
+            disciplineDocReceiptCount: checkedRows.reduce((sum, row) => sum + Number(row.disciplineDocReceiptCount || 0), 0),
+            missingRequiredDocCount: checkedRows.reduce((sum, row) => sum + Number(row.missingRequiredDocCount || 0), 0),
+            missingUsageStateDocCount: checkedRows.reduce((sum, row) => sum + Number(row.missingUsageStateDocCount || 0), 0),
+            metadataGapCount: checkedRows.reduce((sum, row) => sum + Number((row.gaps || []).length), 0),
+        },
+        groups: rows.sort((a, b) => Number(b.requiredDocReceiptCount || 0) - Number(a.requiredDocReceiptCount || 0)).slice(0, 50),
+        weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn").slice(0, 20),
+    };
+}
+function evaluateWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRequiredDocs(options = {}) {
+    const report = buildWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRequiredDocsReport(options);
+    const checked = Number(report.overall.checkedGroupCount || 0);
+    const passed = Number(report.overall.groupsCovered || 0);
+    const evidence = (report.groups || []).filter((row) => row.status === "ok").slice(0, 12).map((row) => ({
+        groupId: row.groupId,
+        requiredDocReceiptCount: row.requiredDocReceiptCount,
+        coveredRequiredDocReceiptCount: row.coveredRequiredDocReceiptCount,
+        requiredDocRelPaths: row.requiredDocRelPaths,
+        disciplineDocReceiptCount: row.disciplineDocReceiptCount,
+    }));
+    const gaps = (report.weakGroups || []).flatMap((row) => (row.gaps || []).slice(0, 3).map((gap) => ({
+        groupId: row.groupId,
+        reason: gap.reason || "provider ranking receipt required docs coverage 缺失",
+        binding_id: gap.binding_id || "",
+        packet_id: gap.packet_id || "",
+        relPath: gap.relPath || "",
+    }))).slice(0, 12);
+    const check = makeQualityCheck("worker_context_provider_ranking_provenance_compact_repair_receipt_memory_usage_receipt_required_docs", "WorkerContext Provider Ranking Provenance Compact Repair Receipt Memory Usage Receipt Required Docs", checked, passed, evidence, gaps, "When WorkerContextPacket declares provider ranking memory_receipt_required_doc_rel_paths, child Agent final receipts must cover every required doc relPath in memoryUsed or memoryIgnored with usageState and the ranking-evidence-not-authorization boundary.");
+    check.report = report;
+    return check;
+}
+function isWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairSource(source) {
+    return String(source || "").trim() === "worker_context_provider_ranking_compact_repair_receipt_memory_usage_receipt_repair";
+}
+function isWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairWorkItem(item = {}) {
+    return isWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairSource(item.source);
+}
+function buildWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairWorkItem(groupId, row = {}, index = 0, existing = {}, at = now()) {
+    const entry = row.entry || {};
+    const packetId = String(row.packet_id || workerContextPacketBindingPacketId(entry) || "").trim();
+    const bindingId = String(row.binding_id || entry.binding_id || entry.bindingId || "").trim();
+    const assignmentId = String(row.assignment_id || entry.assignment_id || entry.assignmentId || "").trim();
+    const dispatchKey = String(entry.dispatch_key || entry.dispatchKey || "").trim();
+    const targetProject = String(row.project || workerContextPacketBindingProject(entry) || "").trim();
+    const docRelPath = String(row.docRelPath || row.doc_rel_path || "provider-ranking-provenance-compact-repair-receipt-memory.md").trim();
+    const requiredDocRelPaths = uniqueStrings([
+        docRelPath,
+        ...normalizeQualityStringList(row.requiredDocRelPaths || row.required_doc_rel_paths || row.coverage?.requiredDocRelPaths || []),
+    ], 12);
+    const missingDocRelPaths = uniqueStrings(normalizeQualityStringList(row.missingDocRelPaths || row.missing_doc_rel_paths || row.coverage?.missingDocRelPaths || []), 12);
+    const missingUsageStateDocRelPaths = uniqueStrings(normalizeQualityStringList(row.missingUsageStateDocRelPaths || row.missing_usage_state_doc_rel_paths || row.coverage?.missingUsageStateDocRelPaths || []), 12);
+    const gapCodes = uniqueStrings((Array.isArray(row.gaps) ? row.gaps : []).map((item) => String(item || "").trim()).filter(Boolean), 12);
+    const id = `provider-ranking-receipt-memory-usage-repair:${hash([
+        groupId,
+        bindingId,
+        packetId,
+        targetProject,
+        docRelPath,
+        requiredDocRelPaths.join("|"),
+        missingDocRelPaths.join("|"),
+        missingUsageStateDocRelPaths.join("|"),
+        gapCodes.join("|"),
+    ], 14)}`;
+    const previousStatus = replayRepairWorkItemStatus(existing.status);
+    const status = previousStatus === "completed"
+        ? "completed"
+        : ["in_progress", "blocked"].includes(previousStatus) ? previousStatus : "pending";
+    const reason = compactMemoryCenterText(`provider ranking receipt memory usage gaps: ${gapCodes.join(",") || "missing_memoryUsed_memoryIgnored"}`, 360);
+    const instruction = [
+        `要求 ${targetProject || "目标子 Agent"} 补齐 provider ranking compact repair receipt typed memory 的最终回执。`,
+        packetId ? `worker_context_packet_id=${packetId}` : "",
+        bindingId ? `binding_id=${bindingId}` : "",
+        `memory_doc=${docRelPath}`,
+        requiredDocRelPaths.length ? `required_memory_docs=${requiredDocRelPaths.join(",")}` : "",
+        missingDocRelPaths.length ? `missing_memory_docs=${missingDocRelPaths.join(",")}` : "",
+        missingUsageStateDocRelPaths.length ? `missing_usage_state_docs=${missingUsageStateDocRelPaths.join(",")}` : "",
+        "CCM_AGENT_RECEIPT.memoryUsed 或 CCM_AGENT_RECEIPT.memoryIgnored 必须引用每一个 required_memory_docs。",
+        "回执必须声明 usageState=used/verified/background 或 ignored/not_used。",
+        "回执必须再次声明 ranking evidence only, not authorization；任何显式 provider switch 仍需要 fresh valid provider switch decision receipt。",
+    ].filter(Boolean).join(" ");
+    return {
+        id,
+        work_item_id: id,
+        taskId: assignmentId,
+        scopeId: groupId,
+        group_id: groupId,
+        subject: "补齐 provider ranking typed memory 子 Agent 回执",
+        description: reason,
+        activeForm: compactMemoryCenterText(`补齐 memoryUsed/memoryIgnored：${targetProject || packetId || "worker"}`, 180),
+        owner: existing.owner && previousStatus !== "pending" ? existing.owner : "group-main-agent",
+        target: compactMemoryCenterText(targetProject || "memory-context", 120),
+        agentType: "group-main-agent",
+        status,
+        priority: gapCodes.includes("child_agent_receipt") ? "critical" : "high",
+        component: "worker_context_provider_ranking_compact_repair_receipt_memory_usage_receipt_contract",
+        source: "worker_context_provider_ranking_compact_repair_receipt_memory_usage_receipt_repair",
+        source_action_id: `provider-ranking-memory-usage-receipt:${bindingId || packetId || index}`,
+        repair_target: packetId || bindingId || "worker_context_packet",
+        instruction: compactMemoryCenterText(instruction, 1200),
+        expected: "Corrected CCM_AGENT_RECEIPT.memoryUsed or memoryIgnored cites every required provider ranking receipt memory doc, states usage, and preserves the ranking-evidence-not-authorization boundary.",
+        source_reason: reason,
+        replay_status: "provider_ranking_memory_usage_receipt_gap",
+        target_project: targetProject,
+        dispatch_target: targetProject,
+        provider_ranking_provenance_gap_codes: gapCodes,
+        provider_ranking_provenance_rel_paths: requiredDocRelPaths.filter(Boolean),
+        provider_ranking_memory_receipt_required_doc_rel_paths: requiredDocRelPaths,
+        provider_ranking_memory_receipt_missing_doc_rel_paths: missingDocRelPaths,
+        provider_ranking_memory_receipt_missing_usage_state_doc_rel_paths: missingUsageStateDocRelPaths,
+        provider_ranking_compact_repair_receipt_memory_usage_doc_rel_path: docRelPath,
+        prompt_patch: compactMemoryCenterText([
+            "Provider ranking compact repair receipt memory usage repair:",
+            `- group=${groupId}`,
+            targetProject ? `- target_project=${targetProject}` : "",
+            packetId ? `- worker_context_packet_id=${packetId}` : "",
+            bindingId ? `- binding_id=${bindingId}` : "",
+            `- memory_doc=${docRelPath}`,
+            requiredDocRelPaths.length ? `- required_memory_docs=${requiredDocRelPaths.join(",")}` : "",
+            missingDocRelPaths.length ? `- missing_memory_docs=${missingDocRelPaths.join(",")}` : "",
+            missingUsageStateDocRelPaths.length ? `- missing_usage_state_docs=${missingUsageStateDocRelPaths.join(",")}` : "",
+            gapCodes.length ? `- gaps=${gapCodes.join(",")}` : "",
+            "- Return a corrected CCM_AGENT_RECEIPT block.",
+            "- Include memoryUsed or memoryIgnored referencing every required_memory_docs relPath.",
+            "- Include usageState=verified/used/background or ignored/not_used.",
+            "- Include: ranking evidence only, not authorization.",
+            "- Include: fresh valid provider switch decision receipt required for any explicit provider switch.",
+        ].filter(Boolean).join("\n"), 1800),
+        dispatch_hint: {
+            claim_policy: "group_main_agent_before_child_dispatch",
+            next_step: "request_corrected_child_agent_memoryUsed_memoryIgnored_receipt",
+            should_create_real_task: false,
+            reason: "Memory Center diagnostic sidecar; main Agent may claim and request a corrected receipt deliberately.",
+        },
+        raw_recovery: {
+            rule: "worker_context_provider_ranking_provenance_compact_repair_receipt_memory_usage_receipt",
+            gaps: gapCodes,
+            docRelPath,
+            requiredDocRelPaths,
+            missingDocRelPaths,
+            missingUsageStateDocRelPaths,
+        },
+        worker_context_packet_id: packetId,
+        worker_context_packet_binding_id: bindingId,
+        binding_id: bindingId,
+        assignment_id: assignmentId,
+        dispatch_key: dispatchKey,
+        evidence: [
+            packetId ? `worker_context_packet_id=${packetId}` : "",
+            bindingId ? `binding_id=${bindingId}` : "",
+            `memory_doc=${docRelPath}`,
+            reason,
+        ].filter(Boolean),
+        filesChanged: [],
+        verification: [
+            "重新运行 worker_context_provider_ranking_provenance_compact_repair_receipt_memory_usage_receipt",
+            "确认 CCM_AGENT_RECEIPT.memoryUsed 或 memoryIgnored 覆盖 provider ranking typed memory 且保留授权边界",
+        ],
+        blockers: [],
+        needs: ["子 Agent 更正 CCM_AGENT_RECEIPT.memoryUsed/memoryIgnored"],
+        createdAt: existing.createdAt || existing.created_at || at,
+        updatedAt: existing.updatedAt || existing.updated_at || at,
+        lastSeenAt: existing.lastSeenAt || existing.last_seen_at || at,
+        completedAt: existing.completedAt || existing.completed_at || "",
+        seenCount: Math.max(1, Number(existing.seenCount || existing.seen_count || 1) || 1),
+    };
+}
+function syncWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairWorkItems(groupId, gapRows = [], options = {}) {
+    if (!groupId)
+        return summarizeReplayRepairPendingWorkItems(groupId);
+    const at = String(options.at || now());
+    const ledger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+    const previousItems = Array.isArray(ledger.items) ? ledger.items : [];
+    const previousById = new Map(previousItems.map((item) => [String(item.id || item.work_item_id || ""), item]));
+    const currentIds = new Set();
+    const nextRepairItems = [];
+    let changed = false;
+    for (const [index, row] of gapRows.entries()) {
+        const draft = buildWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairWorkItem(groupId, row, index, {}, at);
+        const existing = previousById.get(draft.id) || {};
+        let item = buildWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairWorkItem(groupId, row, index, existing, at);
+        const previousSignature = replayRepairWorkItemSignature(existing);
+        const nextSignature = replayRepairWorkItemSignature(item);
+        if (existing.id && previousSignature === nextSignature) {
+            item = { ...existing, ...item, createdAt: existing.createdAt || item.createdAt, updatedAt: existing.updatedAt || item.updatedAt, lastSeenAt: existing.lastSeenAt || item.lastSeenAt, seenCount: Number(existing.seenCount || 1) };
+        }
+        else {
+            item = { ...item, updatedAt: at, lastSeenAt: at, seenCount: existing.id ? Number(existing.seenCount || 1) + 1 : 1 };
+            changed = true;
+        }
+        currentIds.add(item.id);
+        nextRepairItems.push(item);
+    }
+    const untouchedItems = [];
+    for (const existing of previousItems) {
+        const id = String(existing.id || existing.work_item_id || "");
+        if (!isWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairWorkItem(existing)) {
+            untouchedItems.push(existing);
+            continue;
+        }
+        if (!id || currentIds.has(id))
+            continue;
+        const currentStatus = replayRepairWorkItemStatus(existing.status);
+        if (!replayRepairWorkItemOpen(currentStatus)) {
+            nextRepairItems.push(existing);
+            continue;
+        }
+        nextRepairItems.push({
+            ...existing,
+            status: "completed",
+            updatedAt: at,
+            completedAt: existing.completedAt || at,
+            resolutionReason: "provider_ranking_memory_usage_receipt_compliant",
+            latestProviderRankingMemoryUsageReceipt: { gapCount: gapRows.length },
+        });
+        changed = true;
+    }
+    const nextItems = [...untouchedItems, ...nextRepairItems]
+        .sort((a, b) => {
+        const statusRank = replayRepairWorkItemOpen(a.status) === replayRepairWorkItemOpen(b.status) ? 0 : replayRepairWorkItemOpen(a.status) ? -1 : 1;
+        if (statusRank)
+            return statusRank;
+        const priority = replayRepairPriorityRank(a.priority) - replayRepairPriorityRank(b.priority);
+        if (priority)
+            return priority;
+        return String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""));
+    })
+        .slice(0, 160);
+    const stats = replayRepairWorkItemStats(nextItems);
+    const nextLedger = {
+        ...ledger,
+        latestProviderRankingMemoryUsageReceiptRepair: {
+            gapCount: gapRows.length,
+            packetIds: gapRows.map((row) => row.packet_id || "").filter(Boolean).slice(0, 20),
+        },
+        items: nextItems,
+        stats,
+        updatedAt: changed || !ledger.updatedAt ? at : ledger.updatedAt,
+    };
+    const currentComparable = JSON.stringify(previousItems.filter(isWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairWorkItem));
+    const nextComparable = JSON.stringify(nextItems.filter(isWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairWorkItem));
+    if (changed || currentComparable !== nextComparable || !fs.existsSync(ledger.file || getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId))) {
+        return summarizeReplayRepairPendingWorkItems(groupId, writeGroupCompactBoundaryReplayRepairWorkItems(groupId, nextLedger));
+    }
+    return summarizeReplayRepairPendingWorkItems(groupId, ledger);
+}
+function buildWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairWorkItemReport(options = {}) {
+    const receiptReport = options.receiptReport
+        || options.receipt_report
+        || buildWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptReport(options);
+    const rows = (receiptReport.groups || []).map((receiptGroup) => {
+        const groupId = String(receiptGroup.groupId || "");
+        const workLedger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+        const repairItems = (Array.isArray(workLedger.items) ? workLedger.items : [])
+            .filter(isWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairWorkItem);
+        const openItems = repairItems.filter((item) => replayRepairWorkItemOpen(item.status));
+        const expectedGaps = Array.isArray(receiptGroup.gaps) ? receiptGroup.gaps : [];
+        const itemByPacket = new Map(openItems.map((item) => [String(item.worker_context_packet_id || ""), item]));
+        const missingItems = expectedGaps.filter((gap) => {
+            const packetId = String(gap.packet_id || "").trim();
+            return !packetId || !itemByPacket.has(packetId);
+        });
+        const status = expectedGaps.length === 0
+            ? openItems.length > 0 ? "warn" : "empty"
+            : missingItems.length > 0 ? "fail" : "ok";
+        return {
+            schema: "ccm-worker-context-provider-ranking-provenance-compact-repair-receipt-memory-usage-receipt-repair-work-item-group-v1",
+            groupId,
+            status,
+            file: workLedger.file || getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId),
+            expectedRepairItemCount: expectedGaps.length,
+            coveredRepairItemCount: Math.max(0, expectedGaps.length - missingItems.length),
+            repairItemCount: repairItems.length,
+            openRepairItemCount: openItems.length,
+            dispatchMarkedCount: openItems.filter((item) => String(item.dispatch_target || item.dispatchTarget || "").trim()).length,
+            docRelPathItemCount: repairItems.filter((item) => item.provider_ranking_compact_repair_receipt_memory_usage_doc_rel_path).length,
+            boundaryPromptItemCount: repairItems.filter((item) => /ranking evidence only, not authorization/i.test(String(item.prompt_patch || item.instruction || ""))).length,
+            items: repairItems.slice(0, 12).map((item) => ({
+                id: item.id || item.work_item_id || "",
+                status: replayRepairWorkItemStatus(item.status),
+                priority: item.priority || "",
+                packet_id: item.worker_context_packet_id || "",
+                binding_id: item.binding_id || "",
+                target_project: item.target_project || "",
+                docRelPath: item.provider_ranking_compact_repair_receipt_memory_usage_doc_rel_path || "",
+                gaps: item.provider_ranking_provenance_gap_codes || [],
+            })),
+            gaps: missingItems.slice(0, 8).map((gap) => ({
+                packet_id: gap.packet_id || "",
+                binding_id: gap.binding_id || "",
+                project: gap.project || "",
+                reason: "provider ranking memory usage receipt gap 缺少 repair work item",
+            })),
+        };
+    });
+    const checkedRows = rows.filter(row => Number(row.expectedRepairItemCount || 0) > 0 || Number(row.repairItemCount || 0) > 0);
+    const requiredRows = checkedRows.filter(row => Number(row.expectedRepairItemCount || 0) > 0);
+    const coveredRows = requiredRows.filter(row => Number(row.coveredRepairItemCount || 0) >= Number(row.expectedRepairItemCount || 0) && row.status === "ok");
+    const coverageRate = requiredRows.length ? Math.round((coveredRows.length / requiredRows.length) * 1000) / 10 : null;
+    const status = coverageRate === null ? "empty" : coverageRate >= 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail";
+    return {
+        schema: "ccm-worker-context-provider-ranking-provenance-compact-repair-receipt-memory-usage-receipt-repair-work-item-report-v1",
+        generatedAt: now(),
+        receiptReport: { schema: receiptReport.schema || "", overall: receiptReport.overall || {} },
+        overall: {
+            status,
+            coverageRate,
+            groupCount: rows.length,
+            checkedGroupCount: checkedRows.length,
+            groupsNeedingRepairItems: requiredRows.length,
+            groupsCovered: coveredRows.length,
+            expectedRepairItemCount: checkedRows.reduce((sum, row) => sum + Number(row.expectedRepairItemCount || 0), 0),
+            coveredRepairItemCount: checkedRows.reduce((sum, row) => sum + Number(row.coveredRepairItemCount || 0), 0),
+            repairItemCount: checkedRows.reduce((sum, row) => sum + Number(row.repairItemCount || 0), 0),
+            openRepairItemCount: checkedRows.reduce((sum, row) => sum + Number(row.openRepairItemCount || 0), 0),
+            dispatchMarkedCount: checkedRows.reduce((sum, row) => sum + Number(row.dispatchMarkedCount || 0), 0),
+            docRelPathItemCount: checkedRows.reduce((sum, row) => sum + Number(row.docRelPathItemCount || 0), 0),
+            boundaryPromptItemCount: checkedRows.reduce((sum, row) => sum + Number(row.boundaryPromptItemCount || 0), 0),
+        },
+        groups: rows.sort((a, b) => Number(b.expectedRepairItemCount || 0) - Number(a.expectedRepairItemCount || 0) || Number(b.openRepairItemCount || 0) - Number(a.openRepairItemCount || 0)).slice(0, 50),
+        weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn").slice(0, 20),
+    };
+}
+function evaluateWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairWorkItems(options = {}) {
+    const report = buildWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairWorkItemReport(options);
+    const checked = Number(report.overall.groupsNeedingRepairItems || 0);
+    const passed = (report.groups || []).filter((row) => Number(row.expectedRepairItemCount || 0) > 0 && row.status === "ok").length;
+    const evidence = (report.groups || []).filter((row) => row.status === "ok").slice(0, 12).map((row) => ({
+        groupId: row.groupId,
+        expectedRepairItemCount: row.expectedRepairItemCount,
+        coveredRepairItemCount: row.coveredRepairItemCount,
+        openRepairItemCount: row.openRepairItemCount,
+        docRelPathItemCount: row.docRelPathItemCount,
+        boundaryPromptItemCount: row.boundaryPromptItemCount,
+        file: row.file,
+    }));
+    const gaps = (report.weakGroups || []).flatMap((row) => (row.gaps || []).slice(0, 3).map((gap) => ({
+        groupId: row.groupId,
+        reason: gap.reason || "provider ranking memory usage receipt repair work item 缺失",
+        packet_id: gap.packet_id || "",
+        binding_id: gap.binding_id || "",
+        project: gap.project || "",
+    }))).slice(0, 12);
+    const check = makeQualityCheck("worker_context_provider_ranking_provenance_compact_repair_receipt_memory_usage_receipt_repair_work_items", "WorkerContext Provider Ranking Provenance Compact Repair Receipt Memory Usage Receipt Repair Work Items", checked, passed, evidence, gaps, "当 provider ranking compact repair receipt typed memory 的 child Agent 最终回执缺失 memoryUsed/memoryIgnored 覆盖或授权边界时，Memory Center 必须物化主 Agent 可认领的 corrected-receipt repair work item。");
+    check.report = report;
+    return check;
+}
+function workerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairDispatchGroupIds(options = {}, repairWorkItemReport = {}) {
+    const explicit = Array.isArray(options.groupIds || options.group_ids)
+        ? (options.groupIds || options.group_ids).map((item) => String(item || "").trim()).filter(Boolean)
+        : null;
+    if (explicit?.length)
+        return explicit;
+    const repairReportGroupIds = Array.isArray(repairWorkItemReport.groups)
+        ? repairWorkItemReport.groups.map((row) => String(row.groupId || "").trim()).filter(Boolean)
+        : [];
+    return [...new Set([
+            ...replayRepairDispatchCandidateGroupIds(options),
+            ...repairReportGroupIds,
+        ])].filter(Boolean);
+}
+function workerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairCandidateMetadataGaps(item = {}, candidate = {}) {
+    const gaps = [];
+    if (!candidate || !candidate.work_item_id) {
+        gaps.push("candidate_missing");
+        return gaps;
+    }
+    if (!isWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairSource(candidate.source))
+        gaps.push("source");
+    if (candidate.component !== "worker_context_provider_ranking_compact_repair_receipt_memory_usage_receipt_contract")
+        gaps.push("component");
+    if (candidate.shouldCreateRealTask !== false && candidate.should_create_real_task !== false)
+        gaps.push("should_create_real_task_false");
+    const mirroredFields = [
+        "worker_context_packet_id",
+        "worker_context_packet_binding_id",
+        "binding_id",
+        "assignment_id",
+        "dispatch_key",
+    ];
+    for (const field of mirroredFields) {
+        const expectedValue = field === "worker_context_packet_binding_id"
+            ? item.worker_context_packet_binding_id || item.binding_id || ""
+            : item[field] || "";
+        const expected = String(expectedValue || "").trim();
+        if (expected && String(candidate[field] || "").trim() !== expected)
+            gaps.push(field);
+    }
+    const docRelPath = String(item.provider_ranking_compact_repair_receipt_memory_usage_doc_rel_path || "provider-ranking-provenance-compact-repair-receipt-memory.md").trim();
+    const expectedRelPaths = uniqueStrings([
+        docRelPath,
+        ...normalizeQualityStringList(item.provider_ranking_memory_receipt_required_doc_rel_paths || item.providerRankingMemoryReceiptRequiredDocRelPaths || item.provider_ranking_provenance_rel_paths || []),
+    ], 12);
+    const candidateRelPaths = Array.isArray(candidate.provider_ranking_provenance_rel_paths) ? candidate.provider_ranking_provenance_rel_paths : [];
+    for (const relPath of expectedRelPaths) {
+        if (relPath && !candidateRelPaths.includes(relPath))
+            gaps.push("provider_ranking_provenance_rel_paths");
+    }
+    const text = [
+        candidate.instruction,
+        candidate.expected,
+        candidate.prompt_patch,
+        candidate.source_reason,
+    ].filter(Boolean).join("\n");
+    if (!/memoryUsed/i.test(text))
+        gaps.push("memoryUsed_prompt");
+    if (!/memoryIgnored/i.test(text))
+        gaps.push("memoryIgnored_prompt");
+    for (const relPath of expectedRelPaths) {
+        if (relPath && !text.includes(relPath))
+            gaps.push("doc_rel_path_prompt");
+    }
+    if (!/ranking evidence only, not authorization/i.test(text))
+        gaps.push("authorization_boundary_prompt");
+    if (!/fresh valid provider switch decision receipt/i.test(text))
+        gaps.push("fresh_receipt_prompt");
+    return [...new Set(gaps)];
+}
+function buildWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairDispatchCandidateReport(options = {}) {
+    const repairWorkItemReport = options.repairWorkItemReport
+        || options.repair_work_item_report
+        || buildWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairWorkItemReport(options);
+    const groupIds = workerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairDispatchGroupIds(options, repairWorkItemReport);
+    const rows = groupIds.map((groupId) => {
+        const ledger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+        const items = Array.isArray(ledger.items) ? ledger.items : [];
+        const repairItems = items.filter(isWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairWorkItem);
+        const openItems = repairItems.filter((item) => replayRepairWorkItemOpen(item.status));
+        const requiredItems = openItems;
+        const limit = Math.max(Number(options.limit || 24), requiredItems.length + 8);
+        const summary = buildReplayRepairMainAgentDispatchCandidates(groupId, { limit, ledger });
+        const candidateByWorkId = new Map((summary.candidates || []).map((candidate) => [String(candidate.work_item_id || ""), candidate]));
+        const missing = requiredItems.filter((item) => !candidateByWorkId.has(replayRepairWorkItemId(item)));
+        const matched = requiredItems.map((item) => ({
+            item,
+            candidate: candidateByWorkId.get(replayRepairWorkItemId(item)) || null,
+        })).filter((entry) => entry.candidate);
+        const metadataGaps = matched
+            .map((entry) => ({
+            work_item_id: replayRepairWorkItemId(entry.item),
+            candidate_id: entry.candidate.candidate_id || "",
+            gaps: workerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairCandidateMetadataGaps(entry.item, entry.candidate),
+            worker_context_packet_id: entry.candidate.worker_context_packet_id || "",
+            binding_id: entry.candidate.binding_id || entry.candidate.worker_context_packet_binding_id || "",
+        }))
+            .filter((entry) => entry.gaps.length > 0);
+        const repairCandidates = (summary.candidates || []).filter((candidate) => isWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairSource(candidate.source));
+        const status = requiredItems.length === 0
+            ? repairItems.length > 0 ? "warn" : "empty"
+            : missing.length > 0 ? "fail" : metadataGaps.length > 0 ? "warn" : "ok";
+        return {
+            schema: "ccm-worker-context-provider-ranking-provenance-compact-repair-receipt-memory-usage-receipt-repair-dispatch-candidate-group-v1",
+            groupId,
+            status,
+            file: summary.file,
+            updatedAt: summary.updatedAt,
+            repairItemCount: repairItems.length,
+            openRepairItemCount: openItems.length,
+            expectedCandidateCount: requiredItems.length,
+            coveredCandidateCount: requiredItems.length - missing.length,
+            candidateCount: repairCandidates.length,
+            readyCount: repairCandidates.filter((candidate) => candidate.dispatchMarked || candidate.claimedByMainAgent || candidate.status === "in_progress").length,
+            dispatchMarkedCount: repairCandidates.filter((candidate) => candidate.dispatchMarked || String(candidate.dispatch_target || "").trim()).length,
+            metadataGapCount: metadataGaps.length,
+            promptPatchCandidateCount: repairCandidates.filter((candidate) => /memoryUsed|memoryIgnored/i.test(String(candidate.prompt_patch || ""))).length,
+            packetBoundCandidateCount: repairCandidates.filter((candidate) => candidate.worker_context_packet_id).length,
+            docRelPathCandidateCount: repairCandidates.filter((candidate) => (candidate.provider_ranking_provenance_rel_paths || []).includes("provider-ranking-provenance-compact-repair-receipt-memory.md")).length,
+            boundaryPromptCandidateCount: repairCandidates.filter((candidate) => /ranking evidence only, not authorization/i.test(String(candidate.prompt_patch || candidate.instruction || ""))).length,
+            candidates: repairCandidates.slice(0, 12),
+            missingCandidates: missing.slice(0, 8).map((item) => ({
+                work_item_id: replayRepairWorkItemId(item),
+                status: replayRepairWorkItemStatus(item.status),
+                priority: item.priority || "",
+                reason: "provider ranking memory usage receipt repair work item 缺少主 Agent 派发候选",
+            })),
+            metadataGaps: metadataGaps.slice(0, 8),
+            gaps: [
+                ...missing.slice(0, 8).map((item) => ({
+                    work_item_id: replayRepairWorkItemId(item),
+                    reason: "provider ranking memory usage receipt repair work item 未进入主 Agent 派发候选",
+                    status: replayRepairWorkItemStatus(item.status),
+                    priority: item.priority || "",
+                })),
+                ...metadataGaps.slice(0, 8).map((gap) => ({
+                    work_item_id: gap.work_item_id || "",
+                    candidate_id: gap.candidate_id || "",
+                    reason: `provider ranking memory usage receipt repair dispatch candidate 缺少字段：${gap.gaps.join(",")}`,
+                })),
+            ].slice(0, 12),
+        };
+    });
+    const checkedRows = rows.filter(row => Number(row.expectedCandidateCount || 0) > 0 || Number(row.candidateCount || 0) > 0);
+    const requiredRows = checkedRows.filter(row => Number(row.expectedCandidateCount || 0) > 0);
+    const coveredRows = requiredRows.filter(row => Number(row.coveredCandidateCount || 0) >= Number(row.expectedCandidateCount || 0));
+    const metadataCompleteRows = requiredRows.filter(row => Number(row.metadataGapCount || 0) === 0);
+    const coverageRate = requiredRows.length ? Math.round((coveredRows.length / requiredRows.length) * 1000) / 10 : null;
+    const metadataCoverageRate = requiredRows.length ? Math.round((metadataCompleteRows.length / requiredRows.length) * 1000) / 10 : null;
+    const status = coverageRate === null
+        ? "empty"
+        : coverageRate < 100 ? coverageRate >= 75 ? "warn" : "fail" : metadataCoverageRate === 100 ? "ok" : "warn";
+    return {
+        schema: "ccm-worker-context-provider-ranking-provenance-compact-repair-receipt-memory-usage-receipt-repair-dispatch-candidate-report-v1",
+        generatedAt: now(),
+        overall: {
+            status,
+            coverageRate,
+            metadataCoverageRate,
+            groupCount: rows.length,
+            checkedGroupCount: checkedRows.length,
+            groupsNeedingCandidates: requiredRows.length,
+            groupsCovered: coveredRows.length,
+            groupsMetadataComplete: metadataCompleteRows.length,
+            expectedCandidateCount: checkedRows.reduce((sum, row) => sum + Number(row.expectedCandidateCount || 0), 0),
+            coveredCandidateCount: checkedRows.reduce((sum, row) => sum + Number(row.coveredCandidateCount || 0), 0),
+            candidateCount: checkedRows.reduce((sum, row) => sum + Number(row.candidateCount || 0), 0),
+            readyCount: checkedRows.reduce((sum, row) => sum + Number(row.readyCount || 0), 0),
+            dispatchMarkedCount: checkedRows.reduce((sum, row) => sum + Number(row.dispatchMarkedCount || 0), 0),
+            metadataGapCount: checkedRows.reduce((sum, row) => sum + Number(row.metadataGapCount || 0), 0),
+            promptPatchCandidateCount: checkedRows.reduce((sum, row) => sum + Number(row.promptPatchCandidateCount || 0), 0),
+            packetBoundCandidateCount: checkedRows.reduce((sum, row) => sum + Number(row.packetBoundCandidateCount || 0), 0),
+            docRelPathCandidateCount: checkedRows.reduce((sum, row) => sum + Number(row.docRelPathCandidateCount || 0), 0),
+            boundaryPromptCandidateCount: checkedRows.reduce((sum, row) => sum + Number(row.boundaryPromptCandidateCount || 0), 0),
+        },
+        groups: rows.sort((a, b) => Number(b.expectedCandidateCount || 0) - Number(a.expectedCandidateCount || 0) || Number(b.candidateCount || 0) - Number(a.candidateCount || 0)).slice(0, 50),
+        weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn").slice(0, 20),
+    };
+}
+function evaluateWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairDispatchCandidates(options = {}) {
+    const report = buildWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairDispatchCandidateReport(options);
+    const checked = Number(report.overall.groupsNeedingCandidates || 0);
+    const passed = (report.groups || []).filter((row) => Number(row.expectedCandidateCount || 0) > 0 && row.status === "ok").length;
+    const evidence = (report.groups || []).filter((row) => row.status === "ok").slice(0, 12).map((row) => ({
+        groupId: row.groupId,
+        expectedCandidateCount: row.expectedCandidateCount,
+        coveredCandidateCount: row.coveredCandidateCount,
+        candidateCount: row.candidateCount,
+        packetBoundCandidateCount: row.packetBoundCandidateCount,
+        docRelPathCandidateCount: row.docRelPathCandidateCount,
+        boundaryPromptCandidateCount: row.boundaryPromptCandidateCount,
+        file: row.file,
+    }));
+    const gaps = (report.weakGroups || []).flatMap((row) => (row.gaps || []).slice(0, 3).map((gap) => ({
+        groupId: row.groupId,
+        reason: gap.reason || "provider ranking memory usage receipt repair dispatch candidate 缺失",
+        work_item_id: gap.work_item_id || "",
+        candidate_id: gap.candidate_id || "",
+    }))).slice(0, 12);
+    const check = makeQualityCheck("worker_context_provider_ranking_provenance_compact_repair_receipt_memory_usage_receipt_repair_dispatch_candidates", "WorkerContext Provider Ranking Provenance Compact Repair Receipt Memory Usage Receipt Repair Dispatch Candidates", checked, passed, evidence, gaps, "把 provider ranking memory usage receipt repair work items 转成主 Agent 可读派发候选，并保留 worker_context_packet_id、binding、typed memory doc、memoryUsed/memoryIgnored 修复 prompt 与 ranking-evidence-not-authorization 边界。");
+    check.report = report;
+    return check;
+}
+function workerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptDispatchBriefMetadataGaps(candidate = {}, brief = {}) {
+    const gaps = replayRepairDispatchBriefMetadataGaps(candidate, brief);
+    if (!brief || !brief.brief_id)
+        return gaps;
+    if (!isWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairSource(brief.source))
+        gaps.push("source");
+    const mirroredFields = [
+        "worker_context_packet_id",
+        "worker_context_packet_binding_id",
+        "binding_id",
+        "assignment_id",
+        "dispatch_key",
+    ];
+    for (const field of mirroredFields) {
+        const expected = String(candidate[field] || "").trim();
+        if (expected && String(brief[field] || "").trim() !== expected)
+            gaps.push(field);
+    }
+    const requiredReceiptDocRelPaths = normalizeQualityStringList(candidate.provider_ranking_memory_receipt_required_doc_rel_paths || candidate.providerRankingMemoryReceiptRequiredDocRelPaths || []);
+    const missingReceiptDocRelPaths = normalizeQualityStringList(candidate.provider_ranking_memory_receipt_missing_doc_rel_paths || candidate.providerRankingMemoryReceiptMissingDocRelPaths || []);
+    const missingUsageStateDocRelPaths = normalizeQualityStringList(candidate.provider_ranking_memory_receipt_missing_usage_state_doc_rel_paths || candidate.providerRankingMemoryReceiptMissingUsageStateDocRelPaths || []);
+    const expectedRelPaths = uniqueStrings([
+        ...(Array.isArray(candidate.provider_ranking_provenance_rel_paths) ? candidate.provider_ranking_provenance_rel_paths : []),
+        ...requiredReceiptDocRelPaths,
+    ], 12);
+    const briefRelPaths = uniqueStrings([
+        ...(Array.isArray(brief.provider_ranking_provenance_rel_paths) ? brief.provider_ranking_provenance_rel_paths : []),
+        ...normalizeQualityStringList(brief.provider_ranking_memory_receipt_required_doc_rel_paths || brief.providerRankingMemoryReceiptRequiredDocRelPaths || []),
+    ], 12);
+    for (const relPath of expectedRelPaths) {
+        if (relPath && !briefRelPaths.includes(relPath))
+            gaps.push("provider_ranking_provenance_rel_paths");
+    }
+    const briefRequiredDocRelPaths = normalizeQualityStringList(brief.provider_ranking_memory_receipt_required_doc_rel_paths || brief.providerRankingMemoryReceiptRequiredDocRelPaths || []);
+    for (const relPath of requiredReceiptDocRelPaths) {
+        if (relPath && !briefRequiredDocRelPaths.includes(relPath))
+            gaps.push("provider_ranking_memory_receipt_required_doc_rel_paths");
+    }
+    const briefMissingDocRelPaths = normalizeQualityStringList(brief.provider_ranking_memory_receipt_missing_doc_rel_paths || brief.providerRankingMemoryReceiptMissingDocRelPaths || []);
+    for (const relPath of missingReceiptDocRelPaths) {
+        if (relPath && !briefMissingDocRelPaths.includes(relPath))
+            gaps.push("provider_ranking_memory_receipt_missing_doc_rel_paths");
+    }
+    const briefMissingUsageStateDocRelPaths = normalizeQualityStringList(brief.provider_ranking_memory_receipt_missing_usage_state_doc_rel_paths || brief.providerRankingMemoryReceiptMissingUsageStateDocRelPaths || []);
+    for (const relPath of missingUsageStateDocRelPaths) {
+        if (relPath && !briefMissingUsageStateDocRelPaths.includes(relPath))
+            gaps.push("provider_ranking_memory_receipt_missing_usage_state_doc_rel_paths");
+    }
+    const workerTask = String(brief.worker_task || "");
+    if (!/memoryUsed/i.test(workerTask))
+        gaps.push("worker_task_memoryUsed");
+    if (!/memoryIgnored/i.test(workerTask))
+        gaps.push("worker_task_memoryIgnored");
+    if (!/usageState|usage_state/i.test(workerTask))
+        gaps.push("worker_task_usageState");
+    if (!/ranking evidence only, not authorization/i.test(workerTask))
+        gaps.push("worker_task_authorization_boundary");
+    if (!/fresh valid provider switch decision receipt/i.test(workerTask))
+        gaps.push("worker_task_fresh_receipt");
+    if (!/CCM_AGENT_RECEIPT/i.test(workerTask))
+        gaps.push("worker_task_receipt_contract");
+    if (candidate.worker_context_packet_id && !workerTask.includes(String(candidate.worker_context_packet_id)))
+        gaps.push("worker_task_packet_id");
+    for (const relPath of expectedRelPaths.slice(0, 4)) {
+        if (relPath && !workerTask.includes(String(relPath)))
+            gaps.push("worker_task_rel_path");
+    }
+    for (const relPath of requiredReceiptDocRelPaths.slice(0, 6)) {
+        if (relPath && !workerTask.includes(String(relPath)))
+            gaps.push("worker_task_required_doc_rel_path");
+    }
+    for (const relPath of missingReceiptDocRelPaths.slice(0, 6)) {
+        if (relPath && !workerTask.includes(String(relPath)))
+            gaps.push("worker_task_missing_doc_rel_path");
+    }
+    return [...new Set(gaps)];
+}
+function buildWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairDispatchBriefReport(options = {}) {
+    const candidateReport = options.candidateReport
+        || options.candidate_report
+        || buildWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairDispatchCandidateReport(options);
+    const rows = (candidateReport.groups || []).map((candidateGroup) => {
+        const groupId = String(candidateGroup.groupId || "");
+        const repairCandidates = Array.isArray(candidateGroup.candidates)
+            ? candidateGroup.candidates.filter((candidate) => isWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairSource(candidate.source))
+            : [];
+        const candidateSummary = {
+            schema: "ccm-replay-repair-main-agent-dispatch-candidates-v1",
+            groupId,
+            file: candidateGroup.file || getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId),
+            updatedAt: candidateGroup.updatedAt || "",
+            candidateCount: repairCandidates.length,
+            openItemCount: candidateGroup.openRepairItemCount || repairCandidates.length,
+            readyCount: candidateGroup.readyCount || repairCandidates.length,
+            dispatchMarkedCount: candidateGroup.dispatchMarkedCount || 0,
+            shouldCreateRealTask: false,
+            candidates: repairCandidates,
+        };
+        const ledger = syncReplayRepairDispatchPlanLedgerForCenter(groupId, candidateSummary, options);
+        const readyBriefs = (Array.isArray(ledger.briefs) ? ledger.briefs : [])
+            .filter((brief) => String(brief.status || "") === "ready" && isWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairSource(brief.source));
+        const briefByWorkId = new Map(readyBriefs.map((brief) => [String(brief.work_item_id || ""), brief]));
+        const requiredCandidates = repairCandidates.filter((candidate) => candidate.work_item_id);
+        const missing = requiredCandidates.filter((candidate) => !briefByWorkId.has(String(candidate.work_item_id || "")));
+        const metadataGaps = requiredCandidates
+            .map((candidate) => {
+            const brief = briefByWorkId.get(String(candidate.work_item_id || "")) || null;
+            return {
+                work_item_id: candidate.work_item_id || "",
+                candidate_id: candidate.candidate_id || "",
+                brief_id: brief?.brief_id || "",
+                gaps: workerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptDispatchBriefMetadataGaps(candidate, brief),
+            };
+        })
+            .filter((entry) => entry.gaps.length > 0);
+        const status = requiredCandidates.length === 0
+            ? "empty"
+            : missing.length > 0 ? "fail" : metadataGaps.length > 0 ? "warn" : "ok";
+        return {
+            schema: "ccm-worker-context-provider-ranking-provenance-compact-repair-receipt-memory-usage-receipt-repair-dispatch-brief-group-v1",
+            groupId,
+            status,
+            file: ledger.file || getGroupReplayRepairDispatchPlanLedgerFile(groupId),
+            sourceCandidateFile: ledger.sourceCandidateFile || candidateGroup.file || "",
+            expectedBriefCount: requiredCandidates.length,
+            coveredBriefCount: requiredCandidates.length - missing.length,
+            readyBriefCount: readyBriefs.length,
+            metadataGapCount: metadataGaps.length,
+            packetBoundBriefCount: readyBriefs.filter((brief) => brief.worker_context_packet_id).length,
+            docRelPathBriefCount: readyBriefs.filter((brief) => (brief.provider_ranking_provenance_rel_paths || []).includes("provider-ranking-provenance-compact-repair-receipt-memory.md")).length,
+            requiredDocBriefCount: readyBriefs.filter((brief) => (brief.provider_ranking_memory_receipt_required_doc_rel_paths || []).length > 0).length,
+            disciplineRequiredDocBriefCount: readyBriefs.filter((brief) => (brief.provider_ranking_memory_receipt_required_doc_rel_paths || []).includes("provider-ranking-memory-usage-receipt-discipline.md")).length,
+            missingDocBriefCount: readyBriefs.filter((brief) => (brief.provider_ranking_memory_receipt_missing_doc_rel_paths || []).length > 0).length,
+            memoryUsedPromptBriefCount: readyBriefs.filter((brief) => /memoryUsed/i.test(String(brief.worker_task || ""))).length,
+            memoryIgnoredPromptBriefCount: readyBriefs.filter((brief) => /memoryIgnored/i.test(String(brief.worker_task || ""))).length,
+            authorizationBoundaryBriefCount: readyBriefs.filter((brief) => /ranking evidence only, not authorization/i.test(String(brief.worker_task || ""))).length,
+            freshReceiptBriefCount: readyBriefs.filter((brief) => /fresh valid provider switch decision receipt/i.test(String(brief.worker_task || ""))).length,
+            shouldCreateRealTask: ledger.shouldCreateRealTask === false || ledger.should_create_real_task === false,
+            briefs: readyBriefs.slice(0, 12).map((brief) => ({
+                brief_id: brief.brief_id || "",
+                work_item_id: brief.work_item_id || "",
+                source: brief.source || "",
+                target_project: brief.target_project || "",
+                worker_context_packet_id: brief.worker_context_packet_id || "",
+                worker_context_packet_binding_id: brief.worker_context_packet_binding_id || brief.binding_id || "",
+                provider_ranking_provenance_rel_paths: brief.provider_ranking_provenance_rel_paths || [],
+                provider_ranking_provenance_gap_codes: brief.provider_ranking_provenance_gap_codes || [],
+                provider_ranking_memory_receipt_required_doc_rel_paths: brief.provider_ranking_memory_receipt_required_doc_rel_paths || [],
+                provider_ranking_memory_receipt_missing_doc_rel_paths: brief.provider_ranking_memory_receipt_missing_doc_rel_paths || [],
+                provider_ranking_memory_receipt_missing_usage_state_doc_rel_paths: brief.provider_ranking_memory_receipt_missing_usage_state_doc_rel_paths || [],
+                worker_task: compactMemoryCenterText(brief.worker_task || "", 2600),
+            })),
+            missingBriefs: missing.slice(0, 8).map((candidate) => ({
+                work_item_id: candidate.work_item_id || "",
+                candidate_id: candidate.candidate_id || "",
+                reason: "provider ranking memory usage receipt repair dispatch candidate 缺少 corrected-receipt worker brief",
+            })),
+            metadataGaps: metadataGaps.slice(0, 8),
+            gaps: [
+                ...missing.slice(0, 8).map((candidate) => ({
+                    work_item_id: candidate.work_item_id || "",
+                    candidate_id: candidate.candidate_id || "",
+                    reason: "provider ranking memory usage receipt repair dispatch candidate 缺少 corrected-receipt worker brief",
+                })),
+                ...metadataGaps.slice(0, 8).map((gap) => ({
+                    work_item_id: gap.work_item_id || "",
+                    candidate_id: gap.candidate_id || "",
+                    brief_id: gap.brief_id || "",
+                    reason: `provider ranking memory usage receipt repair dispatch brief 缺少字段：${gap.gaps.join(",")}`,
+                })),
+            ].slice(0, 12),
+        };
+    });
+    const checkedRows = rows.filter(row => Number(row.expectedBriefCount || 0) > 0 || Number(row.readyBriefCount || 0) > 0);
+    const requiredRows = checkedRows.filter(row => Number(row.expectedBriefCount || 0) > 0);
+    const coveredRows = requiredRows.filter(row => Number(row.coveredBriefCount || 0) >= Number(row.expectedBriefCount || 0));
+    const metadataCompleteRows = requiredRows.filter(row => Number(row.metadataGapCount || 0) === 0);
+    const coverageRate = requiredRows.length ? Math.round((coveredRows.length / requiredRows.length) * 1000) / 10 : null;
+    const metadataCoverageRate = requiredRows.length ? Math.round((metadataCompleteRows.length / requiredRows.length) * 1000) / 10 : null;
+    const status = coverageRate === null
+        ? "empty"
+        : coverageRate < 100 ? coverageRate >= 75 ? "warn" : "fail" : metadataCoverageRate === 100 ? "ok" : "warn";
+    return {
+        schema: "ccm-worker-context-provider-ranking-provenance-compact-repair-receipt-memory-usage-receipt-repair-dispatch-brief-report-v1",
+        generatedAt: now(),
+        overall: {
+            status,
+            coverageRate,
+            metadataCoverageRate,
+            groupCount: rows.length,
+            checkedGroupCount: checkedRows.length,
+            groupsNeedingBriefs: requiredRows.length,
+            groupsCovered: coveredRows.length,
+            groupsMetadataComplete: metadataCompleteRows.length,
+            expectedBriefCount: checkedRows.reduce((sum, row) => sum + Number(row.expectedBriefCount || 0), 0),
+            coveredBriefCount: checkedRows.reduce((sum, row) => sum + Number(row.coveredBriefCount || 0), 0),
+            readyBriefCount: checkedRows.reduce((sum, row) => sum + Number(row.readyBriefCount || 0), 0),
+            metadataGapCount: checkedRows.reduce((sum, row) => sum + Number(row.metadataGapCount || 0), 0),
+            packetBoundBriefCount: checkedRows.reduce((sum, row) => sum + Number(row.packetBoundBriefCount || 0), 0),
+            docRelPathBriefCount: checkedRows.reduce((sum, row) => sum + Number(row.docRelPathBriefCount || 0), 0),
+            requiredDocBriefCount: checkedRows.reduce((sum, row) => sum + Number(row.requiredDocBriefCount || 0), 0),
+            disciplineRequiredDocBriefCount: checkedRows.reduce((sum, row) => sum + Number(row.disciplineRequiredDocBriefCount || 0), 0),
+            missingDocBriefCount: checkedRows.reduce((sum, row) => sum + Number(row.missingDocBriefCount || 0), 0),
+            memoryUsedPromptBriefCount: checkedRows.reduce((sum, row) => sum + Number(row.memoryUsedPromptBriefCount || 0), 0),
+            memoryIgnoredPromptBriefCount: checkedRows.reduce((sum, row) => sum + Number(row.memoryIgnoredPromptBriefCount || 0), 0),
+            authorizationBoundaryBriefCount: checkedRows.reduce((sum, row) => sum + Number(row.authorizationBoundaryBriefCount || 0), 0),
+            freshReceiptBriefCount: checkedRows.reduce((sum, row) => sum + Number(row.freshReceiptBriefCount || 0), 0),
+        },
+        groups: rows.sort((a, b) => Number(b.expectedBriefCount || 0) - Number(a.expectedBriefCount || 0) || Number(b.readyBriefCount || 0) - Number(a.readyBriefCount || 0)).slice(0, 50),
+        weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn").slice(0, 20),
+    };
+}
+function evaluateWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairDispatchBriefs(options = {}) {
+    const report = buildWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairDispatchBriefReport(options);
+    const checked = Number(report.overall.groupsNeedingBriefs || 0);
+    const passed = (report.groups || []).filter((row) => Number(row.expectedBriefCount || 0) > 0 && row.status === "ok").length;
+    const evidence = (report.groups || []).filter((row) => row.status === "ok").slice(0, 12).map((row) => ({
+        groupId: row.groupId,
+        expectedBriefCount: row.expectedBriefCount,
+        coveredBriefCount: row.coveredBriefCount,
+        readyBriefCount: row.readyBriefCount,
+        packetBoundBriefCount: row.packetBoundBriefCount,
+        docRelPathBriefCount: row.docRelPathBriefCount,
+        requiredDocBriefCount: row.requiredDocBriefCount,
+        disciplineRequiredDocBriefCount: row.disciplineRequiredDocBriefCount,
+        memoryUsedPromptBriefCount: row.memoryUsedPromptBriefCount,
+        memoryIgnoredPromptBriefCount: row.memoryIgnoredPromptBriefCount,
+        authorizationBoundaryBriefCount: row.authorizationBoundaryBriefCount,
+        freshReceiptBriefCount: row.freshReceiptBriefCount,
+        file: row.file,
+    }));
+    const gaps = (report.weakGroups || []).flatMap((row) => (row.gaps || []).slice(0, 3).map((gap) => ({
+        groupId: row.groupId,
+        reason: gap.reason || "provider ranking memory usage receipt repair dispatch brief 缺失",
+        work_item_id: gap.work_item_id || "",
+        candidate_id: gap.candidate_id || "",
+        brief_id: gap.brief_id || "",
+    }))).slice(0, 12);
+    const check = makeQualityCheck("worker_context_provider_ranking_provenance_compact_repair_receipt_memory_usage_receipt_repair_dispatch_briefs", "WorkerContext Provider Ranking Provenance Compact Repair Receipt Memory Usage Receipt Repair Dispatch Briefs", checked, passed, evidence, gaps, "把 provider ranking memory usage receipt repair candidates 编译成主 Agent 可复制给子 Agent 的 corrected-receipt worker brief；brief 必须包含 CCM_AGENT_RECEIPT.memoryUsed/memoryIgnored、typed memory doc、usageState、fresh receipt 要求和 ranking-evidence-not-authorization 边界。");
+    check.report = report;
+    return check;
+}
+function buildWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairDispatchBriefRequiredDocsReport(options = {}) {
+    const briefReport = options.briefReport
+        || options.brief_report
+        || buildWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairDispatchBriefReport(options);
+    const rows = (briefReport.groups || []).map((group) => {
+        const briefs = Array.isArray(group.briefs) ? group.briefs : [];
+        const checkedBriefs = briefs.map((brief) => {
+            const requiredDocRelPaths = normalizeQualityStringList(brief.provider_ranking_memory_receipt_required_doc_rel_paths || brief.providerRankingMemoryReceiptRequiredDocRelPaths || []);
+            const missingDocRelPaths = normalizeQualityStringList(brief.provider_ranking_memory_receipt_missing_doc_rel_paths || brief.providerRankingMemoryReceiptMissingDocRelPaths || []);
+            const provenanceRelPaths = normalizeQualityStringList(brief.provider_ranking_provenance_rel_paths || brief.providerRankingProvenanceRelPaths || []);
+            const workerTask = String(brief.worker_task || "");
+            const gaps = [];
+            if (!requiredDocRelPaths.length) {
+                gaps.push({ reason: "dispatch brief missing provider_ranking_memory_receipt_required_doc_rel_paths" });
+            }
+            for (const relPath of requiredDocRelPaths) {
+                if (relPath && !provenanceRelPaths.includes(relPath)) {
+                    gaps.push({ relPath, reason: `dispatch brief provider_ranking_provenance_rel_paths missing required doc：${relPath}` });
+                }
+                if (relPath && !workerTask.includes(relPath)) {
+                    gaps.push({ relPath, reason: `dispatch brief worker_task missing required doc：${relPath}` });
+                }
+            }
+            for (const relPath of missingDocRelPaths) {
+                if (relPath && !workerTask.includes(relPath)) {
+                    gaps.push({ relPath, reason: `dispatch brief worker_task missing missing-doc repair target：${relPath}` });
+                }
+            }
+            if (!/memoryUsed/i.test(workerTask))
+                gaps.push({ reason: "dispatch brief worker_task missing memoryUsed" });
+            if (!/memoryIgnored/i.test(workerTask))
+                gaps.push({ reason: "dispatch brief worker_task missing memoryIgnored" });
+            if (!/usageState|usage_state/i.test(workerTask))
+                gaps.push({ reason: "dispatch brief worker_task missing usageState" });
+            if (!/ranking evidence only, not authorization/i.test(workerTask))
+                gaps.push({ reason: "dispatch brief worker_task missing ranking evidence only / not authorization boundary" });
+            if (!/fresh valid provider switch decision receipt/i.test(workerTask))
+                gaps.push({ reason: "dispatch brief worker_task missing fresh valid provider switch decision receipt requirement" });
+            return {
+                brief_id: brief.brief_id || "",
+                work_item_id: brief.work_item_id || "",
+                worker_context_packet_id: brief.worker_context_packet_id || "",
+                requiredDocRelPaths,
+                missingDocRelPaths,
+                provenanceRelPaths,
+                disciplineDocRequired: requiredDocRelPaths.includes("provider-ranking-memory-usage-receipt-discipline.md"),
+                gaps,
+            };
+        });
+        const requiredBriefs = checkedBriefs.filter((brief) => brief.requiredDocRelPaths.length > 1
+            || brief.requiredDocRelPaths.includes("provider-ranking-memory-usage-receipt-discipline.md"));
+        const coveredBriefs = requiredBriefs.filter((brief) => brief.gaps.length === 0);
+        const gaps = requiredBriefs.flatMap((brief) => brief.gaps.map((gap) => ({
+            brief_id: brief.brief_id || "",
+            work_item_id: brief.work_item_id || "",
+            worker_context_packet_id: brief.worker_context_packet_id || "",
+            relPath: gap.relPath || "",
+            reason: gap.reason || "provider ranking required doc dispatch brief gap",
+        })));
+        const status = requiredBriefs.length === 0 ? "empty" : gaps.length ? "fail" : "ok";
+        return {
+            schema: "ccm-worker-context-provider-ranking-provenance-compact-repair-receipt-memory-usage-receipt-repair-dispatch-brief-required-docs-group-v1",
+            groupId: group.groupId || "",
+            status,
+            file: group.file || "",
+            requiredDocBriefCount: requiredBriefs.length,
+            coveredRequiredDocBriefCount: coveredBriefs.length,
+            disciplineDocBriefCount: requiredBriefs.filter((brief) => brief.disciplineDocRequired === true).length,
+            missingDocBriefCount: requiredBriefs.filter((brief) => brief.missingDocRelPaths.length > 0).length,
+            requiredDocRelPaths: uniqueStrings(requiredBriefs.flatMap((brief) => brief.requiredDocRelPaths), 20),
+            briefs: requiredBriefs.slice(0, 12),
+            gaps: gaps.slice(0, 12),
+        };
+    });
+    const checkedRows = rows.filter(row => Number(row.requiredDocBriefCount || 0) > 0);
+    const passedRows = checkedRows.filter(row => row.status === "ok");
+    const coverageRate = checkedRows.length ? Math.round((passedRows.length / checkedRows.length) * 1000) / 10 : null;
+    const status = coverageRate === null ? "empty" : coverageRate >= 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail";
+    return {
+        schema: "ccm-worker-context-provider-ranking-provenance-compact-repair-receipt-memory-usage-receipt-repair-dispatch-brief-required-docs-report-v1",
+        generatedAt: now(),
+        briefReport: { schema: briefReport.schema || "", overall: briefReport.overall || {} },
+        overall: {
+            status,
+            coverageRate,
+            groupCount: rows.length,
+            checkedGroupCount: checkedRows.length,
+            groupsCovered: passedRows.length,
+            requiredDocBriefCount: checkedRows.reduce((sum, row) => sum + Number(row.requiredDocBriefCount || 0), 0),
+            coveredRequiredDocBriefCount: checkedRows.reduce((sum, row) => sum + Number(row.coveredRequiredDocBriefCount || 0), 0),
+            disciplineDocBriefCount: checkedRows.reduce((sum, row) => sum + Number(row.disciplineDocBriefCount || 0), 0),
+            missingDocBriefCount: checkedRows.reduce((sum, row) => sum + Number(row.missingDocBriefCount || 0), 0),
+            metadataGapCount: checkedRows.reduce((sum, row) => sum + Number((row.gaps || []).length), 0),
+        },
+        groups: rows.sort((a, b) => Number(b.requiredDocBriefCount || 0) - Number(a.requiredDocBriefCount || 0)).slice(0, 50),
+        weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn").slice(0, 20),
+    };
+}
+function evaluateWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairDispatchBriefRequiredDocs(options = {}) {
+    const report = buildWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairDispatchBriefRequiredDocsReport(options);
+    const checked = Number(report.overall.checkedGroupCount || 0);
+    const passed = Number(report.overall.groupsCovered || 0);
+    const evidence = (report.groups || []).filter((row) => row.status === "ok").slice(0, 12).map((row) => ({
+        groupId: row.groupId,
+        requiredDocBriefCount: row.requiredDocBriefCount,
+        coveredRequiredDocBriefCount: row.coveredRequiredDocBriefCount,
+        disciplineDocBriefCount: row.disciplineDocBriefCount,
+        requiredDocRelPaths: row.requiredDocRelPaths,
+    }));
+    const gaps = (report.weakGroups || []).flatMap((row) => (row.gaps || []).slice(0, 3).map((gap) => ({
+        groupId: row.groupId,
+        reason: gap.reason || "provider ranking required docs dispatch brief coverage 缺失",
+        brief_id: gap.brief_id || "",
+        work_item_id: gap.work_item_id || "",
+        relPath: gap.relPath || "",
+    }))).slice(0, 12);
+    const check = makeQualityCheck("worker_context_provider_ranking_provenance_compact_repair_receipt_memory_usage_receipt_repair_dispatch_brief_required_docs", "WorkerContext Provider Ranking Provenance Compact Repair Receipt Memory Usage Receipt Repair Dispatch Brief Required Docs", checked, passed, evidence, gaps, "Corrected-receipt dispatch briefs for provider ranking memory usage must carry every required memory doc relPath into metadata and worker_task before the main Agent asks a child Agent to correct CCM_AGENT_RECEIPT.memoryUsed/memoryIgnored.");
+    check.report = report;
+    return check;
+}
+function buildWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairTypedMemoryReport(options = {}) {
+    const repairReport = options.repairWorkItemReport
+        || options.repair_work_item_report
+        || buildWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairWorkItemReport(options);
+    const candidateReport = options.candidateReport
+        || options.candidate_report
+        || buildWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairDispatchCandidateReport({ ...options, repairWorkItemReport: repairReport });
+    const briefReport = options.briefReport
+        || options.brief_report
+        || buildWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairDispatchBriefReport({ ...options, candidateReport });
+    const groupIds = [...new Set([
+            ...(repairReport.groups || []).map((row) => row.groupId),
+            ...(candidateReport.groups || []).map((row) => row.groupId),
+            ...(briefReport.groups || []).map((row) => row.groupId),
+        ].map((item) => String(item || "").trim()).filter(Boolean))];
+    const rows = groupIds.map((groupId) => {
+        const repairGroup = (repairReport.groups || []).find((row) => row.groupId === groupId) || {};
+        const candidateGroup = (candidateReport.groups || []).find((row) => row.groupId === groupId) || {};
+        const briefGroup = (briefReport.groups || []).find((row) => row.groupId === groupId) || {};
+        const workLedger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+        const repairItems = (Array.isArray(workLedger.items) ? workLedger.items : [])
+            .filter(isWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairWorkItem);
+        const candidates = (Array.isArray(candidateGroup.candidates) ? candidateGroup.candidates : [])
+            .filter((candidate) => isWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairSource(candidate.source));
+        const briefs = (Array.isArray(briefGroup.briefs) ? briefGroup.briefs : [])
+            .filter((brief) => isWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairSource(brief.source));
+        const inputRows = [
+            ...repairItems,
+            ...candidates,
+            ...briefs,
+            ...(Array.isArray(repairGroup.gaps) ? repairGroup.gaps : []),
+            ...(Array.isArray(candidateGroup.gaps) ? candidateGroup.gaps : []),
+            ...(Array.isArray(briefGroup.gaps) ? briefGroup.gaps : []),
+        ];
+        let distillation = null;
+        let distillationError = "";
+        try {
+            const { distillProviderRankingMemoryUsageReceiptRepairToTypedMemory, } = require("../collaboration/group-memory-index");
+            distillation = inputRows.length
+                ? distillProviderRankingMemoryUsageReceiptRepairToTypedMemory(groupId, {
+                    items: repairItems,
+                    candidates,
+                    briefs,
+                    gaps: [
+                        ...(Array.isArray(repairGroup.gaps) ? repairGroup.gaps : []),
+                        ...(Array.isArray(candidateGroup.gaps) ? candidateGroup.gaps : []),
+                        ...(Array.isArray(briefGroup.gaps) ? briefGroup.gaps : []),
+                    ],
+                }, {
+                    reason: "memory-center-provider-ranking-memory-usage-receipt-repair-typed-memory-report",
+                    updatedAt: options.generatedAt || options.generated_at || now(),
+                })
+                : null;
+        }
+        catch (error) {
+            distillationError = String(error?.message || error);
+        }
+        const { readGroupTypedMemoryDistillationLedger, scanGroupTypedMemoryDocuments, buildGroupTypedMemoryRecall, } = require("../collaboration/group-memory-index");
+        const distillationLedger = readGroupTypedMemoryDistillationLedger(groupId);
+        const archive = distillationLedger.providerRankingMemoryUsageReceiptRepairArchive || {};
+        const docs = scanGroupTypedMemoryDocuments(groupId);
+        const disciplineDocs = (Array.isArray(docs) ? docs : [])
+            .filter((doc) => String(doc.source || "") === "auto:provider-ranking-memory-usage-receipt-repair-distillation");
+        const docText = disciplineDocs.map((doc) => String(doc.body || "")).join("\n");
+        const recall = buildGroupTypedMemoryRecall(groupId, "provider ranking memory usage receipt memoryUsed memoryIgnored usageState fresh valid provider switch decision receipt ranking evidence only not authorization", {
+            disableLedger: true,
+            forceMemory: true,
+            max: 8,
+            snippetChars: 360,
+        });
+        const recallText = [
+            ...(Array.isArray(recall.recalled) ? recall.recalled : []),
+            ...(Array.isArray(recall.entries) ? recall.entries : []),
+            ...(Array.isArray(recall.selected) ? recall.selected : []),
+            ...(Array.isArray(recall.docs) ? recall.docs : []),
+        ].map((item) => `${item.relPath || item.rel_path || ""}\n${item.name || ""}\n${item.body || ""}\n${item.snippet || ""}\n${item.text || ""}`).join("\n");
+        const recallMatchCount = Array.isArray(recall.recalled)
+            ? recall.recalled.length
+            : Number(recall.matched_count || recall.entryCount || recall.entries?.length || 0);
+        const gaps = [];
+        if (distillationError)
+            gaps.push({ reason: `provider ranking memory usage receipt repair typed memory 蒸馏失败：${distillationError}` });
+        if (inputRows.length && !distillation)
+            gaps.push({ reason: "存在 provider ranking memory usage receipt repair 行但未触发 typed memory 蒸馏" });
+        if (inputRows.length && Number(archive.archived_count || 0) < 1)
+            gaps.push({ reason: "provider ranking memory usage receipt repair archive 为空" });
+        if (inputRows.length && !disciplineDocs.length)
+            gaps.push({ reason: "未写入 provider ranking memory usage receipt discipline typed MEMORY.md 文档" });
+        if (disciplineDocs.length && !/provider-ranking-provenance-compact-repair-receipt-memory\.md/i.test(docText))
+            gaps.push({ reason: "typed memory 文档缺少 provider ranking compact repair receipt memory doc relPath" });
+        if (disciplineDocs.length && !/memoryUsed/i.test(docText))
+            gaps.push({ reason: "typed memory 文档缺少 memoryUsed 规则" });
+        if (disciplineDocs.length && !/memoryIgnored/i.test(docText))
+            gaps.push({ reason: "typed memory 文档缺少 memoryIgnored 规则" });
+        if (disciplineDocs.length && !/usageState|usage_state/i.test(docText))
+            gaps.push({ reason: "typed memory 文档缺少 usageState 规则" });
+        if (disciplineDocs.length && !/ranking evidence only, not authorization/i.test(docText))
+            gaps.push({ reason: "typed memory 文档缺少 ranking evidence only, not authorization 边界" });
+        if (disciplineDocs.length && !/fresh valid provider switch decision receipt/i.test(docText))
+            gaps.push({ reason: "typed memory 文档缺少 fresh valid provider switch decision receipt 要求" });
+        if (inputRows.length && !/provider-ranking-memory-usage-receipt-discipline\.md|memoryUsed|memoryIgnored|usageState|fresh valid provider switch decision receipt|ranking evidence only, not authorization/i.test(recallText)) {
+            gaps.push({ reason: "provider ranking memory usage receipt discipline typed memory 无法通过 recall probe 召回" });
+        }
+        const status = inputRows.length === 0 ? "empty" : gaps.length ? "fail" : "ok";
+        return {
+            schema: "ccm-worker-context-provider-ranking-provenance-compact-repair-receipt-memory-usage-receipt-repair-typed-memory-group-v1",
+            groupId,
+            status,
+            inputRowCount: inputRows.length,
+            repairItemCount: repairItems.length,
+            candidateCount: candidates.length,
+            briefCount: briefs.length,
+            archivedCount: Number(archive.archived_count || 0),
+            openCount: Number(archive.open_count || 0),
+            typedMemoryDocCount: disciplineDocs.length,
+            recallMatchCount,
+            docRelPathCount: Number(archive.doc_rel_path_count || 0),
+            correctedPromptCount: Number(archive.corrected_prompt_count || 0),
+            usageStatePromptCount: Number(archive.usage_state_prompt_count || 0),
+            authorizationBoundaryPromptCount: Number(archive.authorization_boundary_prompt_count || 0),
+            freshReceiptPromptCount: Number(archive.fresh_receipt_prompt_count || 0),
+            typedMemoryLedgerFile: distillationLedger.file || "",
+            docs: disciplineDocs.slice(0, 8).map((doc) => ({ relPath: doc.relPath, name: doc.name, source: doc.source })),
+            distillation: distillation ? {
+                incomingRowCount: distillation.incomingRowCount || 0,
+                archivedCount: distillation.archivedCount || 0,
+                writeCount: distillation.writeCount || 0,
+                correctedPromptCount: distillation.correctedPromptCount || 0,
+                usageStatePromptCount: distillation.usageStatePromptCount || 0,
+                authorizationBoundaryPromptCount: distillation.authorizationBoundaryPromptCount || 0,
+                freshReceiptPromptCount: distillation.freshReceiptPromptCount || 0,
+            } : null,
+            gaps,
+        };
+    });
+    const checkedRows = rows.filter(row => Number(row.inputRowCount || 0) > 0 || Number(row.archivedCount || 0) > 0);
+    const passedRows = checkedRows.filter(row => row.status === "ok");
+    const coverageRate = checkedRows.length ? Math.round((passedRows.length / checkedRows.length) * 1000) / 10 : null;
+    const status = coverageRate === null ? "empty" : coverageRate >= 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail";
+    return {
+        schema: "ccm-worker-context-provider-ranking-provenance-compact-repair-receipt-memory-usage-receipt-repair-typed-memory-report-v1",
+        generatedAt: now(),
+        overall: {
+            status,
+            coverageRate,
+            groupCount: rows.length,
+            checkedGroupCount: checkedRows.length,
+            groupsCovered: passedRows.length,
+            inputRowCount: checkedRows.reduce((sum, row) => sum + Number(row.inputRowCount || 0), 0),
+            repairItemCount: checkedRows.reduce((sum, row) => sum + Number(row.repairItemCount || 0), 0),
+            candidateCount: checkedRows.reduce((sum, row) => sum + Number(row.candidateCount || 0), 0),
+            briefCount: checkedRows.reduce((sum, row) => sum + Number(row.briefCount || 0), 0),
+            archivedCount: checkedRows.reduce((sum, row) => sum + Number(row.archivedCount || 0), 0),
+            typedMemoryDocCount: checkedRows.reduce((sum, row) => sum + Number(row.typedMemoryDocCount || 0), 0),
+            recallMatchCount: checkedRows.reduce((sum, row) => sum + Number(row.recallMatchCount || 0), 0),
+            docRelPathCount: checkedRows.reduce((sum, row) => sum + Number(row.docRelPathCount || 0), 0),
+            correctedPromptCount: checkedRows.reduce((sum, row) => sum + Number(row.correctedPromptCount || 0), 0),
+            usageStatePromptCount: checkedRows.reduce((sum, row) => sum + Number(row.usageStatePromptCount || 0), 0),
+            authorizationBoundaryPromptCount: checkedRows.reduce((sum, row) => sum + Number(row.authorizationBoundaryPromptCount || 0), 0),
+            freshReceiptPromptCount: checkedRows.reduce((sum, row) => sum + Number(row.freshReceiptPromptCount || 0), 0),
+        },
+        groups: rows.sort((a, b) => Number(b.inputRowCount || 0) - Number(a.inputRowCount || 0) || Number(b.archivedCount || 0) - Number(a.archivedCount || 0)).slice(0, 50),
+        weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn").slice(0, 20),
+    };
+}
+function evaluateWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairTypedMemory(options = {}) {
+    const report = buildWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairTypedMemoryReport(options);
+    const checked = Number(report.overall.checkedGroupCount || 0);
+    const passed = Number(report.overall.groupsCovered || 0);
+    const evidence = (report.groups || []).filter((row) => row.status === "ok").slice(0, 12).map((row) => ({
+        groupId: row.groupId,
+        inputRowCount: row.inputRowCount,
+        archivedCount: row.archivedCount,
+        typedMemoryDocCount: row.typedMemoryDocCount,
+        recallMatchCount: row.recallMatchCount,
+        correctedPromptCount: row.correctedPromptCount,
+        usageStatePromptCount: row.usageStatePromptCount,
+        authorizationBoundaryPromptCount: row.authorizationBoundaryPromptCount,
+        freshReceiptPromptCount: row.freshReceiptPromptCount,
+        typedMemoryLedgerFile: row.typedMemoryLedgerFile,
+    }));
+    const gaps = (report.weakGroups || []).flatMap((row) => (row.gaps || []).slice(0, 3).map((gap) => ({
+        groupId: row.groupId,
+        reason: gap.reason || "provider ranking memory usage receipt repair typed memory 缺失",
+    }))).slice(0, 12);
+    const check = makeQualityCheck("worker_context_provider_ranking_provenance_compact_repair_receipt_memory_usage_receipt_repair_typed_memory", "WorkerContext Provider Ranking Provenance Compact Repair Receipt Memory Usage Receipt Repair Typed Memory", checked, passed, evidence, gaps, "当 provider ranking compact repair typed memory 的 memoryUsed/memoryIgnored 回执纪律反复被修复时，必须蒸馏成 feedback typed MEMORY.md，让后续子 Agent 会话能提前召回 usageState、ranking-evidence-not-authorization 和 fresh provider switch receipt 要求。");
+    check.report = report;
+    return check;
+}
+function buildWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairWorkerContextInjectionReport(options = {}) {
+    const typedMemoryReport = options.typedMemoryReport
+        || options.typed_memory_report
+        || buildWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairTypedMemoryReport(options);
+    const { readGroupTypedMemoryDistillationLedger, } = require("../collaboration/group-memory-index");
+    const { buildAgentMemoryContextBundle, renderGroupMemoryContextBundle, } = require("../collaboration/memory");
+    const { buildWorkerContextPacket, renderWorkerContextPacket, } = require("../../agents/runtime-kernel");
+    const targetProject = String(options.targetProject || options.target_project || "api");
+    const task = String(options.task || options.query || "provider ranking memory usage receipt discipline provider-ranking-memory-usage-receipt-discipline.md memoryUsed memoryIgnored usageState ranking evidence only not authorization fresh valid provider switch decision receipt");
+    const groupIds = [...new Set([
+            ...(typedMemoryReport.groups || []).map((row) => row.groupId),
+            ...(Array.isArray(options.groupIds || options.group_ids) ? (options.groupIds || options.group_ids) : []),
+        ].map((item) => String(item || "").trim()).filter(Boolean))];
+    const rows = groupIds.map((groupId) => {
+        const typedGroup = (typedMemoryReport.groups || []).find((row) => row.groupId === groupId) || {};
+        const distillationLedger = readGroupTypedMemoryDistillationLedger(groupId);
+        const archive = distillationLedger.providerRankingMemoryUsageReceiptRepairArchive || {};
+        const archiveRows = Array.isArray(archive.rows) ? archive.rows : [];
+        const archivedCount = Number(archive.archived_count || archiveRows.length || 0);
+        if (archivedCount <= 0) {
+            return {
+                schema: "ccm-worker-context-provider-ranking-provenance-compact-repair-receipt-memory-usage-receipt-repair-worker-context-injection-group-v1",
+                groupId,
+                status: "empty",
+                archivedCount: 0,
+                gaps: [],
+            };
+        }
+        const bundle = buildAgentMemoryContextBundle(groupId, targetProject, task, {
+            includeGlobalClaudeMemory: false,
+            includeProjectMemory: false,
+            maxTypedMemory: Number(options.maxTypedMemory || options.max_typed_memory || 8),
+            maxRenderedChars: Number(options.maxRenderedChars || options.max_rendered_chars || 12000),
+        });
+        const renderedText = String(bundle.rendered_text || renderGroupMemoryContextBundle(bundle) || "");
+        const providerRecall = bundle.group_state?.typedMemory?.providerRankingCompactRepairReceiptRecall
+            || bundle.provider_ranking_compact_repair_receipt_recall
+            || {};
+        const typedRecall = bundle.group_state?.typedMemory?.recall || bundle.typed_memory_recall || {};
+        const recalledText = JSON.stringify(typedRecall.recalled || []);
+        const loadEntries = bundle.group_state?.typedMemory?.loadPlan?.entries || [];
+        const packet = buildWorkerContextPacket({
+            group: { id: groupId, name: "Provider Ranking Usage Receipt Discipline", members: [{ project: targetProject }] },
+            project: targetProject,
+            task,
+            agentType: String(options.agentType || options.agent_type || "codex"),
+            memory: bundle,
+            contextUsageOptions: {
+                maxTokens: Number(options.maxContextTokens || options.max_context_tokens || 90000),
+            },
+        });
+        const packetText = renderWorkerContextPacket(packet);
+        const contract = packet.provider_ranking_compact_repair_receipt_memory_contract || {};
+        const acceptance = packet.acceptance || {};
+        const usageCategories = new Map((packet.context_usage?.categories || []).map((item) => [item.id, item]));
+        const contractCategory = usageCategories.get("provider_ranking_compact_repair_receipt_memory_contract") || {};
+        const disciplineDoc = "provider-ranking-memory-usage-receipt-discipline.md";
+        const primaryDoc = "provider-ranking-provenance-compact-repair-receipt-memory.md";
+        const gaps = [];
+        if (providerRecall.active !== true)
+            gaps.push({ reason: "provider ranking recall inactive after receipt-discipline typed memory archive" });
+        if (!(providerRecall.memoryUsageReceiptDisciplineRelPaths || []).includes(disciplineDoc))
+            gaps.push({ reason: "provider recall omitted memoryUsageReceiptDisciplineRelPaths" });
+        if (!recalledText.includes(disciplineDoc))
+            gaps.push({ reason: "typed MEMORY recall did not surface provider-ranking-memory-usage-receipt-discipline.md" });
+        if (!renderedText.includes(disciplineDoc))
+            gaps.push({ reason: "rendered group memory context omitted provider ranking memory usage receipt discipline doc" });
+        if (!/memoryUsed/i.test(renderedText) || !/memoryIgnored/i.test(renderedText) || !/usageState|usage_state/i.test(renderedText)) {
+            gaps.push({ reason: "rendered group memory context omitted memoryUsed/memoryIgnored/usageState discipline" });
+        }
+        if (!/ranking evidence only, not authorization/i.test(renderedText) || !/fresh valid provider switch decision receipt/i.test(renderedText)) {
+            gaps.push({ reason: "rendered group memory context omitted authorization boundary or fresh receipt requirement" });
+        }
+        if (contract.schema !== "ccm-provider-ranking-compact-repair-receipt-memory-usage-contract-v1" || contract.active !== true) {
+            gaps.push({ reason: "WorkerContextPacket omitted active provider ranking memory usage contract" });
+        }
+        if (!(contract.memory_usage_receipt_discipline_rel_paths || []).includes(disciplineDoc)) {
+            gaps.push({ reason: "WorkerContextPacket contract omitted memory_usage_receipt_discipline_rel_paths" });
+        }
+        if (!(contract.memory_receipt_required_doc_rel_paths || []).includes(primaryDoc) || !(contract.memory_receipt_required_doc_rel_paths || []).includes(disciplineDoc)) {
+            gaps.push({ reason: "WorkerContextPacket contract omitted primary/discipline receipt required doc relPaths" });
+        }
+        if (acceptance.provider_ranking_memory_usage_receipt_discipline_required !== true) {
+            gaps.push({ reason: "WorkerContextPacket acceptance did not require provider ranking receipt discipline usage" });
+        }
+        if (!(acceptance.provider_ranking_memory_receipt_required_doc_rel_paths || []).includes(disciplineDoc)) {
+            gaps.push({ reason: "WorkerContextPacket acceptance omitted discipline doc from required receipt relPaths" });
+        }
+        if (!packetText.includes(disciplineDoc) || !/Receipt discipline typed MEMORY\.md surfaced/i.test(packetText)) {
+            gaps.push({ reason: "rendered WorkerContextPacket omitted receipt discipline contract line" });
+        }
+        if (Number(contractCategory.tokens || 0) <= 0 || contractCategory.required !== true) {
+            gaps.push({ reason: "context_usage did not count provider ranking receipt memory contract as required" });
+        }
+        if (!loadEntries.some((entry) => entry.relPath === disciplineDoc)) {
+            gaps.push({ reason: "typed MEMORY.md load plan did not include provider ranking memory usage receipt discipline doc" });
+        }
+        const status = gaps.length ? "fail" : "ok";
+        return {
+            schema: "ccm-worker-context-provider-ranking-provenance-compact-repair-receipt-memory-usage-receipt-repair-worker-context-injection-group-v1",
+            groupId,
+            status,
+            archivedCount,
+            typedMemoryStatus: typedGroup.status || "",
+            typedMemoryDocCount: Number(typedGroup.typedMemoryDocCount || 0),
+            recallSurfacedDiscipline: recalledText.includes(disciplineDoc),
+            renderedContextCovered: renderedText.includes(disciplineDoc)
+                && /memoryUsed/i.test(renderedText)
+                && /memoryIgnored/i.test(renderedText)
+                && /usageState|usage_state/i.test(renderedText)
+                && /ranking evidence only, not authorization/i.test(renderedText)
+                && /fresh valid provider switch decision receipt/i.test(renderedText),
+            workerContextPacketCovered: packetText.includes(disciplineDoc)
+                && (contract.memory_usage_receipt_discipline_rel_paths || []).includes(disciplineDoc)
+                && acceptance.provider_ranking_memory_usage_receipt_discipline_required === true,
+            contextUsageContractTokens: Number(contractCategory.tokens || 0),
+            loadPlanIncludesDiscipline: loadEntries.some((entry) => entry.relPath === disciplineDoc),
+            providerRecall: {
+                active: providerRecall.active === true,
+                memoryUsageReceiptDisciplineRelPaths: providerRecall.memoryUsageReceiptDisciplineRelPaths || [],
+                memoryUsageReceiptDisciplineRecalledThisTurn: providerRecall.memoryUsageReceiptDisciplineRecalledThisTurn === true,
+            },
+            contract: {
+                schema: contract.schema || "",
+                active: contract.active === true,
+                memory_usage_receipt_discipline_required: contract.memory_usage_receipt_discipline_required === true,
+                memory_usage_receipt_discipline_rel_paths: contract.memory_usage_receipt_discipline_rel_paths || [],
+                memory_receipt_required_doc_rel_paths: contract.memory_receipt_required_doc_rel_paths || [],
+            },
+            gaps: gaps.slice(0, 12),
+        };
+    });
+    const checkedRows = rows.filter(row => Number(row.archivedCount || 0) > 0);
+    const passedRows = checkedRows.filter(row => row.status === "ok");
+    const coverageRate = checkedRows.length ? Math.round((passedRows.length / checkedRows.length) * 1000) / 10 : null;
+    const status = coverageRate === null ? "empty" : coverageRate >= 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail";
+    return {
+        schema: "ccm-worker-context-provider-ranking-provenance-compact-repair-receipt-memory-usage-receipt-repair-worker-context-injection-report-v1",
+        generatedAt: now(),
+        typedMemoryReport: { schema: typedMemoryReport.schema || "", overall: typedMemoryReport.overall || {} },
+        overall: {
+            status,
+            coverageRate,
+            groupCount: rows.length,
+            checkedGroupCount: checkedRows.length,
+            groupsCovered: passedRows.length,
+            archivedCount: checkedRows.reduce((sum, row) => sum + Number(row.archivedCount || 0), 0),
+            typedMemoryDocCount: checkedRows.reduce((sum, row) => sum + Number(row.typedMemoryDocCount || 0), 0),
+            recallSurfacedDisciplineCount: checkedRows.filter(row => row.recallSurfacedDiscipline === true).length,
+            renderedContextCoveredCount: checkedRows.filter(row => row.renderedContextCovered === true).length,
+            workerContextPacketCoveredCount: checkedRows.filter(row => row.workerContextPacketCovered === true).length,
+            contextUsageContractTokens: checkedRows.reduce((sum, row) => sum + Number(row.contextUsageContractTokens || 0), 0),
+            loadPlanDisciplineCount: checkedRows.filter(row => row.loadPlanIncludesDiscipline === true).length,
+            metadataGapCount: checkedRows.reduce((sum, row) => sum + Number((row.gaps || []).length), 0),
+        },
+        groups: rows.sort((a, b) => Number(b.archivedCount || 0) - Number(a.archivedCount || 0)).slice(0, 50),
+        weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn").slice(0, 20),
+    };
+}
+function evaluateWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairWorkerContextInjection(options = {}) {
+    const report = buildWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairWorkerContextInjectionReport(options);
+    const checked = Number(report.overall.checkedGroupCount || 0);
+    const passed = Number(report.overall.groupsCovered || 0);
+    const evidence = (report.groups || []).filter((row) => row.status === "ok").slice(0, 12).map((row) => ({
+        groupId: row.groupId,
+        archivedCount: row.archivedCount,
+        recallSurfacedDiscipline: row.recallSurfacedDiscipline,
+        renderedContextCovered: row.renderedContextCovered,
+        workerContextPacketCovered: row.workerContextPacketCovered,
+        contextUsageContractTokens: row.contextUsageContractTokens,
+    }));
+    const gaps = (report.weakGroups || []).flatMap((row) => (row.gaps || []).slice(0, 3).map((gap) => ({
+        groupId: row.groupId,
+        reason: gap.reason || "provider ranking memory usage receipt discipline WorkerContext injection 缺失",
+    }))).slice(0, 12);
+    const check = makeQualityCheck("worker_context_provider_ranking_provenance_compact_repair_receipt_memory_usage_receipt_repair_worker_context_injection", "WorkerContext Provider Ranking Provenance Compact Repair Receipt Memory Usage Receipt Repair Worker Context Injection", checked, passed, evidence, gaps, "provider-ranking-memory-usage-receipt-discipline.md must be injected into relevant child Agent WorkerContext packets as a visible receipt discipline contract, not only archived in typed MEMORY.md.");
     check.report = report;
     return check;
 }
@@ -14772,6 +19196,7 @@ function normalizeWorkerContextPacketReceiptSource(raw = {}, source = "", fallba
 }
 function collectWorkerContextPacketReceiptSources(groupId, entry = {}, options = {}) {
     const sources = [];
+    const entryPacketId = workerContextPacketBindingPacketId(entry);
     const pushReceipt = (raw, source, fallback = {}) => {
         const normalized = normalizeWorkerContextPacketReceiptSource(raw, source, fallback);
         if (normalized)
@@ -14815,7 +19240,10 @@ function collectWorkerContextPacketReceiptSources(groupId, entry = {}, options =
         pushReceipt(message.delivery_summary || message.deliverySummary, "group_message.delivery_summary", fallback);
     }
     const timeline = readGroupReplayRepairDispatchTimelineBindingLedger(groupId);
-    for (const timelineEntry of (Array.isArray(timeline.entries) ? timeline.entries : []).filter((item) => String(item.worker_context_packet_id || "") === String(entry.worker_context_packet_id || ""))) {
+    for (const timelineEntry of (Array.isArray(timeline.entries) ? timeline.entries : []).filter((item) => {
+        const timelinePacketId = workerContextPacketBindingPacketId(item);
+        return timelinePacketId && entryPacketId && timelinePacketId === entryPacketId;
+    })) {
         pushReceipt(timelineEntry.receipt || timelineEntry.ccm_receipt || timelineEntry.delivery_summary, "timeline_binding", timelineEntry);
         if (timelineEntry.receipt_status) {
             pushReceipt({
@@ -14829,19 +19257,19 @@ function collectWorkerContextPacketReceiptSources(groupId, entry = {}, options =
     return sources;
 }
 function workerContextPacketReceiptMatchesBinding(receipt = {}, entry = {}) {
-    const packetId = String(entry.worker_context_packet_id || "").trim();
+    const packetId = workerContextPacketBindingPacketId(entry);
     const receiptPacketId = String(receipt.worker_context_packet_id || "").trim();
     if (packetId && receiptPacketId)
         return packetId === receiptPacketId;
-    const assignmentId = String(entry.assignment_id || "").trim();
+    const assignmentId = String(entry.assignment_id || entry.assignmentId || "").trim();
     const receiptAssignmentId = String(receipt.assignment_id || "").trim();
     if (assignmentId && receiptAssignmentId)
         return assignmentId === receiptAssignmentId;
-    const dispatchKey = String(entry.dispatch_key || "").trim();
+    const dispatchKey = String(entry.dispatch_key || entry.dispatchKey || "").trim();
     const receiptDispatchKey = String(receipt.dispatch_key || "").trim();
     if (dispatchKey && receiptDispatchKey)
         return dispatchKey === receiptDispatchKey;
-    const project = String(entry.project || "").trim().toLowerCase();
+    const project = workerContextPacketBindingProject(entry).toLowerCase();
     const receiptProject = String(receipt.project || receipt.agent || "").trim().toLowerCase();
     if (project && receiptProject && project === receiptProject) {
         const taskId = String(receipt.task_id || "").trim();
@@ -18053,6 +22481,2412 @@ function evaluateCompactFileReferenceReadPlanRevalidationRepairWorkItems(options
     check.report = report;
     return check;
 }
+function isCompactFileReferenceReadPlanRevalidationRepairSource(source) {
+    return String(source || "").trim() === "compact_read_plan_revalidation_repair";
+}
+function compactFileReferenceReadPlanRevalidationRepairCandidateMetadataGaps(item = {}, candidate = {}) {
+    const gaps = [];
+    if (!candidate || !candidate.work_item_id) {
+        gaps.push("candidate_missing");
+        return gaps;
+    }
+    if (!isCompactFileReferenceReadPlanRevalidationRepairSource(candidate.source))
+        gaps.push("source");
+    if (candidate.component !== "compact_read_plan_revalidation")
+        gaps.push("component");
+    if (candidate.shouldCreateRealTask !== false && candidate.should_create_real_task !== false)
+        gaps.push("should_create_real_task_false");
+    const mirroredFields = [
+        "revalidation_gate_id",
+        "read_plan_id",
+        "reference_id",
+        "expected_task_agent_session_id",
+        "expected_native_session_id",
+        "receipt_task_agent_session_id",
+        "receipt_native_session_id",
+    ];
+    for (const field of mirroredFields) {
+        const expected = String(item[field] || "").trim();
+        if (expected && String(candidate[field] || "").trim() !== expected)
+            gaps.push(field);
+    }
+    if (item.session_mismatch === true && candidate.session_mismatch !== true)
+        gaps.push("session_mismatch");
+    const text = [
+        candidate.instruction,
+        candidate.expected,
+        candidate.prompt_patch,
+        candidate.source_reason,
+    ].filter(Boolean).join("\n");
+    if (item.revalidation_gate_id && !text.includes(String(item.revalidation_gate_id)))
+        gaps.push("revalidation_gate_id_prompt");
+    if (item.read_plan_id && !text.includes(String(item.read_plan_id)))
+        gaps.push("read_plan_id_prompt");
+    if (!/currentSourceVerified|current source verified|current_source_verified/i.test(text))
+        gaps.push("currentSourceVerified_prompt");
+    if (!/readPlanRevalidationUsage|memoryUsed|memoryIgnored/i.test(text))
+        gaps.push("receipt_contract_prompt");
+    if (item.expected_task_agent_session_id && !text.includes(String(item.expected_task_agent_session_id)))
+        gaps.push("expected_task_agent_session_id_prompt");
+    if (item.expected_native_session_id && !text.includes(String(item.expected_native_session_id)))
+        gaps.push("expected_native_session_id_prompt");
+    return [...new Set(gaps)];
+}
+function compactFileReferenceReadPlanRevalidationRepairDispatchGroupIds(options = {}, repairReport = {}) {
+    const explicit = Array.isArray(options.groupIds || options.group_ids)
+        ? (options.groupIds || options.group_ids).map((item) => String(item || "").trim()).filter(Boolean)
+        : [];
+    if (explicit.length)
+        return explicit;
+    return [...new Set((repairReport.groups || []).map((row) => String(row.groupId || "").trim()).filter(Boolean))];
+}
+function buildCompactFileReferenceReadPlanRevalidationRepairDispatchCandidateReport(options = {}) {
+    const explicitGroupIds = Array.isArray(options.groupIds || options.group_ids)
+        ? (options.groupIds || options.group_ids).map((item) => String(item || "").trim()).filter(Boolean)
+        : [];
+    const repairReport = options.repairWorkItemReport
+        || options.repair_work_item_report
+        || (explicitGroupIds.length
+            ? {
+                schema: "ccm-read-plan-revalidation-repair-work-item-report-v1",
+                overall: {},
+                groups: explicitGroupIds.map((groupId) => ({ groupId })),
+            }
+            : buildCompactFileReferenceReadPlanRevalidationRepairWorkItemReport(options));
+    const groupIds = compactFileReferenceReadPlanRevalidationRepairDispatchGroupIds(options, repairReport);
+    const rows = groupIds.map((groupId) => {
+        const ledger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+        const items = (Array.isArray(ledger.items) ? ledger.items : []).filter((item) => isCompactFileReferenceReadPlanRevalidationRepairSource(item.source));
+        const openItems = items.filter((item) => replayRepairWorkItemOpen(item.status));
+        const limit = Math.max(Number(options.limit || 24), openItems.length + 8);
+        const summary = buildReplayRepairMainAgentDispatchCandidates(groupId, { ledger, limit });
+        const candidates = (summary.candidates || []).filter((candidate) => isCompactFileReferenceReadPlanRevalidationRepairSource(candidate.source));
+        const candidateByWorkId = new Map(candidates.map((candidate) => [String(candidate.work_item_id || ""), candidate]));
+        const missing = openItems.filter((item) => !candidateByWorkId.has(replayRepairWorkItemId(item)));
+        const metadataGaps = openItems
+            .map((item) => {
+            const candidate = candidateByWorkId.get(replayRepairWorkItemId(item)) || null;
+            return {
+                work_item_id: replayRepairWorkItemId(item),
+                candidate_id: candidate?.candidate_id || "",
+                revalidation_gate_id: item.revalidation_gate_id || "",
+                read_plan_id: item.read_plan_id || "",
+                gaps: compactFileReferenceReadPlanRevalidationRepairCandidateMetadataGaps(item, candidate),
+            };
+        })
+            .filter((entry) => entry.gaps.length > 0);
+        const status = openItems.length === 0
+            ? items.length > 0 ? "warn" : "empty"
+            : missing.length > 0 ? "fail" : metadataGaps.length > 0 ? "warn" : "ok";
+        return {
+            schema: "ccm-compact-read-plan-revalidation-repair-dispatch-candidate-group-v1",
+            groupId,
+            status,
+            file: summary.file || ledger.file || getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId),
+            updatedAt: summary.updatedAt || ledger.updatedAt || "",
+            repairItemCount: items.length,
+            openRepairItemCount: openItems.length,
+            expectedCandidateCount: openItems.length,
+            coveredCandidateCount: Math.max(0, openItems.length - missing.length),
+            candidateCount: candidates.length,
+            metadataGapCount: metadataGaps.length,
+            gateBoundCandidateCount: candidates.filter((candidate) => candidate.revalidation_gate_id).length,
+            readPlanBoundCandidateCount: candidates.filter((candidate) => candidate.read_plan_id).length,
+            sessionBoundCandidateCount: candidates.filter((candidate) => candidate.expected_task_agent_session_id || candidate.expected_native_session_id).length,
+            candidates: candidates.slice(0, 12),
+            missingCandidates: missing.slice(0, 8).map((item) => ({
+                work_item_id: replayRepairWorkItemId(item),
+                revalidation_gate_id: item.revalidation_gate_id || "",
+                read_plan_id: item.read_plan_id || "",
+                reason: "read-plan revalidation repair work item missing main Agent dispatch candidate",
+            })),
+            metadataGaps: metadataGaps.slice(0, 8),
+            gaps: [
+                ...missing.slice(0, 8).map((item) => ({
+                    work_item_id: replayRepairWorkItemId(item),
+                    reason: "read-plan revalidation repair work item did not enter main Agent dispatch candidates",
+                })),
+                ...metadataGaps.slice(0, 8).map((gap) => ({
+                    work_item_id: gap.work_item_id || "",
+                    candidate_id: gap.candidate_id || "",
+                    reason: `read-plan revalidation repair dispatch candidate missing fields: ${gap.gaps.join(",")}`,
+                })),
+            ].slice(0, 12),
+        };
+    });
+    const checkedRows = rows.filter(row => Number(row.expectedCandidateCount || 0) > 0 || Number(row.candidateCount || 0) > 0);
+    const requiredRows = checkedRows.filter(row => Number(row.expectedCandidateCount || 0) > 0);
+    const coveredRows = requiredRows.filter(row => Number(row.coveredCandidateCount || 0) >= Number(row.expectedCandidateCount || 0));
+    const metadataCompleteRows = requiredRows.filter(row => Number(row.metadataGapCount || 0) === 0);
+    const coverageRate = requiredRows.length ? Math.round((coveredRows.length / requiredRows.length) * 1000) / 10 : null;
+    const metadataCoverageRate = requiredRows.length ? Math.round((metadataCompleteRows.length / requiredRows.length) * 1000) / 10 : null;
+    const status = coverageRate === null
+        ? "empty"
+        : coverageRate < 100 ? coverageRate >= 75 ? "warn" : "fail" : metadataCoverageRate === 100 ? "ok" : "warn";
+    return {
+        schema: "ccm-compact-read-plan-revalidation-repair-dispatch-candidate-report-v1",
+        generatedAt: now(),
+        repairReport: { schema: repairReport.schema || "", overall: repairReport.overall || {} },
+        overall: {
+            status,
+            coverageRate,
+            metadataCoverageRate,
+            groupCount: rows.length,
+            checkedGroupCount: checkedRows.length,
+            groupsNeedingCandidates: requiredRows.length,
+            groupsCovered: coveredRows.length,
+            groupsMetadataComplete: metadataCompleteRows.length,
+            expectedCandidateCount: checkedRows.reduce((sum, row) => sum + Number(row.expectedCandidateCount || 0), 0),
+            coveredCandidateCount: checkedRows.reduce((sum, row) => sum + Number(row.coveredCandidateCount || 0), 0),
+            candidateCount: checkedRows.reduce((sum, row) => sum + Number(row.candidateCount || 0), 0),
+            metadataGapCount: checkedRows.reduce((sum, row) => sum + Number(row.metadataGapCount || 0), 0),
+            gateBoundCandidateCount: checkedRows.reduce((sum, row) => sum + Number(row.gateBoundCandidateCount || 0), 0),
+            readPlanBoundCandidateCount: checkedRows.reduce((sum, row) => sum + Number(row.readPlanBoundCandidateCount || 0), 0),
+            sessionBoundCandidateCount: checkedRows.reduce((sum, row) => sum + Number(row.sessionBoundCandidateCount || 0), 0),
+        },
+        groups: rows.sort((a, b) => Number(b.expectedCandidateCount || 0) - Number(a.expectedCandidateCount || 0)).slice(0, 50),
+        weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn").slice(0, 20),
+    };
+}
+function evaluateCompactFileReferenceReadPlanRevalidationRepairDispatchCandidates(options = {}) {
+    const report = buildCompactFileReferenceReadPlanRevalidationRepairDispatchCandidateReport(options);
+    const checked = Number(report.overall.groupsNeedingCandidates || 0);
+    const passed = Number(report.overall.groupsMetadataComplete || 0);
+    const evidence = (report.groups || []).filter((row) => row.status === "ok").slice(0, 12).map((row) => ({
+        groupId: row.groupId,
+        expectedCandidateCount: row.expectedCandidateCount,
+        coveredCandidateCount: row.coveredCandidateCount,
+        gateBoundCandidateCount: row.gateBoundCandidateCount,
+        readPlanBoundCandidateCount: row.readPlanBoundCandidateCount,
+        sessionBoundCandidateCount: row.sessionBoundCandidateCount,
+    }));
+    const gaps = (report.weakGroups || []).flatMap((row) => (row.gaps || []).slice(0, 3).map((gap) => ({
+        groupId: row.groupId,
+        reason: gap.reason || "read-plan revalidation repair dispatch candidate missing",
+        work_item_id: gap.work_item_id || "",
+        candidate_id: gap.candidate_id || "",
+    }))).slice(0, 12);
+    const check = makeQualityCheck("compact_file_reference_read_plan_revalidation_repair_dispatch_candidates", "Compact File Reference Read Plan Revalidation Repair Dispatch Candidates", checked, passed, evidence, gaps, "Every open compact read-plan revalidation repair item must become a main Agent dispatch candidate preserving gate, read_plan_id, reference and bound task/native session receipt requirements.");
+    check.report = report;
+    return check;
+}
+function compactFileReferenceReadPlanRevalidationRepairDispatchBriefMetadataGaps(candidate = {}, brief = {}) {
+    const gaps = replayRepairDispatchBriefMetadataGaps(candidate, brief);
+    if (!brief || !brief.brief_id)
+        return gaps;
+    if (!isCompactFileReferenceReadPlanRevalidationRepairSource(brief.source))
+        gaps.push("source");
+    if (brief.component !== "compact_read_plan_revalidation")
+        gaps.push("component");
+    const mirroredFields = [
+        "revalidation_gate_id",
+        "read_plan_id",
+        "reference_id",
+        "expected_task_agent_session_id",
+        "expected_native_session_id",
+        "receipt_task_agent_session_id",
+        "receipt_native_session_id",
+    ];
+    for (const field of mirroredFields) {
+        const expected = String(candidate[field] || "").trim();
+        if (expected && String(brief[field] || "").trim() !== expected)
+            gaps.push(field);
+    }
+    if (candidate.session_mismatch === true && brief.session_mismatch !== true)
+        gaps.push("session_mismatch");
+    const workerTask = String(brief.worker_task || "");
+    if (candidate.revalidation_gate_id && !workerTask.includes(String(candidate.revalidation_gate_id)))
+        gaps.push("worker_task_revalidation_gate_id");
+    if (candidate.read_plan_id && !workerTask.includes(String(candidate.read_plan_id)))
+        gaps.push("worker_task_read_plan_id");
+    if (!/currentSourceVerified|current source verified|current_source_verified/i.test(workerTask))
+        gaps.push("worker_task_currentSourceVerified");
+    if (!/readPlanRevalidationUsage|memoryUsed|memoryIgnored/i.test(workerTask))
+        gaps.push("worker_task_receipt_contract");
+    if (!/CCM_AGENT_RECEIPT/i.test(workerTask))
+        gaps.push("worker_task_CCM_AGENT_RECEIPT");
+    if (candidate.expected_task_agent_session_id && !workerTask.includes(String(candidate.expected_task_agent_session_id)))
+        gaps.push("worker_task_expected_task_agent_session_id");
+    if (candidate.expected_native_session_id && !workerTask.includes(String(candidate.expected_native_session_id)))
+        gaps.push("worker_task_expected_native_session_id");
+    return [...new Set(gaps)];
+}
+function buildCompactFileReferenceReadPlanRevalidationRepairDispatchBriefReport(options = {}) {
+    const candidateReport = options.candidateReport
+        || options.candidate_report
+        || buildCompactFileReferenceReadPlanRevalidationRepairDispatchCandidateReport(options);
+    const rows = (candidateReport.groups || []).map((candidateGroup) => {
+        const groupId = String(candidateGroup.groupId || "");
+        const candidates = (candidateGroup.candidates || []).filter((candidate) => isCompactFileReferenceReadPlanRevalidationRepairSource(candidate.source));
+        const workLedger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+        const limit = Math.max(Number(options.limit || 24), (Array.isArray(workLedger.items) ? workLedger.items.length : 0) + 8);
+        const candidateSummary = buildReplayRepairMainAgentDispatchCandidates(groupId, { ledger: workLedger, limit });
+        const ledger = syncReplayRepairDispatchPlanLedgerForCenter(groupId, candidateSummary, options);
+        const readyBriefs = (Array.isArray(ledger.briefs) ? ledger.briefs : [])
+            .filter((brief) => String(brief.status || "") === "ready" && isCompactFileReferenceReadPlanRevalidationRepairSource(brief.source));
+        const briefByWorkId = new Map(readyBriefs.map((brief) => [String(brief.work_item_id || ""), brief]));
+        const missing = candidates.filter((candidate) => !briefByWorkId.has(String(candidate.work_item_id || "")));
+        const metadataGaps = candidates
+            .map((candidate) => {
+            const brief = briefByWorkId.get(String(candidate.work_item_id || "")) || null;
+            return {
+                work_item_id: candidate.work_item_id || "",
+                candidate_id: candidate.candidate_id || "",
+                brief_id: brief?.brief_id || "",
+                gaps: compactFileReferenceReadPlanRevalidationRepairDispatchBriefMetadataGaps(candidate, brief),
+            };
+        })
+            .filter((entry) => entry.gaps.length > 0);
+        const status = candidates.length === 0
+            ? "empty"
+            : missing.length > 0 ? "fail" : metadataGaps.length > 0 ? "warn" : "ok";
+        return {
+            schema: "ccm-compact-read-plan-revalidation-repair-dispatch-brief-group-v1",
+            groupId,
+            status,
+            file: ledger.file || getGroupReplayRepairDispatchPlanLedgerFile(groupId),
+            sourceCandidateFile: ledger.sourceCandidateFile || candidateGroup.file || "",
+            expectedBriefCount: candidates.length,
+            coveredBriefCount: Math.max(0, candidates.length - missing.length),
+            readyBriefCount: readyBriefs.length,
+            metadataGapCount: metadataGaps.length,
+            gateBoundBriefCount: readyBriefs.filter((brief) => brief.revalidation_gate_id).length,
+            readPlanBoundBriefCount: readyBriefs.filter((brief) => brief.read_plan_id).length,
+            sessionBoundBriefCount: readyBriefs.filter((brief) => brief.expected_task_agent_session_id || brief.expected_native_session_id).length,
+            briefs: readyBriefs.slice(0, 12).map((brief) => ({
+                brief_id: brief.brief_id || "",
+                work_item_id: brief.work_item_id || "",
+                source: brief.source || "",
+                component: brief.component || "",
+                target_project: brief.target_project || "",
+                revalidation_gate_id: brief.revalidation_gate_id || "",
+                read_plan_id: brief.read_plan_id || "",
+                reference_id: brief.reference_id || "",
+                expected_task_agent_session_id: brief.expected_task_agent_session_id || "",
+                expected_native_session_id: brief.expected_native_session_id || "",
+                receipt_task_agent_session_id: brief.receipt_task_agent_session_id || "",
+                receipt_native_session_id: brief.receipt_native_session_id || "",
+                session_mismatch: brief.session_mismatch === true,
+                worker_task: compactMemoryCenterText(brief.worker_task || "", 2600),
+            })),
+            missingBriefs: missing.slice(0, 8).map((candidate) => ({
+                work_item_id: candidate.work_item_id || "",
+                candidate_id: candidate.candidate_id || "",
+                reason: "read-plan revalidation repair candidate missing dispatch brief",
+            })),
+            metadataGaps: metadataGaps.slice(0, 8),
+            gaps: [
+                ...missing.slice(0, 8).map((candidate) => ({
+                    work_item_id: candidate.work_item_id || "",
+                    candidate_id: candidate.candidate_id || "",
+                    reason: "read-plan revalidation repair candidate did not compile into dispatch brief",
+                })),
+                ...metadataGaps.slice(0, 8).map((gap) => ({
+                    work_item_id: gap.work_item_id || "",
+                    candidate_id: gap.candidate_id || "",
+                    brief_id: gap.brief_id || "",
+                    reason: `read-plan revalidation repair dispatch brief missing fields: ${gap.gaps.join(",")}`,
+                })),
+            ].slice(0, 12),
+        };
+    });
+    const checkedRows = rows.filter(row => Number(row.expectedBriefCount || 0) > 0 || Number(row.readyBriefCount || 0) > 0);
+    const requiredRows = checkedRows.filter(row => Number(row.expectedBriefCount || 0) > 0);
+    const coveredRows = requiredRows.filter(row => Number(row.coveredBriefCount || 0) >= Number(row.expectedBriefCount || 0));
+    const metadataCompleteRows = requiredRows.filter(row => Number(row.metadataGapCount || 0) === 0);
+    const coverageRate = requiredRows.length ? Math.round((coveredRows.length / requiredRows.length) * 1000) / 10 : null;
+    const metadataCoverageRate = requiredRows.length ? Math.round((metadataCompleteRows.length / requiredRows.length) * 1000) / 10 : null;
+    const status = coverageRate === null
+        ? "empty"
+        : coverageRate < 100 ? coverageRate >= 75 ? "warn" : "fail" : metadataCoverageRate === 100 ? "ok" : "warn";
+    return {
+        schema: "ccm-compact-read-plan-revalidation-repair-dispatch-brief-report-v1",
+        generatedAt: now(),
+        candidateReport: { schema: candidateReport.schema || "", overall: candidateReport.overall || {} },
+        overall: {
+            status,
+            coverageRate,
+            metadataCoverageRate,
+            groupCount: rows.length,
+            checkedGroupCount: checkedRows.length,
+            groupsNeedingBriefs: requiredRows.length,
+            groupsCovered: coveredRows.length,
+            groupsMetadataComplete: metadataCompleteRows.length,
+            expectedBriefCount: checkedRows.reduce((sum, row) => sum + Number(row.expectedBriefCount || 0), 0),
+            coveredBriefCount: checkedRows.reduce((sum, row) => sum + Number(row.coveredBriefCount || 0), 0),
+            readyBriefCount: checkedRows.reduce((sum, row) => sum + Number(row.readyBriefCount || 0), 0),
+            metadataGapCount: checkedRows.reduce((sum, row) => sum + Number(row.metadataGapCount || 0), 0),
+            gateBoundBriefCount: checkedRows.reduce((sum, row) => sum + Number(row.gateBoundBriefCount || 0), 0),
+            readPlanBoundBriefCount: checkedRows.reduce((sum, row) => sum + Number(row.readPlanBoundBriefCount || 0), 0),
+            sessionBoundBriefCount: checkedRows.reduce((sum, row) => sum + Number(row.sessionBoundBriefCount || 0), 0),
+        },
+        groups: rows.sort((a, b) => Number(b.expectedBriefCount || 0) - Number(a.expectedBriefCount || 0)).slice(0, 50),
+        weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn").slice(0, 20),
+    };
+}
+function evaluateCompactFileReferenceReadPlanRevalidationRepairDispatchBriefs(options = {}) {
+    const report = buildCompactFileReferenceReadPlanRevalidationRepairDispatchBriefReport(options);
+    const checked = Number(report.overall.groupsNeedingBriefs || 0);
+    const passed = Number(report.overall.groupsMetadataComplete || 0);
+    const evidence = (report.groups || []).filter((row) => row.status === "ok").slice(0, 12).map((row) => ({
+        groupId: row.groupId,
+        expectedBriefCount: row.expectedBriefCount,
+        coveredBriefCount: row.coveredBriefCount,
+        gateBoundBriefCount: row.gateBoundBriefCount,
+        readPlanBoundBriefCount: row.readPlanBoundBriefCount,
+        sessionBoundBriefCount: row.sessionBoundBriefCount,
+    }));
+    const gaps = (report.weakGroups || []).flatMap((row) => (row.gaps || []).slice(0, 3).map((gap) => ({
+        groupId: row.groupId,
+        reason: gap.reason || "read-plan revalidation repair dispatch brief missing",
+        work_item_id: gap.work_item_id || "",
+        candidate_id: gap.candidate_id || "",
+        brief_id: gap.brief_id || "",
+    }))).slice(0, 12);
+    const check = makeQualityCheck("compact_file_reference_read_plan_revalidation_repair_dispatch_briefs", "Compact File Reference Read Plan Revalidation Repair Dispatch Briefs", checked, passed, evidence, gaps, "Every compact read-plan revalidation repair candidate must compile into a self-contained main Agent dispatch brief preserving gate, read_plan_id, current-source verification, and bound task/native session receipt requirements.");
+    check.report = report;
+    return check;
+}
+function isPostCompactReinjectionRepairItem(item = {}) {
+    return String(item.source || "").trim() === "compact_boundary_replay_repair"
+        && String(item.component || "").trim() === "post_compact_reinject";
+}
+function postCompactReinjectionRepairDispatchCandidateMetadataGaps(item = {}, candidate = {}) {
+    const gaps = [];
+    if (!candidate || !candidate.work_item_id) {
+        gaps.push("candidate_missing");
+        return gaps;
+    }
+    if (!isPostCompactReinjectionRepairItem(candidate))
+        gaps.push("source_or_component");
+    if (candidate.shouldCreateRealTask !== false && candidate.should_create_real_task !== false)
+        gaps.push("should_create_real_task_false");
+    const mirroredFields = [
+        "reinjection_gate_id",
+        "post_compact_candidate_id",
+        "post_compact_candidate_kind",
+        "post_compact_candidate_value",
+        "post_compact_candidate_source_message_id",
+        "boundary_checksum",
+    ];
+    for (const field of mirroredFields) {
+        const expected = String(item[field] || "").trim();
+        if (expected && String(candidate[field] || "").trim() !== expected)
+            gaps.push(field);
+    }
+    const expectedTarget = String(item.target_project || "").trim();
+    if (expectedTarget && String(candidate.targetProject || candidate.target_project || "").trim() !== expectedTarget)
+        gaps.push("target_project");
+    const text = [
+        candidate.instruction,
+        candidate.expected,
+        candidate.prompt_patch,
+        candidate.source_reason,
+    ].filter(Boolean).join("\n");
+    if (item.reinjection_gate_id && !text.includes(String(item.reinjection_gate_id)))
+        gaps.push("reinjection_gate_id_prompt");
+    if (item.post_compact_candidate_id && !text.includes(String(item.post_compact_candidate_id)))
+        gaps.push("candidate_id_prompt");
+    if (item.post_compact_candidate_value && !text.includes(String(item.post_compact_candidate_value)))
+        gaps.push("candidate_value_prompt");
+    if (!/postCompactCandidateUsage/i.test(text))
+        gaps.push("postCompactCandidateUsage_prompt");
+    if (!/memoryUsed|memoryIgnored/i.test(text))
+        gaps.push("memory_receipt_prompt");
+    if (!/currentSourceVerified|current source verified|current_source_verified/i.test(text))
+        gaps.push("currentSourceVerified_prompt");
+    if (!/task_agent_session_id/i.test(text))
+        gaps.push("task_agent_session_id_prompt");
+    if (!/native_session_id/i.test(text))
+        gaps.push("native_session_id_prompt");
+    return [...new Set(gaps)];
+}
+function buildPostCompactReinjectionRepairDispatchCandidateReport(options = {}) {
+    const groupIds = replayRepairDispatchCandidateGroupIds(options);
+    const rows = groupIds.map((groupId) => {
+        const ledger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+        const items = (Array.isArray(ledger.items) ? ledger.items : []).filter(isPostCompactReinjectionRepairItem);
+        const openItems = items.filter((item) => replayRepairWorkItemOpen(item.status));
+        const limit = Math.max(Number(options.limit || 24), (Array.isArray(ledger.items) ? ledger.items.length : 0) + 8);
+        const summary = buildReplayRepairMainAgentDispatchCandidates(groupId, { ledger, limit });
+        const candidates = (summary.candidates || []).filter(isPostCompactReinjectionRepairItem);
+        const candidateByWorkId = new Map(candidates.map((candidate) => [String(candidate.work_item_id || ""), candidate]));
+        const missing = openItems.filter((item) => !candidateByWorkId.has(replayRepairWorkItemId(item)));
+        const metadataGaps = openItems
+            .map((item) => {
+            const candidate = candidateByWorkId.get(replayRepairWorkItemId(item)) || null;
+            return {
+                work_item_id: replayRepairWorkItemId(item),
+                candidate_id: candidate?.candidate_id || "",
+                reinjection_gate_id: item.reinjection_gate_id || "",
+                post_compact_candidate_id: item.post_compact_candidate_id || "",
+                gaps: postCompactReinjectionRepairDispatchCandidateMetadataGaps(item, candidate),
+            };
+        })
+            .filter((entry) => entry.gaps.length > 0);
+        const status = openItems.length === 0
+            ? items.length > 0 ? "warn" : "empty"
+            : missing.length > 0 ? "fail" : metadataGaps.length > 0 ? "warn" : "ok";
+        return {
+            schema: "ccm-post-compact-reinjection-repair-dispatch-candidate-group-v1",
+            groupId,
+            status,
+            file: summary.file || ledger.file || getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId),
+            updatedAt: summary.updatedAt || ledger.updatedAt || "",
+            repairItemCount: items.length,
+            openRepairItemCount: openItems.length,
+            expectedCandidateCount: openItems.length,
+            coveredCandidateCount: Math.max(0, openItems.length - missing.length),
+            candidateCount: candidates.length,
+            metadataGapCount: metadataGaps.length,
+            gateBoundCandidateCount: candidates.filter((candidate) => candidate.reinjection_gate_id).length,
+            identityBoundCandidateCount: candidates.filter((candidate) => candidate.post_compact_candidate_id && candidate.post_compact_candidate_kind).length,
+            valueBoundCandidateCount: candidates.filter((candidate) => candidate.post_compact_candidate_value).length,
+            candidates: candidates.slice(0, 12),
+            missingCandidates: missing.slice(0, 8).map((item) => ({
+                work_item_id: replayRepairWorkItemId(item),
+                reinjection_gate_id: item.reinjection_gate_id || "",
+                post_compact_candidate_id: item.post_compact_candidate_id || "",
+                reason: "post-compact reinjection repair work item missing main Agent dispatch candidate",
+            })),
+            metadataGaps: metadataGaps.slice(0, 8),
+            gaps: [
+                ...missing.slice(0, 8).map((item) => ({
+                    work_item_id: replayRepairWorkItemId(item),
+                    reason: "post-compact reinjection repair work item did not enter main Agent dispatch candidates",
+                })),
+                ...metadataGaps.slice(0, 8).map((gap) => ({
+                    work_item_id: gap.work_item_id || "",
+                    candidate_id: gap.candidate_id || "",
+                    reason: `post-compact reinjection repair dispatch candidate missing fields: ${gap.gaps.join(",")}`,
+                })),
+            ].slice(0, 12),
+        };
+    });
+    const checkedRows = rows.filter(row => Number(row.expectedCandidateCount || 0) > 0 || Number(row.candidateCount || 0) > 0);
+    const requiredRows = checkedRows.filter(row => Number(row.expectedCandidateCount || 0) > 0);
+    const coveredRows = requiredRows.filter(row => Number(row.coveredCandidateCount || 0) >= Number(row.expectedCandidateCount || 0));
+    const metadataCompleteRows = requiredRows.filter(row => Number(row.metadataGapCount || 0) === 0);
+    const coverageRate = requiredRows.length ? Math.round((coveredRows.length / requiredRows.length) * 1000) / 10 : null;
+    const metadataCoverageRate = requiredRows.length ? Math.round((metadataCompleteRows.length / requiredRows.length) * 1000) / 10 : null;
+    const status = coverageRate === null
+        ? "empty"
+        : coverageRate < 100 ? coverageRate >= 75 ? "warn" : "fail" : metadataCoverageRate === 100 ? "ok" : "warn";
+    return {
+        schema: "ccm-post-compact-reinjection-repair-dispatch-candidate-report-v1",
+        generatedAt: now(),
+        overall: {
+            status,
+            coverageRate,
+            metadataCoverageRate,
+            groupCount: rows.length,
+            checkedGroupCount: checkedRows.length,
+            groupsNeedingCandidates: requiredRows.length,
+            groupsCovered: coveredRows.length,
+            groupsMetadataComplete: metadataCompleteRows.length,
+            expectedCandidateCount: checkedRows.reduce((sum, row) => sum + Number(row.expectedCandidateCount || 0), 0),
+            coveredCandidateCount: checkedRows.reduce((sum, row) => sum + Number(row.coveredCandidateCount || 0), 0),
+            candidateCount: checkedRows.reduce((sum, row) => sum + Number(row.candidateCount || 0), 0),
+            metadataGapCount: checkedRows.reduce((sum, row) => sum + Number(row.metadataGapCount || 0), 0),
+            gateBoundCandidateCount: checkedRows.reduce((sum, row) => sum + Number(row.gateBoundCandidateCount || 0), 0),
+            identityBoundCandidateCount: checkedRows.reduce((sum, row) => sum + Number(row.identityBoundCandidateCount || 0), 0),
+            valueBoundCandidateCount: checkedRows.reduce((sum, row) => sum + Number(row.valueBoundCandidateCount || 0), 0),
+        },
+        groups: rows.sort((a, b) => Number(b.expectedCandidateCount || 0) - Number(a.expectedCandidateCount || 0)).slice(0, 50),
+        weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn").slice(0, 20),
+    };
+}
+function evaluatePostCompactReinjectionRepairDispatchCandidates(options = {}) {
+    const report = buildPostCompactReinjectionRepairDispatchCandidateReport(options);
+    const checked = Number(report.overall.groupsNeedingCandidates || 0);
+    const passed = Number(report.overall.groupsMetadataComplete || 0);
+    const evidence = (report.groups || []).filter((row) => row.status === "ok").slice(0, 12).map((row) => ({
+        groupId: row.groupId,
+        expectedCandidateCount: row.expectedCandidateCount,
+        coveredCandidateCount: row.coveredCandidateCount,
+        gateBoundCandidateCount: row.gateBoundCandidateCount,
+        identityBoundCandidateCount: row.identityBoundCandidateCount,
+        valueBoundCandidateCount: row.valueBoundCandidateCount,
+    }));
+    const gaps = (report.weakGroups || []).flatMap((row) => (row.gaps || []).slice(0, 3).map((gap) => ({
+        groupId: row.groupId,
+        reason: gap.reason || "post-compact reinjection repair dispatch candidate missing",
+        work_item_id: gap.work_item_id || "",
+        candidate_id: gap.candidate_id || "",
+    }))).slice(0, 12);
+    const check = makeQualityCheck("post_compact_reinjection_repair_dispatch_candidates", "Post-Compact Reinjection Repair Dispatch Candidates", checked, passed, evidence, gaps, "Every open post-compact reinjection repair item must become a main Agent dispatch candidate preserving reinjection gate, candidate identity/value, target project, current-source verification, and child session receipt requirements.");
+    check.report = report;
+    return check;
+}
+function postCompactReinjectionRepairDispatchBriefMetadataGaps(candidate = {}, brief = {}) {
+    const gaps = replayRepairDispatchBriefMetadataGaps(candidate, brief);
+    if (!brief || !brief.brief_id)
+        return gaps;
+    if (!isPostCompactReinjectionRepairItem(brief))
+        gaps.push("source_or_component");
+    const mirroredFields = [
+        "reinjection_gate_id",
+        "post_compact_candidate_id",
+        "post_compact_candidate_kind",
+        "post_compact_candidate_value",
+        "post_compact_candidate_source_message_id",
+    ];
+    for (const field of mirroredFields) {
+        const expected = String(candidate[field] || "").trim();
+        if (expected && String(brief[field] || "").trim() !== expected)
+            gaps.push(field);
+    }
+    const workerTask = String(brief.worker_task || "");
+    if (candidate.reinjection_gate_id && !workerTask.includes(String(candidate.reinjection_gate_id)))
+        gaps.push("worker_task_reinjection_gate_id");
+    if (candidate.post_compact_candidate_id && !workerTask.includes(String(candidate.post_compact_candidate_id)))
+        gaps.push("worker_task_candidate_id");
+    if (candidate.post_compact_candidate_kind && !workerTask.includes(String(candidate.post_compact_candidate_kind)))
+        gaps.push("worker_task_candidate_kind");
+    if (candidate.post_compact_candidate_value && !workerTask.includes(String(candidate.post_compact_candidate_value)))
+        gaps.push("worker_task_candidate_value");
+    if (candidate.post_compact_candidate_source_message_id && !workerTask.includes(String(candidate.post_compact_candidate_source_message_id)))
+        gaps.push("worker_task_source_message_id");
+    if (!/postCompactCandidateUsage/i.test(workerTask))
+        gaps.push("worker_task_postCompactCandidateUsage");
+    if (!/memoryUsed|memoryIgnored/i.test(workerTask))
+        gaps.push("worker_task_memory_receipt");
+    if (!/currentSourceVerified|current source verified|current_source_verified/i.test(workerTask))
+        gaps.push("worker_task_currentSourceVerified");
+    if (!/task_agent_session_id/i.test(workerTask))
+        gaps.push("worker_task_task_agent_session_id");
+    if (!/native_session_id/i.test(workerTask))
+        gaps.push("worker_task_native_session_id");
+    return [...new Set(gaps)];
+}
+function buildPostCompactReinjectionRepairDispatchBriefReport(options = {}) {
+    const candidateReport = options.candidateReport
+        || options.candidate_report
+        || buildPostCompactReinjectionRepairDispatchCandidateReport(options);
+    const rows = (candidateReport.groups || []).map((candidateGroup) => {
+        const groupId = String(candidateGroup.groupId || "");
+        const candidates = (candidateGroup.candidates || []).filter(isPostCompactReinjectionRepairItem);
+        const workLedger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+        const limit = Math.max(Number(options.limit || 24), (Array.isArray(workLedger.items) ? workLedger.items.length : 0) + 8);
+        const candidateSummary = buildReplayRepairMainAgentDispatchCandidates(groupId, { ledger: workLedger, limit });
+        const ledger = syncReplayRepairDispatchPlanLedgerForCenter(groupId, candidateSummary, options);
+        const readyBriefs = (Array.isArray(ledger.briefs) ? ledger.briefs : [])
+            .filter((brief) => String(brief.status || "") === "ready" && isPostCompactReinjectionRepairItem(brief));
+        const briefByWorkId = new Map(readyBriefs.map((brief) => [String(brief.work_item_id || ""), brief]));
+        const missing = candidates.filter((candidate) => !briefByWorkId.has(String(candidate.work_item_id || "")));
+        const metadataGaps = candidates
+            .map((candidate) => {
+            const brief = briefByWorkId.get(String(candidate.work_item_id || "")) || null;
+            return {
+                work_item_id: candidate.work_item_id || "",
+                candidate_id: candidate.candidate_id || "",
+                brief_id: brief?.brief_id || "",
+                gaps: postCompactReinjectionRepairDispatchBriefMetadataGaps(candidate, brief),
+            };
+        })
+            .filter((entry) => entry.gaps.length > 0);
+        const status = candidates.length === 0
+            ? "empty"
+            : missing.length > 0 ? "fail" : metadataGaps.length > 0 ? "warn" : "ok";
+        return {
+            schema: "ccm-post-compact-reinjection-repair-dispatch-brief-group-v1",
+            groupId,
+            status,
+            file: ledger.file || getGroupReplayRepairDispatchPlanLedgerFile(groupId),
+            sourceCandidateFile: ledger.sourceCandidateFile || candidateGroup.file || "",
+            expectedBriefCount: candidates.length,
+            coveredBriefCount: Math.max(0, candidates.length - missing.length),
+            readyBriefCount: readyBriefs.length,
+            metadataGapCount: metadataGaps.length,
+            gateBoundBriefCount: readyBriefs.filter((brief) => brief.reinjection_gate_id).length,
+            identityBoundBriefCount: readyBriefs.filter((brief) => brief.post_compact_candidate_id && brief.post_compact_candidate_kind).length,
+            valueBoundBriefCount: readyBriefs.filter((brief) => brief.post_compact_candidate_value).length,
+            briefs: readyBriefs.slice(0, 12).map((brief) => ({
+                brief_id: brief.brief_id || "",
+                work_item_id: brief.work_item_id || "",
+                source: brief.source || "",
+                component: brief.component || "",
+                target_project: brief.target_project || "",
+                reinjection_gate_id: brief.reinjection_gate_id || "",
+                post_compact_candidate_id: brief.post_compact_candidate_id || "",
+                post_compact_candidate_kind: brief.post_compact_candidate_kind || "",
+                post_compact_candidate_value: brief.post_compact_candidate_value || "",
+                post_compact_candidate_source_message_id: brief.post_compact_candidate_source_message_id || "",
+                worker_task: compactMemoryCenterText(brief.worker_task || "", 2600),
+            })),
+            missingBriefs: missing.slice(0, 8).map((candidate) => ({
+                work_item_id: candidate.work_item_id || "",
+                candidate_id: candidate.candidate_id || "",
+                reason: "post-compact reinjection repair candidate missing dispatch brief",
+            })),
+            metadataGaps: metadataGaps.slice(0, 8),
+            gaps: [
+                ...missing.slice(0, 8).map((candidate) => ({
+                    work_item_id: candidate.work_item_id || "",
+                    candidate_id: candidate.candidate_id || "",
+                    reason: "post-compact reinjection repair candidate did not compile into dispatch brief",
+                })),
+                ...metadataGaps.slice(0, 8).map((gap) => ({
+                    work_item_id: gap.work_item_id || "",
+                    candidate_id: gap.candidate_id || "",
+                    brief_id: gap.brief_id || "",
+                    reason: `post-compact reinjection repair dispatch brief missing fields: ${gap.gaps.join(",")}`,
+                })),
+            ].slice(0, 12),
+        };
+    });
+    const checkedRows = rows.filter(row => Number(row.expectedBriefCount || 0) > 0 || Number(row.readyBriefCount || 0) > 0);
+    const requiredRows = checkedRows.filter(row => Number(row.expectedBriefCount || 0) > 0);
+    const coveredRows = requiredRows.filter(row => Number(row.coveredBriefCount || 0) >= Number(row.expectedBriefCount || 0));
+    const metadataCompleteRows = requiredRows.filter(row => Number(row.metadataGapCount || 0) === 0);
+    const coverageRate = requiredRows.length ? Math.round((coveredRows.length / requiredRows.length) * 1000) / 10 : null;
+    const metadataCoverageRate = requiredRows.length ? Math.round((metadataCompleteRows.length / requiredRows.length) * 1000) / 10 : null;
+    const status = coverageRate === null
+        ? "empty"
+        : coverageRate < 100 ? coverageRate >= 75 ? "warn" : "fail" : metadataCoverageRate === 100 ? "ok" : "warn";
+    return {
+        schema: "ccm-post-compact-reinjection-repair-dispatch-brief-report-v1",
+        generatedAt: now(),
+        candidateReport: { schema: candidateReport.schema || "", overall: candidateReport.overall || {} },
+        overall: {
+            status,
+            coverageRate,
+            metadataCoverageRate,
+            groupCount: rows.length,
+            checkedGroupCount: checkedRows.length,
+            groupsNeedingBriefs: requiredRows.length,
+            groupsCovered: coveredRows.length,
+            groupsMetadataComplete: metadataCompleteRows.length,
+            expectedBriefCount: checkedRows.reduce((sum, row) => sum + Number(row.expectedBriefCount || 0), 0),
+            coveredBriefCount: checkedRows.reduce((sum, row) => sum + Number(row.coveredBriefCount || 0), 0),
+            readyBriefCount: checkedRows.reduce((sum, row) => sum + Number(row.readyBriefCount || 0), 0),
+            metadataGapCount: checkedRows.reduce((sum, row) => sum + Number(row.metadataGapCount || 0), 0),
+            gateBoundBriefCount: checkedRows.reduce((sum, row) => sum + Number(row.gateBoundBriefCount || 0), 0),
+            identityBoundBriefCount: checkedRows.reduce((sum, row) => sum + Number(row.identityBoundBriefCount || 0), 0),
+            valueBoundBriefCount: checkedRows.reduce((sum, row) => sum + Number(row.valueBoundBriefCount || 0), 0),
+        },
+        groups: rows.sort((a, b) => Number(b.expectedBriefCount || 0) - Number(a.expectedBriefCount || 0)).slice(0, 50),
+        weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn").slice(0, 20),
+    };
+}
+function evaluatePostCompactReinjectionRepairDispatchBriefs(options = {}) {
+    const report = buildPostCompactReinjectionRepairDispatchBriefReport(options);
+    const checked = Number(report.overall.groupsNeedingBriefs || 0);
+    const passed = Number(report.overall.groupsMetadataComplete || 0);
+    const evidence = (report.groups || []).filter((row) => row.status === "ok").slice(0, 12).map((row) => ({
+        groupId: row.groupId,
+        expectedBriefCount: row.expectedBriefCount,
+        coveredBriefCount: row.coveredBriefCount,
+        gateBoundBriefCount: row.gateBoundBriefCount,
+        identityBoundBriefCount: row.identityBoundBriefCount,
+        valueBoundBriefCount: row.valueBoundBriefCount,
+    }));
+    const gaps = (report.weakGroups || []).flatMap((row) => (row.gaps || []).slice(0, 3).map((gap) => ({
+        groupId: row.groupId,
+        reason: gap.reason || "post-compact reinjection repair dispatch brief missing",
+        work_item_id: gap.work_item_id || "",
+        candidate_id: gap.candidate_id || "",
+        brief_id: gap.brief_id || "",
+    }))).slice(0, 12);
+    const check = makeQualityCheck("post_compact_reinjection_repair_dispatch_briefs", "Post-Compact Reinjection Repair Dispatch Briefs", checked, passed, evidence, gaps, "Every post-compact reinjection repair candidate must compile into a self-contained main Agent dispatch brief preserving gate/candidate identity, current-source verification, used-or-ignored classification, and actual child session receipt requirements.");
+    check.report = report;
+    return check;
+}
+function postCompactReinjectionRepairReceiptConsumptionGaps(item = {}, binding = {}) {
+    const gaps = [];
+    if (!binding || !binding.timeline_binding_id) {
+        gaps.push("timeline_binding");
+        return gaps;
+    }
+    if (!isPostCompactReinjectionRepairItem(binding))
+        gaps.push("source_or_component");
+    const mirroredFields = [
+        "reinjection_gate_id",
+        "post_compact_candidate_id",
+        "post_compact_candidate_kind",
+        "post_compact_candidate_value",
+    ];
+    for (const field of mirroredFields) {
+        const expected = String(item[field] || "").trim();
+        if (expected && String(binding[field] || "").trim() !== expected)
+            gaps.push(field);
+    }
+    const eventTypes = new Set((Array.isArray(binding.event_types) ? binding.event_types : []).map((event) => String(event || "").trim()));
+    for (const eventType of REPLAY_REPAIR_TIMELINE_REQUIRED_EVENTS) {
+        if (!eventTypes.has(eventType))
+            gaps.push(`event:${eventType}`);
+    }
+    if (binding.replay_repair_consumption_source !== "receipt.replayRepairDispatchBriefUsage")
+        gaps.push("replay_repair_consumption_source");
+    if (!["used", "verified", "ignored"].includes(String(binding.replay_repair_consumption_status || "").trim().toLowerCase()))
+        gaps.push("replay_repair_consumption_status");
+    if (binding.post_compact_reinjection_receipt_verified !== true)
+        gaps.push("post_compact_reinjection_receipt_verified");
+    if (binding.post_compact_reinjection_memory_receipt_matched !== true)
+        gaps.push("memory_receipt_matched");
+    if (binding.post_compact_reinjection_task_session_matched !== true)
+        gaps.push("task_session_matched");
+    if (binding.post_compact_reinjection_native_session_matched !== true)
+        gaps.push("native_session_matched");
+    if (!binding.task_agent_session_id)
+        gaps.push("task_agent_session_id");
+    if (!binding.native_session_id)
+        gaps.push("native_session_id");
+    if (!binding.memory_context_snapshot_id)
+        gaps.push("memory_context_snapshot_id");
+    if (!binding.execution_id)
+        gaps.push("execution_id");
+    const usageState = String(binding.post_compact_reinjection_receipt_usage_state || "").trim().toLowerCase();
+    if (!["used", "verified", "ignored"].includes(usageState))
+        gaps.push("post_compact_candidate_usage_state");
+    if (usageState === "ignored") {
+        if (!String(binding.post_compact_reinjection_receipt_reason || "").trim())
+            gaps.push("ignored_reason");
+    }
+    else if (binding.post_compact_reinjection_current_source_verified !== true) {
+        gaps.push("current_source_verified");
+    }
+    if (replayRepairWorkItemStatus(item.status) !== "completed")
+        gaps.push("repair_work_item_not_completed");
+    if (String(item.completion_source || "") !== "post_compact_reinjection_replay_repair_receipt_consumption")
+        gaps.push("completion_source");
+    if (String(item.resolutionReason || item.resolution_reason || "") !== "post_compact_reinjection_repair_receipt_verified")
+        gaps.push("resolution_reason");
+    return [...new Set(gaps)];
+}
+function buildPostCompactReinjectionRepairReceiptConsumptionReport(options = {}) {
+    const groupIds = replayRepairDispatchCandidateGroupIds(options);
+    const rows = groupIds.map((groupId) => {
+        const workLedger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+        const items = (Array.isArray(workLedger.items) ? workLedger.items : []).filter(isPostCompactReinjectionRepairItem);
+        const timelineLedger = readGroupReplayRepairDispatchTimelineBindingLedger(groupId);
+        const bindings = (Array.isArray(timelineLedger.entries) ? timelineLedger.entries : []).filter(isPostCompactReinjectionRepairItem);
+        const latestBindingByWorkId = new Map();
+        for (const binding of bindings) {
+            const workItemId = String(binding.work_item_id || "").trim();
+            if (!workItemId)
+                continue;
+            const previous = latestBindingByWorkId.get(workItemId);
+            if (!previous || String(binding.updated_at || binding.at || "").localeCompare(String(previous.updated_at || previous.at || "")) >= 0) {
+                latestBindingByWorkId.set(workItemId, binding);
+            }
+        }
+        const receiptRows = items.map((item) => {
+            const workItemId = replayRepairWorkItemId(item);
+            const binding = latestBindingByWorkId.get(workItemId) || null;
+            const gaps = postCompactReinjectionRepairReceiptConsumptionGaps(item, binding);
+            return {
+                work_item_id: workItemId,
+                status: gaps.length === 0 ? "ok" : binding ? "warn" : "fail",
+                reinjection_gate_id: item.reinjection_gate_id || "",
+                post_compact_candidate_id: item.post_compact_candidate_id || "",
+                post_compact_candidate_kind: item.post_compact_candidate_kind || "",
+                post_compact_candidate_value: item.post_compact_candidate_value || "",
+                repair_status: replayRepairWorkItemStatus(item.status),
+                completion_source: item.completion_source || "",
+                resolution_reason: item.resolutionReason || item.resolution_reason || "",
+                timeline_binding_id: binding?.timeline_binding_id || "",
+                brief_id: binding?.brief_id || "",
+                task_id: binding?.task_id || "",
+                task_agent_session_id: binding?.task_agent_session_id || "",
+                native_session_id: binding?.native_session_id || "",
+                memory_context_snapshot_id: binding?.memory_context_snapshot_id || "",
+                execution_id: binding?.execution_id || "",
+                usage_state: binding?.post_compact_reinjection_receipt_usage_state || "",
+                current_source_verified: binding?.post_compact_reinjection_current_source_verified === true,
+                memory_receipt_matched: binding?.post_compact_reinjection_memory_receipt_matched === true,
+                receipt_verified: binding?.post_compact_reinjection_receipt_verified === true,
+                event_types: binding?.event_types || [],
+                gaps,
+            };
+        });
+        const coveredRows = receiptRows.filter((row) => row.status === "ok");
+        const status = items.length === 0
+            ? "empty"
+            : coveredRows.length === items.length ? "ok" : coveredRows.length > 0 ? "warn" : "fail";
+        return {
+            schema: "ccm-post-compact-reinjection-repair-receipt-consumption-group-v1",
+            groupId,
+            status,
+            workItemFile: workLedger.file || getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId),
+            timelineFile: timelineLedger.file || getGroupReplayRepairDispatchTimelineBindingLedgerFile(groupId),
+            expectedReceiptCount: items.length,
+            coveredReceiptCount: coveredRows.length,
+            timelineBindingCount: bindings.length,
+            receiptVerifiedCount: receiptRows.filter((row) => row.receipt_verified).length,
+            completedRepairCount: receiptRows.filter((row) => row.repair_status === "completed").length,
+            metadataGapCount: receiptRows.reduce((sum, row) => sum + row.gaps.length, 0),
+            rows: receiptRows.slice(0, 12),
+            gaps: receiptRows.filter((row) => row.gaps.length > 0).slice(0, 12).map((row) => ({
+                work_item_id: row.work_item_id,
+                reinjection_gate_id: row.reinjection_gate_id,
+                post_compact_candidate_id: row.post_compact_candidate_id,
+                timeline_binding_id: row.timeline_binding_id,
+                reason: `post-compact reinjection repair receipt consumption gaps: ${row.gaps.join(",")}`,
+            })),
+        };
+    });
+    const checkedRows = rows.filter(row => Number(row.expectedReceiptCount || 0) > 0);
+    const coveredRows = checkedRows.filter(row => Number(row.coveredReceiptCount || 0) >= Number(row.expectedReceiptCount || 0));
+    const coverageRate = checkedRows.length ? Math.round((coveredRows.length / checkedRows.length) * 1000) / 10 : null;
+    const status = coverageRate === null
+        ? "empty"
+        : coverageRate >= 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail";
+    return {
+        schema: "ccm-post-compact-reinjection-repair-receipt-consumption-report-v1",
+        generatedAt: now(),
+        overall: {
+            status,
+            coverageRate,
+            groupCount: rows.length,
+            checkedGroupCount: checkedRows.length,
+            groupsCovered: coveredRows.length,
+            expectedReceiptCount: checkedRows.reduce((sum, row) => sum + Number(row.expectedReceiptCount || 0), 0),
+            coveredReceiptCount: checkedRows.reduce((sum, row) => sum + Number(row.coveredReceiptCount || 0), 0),
+            timelineBindingCount: checkedRows.reduce((sum, row) => sum + Number(row.timelineBindingCount || 0), 0),
+            receiptVerifiedCount: checkedRows.reduce((sum, row) => sum + Number(row.receiptVerifiedCount || 0), 0),
+            completedRepairCount: checkedRows.reduce((sum, row) => sum + Number(row.completedRepairCount || 0), 0),
+            metadataGapCount: checkedRows.reduce((sum, row) => sum + Number(row.metadataGapCount || 0), 0),
+        },
+        groups: rows.sort((a, b) => Number(b.expectedReceiptCount || 0) - Number(a.expectedReceiptCount || 0)).slice(0, 50),
+        weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn").slice(0, 20),
+    };
+}
+function evaluatePostCompactReinjectionRepairReceiptConsumption(options = {}) {
+    const report = buildPostCompactReinjectionRepairReceiptConsumptionReport(options);
+    const checked = Number(report.overall.checkedGroupCount || 0);
+    const passed = Number(report.overall.groupsCovered || 0);
+    const evidence = (report.groups || []).filter((row) => row.status === "ok").slice(0, 12).map((row) => ({
+        groupId: row.groupId,
+        expectedReceiptCount: row.expectedReceiptCount,
+        coveredReceiptCount: row.coveredReceiptCount,
+        receiptVerifiedCount: row.receiptVerifiedCount,
+        completedRepairCount: row.completedRepairCount,
+    }));
+    const gaps = (report.weakGroups || []).flatMap((row) => (row.gaps || []).slice(0, 3).map((gap) => ({
+        groupId: row.groupId,
+        reason: gap.reason || "post-compact reinjection repair receipt consumption missing",
+        work_item_id: gap.work_item_id || "",
+        timeline_binding_id: gap.timeline_binding_id || "",
+        post_compact_candidate_id: gap.post_compact_candidate_id || "",
+    }))).slice(0, 12);
+    const check = makeQualityCheck("post_compact_reinjection_repair_receipt_consumption", "Post-Compact Reinjection Repair Receipt Consumption", checked, passed, evidence, gaps, "A post-compact reinjection repair work item may close only after the bound child Agent session consumes the exact brief and classifies the exact gate/candidate with valid postCompactCandidateUsage plus matching memoryUsed/memoryIgnored evidence.");
+    check.report = report;
+    return check;
+}
+function postCompactReinjectionRepairReceiptTypedMemoryEntryKey(entry = {}) {
+    return [
+        String(entry.timeline_binding_id || "").trim(),
+        String(entry.brief_id || "").trim(),
+        String(entry.work_item_id || "").trim(),
+        String(entry.reinjection_gate_id || "").trim(),
+        String(entry.post_compact_candidate_id || "").trim(),
+        String(entry.task_agent_session_id || "").trim(),
+        String(entry.native_session_id || "").trim(),
+    ].filter(Boolean).join("|").toLowerCase();
+}
+function postCompactReinjectionRepairReceiptTypedMemoryArchiveMatchesEntry(row = {}, entry = {}) {
+    const rowKey = postCompactReinjectionRepairReceiptTypedMemoryEntryKey(row);
+    const entryKey = postCompactReinjectionRepairReceiptTypedMemoryEntryKey(entry);
+    if (rowKey && entryKey && rowKey === entryKey)
+        return true;
+    return String(row.work_item_id || "").trim() === String(entry.work_item_id || "").trim()
+        && String(row.reinjection_gate_id || "").trim() === String(entry.reinjection_gate_id || "").trim()
+        && String(row.post_compact_candidate_id || "").trim() === String(entry.post_compact_candidate_id || "").trim()
+        && String(row.task_agent_session_id || "").trim() === String(entry.task_agent_session_id || "").trim()
+        && String(row.native_session_id || "").trim() === String(entry.native_session_id || "").trim();
+}
+function postCompactReinjectionRepairReceiptTypedMemoryProbeQuery(entries = []) {
+    return compactMemoryCenterText(entries.map((entry) => [
+        entry.reinjection_gate_id,
+        entry.post_compact_candidate_id,
+        entry.post_compact_candidate_kind,
+        entry.post_compact_candidate_value,
+        entry.post_compact_candidate_source_message_id,
+        entry.work_item_id,
+        entry.brief_id,
+        entry.task_agent_session_id,
+        entry.native_session_id,
+        entry.completion_source,
+        entry.resolution_reason,
+    ].filter(Boolean).join(" ")).join("\n") || "post-compact reinjection repair receipt typed MEMORY.md", 5000);
+}
+function buildPostCompactReinjectionRepairReceiptTypedMemoryReport(options = {}) {
+    const groupIds = replayRepairDispatchCandidateGroupIds(options);
+    const { buildGroupTypedMemoryRecall, distillPostCompactReinjectionRepairReceiptConsumptionToTypedMemory, readGroupTypedMemoryDistillationLedger, scanGroupTypedMemoryDocuments, } = require("../collaboration/group-memory-index");
+    const rows = groupIds.map((groupId) => {
+        const workLedger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+        const completedItems = (Array.isArray(workLedger.items) ? workLedger.items : [])
+            .filter(isPostCompactReinjectionRepairItem)
+            .filter((item) => replayRepairWorkItemStatus(item.status) === "completed")
+            .filter((item) => String(item.completion_source || "") === "post_compact_reinjection_replay_repair_receipt_consumption")
+            .filter((item) => String(item.resolutionReason || item.resolution_reason || "") === "post_compact_reinjection_repair_receipt_verified");
+        const timelineLedger = readGroupReplayRepairDispatchTimelineBindingLedger(groupId);
+        const bindings = (Array.isArray(timelineLedger.entries) ? timelineLedger.entries : []).filter(isPostCompactReinjectionRepairItem);
+        const latestBindingByWorkId = new Map();
+        for (const binding of bindings) {
+            const workItemId = String(binding.work_item_id || "").trim();
+            if (!workItemId)
+                continue;
+            const previous = latestBindingByWorkId.get(workItemId);
+            if (!previous || String(binding.updated_at || binding.at || "").localeCompare(String(previous.updated_at || previous.at || "")) >= 0) {
+                latestBindingByWorkId.set(workItemId, binding);
+            }
+        }
+        const allVerifiedEntries = completedItems.map((item) => {
+            const binding = latestBindingByWorkId.get(replayRepairWorkItemId(item)) || null;
+            if (!binding || postCompactReinjectionRepairReceiptConsumptionGaps(item, binding).length > 0)
+                return null;
+            return {
+                ...binding,
+                work_item: item,
+                completion_source: item.completion_source || "",
+                resolution_reason: item.resolutionReason || item.resolution_reason || "",
+                completed_at: item.completedAt || item.completed_at || binding.updated_at || binding.at || "",
+            };
+        }).filter(Boolean);
+        const verifiedEntries = allVerifiedEntries.slice(-100);
+        const distillation = verifiedEntries.length
+            ? distillPostCompactReinjectionRepairReceiptConsumptionToTypedMemory(groupId, { rows: verifiedEntries }, {
+                reason: "memory-center-post-compact-reinjection-repair-receipt-typed-memory-report",
+                updatedAt: options.generatedAt || options.generated_at || now(),
+            })
+            : null;
+        const distillationLedger = readGroupTypedMemoryDistillationLedger(groupId);
+        const archive = distillationLedger.postCompactReinjectionRepairReceiptConsumptionArchive || {};
+        const archiveRows = Array.isArray(archive.rows) ? archive.rows : [];
+        const docs = scanGroupTypedMemoryDocuments(groupId);
+        const referenceDoc = docs.find((doc) => doc.relPath === "post-compact-reinjection-repair-receipt-memory.md");
+        const cautionDoc = docs.find((doc) => doc.relPath === "post-compact-reinjection-repair-receipt-cautions.md");
+        const referenceText = (() => {
+            try {
+                return referenceDoc?.file ? fs.readFileSync(referenceDoc.file, "utf-8") : "";
+            }
+            catch {
+                return "";
+            }
+        })();
+        const cautionText = (() => {
+            try {
+                return cautionDoc?.file ? fs.readFileSync(cautionDoc.file, "utf-8") : "";
+            }
+            catch {
+                return "";
+            }
+        })();
+        const archivedEntries = verifiedEntries.filter((entry) => archiveRows.some((row) => postCompactReinjectionRepairReceiptTypedMemoryArchiveMatchesEntry(row, entry)));
+        const documentedEntries = verifiedEntries.filter((entry) => {
+            const usageState = String(entry.post_compact_reinjection_receipt_usage_state || "").trim().toLowerCase();
+            const text = usageState === "ignored" ? cautionText : referenceText;
+            return !!text
+                && text.includes(String(entry.reinjection_gate_id || ""))
+                && text.includes(String(entry.post_compact_candidate_id || ""))
+                && text.includes(String(entry.task_agent_session_id || ""))
+                && text.includes(String(entry.native_session_id || ""))
+                && text.includes(String(entry.completion_source || ""))
+                && text.includes(String(entry.resolution_reason || ""));
+        });
+        const recall = verifiedEntries.length
+            ? buildGroupTypedMemoryRecall(groupId, postCompactReinjectionRepairReceiptTypedMemoryProbeQuery(verifiedEntries), {
+                max: 8,
+                disableLedger: true,
+                forceMemory: true,
+                snippetChars: 520,
+            })
+            : { recalled: [] };
+        const recalledText = JSON.stringify(recall.recalled || []);
+        const expectedReference = verifiedEntries.some((entry) => String(entry.post_compact_reinjection_receipt_usage_state || "").trim().toLowerCase() !== "ignored");
+        const expectedCaution = verifiedEntries.some((entry) => String(entry.post_compact_reinjection_receipt_usage_state || "").trim().toLowerCase() === "ignored");
+        const relevantDocText = [referenceText, cautionText].filter(Boolean).join("\n");
+        const gaps = [];
+        if (verifiedEntries.length && archivedEntries.length < verifiedEntries.length) {
+            gaps.push({ reason: `post-compact reinjection receipt typed archive missing ${verifiedEntries.length - archivedEntries.length} verified completion rows` });
+        }
+        if (verifiedEntries.length && documentedEntries.length < verifiedEntries.length) {
+            gaps.push({ reason: `typed MEMORY.md missing exact gate/candidate/session/completion metadata for ${verifiedEntries.length - documentedEntries.length} verified completion rows` });
+        }
+        if (expectedReference && (!referenceDoc || referenceDoc.type !== "reference")) {
+            gaps.push({ reason: "used/verified post-compact reinjection completion missing reference typed MEMORY.md" });
+        }
+        if (expectedCaution && (!cautionDoc || cautionDoc.type !== "feedback")) {
+            gaps.push({ reason: "ignored post-compact reinjection completion missing feedback typed MEMORY.md" });
+        }
+        if (verifiedEntries.length && !/historical repair completion is recovery evidence, not permanent repository truth/i.test(relevantDocText)) {
+            gaps.push({ reason: "post-compact reinjection typed memory missing historical-evidence versus current-truth boundary" });
+        }
+        if (verifiedEntries.length && !/Future use must reverify the current source/i.test(relevantDocText)) {
+            gaps.push({ reason: "post-compact reinjection typed memory missing current-source reverify rule" });
+        }
+        if (verifiedEntries.length && !recalledText.includes("post-compact-reinjection-repair-receipt")) {
+            gaps.push({ reason: "post-compact reinjection repair receipt typed memory cannot be recalled by exact candidate/session probe" });
+        }
+        const status = verifiedEntries.length === 0 ? "empty" : gaps.length ? "fail" : "ok";
+        return {
+            schema: "ccm-post-compact-reinjection-repair-receipt-typed-memory-group-v1",
+            groupId,
+            status,
+            workItemFile: workLedger.file || getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId),
+            timelineFile: timelineLedger.file || getGroupReplayRepairDispatchTimelineBindingLedgerFile(groupId),
+            typedMemoryLedgerFile: distillationLedger.file || "",
+            totalVerifiedCompletionCount: allVerifiedEntries.length,
+            checkedVerifiedCompletionCount: verifiedEntries.length,
+            archivedCompletionCount: archivedEntries.length,
+            documentedCompletionCount: documentedEntries.length,
+            typedArchiveCount: Number(archive.archived_count || archiveRows.length || 0),
+            typedDocCount: Number(!!referenceDoc) + Number(!!cautionDoc),
+            recallProbeCount: Array.isArray(recall.recalled) ? recall.recalled.length : 0,
+            recallProbeCovered: recalledText.includes("post-compact-reinjection-repair-receipt"),
+            freshnessBoundaryCovered: /historical repair completion is recovery evidence, not permanent repository truth/i.test(relevantDocText)
+                && /Future use must reverify the current source/i.test(relevantDocText),
+            distillation: distillation ? {
+                incomingRowCount: distillation.incomingRowCount || 0,
+                archivedCount: distillation.archivedCount || 0,
+                restoredCount: distillation.restoredCount || 0,
+                cautionCount: distillation.cautionCount || 0,
+                writeCount: distillation.writeCount || 0,
+            } : null,
+            docs: [referenceDoc, cautionDoc].filter(Boolean).map((doc) => ({
+                relPath: doc.relPath,
+                type: doc.type,
+                source: doc.source,
+                file: doc.file,
+            })),
+            entries: verifiedEntries.slice(-12).reverse().map((entry) => ({
+                timeline_binding_id: entry.timeline_binding_id || "",
+                brief_id: entry.brief_id || "",
+                work_item_id: entry.work_item_id || "",
+                reinjection_gate_id: entry.reinjection_gate_id || "",
+                post_compact_candidate_id: entry.post_compact_candidate_id || "",
+                post_compact_candidate_kind: entry.post_compact_candidate_kind || "",
+                post_compact_candidate_value: entry.post_compact_candidate_value || "",
+                post_compact_candidate_source_message_id: entry.post_compact_candidate_source_message_id || "",
+                usage_state: entry.post_compact_reinjection_receipt_usage_state || "",
+                current_source_verified: entry.post_compact_reinjection_current_source_verified === true,
+                task_agent_session_id: entry.task_agent_session_id || "",
+                native_session_id: entry.native_session_id || "",
+                completion_source: entry.completion_source || "",
+                resolution_reason: entry.resolution_reason || "",
+            })),
+            gaps: gaps.slice(0, 8),
+        };
+    });
+    const checkedRows = rows.filter(row => Number(row.checkedVerifiedCompletionCount || 0) > 0);
+    const passedRows = checkedRows.filter(row => row.status === "ok");
+    const coverageRate = checkedRows.length ? Math.round((passedRows.length / checkedRows.length) * 1000) / 10 : null;
+    const status = coverageRate === null ? "empty" : coverageRate >= 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail";
+    return {
+        schema: "ccm-post-compact-reinjection-repair-receipt-typed-memory-report-v1",
+        generatedAt: now(),
+        overall: {
+            status,
+            coverageRate,
+            groupCount: rows.length,
+            checkedGroupCount: checkedRows.length,
+            groupsCovered: passedRows.length,
+            totalVerifiedCompletionCount: checkedRows.reduce((sum, row) => sum + Number(row.totalVerifiedCompletionCount || 0), 0),
+            checkedVerifiedCompletionCount: checkedRows.reduce((sum, row) => sum + Number(row.checkedVerifiedCompletionCount || 0), 0),
+            archivedCompletionCount: checkedRows.reduce((sum, row) => sum + Number(row.archivedCompletionCount || 0), 0),
+            documentedCompletionCount: checkedRows.reduce((sum, row) => sum + Number(row.documentedCompletionCount || 0), 0),
+            typedArchiveCount: checkedRows.reduce((sum, row) => sum + Number(row.typedArchiveCount || 0), 0),
+            typedDocCount: checkedRows.reduce((sum, row) => sum + Number(row.typedDocCount || 0), 0),
+            recallProbeCoveredCount: checkedRows.filter(row => row.recallProbeCovered === true).length,
+            freshnessBoundaryCoveredCount: checkedRows.filter(row => row.freshnessBoundaryCovered === true).length,
+            metadataGapCount: checkedRows.reduce((sum, row) => sum + Number((row.gaps || []).length), 0),
+        },
+        groups: rows.sort((a, b) => Number(b.checkedVerifiedCompletionCount || 0) - Number(a.checkedVerifiedCompletionCount || 0)).slice(0, 50),
+        weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn").slice(0, 20),
+    };
+}
+function evaluatePostCompactReinjectionRepairReceiptTypedMemory(options = {}) {
+    const report = buildPostCompactReinjectionRepairReceiptTypedMemoryReport(options);
+    const checked = Number(report.overall.checkedGroupCount || 0);
+    const passed = Number(report.overall.groupsCovered || 0);
+    const evidence = (report.groups || []).filter((row) => row.status === "ok").slice(0, 12).map((row) => ({
+        groupId: row.groupId,
+        checkedVerifiedCompletionCount: row.checkedVerifiedCompletionCount,
+        archivedCompletionCount: row.archivedCompletionCount,
+        documentedCompletionCount: row.documentedCompletionCount,
+        typedDocCount: row.typedDocCount,
+        recallProbeCovered: row.recallProbeCovered,
+        freshnessBoundaryCovered: row.freshnessBoundaryCovered,
+        typedMemoryLedgerFile: row.typedMemoryLedgerFile,
+    }));
+    const gaps = (report.weakGroups || []).flatMap((row) => (row.gaps || []).slice(0, 3).map((gap) => ({
+        groupId: row.groupId,
+        reason: gap.reason || "post-compact reinjection repair receipt typed memory missing",
+        checkedVerifiedCompletionCount: row.checkedVerifiedCompletionCount || 0,
+        archivedCompletionCount: row.archivedCompletionCount || 0,
+        documentedCompletionCount: row.documentedCompletionCount || 0,
+    }))).slice(0, 12);
+    const check = makeQualityCheck("post_compact_reinjection_repair_receipt_typed_memory", "Post-Compact Reinjection Repair Receipt Typed Memory", checked, passed, evidence, gaps, "Every verified post-compact reinjection repair completion must be distilled into typed MEMORY.md with exact gate/candidate/session/completion identity, while explicitly requiring current-source revalidation before future reuse.");
+    check.report = report;
+    return check;
+}
+function workerContextPacketPostCompactReinjectionRepairReceiptMemoryContract(entry = {}) {
+    return entry.post_compact_reinjection_repair_receipt_memory_contract
+        || entry.postCompactReinjectionRepairReceiptMemoryContract
+        || entry.worker_context_packet_post_compact_reinjection_repair_receipt_memory_contract
+        || entry.workerContextPacketPostCompactReinjectionRepairReceiptMemoryContract
+        || entry.worker_context_packet?.post_compact_reinjection_repair_receipt_memory_contract
+        || entry.worker_context_packet?.postCompactReinjectionRepairReceiptMemoryContract
+        || entry.workerContextPacket?.post_compact_reinjection_repair_receipt_memory_contract
+        || entry.workerContextPacket?.postCompactReinjectionRepairReceiptMemoryContract
+        || null;
+}
+function workerContextPacketRequiresPostCompactReinjectionRepairReceiptMemoryUsage(entry = {}) {
+    const contract = workerContextPacketPostCompactReinjectionRepairReceiptMemoryContract(entry) || {};
+    const acceptance = workerContextPacketAcceptance(entry) || {};
+    const categoryIds = workerContextPacketUsageCategoryIds(entry);
+    return contract.active === true
+        || acceptance.post_compact_reinjection_repair_receipt_memory_usage_required === true
+        || acceptance.postCompactReinjectionRepairReceiptMemoryUsageRequired === true
+        || categoryIds.has("post_compact_reinjection_repair_receipt_memory_contract");
+}
+function postCompactReinjectionRepairReceiptMemoryUsageCoverage(contract = {}, receipt = {}) {
+    const requiredDocRelPaths = uniqueStrings(normalizeQualityStringList(contract.memory_receipt_required_doc_rel_paths
+        || contract.memoryReceiptRequiredDocRelPaths
+        || contract.doc_rel_paths
+        || contract.docRelPaths
+        || []), 12);
+    const memoryUsed = normalizeQualityStringList(receipt.memoryUsed || receipt.memory_used || []);
+    const memoryIgnored = normalizeQualityStringList(receipt.memoryIgnored || receipt.memory_ignored || []);
+    const docRows = requiredDocRelPaths.map((relPath) => {
+        const usedRows = memoryUsed.filter((item) => item.includes(relPath));
+        const ignoredRows = memoryIgnored.filter((item) => item.includes(relPath));
+        const usedCovered = usedRows.some((item) => /usageState\s*=\s*(used|verified)|\b(used|verified)\b/i.test(item));
+        const usedCurrentSourceVerified = usedRows.some((item) => /currentSourceVerified\s*=\s*true/i.test(item));
+        const ignoredCovered = ignoredRows.some((item) => /usageState\s*=\s*(ignored|not_used|not used)|\bignored\b/i.test(item));
+        const ignoredReasonCovered = ignoredRows.some((item) => /reason\s*=\s*[^;\s][^;]*/i.test(item));
+        const covered = usedCovered || ignoredCovered;
+        const compliant = usedCovered
+            ? usedCurrentSourceVerified
+            : ignoredCovered
+                ? ignoredReasonCovered
+                : false;
+        return {
+            relPath,
+            covered,
+            compliant,
+            usedCovered,
+            usedCurrentSourceVerified,
+            ignoredCovered,
+            ignoredReasonCovered,
+        };
+    });
+    const missingDocRelPaths = docRows.filter((row) => row.covered !== true).map((row) => row.relPath);
+    const missingCurrentSourceVerifiedDocRelPaths = docRows
+        .filter((row) => row.usedCovered === true && row.usedCurrentSourceVerified !== true)
+        .map((row) => row.relPath);
+    const missingIgnoredReasonDocRelPaths = docRows
+        .filter((row) => row.ignoredCovered === true && row.ignoredReasonCovered !== true)
+        .map((row) => row.relPath);
+    const historicalBoundaryCovered = [...memoryUsed, ...memoryIgnored].some((item) => /historical repair completion is recovery evidence|recovery evidence.*not permanent repository truth|历史.*恢复证据.*不是.*永久|历史完成.*不是.*当前事实/i.test(item));
+    const currentTaskAgentSessionId = String(contract.current_task_agent_session_id || contract.currentTaskAgentSessionId || "").trim();
+    const currentNativeSessionId = String(contract.current_native_session_id || contract.currentNativeSessionId || "").trim();
+    const receiptTaskAgentSessionId = String(receipt.task_agent_session_id || receipt.taskAgentSessionId || "").trim();
+    const receiptNativeSessionId = String(receipt.native_session_id || receipt.nativeSessionId || "").trim();
+    const taskSessionMatched = !currentTaskAgentSessionId || receiptTaskAgentSessionId === currentTaskAgentSessionId;
+    const nativeSessionMatched = !currentNativeSessionId || receiptNativeSessionId === currentNativeSessionId;
+    const docsCovered = requiredDocRelPaths.length > 0 && docRows.every((row) => row.covered === true);
+    const usageCompliant = requiredDocRelPaths.length > 0 && docRows.every((row) => row.compliant === true);
+    const pass = docsCovered
+        && usageCompliant
+        && historicalBoundaryCovered
+        && taskSessionMatched
+        && nativeSessionMatched;
+    const gaps = [
+        missingDocRelPaths.length ? "required_doc_missing" : "",
+        missingCurrentSourceVerifiedDocRelPaths.length ? "current_source_verified_missing" : "",
+        missingIgnoredReasonDocRelPaths.length ? "ignored_reason_missing" : "",
+        !historicalBoundaryCovered ? "historical_freshness_boundary_missing" : "",
+        !taskSessionMatched ? "task_agent_session_mismatch" : "",
+        !nativeSessionMatched ? "native_session_mismatch" : "",
+    ].filter(Boolean);
+    return {
+        schema: "ccm-post-compact-reinjection-repair-receipt-memory-usage-coverage-v1",
+        pass,
+        requiredDocRelPaths,
+        docRows,
+        missingDocRelPaths,
+        missingCurrentSourceVerifiedDocRelPaths,
+        missingIgnoredReasonDocRelPaths,
+        docsCovered,
+        usageCompliant,
+        historicalBoundaryCovered,
+        currentTaskAgentSessionId,
+        currentNativeSessionId,
+        receiptTaskAgentSessionId,
+        receiptNativeSessionId,
+        taskSessionMatched,
+        nativeSessionMatched,
+        memoryUsed,
+        memoryIgnored,
+        gaps,
+    };
+}
+function buildPostCompactReinjectionRepairReceiptWorkerContextRecallReport(options = {}) {
+    const groupIds = replayRepairDispatchTimelineBindingGroupIds(options);
+    const { readGroupTypedMemoryDistillationLedger } = require("../collaboration/group-memory-index");
+    const { buildAgentMemoryContextBundle } = require("../collaboration/memory");
+    const { buildWorkerContextPacket, renderWorkerContextPacket } = require("../../agents/runtime-kernel");
+    const targetProject = String(options.targetProject || options.target_project || "api");
+    const task = String(options.task || options.query || "continue post-compact reinjection repair receipt current source recovered candidate memoryUsed memoryIgnored");
+    const rows = groupIds.map((groupId) => {
+        const ledger = readGroupTypedMemoryDistillationLedger(groupId);
+        const archive = ledger.postCompactReinjectionRepairReceiptConsumptionArchive || {};
+        const archiveRows = Array.isArray(archive.rows) ? archive.rows : [];
+        const archivedCount = Number(archive.archived_count || archiveRows.length || 0);
+        if (archivedCount <= 0) {
+            return {
+                schema: "ccm-post-compact-reinjection-repair-receipt-worker-context-recall-group-v1",
+                groupId,
+                status: "empty",
+                archivedReceiptCount: 0,
+                gaps: [],
+            };
+        }
+        const firstTaskSessionId = String(options.firstTaskAgentSessionId || options.first_task_agent_session_id || `phase180-task-session-a-${sidecarFileId(groupId)}`);
+        const firstNativeSessionId = String(options.firstNativeSessionId || options.first_native_session_id || `phase180-native-session-a-${sidecarFileId(groupId)}`);
+        const secondTaskSessionId = String(options.secondTaskAgentSessionId || options.second_task_agent_session_id || `phase180-task-session-b-${sidecarFileId(groupId)}`);
+        const secondNativeSessionId = String(options.secondNativeSessionId || options.second_native_session_id || `phase180-native-session-b-${sidecarFileId(groupId)}`);
+        const firstBundle = buildAgentMemoryContextBundle(groupId, targetProject, task, {
+            includeGlobalClaudeMemory: false,
+            includeProjectMemory: false,
+            maxTypedMemory: Number(options.maxTypedMemory || options.max_typed_memory || 8),
+            maxRenderedChars: Number(options.maxRenderedChars || options.max_rendered_chars || 14000),
+            taskAgentSessionId: firstTaskSessionId,
+            nativeSessionId: firstNativeSessionId,
+            executionId: `phase180-execution-a-${sidecarFileId(groupId)}`,
+            forcePostCompactReinjectionRepairReceiptRecall: true,
+        });
+        const secondBundle = buildAgentMemoryContextBundle(groupId, targetProject, task, {
+            includeGlobalClaudeMemory: false,
+            includeProjectMemory: false,
+            maxTypedMemory: Number(options.maxTypedMemory || options.max_typed_memory || 8),
+            maxRenderedChars: Number(options.maxRenderedChars || options.max_rendered_chars || 14000),
+            taskAgentSessionId: secondTaskSessionId,
+            nativeSessionId: secondNativeSessionId,
+            executionId: `phase180-execution-b-${sidecarFileId(groupId)}`,
+            forcePostCompactReinjectionRepairReceiptRecall: true,
+        });
+        const firstRecall = firstBundle.group_state?.typedMemory?.postCompactReinjectionRepairReceiptRecall
+            || firstBundle.post_compact_reinjection_repair_receipt_recall
+            || {};
+        const secondRecall = secondBundle.group_state?.typedMemory?.postCompactReinjectionRepairReceiptRecall
+            || secondBundle.post_compact_reinjection_repair_receipt_recall
+            || {};
+        const firstPacket = buildWorkerContextPacket({
+            group: { id: groupId, name: "Post-Compact Repair Recall A", members: [{ project: targetProject }] },
+            project: targetProject,
+            task,
+            taskId: `phase180-task-a-${sidecarFileId(groupId)}`,
+            traceId: `phase180-trace-a-${sidecarFileId(groupId)}`,
+            agentType: String(options.agentType || options.agent_type || "codex"),
+            memory: firstBundle,
+            contextUsageOptions: { maxTokens: Number(options.maxContextTokens || options.max_context_tokens || 90000) },
+        });
+        const secondPacket = buildWorkerContextPacket({
+            group: { id: groupId, name: "Post-Compact Repair Recall B", members: [{ project: targetProject }] },
+            project: targetProject,
+            task,
+            taskId: `phase180-task-b-${sidecarFileId(groupId)}`,
+            traceId: `phase180-trace-b-${sidecarFileId(groupId)}`,
+            agentType: String(options.agentType || options.agent_type || "codex"),
+            memory: secondBundle,
+            contextUsageOptions: { maxTokens: Number(options.maxContextTokens || options.max_context_tokens || 90000) },
+        });
+        const firstContract = workerContextPacketPostCompactReinjectionRepairReceiptMemoryContract(firstPacket) || {};
+        const secondContract = workerContextPacketPostCompactReinjectionRepairReceiptMemoryContract(secondPacket) || {};
+        const firstPacketText = renderWorkerContextPacket(firstPacket);
+        const secondPacketText = renderWorkerContextPacket(secondPacket);
+        const firstRecallText = JSON.stringify(firstBundle.group_state?.typedMemory?.recall?.recalled || []);
+        const secondRecallText = JSON.stringify(secondBundle.group_state?.typedMemory?.recall?.recalled || []);
+        const requiredDocs = normalizeQualityStringList(firstContract.memory_receipt_required_doc_rel_paths || firstContract.doc_rel_paths || []);
+        const usageCategories = new Map((firstPacket.context_usage?.categories || []).map((item) => [item.id, item]));
+        const contractCategory = usageCategories.get("post_compact_reinjection_repair_receipt_memory_contract") || {};
+        const loadEntries = firstBundle.group_state?.typedMemory?.loadPlan?.entries || [];
+        const goodCoverage = postCompactReinjectionRepairReceiptMemoryUsageCoverage(firstContract, {
+            task_agent_session_id: firstTaskSessionId,
+            native_session_id: firstNativeSessionId,
+            memoryUsed: requiredDocs.map((relPath) => `${relPath}; usageState=verified; currentSourceVerified=true; historical repair completion is recovery evidence, not permanent repository truth`),
+            memoryIgnored: [],
+        });
+        const ignoredCoverage = postCompactReinjectionRepairReceiptMemoryUsageCoverage(firstContract, {
+            task_agent_session_id: firstTaskSessionId,
+            native_session_id: firstNativeSessionId,
+            memoryUsed: [],
+            memoryIgnored: requiredDocs.map((relPath) => `${relPath}; usageState=ignored; reason=not relevant to the current task; historical repair completion is recovery evidence, not permanent repository truth`),
+        });
+        const badCoverage = postCompactReinjectionRepairReceiptMemoryUsageCoverage(firstContract, {
+            task_agent_session_id: firstTaskSessionId,
+            native_session_id: firstNativeSessionId,
+            memoryUsed: requiredDocs.map((relPath) => `${relPath}; usageState=verified`),
+            memoryIgnored: [],
+        });
+        const gaps = [];
+        if (firstRecall.active !== true || firstRecall.recalledThisTurn !== true)
+            gaps.push({ reason: "first fresh child session did not activate and recall post-compact repair receipt memory" });
+        if (secondRecall.active !== true || secondRecall.recalledThisTurn !== true)
+            gaps.push({ reason: "second fresh child session did not repeat recall after recall-ledger surfacing" });
+        if (firstBundle.session_binding?.task_agent_session_id !== firstTaskSessionId || secondBundle.session_binding?.task_agent_session_id !== secondTaskSessionId) {
+            gaps.push({ reason: "fresh child session task Agent bindings do not match requested session ids" });
+        }
+        if (firstBundle.session_binding?.binding_id === secondBundle.session_binding?.binding_id)
+            gaps.push({ reason: "repeat recall reused the same child session binding" });
+        for (const relPath of requiredDocs) {
+            if (!firstRecallText.includes(relPath) || !secondRecallText.includes(relPath))
+                gaps.push({ reason: `typed recall missing required post-compact receipt doc in one fresh session: ${relPath}` });
+            if (!firstPacketText.includes(relPath) || !secondPacketText.includes(relPath))
+                gaps.push({ reason: `WorkerContextPacket omitted required post-compact receipt doc: ${relPath}` });
+            if (!loadEntries.some((entry) => entry.relPath === relPath))
+                gaps.push({ reason: `typed MEMORY.md load plan missing required doc: ${relPath}` });
+        }
+        if (firstContract.schema !== "ccm-post-compact-reinjection-repair-receipt-memory-usage-contract-v1"
+            || secondContract.schema !== "ccm-post-compact-reinjection-repair-receipt-memory-usage-contract-v1") {
+            gaps.push({ reason: "fresh WorkerContextPacket missing post-compact repair receipt memory usage contract" });
+        }
+        if (firstContract.current_task_agent_session_id !== firstTaskSessionId
+            || secondContract.current_task_agent_session_id !== secondTaskSessionId
+            || firstContract.current_native_session_id !== firstNativeSessionId
+            || secondContract.current_native_session_id !== secondNativeSessionId) {
+            gaps.push({ reason: "memory usage contract not rebound to each fresh child/native session" });
+        }
+        if (!Array.isArray(firstContract.reinjection_gate_ids) || firstContract.reinjection_gate_ids.length === 0
+            || !Array.isArray(firstContract.post_compact_candidate_ids) || firstContract.post_compact_candidate_ids.length === 0) {
+            gaps.push({ reason: "memory usage contract missing historical gate/candidate identity" });
+        }
+        if (!/historical repair completion is recovery evidence, not permanent repository truth/i.test(firstPacketText)
+            || !/future use must reverify the current source/i.test(firstPacketText)) {
+            gaps.push({ reason: "WorkerContextPacket missing historical-evidence/current-source freshness boundary" });
+        }
+        if (!/memoryUsed/i.test(firstPacketText) || !/memoryIgnored/i.test(firstPacketText) || !/currentSourceVerified=true/i.test(firstPacketText)) {
+            gaps.push({ reason: "WorkerContextPacket missing memoryUsed/memoryIgnored/currentSourceVerified receipt instructions" });
+        }
+        if (firstPacket.acceptance?.post_compact_reinjection_repair_receipt_memory_usage_required !== true
+            || firstPacket.acceptance?.post_compact_reinjection_repair_receipt_memory_current_source_reverification_required !== true) {
+            gaps.push({ reason: "WorkerContextPacket acceptance missing post-compact receipt memory usage and current-source requirements" });
+        }
+        if (contractCategory.required !== true || Number(contractCategory.tokens || 0) <= 0) {
+            gaps.push({ reason: "context_usage missing required post-compact repair receipt memory contract category" });
+        }
+        if (goodCoverage.pass !== true || ignoredCoverage.pass !== true || badCoverage.pass === true) {
+            gaps.push({ reason: "post-compact receipt memory usage validator does not distinguish compliant used/ignored from stale unverified use" });
+        }
+        const status = gaps.length ? "fail" : "ok";
+        return {
+            schema: "ccm-post-compact-reinjection-repair-receipt-worker-context-recall-group-v1",
+            groupId,
+            status,
+            archivedReceiptCount: archivedCount,
+            requiredDocRelPaths: requiredDocs,
+            firstSessionRecalled: firstRecall.recalledThisTurn === true,
+            secondSessionRecalled: secondRecall.recalledThisTurn === true,
+            distinctSessionBindings: firstBundle.session_binding?.binding_id !== secondBundle.session_binding?.binding_id,
+            firstSessionContractBound: firstContract.current_task_agent_session_id === firstTaskSessionId
+                && firstContract.current_native_session_id === firstNativeSessionId,
+            secondSessionContractBound: secondContract.current_task_agent_session_id === secondTaskSessionId
+                && secondContract.current_native_session_id === secondNativeSessionId,
+            workerContextPacketCovered: requiredDocs.length > 0
+                && requiredDocs.every((relPath) => firstPacketText.includes(relPath) && secondPacketText.includes(relPath)),
+            freshnessBoundaryCovered: /historical repair completion is recovery evidence, not permanent repository truth/i.test(firstPacketText)
+                && /future use must reverify the current source/i.test(firstPacketText),
+            acceptanceRequiresUsage: firstPacket.acceptance?.post_compact_reinjection_repair_receipt_memory_usage_required === true,
+            contractUsageTokens: Number(contractCategory.tokens || 0),
+            goodCoverage,
+            ignoredCoverage,
+            badCoverage,
+            packet: {
+                first_packet_id: firstPacket.packet_id || "",
+                second_packet_id: secondPacket.packet_id || "",
+                first_task_agent_session_id: firstTaskSessionId,
+                second_task_agent_session_id: secondTaskSessionId,
+            },
+            gaps: gaps.slice(0, 16),
+        };
+    });
+    const checkedRows = rows.filter(row => Number(row.archivedReceiptCount || 0) > 0);
+    const passedRows = checkedRows.filter(row => row.status === "ok");
+    const coverageRate = checkedRows.length ? Math.round((passedRows.length / checkedRows.length) * 1000) / 10 : null;
+    const status = coverageRate === null ? "empty" : coverageRate >= 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail";
+    return {
+        schema: "ccm-post-compact-reinjection-repair-receipt-worker-context-recall-report-v1",
+        generatedAt: now(),
+        overall: {
+            status,
+            coverageRate,
+            groupCount: rows.length,
+            checkedGroupCount: checkedRows.length,
+            groupsCovered: passedRows.length,
+            archivedReceiptCount: checkedRows.reduce((sum, row) => sum + Number(row.archivedReceiptCount || 0), 0),
+            firstSessionRecallCount: checkedRows.filter(row => row.firstSessionRecalled === true).length,
+            secondSessionRecallCount: checkedRows.filter(row => row.secondSessionRecalled === true).length,
+            distinctSessionBindingCount: checkedRows.filter(row => row.distinctSessionBindings === true).length,
+            workerContextPacketCoveredCount: checkedRows.filter(row => row.workerContextPacketCovered === true).length,
+            freshnessBoundaryCoveredCount: checkedRows.filter(row => row.freshnessBoundaryCovered === true).length,
+            validatorCoveredCount: checkedRows.filter(row => row.goodCoverage?.pass === true && row.ignoredCoverage?.pass === true && row.badCoverage?.pass === false).length,
+            metadataGapCount: checkedRows.reduce((sum, row) => sum + Number((row.gaps || []).length), 0),
+        },
+        groups: rows.sort((a, b) => Number(b.archivedReceiptCount || 0) - Number(a.archivedReceiptCount || 0)).slice(0, 50),
+        weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn").slice(0, 20),
+    };
+}
+function evaluatePostCompactReinjectionRepairReceiptWorkerContextRecall(options = {}) {
+    const report = buildPostCompactReinjectionRepairReceiptWorkerContextRecallReport(options);
+    const checked = Number(report.overall.checkedGroupCount || 0);
+    const passed = Number(report.overall.groupsCovered || 0);
+    const evidence = (report.groups || []).filter((row) => row.status === "ok").slice(0, 12).map((row) => ({
+        groupId: row.groupId,
+        archivedReceiptCount: row.archivedReceiptCount,
+        firstSessionRecalled: row.firstSessionRecalled,
+        secondSessionRecalled: row.secondSessionRecalled,
+        distinctSessionBindings: row.distinctSessionBindings,
+        workerContextPacketCovered: row.workerContextPacketCovered,
+        contractUsageTokens: row.contractUsageTokens,
+    }));
+    const gaps = (report.weakGroups || []).flatMap((row) => (row.gaps || []).slice(0, 3).map((gap) => ({
+        groupId: row.groupId,
+        reason: gap.reason || "post-compact reinjection repair receipt worker context recall missing",
+    }))).slice(0, 12);
+    const check = makeQualityCheck("post_compact_reinjection_repair_receipt_worker_context_recall", "Post-Compact Reinjection Repair Receipt Worker Context Recall", checked, passed, evidence, gaps, "Relevant fresh child Agent sessions must repeatedly receive post-compact reinjection repair receipt typed memory in WorkerContextPacket, rebound to the new task/native session and requiring a new memoryUsed/memoryIgnored decision with current-source verification.");
+    check.report = report;
+    return check;
+}
+function isPostCompactReinjectionRepairReceiptMemoryUsageReceiptRepairSource(source) {
+    return String(source || "").trim() === "post_compact_reinjection_repair_receipt_memory_usage_receipt_repair";
+}
+function isPostCompactReinjectionRepairReceiptMemoryUsageReceiptRepairWorkItem(item = {}) {
+    return isPostCompactReinjectionRepairReceiptMemoryUsageReceiptRepairSource(item.source);
+}
+function completedPostCompactReinjectionRepairReceiptMemoryUsageRepair(groupId, entry = {}, contract = {}) {
+    const packetId = workerContextPacketBindingPacketId(entry);
+    const bindingId = String(entry.binding_id || entry.bindingId || "").trim();
+    const requiredDocs = uniqueStrings(normalizeQualityStringList(contract.memory_receipt_required_doc_rel_paths
+        || contract.memoryReceiptRequiredDocRelPaths
+        || contract.doc_rel_paths
+        || contract.docRelPaths
+        || []), 12);
+    const ledger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+    return (Array.isArray(ledger.items) ? ledger.items : []).find((item) => {
+        if (!isPostCompactReinjectionRepairReceiptMemoryUsageReceiptRepairWorkItem(item))
+            return false;
+        if (replayRepairWorkItemStatus(item.status) !== "completed")
+            return false;
+        if (item.post_compact_receipt_memory_usage_repair_receipt?.verified !== true)
+            return false;
+        if (packetId && String(item.original_worker_context_packet_id || item.worker_context_packet_id || "") !== packetId)
+            return false;
+        if (bindingId && String(item.original_binding_id || item.binding_id || "") !== bindingId)
+            return false;
+        const itemDocs = normalizeQualityStringList(item.post_compact_receipt_memory_required_doc_rel_paths || []);
+        return requiredDocs.every((relPath) => itemDocs.includes(relPath));
+    }) || null;
+}
+function postCompactReinjectionRepairReceiptMemoryUsageReceiptRow(groupId, entry = {}, options = {}) {
+    const contract = workerContextPacketPostCompactReinjectionRepairReceiptMemoryContract(entry) || {};
+    const packetId = workerContextPacketBindingPacketId(entry);
+    const project = workerContextPacketBindingProject(entry);
+    const sources = collectWorkerContextPacketReceiptSources(groupId, entry, options);
+    const matchingReceipts = sources.filter(source => workerContextPacketReceiptMatchesBinding(source, entry));
+    const candidateReceipts = matchingReceipts.length ? matchingReceipts : sources.filter(source => {
+        const receiptProject = String(source.project || source.agent || "").trim().toLowerCase();
+        return project && receiptProject && receiptProject === project.toLowerCase();
+    });
+    const coverages = candidateReceipts.map((source) => ({
+        source: source.source || "",
+        project: source.project || source.agent || "",
+        status: source.status || "",
+        worker_context_packet_id: source.worker_context_packet_id || "",
+        task_agent_session_id: source.task_agent_session_id || "",
+        native_session_id: source.native_session_id || "",
+        coverage: postCompactReinjectionRepairReceiptMemoryUsageCoverage(contract, source),
+        memoryUsed: source.memoryUsed || [],
+        memoryIgnored: source.memoryIgnored || [],
+    }));
+    const passing = coverages.find((row) => row.coverage?.pass === true) || null;
+    const coverage = passing?.coverage || coverages[0]?.coverage || postCompactReinjectionRepairReceiptMemoryUsageCoverage(contract, {});
+    const completedRepair = passing ? null : completedPostCompactReinjectionRepairReceiptMemoryUsageRepair(groupId, entry, contract);
+    const gaps = [];
+    if (!packetId)
+        gaps.push("worker_context_packet_id");
+    if (!candidateReceipts.length && !completedRepair)
+        gaps.push("child_agent_receipt");
+    else {
+        if (!completedRepair && !coverages.some((row) => row.coverage?.docsCovered === true))
+            gaps.push("receipt_required_docs");
+        if (!completedRepair && !coverages.some((row) => row.coverage?.usageCompliant === true))
+            gaps.push("receipt_usage_state_or_reverify");
+        if (!completedRepair && !coverages.some((row) => row.coverage?.historicalBoundaryCovered === true))
+            gaps.push("receipt_historical_boundary");
+        if (!completedRepair && !coverages.some((row) => row.coverage?.taskSessionMatched === true && row.coverage?.nativeSessionMatched === true))
+            gaps.push("receipt_session_binding");
+    }
+    return {
+        schema: "ccm-post-compact-reinjection-repair-receipt-memory-usage-receipt-row-v1",
+        entry,
+        groupId,
+        binding_id: entry.binding_id || entry.bindingId || "",
+        assignment_id: entry.assignment_id || entry.assignmentId || "",
+        packet_id: packetId,
+        project,
+        contractActive: contract.active === true,
+        requiredDocRelPaths: coverage.requiredDocRelPaths || [],
+        receiptCount: candidateReceipts.length,
+        matchingReceiptCount: matchingReceipts.length,
+        covered: passing !== null || !!completedRepair,
+        compliant: (passing !== null || !!completedRepair) && gaps.length === 0,
+        repairedByWorkItemId: completedRepair?.work_item_id || completedRepair?.id || "",
+        completedRepairReceipt: completedRepair?.post_compact_receipt_memory_usage_repair_receipt || null,
+        coverage,
+        coverages,
+        receipt: passing || coverages[0] || null,
+        gaps: [...new Set(gaps)],
+    };
+}
+function buildPostCompactReinjectionRepairReceiptMemoryUsageReceiptReport(options = {}) {
+    const groupIds = replayRepairDispatchBindingGroupIds(options);
+    const rows = groupIds.map((groupId) => {
+        const ledger = readGroupReplayRepairDispatchBindingLedger(groupId);
+        const entries = (Array.isArray(ledger.entries) ? ledger.entries : [])
+            .filter((entry) => workerContextPacketRequiresPostCompactReinjectionRepairReceiptMemoryUsage(entry));
+        const receiptRows = entries.map((entry) => postCompactReinjectionRepairReceiptMemoryUsageReceiptRow(groupId, entry, options));
+        const gapRows = receiptRows.filter((row) => row.compliant !== true);
+        const repairWorkItems = syncPostCompactReinjectionRepairReceiptMemoryUsageRepairWorkItems(groupId, gapRows, {
+            at: options.generatedAt || options.generated_at || now(),
+        });
+        const workLedger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+        const repairItems = (Array.isArray(workLedger.items) ? workLedger.items : [])
+            .filter(isPostCompactReinjectionRepairReceiptMemoryUsageReceiptRepairWorkItem);
+        const openRepairItems = repairItems.filter((item) => replayRepairWorkItemOpen(item.status));
+        const status = receiptRows.length === 0 ? "empty" : gapRows.length === 0 ? "ok" : gapRows.length < receiptRows.length ? "warn" : "fail";
+        return {
+            schema: "ccm-post-compact-reinjection-repair-receipt-memory-usage-receipt-group-v1",
+            groupId,
+            status,
+            file: ledger.file || getGroupReplayRepairDispatchBindingLedgerFile(groupId),
+            workItemsFile: repairWorkItems.file || workLedger.file || getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId),
+            receiptContractCount: receiptRows.length,
+            coveredReceiptCount: receiptRows.filter((row) => row.covered === true).length,
+            compliantReceiptCount: receiptRows.filter((row) => row.compliant === true).length,
+            missingReceiptCoverageCount: gapRows.length,
+            missingReceiptCount: receiptRows.filter((row) => row.gaps.includes("child_agent_receipt")).length,
+            missingDocCoverageCount: receiptRows.filter((row) => row.gaps.includes("receipt_required_docs")).length,
+            missingUsageOrReverifyCount: receiptRows.filter((row) => row.gaps.includes("receipt_usage_state_or_reverify")).length,
+            missingBoundaryCount: receiptRows.filter((row) => row.gaps.includes("receipt_historical_boundary")).length,
+            sessionMismatchCount: receiptRows.filter((row) => row.gaps.includes("receipt_session_binding")).length,
+            repairedReceiptCount: receiptRows.filter((row) => !!row.repairedByWorkItemId).length,
+            repairItemCount: repairItems.length,
+            openRepairItemCount: openRepairItems.length,
+            receipts: receiptRows.slice(-12).reverse().map((row) => ({
+                binding_id: row.binding_id || "",
+                assignment_id: row.assignment_id || "",
+                packet_id: row.packet_id || "",
+                project: row.project || "",
+                receipt_source: row.receipt?.source || "",
+                receipt_status: row.receipt?.status || "",
+                task_agent_session_id: row.receipt?.task_agent_session_id || "",
+                native_session_id: row.receipt?.native_session_id || "",
+                requiredDocRelPaths: row.requiredDocRelPaths || [],
+                covered: row.covered === true,
+                compliant: row.compliant === true,
+                repairedByWorkItemId: row.repairedByWorkItemId || "",
+                memoryUsed: row.receipt?.memoryUsed || [],
+                memoryIgnored: row.receipt?.memoryIgnored || [],
+                coverage: row.coverage,
+                gaps: row.gaps || [],
+            })),
+            gaps: gapRows.slice(0, 8).map((row) => ({
+                binding_id: row.binding_id || "",
+                assignment_id: row.assignment_id || "",
+                packet_id: row.packet_id || "",
+                project: row.project || "",
+                requiredDocRelPaths: row.requiredDocRelPaths || [],
+                reason: `post-compact reinjection repair receipt memory usage gaps: ${(row.gaps || []).join(",")}`,
+                gaps: row.gaps || [],
+            })),
+        };
+    });
+    const checkedRows = rows.filter(row => Number(row.receiptContractCount || 0) > 0);
+    const receiptContractCount = checkedRows.reduce((sum, row) => sum + Number(row.receiptContractCount || 0), 0);
+    const compliantReceiptCount = checkedRows.reduce((sum, row) => sum + Number(row.compliantReceiptCount || 0), 0);
+    const coverageRate = receiptContractCount ? Math.round((compliantReceiptCount / receiptContractCount) * 1000) / 10 : null;
+    const status = coverageRate === null ? "empty" : coverageRate >= 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail";
+    return {
+        schema: "ccm-post-compact-reinjection-repair-receipt-memory-usage-receipt-report-v1",
+        generatedAt: now(),
+        overall: {
+            status,
+            coverageRate,
+            groupCount: rows.length,
+            checkedGroupCount: checkedRows.length,
+            groupsCovered: checkedRows.filter(row => row.status === "ok").length,
+            receiptContractCount,
+            coveredReceiptCount: compliantReceiptCount,
+            missingReceiptCoverageCount: Math.max(0, receiptContractCount - compliantReceiptCount),
+            missingReceiptCount: checkedRows.reduce((sum, row) => sum + Number(row.missingReceiptCount || 0), 0),
+            missingDocCoverageCount: checkedRows.reduce((sum, row) => sum + Number(row.missingDocCoverageCount || 0), 0),
+            missingUsageOrReverifyCount: checkedRows.reduce((sum, row) => sum + Number(row.missingUsageOrReverifyCount || 0), 0),
+            missingBoundaryCount: checkedRows.reduce((sum, row) => sum + Number(row.missingBoundaryCount || 0), 0),
+            sessionMismatchCount: checkedRows.reduce((sum, row) => sum + Number(row.sessionMismatchCount || 0), 0),
+            repairedReceiptCount: checkedRows.reduce((sum, row) => sum + Number(row.repairedReceiptCount || 0), 0),
+            repairItemCount: checkedRows.reduce((sum, row) => sum + Number(row.repairItemCount || 0), 0),
+            openRepairItemCount: checkedRows.reduce((sum, row) => sum + Number(row.openRepairItemCount || 0), 0),
+            metadataGapCount: checkedRows.reduce((sum, row) => sum + Number(row.missingReceiptCoverageCount || 0), 0),
+        },
+        groups: rows.sort((a, b) => Number(b.receiptContractCount || 0) - Number(a.receiptContractCount || 0)).slice(0, 50),
+        weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn").slice(0, 20),
+    };
+}
+function evaluatePostCompactReinjectionRepairReceiptMemoryUsageReceipt(options = {}) {
+    const report = buildPostCompactReinjectionRepairReceiptMemoryUsageReceiptReport(options);
+    const checked = Number(report.overall.receiptContractCount || 0);
+    const passed = Number(report.overall.coveredReceiptCount || 0);
+    const evidence = (report.groups || []).flatMap((row) => (row.receipts || [])
+        .filter((receipt) => receipt.compliant === true)
+        .map((receipt) => ({
+        groupId: row.groupId,
+        binding_id: receipt.binding_id || "",
+        packet_id: receipt.packet_id || "",
+        project: receipt.project || "",
+        requiredDocRelPaths: receipt.requiredDocRelPaths || [],
+        receipt_source: receipt.receipt_source || "",
+    }))).slice(0, 12);
+    const gaps = (report.weakGroups || []).flatMap((row) => (row.gaps || []).slice(0, 3).map((gap) => ({
+        groupId: row.groupId,
+        reason: gap.reason || "post-compact reinjection repair receipt memory usage receipt missing",
+        binding_id: gap.binding_id || "",
+        assignment_id: gap.assignment_id || "",
+        packet_id: gap.packet_id || "",
+        project: gap.project || "",
+    }))).slice(0, 12);
+    const check = makeQualityCheck("post_compact_reinjection_repair_receipt_memory_usage_receipt", "Post-Compact Reinjection Repair Receipt Memory Usage Receipt", checked, passed, evidence, gaps, "After post-compact reinjection repair receipt typed memory is injected, the bound child Agent receipt must cover every surfaced doc in memoryUsed or memoryIgnored, reverify current source for used/verified memory, explain ignored memory, preserve the historical-evidence boundary, and match the new task/native session.");
+    check.report = report;
+    return check;
+}
+function buildPostCompactReinjectionRepairReceiptMemoryUsageRepairWorkItem(groupId, row = {}, index = 0, existing = {}, at = now()) {
+    const entry = row.entry || {};
+    const contract = workerContextPacketPostCompactReinjectionRepairReceiptMemoryContract(entry) || {};
+    const packetId = String(row.packet_id || workerContextPacketBindingPacketId(entry) || "").trim();
+    const bindingId = String(row.binding_id || entry.binding_id || entry.bindingId || "").trim();
+    const assignmentId = String(row.assignment_id || entry.assignment_id || entry.assignmentId || "").trim();
+    const dispatchKey = String(entry.dispatch_key || entry.dispatchKey || "").trim();
+    const targetProject = String(row.project || workerContextPacketBindingProject(entry) || "").trim();
+    const requiredDocRelPaths = uniqueStrings(normalizeQualityStringList(row.requiredDocRelPaths
+        || row.required_doc_rel_paths
+        || row.coverage?.requiredDocRelPaths
+        || contract.memory_receipt_required_doc_rel_paths
+        || []), 12);
+    const missingDocRelPaths = uniqueStrings(normalizeQualityStringList(row.coverage?.missingDocRelPaths || []), 12);
+    const missingCurrentSourceVerifiedDocRelPaths = uniqueStrings(normalizeQualityStringList(row.coverage?.missingCurrentSourceVerifiedDocRelPaths || []), 12);
+    const missingIgnoredReasonDocRelPaths = uniqueStrings(normalizeQualityStringList(row.coverage?.missingIgnoredReasonDocRelPaths || []), 12);
+    const gapCodes = uniqueStrings((Array.isArray(row.gaps) ? row.gaps : []).map((item) => String(item || "").trim()).filter(Boolean), 12);
+    const originalTaskAgentSessionId = String(contract.current_task_agent_session_id || contract.currentTaskAgentSessionId || entry.task_agent_session_id || "").trim();
+    const originalNativeSessionId = String(contract.current_native_session_id || contract.currentNativeSessionId || entry.native_session_id || "").trim();
+    const id = `post-compact-receipt-memory-usage-repair:${hash([
+        groupId,
+        bindingId,
+        packetId,
+        requiredDocRelPaths,
+        gapCodes,
+    ], 16)}`;
+    const previousStatus = replayRepairWorkItemStatus(existing.status);
+    const status = previousStatus === "completed"
+        ? "completed"
+        : ["in_progress", "blocked"].includes(previousStatus) ? previousStatus : "pending";
+    const reason = compactMemoryCenterText(`post-compact repair receipt memory usage gaps: ${gapCodes.join(",") || "missing_memory_usage_receipt"}`, 420);
+    const promptPatch = [
+        "Post-compact reinjection repair receipt memory usage corrected-receipt task:",
+        `- group=${groupId}`,
+        targetProject ? `- target_project=${targetProject}` : "",
+        packetId ? `- original_worker_context_packet_id=${packetId}` : "",
+        bindingId ? `- original_binding_id=${bindingId}` : "",
+        originalTaskAgentSessionId ? `- original_task_agent_session_id=${originalTaskAgentSessionId}` : "",
+        originalNativeSessionId ? `- original_native_session_id=${originalNativeSessionId}` : "",
+        requiredDocRelPaths.length ? `- required_memory_docs=${requiredDocRelPaths.join(",")}` : "",
+        missingDocRelPaths.length ? `- missing_memory_docs=${missingDocRelPaths.join(",")}` : "",
+        missingCurrentSourceVerifiedDocRelPaths.length ? `- missing_current_source_verified_docs=${missingCurrentSourceVerifiedDocRelPaths.join(",")}` : "",
+        missingIgnoredReasonDocRelPaths.length ? `- missing_ignored_reason_docs=${missingIgnoredReasonDocRelPaths.join(",")}` : "",
+        gapCodes.length ? `- gaps=${gapCodes.join(",")}` : "",
+        "- Return a corrected CCM_AGENT_RECEIPT for the newly bound repair session.",
+        "- memoryUsed must cite every used/verified required doc with usageState and currentSourceVerified=true.",
+        "- memoryIgnored must cite every ignored required doc with usageState=ignored and reason.",
+        "- State: historical repair completion is recovery evidence, not permanent repository truth.",
+        "- replayRepairDispatchBriefUsage must cite this brief_id/work_item_id as verified.",
+        "- Do not reuse the original task/native session ids as the new repair-session identity.",
+    ].filter(Boolean).join("\n");
+    return {
+        id,
+        work_item_id: id,
+        taskId: assignmentId,
+        scopeId: groupId,
+        group_id: groupId,
+        subject: "补齐 post-compact repair receipt memory 使用回执",
+        description: reason,
+        activeForm: compactMemoryCenterText(`补齐 post-compact memoryUsed/memoryIgnored：${targetProject || packetId || "worker"}`, 180),
+        owner: existing.owner && previousStatus !== "pending" ? existing.owner : "group-main-agent",
+        target: compactMemoryCenterText(targetProject || "memory-context", 120),
+        agentType: "group-main-agent",
+        status,
+        priority: gapCodes.includes("child_agent_receipt") || gapCodes.includes("receipt_session_binding") ? "critical" : "high",
+        component: "post_compact_reinjection_repair_receipt_memory_usage_contract",
+        source: "post_compact_reinjection_repair_receipt_memory_usage_receipt_repair",
+        source_action_id: `post-compact-receipt-memory-usage:${bindingId || packetId || index}`,
+        repair_target: packetId || bindingId || "worker_context_packet",
+        instruction: compactMemoryCenterText(promptPatch, 1800),
+        expected: "A corrected CCM_AGENT_RECEIPT from the newly bound repair session covers every required receipt MEMORY.md with fresh verification or an ignored reason.",
+        source_reason: reason,
+        replay_status: "post_compact_receipt_memory_usage_gap",
+        target_project: targetProject,
+        dispatch_target: targetProject,
+        original_worker_context_packet_id: packetId,
+        original_binding_id: bindingId,
+        original_assignment_id: assignmentId,
+        original_dispatch_key: dispatchKey,
+        original_task_agent_session_id: originalTaskAgentSessionId,
+        original_native_session_id: originalNativeSessionId,
+        worker_context_packet_id: packetId,
+        worker_context_packet_binding_id: bindingId,
+        binding_id: bindingId,
+        assignment_id: assignmentId,
+        dispatch_key: dispatchKey,
+        post_compact_receipt_memory_gap_codes: gapCodes,
+        post_compact_receipt_memory_required_doc_rel_paths: requiredDocRelPaths,
+        post_compact_receipt_memory_missing_doc_rel_paths: missingDocRelPaths,
+        post_compact_receipt_memory_missing_current_source_verified_doc_rel_paths: missingCurrentSourceVerifiedDocRelPaths,
+        post_compact_receipt_memory_missing_ignored_reason_doc_rel_paths: missingIgnoredReasonDocRelPaths,
+        prompt_patch: compactMemoryCenterText(promptPatch, 2400),
+        dispatch_hint: {
+            claim_policy: "group_main_agent_before_child_dispatch",
+            next_step: "request_new_session_corrected_memory_usage_receipt",
+            should_create_real_task: false,
+            reason: "Memory Center diagnostic sidecar; only the group main Agent may dispatch the real corrected-receipt task.",
+        },
+        raw_recovery: {
+            rule: "post_compact_reinjection_repair_receipt_memory_usage_receipt",
+            gaps: gapCodes,
+            requiredDocRelPaths,
+            originalTaskAgentSessionId,
+            originalNativeSessionId,
+        },
+        evidence: [
+            packetId ? `original_worker_context_packet_id=${packetId}` : "",
+            bindingId ? `original_binding_id=${bindingId}` : "",
+            requiredDocRelPaths.length ? `required_memory_docs=${requiredDocRelPaths.join(";")}` : "",
+            reason,
+        ].filter(Boolean),
+        verification: [
+            "重新运行 post_compact_reinjection_repair_receipt_memory_usage_receipt",
+            "确认 corrected receipt 覆盖 required docs、fresh current source、historical boundary 和新 session binding",
+        ],
+        blockers: [],
+        needs: ["子 Agent 在新 repair session 中返回 corrected CCM_AGENT_RECEIPT"],
+        createdAt: existing.createdAt || existing.created_at || at,
+        updatedAt: existing.updatedAt || existing.updated_at || at,
+        lastSeenAt: existing.lastSeenAt || existing.last_seen_at || at,
+        completedAt: existing.completedAt || existing.completed_at || "",
+        seenCount: Math.max(1, Number(existing.seenCount || existing.seen_count || 1) || 1),
+    };
+}
+function syncPostCompactReinjectionRepairReceiptMemoryUsageRepairWorkItems(groupId, gapRows = [], options = {}) {
+    if (!groupId)
+        return summarizeReplayRepairPendingWorkItems(groupId);
+    const at = String(options.at || now());
+    const ledger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+    const previousItems = Array.isArray(ledger.items) ? ledger.items : [];
+    const previousById = new Map(previousItems.map((item) => [String(item.id || item.work_item_id || ""), item]));
+    const currentIds = new Set();
+    const nextRepairItems = [];
+    let changed = false;
+    for (const [index, row] of gapRows.entries()) {
+        const draft = buildPostCompactReinjectionRepairReceiptMemoryUsageRepairWorkItem(groupId, row, index, {}, at);
+        const existing = previousById.get(draft.id) || {};
+        let item = buildPostCompactReinjectionRepairReceiptMemoryUsageRepairWorkItem(groupId, row, index, existing, at);
+        const same = existing.id && replayRepairWorkItemSignature(existing) === replayRepairWorkItemSignature(item);
+        if (same) {
+            item = {
+                ...existing,
+                ...item,
+                createdAt: existing.createdAt || item.createdAt,
+                updatedAt: existing.updatedAt || item.updatedAt,
+                lastSeenAt: existing.lastSeenAt || item.lastSeenAt,
+                seenCount: Number(existing.seenCount || 1),
+            };
+        }
+        else {
+            item = {
+                ...item,
+                updatedAt: at,
+                lastSeenAt: at,
+                seenCount: existing.id ? Number(existing.seenCount || 1) + 1 : 1,
+            };
+            changed = true;
+        }
+        currentIds.add(item.id);
+        nextRepairItems.push(item);
+    }
+    const untouchedItems = [];
+    for (const existing of previousItems) {
+        const id = String(existing.id || existing.work_item_id || "");
+        if (!isPostCompactReinjectionRepairReceiptMemoryUsageReceiptRepairWorkItem(existing)) {
+            untouchedItems.push(existing);
+            continue;
+        }
+        if (!id || currentIds.has(id))
+            continue;
+        if (!replayRepairWorkItemOpen(existing.status)) {
+            nextRepairItems.push(existing);
+            continue;
+        }
+        nextRepairItems.push({
+            ...existing,
+            status: "completed",
+            updatedAt: at,
+            completedAt: existing.completedAt || at,
+            resolutionReason: "post_compact_receipt_memory_usage_directly_compliant",
+            completion_source: "post_compact_receipt_memory_usage_report",
+        });
+        changed = true;
+    }
+    const nextItems = [...untouchedItems, ...nextRepairItems]
+        .sort((a, b) => {
+        const openRank = replayRepairWorkItemOpen(a.status) === replayRepairWorkItemOpen(b.status) ? 0 : replayRepairWorkItemOpen(a.status) ? -1 : 1;
+        if (openRank)
+            return openRank;
+        const priority = replayRepairPriorityRank(a.priority) - replayRepairPriorityRank(b.priority);
+        if (priority)
+            return priority;
+        return String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""));
+    })
+        .slice(0, 160);
+    const nextLedger = {
+        ...ledger,
+        latestPostCompactReceiptMemoryUsageRepair: {
+            gapCount: gapRows.length,
+            packetIds: gapRows.map((row) => row.packet_id || "").filter(Boolean).slice(0, 20),
+        },
+        items: nextItems,
+        stats: replayRepairWorkItemStats(nextItems),
+        updatedAt: changed || !ledger.updatedAt ? at : ledger.updatedAt,
+    };
+    const currentComparable = JSON.stringify(previousItems.filter(isPostCompactReinjectionRepairReceiptMemoryUsageReceiptRepairWorkItem));
+    const nextComparable = JSON.stringify(nextItems.filter(isPostCompactReinjectionRepairReceiptMemoryUsageReceiptRepairWorkItem));
+    if (changed || currentComparable !== nextComparable || !fs.existsSync(ledger.file || getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId))) {
+        return summarizeReplayRepairPendingWorkItems(groupId, writeGroupCompactBoundaryReplayRepairWorkItems(groupId, nextLedger));
+    }
+    return summarizeReplayRepairPendingWorkItems(groupId, ledger);
+}
+function buildPostCompactReinjectionRepairReceiptMemoryUsageRepairWorkItemReport(options = {}) {
+    const receiptReport = options.receiptReport || options.receipt_report || buildPostCompactReinjectionRepairReceiptMemoryUsageReceiptReport(options);
+    const rows = (receiptReport.groups || []).map((group) => {
+        const groupId = String(group.groupId || "");
+        const ledger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+        const items = (Array.isArray(ledger.items) ? ledger.items : []).filter(isPostCompactReinjectionRepairReceiptMemoryUsageReceiptRepairWorkItem);
+        const openItems = items.filter((item) => replayRepairWorkItemOpen(item.status));
+        const expectedGaps = Array.isArray(group.gaps) ? group.gaps : [];
+        const openByPacket = new Map(openItems.map((item) => [String(item.original_worker_context_packet_id || item.worker_context_packet_id || ""), item]));
+        const missing = expectedGaps.filter((gap) => !openByPacket.has(String(gap.packet_id || "")));
+        const status = expectedGaps.length === 0 ? openItems.length ? "warn" : "empty" : missing.length ? "fail" : "ok";
+        return {
+            schema: "ccm-post-compact-reinjection-repair-receipt-memory-usage-repair-work-item-group-v1",
+            groupId,
+            status,
+            file: ledger.file || getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId),
+            expectedRepairItemCount: expectedGaps.length,
+            coveredRepairItemCount: Math.max(0, expectedGaps.length - missing.length),
+            repairItemCount: items.length,
+            openRepairItemCount: openItems.length,
+            completedRepairItemCount: items.filter((item) => replayRepairWorkItemStatus(item.status) === "completed").length,
+            items: items.slice(0, 12),
+            gaps: missing.slice(0, 8).map((gap) => ({
+                packet_id: gap.packet_id || "",
+                binding_id: gap.binding_id || "",
+                reason: "post-compact receipt memory usage gap missing repair work item",
+            })),
+        };
+    });
+    const required = rows.filter(row => Number(row.expectedRepairItemCount || 0) > 0);
+    const passed = required.filter(row => row.status === "ok");
+    const coverageRate = required.length ? Math.round((passed.length / required.length) * 1000) / 10 : null;
+    return {
+        schema: "ccm-post-compact-reinjection-repair-receipt-memory-usage-repair-work-item-report-v1",
+        generatedAt: now(),
+        overall: {
+            status: coverageRate === null ? "empty" : coverageRate === 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail",
+            coverageRate,
+            groupCount: rows.length,
+            groupsNeedingRepairItems: required.length,
+            groupsCovered: passed.length,
+            expectedRepairItemCount: rows.reduce((sum, row) => sum + Number(row.expectedRepairItemCount || 0), 0),
+            coveredRepairItemCount: rows.reduce((sum, row) => sum + Number(row.coveredRepairItemCount || 0), 0),
+            openRepairItemCount: rows.reduce((sum, row) => sum + Number(row.openRepairItemCount || 0), 0),
+        },
+        groups: rows,
+        weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn"),
+    };
+}
+function evaluatePostCompactReinjectionRepairReceiptMemoryUsageRepairWorkItems(options = {}) {
+    const report = buildPostCompactReinjectionRepairReceiptMemoryUsageRepairWorkItemReport(options);
+    const checked = Number(report.overall.groupsNeedingRepairItems || 0);
+    const passed = Number(report.overall.groupsCovered || 0);
+    const evidence = (report.groups || []).filter((row) => row.status === "ok").slice(0, 12).map((row) => ({
+        groupId: row.groupId,
+        expectedRepairItemCount: row.expectedRepairItemCount,
+        coveredRepairItemCount: row.coveredRepairItemCount,
+        openRepairItemCount: row.openRepairItemCount,
+        file: row.file,
+    }));
+    const gaps = (report.weakGroups || []).flatMap((row) => (row.gaps || []).map((gap) => ({ groupId: row.groupId, ...gap }))).slice(0, 12);
+    const check = makeQualityCheck("post_compact_reinjection_repair_receipt_memory_usage_repair_work_items", "Post-Compact Reinjection Repair Receipt Memory Usage Repair Work Items", checked, passed, evidence, gaps, "Noncompliant post-compact repair receipt memory usage must become an idempotent group-main-Agent repair work item carrying original packet/session identity and every required MEMORY.md relPath.");
+    check.report = report;
+    return check;
+}
+function postCompactReceiptMemoryUsageRepairCandidateMetadataGaps(item = {}, candidate = {}) {
+    const gaps = [];
+    if (!candidate?.work_item_id)
+        return ["candidate_missing"];
+    if (!isPostCompactReinjectionRepairReceiptMemoryUsageReceiptRepairSource(candidate.source))
+        gaps.push("source");
+    if (candidate.component !== "post_compact_reinjection_repair_receipt_memory_usage_contract")
+        gaps.push("component");
+    if (candidate.shouldCreateRealTask !== false && candidate.should_create_real_task !== false)
+        gaps.push("should_create_real_task_false");
+    for (const field of ["worker_context_packet_id", "binding_id", "assignment_id", "dispatch_key", "original_worker_context_packet_id", "original_binding_id", "original_task_agent_session_id", "original_native_session_id"]) {
+        const expected = String(item[field] || "").trim();
+        if (expected && String(candidate[field] || "").trim() !== expected)
+            gaps.push(field);
+    }
+    const requiredDocs = normalizeQualityStringList(item.post_compact_receipt_memory_required_doc_rel_paths || []);
+    const candidateDocs = normalizeQualityStringList(candidate.post_compact_receipt_memory_required_doc_rel_paths || []);
+    for (const relPath of requiredDocs)
+        if (!candidateDocs.includes(relPath))
+            gaps.push("required_doc_rel_paths");
+    const text = [candidate.instruction, candidate.expected, candidate.prompt_patch].join("\n");
+    if (!/memoryUsed/i.test(text))
+        gaps.push("memoryUsed_prompt");
+    if (!/memoryIgnored/i.test(text))
+        gaps.push("memoryIgnored_prompt");
+    if (!/currentSourceVerified=true/i.test(text))
+        gaps.push("currentSourceVerified_prompt");
+    if (!/historical repair completion is recovery evidence, not permanent repository truth/i.test(text))
+        gaps.push("freshness_boundary");
+    if (!/newly bound repair session|new repair session|新 repair session/i.test(text))
+        gaps.push("new_session_boundary");
+    return [...new Set(gaps)];
+}
+function buildPostCompactReinjectionRepairReceiptMemoryUsageRepairDispatchCandidateReport(options = {}) {
+    const workItemReport = options.workItemReport || options.work_item_report || buildPostCompactReinjectionRepairReceiptMemoryUsageRepairWorkItemReport(options);
+    const rows = (workItemReport.groups || []).map((workGroup) => {
+        const groupId = String(workGroup.groupId || "");
+        const ledger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+        const items = (Array.isArray(ledger.items) ? ledger.items : []).filter(isPostCompactReinjectionRepairReceiptMemoryUsageReceiptRepairWorkItem);
+        const openItems = items.filter((item) => replayRepairWorkItemOpen(item.status));
+        const summary = buildReplayRepairMainAgentDispatchCandidates(groupId, { ledger, limit: Math.max(12, openItems.length + 4) });
+        const candidates = (summary.candidates || []).filter((candidate) => isPostCompactReinjectionRepairReceiptMemoryUsageReceiptRepairSource(candidate.source));
+        const candidateByWorkId = new Map(candidates.map((candidate) => [String(candidate.work_item_id || ""), candidate]));
+        const missing = openItems.filter((item) => !candidateByWorkId.has(String(item.work_item_id || item.id || "")));
+        const metadataGaps = openItems.map((item) => {
+            const candidate = candidateByWorkId.get(String(item.work_item_id || item.id || "")) || null;
+            return { work_item_id: item.work_item_id || item.id || "", candidate_id: candidate?.candidate_id || "", gaps: postCompactReceiptMemoryUsageRepairCandidateMetadataGaps(item, candidate) };
+        }).filter((row) => row.gaps.length);
+        const status = openItems.length === 0 ? "empty" : missing.length ? "fail" : metadataGaps.length ? "warn" : "ok";
+        return {
+            schema: "ccm-post-compact-reinjection-repair-receipt-memory-usage-repair-dispatch-candidate-group-v1",
+            groupId,
+            status,
+            file: summary.file || ledger.file,
+            expectedCandidateCount: openItems.length,
+            coveredCandidateCount: Math.max(0, openItems.length - missing.length),
+            candidateCount: candidates.length,
+            metadataGapCount: metadataGaps.length,
+            candidates: candidates.slice(0, 12),
+            gaps: [
+                ...missing.map((item) => ({ work_item_id: item.work_item_id || item.id || "", reason: "repair work item missing main-Agent dispatch candidate" })),
+                ...metadataGaps.map((gap) => ({ ...gap, reason: `dispatch candidate missing fields: ${gap.gaps.join(",")}` })),
+            ].slice(0, 12),
+        };
+    });
+    const required = rows.filter(row => Number(row.expectedCandidateCount || 0) > 0);
+    const passed = required.filter(row => row.status === "ok");
+    const coverageRate = required.length ? Math.round((passed.length / required.length) * 1000) / 10 : null;
+    return {
+        schema: "ccm-post-compact-reinjection-repair-receipt-memory-usage-repair-dispatch-candidate-report-v1",
+        generatedAt: now(),
+        overall: {
+            status: coverageRate === null ? "empty" : coverageRate === 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail",
+            coverageRate,
+            groupsNeedingCandidates: required.length,
+            groupsCovered: passed.length,
+            expectedCandidateCount: rows.reduce((sum, row) => sum + Number(row.expectedCandidateCount || 0), 0),
+            coveredCandidateCount: rows.reduce((sum, row) => sum + Number(row.coveredCandidateCount || 0), 0),
+            metadataGapCount: rows.reduce((sum, row) => sum + Number(row.metadataGapCount || 0), 0),
+        },
+        groups: rows,
+        weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn"),
+    };
+}
+function evaluatePostCompactReinjectionRepairReceiptMemoryUsageRepairDispatchCandidates(options = {}) {
+    const report = buildPostCompactReinjectionRepairReceiptMemoryUsageRepairDispatchCandidateReport(options);
+    const checked = Number(report.overall.groupsNeedingCandidates || 0);
+    const passed = Number(report.overall.groupsCovered || 0);
+    const evidence = (report.groups || []).filter((row) => row.status === "ok").slice(0, 12).map((row) => ({ groupId: row.groupId, expectedCandidateCount: row.expectedCandidateCount, coveredCandidateCount: row.coveredCandidateCount, file: row.file }));
+    const gaps = (report.weakGroups || []).flatMap((row) => (row.gaps || []).map((gap) => ({ groupId: row.groupId, ...gap }))).slice(0, 12);
+    const check = makeQualityCheck("post_compact_reinjection_repair_receipt_memory_usage_repair_dispatch_candidates", "Post-Compact Reinjection Repair Receipt Memory Usage Repair Dispatch Candidates", checked, passed, evidence, gaps, "Every open post-compact receipt-memory usage repair item must become a group-main-Agent dispatch candidate preserving required docs, original evidence sessions and new-session corrected-receipt rules.");
+    check.report = report;
+    return check;
+}
+function postCompactReceiptMemoryUsageRepairBriefMetadataGaps(candidate = {}, brief = {}) {
+    const gaps = replayRepairDispatchBriefMetadataGaps(candidate, brief);
+    if (!brief?.brief_id)
+        return gaps;
+    if (!isPostCompactReinjectionRepairReceiptMemoryUsageReceiptRepairSource(brief.source))
+        gaps.push("source");
+    for (const field of ["original_worker_context_packet_id", "original_binding_id", "original_task_agent_session_id", "original_native_session_id"]) {
+        const expected = String(candidate[field] || "").trim();
+        if (expected && String(brief[field] || "").trim() !== expected)
+            gaps.push(field);
+    }
+    const requiredDocs = normalizeQualityStringList(candidate.post_compact_receipt_memory_required_doc_rel_paths || []);
+    const briefDocs = normalizeQualityStringList(brief.post_compact_receipt_memory_required_doc_rel_paths || []);
+    const workerTask = String(brief.worker_task || "");
+    for (const relPath of requiredDocs) {
+        if (!briefDocs.includes(relPath))
+            gaps.push("required_doc_rel_paths");
+        if (!workerTask.includes(relPath))
+            gaps.push("worker_task_required_doc");
+    }
+    if (!/memoryUsed/i.test(workerTask))
+        gaps.push("worker_task_memoryUsed");
+    if (!/memoryIgnored/i.test(workerTask))
+        gaps.push("worker_task_memoryIgnored");
+    if (!/currentSourceVerified=true/i.test(workerTask))
+        gaps.push("worker_task_currentSourceVerified");
+    if (!/historical repair completion is recovery evidence, not permanent repository truth/i.test(workerTask))
+        gaps.push("worker_task_freshness_boundary");
+    if (!/replayRepairDispatchBriefUsage/i.test(workerTask))
+        gaps.push("worker_task_brief_usage");
+    return [...new Set(gaps)];
+}
+function buildPostCompactReinjectionRepairReceiptMemoryUsageRepairDispatchBriefReport(options = {}) {
+    const candidateReport = options.candidateReport || options.candidate_report || buildPostCompactReinjectionRepairReceiptMemoryUsageRepairDispatchCandidateReport(options);
+    const rows = (candidateReport.groups || []).map((candidateGroup) => {
+        const groupId = String(candidateGroup.groupId || "");
+        const candidates = (candidateGroup.candidates || []).filter((candidate) => isPostCompactReinjectionRepairReceiptMemoryUsageReceiptRepairSource(candidate.source));
+        const summary = { schema: "ccm-replay-repair-main-agent-dispatch-candidates-v1", groupId, file: candidateGroup.file || "", updatedAt: "", candidateCount: candidates.length, openItemCount: candidates.length, readyCount: candidates.length, dispatchMarkedCount: candidates.length, shouldCreateRealTask: false, candidates };
+        const ledger = syncReplayRepairDispatchPlanLedgerForCenter(groupId, summary, options);
+        const briefs = (Array.isArray(ledger.briefs) ? ledger.briefs : []).filter((brief) => String(brief.status || "") === "ready" && isPostCompactReinjectionRepairReceiptMemoryUsageReceiptRepairSource(brief.source));
+        const briefByWorkId = new Map(briefs.map((brief) => [String(brief.work_item_id || ""), brief]));
+        const missing = candidates.filter((candidate) => !briefByWorkId.has(String(candidate.work_item_id || "")));
+        const metadataGaps = candidates.map((candidate) => {
+            const brief = briefByWorkId.get(String(candidate.work_item_id || "")) || null;
+            return { work_item_id: candidate.work_item_id || "", candidate_id: candidate.candidate_id || "", brief_id: brief?.brief_id || "", gaps: postCompactReceiptMemoryUsageRepairBriefMetadataGaps(candidate, brief) };
+        }).filter((row) => row.gaps.length);
+        const status = candidates.length === 0 ? "empty" : missing.length ? "fail" : metadataGaps.length ? "warn" : "ok";
+        return {
+            schema: "ccm-post-compact-reinjection-repair-receipt-memory-usage-repair-dispatch-brief-group-v1",
+            groupId,
+            status,
+            file: ledger.file || "",
+            expectedBriefCount: candidates.length,
+            coveredBriefCount: Math.max(0, candidates.length - missing.length),
+            readyBriefCount: briefs.length,
+            metadataGapCount: metadataGaps.length,
+            shouldCreateRealTask: ledger.shouldCreateRealTask === false || ledger.should_create_real_task === false,
+            briefs: briefs.slice(0, 12),
+            gaps: [
+                ...missing.map((candidate) => ({ work_item_id: candidate.work_item_id || "", candidate_id: candidate.candidate_id || "", reason: "dispatch candidate missing corrected-receipt brief" })),
+                ...metadataGaps.map((gap) => ({ ...gap, reason: `dispatch brief missing fields: ${gap.gaps.join(",")}` })),
+            ].slice(0, 12),
+        };
+    });
+    const required = rows.filter(row => Number(row.expectedBriefCount || 0) > 0);
+    const passed = required.filter(row => row.status === "ok");
+    const coverageRate = required.length ? Math.round((passed.length / required.length) * 1000) / 10 : null;
+    return {
+        schema: "ccm-post-compact-reinjection-repair-receipt-memory-usage-repair-dispatch-brief-report-v1",
+        generatedAt: now(),
+        overall: {
+            status: coverageRate === null ? "empty" : coverageRate === 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail",
+            coverageRate,
+            groupsNeedingBriefs: required.length,
+            groupsCovered: passed.length,
+            expectedBriefCount: rows.reduce((sum, row) => sum + Number(row.expectedBriefCount || 0), 0),
+            coveredBriefCount: rows.reduce((sum, row) => sum + Number(row.coveredBriefCount || 0), 0),
+            readyBriefCount: rows.reduce((sum, row) => sum + Number(row.readyBriefCount || 0), 0),
+            metadataGapCount: rows.reduce((sum, row) => sum + Number(row.metadataGapCount || 0), 0),
+        },
+        groups: rows,
+        weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn"),
+    };
+}
+function evaluatePostCompactReinjectionRepairReceiptMemoryUsageRepairDispatchBriefs(options = {}) {
+    const report = buildPostCompactReinjectionRepairReceiptMemoryUsageRepairDispatchBriefReport(options);
+    const checked = Number(report.overall.groupsNeedingBriefs || 0);
+    const passed = Number(report.overall.groupsCovered || 0);
+    const evidence = (report.groups || []).filter((row) => row.status === "ok").slice(0, 12).map((row) => ({ groupId: row.groupId, expectedBriefCount: row.expectedBriefCount, coveredBriefCount: row.coveredBriefCount, readyBriefCount: row.readyBriefCount, file: row.file }));
+    const gaps = (report.weakGroups || []).flatMap((row) => (row.gaps || []).map((gap) => ({ groupId: row.groupId, ...gap }))).slice(0, 12);
+    const check = makeQualityCheck("post_compact_reinjection_repair_receipt_memory_usage_repair_dispatch_briefs", "Post-Compact Reinjection Repair Receipt Memory Usage Repair Dispatch Briefs", checked, passed, evidence, gaps, "Every post-compact receipt-memory usage repair candidate must compile into a self-contained corrected-receipt brief with required docs, fresh current-source rules, historical evidence boundary and replayRepairDispatchBriefUsage.");
+    check.report = report;
+    return check;
+}
+function buildPostCompactReinjectionRepairReceiptMemoryUsageRepairReceiptConsumptionReport(options = {}) {
+    const explicit = Array.isArray(options.groupIds || options.group_ids)
+        ? (options.groupIds || options.group_ids).map((item) => String(item || "").trim()).filter(Boolean)
+        : replayRepairDispatchCandidateGroupIds(options);
+    const rows = explicit.map((groupId) => {
+        const ledger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+        const items = (Array.isArray(ledger.items) ? ledger.items : []).filter(isPostCompactReinjectionRepairReceiptMemoryUsageReceiptRepairWorkItem);
+        const completed = items.filter((item) => replayRepairWorkItemStatus(item.status) === "completed"
+            && item.completion_source === "post_compact_reinjection_receipt_memory_usage_repair_receipt_consumption");
+        const receiptRows = completed.map((item) => {
+            const proof = item.post_compact_receipt_memory_usage_repair_receipt || {};
+            const requiredDocs = normalizeQualityStringList(item.post_compact_receipt_memory_required_doc_rel_paths || []);
+            const coveredDocs = normalizeQualityStringList(proof.covered_doc_rel_paths || proof.coveredDocRelPaths || []);
+            const gaps = [
+                item.resolutionReason !== "post_compact_reinjection_receipt_memory_usage_corrected_receipt_verified" ? "resolution_reason" : "",
+                proof.verified !== true ? "proof_verified" : "",
+                !proof.timeline_binding_id ? "timeline_binding_id" : "",
+                !proof.brief_id ? "brief_id" : "",
+                !proof.task_agent_session_id ? "task_agent_session_id" : "",
+                !proof.native_session_id ? "native_session_id" : "",
+                proof.historical_boundary_covered !== true ? "historical_boundary" : "",
+                !requiredDocs.length || !requiredDocs.every((relPath) => coveredDocs.includes(relPath)) ? "required_docs" : "",
+                item.original_task_agent_session_id && proof.task_agent_session_id === item.original_task_agent_session_id ? "reused_original_task_session" : "",
+                item.original_native_session_id && proof.native_session_id === item.original_native_session_id ? "reused_original_native_session" : "",
+            ].filter(Boolean);
+            return {
+                work_item_id: item.work_item_id || item.id || "",
+                status: gaps.length ? "fail" : "ok",
+                original_worker_context_packet_id: item.original_worker_context_packet_id || "",
+                original_binding_id: item.original_binding_id || "",
+                original_task_agent_session_id: item.original_task_agent_session_id || "",
+                original_native_session_id: item.original_native_session_id || "",
+                repair_task_agent_session_id: proof.task_agent_session_id || "",
+                repair_native_session_id: proof.native_session_id || "",
+                requiredDocRelPaths: requiredDocs,
+                coveredDocRelPaths: coveredDocs,
+                completion_source: item.completion_source || "",
+                resolutionReason: item.resolutionReason || "",
+                proof,
+                gaps,
+            };
+        });
+        const passed = receiptRows.filter((row) => row.status === "ok");
+        const status = completed.length === 0 ? "empty" : passed.length === completed.length ? "ok" : passed.length ? "warn" : "fail";
+        return {
+            schema: "ccm-post-compact-reinjection-repair-receipt-memory-usage-repair-receipt-consumption-group-v1",
+            groupId,
+            status,
+            file: ledger.file || getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId),
+            repairItemCount: items.length,
+            completedReceiptRepairCount: completed.length,
+            verifiedCompletionCount: passed.length,
+            receipts: receiptRows,
+            gaps: receiptRows.filter((row) => row.gaps.length).map((row) => ({ work_item_id: row.work_item_id, reason: `corrected receipt consumption gaps: ${row.gaps.join(",")}` })),
+        };
+    });
+    const checked = rows.filter(row => Number(row.completedReceiptRepairCount || 0) > 0);
+    const completedCount = checked.reduce((sum, row) => sum + Number(row.completedReceiptRepairCount || 0), 0);
+    const verifiedCount = checked.reduce((sum, row) => sum + Number(row.verifiedCompletionCount || 0), 0);
+    const coverageRate = completedCount ? Math.round((verifiedCount / completedCount) * 1000) / 10 : null;
+    return {
+        schema: "ccm-post-compact-reinjection-repair-receipt-memory-usage-repair-receipt-consumption-report-v1",
+        generatedAt: now(),
+        overall: {
+            status: coverageRate === null ? "empty" : coverageRate === 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail",
+            coverageRate,
+            checkedGroupCount: checked.length,
+            groupsCovered: checked.filter(row => row.status === "ok").length,
+            completedReceiptRepairCount: completedCount,
+            verifiedCompletionCount: verifiedCount,
+            metadataGapCount: checked.reduce((sum, row) => sum + Number((row.gaps || []).length), 0),
+        },
+        groups: rows,
+        weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn"),
+    };
+}
+function evaluatePostCompactReinjectionRepairReceiptMemoryUsageRepairReceiptConsumption(options = {}) {
+    const report = buildPostCompactReinjectionRepairReceiptMemoryUsageRepairReceiptConsumptionReport(options);
+    const checked = Number(report.overall.completedReceiptRepairCount || 0);
+    const passed = Number(report.overall.verifiedCompletionCount || 0);
+    const evidence = (report.groups || []).flatMap((row) => (row.receipts || []).filter((receipt) => receipt.status === "ok").map((receipt) => ({ groupId: row.groupId, work_item_id: receipt.work_item_id, repair_task_agent_session_id: receipt.repair_task_agent_session_id, repair_native_session_id: receipt.repair_native_session_id, file: row.file }))).slice(0, 12);
+    const gaps = (report.weakGroups || []).flatMap((row) => (row.gaps || []).map((gap) => ({ groupId: row.groupId, ...gap }))).slice(0, 12);
+    const check = makeQualityCheck("post_compact_reinjection_repair_receipt_memory_usage_repair_receipt_consumption", "Post-Compact Reinjection Repair Receipt Memory Usage Repair Receipt Consumption", checked, passed, evidence, gaps, "A post-compact receipt-memory usage repair may close only after a full dispatch timeline and a corrected receipt from a new bound task/native session covers every required doc with freshness/ignored-reason rules and the historical-evidence boundary.");
+    check.report = report;
+    return check;
+}
+function buildPostCompactReceiptMemoryUsageRepairCompletionTypedMemoryReport(options = {}) {
+    const groupIds = Array.isArray(options.groupIds || options.group_ids)
+        ? (options.groupIds || options.group_ids).map((item) => String(item || "").trim()).filter(Boolean)
+        : replayRepairDispatchCandidateGroupIds(options);
+    const { buildGroupTypedMemoryRecall, distillPostCompactReceiptMemoryUsageRepairCompletionToTypedMemory, readGroupTypedMemoryDistillationLedger, scanGroupTypedMemoryDocuments, } = require("../collaboration/group-memory-index");
+    const rows = groupIds.map((groupId) => {
+        const workLedger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+        const completedItems = (Array.isArray(workLedger.items) ? workLedger.items : [])
+            .filter(isPostCompactReinjectionRepairReceiptMemoryUsageReceiptRepairWorkItem)
+            .filter((item) => replayRepairWorkItemStatus(item.status) === "completed")
+            .filter((item) => item.completion_source === "post_compact_reinjection_receipt_memory_usage_repair_receipt_consumption")
+            .filter((item) => item.resolutionReason === "post_compact_reinjection_receipt_memory_usage_corrected_receipt_verified");
+        const distillationRows = completedItems.map((item) => {
+            const proof = item.post_compact_receipt_memory_usage_repair_receipt || {};
+            return {
+                work_item: item,
+                proof,
+                entry: {
+                    ...(item.replay_repair_timeline_binding || {}),
+                    groupId,
+                    source: item.source || "",
+                    project: item.target_project || item.project || "",
+                    work_item_id: item.work_item_id || item.id || "",
+                    brief_id: proof.brief_id || item.brief_id || "",
+                    timeline_binding_id: proof.timeline_binding_id || item.replay_repair_timeline_binding?.timeline_binding_id || "",
+                    original_worker_context_packet_id: item.original_worker_context_packet_id || proof.original_worker_context_packet_id || "",
+                    original_binding_id: item.original_binding_id || proof.original_binding_id || "",
+                    original_assignment_id: item.original_assignment_id || proof.original_assignment_id || "",
+                    original_dispatch_key: item.original_dispatch_key || proof.original_dispatch_key || "",
+                    original_task_agent_session_id: item.original_task_agent_session_id || proof.original_task_agent_session_id || "",
+                    original_native_session_id: item.original_native_session_id || proof.original_native_session_id || "",
+                    post_compact_receipt_memory_gap_codes: item.post_compact_receipt_memory_gap_codes || [],
+                    post_compact_receipt_memory_usage_repair_required_doc_rel_paths: proof.required_doc_rel_paths || item.post_compact_receipt_memory_required_doc_rel_paths || [],
+                    post_compact_receipt_memory_usage_repair_covered_doc_rel_paths: proof.covered_doc_rel_paths || [],
+                    post_compact_receipt_memory_usage_repair_coverage_rows: proof.coverage_rows || [],
+                    post_compact_receipt_memory_usage_repair_all_docs_compliant: proof.all_docs_compliant === true,
+                    post_compact_receipt_memory_usage_repair_historical_boundary_covered: proof.historical_boundary_covered === true,
+                    post_compact_receipt_memory_usage_repair_task_session_matched: proof.task_session_matched === true,
+                    post_compact_receipt_memory_usage_repair_native_session_matched: proof.native_session_matched === true,
+                    post_compact_receipt_memory_usage_repair_verified: proof.verified === true,
+                    task_agent_session_id: proof.task_agent_session_id || "",
+                    native_session_id: proof.native_session_id || "",
+                    execution_id: proof.execution_id || "",
+                    event_types: proof.event_types || item.replay_repair_timeline_binding?.event_types || [],
+                    completion_source: item.completion_source || "",
+                    resolution_reason: item.resolutionReason || "",
+                },
+            };
+        });
+        const distillation = distillationRows.length
+            ? distillPostCompactReceiptMemoryUsageRepairCompletionToTypedMemory(groupId, { rows: distillationRows }, {
+                reason: "memory-center-post-compact-receipt-memory-usage-repair-completion-typed-memory-report",
+                updatedAt: options.generatedAt || options.generated_at || now(),
+            })
+            : null;
+        const typedLedger = readGroupTypedMemoryDistillationLedger(groupId);
+        const archive = typedLedger.postCompactReceiptMemoryUsageRepairCompletionArchive || {};
+        const archiveRows = Array.isArray(archive.rows) ? archive.rows : [];
+        const docs = scanGroupTypedMemoryDocuments(groupId);
+        const typedDoc = docs.find((doc) => doc.relPath === "post-compact-receipt-memory-usage-repair-completions.md");
+        const docText = (() => {
+            try {
+                return typedDoc?.file ? fs.readFileSync(typedDoc.file, "utf-8") : "";
+            }
+            catch {
+                return "";
+            }
+        })();
+        const matchedRows = completedItems.filter((item) => archiveRows.some((row) => row.work_item_id === (item.work_item_id || item.id || "")
+            && row.timeline_binding_id === (item.post_compact_receipt_memory_usage_repair_receipt?.timeline_binding_id || item.replay_repair_timeline_binding?.timeline_binding_id || "")
+            && row.repair_task_agent_session_id === (item.post_compact_receipt_memory_usage_repair_receipt?.task_agent_session_id || "")
+            && row.repair_native_session_id === (item.post_compact_receipt_memory_usage_repair_receipt?.native_session_id || "")));
+        const query = completedItems.flatMap((item) => [
+            item.work_item_id || item.id || "",
+            item.original_worker_context_packet_id || "",
+            ...(item.post_compact_receipt_memory_required_doc_rel_paths || []),
+        ]).filter(Boolean).join(" ");
+        const recall = completedItems.length ? buildGroupTypedMemoryRecall(groupId, query, {
+            max: 8,
+            disableLedger: true,
+            forceMemory: true,
+            snippetChars: 420,
+        }) : { recalled: [] };
+        const recallText = JSON.stringify(recall.recalled || []);
+        const gaps = [];
+        if (completedItems.length && matchedRows.length !== completedItems.length)
+            gaps.push({ reason: `typed archive missing ${completedItems.length - matchedRows.length} verified corrected-receipt completion rows` });
+        if (completedItems.length && (!typedDoc || typedDoc.type !== "reference"))
+            gaps.push({ reason: "verified corrected-receipt completion missing reference typed MEMORY.md" });
+        if (completedItems.length && !recallText.includes("post-compact-receipt-memory-usage-repair-completions.md"))
+            gaps.push({ reason: "corrected-receipt completion typed memory not recallable" });
+        if (completedItems.length && !/historical repair completion is recovery evidence, not permanent repository truth/i.test(docText))
+            gaps.push({ reason: "typed memory missing historical recovery evidence freshness boundary" });
+        if (completedItems.length && !/Every future child Agent session must independently classify recalled memory/i.test(docText))
+            gaps.push({ reason: "typed memory missing per-future-session memory usage decision rule" });
+        if (completedItems.length && !/Historical task\/native session ids are evidence only and never authorize a future session/i.test(docText))
+            gaps.push({ reason: "typed memory missing historical session non-authorization boundary" });
+        for (const item of completedItems) {
+            const proof = item.post_compact_receipt_memory_usage_repair_receipt || {};
+            for (const value of [
+                item.work_item_id || item.id || "",
+                proof.timeline_binding_id || "",
+                item.original_worker_context_packet_id || "",
+                item.original_task_agent_session_id || "",
+                item.original_native_session_id || "",
+                proof.task_agent_session_id || "",
+                proof.native_session_id || "",
+                item.completion_source || "",
+                item.resolutionReason || "",
+                ...(item.post_compact_receipt_memory_required_doc_rel_paths || []),
+            ].filter(Boolean)) {
+                if (!docText.includes(String(value)))
+                    gaps.push({ work_item_id: item.work_item_id || item.id || "", reason: `typed MEMORY.md missing exact completion evidence: ${value}` });
+            }
+            const coverageRows = Array.isArray(proof.coverage_rows) ? proof.coverage_rows : [];
+            if (!coverageRows.length || coverageRows.some((coverage) => coverage.compliant !== true))
+                gaps.push({ work_item_id: item.work_item_id || item.id || "", reason: "typed source proof missing compliant per-document coverage rows" });
+        }
+        const status = completedItems.length === 0 ? "empty" : gaps.length ? "fail" : "ok";
+        return {
+            schema: "ccm-post-compact-receipt-memory-usage-repair-completion-typed-memory-group-v1",
+            groupId,
+            status,
+            file: workLedger.file || getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId),
+            typedMemoryLedgerFile: typedLedger.file || "",
+            completedReceiptRepairCount: completedItems.length,
+            archivedCompletionCount: matchedRows.length,
+            typedDocCount: Number(!!typedDoc),
+            recallProbeCovered: recallText.includes("post-compact-receipt-memory-usage-repair-completions.md"),
+            freshnessBoundaryCovered: /historical repair completion is recovery evidence, not permanent repository truth/i.test(docText),
+            sessionBoundaryCovered: /Historical task\/native session ids are evidence only and never authorize a future session/i.test(docText),
+            distillation: distillation ? {
+                incomingRowCount: distillation.incomingRowCount || 0,
+                archivedCount: distillation.archivedCount || 0,
+                newRowCount: distillation.newRowCount || 0,
+                updatedRowCount: distillation.updatedRowCount || 0,
+                writeCount: distillation.writeCount || 0,
+            } : null,
+            docs: [typedDoc].filter(Boolean).map((doc) => ({ relPath: doc.relPath, type: doc.type, source: doc.source, file: doc.file })),
+            gaps: gaps.slice(0, 16),
+        };
+    });
+    const checked = rows.filter(row => Number(row.completedReceiptRepairCount || 0) > 0);
+    const expected = checked.reduce((sum, row) => sum + Number(row.completedReceiptRepairCount || 0), 0);
+    const archived = checked.reduce((sum, row) => sum + Number(row.archivedCompletionCount || 0), 0);
+    const coverageRate = expected ? Math.round((archived / expected) * 1000) / 10 : null;
+    return {
+        schema: "ccm-post-compact-receipt-memory-usage-repair-completion-typed-memory-report-v1",
+        generatedAt: now(),
+        overall: {
+            status: coverageRate === null ? "empty" : coverageRate === 100 && checked.every(row => row.status === "ok") ? "ok" : coverageRate >= 75 ? "warn" : "fail",
+            coverageRate,
+            checkedGroupCount: checked.length,
+            groupsCovered: checked.filter(row => row.status === "ok").length,
+            completedReceiptRepairCount: expected,
+            archivedCompletionCount: archived,
+            typedDocCount: checked.reduce((sum, row) => sum + Number(row.typedDocCount || 0), 0),
+            recallProbeCoveredCount: checked.filter(row => row.recallProbeCovered === true).length,
+            metadataGapCount: checked.reduce((sum, row) => sum + Number((row.gaps || []).length), 0),
+        },
+        groups: rows,
+        weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn"),
+    };
+}
+function evaluatePostCompactReceiptMemoryUsageRepairCompletionTypedMemory(options = {}) {
+    const report = buildPostCompactReceiptMemoryUsageRepairCompletionTypedMemoryReport(options);
+    const checked = Number(report.overall.completedReceiptRepairCount || 0);
+    const passed = Number(report.overall.archivedCompletionCount || 0) - Number(report.overall.metadataGapCount || 0);
+    const evidence = (report.groups || []).filter((row) => row.status === "ok").slice(0, 12).map((row) => ({ groupId: row.groupId, archivedCompletionCount: row.archivedCompletionCount, typedMemoryLedgerFile: row.typedMemoryLedgerFile, docs: row.docs }));
+    const gaps = (report.weakGroups || []).flatMap((row) => (row.gaps || []).map((gap) => ({ groupId: row.groupId, ...gap }))).slice(0, 12);
+    const check = makeQualityCheck("post_compact_reinjection_repair_receipt_memory_usage_repair_completion_typed_memory", "Post-Compact Receipt Memory Usage Repair Completion Typed Memory", checked, Math.max(0, passed), evidence, gaps, "Every strictly verified corrected-receipt completion must become idempotent group-scoped typed MEMORY.md with exact original/repair session identity, per-document usage proof and mandatory future current-source reverification.");
+    check.report = report;
+    return check;
+}
 function buildGroupSessionMemorySnapshotReport(options = {}) {
     const explicitGroupIds = Array.isArray(options.groupIds || options.group_ids)
         ? (options.groupIds || options.group_ids).map((item) => String(item || "").trim()).filter(Boolean)
@@ -20251,15 +27085,36 @@ function memoryQualityCheckDescriptors(lightweight, options = {}) {
         { id: "worker_context_packet_pressure_provenance_provider_dispatch_override_followup_pre_dispatch_policy", run: () => evaluateWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupPreDispatchPolicy(options) },
         { id: "worker_context_packet_pressure_provenance_provider_dispatch_override_followup_receipt_contract", run: () => evaluateWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptContract(options) },
         { id: "worker_context_packet_pressure_provenance_provider_dispatch_override_followup_receipt_contract_validation", run: () => evaluateWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptContractValidation(options) },
+        { id: "worker_context_packet_pressure_provenance_provider_dispatch_override_followup_receipt_validation_repair", run: () => evaluateWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptValidationRepair(options) },
+        { id: "worker_context_packet_pressure_provenance_provider_dispatch_override_followup_receipt_validation_typed_memory_policy", run: () => evaluateWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptValidationTypedMemoryPolicy(options) },
+        { id: "worker_context_packet_cross_group_provider_reliability_guidance", run: () => evaluateWorkerContextPacketCrossGroupProviderReliabilityGuidance(options) },
+        { id: "worker_context_packet_provider_reliability_snapshot_ranking", run: () => evaluateWorkerContextPacketProviderReliabilitySnapshotRanking(options) },
+        { id: "worker_context_packet_provider_switch_decision_receipt", run: () => evaluateWorkerContextPacketProviderSwitchDecisionReceipt(options) },
+        { id: "worker_context_packet_provider_switch_execution_typed_memory", run: () => evaluateWorkerContextPacketProviderSwitchExecutionTypedMemory(options) },
         { id: "worker_context_packet_pressure_provenance_feedback_recall_risk_gating", run: () => evaluateWorkerContextPacketPressureProvenanceFeedbackRecallRiskGating(options) },
         { id: "worker_context_packet_pressure_memory_provenance_receipts", run: () => evaluateWorkerContextPacketPressureMemoryProvenanceReceipts(options) },
         { id: "worker_context_packet_pressure_memory_provenance_receipt_repair_dispatch_candidates", run: () => evaluateWorkerContextPacketPressureMemoryProvenanceReceiptRepairDispatchCandidates(options) },
         { id: "worker_context_packet_pressure_memory_provenance_receipt_repair_dispatch_briefs", run: () => evaluateWorkerContextPacketPressureMemoryProvenanceReceiptRepairDispatchBriefs(options) },
+        { id: "worker_context_packet_pressure_memory_provenance_receipt_repair_dispatch_brief_required_docs", run: () => evaluateWorkerContextPacketPressureMemoryProvenanceReceiptRepairDispatchBriefRequiredDocs(options) },
         { id: "worker_context_packet_pressure_memory_provenance_receipt_repair_typed_memory", run: () => evaluateWorkerContextPacketPressureMemoryProvenanceReceiptRepairTypedMemory(options) },
         { id: "worker_context_packet_pre_dispatch_gate", run: () => evaluateWorkerContextPacketPreDispatchGate(options) },
         { id: "worker_context_packet_compaction_retry", run: () => evaluateWorkerContextPacketCompactionRetry(options) },
         { id: "worker_context_packet_compact_hook_ledger", run: () => evaluateWorkerContextPacketCompactHookLedger(options) },
         { id: "worker_context_packet_compact_outcome_ledger", run: () => evaluateWorkerContextPacketCompactOutcomeLedger(options) },
+        { id: "worker_context_provider_ranking_provenance_compact_repair_work_items", run: () => evaluateWorkerContextProviderRankingProvenanceCompactRepairWorkItems(options) },
+        { id: "worker_context_provider_ranking_provenance_compact_repair_dispatch_briefs", run: () => evaluateWorkerContextProviderRankingProvenanceCompactRepairDispatchBriefs(options) },
+        { id: "worker_context_provider_ranking_provenance_compact_repair_receipt_consumption", run: () => evaluateWorkerContextProviderRankingProvenanceCompactRepairReceiptConsumption(options) },
+        { id: "worker_context_provider_ranking_provenance_compact_repair_receipt_typed_memory", run: () => evaluateWorkerContextProviderRankingProvenanceCompactRepairReceiptTypedMemory(options) },
+        { id: "worker_context_provider_ranking_provenance_compact_repair_receipt_worker_context_recall", run: () => evaluateWorkerContextProviderRankingProvenanceCompactRepairReceiptWorkerContextRecall(options) },
+        { id: "worker_context_provider_ranking_provenance_compact_repair_receipt_memory_usage_contract", run: () => evaluateWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageContract(options) },
+        { id: "worker_context_provider_ranking_provenance_compact_repair_receipt_memory_usage_receipt", run: () => evaluateWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceipt(options) },
+        { id: "worker_context_provider_ranking_provenance_compact_repair_receipt_memory_usage_receipt_required_docs", run: () => evaluateWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRequiredDocs(options) },
+        { id: "worker_context_provider_ranking_provenance_compact_repair_receipt_memory_usage_receipt_repair_work_items", run: () => evaluateWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairWorkItems(options) },
+        { id: "worker_context_provider_ranking_provenance_compact_repair_receipt_memory_usage_receipt_repair_dispatch_candidates", run: () => evaluateWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairDispatchCandidates(options) },
+        { id: "worker_context_provider_ranking_provenance_compact_repair_receipt_memory_usage_receipt_repair_dispatch_briefs", run: () => evaluateWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairDispatchBriefs(options) },
+        { id: "worker_context_provider_ranking_provenance_compact_repair_receipt_memory_usage_receipt_repair_dispatch_brief_required_docs", run: () => evaluateWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairDispatchBriefRequiredDocs(options) },
+        { id: "worker_context_provider_ranking_provenance_compact_repair_receipt_memory_usage_receipt_repair_typed_memory", run: () => evaluateWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairTypedMemory(options) },
+        { id: "worker_context_provider_ranking_provenance_compact_repair_receipt_memory_usage_receipt_repair_worker_context_injection", run: () => evaluateWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairWorkerContextInjection(options) },
         { id: "worker_context_packet_compact_strategy_memory", run: () => evaluateWorkerContextPacketCompactStrategyMemory(options) },
         { id: "worker_context_packet_compact_strategy_typed_memory", run: () => evaluateWorkerContextPacketCompactStrategyTypedMemory(options) },
         { id: "worker_context_packet_ptl_emergency_downgrade", run: () => evaluateWorkerContextPacketPtlEmergencyDowngrade(options) },
@@ -20282,6 +27137,17 @@ function memoryQualityCheckDescriptors(lightweight, options = {}) {
         { id: "compact_boundary_replay_gate", run: () => evaluateCompactBoundaryReplayGate({}) },
         { id: "replay_repair_pending_work_items", run: () => evaluateReplayRepairPendingWorkItems({}) },
         { id: "replay_repair_dispatch_candidates", run: () => evaluateReplayRepairDispatchCandidates({}) },
+        { id: "post_compact_reinjection_repair_dispatch_candidates", run: () => evaluatePostCompactReinjectionRepairDispatchCandidates(options) },
+        { id: "post_compact_reinjection_repair_dispatch_briefs", run: () => evaluatePostCompactReinjectionRepairDispatchBriefs(options) },
+        { id: "post_compact_reinjection_repair_receipt_consumption", run: () => evaluatePostCompactReinjectionRepairReceiptConsumption(options) },
+        { id: "post_compact_reinjection_repair_receipt_typed_memory", run: () => evaluatePostCompactReinjectionRepairReceiptTypedMemory(options) },
+        { id: "post_compact_reinjection_repair_receipt_worker_context_recall", run: () => evaluatePostCompactReinjectionRepairReceiptWorkerContextRecall(options) },
+        { id: "post_compact_reinjection_repair_receipt_memory_usage_receipt", run: () => evaluatePostCompactReinjectionRepairReceiptMemoryUsageReceipt(options) },
+        { id: "post_compact_reinjection_repair_receipt_memory_usage_repair_work_items", run: () => evaluatePostCompactReinjectionRepairReceiptMemoryUsageRepairWorkItems(options) },
+        { id: "post_compact_reinjection_repair_receipt_memory_usage_repair_dispatch_candidates", run: () => evaluatePostCompactReinjectionRepairReceiptMemoryUsageRepairDispatchCandidates(options) },
+        { id: "post_compact_reinjection_repair_receipt_memory_usage_repair_dispatch_briefs", run: () => evaluatePostCompactReinjectionRepairReceiptMemoryUsageRepairDispatchBriefs(options) },
+        { id: "post_compact_reinjection_repair_receipt_memory_usage_repair_receipt_consumption", run: () => evaluatePostCompactReinjectionRepairReceiptMemoryUsageRepairReceiptConsumption(options) },
+        { id: "post_compact_reinjection_repair_receipt_memory_usage_repair_completion_typed_memory", run: () => evaluatePostCompactReceiptMemoryUsageRepairCompletionTypedMemory(options) },
         { id: "group_session_memory_snapshots", run: () => evaluateGroupSessionMemorySnapshots({}) },
         { id: "group_tool_continuity_snapshots", run: () => evaluateGroupToolContinuitySnapshots({}) },
         { id: "task_agent_memory_context_snapshots", run: () => evaluateTaskAgentMemoryContextSnapshots({}) },
@@ -20291,6 +27157,8 @@ function memoryQualityCheckDescriptors(lightweight, options = {}) {
         { id: "compact_file_reference_read_plan_revalidation_gate", run: () => evaluateCompactFileReferenceReadPlanRevalidationGate({}) },
         { id: "compact_file_reference_read_plan_revalidation_session_binding", run: () => evaluateCompactFileReferenceReadPlanRevalidationSessionBinding({}) },
         { id: "compact_file_reference_read_plan_revalidation_repair_work_items", run: () => evaluateCompactFileReferenceReadPlanRevalidationRepairWorkItems({}) },
+        { id: "compact_file_reference_read_plan_revalidation_repair_dispatch_candidates", run: () => evaluateCompactFileReferenceReadPlanRevalidationRepairDispatchCandidates(options) },
+        { id: "compact_file_reference_read_plan_revalidation_repair_dispatch_briefs", run: () => evaluateCompactFileReferenceReadPlanRevalidationRepairDispatchBriefs(options) },
         { id: "compact_file_reference_read_plan_usage_discipline", run: () => evaluateCompactFileReferenceReadPlanUsageDiscipline({}) },
         { id: "compact_file_reference_usage_discipline", run: () => evaluateCompactFileReferenceUsageDiscipline({}) },
         { id: "historical_compact_boundary_replay", run: () => evaluateHistoricalCompactBoundaryReplay({}) },
@@ -20433,6 +27301,12 @@ function buildMemoryCenterOverview() {
     const workerContextPacketPressureProvenanceProviderDispatchOverrideFollowupPreDispatchPolicyReport = buildWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupPreDispatchPolicyReport({});
     const workerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptContractReport = buildWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptContractReport({});
     const workerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptContractValidationReport = buildWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptContractValidationReport({});
+    const workerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptValidationRepairReport = buildWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptValidationRepairReport({});
+    const workerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptValidationTypedMemoryPolicyReport = buildWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptValidationTypedMemoryPolicyReport({});
+    const workerContextPacketCrossGroupProviderReliabilityGuidanceReport = buildWorkerContextPacketCrossGroupProviderReliabilityGuidanceReport({});
+    const workerContextPacketProviderReliabilitySnapshotRankingReport = buildWorkerContextPacketProviderReliabilitySnapshotRankingReport({});
+    const workerContextPacketProviderSwitchDecisionReceiptReport = buildWorkerContextPacketProviderSwitchDecisionReceiptReport({});
+    const workerContextPacketProviderSwitchExecutionTypedMemoryReport = buildWorkerContextPacketProviderSwitchExecutionTypedMemoryReport({});
     const workerContextPacketPressureMemoryProvenanceReceiptReport = buildWorkerContextPacketPressureMemoryProvenanceReceiptReport({});
     const workerContextPacketPressureMemoryProvenanceReceiptRepairDispatchCandidateReport = buildWorkerContextPacketPressureMemoryProvenanceReceiptRepairDispatchCandidateReport({
         receiptReport: workerContextPacketPressureMemoryProvenanceReceiptReport,
@@ -21178,6 +28052,132 @@ function buildMemoryCenterOverview() {
                 summary.health = "warning";
         }
     }
+    if (workerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptValidationRepairReport.overall?.status === "fail") {
+        addSystemAlert("critical", "worker_context_packet_pressure_provenance_provider_dispatch_override_followup_receipt_validation_repair", `provider override follow-up receipt validation repair 缺口：covered ${workerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptValidationRepairReport.overall.coveredValidationCount || 0}/${workerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptValidationRepairReport.overall.checkedValidationCount || 0}`);
+    }
+    for (const row of workerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptValidationRepairReport.weakGroups || []) {
+        const gap = row.gaps?.[0] || {};
+        const severity = row.status === "fail" ? "critical" : "warning";
+        allAlerts.push({
+            id: `group:${row.groupId}:worker_context_packet_pressure_provenance_provider_dispatch_override_followup_receipt_validation_repair`,
+            scope: "group",
+            scopeId: row.groupId,
+            severity,
+            code: "worker_context_packet_pressure_provenance_provider_dispatch_override_followup_receipt_validation_repair",
+            message: gap.reason || `provider override follow-up receipt validation repair covered ${row.coveredValidationCount || 0}/${row.checkedValidationCount || 0}`,
+        });
+        const summary = groups.find(item => item.id === row.groupId);
+        if (summary) {
+            summary.alerts = Number(summary.alerts || 0) + 1;
+            if (severity === "critical")
+                summary.health = "critical";
+            else if (summary.health !== "critical")
+                summary.health = "warning";
+        }
+    }
+    if (workerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptValidationTypedMemoryPolicyReport.overall?.status === "fail"
+        || workerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptValidationTypedMemoryPolicyReport.overall?.status === "warn") {
+        addSystemAlert(workerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptValidationTypedMemoryPolicyReport.overall.status === "fail" ? "critical" : "warning", "worker_context_packet_pressure_provenance_provider_dispatch_override_followup_receipt_validation_typed_memory_policy", `provider override follow-up corrected-receipt typed memory/policy 覆盖率 ${workerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptValidationTypedMemoryPolicyReport.overall.coverageRate ?? "待采样"}%，covered ${workerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptValidationTypedMemoryPolicyReport.overall.coveredAttributionCount || 0}/${workerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptValidationTypedMemoryPolicyReport.overall.attributionCount || 0}`);
+    }
+    for (const row of workerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptValidationTypedMemoryPolicyReport.weakGroups || []) {
+        const gap = row.gaps?.[0] || {};
+        const severity = row.status === "fail" ? "critical" : "warning";
+        allAlerts.push({
+            id: `group:${row.groupId}:worker_context_packet_pressure_provenance_provider_dispatch_override_followup_receipt_validation_typed_memory_policy`,
+            scope: "group",
+            scopeId: row.groupId,
+            severity,
+            code: "worker_context_packet_pressure_provenance_provider_dispatch_override_followup_receipt_validation_typed_memory_policy",
+            message: gap.reason || `corrected-receipt validation typed memory/policy covered ${row.coveredAttributionCount || 0}/${row.attributionCount || 0}`,
+        });
+        const summary = groups.find(item => item.id === row.groupId);
+        if (summary) {
+            summary.alerts = Number(summary.alerts || 0) + 1;
+            if (severity === "critical")
+                summary.health = "critical";
+            else if (summary.health !== "critical")
+                summary.health = "warning";
+        }
+    }
+    if (workerContextPacketCrossGroupProviderReliabilityGuidanceReport.overall?.status === "fail"
+        || workerContextPacketCrossGroupProviderReliabilityGuidanceReport.overall?.status === "warn") {
+        addSystemAlert(workerContextPacketCrossGroupProviderReliabilityGuidanceReport.overall.status === "fail" ? "critical" : "warning", "worker_context_packet_cross_group_provider_reliability_guidance", `cross-group provider reliability 脱敏/local-first 覆盖率 ${workerContextPacketCrossGroupProviderReliabilityGuidanceReport.overall.coverageRate ?? "待采样"}%，privacy gaps ${workerContextPacketCrossGroupProviderReliabilityGuidanceReport.overall.privacyGapCount || 0}`);
+    }
+    for (const signal of workerContextPacketCrossGroupProviderReliabilityGuidanceReport.highRiskSignals || []) {
+        addSystemAlert("warning", `cross_group_provider_reliability:${signal.agent_type || "unknown"}`, `provider ${signal.agent_type || "unknown"} cross-group decayed reliability risk=${signal.risk_status || "high"} score=${signal.risk_score || 0} confidence=${signal.confidence || 0}; guidance only，不能覆盖群聊 local-first gate`);
+    }
+    if (workerContextPacketProviderReliabilitySnapshotRankingReport.overall?.status === "fail"
+        || workerContextPacketProviderReliabilitySnapshotRankingReport.overall?.status === "warn") {
+        addSystemAlert(workerContextPacketProviderReliabilitySnapshotRankingReport.overall.status === "fail" ? "critical" : "warning", "worker_context_packet_provider_reliability_snapshot_ranking", `provider reliability snapshot/ranking 覆盖率 ${workerContextPacketProviderReliabilitySnapshotRankingReport.overall.coverageRate ?? "待采样"}%，snapshot=${workerContextPacketProviderReliabilitySnapshotRankingReport.overall.snapshotStatus || "missing"}，covered bindings ${workerContextPacketProviderReliabilitySnapshotRankingReport.overall.coveredBindingCount || 0}/${workerContextPacketProviderReliabilitySnapshotRankingReport.overall.checkedBindingCount || 0}`);
+    }
+    for (const row of workerContextPacketProviderReliabilitySnapshotRankingReport.weakGroups || []) {
+        const gap = row.gaps?.[0] || {};
+        const severity = row.status === "fail" ? "critical" : "warning";
+        allAlerts.push({
+            id: `group:${row.groupId}:worker_context_packet_provider_reliability_snapshot_ranking`,
+            scope: "group",
+            scopeId: row.groupId,
+            severity,
+            code: "worker_context_packet_provider_reliability_snapshot_ranking",
+            message: gap.reason || `provider reliability snapshot/ranking covered ${row.coveredBindingCount || 0}/${row.checkedBindingCount || 0}`,
+        });
+        const summary = groups.find(item => item.id === row.groupId);
+        if (summary) {
+            summary.alerts = Number(summary.alerts || 0) + 1;
+            if (severity === "critical")
+                summary.health = "critical";
+            else if (summary.health !== "critical")
+                summary.health = "warning";
+        }
+    }
+    if (workerContextPacketProviderSwitchDecisionReceiptReport.overall?.status === "fail"
+        || workerContextPacketProviderSwitchDecisionReceiptReport.overall?.status === "warn") {
+        addSystemAlert(workerContextPacketProviderSwitchDecisionReceiptReport.overall.status === "fail" ? "critical" : "warning", "worker_context_packet_provider_switch_decision_receipt", `provider switch decision receipt 覆盖率 ${workerContextPacketProviderSwitchDecisionReceiptReport.overall.coverageRate ?? "待采样"}%，advised ${workerContextPacketProviderSwitchDecisionReceiptReport.overall.advisedAlternativeCount || 0}，approved ${workerContextPacketProviderSwitchDecisionReceiptReport.overall.approvedSwitchCount || 0}，executed ${workerContextPacketProviderSwitchDecisionReceiptReport.overall.executedProviderCount || 0}，passed ${workerContextPacketProviderSwitchDecisionReceiptReport.overall.executionPassedCount || 0}`);
+    }
+    for (const row of workerContextPacketProviderSwitchDecisionReceiptReport.weakGroups || []) {
+        const gap = row.gaps?.[0] || {};
+        const severity = row.status === "fail" ? "critical" : "warning";
+        allAlerts.push({
+            id: `group:${row.groupId}:worker_context_packet_provider_switch_decision_receipt`,
+            scope: "group",
+            scopeId: row.groupId,
+            severity,
+            code: "worker_context_packet_provider_switch_decision_receipt",
+            message: gap.reason || `provider switch receipt covered ${row.coveredBindingCount || 0}/${row.checkedBindingCount || 0}`,
+        });
+        const summary = groups.find(item => item.id === row.groupId);
+        if (summary) {
+            summary.alerts = Number(summary.alerts || 0) + 1;
+            if (severity === "critical")
+                summary.health = "critical";
+            else if (summary.health !== "critical")
+                summary.health = "warning";
+        }
+    }
+    if (workerContextPacketProviderSwitchExecutionTypedMemoryReport.overall?.status === "fail"
+        || workerContextPacketProviderSwitchExecutionTypedMemoryReport.overall?.status === "warn") {
+        addSystemAlert(workerContextPacketProviderSwitchExecutionTypedMemoryReport.overall.status === "fail" ? "critical" : "warning", "worker_context_packet_provider_switch_execution_typed_memory", `provider switch execution typed memory 覆盖率 ${workerContextPacketProviderSwitchExecutionTypedMemoryReport.overall.coverageRate ?? "待采样"}%，execution receipts ${workerContextPacketProviderSwitchExecutionTypedMemoryReport.overall.executionReceiptCount || 0}，archived ${workerContextPacketProviderSwitchExecutionTypedMemoryReport.overall.archivedExecutionReceiptCount || 0}，mismatch ${workerContextPacketProviderSwitchExecutionTypedMemoryReport.overall.typedMismatchCount || 0}`);
+    }
+    for (const row of workerContextPacketProviderSwitchExecutionTypedMemoryReport.weakGroups || []) {
+        const gap = row.gaps?.[0] || {};
+        const severity = row.status === "fail" ? "critical" : "warning";
+        allAlerts.push({
+            id: `group:${row.groupId}:worker_context_packet_provider_switch_execution_typed_memory`,
+            scope: "group",
+            scopeId: row.groupId,
+            severity,
+            code: "worker_context_packet_provider_switch_execution_typed_memory",
+            message: gap.reason || `provider switch execution typed memory archived ${row.archivedExecutionReceiptCount || 0}/${row.executionReceiptCount || 0}`,
+        });
+        const summary = groups.find(item => item.id === row.groupId);
+        if (summary) {
+            summary.alerts = Number(summary.alerts || 0) + 1;
+            if (severity === "critical")
+                summary.health = "critical";
+            else if (summary.health !== "critical")
+                summary.health = "warning";
+        }
+    }
     if (workerContextPacketPressureMemoryProvenanceReceiptReport.overall?.status === "fail" || workerContextPacketPressureMemoryProvenanceReceiptReport.overall?.status === "warn") {
         addSystemAlert(workerContextPacketPressureMemoryProvenanceReceiptReport.overall.status === "fail" ? "critical" : "warning", "worker_context_packet_pressure_memory_provenance_receipts", `pressure memory provenance 回执覆盖率 ${workerContextPacketPressureMemoryProvenanceReceiptReport.overall.coverageRate ?? "待采样"}%，required ${workerContextPacketPressureMemoryProvenanceReceiptReport.overall.requiredProvenanceDocCount || 0} 条，缺结构化回执 ${workerContextPacketPressureMemoryProvenanceReceiptReport.overall.missingMemoryProvenanceUsageCount || 0} 条，unsafe ${workerContextPacketPressureMemoryProvenanceReceiptReport.overall.unsafeDisputedUseCount || 0} 条`);
     }
@@ -21805,6 +28805,12 @@ function buildMemoryCenterOverview() {
         workerContextPacketPressureProvenanceProviderDispatchOverrideFollowupPreDispatchPolicyReport,
         workerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptContractReport,
         workerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptContractValidationReport,
+        workerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptValidationRepairReport,
+        workerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptValidationTypedMemoryPolicyReport,
+        workerContextPacketCrossGroupProviderReliabilityGuidanceReport,
+        workerContextPacketProviderReliabilitySnapshotRankingReport,
+        workerContextPacketProviderSwitchDecisionReceiptReport,
+        workerContextPacketProviderSwitchExecutionTypedMemoryReport,
         workerContextPacketPressureMemoryProvenanceReceiptReport,
         workerContextPacketPressureMemoryProvenanceReceiptRepairDispatchCandidateReport,
         workerContextPacketPressureMemoryProvenanceReceiptRepairDispatchBriefReport,
@@ -26536,6 +33542,186 @@ function runMemoryCenterWorkerContextPacketPressureMemoryProvenanceReceiptRepair
         }
     }
 }
+function runMemoryCenterWorkerContextPacketPressureMemoryProvenanceReceiptRepairDispatchBriefRequiredDocsSelfTest() {
+    const groupId = `memory-center-pressure-memory-provenance-receipt-brief-required-docs-selftest-${process.pid}-${Date.now()}`;
+    const bindingFile = getGroupReplayRepairDispatchBindingLedgerFile(groupId);
+    const workItemsFile = getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId);
+    const dispatchPlanFile = getGroupReplayRepairDispatchPlanLedgerFile(groupId);
+    try {
+        const packetId = "wcp-pressure-memory-provenance-receipt-brief-required-docs-selftest";
+        const pressureDocs = [
+            {
+                relPath: "worker-context-usage-pressure-discipline.md",
+                name: "WorkerContextPacket Context Usage Pressure Discipline",
+                repairWorkItemId: "cgpru-phase175-provenance-required-docs-a",
+                repairGapType: "recommendation_conflict",
+            },
+            {
+                relPath: "worker-context-pressure-recall-risk.md",
+                name: "WorkerContextPacket Pressure Recall Risk",
+                repairWorkItemId: "cgpru-phase175-provenance-required-docs-b",
+                repairGapType: "stale_pressure_recall",
+            },
+        ];
+        const entry = {
+            schema: "ccm-worker-context-packet-assignment-binding-v1",
+            binding_id: "binding-pressure-memory-provenance-receipt-brief-required-docs-selftest",
+            groupId,
+            source: "worker_context_packet_pre_dispatch_gate",
+            project: "api",
+            assignment_id: "assignment-pressure-memory-provenance-receipt-brief-required-docs-selftest",
+            dispatch_key: "dispatch-pressure-memory-provenance-receipt-brief-required-docs-selftest",
+            worker_context_packet_id: packetId,
+            worker_context_packet_context_usage: {
+                schema: "ccm-worker-context-usage-v1",
+                packet_id: packetId,
+                project: "api",
+                status: "over_budget",
+                pressure: 122,
+                total_tokens: 1200,
+                max_tokens: 1000,
+                free_tokens: -320,
+                autocompact_buffer_tokens: 120,
+            },
+            worker_context_packet_typed_memory_pressure_recall: {
+                schema: "ccm-worker-context-packet-typed-memory-pressure-recall-v1",
+                active: true,
+                pressure_status: "over_budget",
+                boosted_count: pressureDocs.length,
+                recalled_count: pressureDocs.length,
+                docs: pressureDocs.map(doc => ({
+                    rel_path: doc.relPath,
+                    name: doc.name,
+                    type: "reference",
+                    score: 98,
+                    pressure_adjustment: 12,
+                    pressure_status: "over_budget",
+                    kinds: ["context_usage", "pressure_repair"],
+                    pressure_usage_adjustment: 8,
+                    pressure_usage_recommendation: "promote_pressure_recall",
+                    pressure_usage_matches: [{
+                            rel_path: doc.relPath,
+                            name: doc.name,
+                            target_project: "api",
+                            recommendation: "promote_pressure_recall",
+                            hint_scope: "cross_group_project",
+                            provenance_status: "disputed_under_repair",
+                            repair_work_item_id: doc.repairWorkItemId,
+                            repair_status: "pending",
+                            repair_gap_type: doc.repairGapType,
+                            repair_open: true,
+                        }],
+                    provenance_status: "disputed_under_repair",
+                    repair_work_item_id: doc.repairWorkItemId,
+                    repair_status: "pending",
+                    repair_gap_type: doc.repairGapType,
+                    requires_memory_provenance_usage: true,
+                })),
+            },
+            should_create_real_task: false,
+            at: "2026-07-10T20:35:00.000Z",
+        };
+        writeJsonAtomic(bindingFile, {
+            schema: "ccm-replay-repair-main-agent-dispatch-brief-assignment-ledger-v1",
+            version: 1,
+            groupId,
+            file: bindingFile,
+            updatedAt: "2026-07-10T20:35:00.000Z",
+            bindingCount: 1,
+            workerContextPacketBindingCount: 1,
+            entries: [entry],
+        });
+        const receiptReport = buildWorkerContextPacketPressureMemoryProvenanceReceiptReport({
+            groupIds: [groupId],
+            generatedAt: "2026-07-10T20:35:01.000Z",
+        });
+        const candidateReport = buildWorkerContextPacketPressureMemoryProvenanceReceiptRepairDispatchCandidateReport({
+            groupIds: [groupId],
+            receiptReport,
+            generatedAt: "2026-07-10T20:35:02.000Z",
+        });
+        const briefReport = buildWorkerContextPacketPressureMemoryProvenanceReceiptRepairDispatchBriefReport({
+            groupIds: [groupId],
+            candidateReport,
+            generatedAt: "2026-07-10T20:35:03.000Z",
+        });
+        const requiredDocsReport = buildWorkerContextPacketPressureMemoryProvenanceReceiptRepairDispatchBriefRequiredDocsReport({
+            groupIds: [groupId],
+            briefReport,
+            generatedAt: "2026-07-10T20:35:04.000Z",
+        });
+        const quality = buildMemoryQualityReport({
+            checkIds: ["worker_context_packet_pressure_memory_provenance_receipt_repair_dispatch_brief_required_docs"],
+            groupIds: [groupId],
+            refresh: true,
+        });
+        const qualityCheck = (quality.checks || []).find((item) => item.id === "worker_context_packet_pressure_memory_provenance_receipt_repair_dispatch_brief_required_docs") || {};
+        const candidate = candidateReport.groups?.[0]?.candidates?.[0] || {};
+        const brief = briefReport.groups?.[0]?.briefs?.[0] || {};
+        const workerTask = String(brief.worker_task || "");
+        const relPaths = pressureDocs.map(doc => doc.relPath);
+        const repairIds = pressureDocs.map(doc => doc.repairWorkItemId);
+        const checks = {
+            missingReceiptCreatesRepairChain: receiptReport.overall?.status === "fail"
+                && Number(receiptReport.overall?.requiredProvenanceDocCount || 0) === pressureDocs.length
+                && Number(receiptReport.overall?.openRepairWorkItemCount || 0) === 1
+                && candidateReport.overall?.status === "ok"
+                && briefReport.overall?.status === "ok",
+            candidateCarriesAllPressureDocs: relPaths.every(relPath => (candidate.pressure_memory_provenance_rel_paths || []).includes(relPath))
+                && repairIds.every(repairId => (candidate.pressure_memory_provenance_repair_work_item_ids || []).includes(repairId))
+                && String(candidate.prompt_patch || "").includes("memoryProvenanceUsage"),
+            briefCarriesAllPressureDocs: relPaths.every(relPath => (brief.pressure_memory_provenance_rel_paths || []).includes(relPath))
+                && repairIds.every(repairId => (brief.pressure_memory_provenance_repair_work_item_ids || []).includes(repairId)),
+            briefWorkerTaskIsSelfContained: relPaths.every(relPath => workerTask.includes(relPath))
+                && repairIds.every(repairId => workerTask.includes(repairId))
+                && /CCM_AGENT_RECEIPT/i.test(workerTask)
+                && /memoryProvenanceUsage/i.test(workerTask)
+                && /provenanceStatus|provenance_status/i.test(workerTask)
+                && /repairWorkItemId|repair_work_item_id/i.test(workerTask)
+                && /currentSourceVerified|current_source_verified/i.test(workerTask),
+            requiredDocsQualityPasses: requiredDocsReport.overall?.status === "ok"
+                && Number(requiredDocsReport.overall?.requiredDocBriefCount || 0) === 1
+                && Number(requiredDocsReport.overall?.coveredRequiredDocBriefCount || 0) === 1
+                && Number(requiredDocsReport.overall?.requiredRelPathCount || 0) === pressureDocs.length
+                && Number(requiredDocsReport.overall?.requiredRepairWorkItemIdCount || 0) === pressureDocs.length
+                && qualityCheck.status === "ok"
+                && Number(qualityCheck.checked || 0) === 1
+                && Number(qualityCheck.passed || 0) === 1,
+        };
+        return {
+            pass: Object.values(checks).every(Boolean),
+            checks,
+            receiptReport: receiptReport.overall,
+            candidateReport: candidateReport.overall,
+            briefReport: briefReport.overall,
+            requiredDocsReport: requiredDocsReport.overall,
+            qualityCheck: {
+                id: qualityCheck.id || "",
+                status: qualityCheck.status || "",
+                checked: qualityCheck.checked || 0,
+                passed: qualityCheck.passed || 0,
+            },
+            candidate: {
+                rel_paths: candidate.pressure_memory_provenance_rel_paths || [],
+                repair_ids: candidate.pressure_memory_provenance_repair_work_item_ids || [],
+            },
+            brief: {
+                rel_paths: brief.pressure_memory_provenance_rel_paths || [],
+                repair_ids: brief.pressure_memory_provenance_repair_work_item_ids || [],
+                worker_task: compactMemoryCenterText(workerTask, 1200),
+            },
+        };
+    }
+    finally {
+        for (const file of [bindingFile, `${bindingFile}.bak`, workItemsFile, `${workItemsFile}.bak`, dispatchPlanFile, `${dispatchPlanFile}.bak`]) {
+            try {
+                if (file && fs.existsSync(file))
+                    fs.unlinkSync(file);
+            }
+            catch { }
+        }
+    }
+}
 function runMemoryCenterWorkerContextPacketPressureMemoryProvenanceReceiptRepairTypedMemorySelfTest() {
     const groupId = `memory-center-pressure-memory-provenance-receipt-typed-memory-selftest-${process.pid}-${Date.now()}`;
     const bindingFile = getGroupReplayRepairDispatchBindingLedgerFile(groupId);
@@ -29565,6 +36751,8 @@ function runMemoryCenterWorkerContextPacketPressureProvenanceProviderDispatchOve
 function runMemoryCenterWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptContractValidationSelfTest() {
     const groupId = `memory-center-pressure-provider-override-followup-receipt-contract-validation-selftest-${process.pid}-${Date.now()}`;
     const bindingFile = getGroupReplayRepairDispatchBindingLedgerFile(groupId);
+    const workItemsFile = getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId);
+    const typedDir = path.join(utils_1.CCM_DIR, "group-memory-md", sidecarFileId(groupId));
     const targetProject = "api";
     const agentType = "codex";
     const relPath = "pressure-provider-dispatch-override-followup-receipt-validation.md";
@@ -29704,6 +36892,1068 @@ function runMemoryCenterWorkerContextPacketPressureProvenanceProviderDispatchOve
         };
     }
     finally {
+        for (const file of [bindingFile, `${bindingFile}.bak`, workItemsFile, `${workItemsFile}.bak`]) {
+            try {
+                if (file && fs.existsSync(file))
+                    fs.unlinkSync(file);
+            }
+            catch { }
+        }
+        try {
+            if (typedDir && fs.existsSync(typedDir))
+                fs.rmSync(typedDir, { recursive: true, force: true });
+        }
+        catch { }
+    }
+}
+function runMemoryCenterWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptValidationRepairSelfTest() {
+    const groupId = `memory-center-provider-override-followup-receipt-validation-repair-selftest-${process.pid}-${Date.now()}`;
+    const bindingFile = getGroupReplayRepairDispatchBindingLedgerFile(groupId);
+    const workItemsFile = getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId);
+    const dispatchPlanFile = getGroupReplayRepairDispatchPlanLedgerFile(groupId);
+    const typedDir = path.join(utils_1.CCM_DIR, "group-memory-md", sidecarFileId(groupId));
+    const targetProject = "api";
+    const agentType = "codex";
+    const relPath = "pressure-provider-dispatch-override-followup-retry-brief.md";
+    const followupWorkItemId = "work-phase153-provider-override-followup";
+    const overrideId = "provider-dispatch-override:phase153-repair";
+    try {
+        const { buildWorkerContextPacket } = require("../../agents/runtime-kernel");
+        const { recordWorkerContextPacketAssignmentBindingForCoordinator, recordWorkerContextProviderDispatchOverrideFollowupReceiptContractValidationForCoordinator, } = require("../collaboration/group-orchestrator");
+        const advisory = {
+            schema: "ccm-pressure-provenance-provider-dispatch-advisory-selection-v1",
+            groupId,
+            project: targetProject,
+            agent_type: agentType,
+            health_status: "monitor",
+            dispatch_policy: "allow_with_receipt_sampling",
+            should_hold_dispatch: false,
+            selected_candidate: {
+                schema: "ccm-pressure-provenance-feedback-provider-dispatch-selected-candidate-v1",
+                groupId,
+                project: targetProject,
+                agent_type: agentType,
+                health_status: "monitor",
+                dispatch_policy: "allow_with_receipt_sampling",
+                should_hold_dispatch: false,
+                provider_override_followup_repaired: true,
+                provider_override_followup_repaired_count: 1,
+                provider_override_followup_last_completed_at: "2026-07-10T05:20:00.000Z",
+                provider_override_followup_fresh_after_last_violation: true,
+                provider_override_followup_rel_paths: [relPath],
+                provider_override_followup_work_item_ids: [followupWorkItemId],
+                provider_override_followup_override_ids: [overrideId],
+            },
+        };
+        const packet = buildWorkerContextPacket({
+            group: { id: groupId, members: [{ project: targetProject }] },
+            project: targetProject,
+            agentType,
+            task: "Phase 153 provider override follow-up receipt validation repair selftest.",
+            pressureProvenanceProviderDispatchAdvisory: advisory,
+            contextUsageOptions: { maxTokens: 5000, autoCompactBufferTokens: 120 },
+        });
+        const binding = recordWorkerContextPacketAssignmentBindingForCoordinator(groupId, {
+            scopeId: groupId,
+            project: targetProject,
+            agentType,
+            assignmentId: "assignment-phase153-provider-override-followup-repair",
+            dispatchKey: "dispatch-phase153-provider-override-followup-repair",
+            taskFingerprint: "phase153 provider override followup receipt validation repair",
+            worker_context_packet: packet,
+            dispatch_ready: true,
+        }, { at: "2026-07-10T05:20:01.000Z" }) || {};
+        const failedValidation = recordWorkerContextProviderDispatchOverrideFollowupReceiptContractValidationForCoordinator(groupId, {
+            binding_id: binding.binding_id,
+            worker_context_packet_id: packet.packet_id,
+            task_id: "task-phase153-provider-override-followup-repair",
+            task_agent_session_id: "tas-phase153-provider-override-followup-repair",
+            execution_id: "execution-phase153-provider-override-followup-repair-failed",
+            receipt_status: "done",
+            receipt: {
+                status: "done",
+                memoryProvenanceUsage: [{
+                        relPath,
+                        usageState: "used",
+                        repairStatus: "completed",
+                        repairGapType: "provider_dispatch_override_followup",
+                        currentSourceVerified: true,
+                        reason: "missing corrected provider override follow-up receipt evidence",
+                    }],
+            },
+        }, { at: "2026-07-10T05:20:02.000Z" });
+        const failedReport = buildWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptValidationRepairReport({
+            groupIds: [groupId],
+            generatedAt: "2026-07-10T05:20:03.000Z",
+        });
+        const failedWorkLedger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+        const failedPlanLedger = readGroupReplayRepairDispatchPlanLedger(groupId);
+        const repairWorkItem = (failedWorkLedger.items || []).find((item) => isProviderDispatchOverrideFollowupReceiptValidationRepairSource(item.source)) || {};
+        const readyBrief = (failedPlanLedger.briefs || []).find((brief) => isProviderDispatchOverrideFollowupReceiptValidationRepairSource(brief.source) && brief.status === "ready") || {};
+        const passedValidation = recordWorkerContextProviderDispatchOverrideFollowupReceiptContractValidationForCoordinator(groupId, {
+            binding_id: binding.binding_id,
+            worker_context_packet_id: packet.packet_id,
+            task_id: "task-phase153-provider-override-followup-repair",
+            task_agent_session_id: "tas-phase153-provider-override-followup-repair",
+            execution_id: "execution-phase153-provider-override-followup-repair-passed",
+            receipt_status: "done",
+            receipt: {
+                status: "done",
+                memoryProvenanceUsage: [{
+                        relPath,
+                        usageState: "verified",
+                        repairStatus: "completed",
+                        repairGapType: "provider_dispatch_override_followup",
+                        repairWorkItemId: followupWorkItemId,
+                        providerDispatchOverrideId: overrideId,
+                        currentSourceVerified: true,
+                        providerDispatchOverrideFollowupHistoryReverified: true,
+                        reason: "Phase 153 corrected receipt reverified provider override follow-up history.",
+                    }],
+            },
+        }, { at: "2026-07-10T05:20:04.000Z" });
+        const resolvedReport = buildWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptValidationRepairReport({
+            groupIds: [groupId],
+            generatedAt: "2026-07-10T05:20:05.000Z",
+        });
+        const resolvedWorkLedger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+        const resolvedItem = (resolvedWorkLedger.items || []).find((item) => String(item.work_item_id || item.id || "") === repairWorkItem.work_item_id) || {};
+        const quality = buildMemoryQualityReport({
+            checkIds: ["worker_context_packet_pressure_provenance_provider_dispatch_override_followup_receipt_validation_repair"],
+            groupIds: [groupId],
+            refresh: true,
+        });
+        const check = (quality.checks || []).find((item) => item.id === "worker_context_packet_pressure_provenance_provider_dispatch_override_followup_receipt_validation_repair") || {};
+        const checks = {
+            failedValidationCreatesOpenRepairItem: failedValidation?.status === "failed"
+                && failedValidation?.repair_work_item_status === "pending"
+                && repairWorkItem.source === "worker_context_provider_dispatch_override_followup_receipt_contract_validation_repair"
+                && replayRepairWorkItemOpen(repairWorkItem.status),
+            failedValidationCreatesCandidateAndBrief: failedReport.overall?.status === "ok"
+                && Number(failedReport.overall.openRepairItemCount || 0) === 1
+                && Number(failedReport.overall.readyCandidateCount || 0) === 1
+                && Number(failedReport.overall.readyBriefCount || 0) === 1
+                && !!readyBrief.brief_id,
+            retryBriefIsSelfContained: readyBrief.should_create_real_task === false
+                && readyBrief.worker_task?.includes(relPath)
+                && readyBrief.worker_task?.includes(followupWorkItemId)
+                && readyBrief.worker_task?.includes(overrideId)
+                && readyBrief.worker_task?.includes("providerDispatchOverrideFollowupHistoryReverified=true")
+                && readyBrief.worker_task?.includes("providerDispatchOverrideId"),
+            passedValidationClosesSameWorkItem: passedValidation?.contract_satisfied === true
+                && passedValidation?.repair_work_item_id === repairWorkItem.work_item_id
+                && replayRepairWorkItemStatus(resolvedItem.status) === "completed"
+                && resolvedItem.completion_source === "provider_dispatch_override_followup_receipt_contract_validation",
+            resolvedReportRetiresReadyBrief: resolvedReport.overall?.status === "ok"
+                && Number(resolvedReport.overall.completedRepairItemCount || 0) === 1
+                && Number(resolvedReport.overall.readyCandidateCount || 0) === 0
+                && Number(resolvedReport.overall.readyBriefCount || 0) === 0,
+            qualityCheckPasses: check.status === "ok"
+                && Number(check.checked || 0) === 1
+                && Number(check.passed || 0) === 1,
+        };
+        return {
+            pass: Object.values(checks).every(Boolean),
+            checks,
+            failedReport: failedReport.overall,
+            resolvedReport: resolvedReport.overall,
+            repairWorkItem: {
+                id: repairWorkItem.work_item_id || "",
+                initialStatus: repairWorkItem.status || "",
+                finalStatus: resolvedItem.status || "",
+            },
+            brief: {
+                brief_id: readyBrief.brief_id || "",
+                source: readyBrief.source || "",
+                target_project: readyBrief.target_project || "",
+            },
+            check: {
+                id: check.id || "",
+                status: check.status || "",
+                checked: check.checked || 0,
+                passed: check.passed || 0,
+            },
+        };
+    }
+    finally {
+        for (const file of [bindingFile, `${bindingFile}.bak`, workItemsFile, `${workItemsFile}.bak`, dispatchPlanFile, `${dispatchPlanFile}.bak`]) {
+            try {
+                if (file && fs.existsSync(file))
+                    fs.unlinkSync(file);
+            }
+            catch { }
+        }
+        try {
+            if (typedDir && fs.existsSync(typedDir))
+                fs.rmSync(typedDir, { recursive: true, force: true });
+        }
+        catch { }
+    }
+}
+function runMemoryCenterWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptValidationTypedMemoryPolicySelfTest() {
+    const groupId = `memory-center-provider-override-followup-receipt-validation-typed-policy-selftest-${process.pid}-${Date.now()}`;
+    const bindingFile = getGroupReplayRepairDispatchBindingLedgerFile(groupId);
+    const workItemsFile = getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId);
+    const typedDir = path.join(utils_1.CCM_DIR, "group-memory-md", sidecarFileId(groupId));
+    const targetProject = "api";
+    const agentType = "codex";
+    const relPath = "pressure-provider-dispatch-override-followup-receipt-validation-typed-policy.md";
+    const followupWorkItemId = "work-phase154-mcc-provider-override-followup";
+    const overrideId = "provider-dispatch-override:phase154-mcc-typed-policy";
+    try {
+        const { buildWorkerContextPacket } = require("../../agents/runtime-kernel");
+        const { recordWorkerContextPacketAssignmentBindingForCoordinator, recordWorkerContextProviderDispatchOverrideFollowupReceiptContractValidationForCoordinator, } = require("../collaboration/group-orchestrator");
+        const { buildGroupTypedMemoryRecall, readGroupTypedMemoryDistillationLedger, scanGroupTypedMemoryDocuments, } = require("../collaboration/group-memory-index");
+        const advisory = {
+            schema: "ccm-pressure-provenance-provider-dispatch-advisory-selection-v1",
+            groupId,
+            project: targetProject,
+            agent_type: agentType,
+            health_status: "monitor",
+            dispatch_policy: "allow_with_receipt_sampling",
+            should_hold_dispatch: false,
+            selected_candidate: {
+                groupId,
+                project: targetProject,
+                agent_type: agentType,
+                health_status: "monitor",
+                dispatch_policy: "allow_with_receipt_sampling",
+                should_hold_dispatch: false,
+                provider_override_followup_repaired: true,
+                provider_override_followup_repaired_count: 1,
+                provider_override_followup_last_completed_at: "2026-07-10T06:10:00.000Z",
+                provider_override_followup_fresh_after_last_violation: true,
+                provider_override_followup_rel_paths: [relPath],
+                provider_override_followup_work_item_ids: [followupWorkItemId],
+                provider_override_followup_override_ids: [overrideId],
+            },
+        };
+        const packet = buildWorkerContextPacket({
+            group: { id: groupId, members: [{ project: targetProject }] },
+            project: targetProject,
+            agentType,
+            task: "Phase 154 Memory Center typed validation policy selftest.",
+            pressureProvenanceProviderDispatchAdvisory: advisory,
+            contextUsageOptions: { maxTokens: 5000, autoCompactBufferTokens: 120 },
+        });
+        const binding = recordWorkerContextPacketAssignmentBindingForCoordinator(groupId, {
+            scopeId: groupId,
+            project: targetProject,
+            agentType,
+            assignmentId: "assignment-phase154-mcc-validation-typed-policy",
+            dispatchKey: "dispatch-phase154-mcc-validation-typed-policy",
+            taskFingerprint: "phase154 mcc provider override followup validation typed policy",
+            worker_context_packet: packet,
+            dispatch_ready: true,
+        }, { at: "2026-07-10T06:10:01.000Z" }) || {};
+        const recordFailedAttempt = (executionId, at) => recordWorkerContextProviderDispatchOverrideFollowupReceiptContractValidationForCoordinator(groupId, {
+            binding_id: binding.binding_id,
+            worker_context_packet_id: packet.packet_id,
+            task_id: "task-phase154-mcc-validation-typed-policy",
+            task_agent_session_id: `tas-${executionId}`,
+            execution_id: executionId,
+            receipt_status: "done",
+            receipt: {
+                status: "done",
+                memoryProvenanceUsage: [{
+                        relPath,
+                        usageState: "used",
+                        repairStatus: "completed",
+                        repairGapType: "provider_dispatch_override_followup",
+                        currentSourceVerified: true,
+                        reason: "PROVIDER_OVERRIDE_FOLLOWUP_VALIDATION_POLICY_FAILURE missing corrected receipt evidence",
+                    }],
+            },
+        }, { at });
+        recordFailedAttempt("execution-phase154-mcc-validation-failed-1", "2026-07-10T06:10:02.000Z");
+        recordFailedAttempt("execution-phase154-mcc-validation-failed-2", "2026-07-10T06:10:03.000Z");
+        const escalatedReport = buildWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptValidationTypedMemoryPolicyReport({
+            groupIds: [groupId],
+            providerOverrideFollowupReceiptValidationFailureThreshold: 2,
+            generatedAt: "2026-07-10T06:10:04.000Z",
+        });
+        const passedValidation = recordWorkerContextProviderDispatchOverrideFollowupReceiptContractValidationForCoordinator(groupId, {
+            binding_id: binding.binding_id,
+            worker_context_packet_id: packet.packet_id,
+            task_id: "task-phase154-mcc-validation-typed-policy",
+            task_agent_session_id: "tas-execution-phase154-mcc-validation-passed",
+            execution_id: "execution-phase154-mcc-validation-passed",
+            receipt_status: "done",
+            receipt: {
+                status: "done",
+                memoryProvenanceUsage: [{
+                        relPath,
+                        usageState: "verified",
+                        repairStatus: "completed",
+                        repairGapType: "provider_dispatch_override_followup",
+                        repairWorkItemId: followupWorkItemId,
+                        providerDispatchOverrideId: overrideId,
+                        currentSourceVerified: true,
+                        providerDispatchOverrideFollowupHistoryReverified: true,
+                        reason: "PROVIDER_OVERRIDE_FOLLOWUP_VALIDATION_POLICY_REPAIRED current source and full receipt contract verified",
+                    }],
+            },
+        }, { at: "2026-07-10T06:10:05.000Z" });
+        const repairedReport = buildWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptValidationTypedMemoryPolicyReport({
+            groupIds: [groupId],
+            providerOverrideFollowupReceiptValidationFailureThreshold: 2,
+            generatedAt: "2026-07-10T06:10:06.000Z",
+        });
+        const quality = buildMemoryQualityReport({
+            checkIds: ["worker_context_packet_pressure_provenance_provider_dispatch_override_followup_receipt_validation_typed_memory_policy"],
+            groupIds: [groupId],
+            providerOverrideFollowupReceiptValidationFailureThreshold: 2,
+            refresh: true,
+        });
+        const check = (quality.checks || []).find((item) => item.id === "worker_context_packet_pressure_provenance_provider_dispatch_override_followup_receipt_validation_typed_memory_policy") || {};
+        const typedLedger = readGroupTypedMemoryDistillationLedger(groupId);
+        const archive = typedLedger.pressureProvenanceProviderDispatchOverrideFollowupReceiptValidationArchive || {};
+        const attribution = archive.attributions?.[0] || {};
+        const docs = scanGroupTypedMemoryDocuments(groupId);
+        const recall = buildGroupTypedMemoryRecall(groupId, "PROVIDER_OVERRIDE_FOLLOWUP_VALIDATION_POLICY_FAILURE PROVIDER_OVERRIDE_FOLLOWUP_VALIDATION_POLICY_REPAIRED", {
+            max: 8,
+            disableLedger: true,
+            forceMemory: true,
+        });
+        const escalatedProbe = escalatedReport.groups?.[0]?.probes?.[0] || {};
+        const repairedProbe = repairedReport.groups?.[0]?.probes?.[0] || {};
+        const recallText = JSON.stringify(recall.recalled || []);
+        const checks = {
+            appendOnlyArchivePreservesAttempts: Number(archive.attempt_count || 0) === 3
+                && Number(archive.failed_count || 0) === 2
+                && Number(archive.passed_count || 0) === 1,
+            escalatedPolicyIsCovered: escalatedReport.overall?.status === "ok"
+                && Number(escalatedReport.overall.escalatedAttributionCount || 0) === 1
+                && escalatedProbe.policyActive === true
+                && escalatedProbe.policyAction === "hold_provider_after_repeated_override_followup_receipt_validation_failures"
+                && escalatedProbe.policyEscalated === true,
+            repairedPolicyIsCovered: passedValidation?.contract_satisfied === true
+                && repairedReport.overall?.status === "ok"
+                && Number(repairedReport.overall.repairedAttributionCount || 0) === 1
+                && repairedProbe.policyRepairVerified === true
+                && repairedProbe.policyProviderFollowupRepaired === true,
+            repairClearsStreakWithoutDeletingAudit: attribution.consecutive_failure_count === 0
+                && attribution.repair_verified === true
+                && attribution.failed_count === 2
+                && attribution.passed_count === 1,
+            typedMemoryDocumentAndRecallWork: docs.some((doc) => doc.relPath === "provider-dispatch-override-followup-receipt-validation-history.md" && doc.type === "feedback")
+                && recallText.includes("provider-dispatch-override-followup-receipt-validation-history.md")
+                && recallText.includes("PROVIDER_OVERRIDE_FOLLOWUP_VALIDATION_POLICY_REPAIRED"),
+            qualityCheckPasses: check.status === "ok"
+                && Number(check.checked || 0) === 1
+                && Number(check.passed || 0) === 1,
+        };
+        return {
+            pass: Object.values(checks).every(Boolean),
+            checks,
+            escalatedReport: escalatedReport.overall,
+            repairedReport: repairedReport.overall,
+            archive: {
+                attempt_count: archive.attempt_count || 0,
+                failed_count: archive.failed_count || 0,
+                passed_count: archive.passed_count || 0,
+                consecutive_failure_count: attribution.consecutive_failure_count || 0,
+                repair_verified: attribution.repair_verified === true,
+            },
+            check: {
+                id: check.id || "",
+                status: check.status || "",
+                checked: check.checked || 0,
+                passed: check.passed || 0,
+            },
+        };
+    }
+    finally {
+        for (const file of [bindingFile, `${bindingFile}.bak`, workItemsFile, `${workItemsFile}.bak`]) {
+            try {
+                if (file && fs.existsSync(file))
+                    fs.unlinkSync(file);
+            }
+            catch { }
+        }
+        try {
+            if (typedDir && fs.existsSync(typedDir))
+                fs.rmSync(typedDir, { recursive: true, force: true });
+        }
+        catch { }
+    }
+}
+function runMemoryCenterWorkerContextPacketCrossGroupProviderReliabilityGuidanceSelfTest() {
+    const sourceGroupA = `memory-center-provider-reliability-source-a-${process.pid}-${Date.now()}`;
+    const sourceGroupB = `memory-center-provider-reliability-source-b-${process.pid}-${Date.now()}`;
+    const typedDirA = path.join(utils_1.CCM_DIR, "group-memory-md", sidecarFileId(sourceGroupA));
+    const typedDirB = path.join(utils_1.CCM_DIR, "group-memory-md", sidecarFileId(sourceGroupB));
+    const snapshotFile = path.join(utils_1.CCM_DIR, "global-provider-reliability", `phase155-selftest-${process.pid}-${Date.now()}.json`);
+    const nowAt = "2026-07-10T07:20:00.000Z";
+    try {
+        const { buildGlobalProviderDispatchReliabilitySignals, distillProviderDispatchOverrideFollowupReceiptValidationToTypedMemory, } = require("../collaboration/group-memory-index");
+        const validation = (groupId, project, id, status, at) => ({
+            schema: "ccm-worker-context-provider-dispatch-override-followup-receipt-contract-validation-v1",
+            validation_id: id,
+            groupId,
+            project,
+            agent_type: "codex",
+            binding_id: `binding-${id}`,
+            execution_id: `execution-${id}`,
+            receipt_status: "done",
+            status,
+            contract_satisfied: status === "passed",
+            repair_work_item_id: `private-repair-${id}`,
+            contract: {
+                rel_paths: [`private-${project}-memory.md`],
+                followup_work_item_ids: [`private-${project}-followup`],
+                override_ids: [`private-${project}-override`],
+            },
+            gaps: status === "failed" ? [{ code: "private_gap", reason: `private ${project} evidence` }] : [],
+            receipt: { memoryProvenanceUsage: [{ reason: `private ${project} receipt evidence` }] },
+            at,
+        });
+        distillProviderDispatchOverrideFollowupReceiptValidationToTypedMemory(sourceGroupA, {
+            rows: [
+                { validation: validation(sourceGroupA, "secret-alpha", "phase155-mcc-alpha-old-failed", "failed", "2026-01-10T07:20:00.000Z") },
+                { validation: validation(sourceGroupA, "secret-alpha", "phase155-mcc-alpha-recent-passed", "passed", "2026-07-10T07:00:00.000Z") },
+            ],
+        }, { updatedAt: "2026-07-10T07:00:00.000Z" });
+        distillProviderDispatchOverrideFollowupReceiptValidationToTypedMemory(sourceGroupB, {
+            rows: [
+                { validation: validation(sourceGroupB, "secret-beta", "phase155-mcc-beta-recent-failed-1", "failed", "2026-07-10T07:05:00.000Z") },
+                { validation: validation(sourceGroupB, "secret-beta", "phase155-mcc-beta-recent-failed-2", "failed", "2026-07-10T07:10:00.000Z") },
+            ],
+        }, { updatedAt: "2026-07-10T07:10:00.000Z" });
+        const report = buildWorkerContextPacketCrossGroupProviderReliabilityGuidanceReport({
+            crossGroupProviderReliabilityGroupIds: [sourceGroupA, sourceGroupB],
+            minSourceGroups: 2,
+            providerReliabilityHalfLifeDays: 14,
+            generatedAt: nowAt,
+        });
+        const quality = buildMemoryQualityReport({
+            checkIds: ["worker_context_packet_cross_group_provider_reliability_guidance"],
+            crossGroupProviderReliabilityGroupIds: [sourceGroupA, sourceGroupB],
+            minSourceGroups: 2,
+            providerReliabilityHalfLifeDays: 14,
+            generatedAt: nowAt,
+            refresh: true,
+        });
+        const check = (quality.checks || []).find((item) => item.id === "worker_context_packet_cross_group_provider_reliability_guidance") || {};
+        const globalSignals = buildGlobalProviderDispatchReliabilitySignals({
+            crossGroupProviderReliabilityGroupIds: [sourceGroupA, sourceGroupB],
+            minSourceGroups: 2,
+            providerReliabilityHalfLifeDays: 14,
+            generatedAt: nowAt,
+        });
+        const { buildGlobalGroupMemoryContext } = require("../collaboration/memory");
+        const globalAgentContext = buildGlobalGroupMemoryContext("检查 provider reliability 并规划下一次全局派发", {
+            groups: [],
+            sessionId: "phase155-global-provider-reliability",
+            crossGroupProviderReliabilityGroupIds: [sourceGroupA, sourceGroupB],
+            crossGroupProviderReliabilityMinSourceGroups: 2,
+            providerReliabilityHalfLifeDays: 14,
+            providerReliabilitySnapshotFile: snapshotFile,
+            enableProviderReliabilitySnapshot: true,
+            disableLedger: true,
+        });
+        const ignoredGlobalAgentContext = buildGlobalGroupMemoryContext("本轮忽略记忆，只看当前消息", {
+            groups: [],
+            sessionId: "phase155-global-provider-reliability-ignore",
+            crossGroupProviderReliabilityGroupIds: [sourceGroupA, sourceGroupB],
+            providerReliabilitySnapshotFile: snapshotFile,
+            enableProviderReliabilitySnapshot: true,
+            disableLedger: true,
+        });
+        const signal = report.signals?.[0] || {};
+        const serialized = JSON.stringify(globalSignals);
+        const checks = {
+            reportBuildsDecayedGlobalSignal: report.overall?.status === "ok"
+                && Number(report.overall.signalCount || 0) === 1
+                && Number(report.overall.coveredSignalCount || 0) === 1
+                && Number(signal.half_life_days || 0) === 14
+                && Number(signal.source_group_count || 0) === 2
+                && signal.actionable === true,
+            reportEnforcesGuidanceOnlyLocalFirst: report.guidance?.guidance_only === true
+                && report.guidance?.local_policy_override_allowed === false
+                && report.guidance?.contains_private_memory === false
+                && Number(report.overall.privacyGapCount || 0) === 0,
+            serializedGlobalSignalIsPrivate: !serialized.includes(sourceGroupA)
+                && !serialized.includes(sourceGroupB)
+                && !serialized.includes("secret-alpha")
+                && !serialized.includes("secret-beta")
+                && !serialized.includes("private-secret-alpha-memory.md")
+                && !serialized.includes("phase155-mcc-beta-recent-failed-2"),
+            highRiskIsGlobalGuidanceNotGroupPolicy: ["high", "medium"].includes(signal.risk_status)
+                && signal.guidanceSafe === true
+                && signal.privacySafe === true
+                && signal.actionableSafe === true,
+            globalAgentContextReceivesOnlySanitizedGuidance: globalAgentContext.provider_reliability_guidance?.schema === "ccm-global-provider-dispatch-reliability-signals-v1"
+                && globalAgentContext.provider_reliability_guidance?.signals?.[0]?.actionable === true
+                && String(globalAgentContext.rendered_text || "").includes("全局 provider reliability（脱敏聚合）")
+                && !String(globalAgentContext.rendered_text || "").includes("secret-alpha")
+                && !String(globalAgentContext.rendered_text || "").includes(sourceGroupA),
+            ignoreMemorySuppressesGlobalReliabilityGuidance: ignoredGlobalAgentContext.memory_policy?.ignored === true
+                && !ignoredGlobalAgentContext.provider_reliability_guidance
+                && !String(ignoredGlobalAgentContext.rendered_text || "").includes("provider reliability（脱敏聚合）"),
+            qualityCheckPasses: check.status === "ok"
+                && Number(check.checked || 0) === 1
+                && Number(check.passed || 0) === 1,
+        };
+        return {
+            pass: Object.values(checks).every(Boolean),
+            checks,
+            report: report.overall,
+            signal: {
+                agent_type: signal.agent_type || "",
+                risk_status: signal.risk_status || "",
+                risk_score: signal.risk_score || 0,
+                confidence: signal.confidence || 0,
+                source_group_count: signal.source_group_count || 0,
+                half_life_days: signal.half_life_days || 0,
+            },
+            check: {
+                id: check.id || "",
+                status: check.status || "",
+                checked: check.checked || 0,
+                passed: check.passed || 0,
+            },
+        };
+    }
+    finally {
+        for (const dir of [typedDirA, typedDirB]) {
+            try {
+                if (dir && fs.existsSync(dir))
+                    fs.rmSync(dir, { recursive: true, force: true });
+            }
+            catch { }
+        }
+        for (const file of [snapshotFile, `${snapshotFile}.bak`]) {
+            try {
+                if (file && fs.existsSync(file))
+                    fs.unlinkSync(file);
+            }
+            catch { }
+        }
+    }
+}
+function runMemoryCenterWorkerContextPacketProviderReliabilitySnapshotRankingSelfTest() {
+    const sourceGroupA = `memory-center-provider-snapshot-source-a-${process.pid}-${Date.now()}`;
+    const sourceGroupB = `memory-center-provider-snapshot-source-b-${process.pid}-${Date.now()}`;
+    const targetGroup = `memory-center-provider-snapshot-target-${process.pid}-${Date.now()}`;
+    const typedDirA = path.join(utils_1.CCM_DIR, "group-memory-md", sidecarFileId(sourceGroupA));
+    const typedDirB = path.join(utils_1.CCM_DIR, "group-memory-md", sidecarFileId(sourceGroupB));
+    const snapshotFile = path.join(utils_1.CCM_DIR, "global-provider-reliability", `phase156-mcc-selftest-${process.pid}-${Date.now()}.json`);
+    const bindingFile = getGroupReplayRepairDispatchBindingLedgerFile(targetGroup);
+    const nowAt = "2026-07-10T08:20:00.000Z";
+    const nowMs = Date.parse(nowAt);
+    const targetProject = "api";
+    try {
+        const { buildWorkerContextPacket } = require("../../agents/runtime-kernel");
+        const { recordWorkerContextPacketAssignmentBindingForCoordinator } = require("../collaboration/group-orchestrator");
+        const { distillProviderDispatchOverrideFollowupReceiptValidationToTypedMemory, writeGlobalProviderDispatchReliabilitySnapshot, } = require("../collaboration/group-memory-index");
+        const validation = (groupId, project, agentType, id, status, at) => ({
+            schema: "ccm-worker-context-provider-dispatch-override-followup-receipt-contract-validation-v1",
+            validation_id: id,
+            groupId,
+            project,
+            agent_type: agentType,
+            binding_id: `binding-${id}`,
+            execution_id: `execution-${id}`,
+            receipt_status: "done",
+            status,
+            contract_satisfied: status === "passed",
+            contract: { rel_paths: [`private-${project}-${agentType}.md`] },
+            gaps: status === "failed" ? [{ code: "private_gap", reason: "private receipt evidence" }] : [],
+            at,
+        });
+        for (const [groupId, project, offset] of [[sourceGroupA, "private-a", 10], [sourceGroupB, "private-b", 5]]) {
+            distillProviderDispatchOverrideFollowupReceiptValidationToTypedMemory(groupId, {
+                rows: [
+                    { validation: validation(groupId, project, "codex", `${project}-codex-failed`, "failed", new Date(nowMs - offset * 60_000).toISOString()) },
+                    { validation: validation(groupId, project, "cursor", `${project}-cursor-passed`, "passed", new Date(nowMs - (offset - 1) * 60_000).toISOString()) },
+                ],
+            }, { updatedAt: new Date(nowMs - (offset - 1) * 60_000).toISOString() });
+        }
+        const snapshot = writeGlobalProviderDispatchReliabilitySnapshot({
+            snapshotFile,
+            ttlMs: 5 * 60_000,
+            crossGroupProviderReliabilityGroupIds: [sourceGroupA, sourceGroupB],
+            minSourceGroups: 2,
+            providerReliabilityHalfLifeDays: 14,
+            nowMs,
+            generatedAt: nowAt,
+        });
+        const advisory = {
+            schema: "ccm-pressure-provenance-provider-dispatch-advisory-selection-v1",
+            version: 1,
+            groupId: targetGroup,
+            project: targetProject,
+            agent_type: "codex",
+            health_status: "monitor",
+            dispatch_policy: "allow_with_receipt_sampling",
+            should_hold_dispatch: false,
+            selected_candidate: {
+                schema: "ccm-pressure-provenance-feedback-provider-dispatch-selected-candidate-v1",
+                groupId: targetGroup,
+                project: targetProject,
+                agent_type: "codex",
+                health_status: "monitor",
+                dispatch_policy: "allow_with_receipt_sampling",
+                should_hold_dispatch: false,
+                cross_group_provider_reliability_actionable: true,
+                provider_reliability_snapshot_id: snapshot.snapshot_id,
+                provider_reliability_snapshot_checksum: snapshot.snapshot_checksum,
+                provider_reliability_snapshot_status: "fresh",
+                provider_reliability_snapshot_generation_id: snapshot.generation_id,
+            },
+            provider_reliability_snapshot: {
+                schema: "ccm-provider-dispatch-reliability-snapshot-ref-v1",
+                snapshot_id: snapshot.snapshot_id,
+                generation_id: snapshot.generation_id,
+                snapshot_checksum: snapshot.snapshot_checksum,
+                payload_checksum: snapshot.payload_checksum,
+                status: "fresh",
+                usable: true,
+                generated_at: snapshot.generated_at,
+                expires_at: snapshot.expires_at,
+                source_generation_checksum: snapshot.source_provenance?.generation_checksum,
+                source_ledger_count: snapshot.source_provenance?.source_ledger_count,
+                guidance_only: true,
+                local_policy_override_allowed: false,
+                contains_private_memory: false,
+            },
+            safer_alternative_count: 1,
+            safer_alternatives: [{
+                    schema: "ccm-provider-dispatch-safer-alternative-v1",
+                    agent_type: "cursor",
+                    project: targetProject,
+                    configured: true,
+                    local_health_status: "watch",
+                    local_dispatch_policy: "allow_with_monitoring",
+                    local_policy_active: false,
+                    global_risk_status: "low",
+                    global_risk_score: 0,
+                    global_confidence: 0.4,
+                    global_source_group_count: 2,
+                    composite_rank: 10,
+                    selected_composite_rank: 22,
+                    safer_than_selected: true,
+                    snapshot_id: snapshot.snapshot_id,
+                    snapshot_checksum: snapshot.snapshot_checksum,
+                    snapshot_status: "fresh",
+                }],
+            recommendation: "keep current assignment unchanged; review configured safer cursor candidate for next dispatch",
+        };
+        const packet = buildWorkerContextPacket({
+            group: { id: targetGroup, members: [{ project: targetProject }] },
+            project: targetProject,
+            agentType: "codex",
+            task: "Phase 156 Memory Center provider snapshot ranking selftest.",
+            pressureProvenanceProviderDispatchAdvisory: advisory,
+            contextUsageOptions: { maxTokens: 5000, autoCompactBufferTokens: 120 },
+        });
+        recordWorkerContextPacketAssignmentBindingForCoordinator(targetGroup, {
+            scopeId: targetGroup,
+            project: targetProject,
+            agentType: "codex",
+            assignmentId: "assignment-phase156-mcc-provider-ranking",
+            dispatchKey: "dispatch-phase156-mcc-provider-ranking",
+            taskFingerprint: "phase156 mcc provider snapshot ranking",
+            worker_context_packet: packet,
+            dispatch_ready: true,
+        }, { at: nowAt });
+        const report = buildWorkerContextPacketProviderReliabilitySnapshotRankingReport({
+            groupIds: [targetGroup],
+            providerReliabilitySnapshotFile: snapshotFile,
+            crossGroupProviderReliabilityGroupIds: [sourceGroupA, sourceGroupB],
+            minSourceGroups: 2,
+            providerReliabilityHalfLifeDays: 14,
+            nowMs,
+            generatedAt: nowAt,
+        });
+        const quality = buildMemoryQualityReport({
+            checkIds: ["worker_context_packet_provider_reliability_snapshot_ranking"],
+            groupIds: [targetGroup],
+            providerReliabilitySnapshotFile: snapshotFile,
+            crossGroupProviderReliabilityGroupIds: [sourceGroupA, sourceGroupB],
+            minSourceGroups: 2,
+            providerReliabilityHalfLifeDays: 14,
+            nowMs,
+            generatedAt: nowAt,
+            refresh: true,
+        });
+        const check = (quality.checks || []).find((item) => item.id === "worker_context_packet_provider_reliability_snapshot_ranking") || {};
+        const originalText = fs.readFileSync(snapshotFile, "utf-8");
+        const tamperedPayload = JSON.parse(originalText);
+        tamperedPayload.expires_at = "2099-01-01T00:00:00.000Z";
+        fs.writeFileSync(snapshotFile, JSON.stringify(tamperedPayload, null, 2), "utf-8");
+        const tamperedReport = buildWorkerContextPacketProviderReliabilitySnapshotRankingReport({
+            groupIds: [targetGroup],
+            providerReliabilitySnapshotFile: snapshotFile,
+            crossGroupProviderReliabilityGroupIds: [sourceGroupA, sourceGroupB],
+            nowMs,
+            generatedAt: nowAt,
+        });
+        fs.writeFileSync(snapshotFile, originalText, "utf-8");
+        const group = report.groups?.[0] || {};
+        const bindingCheck = group.checks?.[0] || {};
+        const checks = {
+            freshSnapshotAndBindingAreCovered: report.overall?.status === "ok"
+                && report.overall?.snapshotStatus === "fresh"
+                && report.overall?.snapshotCovered === true
+                && Number(report.overall.checkedBindingCount || 0) === 1
+                && Number(report.overall.coveredBindingCount || 0) === 1,
+            rankingIsConfiguredSameProjectAndNoAutoSwitch: bindingCheck.alternativesSafe === true
+                && bindingCheck.assignmentUnchanged === true
+                && bindingCheck.safer_alternative_agent_types?.includes("cursor"),
+            qualityCheckPasses: check.status === "ok"
+                && Number(check.checked || 0) === 2
+                && Number(check.passed || 0) === 2,
+            tamperedSnapshotFailsQualityReport: tamperedReport.overall?.status === "warn"
+                || tamperedReport.overall?.status === "fail",
+            tamperedSnapshotIsNotCovered: tamperedReport.overall?.snapshotCovered === false
+                && tamperedReport.overall?.snapshotStatus === "tampered",
+        };
+        return {
+            pass: Object.values(checks).every(Boolean),
+            checks,
+            report: report.overall,
+            tamperedReport: tamperedReport.overall,
+            snapshot: report.snapshot,
+            binding: {
+                selected_agent_type: bindingCheck.selected_agent_type || "",
+                safer_alternative_agent_types: bindingCheck.safer_alternative_agent_types || [],
+                assignmentUnchanged: bindingCheck.assignmentUnchanged === true,
+            },
+            check: {
+                id: check.id || "",
+                status: check.status || "",
+                checked: check.checked || 0,
+                passed: check.passed || 0,
+            },
+        };
+    }
+    finally {
+        for (const dir of [typedDirA, typedDirB]) {
+            try {
+                if (dir && fs.existsSync(dir))
+                    fs.rmSync(dir, { recursive: true, force: true });
+            }
+            catch { }
+        }
+        for (const file of [snapshotFile, `${snapshotFile}.bak`, bindingFile, `${bindingFile}.bak`]) {
+            try {
+                if (file && fs.existsSync(file))
+                    fs.unlinkSync(file);
+            }
+            catch { }
+        }
+    }
+}
+function runMemoryCenterWorkerContextPacketProviderSwitchDecisionReceiptSelfTest() {
+    const groupId = `memory-center-provider-switch-receipt-${process.pid}-${Date.now()}`;
+    const bindingFile = getGroupReplayRepairDispatchBindingLedgerFile(groupId);
+    const typedDir = path.join(GROUP_TYPED_MEMORY_MD_DIR, sidecarFileId(groupId));
+    const project = "api";
+    const oldProvider = "codex";
+    const newProvider = "cursor";
+    const nowAt = "2026-07-10T09:30:00.000Z";
+    const nowMs = Date.parse(nowAt);
+    try {
+        const { buildWorkerContextPacket } = require("../../agents/runtime-kernel");
+        const { buildProviderSwitchDecisionReceiptForCoordinator, recordWorkerContextPacketAssignmentBindingForCoordinator, recordWorkerContextProviderSwitchSessionBindingForCoordinator, recordWorkerContextProviderSwitchExecutionReceiptForCoordinator, } = require("../collaboration/group-orchestrator");
+        const snapshotRef = {
+            schema: "ccm-provider-dispatch-reliability-snapshot-ref-v1",
+            snapshot_id: "provider-reliability-snapshot:phase157-memory-center",
+            generation_id: "provider-reliability-generation:phase157-memory-center",
+            snapshot_checksum: "phase157-memory-center-snapshot-checksum",
+            payload_checksum: "phase157-memory-center-payload-checksum",
+            status: "fresh",
+            usable: true,
+            generated_at: nowAt,
+            expires_at: "2026-07-10T09:35:00.000Z",
+            source_generation_checksum: "phase157-memory-center-generation-checksum",
+            guidance_only: true,
+            local_policy_override_allowed: false,
+            contains_private_memory: false,
+        };
+        const advisory = {
+            schema: "ccm-pressure-provenance-provider-dispatch-advisory-selection-v1",
+            version: 1,
+            groupId,
+            project,
+            agent_type: oldProvider,
+            health_status: "monitor",
+            dispatch_policy: "allow_with_receipt_sampling",
+            should_hold_dispatch: false,
+            selected_candidate: {
+                project,
+                agent_type: oldProvider,
+                health_status: "monitor",
+                dispatch_policy: "allow_with_receipt_sampling",
+                should_hold_dispatch: false,
+            },
+            provider_reliability_snapshot: snapshotRef,
+            safer_alternative_count: 1,
+            safer_alternatives: [{
+                    agent_type: newProvider,
+                    project,
+                    configured: true,
+                    local_health_status: "healthy",
+                    local_dispatch_policy: "preferred",
+                    global_risk_status: "low",
+                    global_risk_score: 0,
+                    composite_rank: 7,
+                    selected_composite_rank: 18,
+                    safer_than_selected: true,
+                    snapshot_id: snapshotRef.snapshot_id,
+                    snapshot_checksum: snapshotRef.snapshot_checksum,
+                    snapshot_status: "fresh",
+                }],
+        };
+        const request = {
+            requested_agent_type: newProvider,
+            compatibility_confirmed: true,
+            compatibility_evidence: ["cursor is configured for the api project and supports this task"],
+            reason: "Memory Center provider switch receipt selftest",
+            authority: {
+                kind: "local_user",
+                authority_id: "phase157-memory-center-local-authority",
+                approved: true,
+                local_policy_authority: true,
+                allow_switch_away_from_held_provider: true,
+            },
+        };
+        const makeAssignment = (suffix) => {
+            const packet = buildWorkerContextPacket({
+                group: { id: groupId, members: [{ project }] },
+                project,
+                agentType: oldProvider,
+                task: `Phase 157 Memory Center provider switch ${suffix}.`,
+                pressureProvenanceProviderDispatchAdvisory: advisory,
+                contextUsageOptions: { maxTokens: 5000, autoCompactBufferTokens: 120 },
+            });
+            return {
+                scopeId: groupId,
+                project,
+                agentType: oldProvider,
+                agent_type: oldProvider,
+                assignmentId: `assignment-phase157-memory-center-${suffix}`,
+                dispatchKey: `dispatch-phase157-memory-center-${suffix}`,
+                taskFingerprint: `phase157 memory center ${suffix}`,
+                task: `Phase 157 Memory Center provider switch ${suffix}.`,
+                worker_context_packet: packet,
+            };
+        };
+        const matchedBase = makeAssignment("matched");
+        const matchedReceipt = buildProviderSwitchDecisionReceiptForCoordinator(groupId, matchedBase, request, {
+            verifySnapshot: false,
+            nowMs,
+            at: nowAt,
+        });
+        const matchedPacket = buildWorkerContextPacket({
+            group: { id: groupId, members: [{ project }] },
+            project,
+            agentType: newProvider,
+            task: matchedBase.task,
+            pressureProvenanceProviderDispatchAdvisory: advisory,
+            providerSwitchDecisionReceipt: matchedReceipt,
+            contextUsageOptions: { maxTokens: 5000, autoCompactBufferTokens: 120 },
+        });
+        const matchedAssignment = {
+            ...matchedBase,
+            original_agent_type: oldProvider,
+            agentType: newProvider,
+            agent_type: newProvider,
+            provider_switch_decision_receipt: matchedReceipt,
+            worker_context_packet: matchedPacket,
+        };
+        recordWorkerContextPacketAssignmentBindingForCoordinator(groupId, matchedAssignment, { at: nowAt });
+        const matchedSession = recordWorkerContextProviderSwitchSessionBindingForCoordinator(groupId, {
+            assignment_id: matchedAssignment.assignmentId,
+            dispatch_key: matchedAssignment.dispatchKey,
+            provider_switch_decision_receipt: matchedReceipt,
+            project,
+            agent_type: newProvider,
+            task_agent_session_id: "tas-phase157-memory-center-matched",
+            native_session_id: "native-phase157-memory-center-matched",
+            execution_id: "execution-phase157-memory-center-matched",
+        }, { verifySnapshot: false, nowMs });
+        const matchedExecution = recordWorkerContextProviderSwitchExecutionReceiptForCoordinator(groupId, {
+            assignment_id: matchedAssignment.assignmentId,
+            dispatch_key: matchedAssignment.dispatchKey,
+            project,
+            executed_provider: newProvider,
+            task_agent_session_id: "tas-phase157-memory-center-matched",
+            native_session_id: "native-phase157-memory-center-matched",
+            execution_id: "execution-phase157-memory-center-matched",
+            receipt_status: "done",
+            receipt: {
+                status: "done",
+                providerSwitchExecution: {
+                    decisionReceiptId: matchedReceipt.receipt_id,
+                    expectedProvider: newProvider,
+                    executedProvider: newProvider,
+                    taskAgentSessionId: "tas-phase157-memory-center-matched",
+                    nativeSessionId: "native-phase157-memory-center-matched",
+                    executionId: "execution-phase157-memory-center-matched",
+                    usageState: "executed",
+                },
+            },
+        }, { verifySnapshot: false, nowMs });
+        const advisedOnly = makeAssignment("advised-only");
+        recordWorkerContextPacketAssignmentBindingForCoordinator(groupId, advisedOnly, { at: nowAt });
+        const healthyReport = buildWorkerContextPacketProviderSwitchDecisionReceiptReport({ groupIds: [groupId] });
+        const healthyQuality = buildMemoryQualityReport({
+            checkIds: ["worker_context_packet_provider_switch_decision_receipt"],
+            groupIds: [groupId],
+            refresh: true,
+        });
+        const healthyCheck = (healthyQuality.checks || []).find((item) => item.id === "worker_context_packet_provider_switch_decision_receipt") || {};
+        const mismatchBase = makeAssignment("mismatch");
+        const mismatchReceipt = buildProviderSwitchDecisionReceiptForCoordinator(groupId, mismatchBase, request, {
+            verifySnapshot: false,
+            nowMs,
+            at: nowAt,
+        });
+        const mismatchPacket = buildWorkerContextPacket({
+            group: { id: groupId, members: [{ project }] },
+            project,
+            agentType: newProvider,
+            task: mismatchBase.task,
+            pressureProvenanceProviderDispatchAdvisory: advisory,
+            providerSwitchDecisionReceipt: mismatchReceipt,
+            contextUsageOptions: { maxTokens: 5000, autoCompactBufferTokens: 120 },
+        });
+        const mismatchAssignment = {
+            ...mismatchBase,
+            original_agent_type: oldProvider,
+            agentType: newProvider,
+            agent_type: newProvider,
+            provider_switch_decision_receipt: mismatchReceipt,
+            worker_context_packet: mismatchPacket,
+        };
+        recordWorkerContextPacketAssignmentBindingForCoordinator(groupId, mismatchAssignment, { at: nowAt });
+        recordWorkerContextProviderSwitchSessionBindingForCoordinator(groupId, {
+            assignment_id: mismatchAssignment.assignmentId,
+            dispatch_key: mismatchAssignment.dispatchKey,
+            provider_switch_decision_receipt: mismatchReceipt,
+            project,
+            agent_type: newProvider,
+            task_agent_session_id: "tas-phase157-memory-center-mismatch",
+            native_session_id: "native-phase157-memory-center-mismatch",
+            execution_id: "execution-phase157-memory-center-mismatch",
+        }, { verifySnapshot: false, nowMs });
+        const mismatchExecution = recordWorkerContextProviderSwitchExecutionReceiptForCoordinator(groupId, {
+            assignment_id: mismatchAssignment.assignmentId,
+            dispatch_key: mismatchAssignment.dispatchKey,
+            project,
+            executed_provider: oldProvider,
+            task_agent_session_id: "tas-phase157-memory-center-mismatch",
+            native_session_id: "native-phase157-memory-center-mismatch",
+            execution_id: "execution-phase157-memory-center-mismatch",
+            receipt_status: "done",
+            receipt: {
+                status: "done",
+                providerSwitchExecution: {
+                    decisionReceiptId: mismatchReceipt.receipt_id,
+                    expectedProvider: newProvider,
+                    executedProvider: oldProvider,
+                    taskAgentSessionId: "tas-phase157-memory-center-mismatch",
+                    nativeSessionId: "native-phase157-memory-center-mismatch",
+                    executionId: "execution-phase157-memory-center-mismatch",
+                    usageState: "mismatch",
+                },
+            },
+        }, { verifySnapshot: false, nowMs });
+        const mismatchReport = buildWorkerContextPacketProviderSwitchDecisionReceiptReport({ groupIds: [groupId] });
+        const typedMemoryReport = buildWorkerContextPacketProviderSwitchExecutionTypedMemoryReport({
+            groupIds: [groupId],
+            providerSwitchExecutionMismatchThreshold: 1,
+            generatedAt: "2026-07-10T09:31:00.000Z",
+        });
+        const typedMemoryQuality = buildMemoryQualityReport({
+            checkIds: ["worker_context_packet_provider_switch_execution_typed_memory"],
+            groupIds: [groupId],
+            refresh: true,
+        });
+        const typedMemoryCheck = (typedMemoryQuality.checks || []).find((item) => item.id === "worker_context_packet_provider_switch_execution_typed_memory") || {};
+        const typedMemoryGroup = typedMemoryReport.groups?.[0] || {};
+        const typedMemoryProbe = (typedMemoryGroup.probes || []).find((row) => row.mismatchCount > 0) || {};
+        const healthyRows = healthyReport.groups?.[0]?.checks || [];
+        const mismatchRows = mismatchReport.groups?.[0]?.checks || [];
+        const advisedRow = healthyRows.find((row) => row.lifecycle === "advised_only") || {};
+        const matchedRow = healthyRows.find((row) => row.actually_executed_provider === newProvider) || {};
+        const mismatchRow = mismatchRows.find((row) => row.actually_executed_provider === oldProvider && row.lifecycle === "executed") || {};
+        const checks = {
+            advisedOnlyAndMatchedExecutionAreHealthy: healthyReport.overall?.status === "ok"
+                && Number(healthyReport.overall?.checkedBindingCount || 0) === 2
+                && Number(healthyReport.overall?.coveredBindingCount || 0) === 2
+                && advisedRow.covered === true
+                && advisedRow.approved_switch === false
+                && matchedRow.covered === true,
+            matchedSessionAndExecutionAreBound: matchedSession?.status === "bound"
+                && matchedExecution?.status === "passed"
+                && matchedExecution?.system_attested === true
+                && matchedExecution?.child_declared === true,
+            targetedQualityCheckPasses: healthyCheck.status === "ok"
+                && Number(healthyCheck.checked || 0) === 2
+                && Number(healthyCheck.passed || 0) === 2
+                && healthyQuality.availableCheckIds?.includes("worker_context_packet_provider_switch_decision_receipt"),
+            mismatchExecutionDegradesReport: mismatchExecution?.status === "failed"
+                && mismatchReport.overall?.status === "warn"
+                && Number(mismatchReport.overall?.checkedBindingCount || 0) === 3
+                && Number(mismatchReport.overall?.coveredBindingCount || 0) === 2,
+            mismatchGapNamesActualRunnerFailure: mismatchRow.covered === false
+                && mismatchRow.gaps?.includes("execution_receipt_not_passed")
+                && mismatchRow.gaps?.includes("execution_provider_mismatch")
+                && mismatchRow.actually_executed_provider === oldProvider,
+            reportKeepsThreeLifecycleStatesDistinct: Number(mismatchReport.overall?.advisedAlternativeCount || 0) === 3
+                && Number(mismatchReport.overall?.approvedSwitchCount || 0) === 2
+                && Number(mismatchReport.overall?.executedProviderCount || 0) === 2
+                && Number(mismatchReport.overall?.executionPassedCount || 0) === 1,
+            providerSwitchExecutionTypedMemoryQualityPasses: typedMemoryReport.overall?.status === "ok"
+                && typedMemoryCheck.status === "ok"
+                && Number(typedMemoryReport.overall?.executionReceiptCount || 0) === 2
+                && Number(typedMemoryReport.overall?.archivedExecutionReceiptCount || 0) === 2
+                && Number(typedMemoryReport.overall?.typedMismatchCount || 0) === 1
+                && Number(typedMemoryReport.overall?.policyCoveredAttributionCount || 0) >= 1
+                && Number(typedMemoryReport.overall?.policyRankingSignalCoveredCount || 0) >= 1
+                && Number(typedMemoryReport.overall?.policyProvenanceCoveredCount || 0) >= 1
+                && typedMemoryQuality.availableCheckIds?.includes("worker_context_packet_provider_switch_execution_typed_memory"),
+            providerSwitchExecutionTypedPolicyHoldsMismatch: typedMemoryProbe.covered === true
+                && typedMemoryProbe.rankingSignalCovered === true
+                && typedMemoryProbe.provenanceCovered === true
+                && Number(typedMemoryProbe.rowWeightedRiskScore || 0) > 0
+                && typedMemoryProbe.rowMismatchEscalated === true
+                && typedMemoryProbe.policyActive === true
+                && typedMemoryProbe.policyAction === "hold_provider_after_repeated_provider_switch_execution_mismatches",
+        };
+        return {
+            pass: Object.values(checks).every(Boolean),
+            checks,
+            healthyReport: healthyReport.overall,
+            mismatchReport: mismatchReport.overall,
+            healthyCheck: {
+                id: healthyCheck.id || "",
+                status: healthyCheck.status || "",
+                checked: healthyCheck.checked || 0,
+                passed: healthyCheck.passed || 0,
+            },
+            typedMemoryReport: typedMemoryReport.overall,
+            typedMemoryCheck: {
+                id: typedMemoryCheck.id || "",
+                status: typedMemoryCheck.status || "",
+                checked: typedMemoryCheck.checked || 0,
+                passed: typedMemoryCheck.passed || 0,
+            },
+            matchedExecution,
+            mismatchExecution,
+            mismatchRow,
+        };
+    }
+    finally {
+        try {
+            if (typedDir && fs.existsSync(typedDir))
+                fs.rmSync(typedDir, { recursive: true, force: true });
+        }
+        catch { }
         for (const file of [bindingFile, `${bindingFile}.bak`]) {
             try {
                 if (file && fs.existsSync(file))
@@ -29712,6 +37962,30 @@ function runMemoryCenterWorkerContextPacketPressureProvenanceProviderDispatchOve
             catch { }
         }
     }
+}
+function runMemoryCenterWorkerContextPacketProviderSwitchExecutionTypedMemorySelfTest() {
+    const result = runMemoryCenterWorkerContextPacketProviderSwitchDecisionReceiptSelfTest();
+    return {
+        ...result,
+        pass: result.pass === true
+            && result.checks?.providerSwitchExecutionTypedMemoryQualityPasses === true
+            && result.checks?.providerSwitchExecutionTypedPolicyHoldsMismatch === true,
+        focus: "worker_context_packet_provider_switch_execution_typed_memory",
+    };
+}
+function runMemoryCenterWorkerContextPacketProviderSwitchExecutionRankingSelfTest() {
+    const { runWorkerContextProviderSwitchExecutionRankingSelfTest } = require("../collaboration/group-orchestrator");
+    const result = runWorkerContextProviderSwitchExecutionRankingSelfTest();
+    return {
+        ...result,
+        pass: result.pass === true
+            && result.checks?.policyCarriesDecayedExecutionRisk === true
+            && result.checks?.policyCarriesTypedMemoryProvenance === true
+            && result.checks?.rankingUsesExecutionDecayForSaferAlternative === true
+            && result.checks?.advisoryCarriesCompactSafeRankingProvenance === true
+            && result.checks?.rankingDoesNotAutoSwitchCurrentAssignment === true,
+        focus: "worker_context_packet_provider_switch_execution_ranking",
+    };
 }
 function runMemoryCenterWorkerContextPacketCrossGroupPressureRecallUsageSelfTest() {
     const sourceGroupId = `memory-center-cross-pressure-source-${process.pid}-${Date.now()}`;
@@ -29994,6 +38268,8 @@ function runMemoryCenterWorkerContextPacketCrossGroupPressureRecallUsageRepairWo
             checkIds: ["worker_context_packet_cross_group_pressure_recall_usage_repair_work_items"],
             groupIds: [targetGroupId],
             crossGroupPressureRecallUsageGroupIds: [sourceGroupId],
+            nowMs: Date.parse("2026-07-09T23:55:04.000Z"),
+            generatedAt: "2026-07-09T23:55:04.000Z",
             refresh: true,
         });
         const repairCheck = (repairQuality.checks || []).find((item) => item.id === "worker_context_packet_cross_group_pressure_recall_usage_repair_work_items") || {};
@@ -31245,6 +39521,34 @@ function runMemoryCenterWorkerContextPacketCompactOutcomeLedgerSelfTest() {
             preserves_receipt_reference: true,
             preserves_real_task_suppression: true,
         };
+        const providerRankingProvenancePreservation = {
+            schema: "ccm-provider-ranking-provenance-preservation-v1",
+            required: true,
+            preserved: true,
+            compact_safe_preserved: true,
+            retry_id: "worker-context-retry:compact-outcome-ledger-selftest",
+            before: {
+                schema: "ccm-provider-ranking-provenance-packet-summary-v1",
+                present: true,
+                compact_safe: true,
+                provider_switch_decision_receipt_present: true,
+                provider_switch_decision_receipt_id: "provider-switch-decision:compact-outcome-ledger-selftest",
+                typed_memory_rel_paths: ["provider-switch-execution-memory.md"],
+                typed_memory_row_ids: ["provider-switch-execution:compact-outcome-ledger-selftest"],
+            },
+            after: {
+                schema: "ccm-provider-ranking-provenance-packet-summary-v1",
+                present: true,
+                compact_safe: true,
+                provider_switch_decision_receipt_present: true,
+                provider_switch_decision_receipt_id: "provider-switch-decision:compact-outcome-ledger-selftest",
+                typed_memory_rel_paths: ["provider-switch-execution-memory.md"],
+                typed_memory_row_ids: ["provider-switch-execution:compact-outcome-ledger-selftest"],
+            },
+            missing_typed_memory_rel_paths: [],
+            missing_typed_memory_row_ids: [],
+            gaps: [],
+        };
         const retry = {
             schema: "ccm-worker-context-compaction-retry-v1",
             retry_id: "worker-context-retry:compact-outcome-ledger-selftest",
@@ -31273,6 +39577,8 @@ function runMemoryCenterWorkerContextPacketCompactOutcomeLedgerSelfTest() {
             omitted_chars: 21100,
             critical_line_count: 0,
             preserved_receipt_contract: true,
+            provider_ranking_provenance_preservation: providerRankingProvenancePreservation,
+            provider_ranking_provenance_preserved: true,
             recovered_dispatch_ready: true,
             generated_at: "2026-07-09T14:30:00.000Z",
         };
@@ -31366,6 +39672,8 @@ function runMemoryCenterWorkerContextPacketCompactOutcomeLedgerSelfTest() {
                     partial_omitted_chars: 21100,
                     original_task_hash: "same-task-outcome-selftest",
                     compacted_task_hash: "same-task-outcome-selftest",
+                    provider_ranking_provenance_preservation: providerRankingProvenancePreservation,
+                    provider_ranking_provenance_preserved: true,
                     distillation_candidate: true,
                     at: "2026-07-09T14:30:01.000Z",
                 }],
@@ -31384,17 +39692,24 @@ function runMemoryCenterWorkerContextPacketCompactOutcomeLedgerSelfTest() {
                 && Number(report.overall?.outcomeCount || 0) === 1
                 && Number(report.overall?.partialCompactPolicyOutcomeCount || 0) === 1
                 && Number(report.overall?.taskPreservedOutcomeCount || 0) === 1
+                && Number(report.overall?.providerRankingProvenanceRequiredCount || 0) === 1
+                && Number(report.overall?.providerRankingProvenancePreservedCount || 0) === 1
                 && Number(report.overall?.metadataGapCount || 0) === 0,
             qualityCheckCoversOutcomeLedger: quality.id === "worker_context_packet_compact_outcome_ledger"
                 && quality.status === "ok"
                 && Number(quality.checked || 0) === 1
                 && Number(quality.passed || 0) === 1
-                && qualityCheck.status === "ok",
+                && qualityCheck.status === "ok"
+                && (quality.evidence || [])[0]?.providerRankingProvenancePreservedCount === 1,
             outcomeRowCarriesStrategySample: outcomeRow.outcome_status === "recovered"
                 && outcomeRow.dispatch_ready === true
                 && outcomeRow.selected_categories?.[0] === "constraints_and_documents"
                 && Number(outcomeRow.token_delta || 0) === 5000
-                && outcomeRow.task_hash_unchanged === true,
+                && outcomeRow.task_hash_unchanged === true
+                && outcomeRow.provider_ranking_provenance_required === true
+                && outcomeRow.provider_ranking_provenance_preserved === true
+                && outcomeRow.provider_ranking_provenance_rel_paths?.includes("provider-switch-execution-memory.md")
+                && outcomeRow.provider_ranking_provenance_row_ids?.includes("provider-switch-execution:compact-outcome-ledger-selftest"),
         };
         return {
             pass: Object.values(checks).every(Boolean),
@@ -31405,6 +39720,9 @@ function runMemoryCenterWorkerContextPacketCompactOutcomeLedgerSelfTest() {
                 selected_categories: outcomeRow.selected_categories || [],
                 token_delta: outcomeRow.token_delta || 0,
                 task_hash_unchanged: outcomeRow.task_hash_unchanged === true,
+                provider_ranking_provenance_required: outcomeRow.provider_ranking_provenance_required === true,
+                provider_ranking_provenance_preserved: outcomeRow.provider_ranking_provenance_preserved === true,
+                provider_ranking_provenance_rel_paths: outcomeRow.provider_ranking_provenance_rel_paths || [],
             },
             qualityCheck: {
                 id: qualityCheck.id || "",
@@ -31416,6 +39734,2283 @@ function runMemoryCenterWorkerContextPacketCompactOutcomeLedgerSelfTest() {
     }
     finally {
         for (const file of [bindingFile, `${bindingFile}.bak`, outcomeFile, `${outcomeFile}.bak`]) {
+            try {
+                if (file && fs.existsSync(file))
+                    fs.unlinkSync(file);
+            }
+            catch { }
+        }
+    }
+}
+function runMemoryCenterWorkerContextProviderRankingProvenanceCompactRepairWorkItemsSelfTest() {
+    const groupId = `memory-center-provider-ranking-provenance-compact-repair-selftest-${process.pid}-${Date.now()}`;
+    const bindingFile = getGroupReplayRepairDispatchBindingLedgerFile(groupId);
+    const outcomeFile = getGroupWorkerContextCompactOutcomeLedgerFile(groupId);
+    const workItemsFile = getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId);
+    try {
+        const preservationLost = {
+            schema: "ccm-provider-ranking-provenance-preservation-v1",
+            required: true,
+            preserved: false,
+            compact_safe_preserved: false,
+            retry_id: "worker-context-retry:provider-ranking-provenance-lost",
+            before: {
+                schema: "ccm-provider-ranking-provenance-packet-summary-v1",
+                present: true,
+                compact_safe: true,
+                provider_switch_decision_receipt_present: true,
+                provider_switch_decision_receipt_id: "provider-switch-decision:phase162-repair-selftest",
+                typed_memory_rel_paths: ["provider-switch-execution-memory.md"],
+                typed_memory_row_ids: ["provider-switch-execution:phase162-repair-selftest"],
+            },
+            after: {
+                schema: "ccm-provider-ranking-provenance-packet-summary-v1",
+                present: false,
+                compact_safe: false,
+                provider_switch_decision_receipt_present: false,
+                provider_switch_decision_receipt_id: "",
+                typed_memory_rel_paths: [],
+                typed_memory_row_ids: [],
+            },
+            missing_typed_memory_rel_paths: ["provider-switch-execution-memory.md"],
+            missing_typed_memory_row_ids: ["provider-switch-execution:phase162-repair-selftest"],
+            gaps: [
+                "provider_ranking_provenance_missing_after_compact",
+                "provider_switch_decision_receipt_missing_after_compact",
+                "typed_memory_rel_paths_missing_after_compact",
+                "typed_memory_row_ids_missing_after_compact",
+            ],
+        };
+        const preservationOk = {
+            ...preservationLost,
+            preserved: true,
+            compact_safe_preserved: true,
+            after: {
+                ...preservationLost.before,
+            },
+            missing_typed_memory_rel_paths: [],
+            missing_typed_memory_row_ids: [],
+            gaps: [],
+        };
+        const retry = {
+            schema: "ccm-worker-context-compaction-retry-v1",
+            retry_id: "worker-context-retry:provider-ranking-provenance-lost",
+            method: "metadata_partial_compact",
+            status: "recovered",
+            from_packet_id: "wcp-provider-ranking-before-selftest",
+            retry_packet_id: "wcp-provider-ranking-after-selftest",
+            from_usage_status: "over_budget",
+            from_total_tokens: 7600,
+            from_max_tokens: 3800,
+            from_free_tokens: -3920,
+            retry_usage_status: "warn",
+            retry_total_tokens: 2600,
+            retry_max_tokens: 3800,
+            retry_free_tokens: 1080,
+            compact_hook_run_id: "wcch-provider-ranking-provenance-lost",
+            memory_first: false,
+            partial_compact: true,
+            original_task_hash: "same-provider-ranking-task",
+            compacted_task_hash: "same-provider-ranking-task",
+            preserved_receipt_contract: true,
+            provider_ranking_provenance_preservation: preservationLost,
+            provider_ranking_provenance_preserved: false,
+            recovered_dispatch_ready: true,
+            generated_at: "2026-07-10T16:20:00.000Z",
+        };
+        const bindingEntry = {
+            schema: "ccm-worker-context-packet-assignment-binding-v1",
+            binding_id: "worker-context-packet-assignment:provider-ranking-provenance-compact-repair",
+            groupId,
+            source: "worker_context_packet_pre_dispatch_gate",
+            project: "api",
+            assignment_id: "assignment-provider-ranking-provenance-compact-repair",
+            dispatch_key: "dispatch-provider-ranking-provenance-compact-repair",
+            worker_context_packet_id: "wcp-provider-ranking-after-selftest",
+            worker_context_packet_compaction_retry: retry,
+            worker_context_packet_compact_hook_run_id: "wcch-provider-ranking-provenance-lost",
+            worker_context_pre_dispatch_gate: {
+                schema: "ccm-worker-context-pre-dispatch-gate-v1",
+                assignment_id: "assignment-provider-ranking-provenance-compact-repair",
+                dispatch_key: "dispatch-provider-ranking-provenance-compact-repair",
+                project: "api",
+                worker_context_packet_id: "wcp-provider-ranking-after-selftest",
+                dispatch_ready: true,
+                dispatchReady: true,
+                context_compaction_retry: retry,
+            },
+            dispatch_ready: true,
+            dispatchReady: true,
+            should_create_real_task: true,
+            at: "2026-07-10T16:20:00.000Z",
+        };
+        const outcomeEntry = (preservation) => ({
+            schema: "ccm-worker-context-compact-outcome-entry-v1",
+            outcome_id: "wcco-provider-ranking-provenance-compact-repair",
+            group_id: groupId,
+            assignment_id: "assignment-provider-ranking-provenance-compact-repair",
+            dispatch_key: "dispatch-provider-ranking-provenance-compact-repair",
+            project: "api",
+            hook_run_id: "wcch-provider-ranking-provenance-lost",
+            retry_id: "worker-context-retry:provider-ranking-provenance-lost",
+            method: "metadata_partial_compact",
+            status: "recovered",
+            dispatch_ready: true,
+            from_packet_id: "wcp-provider-ranking-before-selftest",
+            retry_packet_id: "wcp-provider-ranking-after-selftest",
+            initial_usage_status: "over_budget",
+            final_usage_status: "warn",
+            from_total_tokens: 7600,
+            retry_total_tokens: 2600,
+            from_free_tokens: -3920,
+            retry_free_tokens: 1080,
+            token_delta: 5000,
+            free_token_delta: 5000,
+            memory_first: false,
+            partial_compact: true,
+            task_compacted: false,
+            task_hash_unchanged: true,
+            provider_ranking_provenance_preservation: preservation,
+            provider_ranking_provenance_preserved: preservation.preserved === true,
+            distillation_candidate: true,
+            at: "2026-07-10T16:20:01.000Z",
+        });
+        writeJsonAtomic(bindingFile, {
+            schema: "ccm-replay-repair-main-agent-dispatch-brief-assignment-ledger-v1",
+            version: 1,
+            groupId,
+            file: bindingFile,
+            updatedAt: "2026-07-10T16:20:00.000Z",
+            bindingCount: 1,
+            workerContextPacketBindingCount: 1,
+            entries: [bindingEntry],
+        });
+        writeJsonAtomic(outcomeFile, {
+            schema: "ccm-worker-context-compact-outcome-ledger-v1",
+            version: 1,
+            groupId,
+            file: outcomeFile,
+            updatedAt: "2026-07-10T16:20:01.000Z",
+            entries: [outcomeEntry(preservationLost)],
+        });
+        const lossReport = buildWorkerContextProviderRankingProvenanceCompactRepairWorkItemReport({ groupIds: [groupId], generatedAt: "2026-07-10T16:20:02.000Z" });
+        const quality = evaluateWorkerContextProviderRankingProvenanceCompactRepairWorkItems({ groupIds: [groupId], generatedAt: "2026-07-10T16:20:03.000Z" });
+        const qualityReport = buildMemoryQualityReport({
+            checkIds: ["worker_context_provider_ranking_provenance_compact_repair_work_items"],
+            groupIds: [groupId],
+            refresh: true,
+        });
+        const qualityCheck = (qualityReport.checks || []).find((item) => item.id === "worker_context_provider_ranking_provenance_compact_repair_work_items") || {};
+        const candidateSummary = buildReplayRepairMainAgentDispatchCandidates(groupId);
+        const repairLedger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+        const openRepairItem = (repairLedger.items || []).find((item) => item.source === "worker_context_provider_ranking_provenance_compact_repair"
+            && replayRepairWorkItemOpen(item.status)) || {};
+        const candidate = (candidateSummary.candidates || []).find((item) => item.source === "worker_context_provider_ranking_provenance_compact_repair") || {};
+        writeJsonAtomic(outcomeFile, {
+            schema: "ccm-worker-context-compact-outcome-ledger-v1",
+            version: 1,
+            groupId,
+            file: outcomeFile,
+            updatedAt: "2026-07-10T16:20:04.000Z",
+            entries: [outcomeEntry(preservationOk)],
+        });
+        const resolvedReport = buildWorkerContextProviderRankingProvenanceCompactRepairWorkItemReport({ groupIds: [groupId], generatedAt: "2026-07-10T16:20:05.000Z" });
+        const resolvedLedger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+        const completedRepairItem = (resolvedLedger.items || []).find((item) => item.source === "worker_context_provider_ranking_provenance_compact_repair"
+            && replayRepairWorkItemStatus(item.status) === "completed") || {};
+        const checks = {
+            lossReportCreatesRepairWorkItem: lossReport.overall?.status === "ok"
+                && Number(lossReport.overall?.requiredActionCount || 0) === 1
+                && Number(lossReport.overall?.coveredItemCount || 0) === 1
+                && Number(lossReport.overall?.currentOpenItemCount || 0) === 1,
+            qualityCheckCoversRepairWorkItems: quality.id === "worker_context_provider_ranking_provenance_compact_repair_work_items"
+                && quality.status === "ok"
+                && qualityCheck.status === "ok"
+                && Number(quality.checked || 0) === 1
+                && Number(quality.passed || 0) === 1,
+            repairItemCarriesProviderProvenanceContract: openRepairItem.source === "worker_context_provider_ranking_provenance_compact_repair"
+                && openRepairItem.priority === "critical"
+                && openRepairItem.provider_switch_decision_receipt_id === "provider-switch-decision:phase162-repair-selftest"
+                && openRepairItem.provider_ranking_provenance_rel_paths?.includes("provider-switch-execution-memory.md")
+                && openRepairItem.provider_ranking_provenance_row_ids?.includes("provider-switch-execution:phase162-repair-selftest")
+                && /preserved=true/.test(openRepairItem.expected || ""),
+            repairCandidateSurfacesForMainAgent: candidate.source === "worker_context_provider_ranking_provenance_compact_repair"
+                && candidate.provider_switch_decision_receipt_id === "provider-switch-decision:phase162-repair-selftest"
+                && candidate.provider_ranking_provenance_rel_paths?.includes("provider-switch-execution-memory.md")
+                && candidate.prompt_patch?.includes("ranking evidence only"),
+            resolvedOutcomeClosesOpenRepairItem: resolvedReport.overall?.status === "empty"
+                && replayRepairWorkItemStatus(completedRepairItem.status) === "completed"
+                && completedRepairItem.resolutionReason === "provider_ranking_provenance_compact_preserved",
+        };
+        return {
+            pass: Object.values(checks).every(Boolean),
+            checks,
+            lossReport: lossReport.overall,
+            qualityCheck: {
+                id: qualityCheck.id || "",
+                status: qualityCheck.status || "",
+                checked: qualityCheck.checked || 0,
+                passed: qualityCheck.passed || 0,
+            },
+            repairItem: {
+                id: openRepairItem.id || openRepairItem.work_item_id || "",
+                status: replayRepairWorkItemStatus(openRepairItem.status),
+                priority: openRepairItem.priority || "",
+                provider_switch_decision_receipt_id: openRepairItem.provider_switch_decision_receipt_id || "",
+                rel_paths: openRepairItem.provider_ranking_provenance_rel_paths || [],
+            },
+            candidate: {
+                id: candidate.candidate_id || "",
+                source: candidate.source || "",
+                receipt: candidate.provider_switch_decision_receipt_id || "",
+                rel_paths: candidate.provider_ranking_provenance_rel_paths || [],
+            },
+            resolved: {
+                status: resolvedReport.overall?.status || "",
+                completedStatus: replayRepairWorkItemStatus(completedRepairItem.status),
+                resolutionReason: completedRepairItem.resolutionReason || "",
+            },
+        };
+    }
+    finally {
+        for (const file of [bindingFile, `${bindingFile}.bak`, outcomeFile, `${outcomeFile}.bak`, workItemsFile, `${workItemsFile}.bak`]) {
+            try {
+                if (file && fs.existsSync(file))
+                    fs.unlinkSync(file);
+            }
+            catch { }
+        }
+    }
+}
+function runMemoryCenterWorkerContextProviderRankingProvenanceCompactRepairDispatchBriefSelfTest() {
+    const groupId = `memory-center-provider-ranking-provenance-compact-repair-brief-selftest-${process.pid}-${Date.now()}`;
+    const bindingFile = getGroupReplayRepairDispatchBindingLedgerFile(groupId);
+    const outcomeFile = getGroupWorkerContextCompactOutcomeLedgerFile(groupId);
+    const workItemsFile = getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId);
+    const planFile = getGroupReplayRepairDispatchPlanLedgerFile(groupId);
+    try {
+        const receiptId = "provider-switch-decision:phase163-brief-selftest";
+        const receiptChecksum = "provider-switch-receipt-checksum-phase163";
+        const preservationLost = {
+            schema: "ccm-provider-ranking-provenance-preservation-v1",
+            required: true,
+            preserved: false,
+            compact_safe_preserved: false,
+            retry_id: "worker-context-retry:provider-ranking-provenance-brief",
+            before: {
+                schema: "ccm-provider-ranking-provenance-packet-summary-v1",
+                present: true,
+                compact_safe: true,
+                provider_switch_decision_receipt_present: true,
+                provider_switch_decision_receipt_id: receiptId,
+                provider_switch_decision_receipt_checksum: receiptChecksum,
+                typed_memory_rel_paths: ["provider-switch-execution-memory.md"],
+                typed_memory_row_ids: ["provider-switch-execution:phase163-brief-selftest"],
+            },
+            after: {
+                schema: "ccm-provider-ranking-provenance-packet-summary-v1",
+                present: false,
+                compact_safe: false,
+                provider_switch_decision_receipt_present: false,
+                provider_switch_decision_receipt_id: "",
+                provider_switch_decision_receipt_checksum: "",
+                typed_memory_rel_paths: [],
+                typed_memory_row_ids: [],
+            },
+            missing_typed_memory_rel_paths: ["provider-switch-execution-memory.md"],
+            missing_typed_memory_row_ids: ["provider-switch-execution:phase163-brief-selftest"],
+            gaps: [
+                "provider_ranking_provenance_missing_after_compact",
+                "provider_switch_decision_receipt_missing_after_compact",
+                "typed_memory_rel_paths_missing_after_compact",
+                "typed_memory_row_ids_missing_after_compact",
+            ],
+        };
+        const retry = {
+            schema: "ccm-worker-context-compaction-retry-v1",
+            retry_id: "worker-context-retry:provider-ranking-provenance-brief",
+            method: "metadata_partial_compact",
+            status: "recovered",
+            from_packet_id: "wcp-provider-ranking-brief-before",
+            retry_packet_id: "wcp-provider-ranking-brief-after",
+            from_usage_status: "over_budget",
+            from_total_tokens: 7600,
+            from_max_tokens: 3800,
+            from_free_tokens: -3920,
+            retry_usage_status: "warn",
+            retry_total_tokens: 2600,
+            retry_max_tokens: 3800,
+            retry_free_tokens: 1080,
+            compact_hook_run_id: "wcch-provider-ranking-provenance-brief",
+            partial_compact: true,
+            original_task_hash: "same-provider-ranking-brief-task",
+            compacted_task_hash: "same-provider-ranking-brief-task",
+            provider_ranking_provenance_preservation: preservationLost,
+            provider_ranking_provenance_preserved: false,
+            recovered_dispatch_ready: true,
+            generated_at: "2026-07-10T16:40:00.000Z",
+        };
+        writeJsonAtomic(bindingFile, {
+            schema: "ccm-replay-repair-main-agent-dispatch-brief-assignment-ledger-v1",
+            version: 1,
+            groupId,
+            file: bindingFile,
+            updatedAt: "2026-07-10T16:40:00.000Z",
+            bindingCount: 1,
+            workerContextPacketBindingCount: 1,
+            entries: [{
+                    schema: "ccm-worker-context-packet-assignment-binding-v1",
+                    binding_id: "worker-context-packet-assignment:provider-ranking-provenance-compact-brief",
+                    groupId,
+                    source: "worker_context_packet_pre_dispatch_gate",
+                    project: "api",
+                    assignment_id: "assignment-provider-ranking-provenance-compact-brief",
+                    dispatch_key: "dispatch-provider-ranking-provenance-compact-brief",
+                    worker_context_packet_id: "wcp-provider-ranking-brief-after",
+                    worker_context_packet_compaction_retry: retry,
+                    worker_context_packet_compact_hook_run_id: "wcch-provider-ranking-provenance-brief",
+                    worker_context_pre_dispatch_gate: {
+                        schema: "ccm-worker-context-pre-dispatch-gate-v1",
+                        assignment_id: "assignment-provider-ranking-provenance-compact-brief",
+                        dispatch_key: "dispatch-provider-ranking-provenance-compact-brief",
+                        project: "api",
+                        worker_context_packet_id: "wcp-provider-ranking-brief-after",
+                        dispatch_ready: true,
+                        dispatchReady: true,
+                        context_compaction_retry: retry,
+                    },
+                    dispatch_ready: true,
+                    dispatchReady: true,
+                    should_create_real_task: true,
+                    at: "2026-07-10T16:40:00.000Z",
+                }],
+        });
+        writeJsonAtomic(outcomeFile, {
+            schema: "ccm-worker-context-compact-outcome-ledger-v1",
+            version: 1,
+            groupId,
+            file: outcomeFile,
+            updatedAt: "2026-07-10T16:40:01.000Z",
+            entries: [{
+                    schema: "ccm-worker-context-compact-outcome-entry-v1",
+                    outcome_id: "wcco-provider-ranking-provenance-compact-brief",
+                    group_id: groupId,
+                    assignment_id: "assignment-provider-ranking-provenance-compact-brief",
+                    dispatch_key: "dispatch-provider-ranking-provenance-compact-brief",
+                    project: "api",
+                    hook_run_id: "wcch-provider-ranking-provenance-brief",
+                    retry_id: "worker-context-retry:provider-ranking-provenance-brief",
+                    method: "metadata_partial_compact",
+                    status: "recovered",
+                    dispatch_ready: true,
+                    from_packet_id: "wcp-provider-ranking-brief-before",
+                    retry_packet_id: "wcp-provider-ranking-brief-after",
+                    initial_usage_status: "over_budget",
+                    final_usage_status: "warn",
+                    from_total_tokens: 7600,
+                    retry_total_tokens: 2600,
+                    from_free_tokens: -3920,
+                    retry_free_tokens: 1080,
+                    token_delta: 5000,
+                    free_token_delta: 5000,
+                    partial_compact: true,
+                    task_hash_unchanged: true,
+                    provider_ranking_provenance_preservation: preservationLost,
+                    provider_ranking_provenance_preserved: false,
+                    at: "2026-07-10T16:40:01.000Z",
+                }],
+        });
+        const workItemReport = buildWorkerContextProviderRankingProvenanceCompactRepairWorkItemReport({
+            groupIds: [groupId],
+            generatedAt: "2026-07-10T16:40:02.000Z",
+        });
+        const briefReport = buildWorkerContextProviderRankingProvenanceCompactRepairDispatchBriefReport({
+            groupIds: [groupId],
+            workItemReport,
+            generatedAt: "2026-07-10T16:40:03.000Z",
+        });
+        const quality = evaluateWorkerContextProviderRankingProvenanceCompactRepairDispatchBriefs({
+            groupIds: [groupId],
+            workItemReport,
+            generatedAt: "2026-07-10T16:40:04.000Z",
+        });
+        const qualityReport = buildMemoryQualityReport({
+            checkIds: ["worker_context_provider_ranking_provenance_compact_repair_dispatch_briefs"],
+            groupIds: [groupId],
+            refresh: true,
+        });
+        const qualityCheck = (qualityReport.checks || []).find((item) => item.id === "worker_context_provider_ranking_provenance_compact_repair_dispatch_briefs") || {};
+        const ledger = readGroupReplayRepairDispatchPlanLedger(groupId);
+        const readyBrief = (ledger.briefs || []).find((brief) => brief.source === "worker_context_provider_ranking_provenance_compact_repair"
+            && String(brief.status || "") === "ready") || {};
+        const workerTask = String(readyBrief.worker_task || "");
+        const checks = {
+            workItemReportCreatesProviderRepairItem: workItemReport.overall?.status === "ok"
+                && Number(workItemReport.overall?.requiredActionCount || 0) === 1
+                && Number(workItemReport.overall?.coveredItemCount || 0) === 1,
+            briefReportCoversProviderRepairCandidate: briefReport.overall?.status === "ok"
+                && Number(briefReport.overall?.expectedBriefCount || 0) === 1
+                && Number(briefReport.overall?.coveredBriefCount || 0) === 1
+                && Number(briefReport.overall?.metadataGapCount || 0) === 0
+                && Number(briefReport.overall?.receiptBoundBriefCount || 0) === 1
+                && Number(briefReport.overall?.typedMemoryBriefCount || 0) === 1
+                && Number(briefReport.overall?.preservationContractBriefCount || 0) === 1,
+            qualityCheckCoversProviderRepairBrief: quality.id === "worker_context_provider_ranking_provenance_compact_repair_dispatch_briefs"
+                && quality.status === "ok"
+                && qualityCheck.status === "ok"
+                && Number(quality.checked || 0) === 1
+                && Number(quality.passed || 0) === 1,
+            readyBriefMirrorsReceiptAndTypedMemory: readyBrief.provider_switch_decision_receipt_id === receiptId
+                && readyBrief.provider_switch_decision_receipt_checksum === receiptChecksum
+                && readyBrief.provider_ranking_provenance_rel_paths?.includes("provider-switch-execution-memory.md")
+                && readyBrief.provider_ranking_provenance_row_ids?.includes("provider-switch-execution:phase163-brief-selftest")
+                && readyBrief.compact_retry_id === "worker-context-retry:provider-ranking-provenance-brief"
+                && readyBrief.compact_outcome_id === "wcco-provider-ranking-provenance-compact-brief",
+            workerTaskCarriesRerenderReceiptContract: workerTask.includes(receiptId)
+                && workerTask.includes(receiptChecksum)
+                && workerTask.includes("provider-switch-execution-memory.md")
+                && workerTask.includes("provider-switch-execution:phase163-brief-selftest")
+                && /provider_ranking_provenance_preservation\.preserved=true/i.test(workerTask)
+                && /replayRepairDispatchBriefUsage/i.test(workerTask)
+                && /providerRankingProvenancePreserved=true/i.test(workerTask)
+                && /ranking evidence only|不能作为授权/i.test(workerTask),
+        };
+        return {
+            pass: Object.values(checks).every(Boolean),
+            checks,
+            workItemReport: workItemReport.overall,
+            briefReport: briefReport.overall,
+            qualityCheck: {
+                id: qualityCheck.id || "",
+                status: qualityCheck.status || "",
+                checked: qualityCheck.checked || 0,
+                passed: qualityCheck.passed || 0,
+            },
+            brief: {
+                brief_id: readyBrief.brief_id || "",
+                source: readyBrief.source || "",
+                receipt_id: readyBrief.provider_switch_decision_receipt_id || "",
+                receipt_checksum: readyBrief.provider_switch_decision_receipt_checksum || "",
+                rel_paths: readyBrief.provider_ranking_provenance_rel_paths || [],
+                row_ids: readyBrief.provider_ranking_provenance_row_ids || [],
+                metadataGaps: briefReport.groups?.[0]?.metadataGaps || [],
+                worker_task: compactMemoryCenterText(workerTask, 1000),
+            },
+        };
+    }
+    finally {
+        for (const file of [bindingFile, `${bindingFile}.bak`, outcomeFile, `${outcomeFile}.bak`, workItemsFile, `${workItemsFile}.bak`, planFile, `${planFile}.bak`]) {
+            try {
+                if (file && fs.existsSync(file))
+                    fs.unlinkSync(file);
+            }
+            catch { }
+        }
+    }
+}
+function runMemoryCenterWorkerContextProviderRankingProvenanceCompactRepairReceiptConsumptionSelfTest() {
+    const groupId = `memory-center-provider-ranking-provenance-compact-repair-receipt-selftest-${process.pid}-${Date.now()}`;
+    const workItemsFile = getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId);
+    const timelineBindingFile = getGroupReplayRepairDispatchTimelineBindingLedgerFile(groupId);
+    const typedDir = path.join(GROUP_TYPED_MEMORY_MD_DIR, sidecarFileId(groupId));
+    try {
+        const { recordReplayRepairDispatchBriefTimelineBinding, readReplayRepairDispatchTimelineBindingLedgerForCoordinator, } = require("../collaboration/group-orchestrator");
+        const workItemId = "provider-ranking-provenance-compact-repair:phase164-receipt";
+        const briefId = "replay-repair-dispatch-brief:phase164-receipt";
+        const receiptId = "provider-switch-decision:phase164-receipt-selftest";
+        const receiptChecksum = "provider-switch-receipt-checksum-phase164";
+        const relPath = "provider-switch-execution-memory.md";
+        const rowId = "provider-switch-execution:phase164-receipt-selftest";
+        const brief = {
+            schema: "ccm-replay-repair-main-agent-dispatch-brief-v1",
+            brief_id: briefId,
+            groupId,
+            status: "ready",
+            source: "worker_context_provider_ranking_provenance_compact_repair",
+            work_item_id: workItemId,
+            target_project: "api",
+            dispatch_target: "api",
+            worker_context_packet_id: "wcp-provider-ranking-receipt-after",
+            worker_context_packet_binding_id: "worker-context-packet-assignment:phase164-receipt",
+            binding_id: "worker-context-packet-assignment:phase164-receipt",
+            assignment_id: "assignment-provider-ranking-provenance-receipt",
+            dispatch_key: "dispatch-provider-ranking-provenance-receipt",
+            provider_switch_decision_receipt_id: receiptId,
+            provider_switch_decision_receipt_checksum: receiptChecksum,
+            provider_ranking_provenance_rel_paths: [relPath],
+            provider_ranking_provenance_row_ids: [rowId],
+            compact_retry_id: "worker-context-retry:phase164-receipt",
+            compact_outcome_id: "wcco-provider-ranking-provenance-phase164-receipt",
+            compact_hook_run_id: "wcch-provider-ranking-provenance-phase164-receipt",
+        };
+        writeJsonAtomic(workItemsFile, {
+            schema: "ccm-compact-boundary-replay-repair-work-items-v1",
+            version: 1,
+            groupId,
+            file: workItemsFile,
+            updatedAt: "2026-07-10T17:10:00.000Z",
+            stats: replayRepairWorkItemStats([{ status: "pending" }]),
+            items: [{
+                    id: workItemId,
+                    work_item_id: workItemId,
+                    source: "worker_context_provider_ranking_provenance_compact_repair",
+                    status: "pending",
+                    priority: "critical",
+                    target_project: "api",
+                    dispatch_target: "api",
+                    worker_context_packet_id: "wcp-provider-ranking-receipt-after",
+                    worker_context_packet_binding_id: "worker-context-packet-assignment:phase164-receipt",
+                    binding_id: "worker-context-packet-assignment:phase164-receipt",
+                    assignment_id: "assignment-provider-ranking-provenance-receipt",
+                    dispatch_key: "dispatch-provider-ranking-provenance-receipt",
+                    provider_switch_decision_receipt_id: receiptId,
+                    provider_switch_decision_receipt_checksum: receiptChecksum,
+                    provider_ranking_provenance_rel_paths: [relPath],
+                    provider_ranking_provenance_row_ids: [rowId],
+                    provider_ranking_provenance_gap_codes: [
+                        "provider_ranking_provenance_missing_after_compact",
+                        "provider_switch_decision_receipt_missing_after_compact",
+                    ],
+                    evidence: [`provider_switch_decision_receipt_id=${receiptId}`, `provider_switch_decision_receipt_checksum=${receiptChecksum}`],
+                    needs: ["等待子 Agent 回执证明 provider ranking provenance compact repair 完成"],
+                    blockers: [],
+                    createdAt: "2026-07-10T17:10:00.000Z",
+                    updatedAt: "2026-07-10T17:10:00.000Z",
+                }],
+        });
+        const common = {
+            brief,
+            task_id: "task-provider-ranking-provenance-receipt",
+            project: "api",
+            assignment_id: "assignment-provider-ranking-provenance-receipt",
+            dispatch_key: "dispatch-provider-ranking-provenance-receipt",
+            worker_context_packet_id: "wcp-provider-ranking-receipt-after",
+            worker_handoff_id: "worker-handoff-provider-ranking-provenance-receipt",
+            memory_context_snapshot_id: "task-agent-memory-context-snapshot:phase164-receipt",
+            memory_context_snapshot_checksum: "memory-context-snapshot-checksum-phase164-receipt",
+            task_agent_session_id: "task-agent-session-provider-ranking-provenance-receipt",
+            native_session_id: "native-session-provider-ranking-provenance-receipt",
+            execution_id: "execution-provider-ranking-provenance-receipt",
+        };
+        for (const eventType of ["dispatch", "child_agent_start", "worker_handoff_ready", "task_agent_memory_context_snapshot"]) {
+            recordReplayRepairDispatchBriefTimelineBinding(groupId, {
+                ...common,
+                timeline_event_type: eventType,
+                timeline_event_id: `${eventType}:phase164-receipt`,
+            }, { at: "2026-07-10T17:10:01.000Z" });
+        }
+        const incompleteBinding = recordReplayRepairDispatchBriefTimelineBinding(groupId, {
+            ...common,
+            timeline_event_type: "child_agent_receipt",
+            timeline_event_id: "child-agent-receipt:phase164-incomplete",
+            receipt_status: "completed",
+            receipt: {
+                status: "completed",
+                replayRepairDispatchBriefUsage: [{
+                        brief_id: briefId,
+                        work_item_id: workItemId,
+                        usageState: "verified",
+                        repairStatus: "completed",
+                        repairGapType: "provider_ranking_provenance_compact",
+                        providerSwitchDecisionReceiptId: receiptId,
+                        providerSwitchDecisionReceiptChecksum: receiptChecksum,
+                        typedMemoryRelPaths: [relPath],
+                        typedMemoryRowIds: [rowId],
+                        providerRankingProvenancePreserved: false,
+                        reason: "provider ranking provenance compact repair receipt is intentionally incomplete",
+                    }],
+            },
+        }, { at: "2026-07-10T17:10:02.000Z" });
+        const incompleteLedger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+        const itemAfterIncomplete = (incompleteLedger.items || []).find((item) => item.work_item_id === workItemId) || {};
+        const incompleteReport = buildWorkerContextProviderRankingProvenanceCompactRepairReceiptConsumptionReport({
+            groupIds: [groupId],
+            generatedAt: "2026-07-10T17:10:03.000Z",
+        });
+        const completeBinding = recordReplayRepairDispatchBriefTimelineBinding(groupId, {
+            ...common,
+            timeline_event_type: "child_agent_receipt",
+            timeline_event_id: "child-agent-receipt:phase164-complete",
+            receipt_status: "completed",
+            receipt: {
+                status: "completed",
+                replayRepairDispatchBriefUsage: [{
+                        brief_id: briefId,
+                        work_item_id: workItemId,
+                        usageState: "verified",
+                        repairStatus: "completed",
+                        repairGapType: "provider_ranking_provenance_compact",
+                        providerSwitchDecisionReceiptId: receiptId,
+                        providerSwitchDecisionReceiptChecksum: receiptChecksum,
+                        typedMemoryRelPaths: [relPath],
+                        typedMemoryRowIds: [rowId],
+                        providerRankingProvenancePreserved: true,
+                        provider_ranking_provenance_preservation: {
+                            required: true,
+                            preserved: true,
+                        },
+                        reason: "provider ranking provenance compact repair receipt verified typed memory and provider switch decision receipt",
+                    }],
+            },
+        }, { at: "2026-07-10T17:10:04.000Z" });
+        const completeLedger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+        const completedItem = (completeLedger.items || []).find((item) => item.work_item_id === workItemId) || {};
+        const timelineLedger = readReplayRepairDispatchTimelineBindingLedgerForCoordinator(groupId);
+        const binding = (timelineLedger.entries || []).find((entry) => entry.brief_id === briefId) || {};
+        const report = buildWorkerContextProviderRankingProvenanceCompactRepairReceiptConsumptionReport({
+            groupIds: [groupId],
+            generatedAt: "2026-07-10T17:10:05.000Z",
+        });
+        const quality = evaluateWorkerContextProviderRankingProvenanceCompactRepairReceiptConsumption({
+            groupIds: [groupId],
+            generatedAt: "2026-07-10T17:10:06.000Z",
+        });
+        const qualityReport = buildMemoryQualityReport({
+            checkIds: ["worker_context_provider_ranking_provenance_compact_repair_receipt_consumption"],
+            groupIds: [groupId],
+            refresh: true,
+        });
+        const qualityCheck = (qualityReport.checks || []).find((item) => item.id === "worker_context_provider_ranking_provenance_compact_repair_receipt_consumption") || {};
+        const checks = {
+            incompleteReceiptDoesNotCloseRepairItem: replayRepairWorkItemOpen(itemAfterIncomplete.status)
+                && !incompleteBinding?.repair_work_item_completion
+                && incompleteReport.overall?.status === "fail",
+            completeReceiptClosesOnlyAfterVerifiedProviderProof: replayRepairWorkItemStatus(completedItem.status) === "completed"
+                && completedItem.resolutionReason === "provider_ranking_provenance_compact_repair_receipt_verified"
+                && completeBinding?.repair_work_item_completion?.closed === 1,
+            timelineBindingRecordsProviderProof: binding.provider_ranking_provenance_receipt_consumption_verified === true
+                && binding.provider_switch_decision_receipt_id === receiptId
+                && binding.provider_switch_decision_receipt_checksum === receiptChecksum
+                && binding.provider_ranking_provenance_rel_paths?.includes(relPath)
+                && binding.provider_ranking_provenance_row_ids?.includes(rowId)
+                && binding.provider_ranking_provenance_preserved === true
+                && binding.provider_ranking_provenance_repair_status === "completed"
+                && binding.provider_ranking_provenance_repair_gap_type === "provider_ranking_provenance_compact",
+            receiptConsumptionReportPasses: report.overall?.status === "ok"
+                && Number(report.overall?.receiptBindingCount || 0) === 1
+                && Number(report.overall?.validConsumptionCount || 0) === 1
+                && Number(report.overall?.completedRepairItemCount || 0) === 1,
+            qualityCheckRegisteredAndPasses: quality.id === "worker_context_provider_ranking_provenance_compact_repair_receipt_consumption"
+                && quality.status === "ok"
+                && qualityCheck.status === "ok"
+                && Number(quality.checked || 0) === 1
+                && Number(quality.passed || 0) === 1,
+        };
+        return {
+            pass: Object.values(checks).every(Boolean),
+            checks,
+            incompleteReport: incompleteReport.overall,
+            report: report.overall,
+            qualityCheck: {
+                id: qualityCheck.id || "",
+                status: qualityCheck.status || "",
+                checked: qualityCheck.checked || 0,
+                passed: qualityCheck.passed || 0,
+            },
+            binding: {
+                timeline_binding_id: binding.timeline_binding_id || "",
+                receipt_id: binding.provider_switch_decision_receipt_id || "",
+                receipt_checksum: binding.provider_switch_decision_receipt_checksum || "",
+                rel_paths: binding.provider_ranking_provenance_rel_paths || [],
+                row_ids: binding.provider_ranking_provenance_row_ids || [],
+                preserved: binding.provider_ranking_provenance_preserved === true,
+                repair_status: binding.provider_ranking_provenance_repair_status || "",
+                repair_gap_type: binding.provider_ranking_provenance_repair_gap_type || "",
+            },
+            completedItem: {
+                id: completedItem.work_item_id || completedItem.id || "",
+                status: replayRepairWorkItemStatus(completedItem.status),
+                resolutionReason: completedItem.resolutionReason || "",
+                completion_source: completedItem.completion_source || "",
+            },
+        };
+    }
+    finally {
+        for (const file of [workItemsFile, `${workItemsFile}.bak`, timelineBindingFile, `${timelineBindingFile}.bak`]) {
+            try {
+                if (file && fs.existsSync(file))
+                    fs.unlinkSync(file);
+            }
+            catch { }
+        }
+        try {
+            if (typedDir && fs.existsSync(typedDir))
+                fs.rmSync(typedDir, { recursive: true, force: true });
+        }
+        catch { }
+    }
+}
+function runMemoryCenterWorkerContextProviderRankingProvenanceCompactRepairReceiptTypedMemorySelfTest() {
+    const groupId = `memory-center-provider-ranking-provenance-compact-repair-receipt-typed-memory-selftest-${process.pid}-${Date.now()}`;
+    const timelineBindingFile = getGroupReplayRepairDispatchTimelineBindingLedgerFile(groupId);
+    const typedDir = path.join(GROUP_TYPED_MEMORY_MD_DIR, sidecarFileId(groupId));
+    try {
+        const { readGroupTypedMemoryDistillationLedger, scanGroupTypedMemoryDocuments, buildGroupTypedMemoryRecall, } = require("../collaboration/group-memory-index");
+        const entry = {
+            schema: "ccm-replay-repair-main-agent-dispatch-brief-timeline-binding-v1",
+            timeline_binding_id: "replay-repair-brief-timeline:phase165-typed-memory",
+            groupId,
+            task_id: "task-provider-ranking-repair-typed-memory",
+            project: "api",
+            brief_id: "replay-repair-dispatch-brief:phase165-typed-memory",
+            work_item_id: "provider-ranking-provenance-compact-repair:phase165-typed-memory",
+            source: "worker_context_provider_ranking_provenance_compact_repair",
+            assignment_id: "assignment-provider-ranking-repair-typed-memory",
+            dispatch_key: "dispatch-provider-ranking-repair-typed-memory",
+            worker_context_packet_id: "wcp-provider-ranking-repair-typed-memory",
+            worker_handoff_id: "worker-handoff-provider-ranking-repair-typed-memory",
+            memory_context_snapshot_id: "task-agent-memory-context-snapshot:phase165-typed-memory",
+            memory_context_snapshot_checksum: "snapshot-checksum-phase165-typed-memory",
+            task_agent_session_id: "task-agent-session-provider-ranking-repair-typed-memory",
+            native_session_id: "native-session-provider-ranking-repair-typed-memory",
+            execution_id: "execution-provider-ranking-repair-typed-memory",
+            receipt_status: "completed",
+            replay_repair_consumption_status: "verified",
+            replay_repair_consumption_source: "receipt.replayRepairDispatchBriefUsage",
+            replay_repair_consumption_reason: "PROVIDER_RANKING_REPAIR_TYPED_MEMORY_SENTINEL verified compact repair preserved provider-switch-execution:phase165-memory-center.",
+            provider_switch_decision_receipt_id: "provider-switch-decision:phase165-memory-center",
+            provider_switch_decision_receipt_checksum: "provider-switch-receipt-checksum-phase165-memory-center",
+            provider_ranking_provenance_rel_paths: ["provider-switch-execution-memory.md"],
+            provider_ranking_provenance_row_ids: ["provider-switch-execution:phase165-memory-center"],
+            provider_ranking_provenance_preserved: true,
+            provider_ranking_provenance_required: true,
+            provider_ranking_provenance_repair_status: "completed",
+            provider_ranking_provenance_repair_gap_type: "provider_ranking_provenance_compact",
+            provider_ranking_provenance_receipt_consumption_verified: true,
+            should_create_real_task: false,
+            event_types: REPLAY_REPAIR_TIMELINE_REQUIRED_EVENTS,
+            event_refs: REPLAY_REPAIR_TIMELINE_REQUIRED_EVENTS.map((type) => ({ type, id: `${type}:phase165-typed-memory`, at: "2026-07-10T17:50:00.000Z" })),
+            at: "2026-07-10T17:50:00.000Z",
+            updated_at: "2026-07-10T17:50:00.000Z",
+            first_seen_at: "2026-07-10T17:50:00.000Z",
+        };
+        writeJsonAtomic(timelineBindingFile, {
+            schema: "ccm-replay-repair-main-agent-dispatch-brief-timeline-ledger-v1",
+            version: 1,
+            groupId,
+            file: timelineBindingFile,
+            updatedAt: "2026-07-10T17:50:00.000Z",
+            bindingCount: 1,
+            nativeBindingCount: 0,
+            entries: [entry],
+        });
+        const report = buildWorkerContextProviderRankingProvenanceCompactRepairReceiptTypedMemoryReport({
+            groupIds: [groupId],
+            generatedAt: "2026-07-10T17:50:01.000Z",
+        });
+        const quality = evaluateWorkerContextProviderRankingProvenanceCompactRepairReceiptTypedMemory({
+            groupIds: [groupId],
+            generatedAt: "2026-07-10T17:50:02.000Z",
+        });
+        const qualityReport = buildMemoryQualityReport({
+            checkIds: ["worker_context_provider_ranking_provenance_compact_repair_receipt_typed_memory"],
+            groupIds: [groupId],
+            refresh: true,
+        });
+        const qualityCheck = (qualityReport.checks || []).find((item) => item.id === "worker_context_provider_ranking_provenance_compact_repair_receipt_typed_memory") || {};
+        const typedLedger = readGroupTypedMemoryDistillationLedger(groupId);
+        const docs = scanGroupTypedMemoryDocuments(groupId);
+        const recall = buildGroupTypedMemoryRecall(groupId, "PROVIDER_RANKING_REPAIR_TYPED_MEMORY_SENTINEL provider-switch-execution:phase165-memory-center", {
+            disableLedger: true,
+            forceMemory: true,
+            max: 8,
+        });
+        const recallText = JSON.stringify(recall.recalled || []);
+        const archive = typedLedger.providerRankingProvenanceCompactRepairReceiptConsumptionArchive || {};
+        const checks = {
+            reportDistillsVerifiedReceipts: report.overall?.status === "ok"
+                && Number(report.overall?.verifiedReceiptCount || 0) === 1
+                && Number(report.overall?.archivedReceiptCount || 0) === 1
+                && Number(report.overall?.typedDocCount || 0) === 1
+                && Number(report.overall?.authorizationBoundaryCoveredCount || 0) === 1,
+            qualityCheckRegisteredAndPasses: quality.id === "worker_context_provider_ranking_provenance_compact_repair_receipt_typed_memory"
+                && quality.status === "ok"
+                && qualityCheck.status === "ok"
+                && Number(quality.checked || 0) === 1
+                && Number(quality.passed || 0) === 1,
+            ledgerArchiveCreated: archive.archived_count === 1
+                && archive.rows?.[0]?.provider_switch_decision_receipt_id === "provider-switch-decision:phase165-memory-center",
+            typedDocAndRecallWork: docs.some((doc) => doc.relPath === "provider-ranking-provenance-compact-repair-receipt-memory.md" && doc.type === "reference")
+                && recallText.includes("provider-ranking-provenance-compact-repair-receipt-memory.md")
+                && recallText.includes("PROVIDER_RANKING_REPAIR_TYPED_MEMORY_SENTINEL"),
+        };
+        return {
+            pass: Object.values(checks).every(Boolean),
+            checks,
+            report: report.overall,
+            qualityCheck: {
+                id: qualityCheck.id || "",
+                status: qualityCheck.status || "",
+                checked: qualityCheck.checked || 0,
+                passed: qualityCheck.passed || 0,
+            },
+            archive: {
+                archived_count: archive.archived_count || 0,
+                rel_path_count: archive.rel_path_count || 0,
+                row_id_count: archive.row_id_count || 0,
+            },
+            recalled: recall.recalled.map((item) => item.relPath),
+        };
+    }
+    finally {
+        for (const file of [timelineBindingFile, `${timelineBindingFile}.bak`]) {
+            try {
+                if (file && fs.existsSync(file))
+                    fs.unlinkSync(file);
+            }
+            catch { }
+        }
+        try {
+            if (typedDir && fs.existsSync(typedDir))
+                fs.rmSync(typedDir, { recursive: true, force: true });
+        }
+        catch { }
+    }
+}
+function runMemoryCenterWorkerContextProviderRankingProvenanceCompactRepairReceiptWorkerContextRecallSelfTest() {
+    const groupId = `memory-center-provider-ranking-provenance-compact-repair-receipt-worker-context-recall-selftest-${process.pid}-${Date.now()}`;
+    const typedDir = path.join(GROUP_TYPED_MEMORY_MD_DIR, sidecarFileId(groupId));
+    try {
+        const { distillProviderRankingProvenanceCompactRepairReceiptConsumptionToTypedMemory, readGroupTypedMemoryDistillationLedger, } = require("../collaboration/group-memory-index");
+        const row = {
+            schema: "ccm-replay-repair-main-agent-dispatch-brief-timeline-binding-v1",
+            timeline_binding_id: "replay-repair-brief-timeline:phase166-worker-context-recall",
+            groupId,
+            task_id: "task-provider-ranking-repair-worker-context-recall",
+            project: "api",
+            brief_id: "replay-repair-dispatch-brief:phase166-worker-context-recall",
+            work_item_id: "provider-ranking-provenance-compact-repair:phase166-worker-context-recall",
+            source: "worker_context_provider_ranking_provenance_compact_repair",
+            assignment_id: "assignment-provider-ranking-repair-worker-context-recall",
+            dispatch_key: "dispatch-provider-ranking-repair-worker-context-recall",
+            worker_context_packet_id: "wcp-provider-ranking-repair-worker-context-recall",
+            worker_handoff_id: "worker-handoff-provider-ranking-repair-worker-context-recall",
+            memory_context_snapshot_id: "task-agent-memory-context-snapshot:phase166-worker-context-recall",
+            memory_context_snapshot_checksum: "snapshot-checksum-phase166-worker-context-recall",
+            task_agent_session_id: "task-agent-session-provider-ranking-repair-worker-context-recall",
+            native_session_id: "native-session-provider-ranking-repair-worker-context-recall",
+            execution_id: "execution-provider-ranking-repair-worker-context-recall",
+            receipt_status: "completed",
+            replay_repair_consumption_status: "verified",
+            replay_repair_consumption_source: "receipt.replayRepairDispatchBriefUsage",
+            replay_repair_consumption_reason: "PROVIDER_RANKING_REPAIR_WORKER_CONTEXT_RECALL_SENTINEL verified compact repair preserved provider-switch-execution:phase166-worker-context; ranking evidence only, not authorization.",
+            provider_switch_decision_receipt_id: "provider-switch-decision:phase166-worker-context-recall",
+            provider_switch_decision_receipt_checksum: "provider-switch-receipt-checksum-phase166-worker-context-recall",
+            provider_ranking_provenance_rel_paths: ["provider-switch-execution-memory.md"],
+            provider_ranking_provenance_row_ids: ["provider-switch-execution:phase166-worker-context"],
+            provider_ranking_provenance_preserved: true,
+            provider_ranking_provenance_required: true,
+            provider_ranking_provenance_repair_status: "completed",
+            provider_ranking_provenance_repair_gap_type: "provider_ranking_provenance_compact",
+            provider_ranking_provenance_receipt_consumption_verified: true,
+            at: "2026-07-10T18:10:00.000Z",
+            updated_at: "2026-07-10T18:10:00.000Z",
+            first_seen_at: "2026-07-10T18:10:00.000Z",
+        };
+        const distillation = distillProviderRankingProvenanceCompactRepairReceiptConsumptionToTypedMemory(groupId, { rows: [row] }, {
+            reason: "memory-center-provider-ranking-provenance-compact-repair-receipt-worker-context-recall-selftest",
+            updatedAt: "2026-07-10T18:10:01.000Z",
+        });
+        const task = "继续 PROVIDER_RANKING_REPAIR_WORKER_CONTEXT_RECALL_SENTINEL provider ranking provenance compact repair receipt provider-switch-execution-memory.md，确认 ranking evidence only not authorization 且 fresh valid provider switch decision receipt required";
+        const report = buildWorkerContextProviderRankingProvenanceCompactRepairReceiptWorkerContextRecallReport({
+            groupIds: [groupId],
+            targetProject: "api",
+            task,
+        });
+        const quality = evaluateWorkerContextProviderRankingProvenanceCompactRepairReceiptWorkerContextRecall({
+            groupIds: [groupId],
+            targetProject: "api",
+            task,
+        });
+        const qualityReport = buildMemoryQualityReport({
+            checkIds: ["worker_context_provider_ranking_provenance_compact_repair_receipt_worker_context_recall"],
+            groupIds: [groupId],
+            targetProject: "api",
+            task,
+            refresh: true,
+        });
+        const qualityCheck = (qualityReport.checks || []).find((item) => item.id === "worker_context_provider_ranking_provenance_compact_repair_receipt_worker_context_recall") || {};
+        const typedLedger = readGroupTypedMemoryDistillationLedger(groupId);
+        const archive = typedLedger.providerRankingProvenanceCompactRepairReceiptConsumptionArchive || {};
+        const group = report.groups?.[0] || {};
+        const checks = {
+            distillationCreatedArchive: distillation.archivedCount === 1
+                && archive.archived_count === 1
+                && archive.rows?.[0]?.provider_switch_decision_receipt_id === "provider-switch-decision:phase166-worker-context-recall",
+            reportProvesBundleRecall: report.overall?.status === "ok"
+                && Number(report.overall?.recalledGroupCount || 0) === 1
+                && group.recalledThisTurn === true
+                && group.renderedContextCovered === true,
+            reportProvesRepeatNewSessionRecall: group.repeatChildSessionRecalled === true
+                && Number(report.overall?.repeatChildSessionRecallCount || 0) === 1,
+            reportProvesWorkerContextPacketInjection: group.workerContextPacketCovered === true
+                && Number(group.typedRecallUsageTokens || 0) > 0
+                && group.loadPlanIncludesDoc === true,
+            qualityCheckRegisteredAndPasses: quality.id === "worker_context_provider_ranking_provenance_compact_repair_receipt_worker_context_recall"
+                && quality.status === "ok"
+                && qualityCheck.status === "ok"
+                && Number(quality.checked || 0) === 1
+                && Number(quality.passed || 0) === 1,
+        };
+        return {
+            pass: Object.values(checks).every(Boolean),
+            checks,
+            report: report.overall,
+            qualityCheck: {
+                id: qualityCheck.id || "",
+                status: qualityCheck.status || "",
+                checked: qualityCheck.checked || 0,
+                passed: qualityCheck.passed || 0,
+            },
+            group: {
+                status: group.status || "",
+                recalledThisTurn: group.recalledThisTurn === true,
+                repeatChildSessionRecalled: group.repeatChildSessionRecalled === true,
+                workerContextPacketCovered: group.workerContextPacketCovered === true,
+                typedRecallUsageTokens: group.typedRecallUsageTokens || 0,
+            },
+        };
+    }
+    finally {
+        try {
+            if (typedDir && fs.existsSync(typedDir))
+                fs.rmSync(typedDir, { recursive: true, force: true });
+        }
+        catch { }
+    }
+}
+function runMemoryCenterWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageContractSelfTest() {
+    const groupId = `memory-center-provider-ranking-provenance-compact-repair-receipt-memory-usage-contract-selftest-${process.pid}-${Date.now()}`;
+    const typedDir = path.join(GROUP_TYPED_MEMORY_MD_DIR, sidecarFileId(groupId));
+    try {
+        const { distillProviderRankingProvenanceCompactRepairReceiptConsumptionToTypedMemory, readGroupTypedMemoryDistillationLedger, } = require("../collaboration/group-memory-index");
+        const row = {
+            schema: "ccm-replay-repair-main-agent-dispatch-brief-timeline-binding-v1",
+            timeline_binding_id: "replay-repair-brief-timeline:phase167-memory-usage-contract",
+            groupId,
+            task_id: "task-provider-ranking-repair-memory-usage-contract",
+            project: "api",
+            brief_id: "replay-repair-dispatch-brief:phase167-memory-usage-contract",
+            work_item_id: "provider-ranking-provenance-compact-repair:phase167-memory-usage-contract",
+            source: "worker_context_provider_ranking_provenance_compact_repair",
+            worker_context_packet_id: "wcp-provider-ranking-repair-memory-usage-contract",
+            memory_context_snapshot_id: "task-agent-memory-context-snapshot:phase167-memory-usage-contract",
+            task_agent_session_id: "task-agent-session-provider-ranking-repair-memory-usage-contract",
+            execution_id: "execution-provider-ranking-repair-memory-usage-contract",
+            receipt_status: "completed",
+            replay_repair_consumption_status: "verified",
+            replay_repair_consumption_source: "receipt.replayRepairDispatchBriefUsage",
+            replay_repair_consumption_reason: "PROVIDER_RANKING_REPAIR_MEMORY_USAGE_CONTRACT_SENTINEL verified compact repair receipt memory must be declared in memoryUsed or memoryIgnored; ranking evidence only, not authorization.",
+            provider_switch_decision_receipt_id: "provider-switch-decision:phase167-memory-usage-contract",
+            provider_switch_decision_receipt_checksum: "provider-switch-receipt-checksum-phase167-memory-usage-contract",
+            provider_ranking_provenance_rel_paths: ["provider-switch-execution-memory.md"],
+            provider_ranking_provenance_row_ids: ["provider-switch-execution:phase167-memory-usage-contract"],
+            provider_ranking_provenance_preserved: true,
+            provider_ranking_provenance_required: true,
+            provider_ranking_provenance_repair_status: "completed",
+            provider_ranking_provenance_repair_gap_type: "provider_ranking_provenance_compact",
+            provider_ranking_provenance_receipt_consumption_verified: true,
+            at: "2026-07-10T18:25:00.000Z",
+            updated_at: "2026-07-10T18:25:00.000Z",
+            first_seen_at: "2026-07-10T18:25:00.000Z",
+        };
+        const distillation = distillProviderRankingProvenanceCompactRepairReceiptConsumptionToTypedMemory(groupId, { rows: [row] }, {
+            reason: "memory-center-provider-ranking-provenance-compact-repair-receipt-memory-usage-contract-selftest",
+            updatedAt: "2026-07-10T18:25:01.000Z",
+        });
+        const task = "继续 PROVIDER_RANKING_REPAIR_MEMORY_USAGE_CONTRACT_SENTINEL provider ranking compact repair receipt memory usage contract，要求 memoryUsed memoryIgnored 声明且保持 ranking evidence only not authorization";
+        const report = buildWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageContractReport({
+            groupIds: [groupId],
+            targetProject: "api",
+            task,
+        });
+        const quality = evaluateWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageContract({
+            groupIds: [groupId],
+            targetProject: "api",
+            task,
+        });
+        const qualityReport = buildMemoryQualityReport({
+            checkIds: ["worker_context_provider_ranking_provenance_compact_repair_receipt_memory_usage_contract"],
+            groupIds: [groupId],
+            targetProject: "api",
+            task,
+            refresh: true,
+        });
+        const qualityCheck = (qualityReport.checks || []).find((item) => item.id === "worker_context_provider_ranking_provenance_compact_repair_receipt_memory_usage_contract") || {};
+        const typedLedger = readGroupTypedMemoryDistillationLedger(groupId);
+        const archive = typedLedger.providerRankingProvenanceCompactRepairReceiptConsumptionArchive || {};
+        const group = report.groups?.[0] || {};
+        const checks = {
+            distillationCreatedArchive: distillation.archivedCount === 1
+                && archive.archived_count === 1,
+            reportProvesContractInjection: report.overall?.status === "ok"
+                && Number(report.overall?.contractActiveCount || 0) === 1
+                && group.contractActive === true
+                && group.acceptanceRequiresUsage === true
+                && group.renderedContractCovered === true,
+            reportProvesUsageCategory: Number(group.contextUsageTokens || 0) > 0,
+            reportProvesReceiptValidator: group.goodReceiptCoverage?.pass === true
+                && group.badReceiptCoverage?.pass === false
+                && Number(report.overall?.validatorCoveredCount || 0) === 1,
+            qualityCheckRegisteredAndPasses: quality.id === "worker_context_provider_ranking_provenance_compact_repair_receipt_memory_usage_contract"
+                && quality.status === "ok"
+                && qualityCheck.status === "ok"
+                && Number(quality.checked || 0) === 1
+                && Number(quality.passed || 0) === 1,
+        };
+        return {
+            pass: Object.values(checks).every(Boolean),
+            checks,
+            report: report.overall,
+            qualityCheck: {
+                id: qualityCheck.id || "",
+                status: qualityCheck.status || "",
+                checked: qualityCheck.checked || 0,
+                passed: qualityCheck.passed || 0,
+            },
+            group: {
+                status: group.status || "",
+                contractActive: group.contractActive === true,
+                acceptanceRequiresUsage: group.acceptanceRequiresUsage === true,
+                renderedContractCovered: group.renderedContractCovered === true,
+                contextUsageTokens: group.contextUsageTokens || 0,
+                goodReceiptPass: group.goodReceiptCoverage?.pass === true,
+                badReceiptPass: group.badReceiptCoverage?.pass === true,
+            },
+        };
+    }
+    finally {
+        try {
+            if (typedDir && fs.existsSync(typedDir))
+                fs.rmSync(typedDir, { recursive: true, force: true });
+        }
+        catch { }
+    }
+}
+function runMemoryCenterWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptSelfTest() {
+    const groupId = `memory-center-provider-ranking-provenance-compact-repair-receipt-memory-usage-receipt-selftest-${process.pid}-${Date.now()}`;
+    const bindingFile = getGroupReplayRepairDispatchBindingLedgerFile(groupId);
+    const workFile = getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId);
+    const contract = {
+        schema: "ccm-provider-ranking-compact-repair-receipt-memory-usage-contract-v1",
+        active: true,
+        doc_rel_path: "provider-ranking-provenance-compact-repair-receipt-memory.md",
+        required_receipt_fields: ["memoryUsed", "memoryIgnored"],
+        authorization_boundary: "ranking evidence only, not authorization; fresh valid provider switch decision receipt required",
+    };
+    const contextUsage = {
+        schema: "ccm-worker-context-usage-v1",
+        packet_id: "wcp-provider-ranking-repair-memory-usage-receipt",
+        status: "ok",
+        total_tokens: 120,
+        max_tokens: 90000,
+        categories: [
+            { id: "provider_ranking_compact_repair_receipt_memory_contract", label: "Provider ranking compact repair receipt memory contract", tokens: 48, required: true },
+            { id: "task_goal", label: "Task goal", tokens: 24, required: true },
+            { id: "verification_and_acceptance", label: "Verification and acceptance", tokens: 24, required: true },
+            { id: "free_space", label: "Free space", tokens: 24, required: false },
+        ],
+    };
+    const goodEntry = {
+        schema: "ccm-replay-repair-main-agent-dispatch-brief-assignment-binding-v1",
+        binding_id: "replay-repair-assignment-binding:phase168-memory-usage-receipt",
+        assignment_id: "assignment-phase168-memory-usage-receipt",
+        groupId,
+        project: "api",
+        worker_context_packet_id: "wcp-provider-ranking-repair-memory-usage-receipt",
+        provider_ranking_compact_repair_receipt_memory_contract: contract,
+        worker_context_packet_context_usage: contextUsage,
+        worker_context_packet: {
+            packet_id: "wcp-provider-ranking-repair-memory-usage-receipt",
+            project: "api",
+            provider_ranking_compact_repair_receipt_memory_contract: contract,
+            context_usage: contextUsage,
+            acceptance: {
+                provider_ranking_compact_repair_receipt_memory_usage_required: true,
+                provider_ranking_compact_repair_receipt_memory_authorization_boundary_required: true,
+            },
+        },
+        worker_context_packet_receipt: {
+            worker_context_packet_id: "wcp-provider-ranking-repair-memory-usage-receipt",
+            project: "api",
+            status: "completed",
+            memoryUsed: [
+                "provider-ranking-provenance-compact-repair-receipt-memory.md; usageState=verified; ranking evidence only, not authorization; fresh valid provider switch decision receipt required",
+            ],
+            memoryIgnored: [],
+        },
+    };
+    const badEntry = {
+        ...goodEntry,
+        binding_id: "replay-repair-assignment-binding:phase168-memory-usage-receipt-bad",
+        assignment_id: "assignment-phase168-memory-usage-receipt-bad",
+        worker_context_packet_id: "wcp-provider-ranking-repair-memory-usage-receipt-bad",
+        worker_context_packet: {
+            ...goodEntry.worker_context_packet,
+            packet_id: "wcp-provider-ranking-repair-memory-usage-receipt-bad",
+            context_usage: {
+                ...contextUsage,
+                packet_id: "wcp-provider-ranking-repair-memory-usage-receipt-bad",
+            },
+        },
+        worker_context_packet_context_usage: {
+            ...contextUsage,
+            packet_id: "wcp-provider-ranking-repair-memory-usage-receipt-bad",
+        },
+        worker_context_packet_receipt: {
+            worker_context_packet_id: "wcp-provider-ranking-repair-memory-usage-receipt-bad",
+            project: "api",
+            status: "completed",
+            memoryUsed: [
+                "provider-ranking-provenance-compact-repair-receipt-memory.md; usageState=verified",
+            ],
+            memoryIgnored: [],
+        },
+    };
+    try {
+        writeJsonAtomic(bindingFile, {
+            schema: "ccm-replay-repair-main-agent-dispatch-brief-assignment-ledger-v1",
+            version: 1,
+            groupId,
+            file: bindingFile,
+            updatedAt: "2026-07-10T18:45:00.000Z",
+            bindingCount: 1,
+            nativeBindingCount: 1,
+            entries: [goodEntry],
+        });
+        const report = buildWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptReport({
+            groupIds: [groupId],
+            tasks: [],
+        });
+        const quality = evaluateWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceipt({
+            groupIds: [groupId],
+            tasks: [],
+        });
+        const qualityReport = buildMemoryQualityReport({
+            checkIds: ["worker_context_provider_ranking_provenance_compact_repair_receipt_memory_usage_receipt"],
+            groupIds: [groupId],
+            tasks: [],
+            refresh: true,
+        });
+        const qualityCheck = (qualityReport.checks || []).find((item) => item.id === "worker_context_provider_ranking_provenance_compact_repair_receipt_memory_usage_receipt") || {};
+        const group = report.groups?.[0] || {};
+        const goodReceipt = group.receipts?.[0] || {};
+        const badRow = workerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRow(groupId, badEntry, { tasks: [] });
+        const checks = {
+            reportProvesReceiptCoverage: report.overall?.status === "ok"
+                && Number(report.overall?.receiptContractCount || 0) === 1
+                && Number(report.overall?.coveredReceiptCount || 0) === 1
+                && Number(report.overall?.missingReceiptCoverageCount || 0) === 0,
+            reportPreservesAuthorizationBoundary: goodReceipt.compliant === true
+                && goodReceipt.memoryUsed?.some((item) => /ranking evidence only, not authorization/i.test(item))
+                && goodReceipt.memoryUsed?.some((item) => /fresh valid provider switch decision receipt/i.test(item)),
+            badReceiptRejected: badRow.compliant === false
+                && badRow.coverage?.pass === false
+                && badRow.gaps.includes("receipt_authorization_boundary"),
+            qualityCheckRegisteredAndPasses: quality.id === "worker_context_provider_ranking_provenance_compact_repair_receipt_memory_usage_receipt"
+                && quality.status === "ok"
+                && qualityCheck.status === "ok"
+                && Number(quality.checked || 0) === 1
+                && Number(quality.passed || 0) === 1,
+        };
+        return {
+            pass: Object.values(checks).every(Boolean),
+            checks,
+            report: report.overall,
+            qualityCheck: {
+                id: qualityCheck.id || "",
+                status: qualityCheck.status || "",
+                checked: qualityCheck.checked || 0,
+                passed: qualityCheck.passed || 0,
+            },
+            group: {
+                status: group.status || "",
+                receiptContractCount: group.receiptContractCount || 0,
+                compliantReceiptCount: group.compliantReceiptCount || 0,
+                missingReceiptCoverageCount: group.missingReceiptCoverageCount || 0,
+            },
+            badRow: {
+                compliant: badRow.compliant === true,
+                gaps: badRow.gaps || [],
+            },
+        };
+    }
+    finally {
+        try {
+            if (fs.existsSync(bindingFile))
+                fs.rmSync(bindingFile, { force: true });
+        }
+        catch { }
+        try {
+            if (fs.existsSync(workFile))
+                fs.rmSync(workFile, { force: true });
+        }
+        catch { }
+    }
+}
+function runMemoryCenterWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairSelfTest() {
+    const groupId = `memory-center-provider-ranking-provenance-compact-repair-receipt-memory-usage-receipt-repair-selftest-${process.pid}-${Date.now()}`;
+    const bindingFile = getGroupReplayRepairDispatchBindingLedgerFile(groupId);
+    const workFile = getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId);
+    const contract = {
+        schema: "ccm-provider-ranking-compact-repair-receipt-memory-usage-contract-v1",
+        active: true,
+        doc_rel_path: "provider-ranking-provenance-compact-repair-receipt-memory.md",
+        required_receipt_fields: ["memoryUsed", "memoryIgnored"],
+        authorization_boundary: "ranking evidence only, not authorization; fresh valid provider switch decision receipt required",
+    };
+    const contextUsage = {
+        schema: "ccm-worker-context-usage-v1",
+        packet_id: "wcp-provider-ranking-repair-memory-usage-receipt-repair",
+        status: "ok",
+        total_tokens: 120,
+        max_tokens: 90000,
+        categories: [
+            { id: "provider_ranking_compact_repair_receipt_memory_contract", label: "Provider ranking compact repair receipt memory contract", tokens: 48, required: true },
+            { id: "task_goal", label: "Task goal", tokens: 24, required: true },
+            { id: "verification_and_acceptance", label: "Verification and acceptance", tokens: 24, required: true },
+            { id: "free_space", label: "Free space", tokens: 24, required: false },
+        ],
+    };
+    const badEntry = {
+        schema: "ccm-replay-repair-main-agent-dispatch-brief-assignment-binding-v1",
+        binding_id: "replay-repair-assignment-binding:phase169-memory-usage-receipt-repair",
+        assignment_id: "assignment-phase169-memory-usage-receipt-repair",
+        dispatch_key: "dispatch-phase169-memory-usage-receipt-repair",
+        groupId,
+        project: "api",
+        worker_context_packet_id: "wcp-provider-ranking-repair-memory-usage-receipt-repair",
+        provider_ranking_compact_repair_receipt_memory_contract: contract,
+        worker_context_packet_context_usage: contextUsage,
+        worker_context_packet: {
+            packet_id: "wcp-provider-ranking-repair-memory-usage-receipt-repair",
+            project: "api",
+            provider_ranking_compact_repair_receipt_memory_contract: contract,
+            context_usage: contextUsage,
+            acceptance: {
+                provider_ranking_compact_repair_receipt_memory_usage_required: true,
+                provider_ranking_compact_repair_receipt_memory_authorization_boundary_required: true,
+            },
+        },
+        worker_context_packet_receipt: {
+            worker_context_packet_id: "wcp-provider-ranking-repair-memory-usage-receipt-repair",
+            project: "api",
+            status: "completed",
+            memoryUsed: [
+                "provider-ranking-provenance-compact-repair-receipt-memory.md; usageState=verified",
+            ],
+            memoryIgnored: [],
+        },
+    };
+    try {
+        writeJsonAtomic(bindingFile, {
+            schema: "ccm-replay-repair-main-agent-dispatch-brief-assignment-ledger-v1",
+            version: 1,
+            groupId,
+            file: bindingFile,
+            updatedAt: "2026-07-10T19:05:00.000Z",
+            bindingCount: 1,
+            nativeBindingCount: 1,
+            entries: [badEntry],
+        });
+        const repairReport = buildWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairWorkItemReport({
+            groupIds: [groupId],
+            tasks: [],
+        });
+        const candidateReport = buildWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairDispatchCandidateReport({
+            groupIds: [groupId],
+            tasks: [],
+            repairWorkItemReport: repairReport,
+        });
+        const repairQuality = evaluateWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairWorkItems({
+            groupIds: [groupId],
+            tasks: [],
+        });
+        const candidateQuality = evaluateWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairDispatchCandidates({
+            groupIds: [groupId],
+            tasks: [],
+            repairWorkItemReport: repairReport,
+        });
+        const qualityReport = buildMemoryQualityReport({
+            checkIds: [
+                "worker_context_provider_ranking_provenance_compact_repair_receipt_memory_usage_receipt_repair_work_items",
+                "worker_context_provider_ranking_provenance_compact_repair_receipt_memory_usage_receipt_repair_dispatch_candidates",
+            ],
+            groupIds: [groupId],
+            tasks: [],
+            refresh: true,
+        });
+        const repairCheck = (qualityReport.checks || []).find((item) => item.id === "worker_context_provider_ranking_provenance_compact_repair_receipt_memory_usage_receipt_repair_work_items") || {};
+        const candidateCheck = (qualityReport.checks || []).find((item) => item.id === "worker_context_provider_ranking_provenance_compact_repair_receipt_memory_usage_receipt_repair_dispatch_candidates") || {};
+        const repairGroup = repairReport.groups?.[0] || {};
+        const candidateGroup = candidateReport.groups?.[0] || {};
+        const repairItem = repairGroup.items?.[0] || {};
+        const candidate = candidateGroup.candidates?.[0] || {};
+        const checks = {
+            repairWorkItemCreated: repairReport.overall?.status === "ok"
+                && Number(repairReport.overall?.expectedRepairItemCount || 0) === 1
+                && Number(repairReport.overall?.openRepairItemCount || 0) === 1
+                && repairItem.status === "pending"
+                && repairItem.docRelPath === "provider-ranking-provenance-compact-repair-receipt-memory.md"
+                && repairItem.gaps?.includes("receipt_authorization_boundary"),
+            repairDispatchCandidateCreated: candidateReport.overall?.status === "ok"
+                && Number(candidateReport.overall?.expectedCandidateCount || 0) === 1
+                && Number(candidateReport.overall?.coveredCandidateCount || 0) === 1
+                && candidate.shouldCreateRealTask === false
+                && candidate.worker_context_packet_id === "wcp-provider-ranking-repair-memory-usage-receipt-repair"
+                && String(candidate.prompt_patch || "").includes("memoryUsed")
+                && String(candidate.prompt_patch || "").includes("memoryIgnored")
+                && String(candidate.prompt_patch || "").includes("ranking evidence only, not authorization"),
+            qualityChecksRegisteredAndPass: repairQuality.status === "ok"
+                && candidateQuality.status === "ok"
+                && repairCheck.status === "ok"
+                && candidateCheck.status === "ok",
+        };
+        return {
+            pass: Object.values(checks).every(Boolean),
+            checks,
+            repairReport: repairReport.overall,
+            candidateReport: candidateReport.overall,
+            qualityChecks: {
+                repair: {
+                    id: repairCheck.id || "",
+                    status: repairCheck.status || "",
+                    checked: repairCheck.checked || 0,
+                    passed: repairCheck.passed || 0,
+                },
+                candidate: {
+                    id: candidateCheck.id || "",
+                    status: candidateCheck.status || "",
+                    checked: candidateCheck.checked || 0,
+                    passed: candidateCheck.passed || 0,
+                },
+            },
+            repairItem,
+            candidate: {
+                work_item_id: candidate.work_item_id || "",
+                source: candidate.source || "",
+                worker_context_packet_id: candidate.worker_context_packet_id || "",
+                shouldCreateRealTask: candidate.shouldCreateRealTask,
+            },
+        };
+    }
+    finally {
+        try {
+            if (fs.existsSync(bindingFile))
+                fs.rmSync(bindingFile, { force: true });
+        }
+        catch { }
+        try {
+            if (fs.existsSync(workFile))
+                fs.rmSync(workFile, { force: true });
+        }
+        catch { }
+    }
+}
+function runMemoryCenterWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairDispatchBriefSelfTest() {
+    const groupId = `memory-center-provider-ranking-provenance-compact-repair-receipt-memory-usage-receipt-repair-brief-selftest-${process.pid}-${Date.now()}`;
+    const bindingFile = getGroupReplayRepairDispatchBindingLedgerFile(groupId);
+    const workFile = getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId);
+    const planFile = getGroupReplayRepairDispatchPlanLedgerFile(groupId);
+    const contract = {
+        schema: "ccm-provider-ranking-compact-repair-receipt-memory-usage-contract-v1",
+        active: true,
+        doc_rel_path: "provider-ranking-provenance-compact-repair-receipt-memory.md",
+        required_receipt_fields: ["memoryUsed", "memoryIgnored"],
+        authorization_boundary: "ranking evidence only, not authorization; fresh valid provider switch decision receipt required",
+    };
+    const contextUsage = {
+        schema: "ccm-worker-context-usage-v1",
+        packet_id: "wcp-provider-ranking-repair-memory-usage-receipt-repair-brief",
+        status: "ok",
+        total_tokens: 120,
+        max_tokens: 90000,
+        categories: [
+            { id: "provider_ranking_compact_repair_receipt_memory_contract", label: "Provider ranking compact repair receipt memory contract", tokens: 48, required: true },
+            { id: "task_goal", label: "Task goal", tokens: 24, required: true },
+            { id: "verification_and_acceptance", label: "Verification and acceptance", tokens: 24, required: true },
+            { id: "free_space", label: "Free space", tokens: 24, required: false },
+        ],
+    };
+    const badEntry = {
+        schema: "ccm-replay-repair-main-agent-dispatch-brief-assignment-binding-v1",
+        binding_id: "replay-repair-assignment-binding:phase170-memory-usage-receipt-repair-brief",
+        assignment_id: "assignment-phase170-memory-usage-receipt-repair-brief",
+        dispatch_key: "dispatch-phase170-memory-usage-receipt-repair-brief",
+        groupId,
+        project: "api",
+        worker_context_packet_id: "wcp-provider-ranking-repair-memory-usage-receipt-repair-brief",
+        provider_ranking_compact_repair_receipt_memory_contract: contract,
+        worker_context_packet_context_usage: contextUsage,
+        worker_context_packet: {
+            packet_id: "wcp-provider-ranking-repair-memory-usage-receipt-repair-brief",
+            project: "api",
+            provider_ranking_compact_repair_receipt_memory_contract: contract,
+            context_usage: contextUsage,
+            acceptance: {
+                provider_ranking_compact_repair_receipt_memory_usage_required: true,
+                provider_ranking_compact_repair_receipt_memory_authorization_boundary_required: true,
+            },
+        },
+        worker_context_packet_receipt: {
+            worker_context_packet_id: "wcp-provider-ranking-repair-memory-usage-receipt-repair-brief",
+            project: "api",
+            status: "completed",
+            memoryUsed: [
+                "provider-ranking-provenance-compact-repair-receipt-memory.md; usageState=verified",
+            ],
+            memoryIgnored: [],
+        },
+    };
+    try {
+        writeJsonAtomic(bindingFile, {
+            schema: "ccm-replay-repair-main-agent-dispatch-brief-assignment-ledger-v1",
+            version: 1,
+            groupId,
+            file: bindingFile,
+            updatedAt: "2026-07-10T19:20:00.000Z",
+            bindingCount: 1,
+            nativeBindingCount: 1,
+            entries: [badEntry],
+        });
+        const repairReport = buildWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairWorkItemReport({
+            groupIds: [groupId],
+            tasks: [],
+        });
+        const candidateReport = buildWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairDispatchCandidateReport({
+            groupIds: [groupId],
+            tasks: [],
+            repairWorkItemReport: repairReport,
+        });
+        const briefReport = buildWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairDispatchBriefReport({
+            groupIds: [groupId],
+            tasks: [],
+            candidateReport,
+            at: "2026-07-10T19:20:01.000Z",
+        });
+        const briefQuality = evaluateWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairDispatchBriefs({
+            groupIds: [groupId],
+            tasks: [],
+            candidateReport,
+            at: "2026-07-10T19:20:02.000Z",
+        });
+        const qualityReport = buildMemoryQualityReport({
+            checkIds: ["worker_context_provider_ranking_provenance_compact_repair_receipt_memory_usage_receipt_repair_dispatch_briefs"],
+            groupIds: [groupId],
+            tasks: [],
+            refresh: true,
+        });
+        const qualityCheck = (qualityReport.checks || []).find((item) => item.id === "worker_context_provider_ranking_provenance_compact_repair_receipt_memory_usage_receipt_repair_dispatch_briefs") || {};
+        const group = briefReport.groups?.[0] || {};
+        const readyBrief = group.briefs?.[0] || {};
+        const workerTask = String(readyBrief.worker_task || "");
+        const checks = {
+            briefCreatedAndRegistered: briefReport.overall?.status === "ok"
+                && Number(briefReport.overall?.expectedBriefCount || 0) === 1
+                && Number(briefReport.overall?.coveredBriefCount || 0) === 1
+                && Number(group.metadataGapCount || 0) === 0,
+            briefIsSelfContained: workerTask.includes("memoryUsed")
+                && workerTask.includes("memoryIgnored")
+                && workerTask.includes("provider-ranking-provenance-compact-repair-receipt-memory.md")
+                && /usageState|usage_state/i.test(workerTask)
+                && workerTask.includes("ranking evidence only, not authorization")
+                && workerTask.includes("fresh valid provider switch decision receipt")
+                && workerTask.includes("wcp-provider-ranking-repair-memory-usage-receipt-repair-brief")
+                && workerTask.includes("CCM_AGENT_RECEIPT"),
+            qualityCheckRegisteredAndPasses: briefQuality.status === "ok"
+                && qualityCheck.status === "ok"
+                && Number(briefQuality.checked || 0) === 1
+                && Number(briefQuality.passed || 0) === 1,
+        };
+        return {
+            pass: Object.values(checks).every(Boolean),
+            checks,
+            briefReport: briefReport.overall,
+            qualityCheck: {
+                id: qualityCheck.id || "",
+                status: qualityCheck.status || "",
+                checked: qualityCheck.checked || 0,
+                passed: qualityCheck.passed || 0,
+            },
+            brief: {
+                brief_id: readyBrief.brief_id || "",
+                work_item_id: readyBrief.work_item_id || "",
+                source: readyBrief.source || "",
+                worker_context_packet_id: readyBrief.worker_context_packet_id || "",
+                worker_task: compactMemoryCenterText(workerTask, 1000),
+            },
+        };
+    }
+    finally {
+        try {
+            if (fs.existsSync(bindingFile))
+                fs.rmSync(bindingFile, { force: true });
+        }
+        catch { }
+        try {
+            if (fs.existsSync(workFile))
+                fs.rmSync(workFile, { force: true });
+        }
+        catch { }
+        try {
+            if (fs.existsSync(planFile))
+                fs.rmSync(planFile, { force: true });
+        }
+        catch { }
+    }
+}
+function runMemoryCenterWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairTypedMemorySelfTest() {
+    const groupId = `memory-center-provider-ranking-provenance-compact-repair-receipt-memory-usage-receipt-repair-typed-selftest-${process.pid}-${Date.now()}`;
+    const bindingFile = getGroupReplayRepairDispatchBindingLedgerFile(groupId);
+    const workFile = getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId);
+    const planFile = getGroupReplayRepairDispatchPlanLedgerFile(groupId);
+    const typedDir = path.join(GROUP_TYPED_MEMORY_MD_DIR, sidecarFileId(groupId));
+    const contract = {
+        schema: "ccm-provider-ranking-compact-repair-receipt-memory-usage-contract-v1",
+        active: true,
+        doc_rel_path: "provider-ranking-provenance-compact-repair-receipt-memory.md",
+        required_receipt_fields: ["memoryUsed", "memoryIgnored"],
+        authorization_boundary: "ranking evidence only, not authorization; fresh valid provider switch decision receipt required",
+    };
+    const contextUsage = {
+        schema: "ccm-worker-context-usage-v1",
+        packet_id: "wcp-provider-ranking-repair-memory-usage-receipt-repair-typed",
+        status: "ok",
+        total_tokens: 120,
+        max_tokens: 90000,
+        categories: [
+            { id: "provider_ranking_compact_repair_receipt_memory_contract", label: "Provider ranking compact repair receipt memory contract", tokens: 48, required: true },
+            { id: "task_goal", label: "Task goal", tokens: 24, required: true },
+            { id: "verification_and_acceptance", label: "Verification and acceptance", tokens: 24, required: true },
+            { id: "free_space", label: "Free space", tokens: 24, required: false },
+        ],
+    };
+    const badEntry = {
+        schema: "ccm-replay-repair-main-agent-dispatch-brief-assignment-binding-v1",
+        binding_id: "replay-repair-assignment-binding:phase171-memory-usage-receipt-repair-typed",
+        assignment_id: "assignment-phase171-memory-usage-receipt-repair-typed",
+        dispatch_key: "dispatch-phase171-memory-usage-receipt-repair-typed",
+        groupId,
+        project: "api",
+        worker_context_packet_id: "wcp-provider-ranking-repair-memory-usage-receipt-repair-typed",
+        provider_ranking_compact_repair_receipt_memory_contract: contract,
+        worker_context_packet_context_usage: contextUsage,
+        worker_context_packet: {
+            packet_id: "wcp-provider-ranking-repair-memory-usage-receipt-repair-typed",
+            project: "api",
+            provider_ranking_compact_repair_receipt_memory_contract: contract,
+            context_usage: contextUsage,
+            acceptance: {
+                provider_ranking_compact_repair_receipt_memory_usage_required: true,
+                provider_ranking_compact_repair_receipt_memory_authorization_boundary_required: true,
+            },
+        },
+        worker_context_packet_receipt: {
+            worker_context_packet_id: "wcp-provider-ranking-repair-memory-usage-receipt-repair-typed",
+            project: "api",
+            status: "completed",
+            memoryUsed: [
+                "provider-ranking-provenance-compact-repair-receipt-memory.md; usageState=verified",
+            ],
+            memoryIgnored: [],
+        },
+    };
+    try {
+        writeJsonAtomic(bindingFile, {
+            schema: "ccm-replay-repair-main-agent-dispatch-brief-assignment-ledger-v1",
+            version: 1,
+            groupId,
+            file: bindingFile,
+            updatedAt: "2026-07-10T19:35:00.000Z",
+            bindingCount: 1,
+            nativeBindingCount: 1,
+            entries: [badEntry],
+        });
+        const repairReport = buildWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairWorkItemReport({
+            groupIds: [groupId],
+            tasks: [],
+            generatedAt: "2026-07-10T19:35:01.000Z",
+        });
+        const candidateReport = buildWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairDispatchCandidateReport({
+            groupIds: [groupId],
+            tasks: [],
+            repairWorkItemReport: repairReport,
+            generatedAt: "2026-07-10T19:35:02.000Z",
+        });
+        const briefReport = buildWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairDispatchBriefReport({
+            groupIds: [groupId],
+            tasks: [],
+            candidateReport,
+            generatedAt: "2026-07-10T19:35:03.000Z",
+        });
+        const typedReport = buildWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairTypedMemoryReport({
+            groupIds: [groupId],
+            tasks: [],
+            repairWorkItemReport: repairReport,
+            candidateReport,
+            briefReport,
+            generatedAt: "2026-07-10T19:35:04.000Z",
+        });
+        const quality = buildMemoryQualityReport({
+            checkIds: ["worker_context_provider_ranking_provenance_compact_repair_receipt_memory_usage_receipt_repair_typed_memory"],
+            groupIds: [groupId],
+            tasks: [],
+            refresh: true,
+        });
+        const qualityCheck = (quality.checks || []).find((item) => item.id === "worker_context_provider_ranking_provenance_compact_repair_receipt_memory_usage_receipt_repair_typed_memory") || {};
+        const { readGroupTypedMemoryDistillationLedger, scanGroupTypedMemoryDocuments, buildGroupTypedMemoryRecall, } = require("../collaboration/group-memory-index");
+        const ledger = readGroupTypedMemoryDistillationLedger(groupId);
+        const archive = ledger.providerRankingMemoryUsageReceiptRepairArchive || {};
+        const docs = scanGroupTypedMemoryDocuments(groupId);
+        const doc = (docs || []).find((item) => item.source === "auto:provider-ranking-memory-usage-receipt-repair-distillation") || {};
+        const docBody = String(doc.body || "");
+        const recall = buildGroupTypedMemoryRecall(groupId, "provider ranking memory usage receipt memoryUsed memoryIgnored usageState fresh valid provider switch decision receipt ranking evidence only not authorization", {
+            disableLedger: true,
+            forceMemory: true,
+            max: 8,
+        });
+        const recallText = [
+            ...(Array.isArray(recall.recalled) ? recall.recalled : []),
+            ...(Array.isArray(recall.entries) ? recall.entries : []),
+            ...(Array.isArray(recall.selected) ? recall.selected : []),
+            ...(Array.isArray(recall.docs) ? recall.docs : []),
+        ].map((item) => `${item.relPath || item.rel_path || ""}\n${item.name || ""}\n${item.body || ""}\n${item.snippet || ""}\n${item.text || ""}`).join("\n");
+        const checks = {
+            repairDispatchChainReady: repairReport.overall?.status === "ok"
+                && candidateReport.overall?.status === "ok"
+                && briefReport.overall?.status === "ok",
+            typedMemoryReportPasses: typedReport.overall?.status === "ok"
+                && Number(typedReport.overall?.typedMemoryDocCount || 0) >= 1
+                && Number(typedReport.overall?.archivedCount || 0) >= 1
+                && Number(typedReport.overall?.recallMatchCount || 0) >= 1,
+            qualityCheckExposesTypedMemory: qualityCheck.status === "ok"
+                && Number(qualityCheck.checked || 0) === 1
+                && Number(qualityCheck.passed || 0) === 1,
+            ledgerArchivesProviderRankingReceiptRows: archive.schema === "ccm-provider-ranking-memory-usage-receipt-repair-distillation-v1"
+                && Number(archive.archived_count || 0) >= 1
+                && Number(archive.corrected_prompt_count || 0) >= 1
+                && Number(archive.usage_state_prompt_count || 0) >= 1
+                && Number(archive.authorization_boundary_prompt_count || 0) >= 1
+                && Number(archive.fresh_receipt_prompt_count || 0) >= 1
+                && (archive.doc_rel_paths || []).includes("provider-ranking-provenance-compact-repair-receipt-memory.md"),
+            typedDocContainsReceiptDiscipline: doc.source === "auto:provider-ranking-memory-usage-receipt-repair-distillation"
+                && doc.relPath === "provider-ranking-memory-usage-receipt-discipline.md"
+                && docBody.includes("provider-ranking-provenance-compact-repair-receipt-memory.md")
+                && docBody.includes("memoryUsed")
+                && docBody.includes("memoryIgnored")
+                && /usageState|usage_state/i.test(docBody)
+                && docBody.includes("ranking evidence only, not authorization")
+                && docBody.includes("fresh valid provider switch decision receipt"),
+            recallFindsProviderRankingReceiptDiscipline: /provider-ranking-memory-usage-receipt-discipline\.md|memoryUsed|memoryIgnored|usageState|fresh valid provider switch decision receipt|ranking evidence only, not authorization/i.test(recallText),
+        };
+        return {
+            pass: Object.values(checks).every(Boolean),
+            checks,
+            repairReport: repairReport.overall,
+            candidateReport: candidateReport.overall,
+            briefReport: briefReport.overall,
+            typedReport: typedReport.overall,
+            qualityCheck: {
+                id: qualityCheck.id || "",
+                status: qualityCheck.status || "",
+                checked: qualityCheck.checked || 0,
+                passed: qualityCheck.passed || 0,
+            },
+            archive: {
+                archived_count: archive.archived_count || 0,
+                corrected_prompt_count: archive.corrected_prompt_count || 0,
+                usage_state_prompt_count: archive.usage_state_prompt_count || 0,
+                authorization_boundary_prompt_count: archive.authorization_boundary_prompt_count || 0,
+                fresh_receipt_prompt_count: archive.fresh_receipt_prompt_count || 0,
+                doc_rel_paths: archive.doc_rel_paths || [],
+            },
+            doc: {
+                relPath: doc.relPath || "",
+                source: doc.source || "",
+            },
+        };
+    }
+    finally {
+        for (const file of [bindingFile, `${bindingFile}.bak`, workFile, `${workFile}.bak`, planFile, `${planFile}.bak`]) {
+            try {
+                if (file && fs.existsSync(file))
+                    fs.unlinkSync(file);
+            }
+            catch { }
+        }
+        try {
+            if (fs.existsSync(typedDir))
+                fs.rmSync(typedDir, { recursive: true, force: true });
+        }
+        catch { }
+    }
+}
+function runMemoryCenterWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairWorkerContextInjectionSelfTest() {
+    const groupId = `memory-center-provider-ranking-memory-usage-receipt-worker-context-injection-selftest-${process.pid}-${Date.now()}`;
+    const bindingFile = getGroupReplayRepairDispatchBindingLedgerFile(groupId);
+    const workFile = getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId);
+    const planFile = getGroupReplayRepairDispatchPlanLedgerFile(groupId);
+    const typedDir = path.join(GROUP_TYPED_MEMORY_MD_DIR, sidecarFileId(groupId));
+    const contract = {
+        schema: "ccm-provider-ranking-compact-repair-receipt-memory-usage-contract-v1",
+        active: true,
+        doc_rel_path: "provider-ranking-provenance-compact-repair-receipt-memory.md",
+        required_receipt_fields: ["memoryUsed", "memoryIgnored"],
+        authorization_boundary: "ranking evidence only, not authorization; fresh valid provider switch decision receipt required",
+    };
+    const contextUsage = {
+        schema: "ccm-worker-context-usage-v1",
+        packet_id: "wcp-provider-ranking-repair-memory-usage-receipt-worker-context-injection",
+        status: "ok",
+        total_tokens: 120,
+        max_tokens: 90000,
+        categories: [
+            { id: "provider_ranking_compact_repair_receipt_memory_contract", label: "Provider ranking compact repair receipt memory contract", tokens: 48, required: true },
+            { id: "task_goal", label: "Task goal", tokens: 24, required: true },
+            { id: "verification_and_acceptance", label: "Verification and acceptance", tokens: 24, required: true },
+            { id: "free_space", label: "Free space", tokens: 24, required: false },
+        ],
+    };
+    const badEntry = {
+        schema: "ccm-replay-repair-main-agent-dispatch-brief-assignment-binding-v1",
+        binding_id: "replay-repair-assignment-binding:phase172-memory-usage-receipt-worker-context-injection",
+        assignment_id: "assignment-phase172-memory-usage-receipt-worker-context-injection",
+        dispatch_key: "dispatch-phase172-memory-usage-receipt-worker-context-injection",
+        groupId,
+        project: "api",
+        worker_context_packet_id: "wcp-provider-ranking-repair-memory-usage-receipt-worker-context-injection",
+        provider_ranking_compact_repair_receipt_memory_contract: contract,
+        worker_context_packet_context_usage: contextUsage,
+        worker_context_packet: {
+            packet_id: "wcp-provider-ranking-repair-memory-usage-receipt-worker-context-injection",
+            project: "api",
+            provider_ranking_compact_repair_receipt_memory_contract: contract,
+            context_usage: contextUsage,
+            acceptance: {
+                provider_ranking_compact_repair_receipt_memory_usage_required: true,
+                provider_ranking_compact_repair_receipt_memory_authorization_boundary_required: true,
+            },
+        },
+        worker_context_packet_receipt: {
+            worker_context_packet_id: "wcp-provider-ranking-repair-memory-usage-receipt-worker-context-injection",
+            project: "api",
+            status: "completed",
+            memoryUsed: [
+                "provider-ranking-provenance-compact-repair-receipt-memory.md; usageState=verified",
+            ],
+            memoryIgnored: [],
+        },
+    };
+    try {
+        const { distillProviderRankingProvenanceCompactRepairReceiptConsumptionToTypedMemory, } = require("../collaboration/group-memory-index");
+        distillProviderRankingProvenanceCompactRepairReceiptConsumptionToTypedMemory(groupId, {
+            rows: [{
+                    schema: "ccm-replay-repair-main-agent-dispatch-brief-timeline-binding-v1",
+                    timeline_binding_id: "replay-repair-brief-timeline:phase172-worker-context-injection",
+                    groupId,
+                    task_id: "task-provider-ranking-repair-worker-context-injection",
+                    project: "api",
+                    brief_id: "replay-repair-dispatch-brief:phase172-worker-context-injection",
+                    work_item_id: "provider-ranking-provenance-compact-repair:phase172-worker-context-injection",
+                    source: "worker_context_provider_ranking_provenance_compact_repair",
+                    assignment_id: "assignment-provider-ranking-repair-worker-context-injection",
+                    dispatch_key: "dispatch-provider-ranking-repair-worker-context-injection",
+                    worker_context_packet_id: "wcp-provider-ranking-repair-worker-context-injection",
+                    receipt_status: "completed",
+                    replay_repair_consumption_status: "verified",
+                    replay_repair_consumption_source: "receipt.replayRepairDispatchBriefUsage",
+                    replay_repair_consumption_reason: "PHASE172_PROVIDER_RANKING_WORKER_CONTEXT_INJECTION_SENTINEL verified compact repair preserved provider-switch-execution:phase172; ranking evidence only, not authorization.",
+                    provider_switch_decision_receipt_id: "provider-switch-decision:phase172-worker-context-injection",
+                    provider_switch_decision_receipt_checksum: "provider-switch-receipt-checksum-phase172-worker-context-injection",
+                    provider_ranking_provenance_rel_paths: ["provider-switch-execution-memory.md"],
+                    provider_ranking_provenance_row_ids: ["provider-switch-execution:phase172"],
+                    provider_ranking_provenance_preserved: true,
+                    provider_ranking_provenance_required: true,
+                    provider_ranking_provenance_repair_status: "completed",
+                    provider_ranking_provenance_repair_gap_type: "provider_ranking_provenance_compact",
+                    provider_ranking_provenance_receipt_consumption_verified: true,
+                    at: "2026-07-10T19:50:00.000Z",
+                    updated_at: "2026-07-10T19:50:00.000Z",
+                }],
+        }, {
+            reason: "memory-center-provider-ranking-memory-usage-receipt-worker-context-injection-selftest",
+            updatedAt: "2026-07-10T19:50:01.000Z",
+        });
+        writeJsonAtomic(bindingFile, {
+            schema: "ccm-replay-repair-main-agent-dispatch-brief-assignment-ledger-v1",
+            version: 1,
+            groupId,
+            file: bindingFile,
+            updatedAt: "2026-07-10T19:50:02.000Z",
+            bindingCount: 1,
+            nativeBindingCount: 1,
+            entries: [badEntry],
+        });
+        const repairReport = buildWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairWorkItemReport({
+            groupIds: [groupId],
+            tasks: [],
+            generatedAt: "2026-07-10T19:50:03.000Z",
+        });
+        const candidateReport = buildWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairDispatchCandidateReport({
+            groupIds: [groupId],
+            tasks: [],
+            repairWorkItemReport: repairReport,
+            generatedAt: "2026-07-10T19:50:04.000Z",
+        });
+        const briefReport = buildWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairDispatchBriefReport({
+            groupIds: [groupId],
+            tasks: [],
+            candidateReport,
+            generatedAt: "2026-07-10T19:50:05.000Z",
+        });
+        const typedMemoryReport = buildWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairTypedMemoryReport({
+            groupIds: [groupId],
+            tasks: [],
+            repairWorkItemReport: repairReport,
+            candidateReport,
+            briefReport,
+            generatedAt: "2026-07-10T19:50:06.000Z",
+        });
+        const injectionReport = buildWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairWorkerContextInjectionReport({
+            groupIds: [groupId],
+            tasks: [],
+            typedMemoryReport,
+            targetProject: "api",
+            task: "PHASE172_PROVIDER_RANKING_WORKER_CONTEXT_INJECTION_SENTINEL provider ranking memory usage receipt discipline memoryUsed memoryIgnored usageState fresh valid provider switch decision receipt ranking evidence only not authorization",
+            generatedAt: "2026-07-10T19:50:07.000Z",
+        });
+        const quality = buildMemoryQualityReport({
+            checkIds: ["worker_context_provider_ranking_provenance_compact_repair_receipt_memory_usage_receipt_repair_worker_context_injection"],
+            groupIds: [groupId],
+            tasks: [],
+            targetProject: "api",
+            task: "PHASE172_PROVIDER_RANKING_WORKER_CONTEXT_INJECTION_SENTINEL provider ranking memory usage receipt discipline memoryUsed memoryIgnored usageState fresh valid provider switch decision receipt ranking evidence only not authorization",
+            refresh: true,
+        });
+        const qualityCheck = (quality.checks || []).find((item) => item.id === "worker_context_provider_ranking_provenance_compact_repair_receipt_memory_usage_receipt_repair_worker_context_injection") || {};
+        const group = injectionReport.groups?.[0] || {};
+        const checks = {
+            typedMemoryReportReady: typedMemoryReport.overall?.status === "ok"
+                && Number(typedMemoryReport.overall?.typedMemoryDocCount || 0) >= 1
+                && Number(typedMemoryReport.overall?.archivedCount || 0) >= 1,
+            workerContextInjectionReportPasses: injectionReport.overall?.status === "ok"
+                && Number(injectionReport.overall?.workerContextPacketCoveredCount || 0) === 1
+                && Number(injectionReport.overall?.renderedContextCoveredCount || 0) === 1
+                && Number(injectionReport.overall?.recallSurfacedDisciplineCount || 0) === 1,
+            contractRequiresDisciplineDoc: group.contract?.memory_usage_receipt_discipline_required === true
+                && (group.contract?.memory_usage_receipt_discipline_rel_paths || []).includes("provider-ranking-memory-usage-receipt-discipline.md")
+                && (group.contract?.memory_receipt_required_doc_rel_paths || []).includes("provider-ranking-provenance-compact-repair-receipt-memory.md")
+                && (group.contract?.memory_receipt_required_doc_rel_paths || []).includes("provider-ranking-memory-usage-receipt-discipline.md"),
+            qualityCheckRegisteredAndPasses: qualityCheck.status === "ok"
+                && Number(qualityCheck.checked || 0) === 1
+                && Number(qualityCheck.passed || 0) === 1,
+        };
+        return {
+            pass: Object.values(checks).every(Boolean),
+            checks,
+            typedMemoryReport: typedMemoryReport.overall,
+            injectionReport: injectionReport.overall,
+            qualityCheck: {
+                id: qualityCheck.id || "",
+                status: qualityCheck.status || "",
+                checked: qualityCheck.checked || 0,
+                passed: qualityCheck.passed || 0,
+            },
+            group: {
+                status: group.status || "",
+                recallSurfacedDiscipline: group.recallSurfacedDiscipline === true,
+                renderedContextCovered: group.renderedContextCovered === true,
+                workerContextPacketCovered: group.workerContextPacketCovered === true,
+                contract: group.contract || {},
+            },
+        };
+    }
+    finally {
+        for (const file of [bindingFile, `${bindingFile}.bak`, workFile, `${workFile}.bak`, planFile, `${planFile}.bak`]) {
+            try {
+                if (file && fs.existsSync(file))
+                    fs.unlinkSync(file);
+            }
+            catch { }
+        }
+        try {
+            if (fs.existsSync(typedDir))
+                fs.rmSync(typedDir, { recursive: true, force: true });
+        }
+        catch { }
+    }
+}
+function runMemoryCenterWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRequiredDocsSelfTest() {
+    const groupId = `memory-center-provider-ranking-memory-usage-receipt-required-docs-selftest-${process.pid}-${Date.now()}`;
+    const bindingFile = getGroupReplayRepairDispatchBindingLedgerFile(groupId);
+    const workFile = getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId);
+    const planFile = getGroupReplayRepairDispatchPlanLedgerFile(groupId);
+    const requiredDocs = [
+        "provider-ranking-provenance-compact-repair-receipt-memory.md",
+        "provider-ranking-memory-usage-receipt-discipline.md",
+    ];
+    const contract = {
+        schema: "ccm-provider-ranking-compact-repair-receipt-memory-usage-contract-v1",
+        active: true,
+        doc_rel_path: "provider-ranking-provenance-compact-repair-receipt-memory.md",
+        required_receipt_fields: ["memoryUsed", "memoryIgnored"],
+        memory_usage_receipt_discipline_rel_paths: ["provider-ranking-memory-usage-receipt-discipline.md"],
+        memory_usage_receipt_discipline_required: true,
+        memory_receipt_required_doc_rel_paths: requiredDocs,
+        authorization_boundary: "ranking evidence only, not authorization; fresh valid provider switch decision receipt required",
+    };
+    const contextUsage = {
+        schema: "ccm-worker-context-usage-v1",
+        packet_id: "wcp-provider-ranking-repair-memory-usage-receipt-required-docs",
+        status: "ok",
+        total_tokens: 144,
+        max_tokens: 90000,
+        categories: [
+            { id: "provider_ranking_compact_repair_receipt_memory_contract", label: "Provider ranking compact repair receipt memory contract", tokens: 72, required: true },
+            { id: "task_goal", label: "Task goal", tokens: 24, required: true },
+            { id: "verification_and_acceptance", label: "Verification and acceptance", tokens: 24, required: true },
+            { id: "free_space", label: "Free space", tokens: 24, required: false },
+        ],
+    };
+    const goodEntry = {
+        schema: "ccm-replay-repair-main-agent-dispatch-brief-assignment-binding-v1",
+        binding_id: "replay-repair-assignment-binding:phase173-memory-usage-receipt-required-docs",
+        assignment_id: "assignment-phase173-memory-usage-receipt-required-docs",
+        dispatch_key: "dispatch-phase173-memory-usage-receipt-required-docs",
+        groupId,
+        project: "api",
+        worker_context_packet_id: "wcp-provider-ranking-repair-memory-usage-receipt-required-docs",
+        provider_ranking_compact_repair_receipt_memory_contract: contract,
+        worker_context_packet_context_usage: contextUsage,
+        worker_context_packet: {
+            packet_id: "wcp-provider-ranking-repair-memory-usage-receipt-required-docs",
+            project: "api",
+            provider_ranking_compact_repair_receipt_memory_contract: contract,
+            context_usage: contextUsage,
+            acceptance: {
+                provider_ranking_compact_repair_receipt_memory_usage_required: true,
+                provider_ranking_compact_repair_receipt_memory_authorization_boundary_required: true,
+                provider_ranking_memory_usage_receipt_discipline_required: true,
+                provider_ranking_memory_receipt_required_doc_rel_paths: requiredDocs,
+            },
+        },
+        worker_context_packet_receipt: {
+            worker_context_packet_id: "wcp-provider-ranking-repair-memory-usage-receipt-required-docs",
+            project: "api",
+            status: "completed",
+            memoryUsed: [
+                "provider-ranking-provenance-compact-repair-receipt-memory.md; usageState=verified; ranking evidence only, not authorization; fresh valid provider switch decision receipt required",
+                "provider-ranking-memory-usage-receipt-discipline.md; usageState=verified; ranking evidence only, not authorization; fresh valid provider switch decision receipt required",
+            ],
+            memoryIgnored: [],
+        },
+    };
+    const badEntry = {
+        ...goodEntry,
+        binding_id: "replay-repair-assignment-binding:phase173-memory-usage-receipt-required-docs-bad",
+        assignment_id: "assignment-phase173-memory-usage-receipt-required-docs-bad",
+        dispatch_key: "dispatch-phase173-memory-usage-receipt-required-docs-bad",
+        worker_context_packet_id: "wcp-provider-ranking-repair-memory-usage-receipt-required-docs-bad",
+        worker_context_packet_context_usage: {
+            ...contextUsage,
+            packet_id: "wcp-provider-ranking-repair-memory-usage-receipt-required-docs-bad",
+        },
+        worker_context_packet: {
+            ...goodEntry.worker_context_packet,
+            packet_id: "wcp-provider-ranking-repair-memory-usage-receipt-required-docs-bad",
+            context_usage: {
+                ...contextUsage,
+                packet_id: "wcp-provider-ranking-repair-memory-usage-receipt-required-docs-bad",
+            },
+        },
+        worker_context_packet_receipt: {
+            worker_context_packet_id: "wcp-provider-ranking-repair-memory-usage-receipt-required-docs-bad",
+            project: "api",
+            status: "completed",
+            memoryUsed: [
+                "provider-ranking-provenance-compact-repair-receipt-memory.md; usageState=verified; ranking evidence only, not authorization; fresh valid provider switch decision receipt required",
+            ],
+            memoryIgnored: [],
+        },
+    };
+    try {
+        writeJsonAtomic(bindingFile, {
+            schema: "ccm-replay-repair-main-agent-dispatch-brief-assignment-ledger-v1",
+            version: 1,
+            groupId,
+            file: bindingFile,
+            updatedAt: "2026-07-10T20:05:00.000Z",
+            bindingCount: 1,
+            nativeBindingCount: 1,
+            entries: [goodEntry],
+        });
+        const receiptReport = buildWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptReport({
+            groupIds: [groupId],
+            tasks: [],
+            generatedAt: "2026-07-10T20:05:01.000Z",
+        });
+        const requiredDocsReport = buildWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRequiredDocsReport({
+            groupIds: [groupId],
+            tasks: [],
+            receiptReport,
+            generatedAt: "2026-07-10T20:05:02.000Z",
+        });
+        const requiredDocsQuality = evaluateWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRequiredDocs({
+            groupIds: [groupId],
+            tasks: [],
+            receiptReport,
+        });
+        const qualityReport = buildMemoryQualityReport({
+            checkIds: ["worker_context_provider_ranking_provenance_compact_repair_receipt_memory_usage_receipt_required_docs"],
+            groupIds: [groupId],
+            tasks: [],
+            refresh: true,
+        });
+        const qualityCheck = (qualityReport.checks || []).find((item) => item.id === "worker_context_provider_ranking_provenance_compact_repair_receipt_memory_usage_receipt_required_docs") || {};
+        const receiptGroup = receiptReport.groups?.[0] || {};
+        const requiredGroup = requiredDocsReport.groups?.[0] || {};
+        const goodReceipt = receiptGroup.receipts?.[0] || {};
+        const badRow = workerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRow(groupId, badEntry, { tasks: [] });
+        const badRepairItem = buildWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairWorkItem(groupId, badRow, 0, {}, "2026-07-10T20:05:03.000Z");
+        const checks = {
+            baseReceiptReportAcceptsAllRequiredDocs: receiptReport.overall?.status === "ok"
+                && Number(receiptReport.overall?.receiptContractCount || 0) === 1
+                && Number(receiptReport.overall?.coveredReceiptCount || 0) === 1
+                && Number(receiptReport.overall?.missingReceiptCoverageCount || 0) === 0,
+            requiredDocsReportAcceptsAllRequiredDocs: requiredDocsReport.overall?.status === "ok"
+                && Number(requiredDocsReport.overall?.requiredDocReceiptCount || 0) === 1
+                && Number(requiredDocsReport.overall?.coveredRequiredDocReceiptCount || 0) === 1
+                && Number(requiredDocsReport.overall?.disciplineDocReceiptCount || 0) === 1
+                && Number(requiredDocsReport.overall?.missingRequiredDocCount || 0) === 0,
+            qualityCheckRegisteredAndPasses: requiredDocsQuality.id === "worker_context_provider_ranking_provenance_compact_repair_receipt_memory_usage_receipt_required_docs"
+                && requiredDocsQuality.status === "ok"
+                && qualityCheck.status === "ok"
+                && Number(qualityCheck.checked || 0) === 1
+                && Number(qualityCheck.passed || 0) === 1,
+            goodReceiptCoversBothDocs: requiredDocs.every(relPath => (goodReceipt.requiredDocRelPaths || []).includes(relPath))
+                && requiredDocs.every(relPath => (goodReceipt.coveredDocRelPaths || []).includes(relPath))
+                && (goodReceipt.missingDocRelPaths || []).length === 0
+                && (goodReceipt.missingUsageStateDocRelPaths || []).length === 0,
+            badReceiptRejectedForMissingDisciplineDoc: badRow.compliant === false
+                && badRow.coverage?.pass === false
+                && (badRow.missingDocRelPaths || []).includes("provider-ranking-memory-usage-receipt-discipline.md")
+                && (badRow.gaps || []).includes("receipt_memoryUsed_memoryIgnored_doc"),
+            repairItemCarriesRequiredAndMissingDocs: (badRepairItem.provider_ranking_memory_receipt_required_doc_rel_paths || []).includes("provider-ranking-provenance-compact-repair-receipt-memory.md")
+                && (badRepairItem.provider_ranking_memory_receipt_required_doc_rel_paths || []).includes("provider-ranking-memory-usage-receipt-discipline.md")
+                && (badRepairItem.provider_ranking_memory_receipt_missing_doc_rel_paths || []).includes("provider-ranking-memory-usage-receipt-discipline.md")
+                && String(badRepairItem.prompt_patch || "").includes("provider-ranking-memory-usage-receipt-discipline.md"),
+        };
+        return {
+            pass: Object.values(checks).every(Boolean),
+            checks,
+            receiptReport: receiptReport.overall,
+            requiredDocsReport: requiredDocsReport.overall,
+            qualityCheck: {
+                id: qualityCheck.id || "",
+                status: qualityCheck.status || "",
+                checked: qualityCheck.checked || 0,
+                passed: qualityCheck.passed || 0,
+            },
+            group: {
+                status: requiredGroup.status || "",
+                requiredDocRelPaths: requiredGroup.requiredDocRelPaths || [],
+                disciplineDocReceiptCount: requiredGroup.disciplineDocReceiptCount || 0,
+            },
+            goodReceipt: {
+                requiredDocRelPaths: goodReceipt.requiredDocRelPaths || [],
+                coveredDocRelPaths: goodReceipt.coveredDocRelPaths || [],
+                missingDocRelPaths: goodReceipt.missingDocRelPaths || [],
+                missingUsageStateDocRelPaths: goodReceipt.missingUsageStateDocRelPaths || [],
+            },
+            badRow: {
+                compliant: badRow.compliant === true,
+                missingDocRelPaths: badRow.missingDocRelPaths || [],
+                missingUsageStateDocRelPaths: badRow.missingUsageStateDocRelPaths || [],
+                gaps: badRow.gaps || [],
+            },
+            badRepairItem: {
+                requiredDocRelPaths: badRepairItem.provider_ranking_memory_receipt_required_doc_rel_paths || [],
+                missingDocRelPaths: badRepairItem.provider_ranking_memory_receipt_missing_doc_rel_paths || [],
+            },
+        };
+    }
+    finally {
+        for (const file of [bindingFile, `${bindingFile}.bak`, workFile, `${workFile}.bak`, planFile, `${planFile}.bak`]) {
+            try {
+                if (file && fs.existsSync(file))
+                    fs.unlinkSync(file);
+            }
+            catch { }
+        }
+    }
+}
+function runMemoryCenterWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairDispatchBriefRequiredDocsSelfTest() {
+    const groupId = `memory-center-provider-ranking-memory-usage-receipt-brief-required-docs-selftest-${process.pid}-${Date.now()}`;
+    const bindingFile = getGroupReplayRepairDispatchBindingLedgerFile(groupId);
+    const workFile = getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId);
+    const planFile = getGroupReplayRepairDispatchPlanLedgerFile(groupId);
+    const requiredDocs = [
+        "provider-ranking-provenance-compact-repair-receipt-memory.md",
+        "provider-ranking-memory-usage-receipt-discipline.md",
+    ];
+    const contract = {
+        schema: "ccm-provider-ranking-compact-repair-receipt-memory-usage-contract-v1",
+        active: true,
+        doc_rel_path: "provider-ranking-provenance-compact-repair-receipt-memory.md",
+        required_receipt_fields: ["memoryUsed", "memoryIgnored"],
+        memory_usage_receipt_discipline_rel_paths: ["provider-ranking-memory-usage-receipt-discipline.md"],
+        memory_usage_receipt_discipline_required: true,
+        memory_receipt_required_doc_rel_paths: requiredDocs,
+        authorization_boundary: "ranking evidence only, not authorization; fresh valid provider switch decision receipt required",
+    };
+    const contextUsage = {
+        schema: "ccm-worker-context-usage-v1",
+        packet_id: "wcp-provider-ranking-repair-memory-usage-receipt-brief-required-docs",
+        status: "ok",
+        total_tokens: 144,
+        max_tokens: 90000,
+        categories: [
+            { id: "provider_ranking_compact_repair_receipt_memory_contract", label: "Provider ranking compact repair receipt memory contract", tokens: 72, required: true },
+            { id: "task_goal", label: "Task goal", tokens: 24, required: true },
+            { id: "verification_and_acceptance", label: "Verification and acceptance", tokens: 24, required: true },
+            { id: "free_space", label: "Free space", tokens: 24, required: false },
+        ],
+    };
+    const badEntry = {
+        schema: "ccm-replay-repair-main-agent-dispatch-brief-assignment-binding-v1",
+        binding_id: "replay-repair-assignment-binding:phase174-memory-usage-receipt-brief-required-docs",
+        assignment_id: "assignment-phase174-memory-usage-receipt-brief-required-docs",
+        dispatch_key: "dispatch-phase174-memory-usage-receipt-brief-required-docs",
+        groupId,
+        project: "api",
+        worker_context_packet_id: "wcp-provider-ranking-repair-memory-usage-receipt-brief-required-docs",
+        provider_ranking_compact_repair_receipt_memory_contract: contract,
+        worker_context_packet_context_usage: contextUsage,
+        worker_context_packet: {
+            packet_id: "wcp-provider-ranking-repair-memory-usage-receipt-brief-required-docs",
+            project: "api",
+            provider_ranking_compact_repair_receipt_memory_contract: contract,
+            context_usage: contextUsage,
+            acceptance: {
+                provider_ranking_compact_repair_receipt_memory_usage_required: true,
+                provider_ranking_compact_repair_receipt_memory_authorization_boundary_required: true,
+                provider_ranking_memory_usage_receipt_discipline_required: true,
+                provider_ranking_memory_receipt_required_doc_rel_paths: requiredDocs,
+            },
+        },
+        worker_context_packet_receipt: {
+            worker_context_packet_id: "wcp-provider-ranking-repair-memory-usage-receipt-brief-required-docs",
+            project: "api",
+            status: "completed",
+            memoryUsed: [
+                "provider-ranking-provenance-compact-repair-receipt-memory.md; usageState=verified; ranking evidence only, not authorization; fresh valid provider switch decision receipt required",
+            ],
+            memoryIgnored: [],
+        },
+    };
+    try {
+        writeJsonAtomic(bindingFile, {
+            schema: "ccm-replay-repair-main-agent-dispatch-brief-assignment-ledger-v1",
+            version: 1,
+            groupId,
+            file: bindingFile,
+            updatedAt: "2026-07-10T20:20:00.000Z",
+            bindingCount: 1,
+            nativeBindingCount: 1,
+            entries: [badEntry],
+        });
+        const repairReport = buildWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairWorkItemReport({
+            groupIds: [groupId],
+            tasks: [],
+            generatedAt: "2026-07-10T20:20:01.000Z",
+        });
+        const candidateReport = buildWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairDispatchCandidateReport({
+            groupIds: [groupId],
+            tasks: [],
+            repairWorkItemReport: repairReport,
+            generatedAt: "2026-07-10T20:20:02.000Z",
+        });
+        const briefReport = buildWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairDispatchBriefReport({
+            groupIds: [groupId],
+            tasks: [],
+            candidateReport,
+            at: "2026-07-10T20:20:03.000Z",
+        });
+        const requiredDocsReport = buildWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairDispatchBriefRequiredDocsReport({
+            groupIds: [groupId],
+            tasks: [],
+            briefReport,
+            generatedAt: "2026-07-10T20:20:04.000Z",
+        });
+        const quality = buildMemoryQualityReport({
+            checkIds: ["worker_context_provider_ranking_provenance_compact_repair_receipt_memory_usage_receipt_repair_dispatch_brief_required_docs"],
+            groupIds: [groupId],
+            tasks: [],
+            refresh: true,
+        });
+        const qualityCheck = (quality.checks || []).find((item) => item.id === "worker_context_provider_ranking_provenance_compact_repair_receipt_memory_usage_receipt_repair_dispatch_brief_required_docs") || {};
+        const candidateGroup = candidateReport.groups?.[0] || {};
+        const briefGroup = briefReport.groups?.[0] || {};
+        const requiredGroup = requiredDocsReport.groups?.[0] || {};
+        const candidate = candidateGroup.candidates?.[0] || {};
+        const readyBrief = briefGroup.briefs?.[0] || {};
+        const workerTask = String(readyBrief.worker_task || "");
+        const checks = {
+            repairCandidateAndBriefReportsPass: repairReport.overall?.status === "ok"
+                && candidateReport.overall?.status === "ok"
+                && briefReport.overall?.status === "ok"
+                && Number(briefReport.overall?.requiredDocBriefCount || 0) === 1
+                && Number(briefReport.overall?.disciplineRequiredDocBriefCount || 0) === 1,
+            candidateCarriesRequiredAndMissingDocs: requiredDocs.every(relPath => (candidate.provider_ranking_memory_receipt_required_doc_rel_paths || []).includes(relPath))
+                && (candidate.provider_ranking_memory_receipt_missing_doc_rel_paths || []).includes("provider-ranking-memory-usage-receipt-discipline.md")
+                && requiredDocs.every(relPath => (candidate.provider_ranking_provenance_rel_paths || []).includes(relPath)),
+            briefCarriesRequiredAndMissingDocs: requiredDocs.every(relPath => (readyBrief.provider_ranking_memory_receipt_required_doc_rel_paths || []).includes(relPath))
+                && (readyBrief.provider_ranking_memory_receipt_missing_doc_rel_paths || []).includes("provider-ranking-memory-usage-receipt-discipline.md")
+                && requiredDocs.every(relPath => (readyBrief.provider_ranking_provenance_rel_paths || []).includes(relPath)),
+            briefWorkerTaskIsSelfContained: requiredDocs.every(relPath => workerTask.includes(relPath))
+                && workerTask.includes("memoryUsed")
+                && workerTask.includes("memoryIgnored")
+                && /usageState|usage_state/i.test(workerTask)
+                && workerTask.includes("ranking evidence only, not authorization")
+                && workerTask.includes("fresh valid provider switch decision receipt")
+                && workerTask.includes("CCM_AGENT_RECEIPT"),
+            requiredDocsQualityPasses: requiredDocsReport.overall?.status === "ok"
+                && Number(requiredDocsReport.overall?.requiredDocBriefCount || 0) === 1
+                && Number(requiredDocsReport.overall?.coveredRequiredDocBriefCount || 0) === 1
+                && Number(requiredDocsReport.overall?.disciplineDocBriefCount || 0) === 1
+                && qualityCheck.status === "ok"
+                && Number(qualityCheck.checked || 0) === 1
+                && Number(qualityCheck.passed || 0) === 1,
+        };
+        return {
+            pass: Object.values(checks).every(Boolean),
+            checks,
+            repairReport: repairReport.overall,
+            candidateReport: candidateReport.overall,
+            briefReport: briefReport.overall,
+            requiredDocsReport: requiredDocsReport.overall,
+            qualityCheck: {
+                id: qualityCheck.id || "",
+                status: qualityCheck.status || "",
+                checked: qualityCheck.checked || 0,
+                passed: qualityCheck.passed || 0,
+            },
+            candidate: {
+                requiredDocRelPaths: candidate.provider_ranking_memory_receipt_required_doc_rel_paths || [],
+                missingDocRelPaths: candidate.provider_ranking_memory_receipt_missing_doc_rel_paths || [],
+                provenanceRelPaths: candidate.provider_ranking_provenance_rel_paths || [],
+            },
+            brief: {
+                status: requiredGroup.status || "",
+                requiredDocRelPaths: readyBrief.provider_ranking_memory_receipt_required_doc_rel_paths || [],
+                missingDocRelPaths: readyBrief.provider_ranking_memory_receipt_missing_doc_rel_paths || [],
+                provenanceRelPaths: readyBrief.provider_ranking_provenance_rel_paths || [],
+                worker_task: compactMemoryCenterText(workerTask, 1200),
+            },
+        };
+    }
+    finally {
+        for (const file of [bindingFile, `${bindingFile}.bak`, workFile, `${workFile}.bak`, planFile, `${planFile}.bak`]) {
             try {
                 if (file && fs.existsSync(file))
                     fs.unlinkSync(file);
@@ -36428,6 +47023,1451 @@ function runMemoryCenterCompactFileReferenceReadPlanRevalidationRepairWorkItemsS
         for (const dir of [typedDir, sessionDir, toolDir]) {
             try {
                 if (dir && fs.existsSync(dir))
+                    fs.rmSync(dir, { recursive: true, force: true });
+            }
+            catch { }
+        }
+    }
+}
+function runMemoryCenterCompactFileReferenceReadPlanRevalidationRepairDispatchSelfTest() {
+    const groupId = `memory-center-compact-read-plan-revalidation-repair-dispatch-selftest-${process.pid}-${Date.now()}`;
+    const workItemsFile = getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId);
+    const dispatchPlanFile = getGroupReplayRepairDispatchPlanLedgerFile(groupId);
+    try {
+        const at = "2026-07-10T21:00:00.000Z";
+        const gateId = "cfr-rvg-phase176-shared-gate";
+        const expectedTaskSessionId = "tas-phase176-bound";
+        const expectedNativeSessionId = "native-phase176-bound";
+        const discipline = {
+            schema: "ccm-compact-file-reference-read-plan-revalidation-gate-group-v1",
+            groupId,
+            status: "fail",
+            score: 0,
+            gateId,
+            gate: {
+                schema: "ccm-group-compact-file-reference-read-plan-revalidation-gate-v1",
+                revalidation_gate_id: gateId,
+                target_project: "api",
+                session_binding: {
+                    task_agent_session_id: expectedTaskSessionId,
+                    native_session_id: expectedNativeSessionId,
+                },
+            },
+        };
+        const gaps = [
+            {
+                gateId,
+                read_plan_id: "cfr-read-phase176-a",
+                reference_id: "cfr-ref-phase176-a",
+                target_project: "api",
+                expected_task_agent_session_id: expectedTaskSessionId,
+                expected_native_session_id: expectedNativeSessionId,
+                receipt_task_agent_session_id: "tas-phase176-wrong",
+                receipt_native_session_id: "native-phase176-wrong",
+                session_mismatch: true,
+                reason: "Phase 176 wrong-session receipt must become a bound dispatch brief.",
+            },
+            {
+                gateId,
+                read_plan_id: "cfr-read-phase176-b",
+                reference_id: "cfr-ref-phase176-b",
+                target_project: "api",
+                expected_task_agent_session_id: expectedTaskSessionId,
+                expected_native_session_id: expectedNativeSessionId,
+                receipt_task_agent_session_id: expectedTaskSessionId,
+                receipt_native_session_id: expectedNativeSessionId,
+                session_mismatch: false,
+                reason: "Phase 176 current source verification receipt is still missing.",
+            },
+        ];
+        const workItems = gaps.map((gap, index) => buildReadPlanRevalidationRepairWorkItem(groupId, discipline, gap, index, {}, at));
+        writeGroupCompactBoundaryReplayRepairWorkItems(groupId, {
+            groupId,
+            items: workItems,
+            stats: replayRepairWorkItemStats(workItems),
+            updatedAt: at,
+        });
+        const candidateReport = buildCompactFileReferenceReadPlanRevalidationRepairDispatchCandidateReport({
+            groupIds: [groupId],
+            generatedAt: "2026-07-10T21:00:01.000Z",
+        });
+        const briefReport = buildCompactFileReferenceReadPlanRevalidationRepairDispatchBriefReport({
+            groupIds: [groupId],
+            candidateReport,
+            generatedAt: "2026-07-10T21:00:02.000Z",
+        });
+        const candidateQuality = evaluateCompactFileReferenceReadPlanRevalidationRepairDispatchCandidates({
+            groupIds: [groupId],
+        });
+        const briefQuality = evaluateCompactFileReferenceReadPlanRevalidationRepairDispatchBriefs({
+            groupIds: [groupId],
+            candidateReport,
+        });
+        const qualityReport = buildMemoryQualityReport({
+            checkIds: [
+                "compact_file_reference_read_plan_revalidation_repair_dispatch_candidates",
+                "compact_file_reference_read_plan_revalidation_repair_dispatch_briefs",
+            ],
+            groupIds: [groupId],
+            refresh: true,
+        });
+        const qualityById = new Map((qualityReport.checks || []).map((check) => [String(check.id || ""), check]));
+        const candidateGroup = candidateReport.groups?.[0] || {};
+        const briefGroup = briefReport.groups?.[0] || {};
+        const candidates = Array.isArray(candidateGroup.candidates) ? candidateGroup.candidates : [];
+        const briefs = Array.isArray(briefGroup.briefs) ? briefGroup.briefs : [];
+        const candidateByReadPlan = new Map(candidates.map((candidate) => [String(candidate.read_plan_id || ""), candidate]));
+        const briefByReadPlan = new Map(briefs.map((brief) => [String(brief.read_plan_id || ""), brief]));
+        const preservesStructuredFields = gaps.every((gap) => {
+            const candidate = candidateByReadPlan.get(gap.read_plan_id) || {};
+            const brief = briefByReadPlan.get(gap.read_plan_id) || {};
+            return candidate.revalidation_gate_id === gateId
+                && candidate.reference_id === gap.reference_id
+                && candidate.expected_task_agent_session_id === expectedTaskSessionId
+                && candidate.expected_native_session_id === expectedNativeSessionId
+                && candidate.receipt_task_agent_session_id === gap.receipt_task_agent_session_id
+                && candidate.receipt_native_session_id === gap.receipt_native_session_id
+                && candidate.session_mismatch === gap.session_mismatch
+                && brief.revalidation_gate_id === gateId
+                && brief.reference_id === gap.reference_id
+                && brief.expected_task_agent_session_id === expectedTaskSessionId
+                && brief.expected_native_session_id === expectedNativeSessionId
+                && brief.receipt_task_agent_session_id === gap.receipt_task_agent_session_id
+                && brief.receipt_native_session_id === gap.receipt_native_session_id
+                && brief.session_mismatch === gap.session_mismatch;
+        });
+        const briefsAreSelfContained = gaps.every((gap) => {
+            const workerTask = String(briefByReadPlan.get(gap.read_plan_id)?.worker_task || "");
+            return workerTask.includes(gateId)
+                && workerTask.includes(gap.read_plan_id)
+                && workerTask.includes(gap.reference_id)
+                && workerTask.includes(expectedTaskSessionId)
+                && workerTask.includes(expectedNativeSessionId)
+                && workerTask.includes(gap.receipt_task_agent_session_id)
+                && workerTask.includes(gap.receipt_native_session_id)
+                && /CCM_AGENT_RECEIPT/i.test(workerTask)
+                && /readPlanRevalidationUsage|memoryUsed|memoryIgnored/i.test(workerTask)
+                && /currentSourceVerified|current source verified|current_source_verified/i.test(workerTask);
+        });
+        const candidateQualityFromReport = qualityById.get("compact_file_reference_read_plan_revalidation_repair_dispatch_candidates") || {};
+        const briefQualityFromReport = qualityById.get("compact_file_reference_read_plan_revalidation_repair_dispatch_briefs") || {};
+        const checks = {
+            twoReadPlansRemainDistinct: workItems.length === 2
+                && new Set(workItems.map((item) => item.work_item_id)).size === 2
+                && new Set(candidates.map((candidate) => candidate.work_item_id)).size === 2
+                && new Set(briefs.map((brief) => brief.work_item_id)).size === 2,
+            candidatesCoverBothReadPlans: candidateReport.overall?.status === "ok"
+                && Number(candidateReport.overall?.expectedCandidateCount || 0) === 2
+                && Number(candidateReport.overall?.coveredCandidateCount || 0) === 2
+                && Number(candidateReport.overall?.metadataGapCount || 0) === 0
+                && gaps.every((gap) => candidateByReadPlan.has(gap.read_plan_id)),
+            briefsCoverBothReadPlans: briefReport.overall?.status === "ok"
+                && Number(briefReport.overall?.expectedBriefCount || 0) === 2
+                && Number(briefReport.overall?.coveredBriefCount || 0) === 2
+                && Number(briefReport.overall?.metadataGapCount || 0) === 0
+                && gaps.every((gap) => briefByReadPlan.has(gap.read_plan_id)),
+            structuredGateReferenceAndSessionsPreserved: preservesStructuredFields,
+            dispatchBriefsAreSelfContained: briefsAreSelfContained,
+            sessionMismatchSurvivesDispatchCompilation: candidates.some((candidate) => candidate.session_mismatch === true)
+                && briefs.some((brief) => brief.session_mismatch === true),
+            directQualityChecksPass: candidateQuality.status === "ok"
+                && Number(candidateQuality.checked || 0) === 1
+                && Number(candidateQuality.passed || 0) === 1
+                && briefQuality.status === "ok"
+                && Number(briefQuality.checked || 0) === 1
+                && Number(briefQuality.passed || 0) === 1,
+            memoryQualityReportIncludesBothChecks: qualityReport.status === "ok"
+                && candidateQualityFromReport.status === "ok"
+                && Number(candidateQualityFromReport.checked || 0) === 1
+                && Number(candidateQualityFromReport.passed || 0) === 1
+                && briefQualityFromReport.status === "ok"
+                && Number(briefQualityFromReport.checked || 0) === 1
+                && Number(briefQualityFromReport.passed || 0) === 1,
+        };
+        return {
+            pass: Object.values(checks).every(Boolean),
+            checks,
+            candidateReport: candidateReport.overall,
+            briefReport: briefReport.overall,
+            quality: {
+                status: qualityReport.status,
+                checks: (qualityReport.checks || []).map((check) => ({
+                    id: check.id || "",
+                    status: check.status || "",
+                    checked: check.checked || 0,
+                    passed: check.passed || 0,
+                })),
+            },
+            candidates: candidates.map((candidate) => ({
+                candidate_id: candidate.candidate_id || "",
+                work_item_id: candidate.work_item_id || "",
+                revalidation_gate_id: candidate.revalidation_gate_id || "",
+                read_plan_id: candidate.read_plan_id || "",
+                reference_id: candidate.reference_id || "",
+                session_mismatch: candidate.session_mismatch === true,
+            })),
+            briefs: briefs.map((brief) => ({
+                brief_id: brief.brief_id || "",
+                work_item_id: brief.work_item_id || "",
+                revalidation_gate_id: brief.revalidation_gate_id || "",
+                read_plan_id: brief.read_plan_id || "",
+                reference_id: brief.reference_id || "",
+                session_mismatch: brief.session_mismatch === true,
+            })),
+        };
+    }
+    finally {
+        for (const file of [workItemsFile, `${workItemsFile}.bak`, dispatchPlanFile, `${dispatchPlanFile}.bak`]) {
+            try {
+                if (file && fs.existsSync(file))
+                    fs.unlinkSync(file);
+            }
+            catch { }
+        }
+    }
+}
+function runMemoryCenterPostCompactReinjectionRepairDispatchSelfTest() {
+    const groupId = `memory-center-post-compact-reinjection-repair-dispatch-selftest-${process.pid}-${Date.now()}`;
+    const workItemsFile = getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId);
+    const dispatchPlanFile = getGroupReplayRepairDispatchPlanLedgerFile(groupId);
+    try {
+        const gateId = "pcrg-phase177-repair";
+        const boundary = {
+            hasBoundary: true,
+            summaryChecksum: "phase177-post-compact-summary",
+            summarizedThroughMessageId: "phase177-message-17",
+        };
+        const gaps = [
+            {
+                type: "file",
+                label: "pcrc-phase177-file",
+                value: "src/phase177-recovered-memory.ts",
+                reason: "Phase 177 file reinjection candidate was missing from replay context.",
+                reinjection_gate_id: gateId,
+                post_compact_candidate_id: "pcrc-phase177-file",
+                post_compact_candidate_kind: "file",
+                post_compact_candidate_value: "src/phase177-recovered-memory.ts",
+                post_compact_candidate_source_message_id: "phase177-source-file",
+            },
+            {
+                type: "verification",
+                label: "pcrc-phase177-verification",
+                value: "npm run test:phase177-memory",
+                reason: "Phase 177 verification reinjection candidate was missing from replay context.",
+                reinjection_gate_id: gateId,
+                post_compact_candidate_id: "pcrc-phase177-verification",
+                post_compact_candidate_kind: "verification",
+                post_compact_candidate_value: "npm run test:phase177-memory",
+                post_compact_candidate_source_message_id: "phase177-source-verification",
+            },
+        ];
+        const plan = buildCompactBoundaryReplayRepairPlan(groupId, {
+            groupId,
+            compaction: {
+                summaryChecksum: boundary.summaryChecksum,
+                compactedMessageCount: 17,
+            },
+            compactBoundary: boundary,
+        }, {
+            status: "fail",
+            score: 50,
+            targetProject: "api",
+            renderedHash: "phase177-replay-rendered",
+            gaps,
+            candidates: gaps.map((gap) => ({
+                candidate_id: gap.post_compact_candidate_id,
+                kind: gap.post_compact_candidate_kind,
+                value: gap.post_compact_candidate_value,
+                sourceMessageId: gap.post_compact_candidate_source_message_id,
+            })),
+            boundary,
+            reinjectionGateId: gateId,
+        });
+        const replay = {
+            schema: "ccm-compact-boundary-replay-gate-v1",
+            groupId,
+            targetProject: "api",
+            status: "fail",
+            score: 50,
+            renderedHash: "phase177-replay-rendered",
+            boundary,
+            repairPlan: plan,
+            repairLedger: {
+                latestAttemptId: "replay-attempt-phase177",
+            },
+        };
+        const actions = (plan.actions || []).filter((action) => action.component === "post_compact_reinject");
+        const workItems = actions.map((action, index) => buildReplayRepairPendingWorkItem(groupId, replay, action, index, {}, "2026-07-10T22:00:00.000Z"));
+        writeGroupCompactBoundaryReplayRepairWorkItems(groupId, {
+            groupId,
+            latestReplay: {
+                status: replay.status,
+                score: replay.score,
+                renderedHash: replay.renderedHash,
+            },
+            items: workItems,
+            stats: replayRepairWorkItemStats(workItems),
+            updatedAt: "2026-07-10T22:00:00.000Z",
+        });
+        const candidateReport = buildPostCompactReinjectionRepairDispatchCandidateReport({
+            groupIds: [groupId],
+            generatedAt: "2026-07-10T22:00:01.000Z",
+        });
+        const briefReport = buildPostCompactReinjectionRepairDispatchBriefReport({
+            groupIds: [groupId],
+            candidateReport,
+            generatedAt: "2026-07-10T22:00:02.000Z",
+        });
+        const candidateQuality = evaluatePostCompactReinjectionRepairDispatchCandidates({ groupIds: [groupId] });
+        const briefQuality = evaluatePostCompactReinjectionRepairDispatchBriefs({ groupIds: [groupId], candidateReport });
+        const qualityReport = buildMemoryQualityReport({
+            checkIds: [
+                "post_compact_reinjection_repair_dispatch_candidates",
+                "post_compact_reinjection_repair_dispatch_briefs",
+            ],
+            groupIds: [groupId],
+            refresh: true,
+        });
+        const candidateGroup = candidateReport.groups?.[0] || {};
+        const briefGroup = briefReport.groups?.[0] || {};
+        const candidates = Array.isArray(candidateGroup.candidates) ? candidateGroup.candidates : [];
+        const briefs = Array.isArray(briefGroup.briefs) ? briefGroup.briefs : [];
+        const candidateByMemoryId = new Map(candidates.map((candidate) => [String(candidate.post_compact_candidate_id || ""), candidate]));
+        const briefByMemoryId = new Map(briefs.map((brief) => [String(brief.post_compact_candidate_id || ""), brief]));
+        const { buildWorkerContextPacket, renderWorkerContextPacket } = require("../../agents/runtime-kernel");
+        const packet = buildWorkerContextPacket({
+            group: {
+                id: groupId,
+                members: [{ project: "api" }],
+            },
+            project: "api",
+            task: "Phase 177 post-compact reinjection repair dispatch",
+            taskId: "phase177-task",
+            traceId: "phase177-trace",
+            agentType: "codex",
+            analysis: { summary: "Recover both post-compact reinjection candidates." },
+            replayRepairDispatchBriefs: briefs,
+        });
+        const renderedPacket = renderWorkerContextPacket(packet);
+        const packetBriefByMemoryId = new Map((packet.replay_repair_dispatch_briefs || []).map((brief) => [
+            String(brief.post_compact_candidate_id || ""),
+            brief,
+        ]));
+        const preservesStructuredFields = gaps.every((gap) => {
+            const candidate = candidateByMemoryId.get(gap.post_compact_candidate_id) || {};
+            const brief = briefByMemoryId.get(gap.post_compact_candidate_id) || {};
+            const packetBrief = packetBriefByMemoryId.get(gap.post_compact_candidate_id) || {};
+            return candidate.reinjection_gate_id === gateId
+                && candidate.post_compact_candidate_kind === gap.post_compact_candidate_kind
+                && candidate.post_compact_candidate_value === gap.post_compact_candidate_value
+                && candidate.post_compact_candidate_source_message_id === gap.post_compact_candidate_source_message_id
+                && candidate.targetProject === "api"
+                && brief.reinjection_gate_id === gateId
+                && brief.post_compact_candidate_kind === gap.post_compact_candidate_kind
+                && brief.post_compact_candidate_value === gap.post_compact_candidate_value
+                && brief.post_compact_candidate_source_message_id === gap.post_compact_candidate_source_message_id
+                && packetBrief.reinjection_gate_id === gateId
+                && packetBrief.post_compact_candidate_kind === gap.post_compact_candidate_kind
+                && packetBrief.post_compact_candidate_value === gap.post_compact_candidate_value
+                && packetBrief.post_compact_candidate_source_message_id === gap.post_compact_candidate_source_message_id;
+        });
+        const briefsAreSelfContained = gaps.every((gap) => {
+            const workerTask = String(briefByMemoryId.get(gap.post_compact_candidate_id)?.worker_task || "");
+            return workerTask.includes(gateId)
+                && workerTask.includes(gap.post_compact_candidate_id)
+                && workerTask.includes(gap.post_compact_candidate_kind)
+                && workerTask.includes(gap.post_compact_candidate_value)
+                && workerTask.includes(gap.post_compact_candidate_source_message_id)
+                && /CCM_AGENT_RECEIPT/i.test(workerTask)
+                && /postCompactCandidateUsage/i.test(workerTask)
+                && /memoryUsed|memoryIgnored/i.test(workerTask)
+                && /currentSourceVerified|current source verified|current_source_verified/i.test(workerTask)
+                && /task_agent_session_id/i.test(workerTask)
+                && /native_session_id/i.test(workerTask);
+        });
+        const renderedPacketCarriesAllCandidates = gaps.every((gap) => renderedPacket.includes(gateId)
+            && renderedPacket.includes(gap.post_compact_candidate_id)
+            && renderedPacket.includes(gap.post_compact_candidate_kind)
+            && renderedPacket.includes(gap.post_compact_candidate_value)
+            && renderedPacket.includes(gap.post_compact_candidate_source_message_id));
+        const qualityById = new Map((qualityReport.checks || []).map((check) => [String(check.id || ""), check]));
+        const candidateQualityFromReport = qualityById.get("post_compact_reinjection_repair_dispatch_candidates") || {};
+        const briefQualityFromReport = qualityById.get("post_compact_reinjection_repair_dispatch_briefs") || {};
+        const checks = {
+            repairPlanCarriesTwoCandidateActions: actions.length === 2
+                && actions.every((action) => action.priority === "high")
+                && new Set(actions.map((action) => action.post_compact_candidate_id)).size === 2,
+            workItemsPreserveCandidateIdentity: workItems.length === 2
+                && workItems.every((item) => item.reinjection_gate_id === gateId
+                    && !!item.post_compact_candidate_id
+                    && !!item.post_compact_candidate_kind
+                    && !!item.post_compact_candidate_value),
+            candidatesCoverBothMemoryObjects: candidateReport.overall?.status === "ok"
+                && Number(candidateReport.overall?.expectedCandidateCount || 0) === 2
+                && Number(candidateReport.overall?.coveredCandidateCount || 0) === 2
+                && Number(candidateReport.overall?.metadataGapCount || 0) === 0
+                && gaps.every((gap) => candidateByMemoryId.has(gap.post_compact_candidate_id)),
+            briefsCoverBothMemoryObjects: briefReport.overall?.status === "ok"
+                && Number(briefReport.overall?.expectedBriefCount || 0) === 2
+                && Number(briefReport.overall?.coveredBriefCount || 0) === 2
+                && Number(briefReport.overall?.metadataGapCount || 0) === 0
+                && gaps.every((gap) => briefByMemoryId.has(gap.post_compact_candidate_id)),
+            structuredMetadataSurvivesWorkerContext: preservesStructuredFields,
+            dispatchBriefsAreSelfContained: briefsAreSelfContained,
+            renderedWorkerContextCarriesCandidateIdentity: renderedPacketCarriesAllCandidates
+                && renderedPacket.includes("Replay repair dispatch brief")
+                && renderedPacket.includes("shouldCreateRealTask=false"),
+            directQualityChecksPass: candidateQuality.status === "ok"
+                && Number(candidateQuality.checked || 0) === 1
+                && Number(candidateQuality.passed || 0) === 1
+                && briefQuality.status === "ok"
+                && Number(briefQuality.checked || 0) === 1
+                && Number(briefQuality.passed || 0) === 1,
+            memoryQualityReportIncludesBothChecks: qualityReport.status === "ok"
+                && candidateQualityFromReport.status === "ok"
+                && Number(candidateQualityFromReport.checked || 0) === 1
+                && Number(candidateQualityFromReport.passed || 0) === 1
+                && briefQualityFromReport.status === "ok"
+                && Number(briefQualityFromReport.checked || 0) === 1
+                && Number(briefQualityFromReport.passed || 0) === 1,
+        };
+        return {
+            pass: Object.values(checks).every(Boolean),
+            checks,
+            candidateReport: candidateReport.overall,
+            briefReport: briefReport.overall,
+            quality: {
+                status: qualityReport.status,
+                checks: (qualityReport.checks || []).map((check) => ({
+                    id: check.id || "",
+                    status: check.status || "",
+                    checked: check.checked || 0,
+                    passed: check.passed || 0,
+                })),
+            },
+            candidates: candidates.map((candidate) => ({
+                candidate_id: candidate.candidate_id || "",
+                work_item_id: candidate.work_item_id || "",
+                reinjection_gate_id: candidate.reinjection_gate_id || "",
+                post_compact_candidate_id: candidate.post_compact_candidate_id || "",
+                post_compact_candidate_kind: candidate.post_compact_candidate_kind || "",
+                post_compact_candidate_value: candidate.post_compact_candidate_value || "",
+            })),
+            briefs: briefs.map((brief) => ({
+                brief_id: brief.brief_id || "",
+                work_item_id: brief.work_item_id || "",
+                reinjection_gate_id: brief.reinjection_gate_id || "",
+                post_compact_candidate_id: brief.post_compact_candidate_id || "",
+                post_compact_candidate_kind: brief.post_compact_candidate_kind || "",
+                post_compact_candidate_value: brief.post_compact_candidate_value || "",
+            })),
+        };
+    }
+    finally {
+        for (const file of [workItemsFile, `${workItemsFile}.bak`, dispatchPlanFile, `${dispatchPlanFile}.bak`]) {
+            try {
+                if (file && fs.existsSync(file))
+                    fs.unlinkSync(file);
+            }
+            catch { }
+        }
+    }
+}
+function runMemoryCenterPostCompactReinjectionRepairReceiptConsumptionSelfTest() {
+    const groupId = `memory-center-post-compact-reinjection-repair-receipt-selftest-${process.pid}-${Date.now()}`;
+    const workItemsFile = getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId);
+    const dispatchPlanFile = getGroupReplayRepairDispatchPlanLedgerFile(groupId);
+    const timelineFile = getGroupReplayRepairDispatchTimelineBindingLedgerFile(groupId);
+    const typedDir = path.join(GROUP_TYPED_MEMORY_MD_DIR, sidecarFileId(groupId));
+    try {
+        const gateId = "pcrg-phase178-receipt";
+        const memoryCandidateId = "pcrc-phase178-file";
+        const boundary = {
+            hasBoundary: true,
+            summaryChecksum: "phase178-post-compact-summary",
+            summarizedThroughMessageId: "phase178-message-18",
+        };
+        const gap = {
+            type: "file",
+            label: memoryCandidateId,
+            value: "src/phase178-receipt-memory.ts",
+            reason: "Phase 178 candidate needs exact bound-session receipt consumption.",
+            reinjection_gate_id: gateId,
+            post_compact_candidate_id: memoryCandidateId,
+            post_compact_candidate_kind: "file",
+            post_compact_candidate_value: "src/phase178-receipt-memory.ts",
+            post_compact_candidate_source_message_id: "phase178-source-file",
+        };
+        const plan = buildCompactBoundaryReplayRepairPlan(groupId, {
+            groupId,
+            compaction: {
+                summaryChecksum: boundary.summaryChecksum,
+                compactedMessageCount: 18,
+            },
+            compactBoundary: boundary,
+        }, {
+            status: "fail",
+            score: 50,
+            targetProject: "api",
+            renderedHash: "phase178-replay-rendered",
+            gaps: [gap],
+            candidates: [{
+                    candidate_id: memoryCandidateId,
+                    kind: "file",
+                    value: gap.post_compact_candidate_value,
+                    sourceMessageId: gap.post_compact_candidate_source_message_id,
+                }],
+            boundary,
+            reinjectionGateId: gateId,
+        });
+        const replay = {
+            schema: "ccm-compact-boundary-replay-gate-v1",
+            groupId,
+            targetProject: "api",
+            status: "fail",
+            score: 50,
+            renderedHash: "phase178-replay-rendered",
+            boundary,
+            repairPlan: plan,
+            repairLedger: {
+                latestAttemptId: "replay-attempt-phase178",
+            },
+        };
+        const action = (plan.actions || []).find((item) => item.component === "post_compact_reinject") || {};
+        const workItem = buildReplayRepairPendingWorkItem(groupId, replay, action, 0, {}, "2026-07-10T23:00:00.000Z");
+        writeGroupCompactBoundaryReplayRepairWorkItems(groupId, {
+            groupId,
+            items: [workItem],
+            stats: replayRepairWorkItemStats([workItem]),
+            updatedAt: "2026-07-10T23:00:00.000Z",
+        });
+        const candidateReport = buildPostCompactReinjectionRepairDispatchCandidateReport({ groupIds: [groupId] });
+        buildPostCompactReinjectionRepairDispatchBriefReport({
+            groupIds: [groupId],
+            candidateReport,
+            generatedAt: "2026-07-10T23:00:01.000Z",
+        });
+        const planLedger = readGroupReplayRepairDispatchPlanLedger(groupId);
+        const readyBrief = (planLedger.briefs || []).find((brief) => brief.status === "ready" && isPostCompactReinjectionRepairItem(brief)) || {};
+        const { recordReplayRepairDispatchBriefTimelineBinding, readReplayRepairDispatchTimelineBindingLedgerForCoordinator, } = require("../collaboration/group-orchestrator");
+        const taskId = "phase178-task";
+        const assignmentId = "phase178-assignment";
+        const dispatchKey = "phase178-dispatch";
+        const packetId = "wcp-phase178";
+        const handoffId = "handoff-phase178";
+        const snapshotId = "snapshot-phase178";
+        const taskAgentSessionId = "tas-phase178";
+        const nativeSessionId = "native-phase178";
+        const executionId = "execution-phase178";
+        const baseTimelineInput = {
+            brief: readyBrief,
+            task_id: taskId,
+            project: "api",
+            assignment_id: assignmentId,
+            dispatch_key: dispatchKey,
+            worker_context_packet_id: packetId,
+            worker_handoff_id: handoffId,
+            memory_context_snapshot_id: snapshotId,
+            memory_context_snapshot_checksum: "snapshot-checksum-phase178",
+            task_agent_session_id: taskAgentSessionId,
+            native_session_id: nativeSessionId,
+            execution_id: executionId,
+        };
+        const invalidReceipt = {
+            status: "done",
+            task_agent_session_id: "tas-phase178-wrong",
+            native_session_id: "native-phase178-wrong",
+            replayRepairDispatchBriefUsage: [{
+                    briefId: readyBrief.brief_id,
+                    workItemId: readyBrief.work_item_id,
+                    usageState: "verified",
+                    reason: "Claimed the replay repair brief but referenced the wrong reinjection candidate and session.",
+                }],
+            postCompactCandidateUsage: [{
+                    gateId,
+                    candidateId: "pcrc-phase178-wrong",
+                    usageState: "verified",
+                    currentSourceVerified: true,
+                    reason: "Wrong candidate proof.",
+                }],
+            memoryUsed: [`reinjection_gate_id=${gateId}; candidate_id=pcrc-phase178-wrong; currentSourceVerified=true`],
+            memoryIgnored: [],
+            blockers: [],
+            needs: [],
+        };
+        for (const eventType of REPLAY_REPAIR_TIMELINE_REQUIRED_EVENTS) {
+            recordReplayRepairDispatchBriefTimelineBinding(groupId, {
+                ...baseTimelineInput,
+                receipt_status: eventType === "child_agent_receipt" ? "done" : "",
+                receipt: eventType === "child_agent_receipt" ? invalidReceipt : null,
+                timeline_event: {
+                    id: `phase178-invalid-${eventType}`,
+                    type: eventType,
+                    at: "2026-07-10T23:00:02.000Z",
+                },
+            }, { at: "2026-07-10T23:00:02.000Z" });
+        }
+        const invalidTimelineLedger = readReplayRepairDispatchTimelineBindingLedgerForCoordinator(groupId);
+        const invalidBinding = (invalidTimelineLedger.entries || []).find((entry) => entry.brief_id === readyBrief.brief_id) || {};
+        const invalidWorkLedger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+        const invalidWorkItem = (invalidWorkLedger.items || []).find((item) => replayRepairWorkItemId(item) === replayRepairWorkItemId(workItem)) || {};
+        const validReceipt = {
+            status: "done",
+            task_agent_session_id: taskAgentSessionId,
+            native_session_id: nativeSessionId,
+            replayRepairDispatchBriefUsage: [{
+                    briefId: readyBrief.brief_id,
+                    workItemId: readyBrief.work_item_id,
+                    usageState: "verified",
+                    reason: "Used the exact replay repair brief to restore and verify the candidate.",
+                }],
+            postCompactCandidateUsage: [{
+                    gateId,
+                    candidateId: memoryCandidateId,
+                    usageState: "verified",
+                    currentSourceVerified: true,
+                    reason: "Re-read the current repository file before accepting the recovered candidate.",
+                }],
+            memoryUsed: [`reinjection_gate_id=${gateId}; candidate_id=${memoryCandidateId}; currentSourceVerified=true`],
+            memoryIgnored: [],
+            blockers: [],
+            needs: [],
+        };
+        const validBindingResult = recordReplayRepairDispatchBriefTimelineBinding(groupId, {
+            ...baseTimelineInput,
+            receipt_status: "done",
+            receipt: validReceipt,
+            timeline_event: {
+                id: "phase178-valid-child_agent_receipt",
+                type: "child_agent_receipt",
+                at: "2026-07-10T23:00:03.000Z",
+            },
+        }, { at: "2026-07-10T23:00:03.000Z" });
+        const finalTimelineLedger = readReplayRepairDispatchTimelineBindingLedgerForCoordinator(groupId);
+        const finalBinding = (finalTimelineLedger.entries || []).find((entry) => entry.brief_id === readyBrief.brief_id) || {};
+        const finalWorkLedger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+        const completedWorkItem = (finalWorkLedger.items || []).find((item) => replayRepairWorkItemId(item) === replayRepairWorkItemId(workItem)) || {};
+        const { readGroupTypedMemoryDistillationLedger, scanGroupTypedMemoryDocuments, } = require("../collaboration/group-memory-index");
+        const automaticTypedLedger = readGroupTypedMemoryDistillationLedger(groupId);
+        const automaticTypedArchive = automaticTypedLedger.postCompactReinjectionRepairReceiptConsumptionArchive || {};
+        const automaticTypedRows = Array.isArray(automaticTypedArchive.rows) ? automaticTypedArchive.rows : [];
+        const automaticTypedDocs = scanGroupTypedMemoryDocuments(groupId);
+        const automaticTypedDoc = automaticTypedDocs.find((doc) => doc.relPath === "post-compact-reinjection-repair-receipt-memory.md");
+        const automaticTypedDocText = (() => {
+            try {
+                return automaticTypedDoc?.file ? fs.readFileSync(automaticTypedDoc.file, "utf-8") : "";
+            }
+            catch {
+                return "";
+            }
+        })();
+        const report = buildPostCompactReinjectionRepairReceiptConsumptionReport({ groupIds: [groupId] });
+        const quality = evaluatePostCompactReinjectionRepairReceiptConsumption({ groupIds: [groupId] });
+        const qualityReport = buildMemoryQualityReport({
+            checkIds: ["post_compact_reinjection_repair_receipt_consumption"],
+            groupIds: [groupId],
+            refresh: true,
+        });
+        const qualityCheck = (qualityReport.checks || []).find((check) => check.id === "post_compact_reinjection_repair_receipt_consumption") || {};
+        const typedMemoryReport = buildPostCompactReinjectionRepairReceiptTypedMemoryReport({ groupIds: [groupId] });
+        const typedMemoryQuality = evaluatePostCompactReinjectionRepairReceiptTypedMemory({ groupIds: [groupId] });
+        const typedMemoryQualityReport = buildMemoryQualityReport({
+            checkIds: ["post_compact_reinjection_repair_receipt_typed_memory"],
+            groupIds: [groupId],
+            refresh: true,
+        });
+        const typedMemoryQualityCheck = (typedMemoryQualityReport.checks || []).find((check) => check.id === "post_compact_reinjection_repair_receipt_typed_memory") || {};
+        const receiptProof = completedWorkItem.post_compact_reinjection_repair_receipt || {};
+        const checks = {
+            dispatchBriefAvailable: readyBrief.source === "compact_boundary_replay_repair"
+                && readyBrief.component === "post_compact_reinject"
+                && readyBrief.reinjection_gate_id === gateId
+                && readyBrief.post_compact_candidate_id === memoryCandidateId,
+            invalidCandidateOrSessionDoesNotClose: invalidBinding.post_compact_reinjection_receipt_verified !== true
+                && (invalidBinding.post_compact_reinjection_receipt_gaps || []).length >= 1
+                && replayRepairWorkItemOpen(invalidWorkItem.status),
+            validReceiptBindsExactCandidateAndSession: finalBinding.post_compact_reinjection_receipt_verified === true
+                && finalBinding.post_compact_reinjection_receipt_usage_state === "verified"
+                && finalBinding.post_compact_reinjection_current_source_verified === true
+                && finalBinding.post_compact_reinjection_memory_receipt_matched === true
+                && finalBinding.post_compact_reinjection_task_session_matched === true
+                && finalBinding.post_compact_reinjection_native_session_matched === true
+                && finalBinding.reinjection_gate_id === gateId
+                && finalBinding.post_compact_candidate_id === memoryCandidateId,
+            fullTimelineRequiredBeforeClosure: REPLAY_REPAIR_TIMELINE_REQUIRED_EVENTS.every((eventType) => (finalBinding.event_types || []).includes(eventType))
+                && finalBinding.worker_context_packet_id === packetId
+                && finalBinding.worker_handoff_id === handoffId
+                && finalBinding.memory_context_snapshot_id === snapshotId
+                && finalBinding.task_agent_session_id === taskAgentSessionId
+                && finalBinding.native_session_id === nativeSessionId
+                && finalBinding.execution_id === executionId,
+            validReceiptClosesRepairWorkItem: replayRepairWorkItemStatus(completedWorkItem.status) === "completed"
+                && completedWorkItem.completion_source === "post_compact_reinjection_replay_repair_receipt_consumption"
+                && completedWorkItem.resolutionReason === "post_compact_reinjection_repair_receipt_verified"
+                && validBindingResult?.repair_work_item_completion?.closed === 1,
+            completionPersistsReceiptProof: receiptProof.reinjection_gate_id === gateId
+                && receiptProof.post_compact_candidate_id === memoryCandidateId
+                && receiptProof.usage_state === "verified"
+                && receiptProof.current_source_verified === true
+                && receiptProof.memory_receipt_matched === true
+                && receiptProof.task_agent_session_id === taskAgentSessionId
+                && receiptProof.native_session_id === nativeSessionId,
+            receiptConsumptionReportPasses: report.overall?.status === "ok"
+                && Number(report.overall?.expectedReceiptCount || 0) === 1
+                && Number(report.overall?.coveredReceiptCount || 0) === 1
+                && Number(report.overall?.receiptVerifiedCount || 0) === 1
+                && Number(report.overall?.completedRepairCount || 0) === 1
+                && Number(report.overall?.metadataGapCount || 0) === 0,
+            memoryQualityCheckPasses: quality.id === "post_compact_reinjection_repair_receipt_consumption"
+                && quality.status === "ok"
+                && Number(quality.checked || 0) === 1
+                && Number(quality.passed || 0) === 1
+                && qualityCheck.status === "ok"
+                && Number(qualityCheck.checked || 0) === 1
+                && Number(qualityCheck.passed || 0) === 1,
+            automaticTypedMemoryDistillationRunsOnClosure: Number(automaticTypedArchive.archived_count || 0) === 1
+                && automaticTypedRows.some((row) => row.reinjection_gate_id === gateId
+                    && row.post_compact_candidate_id === memoryCandidateId
+                    && row.task_agent_session_id === taskAgentSessionId
+                    && row.native_session_id === nativeSessionId
+                    && row.completion_source === "post_compact_reinjection_replay_repair_receipt_consumption"
+                    && row.resolution_reason === "post_compact_reinjection_repair_receipt_verified"),
+            automaticTypedMemoryDocumentPreservesExactCompletion: automaticTypedDoc?.type === "reference"
+                && automaticTypedDocText.includes(gateId)
+                && automaticTypedDocText.includes(memoryCandidateId)
+                && automaticTypedDocText.includes(taskAgentSessionId)
+                && automaticTypedDocText.includes(nativeSessionId)
+                && automaticTypedDocText.includes("post_compact_reinjection_replay_repair_receipt_consumption")
+                && automaticTypedDocText.includes("post_compact_reinjection_repair_receipt_verified"),
+            typedMemoryFreshnessBoundaryPreserved: /historical repair completion is recovery evidence, not permanent repository truth/i.test(automaticTypedDocText)
+                && /Future use must reverify the current source/i.test(automaticTypedDocText),
+            typedMemoryReportPasses: typedMemoryReport.overall?.status === "ok"
+                && Number(typedMemoryReport.overall?.checkedVerifiedCompletionCount || 0) === 1
+                && Number(typedMemoryReport.overall?.archivedCompletionCount || 0) === 1
+                && Number(typedMemoryReport.overall?.documentedCompletionCount || 0) === 1
+                && Number(typedMemoryReport.overall?.metadataGapCount || 0) === 0,
+            typedMemoryQualityCheckPasses: typedMemoryQuality.id === "post_compact_reinjection_repair_receipt_typed_memory"
+                && typedMemoryQuality.status === "ok"
+                && Number(typedMemoryQuality.checked || 0) === 1
+                && Number(typedMemoryQuality.passed || 0) === 1
+                && typedMemoryQualityCheck.status === "ok"
+                && Number(typedMemoryQualityCheck.checked || 0) === 1
+                && Number(typedMemoryQualityCheck.passed || 0) === 1,
+        };
+        return {
+            pass: Object.values(checks).every(Boolean),
+            checks,
+            report: report.overall,
+            quality: {
+                id: qualityCheck.id || "",
+                status: qualityCheck.status || "",
+                checked: qualityCheck.checked || 0,
+                passed: qualityCheck.passed || 0,
+            },
+            typedMemory: {
+                report: typedMemoryReport.overall,
+                quality: {
+                    id: typedMemoryQualityCheck.id || "",
+                    status: typedMemoryQualityCheck.status || "",
+                    checked: typedMemoryQualityCheck.checked || 0,
+                    passed: typedMemoryQualityCheck.passed || 0,
+                },
+                docs: automaticTypedDocs.map((doc) => doc.relPath),
+            },
+            invalidBinding: {
+                receipt_verified: invalidBinding.post_compact_reinjection_receipt_verified === true,
+                gaps: invalidBinding.post_compact_reinjection_receipt_gaps || [],
+                repair_status: replayRepairWorkItemStatus(invalidWorkItem.status),
+            },
+            finalBinding: {
+                timeline_binding_id: finalBinding.timeline_binding_id || "",
+                receipt_verified: finalBinding.post_compact_reinjection_receipt_verified === true,
+                usage_state: finalBinding.post_compact_reinjection_receipt_usage_state || "",
+                event_types: finalBinding.event_types || [],
+                task_agent_session_id: finalBinding.task_agent_session_id || "",
+                native_session_id: finalBinding.native_session_id || "",
+            },
+            completedWorkItem: {
+                work_item_id: replayRepairWorkItemId(completedWorkItem),
+                status: replayRepairWorkItemStatus(completedWorkItem.status),
+                completion_source: completedWorkItem.completion_source || "",
+                resolutionReason: completedWorkItem.resolutionReason || "",
+            },
+        };
+    }
+    finally {
+        for (const file of [
+            workItemsFile,
+            `${workItemsFile}.bak`,
+            dispatchPlanFile,
+            `${dispatchPlanFile}.bak`,
+            timelineFile,
+            `${timelineFile}.bak`,
+        ]) {
+            try {
+                if (file && fs.existsSync(file))
+                    fs.unlinkSync(file);
+            }
+            catch { }
+        }
+        try {
+            if (fs.existsSync(typedDir))
+                fs.rmSync(typedDir, { recursive: true, force: true });
+        }
+        catch { }
+    }
+}
+function runMemoryCenterPostCompactReinjectionRepairReceiptTypedMemorySelfTest() {
+    return runMemoryCenterPostCompactReinjectionRepairReceiptConsumptionSelfTest();
+}
+function runMemoryCenterPostCompactReinjectionRepairReceiptWorkerContextUsageSelfTest() {
+    const groupId = `memory-center-post-compact-reinjection-repair-receipt-worker-context-usage-selftest-${process.pid}-${Date.now()}`;
+    const typedDir = path.join(GROUP_TYPED_MEMORY_MD_DIR, sidecarFileId(groupId));
+    const bindingFile = getGroupReplayRepairDispatchBindingLedgerFile(groupId);
+    const timelineFile = getGroupReplayRepairDispatchTimelineBindingLedgerFile(groupId);
+    try {
+        const { distillPostCompactReinjectionRepairReceiptConsumptionToTypedMemory, readGroupTypedMemoryDistillationLedger, } = require("../collaboration/group-memory-index");
+        const { buildAgentMemoryContextBundle } = require("../collaboration/memory");
+        const { buildWorkerContextPacket, renderWorkerContextPacket } = require("../../agents/runtime-kernel");
+        const { recordReplayRepairDispatchBriefAssignmentBinding, recordReplayRepairDispatchBriefTimelineBinding, readReplayRepairDispatchBindingLedgerForCoordinator, } = require("../collaboration/group-orchestrator");
+        const gateId = "pcrg-phase180-worker-context";
+        const candidateId = "pcrc-phase180-worker-context";
+        const historicalTaskSessionId = "task-agent-session-phase180-historical";
+        const historicalNativeSessionId = "native-session-phase180-historical";
+        const row = {
+            groupId,
+            timeline_binding_id: "replay-repair-brief-timeline:phase180-historical",
+            brief_id: "replay-repair-dispatch-brief:phase180-historical",
+            work_item_id: "post-compact-reinjection-repair:phase180-historical",
+            source: "compact_boundary_replay_repair",
+            component: "post_compact_reinject",
+            project: "api",
+            task_id: "task-phase180-historical",
+            assignment_id: "assignment-phase180-historical",
+            dispatch_key: "dispatch-phase180-historical",
+            reinjection_gate_id: gateId,
+            post_compact_candidate_id: candidateId,
+            post_compact_candidate_kind: "file",
+            post_compact_candidate_value: "src/phase180-worker-context-memory.ts",
+            post_compact_candidate_source_message_id: "message-phase180-worker-context",
+            post_compact_reinjection_receipt_usage_state: "verified",
+            post_compact_reinjection_receipt_reason: "PHASE180_POST_COMPACT_WORKER_CONTEXT_SENTINEL verified the current source in the historical repair session.",
+            post_compact_reinjection_current_source_verified: true,
+            post_compact_reinjection_memory_receipt_matched: true,
+            post_compact_reinjection_task_session_matched: true,
+            post_compact_reinjection_native_session_matched: true,
+            post_compact_reinjection_receipt_verified: true,
+            receipt_status: "done",
+            replay_repair_consumption_status: "verified",
+            replay_repair_consumption_source: "receipt.replayRepairDispatchBriefUsage",
+            worker_context_packet_id: "wcp-phase180-historical",
+            worker_handoff_id: "handoff-phase180-historical",
+            memory_context_snapshot_id: "snapshot-phase180-historical",
+            memory_context_snapshot_checksum: "snapshot-checksum-phase180-historical",
+            task_agent_session_id: historicalTaskSessionId,
+            native_session_id: historicalNativeSessionId,
+            execution_id: "execution-phase180-historical",
+            event_types: REPLAY_REPAIR_TIMELINE_REQUIRED_EVENTS,
+            completion_source: "post_compact_reinjection_replay_repair_receipt_consumption",
+            resolution_reason: "post_compact_reinjection_repair_receipt_verified",
+            completed_at: "2026-07-10T23:40:00.000Z",
+        };
+        const distillation = distillPostCompactReinjectionRepairReceiptConsumptionToTypedMemory(groupId, { rows: [row] }, {
+            reason: "phase180-worker-context-usage-selftest",
+            updatedAt: "2026-07-10T23:40:00.000Z",
+        });
+        const task = "继续 PHASE180_POST_COMPACT_WORKER_CONTEXT_SENTINEL src/phase180-worker-context-memory.ts post-compact reinjection repair receipt；使用前重新核验 current source";
+        const recallReport = buildPostCompactReinjectionRepairReceiptWorkerContextRecallReport({
+            groupIds: [groupId],
+            targetProject: "api",
+            task,
+            firstTaskAgentSessionId: "task-agent-session-phase180-fresh-a",
+            firstNativeSessionId: "native-session-phase180-fresh-a",
+            secondTaskAgentSessionId: "task-agent-session-phase180-fresh-b",
+            secondNativeSessionId: "native-session-phase180-fresh-b",
+        });
+        const recallQuality = evaluatePostCompactReinjectionRepairReceiptWorkerContextRecall({
+            groupIds: [groupId],
+            targetProject: "api",
+            task,
+        });
+        const freshTaskSessionId = "task-agent-session-phase180-receipt";
+        const freshNativeSessionId = "native-session-phase180-receipt";
+        const bundle = buildAgentMemoryContextBundle(groupId, "api", task, {
+            includeGlobalClaudeMemory: false,
+            includeProjectMemory: false,
+            maxTypedMemory: 8,
+            maxRenderedChars: 14000,
+            taskAgentSessionId: freshTaskSessionId,
+            nativeSessionId: freshNativeSessionId,
+            executionId: "execution-phase180-receipt",
+            forcePostCompactReinjectionRepairReceiptRecall: true,
+        });
+        const packet = buildWorkerContextPacket({
+            group: { id: groupId, name: "Phase 180 Receipt", members: [{ project: "api" }] },
+            project: "api",
+            task,
+            taskId: "task-phase180-receipt",
+            traceId: "trace-phase180-receipt",
+            agentType: "codex",
+            memory: bundle,
+            contextUsageOptions: { maxTokens: 90000 },
+        });
+        const contract = workerContextPacketPostCompactReinjectionRepairReceiptMemoryContract(packet) || {};
+        const requiredDocs = normalizeQualityStringList(contract.memory_receipt_required_doc_rel_paths || contract.doc_rel_paths || []);
+        const brief = {
+            brief_id: "replay-repair-dispatch-brief:phase180-receipt",
+            work_item_id: "post-compact-reinjection-repair:phase180-receipt",
+            source: "compact_boundary_replay_repair",
+            component: "post_compact_reinject",
+            target_project: "api",
+            reinjection_gate_id: gateId,
+            post_compact_candidate_id: candidateId,
+            post_compact_candidate_kind: "file",
+            post_compact_candidate_value: "src/phase180-worker-context-memory.ts",
+            post_compact_candidate_source_message_id: "message-phase180-worker-context",
+        };
+        const assignment = {
+            project: "api",
+            assignmentId: "assignment-phase180-receipt",
+            dispatchKey: "dispatch-phase180-receipt",
+            taskFingerprint: "task-phase180-receipt",
+            worker_context_packet: packet,
+        };
+        const binding = recordReplayRepairDispatchBriefAssignmentBinding(groupId, assignment, { brief });
+        const receipt = {
+            status: "done",
+            worker_context_packet_id: packet.packet_id,
+            task_agent_session_id: freshTaskSessionId,
+            native_session_id: freshNativeSessionId,
+            memoryUsed: requiredDocs.map((relPath) => `${relPath}; usageState=verified; currentSourceVerified=true; historical repair completion is recovery evidence, not permanent repository truth`),
+            memoryIgnored: [],
+            replayRepairDispatchBriefUsage: [{
+                    briefId: brief.brief_id,
+                    workItemId: brief.work_item_id,
+                    usageState: "verified",
+                    reason: "Used the bound replay repair brief and reverified current source.",
+                }],
+            postCompactCandidateUsage: [{
+                    gateId,
+                    candidateId,
+                    usageState: "verified",
+                    currentSourceVerified: true,
+                    reason: "Re-read src/phase180-worker-context-memory.ts in the fresh child session.",
+                }],
+            blockers: [],
+            needs: [],
+        };
+        recordReplayRepairDispatchBriefTimelineBinding(groupId, {
+            brief,
+            task_id: "task-phase180-receipt",
+            project: "api",
+            assignment_id: "assignment-phase180-receipt",
+            dispatch_key: "dispatch-phase180-receipt",
+            worker_context_packet_id: packet.packet_id,
+            worker_handoff_id: "handoff-phase180-receipt",
+            memory_context_snapshot_id: "snapshot-phase180-receipt",
+            memory_context_snapshot_checksum: "snapshot-checksum-phase180-receipt",
+            task_agent_session_id: freshTaskSessionId,
+            native_session_id: freshNativeSessionId,
+            execution_id: "execution-phase180-receipt",
+            receipt_status: "done",
+            receipt,
+            timeline_event: {
+                id: "phase180-child-agent-receipt",
+                type: "child_agent_receipt",
+                at: "2026-07-10T23:41:00.000Z",
+            },
+        }, { at: "2026-07-10T23:41:00.000Z" });
+        const assignmentLedger = readReplayRepairDispatchBindingLedgerForCoordinator(groupId);
+        const persistedBinding = (assignmentLedger.entries || []).find((entry) => entry.binding_id === binding?.binding_id) || {};
+        const receiptReport = buildPostCompactReinjectionRepairReceiptMemoryUsageReceiptReport({
+            groupIds: [groupId],
+            tasks: [],
+        });
+        const receiptQuality = evaluatePostCompactReinjectionRepairReceiptMemoryUsageReceipt({
+            groupIds: [groupId],
+            tasks: [],
+        });
+        const qualityReport = buildMemoryQualityReport({
+            checkIds: [
+                "post_compact_reinjection_repair_receipt_worker_context_recall",
+                "post_compact_reinjection_repair_receipt_memory_usage_receipt",
+            ],
+            groupIds: [groupId],
+            targetProject: "api",
+            task,
+            tasks: [],
+            refresh: true,
+        });
+        const recallQualityCheck = (qualityReport.checks || []).find((item) => item.id === "post_compact_reinjection_repair_receipt_worker_context_recall") || {};
+        const receiptQualityCheck = (qualityReport.checks || []).find((item) => item.id === "post_compact_reinjection_repair_receipt_memory_usage_receipt") || {};
+        const archive = readGroupTypedMemoryDistillationLedger(groupId).postCompactReinjectionRepairReceiptConsumptionArchive || {};
+        const recallGroup = recallReport.groups?.[0] || {};
+        const receiptGroup = receiptReport.groups?.[0] || {};
+        const badCoverage = postCompactReinjectionRepairReceiptMemoryUsageCoverage(contract, {
+            task_agent_session_id: "wrong-task-session",
+            native_session_id: freshNativeSessionId,
+            memoryUsed: requiredDocs.map((relPath) => `${relPath}; usageState=verified`),
+            memoryIgnored: [],
+        });
+        const renderedPacket = renderWorkerContextPacket(packet);
+        const checks = {
+            distillationCreatesRecallArchive: distillation.archivedCount === 1
+                && archive.archived_count === 1
+                && archive.rows?.[0]?.post_compact_candidate_id === candidateId,
+            twoFreshSessionsRecallMemory: recallReport.overall?.status === "ok"
+                && recallGroup.firstSessionRecalled === true
+                && recallGroup.secondSessionRecalled === true
+                && recallGroup.distinctSessionBindings === true,
+            workerContextPacketCarriesBoundContract: contract.schema === "ccm-post-compact-reinjection-repair-receipt-memory-usage-contract-v1"
+                && contract.current_task_agent_session_id === freshTaskSessionId
+                && contract.current_native_session_id === freshNativeSessionId
+                && requiredDocs.includes("post-compact-reinjection-repair-receipt-memory.md")
+                && renderedPacket.includes("currentSourceVerified=true"),
+            assignmentLedgerPersistsContractAndReceipt: persistedBinding.post_compact_reinjection_repair_receipt_memory_contract?.active === true
+                && persistedBinding.worker_context_packet_receipt?.worker_context_packet_id === packet.packet_id
+                && persistedBinding.worker_context_packet_receipt?.task_agent_session_id === freshTaskSessionId,
+            receiptReportAcceptsFreshVerifiedUse: receiptReport.overall?.status === "ok"
+                && Number(receiptReport.overall?.receiptContractCount || 0) === 1
+                && Number(receiptReport.overall?.coveredReceiptCount || 0) === 1
+                && receiptGroup.receipts?.[0]?.compliant === true,
+            staleOrWrongSessionReceiptRejected: badCoverage.pass === false
+                && badCoverage.gaps.includes("current_source_verified_missing")
+                && badCoverage.gaps.includes("task_agent_session_mismatch"),
+            qualityChecksRegisteredAndPass: recallQuality.id === "post_compact_reinjection_repair_receipt_worker_context_recall"
+                && recallQuality.status === "ok"
+                && receiptQuality.id === "post_compact_reinjection_repair_receipt_memory_usage_receipt"
+                && receiptQuality.status === "ok"
+                && recallQualityCheck.status === "ok"
+                && receiptQualityCheck.status === "ok",
+        };
+        return {
+            pass: Object.values(checks).every(Boolean),
+            checks,
+            recallReport: recallReport.overall,
+            receiptReport: receiptReport.overall,
+            quality: {
+                recall: {
+                    id: recallQualityCheck.id || "",
+                    status: recallQualityCheck.status || "",
+                    checked: recallQualityCheck.checked || 0,
+                    passed: recallQualityCheck.passed || 0,
+                },
+                receipt: {
+                    id: receiptQualityCheck.id || "",
+                    status: receiptQualityCheck.status || "",
+                    checked: receiptQualityCheck.checked || 0,
+                    passed: receiptQualityCheck.passed || 0,
+                },
+            },
+            packet: {
+                packet_id: packet.packet_id || "",
+                requiredDocs,
+                current_task_agent_session_id: contract.current_task_agent_session_id || "",
+                current_native_session_id: contract.current_native_session_id || "",
+            },
+        };
+    }
+    finally {
+        for (const file of [bindingFile, `${bindingFile}.bak`, timelineFile, `${timelineFile}.bak`]) {
+            try {
+                if (file && fs.existsSync(file))
+                    fs.unlinkSync(file);
+            }
+            catch { }
+        }
+        try {
+            if (fs.existsSync(typedDir))
+                fs.rmSync(typedDir, { recursive: true, force: true });
+        }
+        catch { }
+    }
+}
+function runMemoryCenterPostCompactReinjectionRepairReceiptMemoryUsageRepairSelfTest() {
+    const groupId = `memory-center-post-compact-receipt-memory-usage-repair-selftest-${process.pid}-${Date.now()}`;
+    const bindingFile = getGroupReplayRepairDispatchBindingLedgerFile(groupId);
+    const workItemsFile = getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId);
+    const dispatchPlanFile = getGroupReplayRepairDispatchPlanLedgerFile(groupId);
+    const timelineFile = getGroupReplayRepairDispatchTimelineBindingLedgerFile(groupId);
+    const typedDir = path.join(GROUP_TYPED_MEMORY_MD_DIR, sidecarFileId(groupId));
+    const originalPacketId = "wcp-phase181-original";
+    const originalBindingId = "binding-phase181-original";
+    const originalTaskSessionId = "task-agent-session-phase181-original";
+    const originalNativeSessionId = "native-session-phase181-original";
+    const requiredDoc = "post-compact-reinjection-repair-receipt-memory.md";
+    try {
+        const contract = {
+            schema: "ccm-post-compact-reinjection-repair-receipt-memory-usage-contract-v1",
+            active: true,
+            memory_receipt_required_doc_rel_paths: [requiredDoc],
+            doc_rel_paths: [requiredDoc],
+            current_task_agent_session_id: originalTaskSessionId,
+            current_native_session_id: originalNativeSessionId,
+            required_receipt_fields: ["memoryUsed", "memoryIgnored"],
+            freshness_boundary: "historical repair completion is recovery evidence, not permanent repository truth",
+        };
+        const badEntry = {
+            schema: "ccm-replay-repair-main-agent-dispatch-brief-assignment-v1",
+            binding_id: originalBindingId,
+            assignment_id: "assignment-phase181-original",
+            dispatch_key: "dispatch-phase181-original",
+            groupId,
+            project: "api",
+            worker_context_packet_id: originalPacketId,
+            post_compact_reinjection_repair_receipt_memory_contract: contract,
+            worker_context_packet_post_compact_reinjection_repair_receipt_memory_contract: contract,
+            worker_context_packet_context_usage: {
+                schema: "ccm-worker-context-usage-v1",
+                packet_id: originalPacketId,
+                categories: [{ id: "post_compact_reinjection_repair_receipt_memory_contract", required: true, tokens: 80 }],
+            },
+            worker_context_packet_receipt: {
+                status: "done",
+                worker_context_packet_id: originalPacketId,
+                task_agent_session_id: originalTaskSessionId,
+                native_session_id: originalNativeSessionId,
+                memoryUsed: [`${requiredDoc}; usageState=verified`],
+                memoryIgnored: [],
+            },
+        };
+        writeJsonAtomic(bindingFile, {
+            schema: "ccm-replay-repair-main-agent-dispatch-brief-assignment-ledger-v1",
+            version: 1,
+            groupId,
+            file: bindingFile,
+            updatedAt: "2026-07-10T23:50:00.000Z",
+            bindingCount: 1,
+            entries: [badEntry],
+        });
+        const firstReceiptReport = buildPostCompactReinjectionRepairReceiptMemoryUsageReceiptReport({ groupIds: [groupId], tasks: [], generatedAt: "2026-07-10T23:50:01.000Z" });
+        const secondReceiptReport = buildPostCompactReinjectionRepairReceiptMemoryUsageReceiptReport({ groupIds: [groupId], tasks: [], generatedAt: "2026-07-10T23:50:02.000Z" });
+        const workLedgerBefore = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+        const repairItemsBefore = (workLedgerBefore.items || []).filter(isPostCompactReinjectionRepairReceiptMemoryUsageReceiptRepairWorkItem);
+        const workItemReport = buildPostCompactReinjectionRepairReceiptMemoryUsageRepairWorkItemReport({ groupIds: [groupId], tasks: [] });
+        const candidateReport = buildPostCompactReinjectionRepairReceiptMemoryUsageRepairDispatchCandidateReport({ groupIds: [groupId], tasks: [], workItemReport });
+        const briefReport = buildPostCompactReinjectionRepairReceiptMemoryUsageRepairDispatchBriefReport({ groupIds: [groupId], tasks: [], candidateReport, generatedAt: "2026-07-10T23:50:03.000Z" });
+        const planLedger = readGroupReplayRepairDispatchPlanLedger(groupId);
+        const readyBrief = (planLedger.briefs || []).find((brief) => brief.status === "ready" && isPostCompactReinjectionRepairReceiptMemoryUsageReceiptRepairSource(brief.source)) || {};
+        const beforeQualityReport = buildMemoryQualityReport({
+            checkIds: [
+                "post_compact_reinjection_repair_receipt_memory_usage_repair_work_items",
+                "post_compact_reinjection_repair_receipt_memory_usage_repair_dispatch_candidates",
+                "post_compact_reinjection_repair_receipt_memory_usage_repair_dispatch_briefs",
+            ],
+            groupIds: [groupId],
+            tasks: [],
+            refresh: true,
+        });
+        const beforeChecks = new Map((beforeQualityReport.checks || []).map((check) => [check.id, check]));
+        const { recordReplayRepairDispatchBriefTimelineBinding, } = require("../collaboration/group-orchestrator");
+        const repairTaskSessionId = "task-agent-session-phase181-repair";
+        const repairNativeSessionId = "native-session-phase181-repair";
+        const baseTimeline = {
+            brief: readyBrief,
+            task_id: "task-phase181-repair",
+            project: "api",
+            assignment_id: "assignment-phase181-repair",
+            dispatch_key: "dispatch-phase181-repair",
+            worker_context_packet_id: "wcp-phase181-repair",
+            worker_handoff_id: "handoff-phase181-repair",
+            memory_context_snapshot_id: "snapshot-phase181-repair",
+            memory_context_snapshot_checksum: "snapshot-checksum-phase181-repair",
+            task_agent_session_id: repairTaskSessionId,
+            native_session_id: repairNativeSessionId,
+            execution_id: "execution-phase181-repair",
+        };
+        const invalidCorrectedReceipt = {
+            status: "done",
+            task_agent_session_id: originalTaskSessionId,
+            native_session_id: originalNativeSessionId,
+            replayRepairDispatchBriefUsage: [{
+                    briefId: readyBrief.brief_id,
+                    workItemId: readyBrief.work_item_id,
+                    usageState: "verified",
+                    reason: "Incorrectly reused the original session and omitted current-source verification.",
+                }],
+            memoryUsed: [`${requiredDoc}; usageState=verified`],
+            memoryIgnored: [],
+        };
+        for (const eventType of REPLAY_REPAIR_TIMELINE_REQUIRED_EVENTS) {
+            recordReplayRepairDispatchBriefTimelineBinding(groupId, {
+                ...baseTimeline,
+                receipt_status: eventType === "child_agent_receipt" ? "done" : "",
+                receipt: eventType === "child_agent_receipt" ? invalidCorrectedReceipt : null,
+                timeline_event: { id: `phase181-invalid-${eventType}`, type: eventType, at: "2026-07-10T23:50:04.000Z" },
+            }, { at: "2026-07-10T23:50:04.000Z" });
+        }
+        const workLedgerAfterInvalid = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+        const itemAfterInvalid = (workLedgerAfterInvalid.items || []).find((item) => (item.work_item_id || item.id) === readyBrief.work_item_id) || {};
+        const validCorrectedReceipt = {
+            status: "done",
+            task_agent_session_id: repairTaskSessionId,
+            native_session_id: repairNativeSessionId,
+            replayRepairDispatchBriefUsage: [{
+                    briefId: readyBrief.brief_id,
+                    workItemId: readyBrief.work_item_id,
+                    usageState: "verified",
+                    reason: "Returned a corrected receipt after re-reading current source in the new repair session.",
+                }],
+            memoryUsed: [`${requiredDoc}; usageState=verified; currentSourceVerified=true; historical repair completion is recovery evidence, not permanent repository truth`],
+            memoryIgnored: [],
+        };
+        const validBindingResult = recordReplayRepairDispatchBriefTimelineBinding(groupId, {
+            ...baseTimeline,
+            receipt_status: "done",
+            receipt: validCorrectedReceipt,
+            timeline_event: { id: "phase181-valid-child_agent_receipt", type: "child_agent_receipt", at: "2026-07-10T23:50:05.000Z" },
+        }, { at: "2026-07-10T23:50:05.000Z" });
+        const workLedgerAfterValid = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+        const completedItem = (workLedgerAfterValid.items || []).find((item) => (item.work_item_id || item.id) === readyBrief.work_item_id) || {};
+        const closureReport = buildPostCompactReinjectionRepairReceiptMemoryUsageRepairReceiptConsumptionReport({ groupIds: [groupId] });
+        const typedMemoryReport = buildPostCompactReceiptMemoryUsageRepairCompletionTypedMemoryReport({ groupIds: [groupId], generatedAt: "2026-07-10T23:50:05.000Z" });
+        const typedMemoryGroup = typedMemoryReport.groups?.[0] || {};
+        const { readGroupTypedMemoryDistillationLedger, scanGroupTypedMemoryDocuments, } = require("../collaboration/group-memory-index");
+        const typedLedger = readGroupTypedMemoryDistillationLedger(groupId);
+        const typedArchive = typedLedger.postCompactReceiptMemoryUsageRepairCompletionArchive || {};
+        const typedRows = Array.isArray(typedArchive.rows) ? typedArchive.rows : [];
+        const typedDocs = scanGroupTypedMemoryDocuments(groupId);
+        const typedDoc = typedDocs.find((doc) => doc.relPath === "post-compact-receipt-memory-usage-repair-completions.md");
+        const typedDocText = (() => {
+            try {
+                return typedDoc?.file ? fs.readFileSync(typedDoc.file, "utf-8") : "";
+            }
+            catch {
+                return "";
+            }
+        })();
+        const repairedReceiptReport = buildPostCompactReinjectionRepairReceiptMemoryUsageReceiptReport({ groupIds: [groupId], tasks: [], generatedAt: "2026-07-10T23:50:06.000Z" });
+        const finalWorkLedger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+        const finalRepairItems = (finalWorkLedger.items || []).filter(isPostCompactReinjectionRepairReceiptMemoryUsageReceiptRepairWorkItem);
+        const afterQualityReport = buildMemoryQualityReport({
+            checkIds: [
+                "post_compact_reinjection_repair_receipt_memory_usage_receipt",
+                "post_compact_reinjection_repair_receipt_memory_usage_repair_receipt_consumption",
+                "post_compact_reinjection_repair_receipt_memory_usage_repair_completion_typed_memory",
+            ],
+            groupIds: [groupId],
+            tasks: [],
+            refresh: true,
+        });
+        const afterChecks = new Map((afterQualityReport.checks || []).map((check) => [check.id, check]));
+        const proof = completedItem.post_compact_receipt_memory_usage_repair_receipt || {};
+        const checks = {
+            badReceiptCreatesSingleIdempotentWorkItem: firstReceiptReport.overall?.status === "fail"
+                && secondReceiptReport.overall?.status === "fail"
+                && repairItemsBefore.length === 1
+                && Number(repairItemsBefore[0]?.seenCount || 0) === 1,
+            workItemPreservesOriginalEvidenceAndRequiredDocs: workItemReport.overall?.status === "ok"
+                && repairItemsBefore[0]?.original_worker_context_packet_id === originalPacketId
+                && repairItemsBefore[0]?.original_task_agent_session_id === originalTaskSessionId
+                && (repairItemsBefore[0]?.post_compact_receipt_memory_required_doc_rel_paths || []).includes(requiredDoc),
+            candidateAndBriefAreComplete: candidateReport.overall?.status === "ok"
+                && briefReport.overall?.status === "ok"
+                && readyBrief.source === "post_compact_reinjection_repair_receipt_memory_usage_receipt_repair"
+                && readyBrief.worker_task?.includes(requiredDoc)
+                && readyBrief.worker_task?.includes("currentSourceVerified=true")
+                && readyBrief.worker_task?.includes("replayRepairDispatchBriefUsage"),
+            planningDoesNotCreateRealTask: candidateReport.groups?.[0]?.candidates?.[0]?.shouldCreateRealTask === false
+                && briefReport.groups?.[0]?.shouldCreateRealTask === true,
+            invalidCorrectedReceiptDoesNotClose: replayRepairWorkItemOpen(itemAfterInvalid.status),
+            validNewSessionReceiptCloses: replayRepairWorkItemStatus(completedItem.status) === "completed"
+                && completedItem.completion_source === "post_compact_reinjection_receipt_memory_usage_repair_receipt_consumption"
+                && completedItem.resolutionReason === "post_compact_reinjection_receipt_memory_usage_corrected_receipt_verified"
+                && validBindingResult?.repair_work_item_completion?.closed === 1,
+            completionPersistsExactProof: proof.verified === true
+                && proof.required_doc_rel_paths?.includes(requiredDoc)
+                && proof.covered_doc_rel_paths?.includes(requiredDoc)
+                && proof.coverage_rows?.some((row) => row.relPath === requiredDoc && row.usageState === "verified" && row.currentSourceVerified === true && row.compliant === true)
+                && proof.all_docs_compliant === true
+                && proof.task_session_matched === true
+                && proof.native_session_matched === true
+                && proof.task_agent_session_id === repairTaskSessionId
+                && proof.native_session_id === repairNativeSessionId
+                && proof.task_agent_session_id !== originalTaskSessionId
+                && proof.native_session_id !== originalNativeSessionId,
+            correctedReceiptSatisfiesOriginalGapWithoutReopen: repairedReceiptReport.overall?.status === "ok"
+                && Number(repairedReceiptReport.overall?.repairedReceiptCount || 0) === 1
+                && finalRepairItems.length === 1
+                && replayRepairWorkItemStatus(finalRepairItems[0]?.status) === "completed",
+            closureReportPasses: closureReport.overall?.status === "ok"
+                && Number(closureReport.overall?.completedReceiptRepairCount || 0) === 1
+                && Number(closureReport.overall?.verifiedCompletionCount || 0) === 1,
+            validCompletionAutomaticallyDistillsTypedMemory: typedMemoryReport.overall?.status === "ok"
+                && typedMemoryGroup.recallProbeCovered === true
+                && typedRows.length === 1
+                && typedRows[0]?.work_item_id === readyBrief.work_item_id
+                && typedRows[0]?.repair_task_agent_session_id === repairTaskSessionId
+                && typedRows[0]?.repair_native_session_id === repairNativeSessionId
+                && typedDocText.includes(requiredDoc)
+                && typedDocText.includes("historical repair completion is recovery evidence, not permanent repository truth"),
+            qualityChecksRegisteredAndPass: [
+                "post_compact_reinjection_repair_receipt_memory_usage_repair_work_items",
+                "post_compact_reinjection_repair_receipt_memory_usage_repair_dispatch_candidates",
+                "post_compact_reinjection_repair_receipt_memory_usage_repair_dispatch_briefs",
+            ].every(id => beforeChecks.get(id)?.status === "ok")
+                && afterChecks.get("post_compact_reinjection_repair_receipt_memory_usage_receipt")?.status === "ok"
+                && afterChecks.get("post_compact_reinjection_repair_receipt_memory_usage_repair_receipt_consumption")?.status === "ok"
+                && afterChecks.get("post_compact_reinjection_repair_receipt_memory_usage_repair_completion_typed_memory")?.status === "ok",
+        };
+        return {
+            pass: Object.values(checks).every(Boolean),
+            checks,
+            receiptReportBefore: firstReceiptReport.overall,
+            workItemReport: workItemReport.overall,
+            candidateReport: candidateReport.overall,
+            briefReport: briefReport.overall,
+            closureReport: closureReport.overall,
+            receiptReportAfter: repairedReceiptReport.overall,
+            completedItem: {
+                work_item_id: completedItem.work_item_id || completedItem.id || "",
+                status: replayRepairWorkItemStatus(completedItem.status),
+                completion_source: completedItem.completion_source || "",
+                resolutionReason: completedItem.resolutionReason || "",
+            },
+        };
+    }
+    finally {
+        for (const file of [bindingFile, `${bindingFile}.bak`, workItemsFile, `${workItemsFile}.bak`, dispatchPlanFile, `${dispatchPlanFile}.bak`, timelineFile, `${timelineFile}.bak`]) {
+            try {
+                if (file && fs.existsSync(file))
+                    fs.unlinkSync(file);
+            }
+            catch { }
+        }
+        try {
+            if (fs.existsSync(typedDir))
+                fs.rmSync(typedDir, { recursive: true, force: true });
+        }
+        catch { }
+    }
+}
+function runMemoryCenterPostCompactReceiptMemoryUsageRepairCompletionTypedMemorySelfTest() {
+    const integration = runMemoryCenterPostCompactReinjectionRepairReceiptMemoryUsageRepairSelfTest();
+    const suffix = `${process.pid}-${Date.now()}`;
+    const groupA = `memory-center-post-compact-receipt-memory-usage-repair-typed-a-${suffix}`;
+    const groupB = `memory-center-post-compact-receipt-memory-usage-repair-typed-b-${suffix}`;
+    const typedDirA = path.join(GROUP_TYPED_MEMORY_MD_DIR, sidecarFileId(groupA));
+    const typedDirB = path.join(GROUP_TYPED_MEMORY_MD_DIR, sidecarFileId(groupB));
+    const requiredDoc = "post-compact-reinjection-repair-receipt-memory.md";
+    const { buildGroupTypedMemoryRecall, distillPostCompactReceiptMemoryUsageRepairCompletionToTypedMemory, readGroupTypedMemoryDistillationLedger, scanGroupTypedMemoryDocuments, } = require("../collaboration/group-memory-index");
+    const makeRow = (groupId, marker) => ({
+        groupId,
+        source: "post_compact_reinjection_repair_receipt_memory_usage_receipt_repair",
+        project: "api",
+        task_id: `task-${marker}`,
+        work_item_id: `post-compact-receipt-memory-usage-repair:${marker}`,
+        brief_id: `replay-repair-dispatch-brief:${marker}`,
+        timeline_binding_id: `replay-repair-brief-timeline:${marker}`,
+        assignment_id: `assignment-repair-${marker}`,
+        dispatch_key: `dispatch-repair-${marker}`,
+        original_worker_context_packet_id: `original-packet-${marker}`,
+        original_binding_id: `original-binding-${marker}`,
+        original_assignment_id: `original-assignment-${marker}`,
+        original_dispatch_key: `original-dispatch-${marker}`,
+        original_task_agent_session_id: `original-task-session-${marker}`,
+        original_native_session_id: `original-native-session-${marker}`,
+        task_agent_session_id: `repair-task-session-${marker}`,
+        native_session_id: `repair-native-session-${marker}`,
+        execution_id: `repair-execution-${marker}`,
+        post_compact_receipt_memory_gap_codes: ["receipt_usage_state_or_reverify", "receipt_historical_boundary"],
+        post_compact_receipt_memory_usage_repair_required_doc_rel_paths: [requiredDoc],
+        post_compact_receipt_memory_usage_repair_covered_doc_rel_paths: [requiredDoc],
+        post_compact_receipt_memory_usage_repair_coverage_rows: [{
+                relPath: requiredDoc,
+                usageState: "verified",
+                covered: true,
+                compliant: true,
+                currentSourceVerified: true,
+                ignoredReasonCovered: false,
+                reason: "",
+            }],
+        post_compact_receipt_memory_usage_repair_all_docs_compliant: true,
+        post_compact_receipt_memory_usage_repair_historical_boundary_covered: true,
+        post_compact_receipt_memory_usage_repair_task_session_matched: true,
+        post_compact_receipt_memory_usage_repair_native_session_matched: true,
+        post_compact_receipt_memory_usage_repair_verified: true,
+        receipt_status: "done",
+        replay_repair_consumption_status: "verified",
+        replay_repair_consumption_source: "receipt.replayRepairDispatchBriefUsage",
+        event_types: [...REPLAY_REPAIR_TIMELINE_REQUIRED_EVENTS],
+        completion_source: "post_compact_reinjection_receipt_memory_usage_repair_receipt_consumption",
+        resolution_reason: "post_compact_reinjection_receipt_memory_usage_corrected_receipt_verified",
+        completed_at: "2026-07-11T00:20:00.000Z",
+    });
+    try {
+        const rowA = makeRow(groupA, "PHASE182_GROUP_A_SENTINEL");
+        const rowB = makeRow(groupB, "PHASE182_GROUP_B_SENTINEL");
+        const firstA = distillPostCompactReceiptMemoryUsageRepairCompletionToTypedMemory(groupA, { rows: [rowA] }, { reason: "phase182-selftest-a", updatedAt: "2026-07-11T00:20:00.000Z" });
+        const secondA = distillPostCompactReceiptMemoryUsageRepairCompletionToTypedMemory(groupA, { rows: [rowA] }, { reason: "phase182-selftest-a-repeat", updatedAt: "2026-07-11T00:20:01.000Z" });
+        const firstB = distillPostCompactReceiptMemoryUsageRepairCompletionToTypedMemory(groupB, { rows: [rowB] }, { reason: "phase182-selftest-b", updatedAt: "2026-07-11T00:20:00.000Z" });
+        const ledgerA = readGroupTypedMemoryDistillationLedger(groupA);
+        const ledgerB = readGroupTypedMemoryDistillationLedger(groupB);
+        const archiveA = ledgerA.postCompactReceiptMemoryUsageRepairCompletionArchive || {};
+        const archiveB = ledgerB.postCompactReceiptMemoryUsageRepairCompletionArchive || {};
+        const rowsA = Array.isArray(archiveA.rows) ? archiveA.rows : [];
+        const rowsB = Array.isArray(archiveB.rows) ? archiveB.rows : [];
+        const docA = scanGroupTypedMemoryDocuments(groupA).find((doc) => doc.relPath === "post-compact-receipt-memory-usage-repair-completions.md");
+        const docB = scanGroupTypedMemoryDocuments(groupB).find((doc) => doc.relPath === "post-compact-receipt-memory-usage-repair-completions.md");
+        const textA = (() => { try {
+            return docA?.file ? fs.readFileSync(docA.file, "utf-8") : "";
+        }
+        catch {
+            return "";
+        } })();
+        const textB = (() => { try {
+            return docB?.file ? fs.readFileSync(docB.file, "utf-8") : "";
+        }
+        catch {
+            return "";
+        } })();
+        const recallA = buildGroupTypedMemoryRecall(groupA, "PHASE182_GROUP_A_SENTINEL corrected receipt currentSourceVerified", { max: 8, disableLedger: true, forceMemory: true, snippetChars: 420 });
+        const recallB = buildGroupTypedMemoryRecall(groupB, "PHASE182_GROUP_B_SENTINEL corrected receipt currentSourceVerified", { max: 8, disableLedger: true, forceMemory: true, snippetChars: 420 });
+        const recallTextA = JSON.stringify(recallA.recalled || []);
+        const recallTextB = JSON.stringify(recallB.recalled || []);
+        const checks = {
+            strictTimelineCompletionAutomaticallyDistills: integration.pass === true
+                && integration.checks?.validCompletionAutomaticallyDistillsTypedMemory === true,
+            directDistillationArchivesVerifiedRows: firstA.archivedCount === 1
+                && firstA.verifiedCount === 1
+                && firstB.archivedCount === 1
+                && rowsA.length === 1
+                && rowsB.length === 1,
+            repeatDistillationIsIdempotent: secondA.archivedCount === 1
+                && secondA.newRowCount === 0
+                && secondA.updatedRowCount === 1,
+            exactOriginalAndRepairSessionsPersist: rowsA[0]?.original_task_agent_session_id === "original-task-session-PHASE182_GROUP_A_SENTINEL"
+                && rowsA[0]?.original_native_session_id === "original-native-session-PHASE182_GROUP_A_SENTINEL"
+                && rowsA[0]?.repair_task_agent_session_id === "repair-task-session-PHASE182_GROUP_A_SENTINEL"
+                && rowsA[0]?.repair_native_session_id === "repair-native-session-PHASE182_GROUP_A_SENTINEL",
+            perDocumentUsageProofPersists: rowsA[0]?.coverage_rows?.some((coverage) => coverage.rel_path === requiredDoc
+                && coverage.usage_state === "verified"
+                && coverage.current_source_verified === true
+                && coverage.compliant === true)
+                && textA.includes(requiredDoc)
+                && textA.includes("currentSourceVerified=true"),
+            futureSessionFreshnessBoundaryPersists: /historical repair completion is recovery evidence, not permanent repository truth/i.test(textA)
+                && /Every future child Agent session must independently classify recalled memory/i.test(textA)
+                && /Historical task\/native session ids are evidence only and never authorize a future session/i.test(textA),
+            typedMemoryIsRecallableAndGroupIsolated: recallTextA.includes("post-compact-receipt-memory-usage-repair-completions.md")
+                && recallTextA.includes("PHASE182_GROUP_A_SENTINEL")
+                && !textA.includes("PHASE182_GROUP_B_SENTINEL")
+                && recallTextB.includes("post-compact-receipt-memory-usage-repair-completions.md")
+                && recallTextB.includes("PHASE182_GROUP_B_SENTINEL")
+                && !textB.includes("PHASE182_GROUP_A_SENTINEL"),
+        };
+        return {
+            pass: Object.values(checks).every(Boolean),
+            checks,
+            integrationChecks: integration.checks,
+            groupA: { archivedCount: archiveA.archived_count || 0, recalled: (recallA.recalled || []).map((item) => item.relPath) },
+            groupB: { archivedCount: archiveB.archived_count || 0, recalled: (recallB.recalled || []).map((item) => item.relPath) },
+        };
+    }
+    finally {
+        for (const dir of [typedDirA, typedDirB]) {
+            try {
+                if (fs.existsSync(dir))
                     fs.rmSync(dir, { recursive: true, force: true });
             }
             catch { }

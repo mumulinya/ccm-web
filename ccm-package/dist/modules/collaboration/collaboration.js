@@ -82,6 +82,8 @@ const group_live_routes_1 = require("./group-live-routes");
 const agent_qa_service_1 = require("./agent-qa-service");
 const task_delivery_report_1 = require("./task-delivery-report");
 const verdict_1 = require("../../test-agent/verdict");
+const test_agent_review_bridge_1 = require("../../agents/test-agent-review-bridge");
+const post_review_spot_check_1 = require("../../agents/post-review-spot-check");
 const agent_receipts_1 = require("./agent-receipts");
 const agent_notifications_1 = require("./agent-notifications");
 const global_mission_1 = require("./global-mission");
@@ -89,6 +91,7 @@ const logs_1 = require("./logs");
 const group_routes_1 = require("./group-routes");
 const orchestrator_routes_1 = require("./orchestrator-routes");
 const task_governance_routes_1 = require("./task-governance-routes");
+const startup_task_recovery_1 = require("./startup-task-recovery");
 const storage_1 = require("./storage");
 const daily_dev_backlog_1 = require("./daily-dev-backlog");
 const runtime_1 = require("../../agents/runtime");
@@ -163,15 +166,6 @@ function runCronDailyDevProtocolSelfTestSafe() {
 const PRIORITY_WEIGHT = { high: 3, normal: 2, low: 1 };
 function isTaskPaused(task) {
     return !!(task?.is_paused || task?.paused);
-}
-function isRecoverableAutoTask(task) {
-    if (!task?.auto_execute || isTaskPaused(task))
-        return false;
-    if (task.status === "pending")
-        return true;
-    if (task.status === "in_progress" && !task.completed_at)
-        return true;
-    return false;
 }
 function getTaskFailureText(task) {
     return [
@@ -400,7 +394,10 @@ function buildTaskPreflightReasoning(task, reason = "任务执行前复核", rec
     (0, reasoning_loop_1.setReasoningAssertion)(state, { id: "goal_revalidated", label: "执行前已重新核对原始目标", kind: "preflight", status: state.original_goal ? "passed" : "blocked", evidence: [state.original_goal], reason });
     (0, reasoning_loop_1.setReasoningAssertion)(state, { id: "acceptance_revalidated", label: "执行前已重新核对验收条件", kind: "preflight", status: task?.acceptance_criteria ? "passed" : "blocked", evidence: [task?.acceptance_criteria || ""], reason });
     if (recovery) {
-        const gaps = task?.delivery_summary?.acceptance_gate?.failed_checks?.map((item) => item.label || item.id) || task?.delivery_summary?.needs || [];
+        const gaps = uniqueStrings([
+            ...(task?.delivery_summary?.acceptance_gate?.failed_checks?.map((item) => item.label || item.id) || task?.delivery_summary?.needs || []),
+            ...(!task?.acceptance_criteria ? ["缺少可核对的验收条件"] : []),
+        ]);
         (0, reasoning_loop_1.recordReasoningRecoveryCheck)(state, {
             reason,
             goalRevalidated: !!state.original_goal,
@@ -454,26 +451,42 @@ function buildMainAgentRecoverySummary(task, phase, sessions = [], workItems = [
         title: "恢复接续",
         status,
         mode,
+        status_label: status === "needs_user"
+            ? "待确认"
+            : mode === "startup_auto_recovery"
+                ? "已自动接上"
+                : status === "recorded"
+                    ? "已记录"
+                    : "已接上",
         headline: status === "needs_user"
-            ? "检测到上次任务没有完整收尾，我已暂停并等待你确认是否继续。"
-            : "我已接上上次任务上下文，重新核对目标、当前状态和验收条件后继续推进。",
+            ? recovery.requires_user === true && recovery.user_headline
+                ? recovery.user_headline
+                : "检测到上次任务没有完整收尾，我已暂停并等待你确认是否继续。"
+            : recovery.user_headline || "我已接上上次任务上下文，重新核对目标、当前状态和验收条件后继续推进。",
         revalidated: {
             goal: latestCheck.goal_revalidated === true,
             state: latestCheck.state_revalidated === true,
             acceptance: latestCheck.acceptance_revalidated === true,
         },
-        preserved,
+        preserved: uniqueStrings([
+            ...(recovery.authorization_preserved === true ? ["已保留你之前确认的执行授权"] : []),
+            ...preserved,
+        ]),
         remaining_gaps: remainingGaps,
         next_action: status === "needs_user"
-            ? "确认继续后会复用原任务、Trace、执行队列和可恢复会话。"
+            ? recovery.user_next_action || "确认继续后会复用原任务、执行队列和可恢复会话。"
             : remainingGaps.length
                 ? "继续处理恢复后仍未满足的验收缺口。"
-                : "继续使用恢复后的上下文执行并等待验收。",
+                : recovery.user_next_action || "继续使用恢复后的上下文执行并等待验收。",
         technical: {
             recovery_checks: checks.length,
             lease_recovery_count: Number(task?.execution_lease?.recovery_count || recovery.lease_recovery_count || 0),
             previous_status: recovery.previous_status || "",
             recovered_at: recovery.recovered_at || recovery.revalidated_at || recovery.pending_since || "",
+            decision_code: recovery.decision_code || "",
+            decision_reason: recovery.decision_reason || "",
+            authorization_preserved: recovery.authorization_preserved === true,
+            authorization_evidence: Array.isArray(recovery.authorization_evidence) ? recovery.authorization_evidence : [],
         },
     };
 }
@@ -588,7 +601,7 @@ function userAgentProgressStatusLabel(status) {
     if (value === "failed")
         return "失败";
     if (value === "blocked")
-        return "需处理";
+        return "待补齐";
     if (value === "running")
         return "执行中";
     return "等待中";
@@ -1490,13 +1503,15 @@ function buildTaskCardView(task, executions, sessions) {
         next_action: nextAction,
         delivery_report: summary.delivery_report || null,
         deliveryReport: summary.delivery_report || null,
+        post_review_spot_check_summary: summary.post_review_spot_check_summary || summary.delivery_report?.post_review_spot_check_summary || null,
+        postReviewSpotCheckSummary: summary.post_review_spot_check_summary || summary.delivery_report?.postReviewSpotCheckSummary || null,
         completion_card: summary.delivery_report?.completion_card || summary.completion_card || null,
         completionCard: summary.delivery_report?.completion_card || summary.completionCard || null,
         pickup_summary: summary.delivery_report?.pickup_summary || summary.pickup_summary || null,
         pickupSummary: summary.delivery_report?.pickup_summary || summary.pickupSummary || null,
         delivery: { headline: summary.headline || task?.status_detail || "", files: files.slice(0, 30), changes: Array.isArray(summary.actual_file_changes) ? summary.actual_file_changes.slice(0, 30) : [], verification: verification.slice(0, 20), risks: uniqueStrings([...(summary.risks || []), ...(summary.remaining_items || []), ...(summary.advisory_needs || [])]).slice(0, 10), acceptance_passed: deliveryAccepted },
         actions: buildUserTaskActions(task, phase, executions),
-        technical: { trace_id: task?.trace_id || "", execution_ids: executions.map(item => item.id), session_ids: sessions.map(item => item.id), work_item_ids: workItems.map((item) => item.id), work_item_summary: workItemSummary, work_item_claim_summary: workItemClaimSummary, work_item_unlock_summary: workItemUnlockSummary, completion_readiness_summary: completionReadinessSummary, recovery_summary: recoverySummary, continuation_state: task?.collaboration_state?.last_continuation || null, receipt_rework_summary: receiptReworkSummary, agent_progress_summary: agentProgressSummary, change_summary: changeSummary, plan_alignment: planAlignment, user_handoff: userHandoff, gap_fingerprint: terminalPhase ? "" : getTaskGapFingerprint(task), entity_chain_endpoint: `/api/tasks/entity-chain?id=${encodeURIComponent(task?.id || "")}`, mainAgentDecision: liveMainAgentDecision, main_agent_decision: liveMainAgentDecision, runtime_kernel: runtimeKernel, display_stream: displayStream },
+        technical: { trace_id: task?.trace_id || "", execution_ids: executions.map(item => item.id), session_ids: sessions.map(item => item.id), work_item_ids: workItems.map((item) => item.id), work_item_summary: workItemSummary, work_item_claim_summary: workItemClaimSummary, work_item_unlock_summary: workItemUnlockSummary, completion_readiness_summary: completionReadinessSummary, recovery_summary: recoverySummary, continuation_state: task?.collaboration_state?.last_continuation || null, receipt_rework_summary: receiptReworkSummary, agent_progress_summary: agentProgressSummary, change_summary: changeSummary, plan_alignment: planAlignment, user_handoff: userHandoff, post_review_spot_check: summary.post_review_spot_check || null, gap_fingerprint: terminalPhase ? "" : getTaskGapFingerprint(task), entity_chain_endpoint: `/api/tasks/entity-chain?id=${encodeURIComponent(task?.id || "")}`, mainAgentDecision: liveMainAgentDecision, main_agent_decision: liveMainAgentDecision, runtime_kernel: runtimeKernel, display_stream: displayStream },
         updated_at: task?.updated_at || new Date().toISOString(),
     };
 }
@@ -2535,7 +2550,7 @@ function buildUserHandoffSummary(task, summary = {}, phase = "planning", nextAct
         {
             id: "attention",
             label: "待关注",
-            value: riskItems.length ? `${riskItems.length} 项需要处理` : "暂无待处理风险",
+            value: riskItems.length ? `${riskItems.length} 项待补齐` : "暂无需要额外关注的风险",
             tone: riskItems.length ? "warning" : "ok",
         },
         {
@@ -2549,7 +2564,7 @@ function buildUserHandoffSummary(task, summary = {}, phase = "planning", nextAct
         schema: "ccm-main-agent-user-handoff-v1",
         title: "接下来建议",
         status,
-        status_label: status === "ready" ? "可验收" : status === "needs_user" ? "等你确认" : status === "failed" ? "未完成" : status === "cancelled" ? "已停止" : status === "reverted" ? "已撤销" : "需处理",
+        status_label: status === "ready" ? "可验收" : status === "needs_user" ? "等你确认" : status === "failed" ? "未完成" : status === "cancelled" ? "已停止" : status === "reverted" ? "已撤销" : "待补齐",
         headline: status === "ready"
             ? "这轮任务已经收尾，建议先核对交付总结和改动明细。"
             : status === "needs_user"
@@ -2560,7 +2575,7 @@ function buildUserHandoffSummary(task, summary = {}, phase = "planning", nextAct
                         ? "任务已经停止；需要继续时可以重新发起或恢复需求。"
                         : status === "reverted"
                             ? "最近一轮改动已撤销；继续前建议重新确认当前代码状态。"
-                            : "还有缺口需要处理，我会按证据继续收敛。",
+                            : "还有缺口待补齐，我会按证据继续收敛。",
         primary_action: actions[0],
         secondary_actions: actions.slice(1, 4),
         summary_cards: summaryCards,
@@ -6054,7 +6069,7 @@ function normalizeGroupDispatchLaunchRowStatus(rawValue = "dispatched") {
     if (["running", "in_progress", "executing"].includes(raw))
         return { status: "running", label: "执行中" };
     if (["blocked", "failed", "error"].includes(raw))
-        return { status: "failed", label: "需处理" };
+        return { status: "failed", label: "待排查" };
     if (["queued", "pending"].includes(raw))
         return { status: raw, label: "已入队" };
     return { status: raw || "dispatched", label: "已派发" };
@@ -6857,7 +6872,19 @@ function runCollaborationUxSelfTest() {
         id: "recovery-task",
         status: "pending",
         acceptance_criteria: "负责人筛选完成后必须有文件变更、npm test 和主 Agent 验收",
-        recovery: { revalidated_at: new Date().toISOString(), previous_status: "in_progress", mode: "startup_auto_recovery", lease_recovery_count: 1 },
+        recovery: {
+            revalidated_at: new Date().toISOString(),
+            previous_status: "in_progress",
+            mode: "startup_auto_recovery",
+            lease_recovery_count: 1,
+            decision_code: "authorized_incomplete_task",
+            decision_reason: "已确认并入队的未完成任务",
+            authorization_preserved: true,
+            authorization_evidence: ["intake_confirmed", "queued_at", "started_at"],
+            requires_user: false,
+            user_headline: "服务重启后，我已自动接上这轮任务，并重新核对目标、当前状态和验收条件。",
+            user_next_action: "我会沿用原计划和执行上下文继续推进，完成后再给你最终总结。",
+        },
         execution_lease: { recovery_count: 1 },
         delivery_summary: {
             ...task.delivery_summary,
@@ -7587,6 +7614,10 @@ function runCollaborationUxSelfTest() {
         liveTodoCancelled: revertedCard.mainAgentDecision?.user_plan_steps?.some((step) => step.status === "cancelled"),
         liveTodoRestoresRecoveryContext: recoveryCard.recovery_summary?.schema === "ccm-main-agent-recovery-summary-v1"
             && recoveryCard.recovery_summary?.revalidated?.goal === true
+            && recoveryCard.recovery_summary?.status_label === "已自动接上"
+            && recoveryCard.recovery_summary?.preserved?.includes("已保留你之前确认的执行授权")
+            && recoveryCard.recovery_summary?.headline?.includes("服务重启后，我已自动接上这轮任务")
+            && recoveryCard.recovery_summary?.technical?.decision_code === "authorized_incomplete_task"
             && recoveryCard.mainAgentDecision?.user_plan_steps?.some((step) => step.id === "restore_task_context" && step.status === "completed"),
         liveTodoEvidenceTraceable: card.mainAgentDecision?.user_plan_steps?.every((step) => Array.isArray(step.evidence) && step.evidence.length > 0),
         liveTodoFailureHasActions: failedCard.mainAgentDecision?.user_plan_steps?.some((step) => ["needs_confirmation", "failed"].includes(step.status) && Array.isArray(step.actions) && step.actions.some((action) => ["retry", "gap_continue", "switch_executor", "cancel"].includes(action.kind))),
@@ -7977,11 +8008,12 @@ function buildChildAgentDevelopmentContract(targetProject, taskText = "", option
         "- 全局记忆健康门禁要求：如果上下文包含 global_memory_health_gate，回执 memoryUsed/memoryIgnored 必须引用 gate_id；status=fail 或 action=block_global_agent_memory_recall 时必须在 memoryIgnored 说明未使用全局记忆，且不得在 globalMemoryUsage 声明 used。",
         "- API microcompact 要求：如果上下文包含 API microcompact edit plan，回执 apiMicrocompactUsage 或 memoryUsed/memoryIgnored 必须引用 planChecksum，并声明 native_applied/advisory/ignored/not_supported；第三方 CLI 未实际调用 native API context-management 时不得声明 native_applied；声明 native_applied 时还必须填写 apiMicrocompactNativeApplyRequestTelemetry；强证明必须来自 fresh native_request_adapter telemetry，agent_receipt 来源只能算弱证据。",
         "- 压缩候选要求：如果上下文包含压缩后重注入 gate / candidate_id，回执必须在 postCompactCandidateUsage 中逐条声明每个 candidate_id 的 usageState，只能是 used、ignored 或 verified。",
+        "- Provider switch 要求：如果上下文包含 approved Provider switch decision receipt，回执 providerSwitchExecution 必须引用 decisionReceiptId，并填写 expectedProvider、executedProvider、taskAgentSessionId、nativeSessionId、executionId；平台会用实际 runner/session 覆盖并验证该执行证明。",
         "- 回执质量要求：status=done 只有在目标覆盖、文件/产出和验证证据都齐全时才能写；缺文件、缺验证、仍有依赖或不确定时写 blocked/needs_info/partial。",
         "- ACK 结构要求：CCM_AGENT_RECEIPT 中必须包含 ack 对象，字段包括 understoodGoal、plannedScope、forbiddenScope、verificationPlan、unclear；如果不清楚，unclear 必须列出问题且 status 不得写 done。",
         "- contractChanges 结构要求：如果涉及接口、字段、schema、路由、类型、配置或前后端契约变化，CCM_AGENT_RECEIPT 中必须包含 contractChanges 数组，写明 type、endpoint/path、request、response、fields、consumers、note。",
         "- contract injection 消费要求：如果工作单包含 injection_id，回执必须写 consumedInjectionIds，并说明是否已适配、无需适配或仍阻塞。",
-        "- 回执要求：回复末尾必须包含 JSON 格式 CCM_AGENT_RECEIPT，写明 status、summary、actions、filesChanged、verification、blockers、needs、ack、contractChanges、consumedInjectionIds、memoryUsed、memoryIgnored、globalMemoryUsage、apiMicrocompactUsage、apiMicrocompactNativeApplyRequestTelemetry、postCompactCandidateUsage。",
+        "- 回执要求：回复末尾必须包含 JSON 格式 CCM_AGENT_RECEIPT，写明 status、summary、actions、filesChanged、verification、blockers、needs、ack、contractChanges、consumedInjectionIds、memoryUsed、memoryIgnored、globalMemoryUsage、apiMicrocompactUsage、apiMicrocompactNativeApplyRequestTelemetry、postCompactCandidateUsage、providerSwitchExecution。",
     ].filter(Boolean).join("\n");
 }
 function getTaskById(taskId) {
@@ -8188,6 +8220,55 @@ function appendTaskGroupReport(task, status, detail = "") {
         delivery_summary: task.delivery_summary || null,
         delivery_report: deliveryReport,
     });
+}
+function buildTaskProviderSwitchRequests(task = {}) {
+    const overrides = task?.runtime_overrides && typeof task.runtime_overrides === "object"
+        ? task.runtime_overrides
+        : {};
+    const requests = {};
+    for (const [project, provider] of Object.entries(overrides)) {
+        const requestedAgentType = String(provider || "").trim();
+        if (!requestedAgentType)
+            continue;
+        requests[String(project || "*")] = {
+            requested_agent_type: requestedAgentType,
+            compatibility_confirmed: true,
+            compatibility_evidence: [
+                `task-local runtime override targets provider ${requestedAgentType}`,
+                `project scope ${project || "*"} remains unchanged`,
+                "existing project workDir and configured provider candidate must pass the provider-switch gate",
+            ],
+            reason: "task-local runtime override selected for this child-agent dispatch",
+            authority: {
+                kind: "task_runtime_override",
+                authority_id: String(task.id || task.task_id || ""),
+                approved: true,
+                local_policy_authority: true,
+                allow_switch_away_from_held_provider: true,
+            },
+        };
+    }
+    const wildcard = String(task?.runtime_override || "").trim();
+    if (wildcard && !requests["*"]) {
+        requests["*"] = {
+            requested_agent_type: wildcard,
+            compatibility_confirmed: true,
+            compatibility_evidence: [
+                `task-local runtime override targets provider ${wildcard}`,
+                "project scope remains unchanged",
+                "existing project workDir and configured provider candidate must pass the provider-switch gate",
+            ],
+            reason: "task-local wildcard runtime override selected for this child-agent dispatch",
+            authority: {
+                kind: "task_runtime_override",
+                authority_id: String(task.id || task.task_id || ""),
+                approved: true,
+                local_policy_authority: true,
+                allow_switch_away_from_held_provider: true,
+            },
+        };
+    }
+    return requests;
 }
 function appendLegacyTaskExecutionGroupReport(input) {
     if (!input.groupId || !input.task)
@@ -8520,6 +8601,17 @@ function extractStructuredAssignments(result, group, sourceProject = "") {
             replay_repair_dispatch_brief: item?.replay_repair_dispatch_brief || item?.replayRepairDispatchBrief || null,
             replayRepairDispatchBrief: item?.replayRepairDispatchBrief || item?.replay_repair_dispatch_brief || null,
             worker_context_packet: item?.worker_context_packet || item?.workerContextPacket || null,
+            agentType: item?.agentType || item?.agent_type || "",
+            agent_type: item?.agent_type || item?.agentType || "",
+            original_agent_type: item?.original_agent_type || item?.originalAgentType || "",
+            provider_switch_decision_receipt: item?.provider_switch_decision_receipt
+                || item?.providerSwitchDecisionReceipt
+                || item?.worker_context_packet?.provider_switch_decision_receipt
+                || null,
+            providerSwitchDecisionReceipt: item?.providerSwitchDecisionReceipt
+                || item?.provider_switch_decision_receipt
+                || item?.workerContextPacket?.providerSwitchDecisionReceipt
+                || null,
             structured: true,
         });
     }
@@ -8916,7 +9008,23 @@ function parseFormattedReceiptsFromText(text) {
         const status = getLine("状态");
         if (!status)
             continue;
+        const markerIndex = section.lastIndexOf("CCM_AGENT_RECEIPT");
+        const receiptArea = markerIndex >= 0 ? section.slice(markerIndex) : "";
+        const rawReceipt = receiptArea
+            ? [...receiptArea.matchAll(/```(?:json)?\s*([\s\S]*?)```/gi)]
+                .map(match => {
+                try {
+                    return JSON.parse(match[1].trim());
+                }
+                catch {
+                    return null;
+                }
+            })
+                .filter((item) => item && typeof item === "object")
+                .at(-1) || null
+            : null;
         receipts.push({
+            ...(rawReceipt || {}),
             agent,
             status,
             summary: getLine("摘要"),
@@ -9245,6 +9353,12 @@ function independentReviewVerdictState(value) {
         .replace(/无.{0,12}(?:阻塞|问题|风险|缺陷)/g, "")
         .replace(/\bno\s+(?:blocking\s+)?(?:blockers?|issues?|risks?|critical\s+issues?)\b/g, "")
         .replace(/\bwithout\s+(?:blocking\s+)?(?:blockers?|issues?|risks?)\b/g, "");
+    if (/needs?[_\s-]*recheck|recheck|需复验|重新复验|重新验证|复核.{0,18}(?:未闭环|没有闭环)|证据.{0,18}(?:未闭环|没有闭环)/.test(normalized))
+        return "needs_recheck";
+    if (/needs?[_\s-]*environment|补齐环境|补充环境|环境.{0,18}(?:阻塞|不足|缺失)|登录条件.{0,18}(?:阻塞|不足|缺失)|运行条件.{0,18}(?:阻塞|不足|缺失)/.test(normalized))
+        return "needs_environment";
+    if (/needs?[_\s-]*(?:human|user)|需要人工确认|等待用户确认|等你确认|待确认/.test(normalized))
+        return "needs_user";
     if (/fail|failed|reject|rejected|block|blocked|问题|风险未解决|不通过|未通过|拒绝|阻塞/.test(riskText))
         return "failed";
     if (/pass|passed|approve|approved|lgtm|ok|success|通过|批准|已复核|无阻塞|无高风险/.test(normalized))
@@ -9312,7 +9426,7 @@ function collectIndependentReviewEvidence(receipts = [], agentQa = []) {
             if (normalized)
                 evidence.push(normalized);
         }
-        if (/review|verifier|verification|qa|tester|审查|复核|验证/i.test(String(receipt?.role || ""))) {
+        if (reviewItems.length === 0 && /review|verifier|verification|qa|tester|审查|复核|验证/i.test(String(receipt?.role || ""))) {
             const normalized = normalizeIndependentReviewEntry({
                 reviewer: receipt?.reviewer || receipt?.agent,
                 verdict: receipt?.status === "done" ? "passed" : receipt?.status,
@@ -9341,14 +9455,27 @@ function collectIndependentReviewEvidence(receipts = [], agentQa = []) {
         if (normalized)
             evidence.push(normalized);
     }
-    const seen = new Set();
-    return evidence.filter((item) => {
-        const key = `${item.source}|${item.reviewer}|${item.requester}|${item.verdict}|${item.summary}`;
-        if (seen.has(key))
-            return false;
-        seen.add(key);
-        return true;
-    }).slice(0, 20);
+    const latestReviewKeys = new Set();
+    const exactKeys = new Set();
+    const latestEvidence = [];
+    for (const item of [...evidence].reverse()) {
+        const reviewer = String(item?.reviewer || "").trim().toLowerCase();
+        const subject = String(item?.reviewSubject || "").trim().toLowerCase();
+        const reviewKey = reviewer && subject ? `${reviewer}|${subject}` : "";
+        if (reviewKey) {
+            if (latestReviewKeys.has(reviewKey))
+                continue;
+            latestReviewKeys.add(reviewKey);
+        }
+        else {
+            const exactKey = `${item.source}|${item.reviewer}|${item.requester}|${item.verdict}|${item.summary}`;
+            if (exactKeys.has(exactKey))
+                continue;
+            exactKeys.add(exactKey);
+        }
+        latestEvidence.push(item);
+    }
+    return latestEvidence.reverse().slice(0, 20);
 }
 function buildIndependentReviewGate(task, actualFileChanges = [], receipts = [], agentQa = []) {
     const highRiskFiles = (actualFileChanges || []).filter(changeLooksHighRiskForIndependentReview);
@@ -9361,18 +9488,40 @@ function buildIndependentReviewGate(task, actualFileChanges = [], receipts = [],
     const evidence = collectIndependentReviewEvidence(receipts, agentQa);
     const failedEvidence = evidence.filter((item) => item.status === "failed");
     const passedEvidence = evidence.filter((item) => item.status === "passed");
+    const recheckEvidence = evidence.filter((item) => item.status === "needs_recheck");
+    const environmentEvidence = evidence.filter((item) => item.status === "needs_environment");
+    const needsUserEvidence = evidence.filter((item) => item.status === "needs_user");
+    const hasPendingEvidence = recheckEvidence.length > 0 || environmentEvidence.length > 0 || needsUserEvidence.length > 0;
     return {
         required,
-        pass: !required || (passedEvidence.length > 0 && failedEvidence.length === 0),
-        status: !required ? "not_required" : passedEvidence.length > 0 && failedEvidence.length === 0 ? "passed" : failedEvidence.length ? "failed" : "missing",
+        pass: !required || (passedEvidence.length > 0 && failedEvidence.length === 0 && !hasPendingEvidence),
+        status: !required
+            ? "not_required"
+            : failedEvidence.length
+                ? "failed"
+                : recheckEvidence.length
+                    ? "needs_recheck"
+                    : environmentEvidence.length
+                        ? "needs_environment"
+                        : needsUserEvidence.length
+                            ? "needs_user"
+                            : passedEvidence.length
+                                ? "passed"
+                                : "missing",
         reason: reasons.join("；") || (required ? "复杂代码变更需要另一个 Agent 复核" : "本次变更不强制独立复核"),
         file_change_count: actualFileChanges.length,
         high_risk_files: highRiskFiles.map((item) => ({ project: item.project || item.agent || "", path: item.path || "" })).slice(0, 12),
         evidence_count: evidence.length,
         passed_count: passedEvidence.length,
         failed_count: failedEvidence.length,
+        needs_recheck_count: recheckEvidence.length,
+        needs_environment_count: environmentEvidence.length,
+        needs_user_count: needsUserEvidence.length,
         evidence,
         failed_evidence: failedEvidence,
+        recheck_evidence: recheckEvidence,
+        environment_evidence: environmentEvidence,
+        needs_user_evidence: needsUserEvidence,
     };
 }
 function buildAcceptanceGate(task, execution, summary, finalStatus) {
@@ -9404,6 +9553,7 @@ function buildAcceptanceGate(task, execution, summary, finalStatus) {
         { id: "required_verification", label: "项目验证命令覆盖", ok: !taskRequiresVerification(task) || summary.verification_required_gate_passed !== false, detail: summary.verification_required_missing?.length ? `缺 ${summary.verification_required_missing.length} 项` : "已覆盖" },
         { id: "verification_source", label: "独立 Runner 验证来源", ok: !taskRequiresVerification(task) || summary.verification_source_gate_passed === true, detail: `外部 Runner ${summary.external_runner_verification_count || 0} 条` },
         { id: "independent_review", label: "复杂变更独立复核", ok: summary.independent_review_required !== true || summary.independent_review_gate_passed === true, detail: summary.independent_review_required ? `${summary.independent_review_gate?.status || "missing"}；证据 ${summary.independent_review_gate?.evidence_count || 0} 条` : "未触发" },
+        { id: "post_review_spot_check", label: "TestAgent 通过后抽查", ok: summary.post_review_spot_check_required !== true || summary.post_review_spot_check_gate_passed === true, detail: summary.post_review_spot_check_required ? `${summary.post_review_spot_check_gate?.status || "missing"}；抽查 ${summary.post_review_spot_check?.executed_count || 0} 项` : "未触发" },
         { id: "agent_qa", label: "Agent 协作问答", ok: !taskRequiresAgentQa(task) || summary.agent_qa_gate_passed === true, detail: taskRequiresAgentQa(task) ? `问答 ${summary.agent_qa_count || 0}，采纳 ${summary.agent_qa_accepted_count || 0}，续跑 ${summary.agent_qa_resumed_count || 0}` : "未要求" },
         { id: "team_shutdown", label: "团队收尾", ok: finalStatus !== "done" || summary.team_shutdown?.pass === true, detail: finalStatus === "done" ? `开放会话 ${summary.team_shutdown?.open_session_count || 0}，未完成工作项 ${summary.team_shutdown?.unresolved_work_item_count || 0}` : "最终交付前检查" },
         { id: "goal_coverage", label: "目标覆盖", ok: finalStatus === "failed" || task?.assign_type !== "group" || (!!summary.has_final_review && !(summary.blockers || []).length && !(summary.blocking_needs || []).length), detail: summary.has_final_review ? "已完成主 Agent 最终复盘" : "等待主 Agent 最终复盘确认目标覆盖" },
@@ -9734,6 +9884,10 @@ function buildDeliverySummary(task, execution, finalStatus) {
     const resumedAgentQa = taskAgentQa.filter((item) => item.status === "resumed" || item.resumed_at);
     const agentQaRequired = taskRequiresAgentQa(task);
     const independentReviewGate = buildIndependentReviewGate(task, actualFileChanges, receiptEvidence, taskAgentQa);
+    const postReviewSpotCheckGate = (0, post_review_spot_check_1.buildPostReviewSpotCheckGate)({
+        required: independentReviewGate.required && independentReviewGate.pass,
+        receipts: receiptEvidence,
+    });
     const headline = finalStatus === "done"
         ? "已完成最终验收"
         : finalStatus === "failed"
@@ -9908,6 +10062,15 @@ function buildDeliverySummary(task, execution, finalStatus) {
         independent_review_gate: independentReviewGate,
         independent_review_gate_passed: independentReviewGate.pass,
         independent_review_evidence: independentReviewGate.evidence,
+        post_review_spot_check_required: postReviewSpotCheckGate.required,
+        post_review_spot_check_gate: postReviewSpotCheckGate,
+        post_review_spot_check_gate_passed: postReviewSpotCheckGate.pass,
+        post_review_spot_check: postReviewSpotCheckGate.latest,
+        post_review_spot_check_summary: postReviewSpotCheckGate.summary,
+        direct_project_review_state: execution?.direct_project_review_state
+            || execution?.directProjectReviewState
+            || task?.delivery_summary?.direct_project_review_state
+            || null,
         blockers,
         needs,
         blocking_needs: blockingNeeds,
@@ -10113,6 +10276,18 @@ function getGroupTaskExecutionStatus(review, coordinatorResult, outputText, task
                 review,
                 detail: `复杂代码变更还缺少独立复核，不能判定完成；原因：${independentReviewGate.reason}`,
                 independentReviewGate,
+            });
+        }
+        const postReviewSpotCheckGate = (0, post_review_spot_check_1.buildPostReviewSpotCheckGate)({
+            required: independentReviewGate.required && independentReviewGate.pass,
+            receipts: childReceipts,
+        });
+        if (postReviewSpotCheckGate.required && !postReviewSpotCheckGate.pass) {
+            return buildGroupResult("waiting", {
+                review,
+                detail: `TestAgent 已通过，但主 Agent 的完成前抽查尚未通过；原因：${postReviewSpotCheckGate.reason}`,
+                independentReviewGate,
+                postReviewSpotCheckGate,
             });
         }
     }
@@ -12502,6 +12677,18 @@ function buildEvidenceGateFollowUps(group, outputs) {
             continue;
         const notificationStatus = (0, agent_notifications_1.extractTaskNotificationTag)(text, "status");
         const status = (0, agent_notifications_1.getCollectedOutputReceiptStatus)(text);
+        const receipt = parseFormattedReceiptsFromText(text)[0];
+        const structuredTestAgentReview = isCoordinatorTestAgentName(agent)
+            && !!(receipt?.testAgentReport
+                || receipt?.test_agent_report
+                || receipt?.testAgentHandoff
+                || receipt?.test_agent_handoff
+                || receipt?.independentReview
+                || receipt?.independent_review);
+        if (structuredTestAgentReview) {
+            seen.add(agent);
+            continue;
+        }
         if (notificationStatus === "missing_receipt" || text.includes("结构化回执：缺失")) {
             seen.add(agent);
             followUps.push({
@@ -12526,7 +12713,6 @@ function buildEvidenceGateFollowUps(group, outputs) {
             });
             continue;
         }
-        const receipt = parseFormattedReceiptsFromText(text)[0];
         const verificationGate = getVerificationEvidenceGate(receipt ? [receipt] : []);
         if (status === "done" && !verificationGate.pass) {
             seen.add(agent);
@@ -12586,6 +12772,88 @@ function inferIndependentReviewSubject(input) {
     const candidates = uniqueStrings(highRiskProjects, changedProjects, receiptAgents, assignedProjects, input.task?.target_project || input.task?.targetProject || "").filter((item) => !isReviewLikeAgentName(item));
     return candidates[0] || uniqueStrings(changedProjects, receiptAgents, assignedProjects)[0] || "";
 }
+function getReceiptTestAgentVerdict(receipt) {
+    return receipt?.testAgentReport?.verdict
+        || receipt?.test_agent_report?.verdict
+        || receipt?.testAgentVerdict
+        || receipt?.test_agent_verdict
+        || null;
+}
+function getReceiptTestAgentHandoff(receipt) {
+    return receipt?.testAgentHandoff
+        || receipt?.test_agent_handoff
+        || receipt?.testAgentReport?.testAgentHandoff
+        || receipt?.test_agent_report?.test_agent_handoff
+        || null;
+}
+function getReceiptIndependentReviewSubject(receipt, fallback = "") {
+    const handoff = getReceiptTestAgentHandoff(receipt);
+    const reviews = [
+        ...(Array.isArray(receipt?.independentReview) ? receipt.independentReview : []),
+        ...(Array.isArray(receipt?.independent_review) ? receipt.independent_review : []),
+    ];
+    return String(getTestAgentHandoffReviewSubject(handoff)
+        || reviews[0]?.reviewSubject
+        || reviews[0]?.review_subject
+        || receipt?.reviewSubject
+        || receipt?.review_subject
+        || fallback
+        || "").trim();
+}
+function findLatestTestAgentReviewReceipt(receipts = [], route = "") {
+    return [...(receipts || [])].reverse().find((receipt) => {
+        const verdict = getReceiptTestAgentVerdict(receipt);
+        const reviewState = independentReviewVerdictState([
+            verdict?.reviewRoute,
+            verdict?.status,
+            verdict?.recommendation,
+            receipt?.status,
+            ...(Array.isArray(receipt?.independentReview) ? receipt.independentReview.map((item) => item?.verdict || item?.status || item?.summary) : []),
+            ...(Array.isArray(receipt?.independent_review) ? receipt.independent_review.map((item) => item?.verdict || item?.status || item?.summary) : []),
+        ].filter(Boolean).join("\n"));
+        if (route === "needs_recheck")
+            return verdict?.needsRecheck === true || verdict?.reviewRoute === "test_agent_recheck" || reviewState === "needs_recheck";
+        if (route === "needs_environment")
+            return verdict?.needsEnvironment === true || verdict?.reviewRoute === "environment" || reviewState === "needs_environment";
+        if (route === "failed")
+            return verdict?.needsRework === true || verdict?.reviewRoute === "implementation_rework" || reviewState === "failed";
+        return !!verdict || isCoordinatorTestAgentName(receipt?.reviewer || receipt?.agent);
+    }) || null;
+}
+function buildTestAgentReviewRecheckFollowUp(input) {
+    const subject = String(input.subject || "").trim();
+    if (!subject)
+        return null;
+    const handoff = input.handoff || null;
+    return {
+        mention: handoff ? "@test-agent" : `@${subject}`,
+        targetName: handoff ? "test-agent" : subject,
+        project: handoff ? "test-agent" : subject,
+        summary: "重新运行 TestAgent 复验",
+        message: [
+            `${subject} 的实现或复核条件已更新，请重新执行 TestAgent 独立复核。`,
+            "必须基于最新文件、最新运行环境和最新真实输出重新判断；不要复用上一轮结论。",
+            "重点补齐上一轮未闭环的操作效果、会话恢复、边界异常或完成前抽查证据。",
+            "如果仍无法验证，请明确返回需复验、补条件或待确认；只有新证据完整通过后才能接受交付。",
+        ].join("\n"),
+        reason: input.reason || "上一轮交付或复核条件已更新，需要 TestAgent 基于最新状态重新验证",
+        rework_kind: "test_agent_review_recheck",
+        testAgentReviewRecheck: true,
+        test_agent_review_recheck: true,
+        reviewSubject: subject,
+        originalTarget: subject,
+        independentReviewGate: handoff ? null : {
+            required: true,
+            pass: false,
+            status: "needs_recheck",
+            reason: input.reason || "需要重新运行独立 TestAgent 复核",
+        },
+        testAgentHandoff: handoff,
+        test_agent_handoff: handoff,
+        userTaskPreview: `重新复验 ${subject}：基于最新状态运行 TestAgent`,
+        source: input.source || "test_agent_review_recheck",
+    };
+}
 function buildIndependentReviewGateFollowUps(input) {
     const task = input.task || getTaskById(input.taskId || "");
     if (!task || task.assign_type !== "group")
@@ -12603,13 +12871,55 @@ function buildIndependentReviewGateFollowUps(input) {
     const existingText = (input.existingFollowUps || [])
         .map((item) => [item?.summary, item?.reason, item?.message, item?.task, item?.rework_kind, item?.kind].filter(Boolean).join("\n"))
         .join("\n");
-    if (/独立.{0,12}(?:验证|复核|检查)|(?:非|不是)原实现者|request_review|fresh\s+verifier|independent\s+(?:verification|review)|code\s+review/i.test(existingText)) {
-        return [];
-    }
     const assignmentEvidence = collectTaskAssignmentEvidence(task, input.execution || {});
     const subject = inferIndependentReviewSubject({ task, actualFileChanges, receipts, assignmentEvidence });
     if (!subject)
         return [];
+    if (gate.status === "needs_recheck") {
+        if (/test_agent_review_recheck|重新运行\s*TestAgent|重新复验/i.test(existingText))
+            return [];
+        const sourceReceipt = findLatestTestAgentReviewReceipt(receipts, "needs_recheck");
+        const recheck = buildTestAgentReviewRecheckFollowUp({
+            subject: getReceiptIndependentReviewSubject(sourceReceipt, subject),
+            reason: gate.recheck_evidence?.[0]?.summary || gate.reason || "TestAgent 复核证据尚未闭环",
+            handoff: getReceiptTestAgentHandoff(sourceReceipt),
+            source: "independent_review_needs_recheck",
+        });
+        return recheck ? [recheck] : [];
+    }
+    if (gate.status === "needs_environment") {
+        if (/test_agent_environment_prepare|补齐.{0,12}(?:环境|登录|运行条件)/i.test(existingText))
+            return [];
+        const sourceReceipt = findLatestTestAgentReviewReceipt(receipts, "needs_environment");
+        const carriedHandoff = getReceiptTestAgentHandoff(sourceReceipt);
+        const reviewSubject = getReceiptIndependentReviewSubject(sourceReceipt, subject);
+        return [{
+                mention: `@${reviewSubject}`,
+                targetName: reviewSubject,
+                project: reviewSubject,
+                summary: "补齐 TestAgent 复核条件",
+                message: [
+                    `TestAgent 暂时无法完成 ${reviewSubject} 的独立复核，当前缺少环境、登录或运行条件。`,
+                    "请只补齐复核所需条件并确认服务可运行、测试账号可用或必要配置已生效；不要把环境准备误写成业务代码已经通过。",
+                    "完成后提交 CCM_AGENT_RECEIPT，明确补齐了什么条件、如何确认可用、是否仍需用户提供信息。",
+                    "主 Agent 收到可用结果后会自动沿用原复核工作单重新运行 TestAgent。",
+                ].join("\n"),
+                reason: gate.environment_evidence?.[0]?.summary || gate.reason || "TestAgent 复核受环境、登录或运行条件阻塞",
+                rework_kind: "test_agent_environment_prepare",
+                testAgentEnvironmentPreparation: true,
+                test_agent_environment_preparation: true,
+                rerunTestAgentAfterCompletion: true,
+                rerun_test_agent_after_completion: true,
+                reviewSubject,
+                originalTarget: reviewSubject,
+                testAgentRecheckHandoff: carriedHandoff,
+                test_agent_recheck_handoff: carriedHandoff,
+                userTaskPreview: `补齐 ${reviewSubject} 的复核环境，完成后自动重新运行 TestAgent`,
+            }];
+    }
+    if (/独立.{0,12}(?:验证|复核|检查)|(?:非|不是)原实现者|request_review|fresh\s+verifier|independent\s+(?:verification|review)|code\s+review/i.test(existingText)) {
+        return [];
+    }
     const highRiskFiles = (gate.high_risk_files || []).map((item) => item.path || "").filter(Boolean).slice(0, 5);
     const reason = gate.reason || "复杂代码变更需要另一个 Agent 复核";
     return [{
@@ -12644,6 +12954,8 @@ function buildFailedIndependentReviewReworkFollowUps(input) {
         return [];
     const assignmentEvidence = collectTaskAssignmentEvidence(task, input.execution || {});
     const fallbackSubject = inferIndependentReviewSubject({ task, actualFileChanges, receipts, assignmentEvidence });
+    const sourceReviewReceipt = findLatestTestAgentReviewReceipt(receipts, "failed");
+    const sourceTestAgentHandoff = getReceiptTestAgentHandoff(sourceReviewReceipt);
     const routable = new Set((0, group_orchestrator_1.getRoutableMembers)(input.group).map((member) => String(member?.project || "").trim()).filter(Boolean));
     const existingFollowUps = Array.isArray(input.existingFollowUps) ? input.existingFollowUps : [];
     const targetFromEvidence = (item) => {
@@ -12682,19 +12994,109 @@ function buildFailedIndependentReviewReworkFollowUps(input) {
                 findingLines.length ? "复核发现：" : "",
                 ...findingLines.map((line) => `- ${line}`),
                 "返工要求：修复根因，不只改表面现象；补跑与失败点相关的最小必要验证；在结果说明里写清楚修复内容、验证结果和剩余风险。",
-                "下一步：返工后重新运行 TestAgent 复核，只有复核通过后主 Agent 才能给用户做完成总结。",
+                "下一步：返工完成后，主 Agent 会自动沿用原工作单重新运行 TestAgent 复核；只有复核通过后才能给用户做完成总结。",
             ].filter(Boolean).join("\n"),
             reason,
             rework_kind: "test_agent_failed_review_rework",
             reviewFailed: true,
             reviewSubject: target,
             originalTarget: target,
+            rerunTestAgentAfterCompletion: true,
+            rerun_test_agent_after_completion: true,
+            testAgentRecheckHandoff: sourceTestAgentHandoff,
+            test_agent_recheck_handoff: sourceTestAgentHandoff,
             failedReviewGate: gate,
             failedReviewEvidence: failures,
             userTaskPreview: `返工 ${target}：复核未通过，修复后重新复核`,
         });
     }
     return (0, memory_1.uniqueByKey)(followUps, (item) => `${String(item?.targetName || item?.project || "").trim()}|test_agent_failed_review_rework`, 12);
+}
+function buildPostReviewSpotCheckFollowUps(input) {
+    const task = input.task || getTaskById(input.taskId || "");
+    if (!task || task.assign_type !== "group")
+        return [];
+    const outputText = (input.outputs || []).filter(Boolean).join("\n\n---\n\n");
+    const receipts = [
+        ...(Array.isArray(input.execution?.receipt) ? input.execution.receipt : input.execution?.receipt ? [input.execution.receipt] : []),
+        ...parseFormattedReceiptsFromText(outputText),
+    ].filter(Boolean);
+    const actualFileChanges = collectTaskActualFileChanges(task, input.execution || {});
+    const agentQa = task.group_id ? (0, agent_qa_service_1.getAgentQaItemsForGroup)(task.group_id).filter((item) => !task.id || item.task_id === task.id) : [];
+    const independentReviewGate = buildIndependentReviewGate(task, actualFileChanges, receipts, agentQa);
+    const spotCheckGate = (0, post_review_spot_check_1.buildPostReviewSpotCheckGate)({
+        required: independentReviewGate.required && independentReviewGate.pass,
+        receipts,
+    });
+    if (!spotCheckGate.required || spotCheckGate.pass)
+        return [];
+    const existingText = (input.existingFollowUps || [])
+        .map((item) => [item?.summary, item?.reason, item?.message, item?.task, item?.rework_kind, item?.kind].filter(Boolean).join("\n"))
+        .join("\n");
+    if (/post_review_spot_check|完成前抽查.{0,24}(?:重新复验|补齐|不一致)|TestAgent.{0,24}重新判断/i.test(existingText))
+        return [];
+    const sourceReceipt = receipts.find((receipt) => receipt?.post_review_spot_check
+        || receipt?.postReviewSpotCheck
+        || receipt?.testAgentHandoff
+        || receipt?.test_agent_handoff) || null;
+    const carriedHandoff = sourceReceipt?.testAgentHandoff || sourceReceipt?.test_agent_handoff || null;
+    const assignmentEvidence = collectTaskAssignmentEvidence(task, input.execution || {});
+    const subject = String(carriedHandoff?.review_subject
+        || carriedHandoff?.reviewSubject
+        || sourceReceipt?.reviewSubject
+        || sourceReceipt?.review_subject
+        || sourceReceipt?.independentReview?.[0]?.reviewSubject
+        || inferIndependentReviewSubject({ task, actualFileChanges, receipts, assignmentEvidence })
+        || task?.target_project
+        || "").trim();
+    if (!subject)
+        return [];
+    const reason = spotCheckGate.reason || "TestAgent 通过后，主 Agent 的关键验证抽查尚未通过";
+    if (carriedHandoff) {
+        return [{
+                mention: "@test-agent",
+                targetName: "test-agent",
+                project: "test-agent",
+                summary: "完成前抽查需要 TestAgent 重新复验",
+                message: [
+                    `TestAgent 已对 ${subject} 给出通过结论，但主 Agent 的完成前抽查尚未一致。`,
+                    "请沿用原复核工作单重新执行验证，并根据最新真实输出重新判断；不要复用上一轮 PASS。",
+                    "如果重新执行失败，请明确返回失败或需要返工；如果仍然通过，请返回新的命令结果块和实际输出，供主 Agent 再次抽查。",
+                ].join("\n"),
+                reason,
+                rework_kind: "post_review_spot_check_reverify",
+                postReviewSpotCheckReverify: true,
+                postReviewSpotCheckGate: spotCheckGate,
+                reviewSubject: subject,
+                originalTarget: subject,
+                testAgentHandoff: carriedHandoff,
+                test_agent_handoff: carriedHandoff,
+                userTaskPreview: `重新复验 ${subject}：完成前抽查尚未一致`,
+            }];
+    }
+    return [{
+            mention: `@${subject}`,
+            targetName: subject,
+            project: subject,
+            summary: "补齐 TestAgent 通过后的完成前抽查",
+            message: [
+                `主 Agent 已收到 ${subject} 的独立复核通过结论，但还没有可供主 Agent 重跑的完整命令结果。`,
+                "请重新发起独立 TestAgent 复核，确保通过报告包含实际执行的命令、退出状态和输出；主 Agent 会在 PASS 后抽查关键验证。",
+            ].join("\n"),
+            reason,
+            rework_kind: "post_review_spot_check_missing",
+            independentReviewGate: {
+                ...independentReviewGate,
+                required: true,
+                pass: false,
+                status: "missing",
+                reason,
+            },
+            postReviewSpotCheckGate: spotCheckGate,
+            reviewSubject: subject,
+            originalTarget: subject,
+            userTaskPreview: `补齐完成前抽查：重新复核 ${subject}`,
+        }];
 }
 function buildCodedCoordinatorReview(group, outputs, options = {}) {
     const coordinator = (0, group_orchestrator_1.getCoordinatorMember)(group);
@@ -13093,7 +13495,22 @@ async function processCrossAgents(groupId, group, sourceProject, output, atMenti
             || sourceTask?.runtime_overrides?.["*"]
             || sourceTask?.runtime_override
             || "").trim();
-        tAgentType = nativeTestAgentDispatch ? "test-agent-native" : (taskRuntimeOverride || runtime?.agentType || targetMember.agent || "claudecode");
+        const providerSwitchDecisionReceipt = typeof mention === "string"
+            ? null
+            : mention.provider_switch_decision_receipt
+                || mention.providerSwitchDecisionReceipt
+                || mention.worker_context_packet?.provider_switch_decision_receipt
+                || mention.workerContextPacket?.providerSwitchDecisionReceipt
+                || null;
+        const approvedSwitchAgentType = providerSwitchDecisionReceipt?.schema === "ccm-provider-switch-decision-receipt-v1"
+            && providerSwitchDecisionReceipt.valid === true
+            && providerSwitchDecisionReceipt.status === "approved"
+            ? String(providerSwitchDecisionReceipt.new_provider?.agent_type || providerSwitchDecisionReceipt.newProvider?.agentType || "").trim()
+            : "";
+        const providerSwitchAttempted = providerSwitchDecisionReceipt?.schema === "ccm-provider-switch-decision-receipt-v1";
+        tAgentType = nativeTestAgentDispatch
+            ? "test-agent-native"
+            : (approvedSwitchAgentType || (!providerSwitchAttempted ? taskRuntimeOverride : "") || runtime?.agentType || targetMember.agent || "claudecode");
         const reworkRoute = getMentionReworkRoute(mention);
         const routeStopResult = coordinatorReworkRouteRequiresStop(reworkRoute)
             ? stopWrongDirectionWorkerForCoordinatorRoute({
@@ -13113,6 +13530,29 @@ async function processCrossAgents(groupId, group, sourceProject, output, atMenti
             project: targetName,
             agentType: tAgentType,
         }) : null;
+        const providerSwitchSessionBinding = approvedSwitchAgentType
+            ? (0, group_orchestrator_1.recordWorkerContextProviderSwitchSessionBindingForCoordinator)(groupId, {
+                assignment_id: typeof mention === "string" ? "" : mention.assignmentId || mention.assignment_id || "",
+                dispatch_key: typeof mention === "string" ? "" : mention.dispatchKey || mention.dispatch_key || "",
+                worker_context_packet_id: typeof mention === "string" ? "" : mention.worker_context_packet?.packet_id || mention.workerContextPacket?.packet_id || "",
+                provider_switch_decision_receipt: providerSwitchDecisionReceipt,
+                project: targetName,
+                agent_type: tAgentType,
+                task_agent_session_id: activeTaskSession?.id || "",
+                native_session_id: activeTaskSession?.nativeSessionId || "",
+                execution_id: taskId ? `${taskId}--${targetName}` : "",
+            })
+            : null;
+        if (approvedSwitchAgentType && providerSwitchSessionBinding?.status !== "bound") {
+            return failChildDispatch("Provider switch child session binding failed", [
+                ...(Array.isArray(providerSwitchSessionBinding?.gaps) ? providerSwitchSessionBinding.gaps : ["provider switch session binding missing"]),
+                "重新生成 fresh provider reliability snapshot 和 provider switch decision receipt 后再派发",
+            ]);
+        }
+        if (providerSwitchSessionBinding && typeof mention !== "string") {
+            mention.provider_switch_session_binding = providerSwitchSessionBinding;
+            mention.providerSwitchSessionBinding = providerSwitchSessionBinding;
+        }
         if (activeTaskSession) {
             (0, logs_1.addTaskLog)(taskId, "info", `${targetName} ${activeTaskSession.turnCount > 0 ? "恢复" : "创建"}任务级原生会话（${activeTaskSession.agentType}，第 ${activeTaskSession.turnCount + 1} 轮）`);
             (0, logs_1.appendTaskTimelineEvent)(taskId, {
@@ -13185,6 +13625,7 @@ async function processCrossAgents(groupId, group, sourceProject, output, atMenti
         const isContinuation = !!continuationStrategy || (typeof mention !== "string" && !!mention.rework);
         const continuationUserLabel = reworkRoute?.user_label || reworkRoute?.userLabel || (coordinatorReworkRouteRequiresStop(reworkRoute) ? "停止旧方向后继续" : "同 Worker 续跑");
         const isFreshVerifierContinuation = coordinatorReworkRouteNeedsFreshVerifier(reworkRoute);
+        const isVerifierContinuation = coordinatorReworkRouteUsesVerifier(reworkRoute);
         if (taskId)
             claimTaskWorkItemForAgent(taskId, targetName, `${targetName} 已开始执行：${(0, memory_1.compactMemoryText)(atMessage, 180)}`);
         emitAssignmentStatus(streamRes, groupId, planMessageId, targetName, "running", "执行中");
@@ -13259,13 +13700,15 @@ async function processCrossAgents(groupId, group, sourceProject, output, atMenti
             : groupMemoryBundle;
         const dependencyOutputPacket = buildDependencyOutputPacket(mention, targetName);
         const continuationNotice = isContinuation ? [
-            isFreshVerifierContinuation ? "独立复核提示：" : "Worker 续跑提示：",
-            isFreshVerifierContinuation
-                ? `- 本次任务是主 Agent 验收后的独立复核，执行 Agent：${targetName}；复核对象：${continuationOf || targetName}。`
+            isVerifierContinuation ? "独立复验提示：" : "Worker 续跑提示：",
+            isVerifierContinuation
+                ? `- 本次任务是主 Agent 验收后的独立复验，执行 Agent：${targetName}；复核对象：${continuationOf || targetName}。`
                 : `- 本次任务是主 Agent 验收后的同 Worker 续跑/返工，目标 Worker：${continuationOf || targetName}。`,
             `- 处理方式：${continuationUserLabel}。`,
-            isFreshVerifierContinuation
-                ? "- 你需要独立核对原实现者的交付证据、实际文件变化、验证记录和剩余风险；不要只复述原实现者结论。"
+            isVerifierContinuation
+                ? isFreshVerifierContinuation
+                    ? "- 你需要用新的验证视角核对原实现者的交付证据、实际文件变化、验证记录和剩余风险；不要只复述原实现者结论。"
+                    : "- 你需要沿用原复核边界，但必须重新执行并核对最新证据；不要复用上一轮通过、失败或受阻结论。"
                 : coordinatorReworkRouteRequiresStop(reworkRoute)
                     ? "- 主 Agent 已检查并停止可能跑偏的旧方向；本轮必须以新工作单为准，不要继续旧方案。"
                     : "- 你必须优先参考上方“协作上下文 / 你自己的 Worker 通知”，承接上一轮结果补齐缺口；不要重复已完成且有证据的工作。",
@@ -13280,6 +13723,7 @@ async function processCrossAgents(groupId, group, sourceProject, output, atMenti
                 context: tContext,
                 source: sourceProject,
                 sharedFilesContext,
+                providerSwitchRequests: buildTaskProviderSwitchRequests(sourceTask),
             });
             const planAssignments = normalizePlanAssignments(result.assignments || []);
             const dispatchPolicy = result.dispatchPolicy || null;
@@ -13641,6 +14085,7 @@ ${childTaskText}
             let targetInvokedSkills = [];
             let testAgentNativeReport = null;
             let testAgentExecutionPlan = null;
+            let testAgentReviewSummary = null;
             let testAgentPlanDispatch = null;
             let testAgentCliDispatch = null;
             if (nativeTestAgentDispatch) {
@@ -13737,14 +14182,69 @@ ${childTaskText}
                         ].filter(Boolean).join("；"));
                     }
                     targetReceipt = buildNativeTestAgentReceipt(targetName, testAgentNativeReport, testAgentHandoffPayload, testAgentExecutionPlan?.metadata?.normalizedWorkOrder || testAgentHandoffPayload);
+                    targetReceipt.testAgentHandoff = testAgentHandoffPayload;
+                    targetReceipt.test_agent_handoff = testAgentHandoffPayload;
+                    if (targetReceipt.status === "done") {
+                        writeSse(streamRes, { type: "status", text: "TestAgent 已通过，我正在抽查关键验证...", agent: targetName });
+                        if (taskId) {
+                            (0, logs_1.appendTaskTimelineEvent)(taskId, {
+                                type: "post_review_spot_check_start",
+                                title: "开始完成前抽查",
+                                detail: "TestAgent 已通过，主 Agent 正在重跑关键验证",
+                                status: "active",
+                                phase: "reviewing",
+                                agent: "main-agent",
+                                data: { report_id: testAgentNativeReport.id, work_order_id: testAgentNativeReport.workOrderId },
+                            });
+                        }
+                        const postReviewSpotCheck = await (0, post_review_spot_check_1.runMainAgentPostReviewSpotCheck)({
+                            report: testAgentNativeReport,
+                            taskId,
+                            projectRoot: testAgentProjectWorkDir || tWorkDir,
+                            required: true,
+                            maxCommands: 3,
+                            timeoutMs: 300000,
+                        });
+                        const postReviewSpotCheckSummary = (0, post_review_spot_check_1.buildPostReviewSpotCheckSummary)(postReviewSpotCheck);
+                        targetReceipt.postReviewSpotCheck = postReviewSpotCheck;
+                        targetReceipt.post_review_spot_check = postReviewSpotCheck;
+                        targetReceipt.postReviewSpotCheckSummary = postReviewSpotCheckSummary;
+                        targetReceipt.post_review_spot_check_summary = postReviewSpotCheckSummary;
+                        if (taskId) {
+                            (0, logs_1.appendTaskTimelineEvent)(taskId, {
+                                type: "post_review_spot_check_ready",
+                                title: "完成前抽查已返回",
+                                detail: postReviewSpotCheckSummary?.headline || postReviewSpotCheck.headline,
+                                status: postReviewSpotCheck.pass ? "ok" : "warn",
+                                phase: "reviewing",
+                                agent: "main-agent",
+                                data: {
+                                    post_review_spot_check_summary: postReviewSpotCheckSummary,
+                                    post_review_spot_check: postReviewSpotCheck,
+                                },
+                            });
+                        }
+                        writeSse(streamRes, {
+                            type: "post_review_spot_check_ready",
+                            taskId,
+                            task_id: taskId,
+                            agent: "main-agent",
+                            detail: postReviewSpotCheckSummary?.headline || postReviewSpotCheck.headline,
+                            status: postReviewSpotCheck.pass ? "ok" : "warn",
+                            postReviewSpotCheckSummary,
+                            post_review_spot_check_summary: postReviewSpotCheckSummary,
+                            technical: { post_review_spot_check: postReviewSpotCheck },
+                        });
+                    }
+                    testAgentReviewSummary = buildNativeTestAgentReviewSummary(targetName, testAgentNativeReport, targetReceipt);
                     tOutput = formatNativeTestAgentOutput(targetName, testAgentNativeReport, targetReceipt, testAgentHandoffPayload);
-                    targetSessionSucceeded = testAgentNativeReport.status === "passed";
-                    targetSessionError = testAgentNativeReport.status === "passed" ? "" : (targetReceipt.blockers || []).join("；");
+                    targetSessionSucceeded = targetReceipt.status === "done";
+                    targetSessionError = targetSessionSucceeded ? "" : (targetReceipt.blockers || []).join("；");
                     targetWorkEvents = [...targetWorkEvents, {
                             id: "we" + Date.now().toString(36) + crypto.randomBytes(2).toString("hex"),
                             time: new Date().toISOString(),
                             agent: targetName,
-                            kind: testAgentNativeReport.status === "passed" ? "tool" : "error",
+                            kind: targetSessionSucceeded ? "tool" : "error",
                             text: targetReceipt.summary,
                             testAgentReport: {
                                 id: testAgentNativeReport.id,
@@ -13756,17 +14256,18 @@ ${childTaskText}
                             },
                         }].slice(-80);
                     if (taskId) {
-                        (0, logs_1.addTaskLog)(taskId, testAgentNativeReport.status === "passed" ? "success" : "warning", `${targetName} TestAgent 原生复核完成：${testAgentNativeReport.status} / ${testAgentNativeReport.recommendation}`);
+                        (0, logs_1.addTaskLog)(taskId, targetSessionSucceeded ? "success" : "warning", `${targetName} TestAgent 原生复核完成：${testAgentNativeReport.status} / ${testAgentNativeReport.recommendation}`);
                         (0, logs_1.appendTaskTimelineEvent)(taskId, {
                             type: "test_agent_native_execution_done",
                             title: `${targetName} 原生复核完成`,
                             detail: targetReceipt.summary,
-                            status: testAgentNativeReport.status === "passed" ? "ok" : "warn",
+                            status: targetSessionSucceeded ? "ok" : "warn",
                             phase: "executing",
                             agent: targetName,
                             data: {
                                 receipt: targetReceipt,
                                 test_agent_report: testAgentNativeReport,
+                                test_agent_review_summary: testAgentReviewSummary,
                                 test_agent_execution_plan: testAgentExecutionPlan,
                                 test_agent_cli_dispatch: {
                                     cliPath: testAgentCliDispatch.cliPath,
@@ -13783,17 +14284,30 @@ ${childTaskText}
                         taskId,
                         task_id: taskId,
                         agent: targetName,
-                        detail: targetReceipt.summary,
-                        status: testAgentNativeReport.status === "passed" ? "ok" : "warn",
+                        detail: testAgentReviewSummary?.headline || targetReceipt.summary,
+                        status: targetSessionSucceeded ? "ok" : "warn",
                         receipt: targetReceipt,
                         testAgentReport: testAgentNativeReport,
                         test_agent_report: testAgentNativeReport,
+                        testAgentVerdict: targetReceipt?.testAgentReport?.verdict || null,
+                        test_agent_verdict: targetReceipt?.testAgentReport?.verdict || null,
+                        testAgentReviewSummary: testAgentReviewSummary,
+                        test_agent_review_summary: testAgentReviewSummary,
+                        independentReviewSummary: testAgentReviewSummary,
+                        independent_review_summary: testAgentReviewSummary,
+                        independentReview: testAgentReviewSummary?.rows || [],
+                        independent_review: testAgentReviewSummary?.rows || [],
+                        postReviewSpotCheckSummary: targetReceipt?.postReviewSpotCheckSummary || null,
+                        post_review_spot_check_summary: targetReceipt?.post_review_spot_check_summary || null,
                         testAgentExecutionPlan: testAgentExecutionPlan,
                         test_agent_execution_plan: testAgentExecutionPlan,
                         technical: {
                             receipt: targetReceipt,
                             test_agent_report: testAgentNativeReport,
+                            test_agent_verdict: targetReceipt?.testAgentReport?.verdict || null,
+                            test_agent_review_summary: testAgentReviewSummary,
                             test_agent_execution_plan: testAgentExecutionPlan,
+                            post_review_spot_check: targetReceipt?.post_review_spot_check || null,
                             test_agent_cli_dispatch: testAgentCliDispatch ? {
                                 cliPath: testAgentCliDispatch.cliPath,
                                 handoffPath: testAgentCliDispatch.handoffPath,
@@ -13820,6 +14334,23 @@ ${childTaskText}
                             }
                             activeTaskSession = taskId ? (0, agent_sessions_1.openTaskAgentSession)({ scopeId: taskId, taskId, groupId, project: targetName, agentType: activeRuntime }) : null;
                             if (activeTaskSession) {
+                                if (providerSwitchDecisionReceipt?.valid === true) {
+                                    const reboundProviderSwitch = (0, group_orchestrator_1.recordWorkerContextProviderSwitchSessionBindingForCoordinator)(groupId, {
+                                        assignment_id: typeof mention === "string" ? "" : mention.assignmentId || mention.assignment_id || "",
+                                        dispatch_key: typeof mention === "string" ? "" : mention.dispatchKey || mention.dispatch_key || "",
+                                        worker_context_packet_id: workerHandoff.worker_context_packet?.packet_id || "",
+                                        provider_switch_decision_receipt: providerSwitchDecisionReceipt,
+                                        project: targetName,
+                                        agent_type: activeRuntime,
+                                        task_agent_session_id: activeTaskSession.id,
+                                        native_session_id: activeTaskSession.nativeSessionId || "",
+                                        execution_id: laneExecutionId,
+                                    });
+                                    if (typeof mention !== "string") {
+                                        mention.provider_switch_session_binding = reboundProviderSwitch;
+                                        mention.providerSwitchSessionBinding = reboundProviderSwitch;
+                                    }
+                                }
                                 const reboundMemorySnapshot = (0, agent_sessions_1.bindTaskAgentMemoryContextSnapshot)(activeTaskSession.id, {
                                     taskId,
                                     groupId,
@@ -14047,6 +14578,58 @@ ${childTaskText}
                     traceId: sourceTask?.trace_id || "",
                     trace_id: sourceTask?.trace_id || "",
                 };
+            }
+            let providerSwitchExecutionReceipt = null;
+            if (targetReceipt && providerSwitchDecisionReceipt?.valid === true) {
+                (0, group_orchestrator_1.recordWorkerContextProviderSwitchSessionBindingForCoordinator)(groupId, {
+                    assignment_id: typeof mention === "string" ? "" : mention.assignmentId || mention.assignment_id || "",
+                    dispatch_key: typeof mention === "string" ? "" : mention.dispatchKey || mention.dispatch_key || "",
+                    worker_context_packet_id: workerHandoff.worker_context_packet?.packet_id || "",
+                    provider_switch_decision_receipt: providerSwitchDecisionReceipt,
+                    project: targetName,
+                    agent_type: activeRuntime,
+                    task_agent_session_id: activeTaskSession?.id || targetReceipt.task_agent_session_id || "",
+                    native_session_id: targetReceipt.native_session_id || targetReceipt.nativeSessionId || targetNativeSessionId || activeTaskSession?.nativeSessionId || "",
+                    execution_id: laneExecutionId,
+                });
+                providerSwitchExecutionReceipt = (0, group_orchestrator_1.recordWorkerContextProviderSwitchExecutionReceiptForCoordinator)(groupId, {
+                    assignment_id: typeof mention === "string" ? "" : mention.assignmentId || mention.assignment_id || "",
+                    dispatch_key: typeof mention === "string" ? "" : mention.dispatchKey || mention.dispatch_key || "",
+                    worker_context_packet_id: workerHandoff.worker_context_packet?.packet_id || "",
+                    provider_switch_decision_receipt: providerSwitchDecisionReceipt,
+                    project: targetName,
+                    executed_provider: activeRuntime,
+                    task_agent_session_id: activeTaskSession?.id || targetReceipt.task_agent_session_id || "",
+                    native_session_id: targetReceipt.native_session_id || targetReceipt.nativeSessionId || targetNativeSessionId || activeTaskSession?.nativeSessionId || "",
+                    execution_id: laneExecutionId,
+                    receipt_status: targetReceipt.status || "",
+                    receipt: targetReceipt,
+                });
+                if (providerSwitchExecutionReceipt) {
+                    targetReceipt = {
+                        ...targetReceipt,
+                        providerSwitchExecution: providerSwitchExecutionReceipt,
+                        provider_switch_execution: providerSwitchExecutionReceipt,
+                        providerSwitchDecisionReceiptId: providerSwitchExecutionReceipt.provider_switch_decision_receipt_id || "",
+                        provider_switch_decision_receipt_id: providerSwitchExecutionReceipt.provider_switch_decision_receipt_id || "",
+                        executedProvider: providerSwitchExecutionReceipt.actually_executed_provider || activeRuntime,
+                        executed_provider: providerSwitchExecutionReceipt.actually_executed_provider || activeRuntime,
+                    };
+                    if (providerSwitchExecutionReceipt.status !== "passed" && targetReceipt.status === "done") {
+                        targetReceipt = {
+                            ...targetReceipt,
+                            status: "partial",
+                            blockers: uniqueStrings([
+                                ...(Array.isArray(targetReceipt.blockers) ? targetReceipt.blockers : []),
+                                `provider switch execution proof failed: ${(providerSwitchExecutionReceipt.gaps || []).join(", ") || "unknown"}`,
+                            ]),
+                            needs: uniqueStrings([
+                                ...(Array.isArray(targetReceipt.needs) ? targetReceipt.needs : []),
+                                "重新派发并确保实际 runner、task Agent session 与 approved provider switch receipt 一致",
+                            ]),
+                        };
+                    }
+                }
             }
             const receiptReplayRepairBindings = targetReceipt ? summarizeReplayRepairTimelineBindingsForEvent(mention, {
                 targetName,
@@ -14956,11 +15539,32 @@ function buildCoordinatorReworkRoutingDecision(item, input = {}) {
     if (wrongDirection) {
         return route("stop_wrong_direction_then_continue", "stop_wrong_direction_then_continue", "停止旧方向并按新要求继续", "检测到目标或方案方向发生变化，先避免子 Agent 继续旧方向，再交代修正后的执行口径。", ["goal_revision_or_wrong_direction"], { requires_stop: true, context_overlap: previous ? "medium" : "low" });
     }
-    const failedReviewRework = item?.reviewFailed === true
+    const explicitTestAgentReviewRecheck = item?.testAgentReviewRecheck === true
+        || item?.test_agent_review_recheck === true;
+    const failedReviewRework = !explicitTestAgentReviewRecheck && (item?.reviewFailed === true
         || /test_agent_failed_review_rework|failed_review_rework|review_failed_rework/i.test(text)
-        || /(?:TestAgent|复核|验证).{0,40}(?:未通过|不通过|需要返工).{0,40}(?:原实现成员|同一子\s*Agent|修复后重新复核)/i.test(text);
+        || /(?:TestAgent|复核|验证).{0,40}(?:未通过|不通过|需要返工).{0,40}(?:原实现成员|同一子\s*Agent|修复后重新复核)/i.test(text));
     if (failedReviewRework) {
         return route("continue_same_worker", "same_worker_scratchpad", "继续同一子 Agent 修复", "独立复核已经给出失败结论，下一步应回到原实现成员修复，再重新复核。", ["failed_review_rework", previous ? "has_previous_ledger" : ""]);
+    }
+    const testAgentEnvironmentPreparation = item?.testAgentEnvironmentPreparation === true
+        || item?.test_agent_environment_preparation === true
+        || /test_agent_environment_prepare|补齐.{0,16}(?:复核环境|登录条件|运行条件)/i.test(text);
+    if (testAgentEnvironmentPreparation) {
+        return route("prepare_verification_environment", "same_worker_context", "补齐复核条件后自动复验", "当前缺口属于环境、登录或运行条件，先由原项目补齐可验证条件，再让 TestAgent 重新执行，不把它误判为业务实现返工。", ["test_agent_environment_preparation", previous ? "has_previous_ledger" : ""]);
+    }
+    const testAgentReviewRecheck = explicitTestAgentReviewRecheck
+        || /test_agent_review_recheck|test_agent_recheck|重新运行\s*TestAgent|重新复验.{0,24}TestAgent/i.test(text);
+    if (testAgentReviewRecheck) {
+        const hasCarriedHandoff = !!(item?.testAgentHandoff || item?.test_agent_handoff || item?.testAgentWorkOrder || item?.test_agent_work_order);
+        return route("resume_verifier", hasCarriedHandoff ? "same_verifier_context" : "fresh_verification_worker", hasCarriedHandoff ? "沿用原工作单重新复验" : "重新派独立验证 Agent 复验", hasCarriedHandoff
+            ? "上一轮复核证据尚未闭环，沿用同一 TestAgent 工作单并基于最新状态重新执行最能保留验收边界。"
+            : "上一轮没有可复用的 TestAgent 工作单，需要重新生成独立复核交接并基于最新状态验证。", ["test_agent_review_recheck", hasCarriedHandoff ? "carried_test_agent_handoff" : "fresh_test_agent_handoff"], { requires_fresh_verifier: !hasCarriedHandoff, context_overlap: hasCarriedHandoff ? "high" : "low" });
+    }
+    const postReviewSpotCheckReverify = item?.postReviewSpotCheckReverify === true
+        || /post_review_spot_check_reverify|spot_check_reverify|完成前抽查.{0,30}(?:不一致|需复验|重新复验)/i.test(text);
+    if (postReviewSpotCheckReverify) {
+        return route("resume_verifier", "same_verifier_context", "让 TestAgent 重新复验", "TestAgent 已给出通过结论，但主 Agent 的完成前抽查尚未一致，应先让同一个验证器重新执行并重新判断。", ["post_review_spot_check_reverify", previous ? "has_previous_ledger" : ""]);
     }
     const independentVerification = /独立.{0,12}(?:验证|复核|检查)|(?:非|不是)原实现者|另(?:一个|外).{0,12}(?:验证|复核|检查)|交叉复核|只读复核|request_review|fresh\s+verifier|independent\s+(?:verification|review)|code\s+review/i.test(text);
     const failureOrCorrection = /(?:测试|验证|构建|编译|lint|typecheck|npm|pnpm|yarn|pytest|jest|vitest).{0,18}(?:失败|报错|未通过)|(?:失败|报错|错误|异常|blocked|failed|error|file not found|not found|missing_receipt|needs_info|partial)|缺少(?:结果说明|验证|证据|文件|回执)|补(?:齐|跑|充)|修复|继续处理/i.test(text);
@@ -14992,6 +15596,12 @@ function coordinatorReworkRouteNeedsFreshVerifier(route) {
         return false;
     return route.requires_fresh_verifier === true
         || /fresh_verification|fresh_verifier|independent/i.test(String(route.strategy || route.continuationStrategy || route.continuation_strategy || ""));
+}
+function coordinatorReworkRouteUsesVerifier(route) {
+    if (!route || typeof route !== "object")
+        return false;
+    return coordinatorReworkRouteNeedsFreshVerifier(route)
+        || /resume_verifier|same_verifier|test_agent_recheck/i.test(String(route.strategy || route.continuationStrategy || route.continuation_strategy || ""));
 }
 function selectCoordinatorIndependentVerifier(group, originalTarget = "") {
     const original = String(originalTarget || "").trim();
@@ -15185,6 +15795,17 @@ function firstConfigNumber(sources, keys) {
     const num = Number(value);
     return Number.isFinite(num) && num > 0 ? num : undefined;
 }
+function hasConfiguredTestAgentMultiSessionBrowserCheck(...lists) {
+    return lists.flat().some((check) => {
+        const sessions = Array.isArray(check?.sessions) ? check.sessions : [];
+        const sessionSteps = Array.isArray(check?.sessionSteps)
+            ? check.sessionSteps
+            : Array.isArray(check?.session_steps)
+                ? check.session_steps
+                : [];
+        return sessions.length >= 2 && sessionSteps.length > 0;
+    });
+}
 function getNestedTestAgentReviewConfig(config = {}) {
     return configRecord(config.test_agent
         || config.testAgent
@@ -15222,6 +15843,7 @@ function collectConfiguredTestAgentReviewConfig(projectName) {
     const browserChecks = configObjectArray(nestedConfig.browserChecks, nestedConfig.browser_checks, baseConfig.test_agent_browser_checks, baseConfig.testAgentBrowserChecks);
     const adversarialBrowserChecks = configObjectArray(nestedConfig.adversarialBrowserChecks, nestedConfig.adversarial_browser_checks, baseConfig.test_agent_adversarial_browser_checks, baseConfig.testAgentAdversarialBrowserChecks);
     const adversarialBrowserProbeTemplates = configObjectArray(nestedConfig.adversarialBrowserProbeTemplates, nestedConfig.adversarial_browser_probe_templates, baseConfig.test_agent_browser_probe_templates, baseConfig.testAgentBrowserProbeTemplates);
+    const hasMultiSessionBrowserCheck = hasConfiguredTestAgentMultiSessionBrowserCheck(browserChecks, adversarialBrowserChecks);
     if (httpChecks.length)
         project.httpChecks = httpChecks;
     if (adversarialHttpChecks.length)
@@ -15232,7 +15854,7 @@ function collectConfiguredTestAgentReviewConfig(projectName) {
         project.adversarialBrowserChecks = adversarialBrowserChecks;
     if (adversarialBrowserProbeTemplates.length)
         project.adversarialBrowserProbeTemplates = adversarialBrowserProbeTemplates;
-    const requiredChecks = uniqueStrings(normalizeProjectConfigList(nestedConfig.requiredChecks || nestedConfig.required_checks || baseConfig.test_agent_required_checks || baseConfig.testAgentRequiredChecks), targetUrl || startupUrl || httpChecks.length || adversarialHttpChecks.length ? ["http"] : [], targetUrl || browserChecks.length || adversarialBrowserChecks.length || adversarialBrowserProbeTemplates.length ? ["browser_e2e", "screenshots", "console_errors", "browser_snapshots", "browser_console_logs", "browser_network_logs"] : [], targetUrl || browserChecks.length || adversarialBrowserChecks.length || adversarialBrowserProbeTemplates.length ? ["browser_trace", "browser_har"] : [], adversarialHttpChecks.length || adversarialBrowserChecks.length || adversarialBrowserProbeTemplates.length ? ["adversarial"] : []).slice(0, 16);
+    const requiredChecks = uniqueStrings(normalizeProjectConfigList(nestedConfig.requiredChecks || nestedConfig.required_checks || baseConfig.test_agent_required_checks || baseConfig.testAgentRequiredChecks), targetUrl || startupUrl || httpChecks.length || adversarialHttpChecks.length ? ["http"] : [], targetUrl || browserChecks.length || adversarialBrowserChecks.length || adversarialBrowserProbeTemplates.length ? ["browser_e2e", "screenshots", "console_errors", "browser_snapshots", "browser_console_logs", "browser_network_logs"] : [], targetUrl || browserChecks.length || adversarialBrowserChecks.length || adversarialBrowserProbeTemplates.length ? ["browser_trace", "browser_har"] : [], hasMultiSessionBrowserCheck ? ["browser_multi_session"] : [], adversarialHttpChecks.length || adversarialBrowserChecks.length || adversarialBrowserProbeTemplates.length ? ["adversarial"] : []).slice(0, 16);
     const options = configRecord(nestedConfig.options || baseConfig.test_agent_options || baseConfig.testAgentOptions);
     const hasExecutableSurface = !!(project.targetUrl || project.startupUrl || httpChecks.length || adversarialHttpChecks.length || browserChecks.length || adversarialBrowserChecks.length || adversarialBrowserProbeTemplates.length);
     return { project, requiredChecks, options, hasExecutableSurface };
@@ -15394,6 +16016,59 @@ function buildTestAgentVerdictFromReport(report) {
         return null;
     }
 }
+function buildLegacyTestAgentDecisionVerdict(report) {
+    const status = String(report?.status || "blocked");
+    const recommendation = String(report?.recommendation || "need_human");
+    const requiredCoverage = safeArray(report.requiredCheckCoverage);
+    const acceptanceCoverage = safeArray(report.acceptanceCoverage);
+    return {
+        schema: "ccm-test-agent-verdict-v1",
+        agent: "test-agent",
+        reportId: String(report?.id || ""),
+        workOrderId: String(report?.workOrderId || ""),
+        taskId: String(report?.taskId || ""),
+        groupId: String(report?.groupId || ""),
+        status,
+        recommendation,
+        canAccept: status === "passed" && recommendation === "accept",
+        needsRework: recommendation === "rework" || status === "failed",
+        needsHuman: recommendation === "need_human" || status === "blocked" || status === "partial",
+        summary: String(report?.summary || ""),
+        failedRequiredChecks: requiredCoverage.filter((item) => item?.status === "not_verified"),
+        unknownRequiredChecks: requiredCoverage.filter((item) => item?.status === "unknown"),
+        failedAcceptanceCriteria: acceptanceCoverage.filter((item) => item?.status === "not_verified"),
+        unknownAcceptanceCriteria: acceptanceCoverage.filter((item) => item?.status === "unknown"),
+        requiredCheckSummary: report.requiredCheckSummary || null,
+        acceptanceSummary: report.acceptanceSummary || null,
+        blockedReasons: safeArray(report.blockedReasons),
+        risks: safeArray(report.risks),
+        nextActions: [],
+        evidenceSummary: {
+            commands: {},
+            devServers: {},
+            httpChecks: {},
+            browserChecks: {},
+            browserToolCalls: {},
+            artifacts: 0,
+        },
+        browserNetworkSummary: safeArray(report.browserNetworkSummary),
+        browserInteractionSummary: safeArray(report.browserInteractionSummary),
+        browserFlowSummary: report.browserFlowSummary,
+        browserMultiSessionSummary: report.browserMultiSessionSummary,
+        browserStabilitySummary: report.browserStabilitySummary,
+        browserRecoverySummary: report.browserRecoverySummary,
+        browserActionEffectSummary: report.browserActionEffectSummary,
+        adversarialEvidenceSummary: report.adversarialEvidenceSummary,
+        browserProviderSummary: report.browserProviderSummary,
+        browserProviderGaps: safeArray(report.browserProviderGaps),
+        failureSummary: safeArray(report.failureSummary),
+        keyEvidence: safeArray(report.evidence).slice(0, 12),
+        artifacts: {
+            artifactDir: String(report?.artifactDir || ""),
+        },
+        metadata: {},
+    };
+}
 function testAgentCoverageIdentity(item) {
     const evidence = Array.isArray(item?.evidence) ? item.evidence.join("|") : "";
     return [
@@ -15420,6 +16095,38 @@ function uniqueTestAgentCoverageItems(...lists) {
 function collectReportCoverageByStatus(report, key, status) {
     return safeArray(report?.[key]).filter((item) => item?.status === status);
 }
+function buildTestAgentCoverageStatusSummary(items, kind) {
+    const rows = safeArray(items).filter(item => item && typeof item === "object");
+    if (!rows.length)
+        return null;
+    const verified = rows.filter(item => item?.status === "verified");
+    const notVerified = rows.filter(item => item?.status === "not_verified");
+    const unknown = rows.filter(item => item?.status === "unknown");
+    const summary = {
+        total: rows.length,
+        statusCounts: {
+            verified: verified.length,
+            not_verified: notVerified.length,
+            unknown: unknown.length,
+        },
+        verified,
+        notVerified,
+        unknown,
+    };
+    if (kind === "acceptance") {
+        summary.matchStrengthCounts = {};
+        summary.evidenceSourceCounts = {};
+        for (const item of rows) {
+            const matchStrength = String(item?.matchStrength || item?.match_strength || "").trim();
+            const evidenceSource = String(item?.evidenceSource || item?.evidence_source || "").trim();
+            if (matchStrength)
+                summary.matchStrengthCounts[matchStrength] = Number(summary.matchStrengthCounts[matchStrength] || 0) + 1;
+            if (evidenceSource)
+                summary.evidenceSourceCounts[evidenceSource] = Number(summary.evidenceSourceCounts[evidenceSource] || 0) + 1;
+        }
+    }
+    return summary;
+}
 function strengthenTestAgentVerdictWithReportCoverage(report, verdict) {
     if (!verdict)
         return null;
@@ -15429,25 +16136,100 @@ function strengthenTestAgentVerdictWithReportCoverage(report, verdict) {
     const unknownAcceptanceCriteria = uniqueTestAgentCoverageItems(verdict.unknownAcceptanceCriteria, collectReportCoverageByStatus(report, "acceptanceCoverage", "unknown"));
     const hasFailedCoverage = failedRequiredChecks.length > 0 || failedAcceptanceCriteria.length > 0;
     const hasUnknownCoverage = unknownRequiredChecks.length > 0 || unknownAcceptanceCriteria.length > 0;
-    if (!hasFailedCoverage && !hasUnknownCoverage)
+    const browserFlows = (0, test_agent_review_bridge_1.summarizeTestAgentBrowserFlows)(report, verdict);
+    const hasFailedBrowserFlows = !!browserFlows?.failedCount || !!browserFlows?.failedStepCount;
+    const hasIncompleteBrowserFlows = !!browserFlows?.blockedCount || !!browserFlows?.skippedCount;
+    const multiSessionBrowser = (0, test_agent_review_bridge_1.summarizeTestAgentMultiSessionBrowser)(report, verdict);
+    const hasFailedMultiSessionBrowser = !!multiSessionBrowser?.failedCount
+        || !!multiSessionBrowser?.failedStepCount
+        || !!multiSessionBrowser?.failedComparisonCount;
+    const hasIncompleteMultiSessionBrowser = !!multiSessionBrowser?.blockedCount || !!multiSessionBrowser?.skippedCount;
+    const browserAuthentication = (0, test_agent_review_bridge_1.summarizeTestAgentBrowserAuthentication)(report, verdict);
+    const hasFailedBrowserAuthentication = !!browserAuthentication?.failedChecks;
+    const hasIncompleteBrowserAuthentication = !!browserAuthentication?.blockedChecks || !!browserAuthentication?.pendingChecks;
+    const browserActionEffects = (0, test_agent_review_bridge_1.summarizeTestAgentBrowserActionEffects)(report, verdict);
+    const hasFailedBrowserActionEffects = !!browserActionEffects?.unchanged;
+    const hasIncompleteBrowserActionEffects = !!browserActionEffects?.unavailable;
+    const browserRecovery = (0, test_agent_review_bridge_1.summarizeTestAgentBrowserRecovery)(report, verdict);
+    const hasIncompleteBrowserRecovery = !!browserRecovery?.failed || !!browserRecovery?.notRetried;
+    const adversarialEvidence = (0, test_agent_review_bridge_1.summarizeTestAgentAdversarialEvidence)(report, verdict);
+    const hasFailedAdversarialEvidence = adversarialEvidence?.status === "failed";
+    const hasIncompleteAdversarialEvidence = adversarialEvidence?.status === "missing"
+        || adversarialEvidence?.status === "unlinked";
+    const hasBlockedAdversarialEvidence = adversarialEvidence?.status === "blocked";
+    const requiredCheckSummary = verdict.requiredCheckSummary
+        || buildTestAgentCoverageStatusSummary(safeArray(report.requiredCheckCoverage), "required");
+    const acceptanceSummary = verdict.acceptanceSummary
+        || buildTestAgentCoverageStatusSummary(safeArray(report.acceptanceCoverage), "acceptance");
+    const needsEnrichment = (!verdict.browserFlowSummary && !!browserFlows?.raw)
+        || (!verdict.browserMultiSessionSummary && !!multiSessionBrowser?.raw)
+        || (!verdict.browserAuthenticationSummary && !!browserAuthentication?.raw)
+        || (!verdict.browserActionEffectSummary && !!browserActionEffects?.raw)
+        || (!verdict.browserRecoverySummary && !!browserRecovery?.raw)
+        || (!verdict.adversarialEvidenceSummary && !!adversarialEvidence?.raw)
+        || !requiredCheckSummary
+        || !acceptanceSummary;
+    if (!hasFailedCoverage
+        && !hasUnknownCoverage
+        && !hasFailedBrowserFlows
+        && !hasIncompleteBrowserFlows
+        && !hasFailedMultiSessionBrowser
+        && !hasIncompleteMultiSessionBrowser
+        && !hasFailedBrowserAuthentication
+        && !hasIncompleteBrowserAuthentication
+        && !hasFailedBrowserActionEffects
+        && !hasIncompleteBrowserActionEffects
+        && !hasIncompleteBrowserRecovery
+        && !hasFailedAdversarialEvidence
+        && !hasIncompleteAdversarialEvidence
+        && !hasBlockedAdversarialEvidence
+        && !needsEnrichment)
         return verdict;
-    const forceRework = hasFailedCoverage || verdict.needsRework === true;
-    const forceHuman = !forceRework && (hasUnknownCoverage || verdict.needsHuman === true);
+    const forceRework = hasFailedCoverage
+        || hasFailedBrowserFlows
+        || hasFailedMultiSessionBrowser
+        || hasFailedBrowserAuthentication
+        || hasFailedBrowserActionEffects
+        || hasFailedAdversarialEvidence
+        || verdict.needsRework === true;
+    const forceRecheck = !forceRework && (hasIncompleteBrowserActionEffects
+        || hasIncompleteBrowserRecovery
+        || hasIncompleteAdversarialEvidence
+        || verdict.needsRecheck === true);
+    const forceEnvironment = !forceRework && !forceRecheck && hasBlockedAdversarialEvidence;
+    const forceHuman = !forceRework && (forceRecheck
+        || forceEnvironment
+        || hasUnknownCoverage
+        || hasIncompleteBrowserFlows
+        || hasIncompleteMultiSessionBrowser
+        || hasIncompleteBrowserAuthentication
+        || verdict.needsHuman === true);
     const retainedNextActions = safeArray(verdict.nextActions)
         .filter(item => !/Accept the delivery/i.test(String(item || "")));
     return {
         ...verdict,
-        status: forceRework ? "failed" : "partial",
-        recommendation: forceRework ? "rework" : "need_human",
-        canAccept: false,
+        status: forceRework ? "failed" : forceHuman ? "partial" : verdict.status,
+        recommendation: forceRework ? "rework" : forceHuman ? "need_human" : verdict.recommendation,
+        canAccept: forceRework || forceHuman ? false : verdict.canAccept,
         needsRework: forceRework,
         needsHuman: forceHuman,
+        needsRecheck: forceRecheck,
+        needsEnvironment: forceEnvironment,
+        reviewRoute: forceRework
+            ? "implementation_rework"
+            : forceRecheck
+                ? "test_agent_recheck"
+                : forceEnvironment
+                    ? "environment"
+                    : verdict.canAccept
+                        ? "accept"
+                        : "needs_user",
         failedRequiredChecks,
         unknownRequiredChecks,
         failedAcceptanceCriteria,
         unknownAcceptanceCriteria,
-        blockedReasons: uniqueStrings(verdict.blockedReasons, hasUnknownCoverage ? ["TestAgent 有验收或必检项待确认，需要补齐证据后再验收。"] : []),
-        risks: uniqueStrings(verdict.risks, hasFailedCoverage ? ["TestAgent 仍有未通过或未覆盖项，主 Agent 不能直接验收。"] : [], hasUnknownCoverage ? ["TestAgent 仍有待确认覆盖项，主 Agent 不能直接验收。"] : []),
+        blockedReasons: uniqueStrings(verdict.blockedReasons, hasUnknownCoverage ? ["TestAgent 有验收或必检项待确认，需要补齐证据后再验收。"] : [], hasIncompleteBrowserFlows ? ["TestAgent 有真实浏览器验收流程受阻或未执行，需要补齐执行条件后再验收。"] : [], hasIncompleteMultiSessionBrowser ? ["TestAgent 有多人协作浏览器场景受阻或未执行，需要补齐会话、登录或运行条件后再验收。"] : [], hasIncompleteBrowserAuthentication ? ["TestAgent 的登录态浏览器验收受阻，需要补齐测试账号或登录条件后再验收。"] : [], hasIncompleteBrowserActionEffects ? ["TestAgent 暂时无法确认部分操作是否真正生效，需要补齐可观察结果后重新复验。"] : [], hasIncompleteBrowserRecovery ? ["TestAgent 的浏览器会话恢复验证尚未闭环，需要重新建立会话后复验。"] : [], hasIncompleteAdversarialEvidence ? ["TestAgent 缺少与当前目标关联的边界或异常验证，需要补充复核工作单后重跑。"] : [], hasBlockedAdversarialEvidence ? ["TestAgent 的边界或异常验证受环境、登录或运行条件阻塞。"] : []),
+        risks: uniqueStrings(verdict.risks, hasFailedCoverage ? ["TestAgent 仍有未通过或未覆盖项，主 Agent 不能直接验收。"] : [], hasUnknownCoverage ? ["TestAgent 仍有待确认覆盖项，主 Agent 不能直接验收。"] : [], hasFailedBrowserFlows ? ["TestAgent 的真实浏览器验收流程仍有失败项，主 Agent 不能直接验收。"] : [], hasIncompleteBrowserFlows ? ["TestAgent 的真实浏览器验收流程尚未全部执行完成，主 Agent 不能直接验收。"] : [], hasFailedMultiSessionBrowser ? ["TestAgent 的多人协作浏览器验收仍有失败角色或跨会话结果不一致，主 Agent 不能直接验收。"] : [], hasIncompleteMultiSessionBrowser ? ["TestAgent 的多人协作浏览器验收尚未全部执行完成，主 Agent 不能直接验收。"] : [], hasFailedBrowserAuthentication ? ["TestAgent 的登录态浏览器验收仍有失败项，主 Agent 不能直接验收。"] : [], hasIncompleteBrowserAuthentication ? ["TestAgent 的登录态浏览器验收尚未全部确认，主 Agent 不能直接验收。"] : [], hasFailedBrowserActionEffects ? ["TestAgent 发现页面操作没有产生可见效果，主 Agent 不能直接验收。"] : [], hasIncompleteBrowserActionEffects ? ["TestAgent 暂时无法观察部分操作结果，当前通过证据只能视为未闭环。"] : [], hasIncompleteBrowserRecovery ? ["TestAgent 的浏览器会话恢复或安全重试尚未闭环，不能据此宣布完成。"] : [], hasFailedAdversarialEvidence ? ["TestAgent 的边界或异常检查未通过，主 Agent 不能直接验收。"] : [], hasIncompleteAdversarialEvidence ? ["TestAgent 尚未提供与当前目标关联的边界或异常证据，主 Agent 不能直接验收。"] : [], hasBlockedAdversarialEvidence ? ["TestAgent 的边界或异常验证受执行条件阻塞，主 Agent 不能直接验收。"] : []),
         nextActions: uniqueStrings(retainedNextActions, hasFailedCoverage
             ? [
                 "Route the task back to the implementation agent with failed evidence.",
@@ -15458,17 +16240,86 @@ function strengthenTestAgentVerdictWithReportCoverage(report, verdict) {
                 "Resolve incomplete verification coverage before accepting the delivery.",
                 "Treat passed evidence as partial only; do not accept until missing coverage is verified or explicitly waived.",
             ]
+            : [], hasFailedBrowserFlows
+            ? [
+                "Route failed browser acceptance flows back to the implementation agent.",
+                "Run TestAgent again after browser flow rework.",
+            ]
+            : [], hasIncompleteBrowserFlows
+            ? ["Complete blocked or skipped browser acceptance flows before accepting the delivery."]
+            : [], hasFailedMultiSessionBrowser
+            ? [
+                "Route failed multi-session browser scenarios back to the implementation agent.",
+                "Run TestAgent again after multi-session browser rework.",
+            ]
+            : [], hasIncompleteMultiSessionBrowser
+            ? ["Complete blocked or skipped multi-session browser scenarios before accepting the delivery."]
+            : [], hasFailedBrowserAuthentication
+            ? [
+                "Route failed authenticated browser checks back to the implementation agent.",
+                "Run TestAgent again after authenticated browser rework.",
+            ]
+            : [], hasIncompleteBrowserAuthentication
+            ? ["Complete blocked authenticated browser checks before accepting the delivery."]
+            : [], hasFailedBrowserActionEffects
+            ? [
+                "Route browser actions without visible effects back to the implementation agent.",
+                "Run TestAgent again after action-effect rework.",
+            ]
+            : [], hasIncompleteBrowserActionEffects
+            ? ["Rerun TestAgent with observable browser action effects before accepting the delivery."]
+            : [], hasIncompleteBrowserRecovery
+            ? ["Re-establish browser sessions and rerun TestAgent without repeating unsafe side effects."]
+            : [], hasFailedAdversarialEvidence
+            ? [
+                "Route failed adversarial checks back to the implementation agent.",
+                "Run TestAgent again after adversarial rework.",
+            ]
+            : [], hasIncompleteAdversarialEvidence
+            ? ["Add goal-linked adversarial checks to the TestAgent work order and rerun TestAgent."]
+            : [], hasBlockedAdversarialEvidence
+            ? ["Complete blocked adversarial checks after restoring environment or login conditions."]
             : []),
+        requiredCheckSummary,
+        acceptanceSummary,
+        browserFlowSummary: verdict.browserFlowSummary || browserFlows?.raw,
+        browserMultiSessionSummary: verdict.browserMultiSessionSummary || multiSessionBrowser?.raw,
+        browserAuthenticationSummary: verdict.browserAuthenticationSummary
+            || (0, test_agent_review_bridge_1.compactTestAgentBrowserAuthenticationSummary)(browserAuthentication),
+        browserActionEffectSummary: browserActionEffects?.raw || verdict.browserActionEffectSummary,
+        browserRecoverySummary: browserRecovery?.raw || verdict.browserRecoverySummary,
+        adversarialEvidenceSummary: adversarialEvidence?.raw || verdict.adversarialEvidenceSummary,
     };
 }
 function resolveTestAgentDecisionVerdict(report, artifactVerdict = readTestAgentVerdictArtifact(report)) {
-    return strengthenTestAgentVerdictWithReportCoverage(report, artifactVerdict || buildTestAgentVerdictFromReport(report));
+    const reportVerdict = buildTestAgentVerdictFromReport(report);
+    const verdict = artifactVerdict && reportVerdict
+        ? {
+            ...reportVerdict,
+            ...artifactVerdict,
+            requiredCheckSummary: artifactVerdict.requiredCheckSummary || reportVerdict.requiredCheckSummary,
+            acceptanceSummary: artifactVerdict.acceptanceSummary || reportVerdict.acceptanceSummary,
+            browserFlowSummary: artifactVerdict.browserFlowSummary || reportVerdict.browserFlowSummary,
+            browserMultiSessionSummary: artifactVerdict.browserMultiSessionSummary || reportVerdict.browserMultiSessionSummary,
+            browserAuthenticationSummary: artifactVerdict.browserAuthenticationSummary
+                || reportVerdict.browserAuthenticationSummary,
+            browserActionEffectSummary: artifactVerdict.browserActionEffectSummary || reportVerdict.browserActionEffectSummary,
+            browserRecoverySummary: artifactVerdict.browserRecoverySummary || reportVerdict.browserRecoverySummary,
+            adversarialEvidenceSummary: artifactVerdict.adversarialEvidenceSummary || reportVerdict.adversarialEvidenceSummary,
+            browserProviderSummary: artifactVerdict.browserProviderSummary || reportVerdict.browserProviderSummary,
+            browserProviderGaps: artifactVerdict.browserProviderGaps || reportVerdict.browserProviderGaps,
+            failureSummary: artifactVerdict.failureSummary || reportVerdict.failureSummary,
+        }
+        : artifactVerdict || reportVerdict || buildLegacyTestAgentDecisionVerdict(report);
+    return strengthenTestAgentVerdictWithReportCoverage(report, verdict);
 }
 function testAgentDecisionReceiptStatus(report, verdict) {
     if (verdict?.canAccept === true)
         return "done";
     if (verdict?.needsRework === true)
         return "failed";
+    if (verdict?.needsRecheck === true || verdict?.needsEnvironment === true)
+        return "blocked";
     if (verdict?.needsHuman === true)
         return "blocked";
     return testAgentStatusToReceiptStatus(verdict?.status || report.status);
@@ -15478,6 +16329,10 @@ function testAgentDecisionReviewVerdict(report, verdict) {
         return "passed";
     if (verdict?.needsRework === true)
         return "failed";
+    if (verdict?.needsRecheck === true)
+        return "needs_recheck";
+    if (verdict?.needsEnvironment === true)
+        return "needs_environment";
     if (verdict?.needsHuman === true)
         return "blocked";
     return testAgentStatusToReviewVerdict(verdict?.status || report.status);
@@ -15487,6 +16342,10 @@ function testAgentDecisionLabel(report, verdict) {
         return "可以接受";
     if (verdict?.needsRework === true)
         return "需要返工";
+    if (verdict?.needsRecheck === true)
+        return "需要重新复验";
+    if (verdict?.needsEnvironment === true)
+        return "需要补齐环境条件";
     if (verdict?.needsHuman === true)
         return "需要人工确认";
     return testAgentRecommendationLabel(verdict?.recommendation || report.recommendation);
@@ -15518,12 +16377,40 @@ function friendlyTestAgentNextAction(value) {
         return "如果复核范围与用户目标一致，主 Agent 可以接受本次交付。";
     if (/Keep the TestAgent report/i.test(text))
         return "保留 TestAgent 报告和证据清单到任务技术详情。";
+    if (/Route failed authenticated browser checks/i.test(text))
+        return "把未通过的登录态浏览器检查交回原实现成员返工。";
+    if (/authenticated browser rework/i.test(text))
+        return "登录流程或会话恢复修复后，我会自动重新运行 TestAgent 复核。";
+    if (/Complete blocked authenticated browser checks/i.test(text))
+        return "先补齐测试账号或登录条件，再重新执行登录态浏览器验收。";
+    if (/Route browser actions without visible effects/i.test(text))
+        return "把没有产生可见效果的页面操作交回原实现成员修复。";
+    if (/action-effect rework/i.test(text))
+        return "交互结果修复后，我会自动重新运行 TestAgent 复核。";
+    if (/observable browser action effects/i.test(text))
+        return "补齐可观察的页面结果后重新运行 TestAgent 复验，不要直接判定实现返工。";
+    if (/Re-establish browser sessions/i.test(text))
+        return "重新建立浏览器会话并安全复验，避免重复点击或提交造成副作用。";
+    if (/Route failed adversarial checks/i.test(text))
+        return "把未通过的边界或异常检查交回原实现成员修复。";
+    if (/adversarial rework/i.test(text))
+        return "边界问题修复后，我会自动重新运行 TestAgent 复核。";
+    if (/Add goal-linked adversarial checks/i.test(text))
+        return "补充与当前目标关联的边界或异常检查到 TestAgent 工作单，并重新运行复核。";
+    if (/Complete blocked adversarial checks/i.test(text))
+        return "先补齐环境、登录或运行条件，再重新执行边界与异常验证。";
     if (/Route the task back/i.test(text))
         return "把失败检查项带回给原实现成员返工。";
     if (/Use failed command|HTTP|browser|acceptance evidence/i.test(text))
         return "返工前先查看失败的命令、接口、浏览器或验收证据。";
     if (/Run TestAgent again/i.test(text))
-        return "返工后重新运行 TestAgent 复核。";
+        return "返工完成后，我会自动重新运行 TestAgent 复核。";
+    if (/Route failed browser acceptance flows/i.test(text))
+        return "把未通过的真实浏览器验收流程交回原实现成员返工。";
+    if (/browser flow rework/i.test(text))
+        return "浏览器流程修复后，我会自动重新运行 TestAgent 复核。";
+    if (/Complete blocked or skipped browser acceptance flows/i.test(text))
+        return "先补齐受阻或未执行的真实浏览器验收流程。";
     if (/Resolve incomplete verification coverage/i.test(text))
         return "补齐未覆盖的验证证据。";
     if (/Treat passed evidence as partial/i.test(text))
@@ -15556,7 +16443,7 @@ function scrubTestAgentEvidencePathText(value) {
         .replace(/(^|[\s（(])\/[^\s；;，。)）]*(?:test-agent-artifacts|screenshots|browser-artifacts|report\.json|report\.md|verdict\.json|artifact-manifest\.json)[^\s；;，。)）]*/gi, "$1技术详情里的证据文件")
         .replace(/\b(?:report\.json|report\.md|verdict\.json|artifact-manifest\.json)\b/gi, "证据文件");
 }
-function sanitizeTestAgentFailureText(value, fallback = "复核发现需要处理的问题。", max = 220) {
+function sanitizeTestAgentFailureText(value, fallback = "复核发现待补齐的问题。", max = 220) {
     return (0, display_1.sanitizeMainAgentUserText)((0, memory_1.compactMemoryText)(scrubTestAgentEvidencePathText(value || fallback), max), fallback, max);
 }
 function collectTestAgentFailureSummaryItems(report, verdict = null) {
@@ -15613,17 +16500,30 @@ function compactTestAgentVerdict(verdict) {
         canAccept: verdict.canAccept,
         needsRework: verdict.needsRework,
         needsHuman: verdict.needsHuman,
+        needsRecheck: verdict.needsRecheck === true,
+        needsEnvironment: verdict.needsEnvironment === true,
+        reviewRoute: verdict.reviewRoute || "",
         summary: verdict.summary,
         failedRequiredChecks: verdict.failedRequiredChecks,
         unknownRequiredChecks: verdict.unknownRequiredChecks,
         failedAcceptanceCriteria: verdict.failedAcceptanceCriteria,
         unknownAcceptanceCriteria: verdict.unknownAcceptanceCriteria,
+        requiredCheckSummary: verdict.requiredCheckSummary,
+        acceptanceSummary: verdict.acceptanceSummary,
         blockedReasons: verdict.blockedReasons,
         risks: verdict.risks,
         nextActions: collectTestAgentVerdictNextActions(verdict),
         evidenceSummary: verdict.evidenceSummary,
         browserNetworkSummary: verdict.browserNetworkSummary,
         browserInteractionSummary: verdict.browserInteractionSummary,
+        browserFlowSummary: verdict.browserFlowSummary,
+        browserMultiSessionSummary: verdict.browserMultiSessionSummary,
+        browserAuthenticationSummary: verdict.browserAuthenticationSummary,
+        browserActionEffectSummary: verdict.browserActionEffectSummary,
+        browserRecoverySummary: verdict.browserRecoverySummary,
+        adversarialEvidenceSummary: verdict.adversarialEvidenceSummary,
+        browserProviderSummary: verdict.browserProviderSummary,
+        browserProviderGaps: verdict.browserProviderGaps,
         failureSummary: verdict.failureSummary,
         artifacts: verdict.artifacts,
     };
@@ -15672,6 +16572,11 @@ function testAgentEvidenceTypeLabel(type) {
         http: "接口检查",
         api: "接口检查",
         browser_e2e: "浏览器流程",
+        browser_auth: "登录态浏览器验收",
+        browser_authentication: "登录态浏览器验收",
+        authenticated_browser: "登录态浏览器验收",
+        login_session: "登录态浏览器验收",
+        browser_multi_session: "多人协作浏览器验收",
         screenshots: "截图证据",
         screenshot: "截图证据",
         console_errors: "控制台错误检查",
@@ -15703,6 +16608,10 @@ function testAgentVisibleReviewSummary(report = {}, verdict = null) {
         return "独立复核通过，我可以继续做最终验收。";
     if (verdict?.needsRework === true)
         return "独立复核要求返工，需要把缺口交回原实现成员。";
+    if (verdict?.needsRecheck === true)
+        return "独立复核还没有闭环，我会先补齐证据并重新复验。";
+    if (verdict?.needsEnvironment === true)
+        return "独立复核受环境或登录条件阻塞，我会先补齐条件。";
     if (verdict?.needsHuman === true)
         return "独立复核需要人工确认，我会先暂停最终验收。";
     const status = String(report?.status || "").trim().toLowerCase();
@@ -15780,6 +16689,24 @@ function collectTestAgentBrowserNetworkLines(report, verdict = null) {
         .map((item) => `${item?.project || "项目"}：${item?.name || "浏览器检查"} 网络需关注（失败请求 ${Number(item?.failedRequestCount || 0)}、失败响应 ${Number(item?.failedResponseCount || 0)}、错误 ${Number(item?.errorCount || 0)}）`)
         .slice(0, 3);
     return uniqueStrings([headline, ...failedChecks]).slice(0, 4);
+}
+function collectTestAgentBrowserFlowLines(report, verdict = null) {
+    return (0, test_agent_review_bridge_1.summarizeTestAgentBrowserFlows)(report, verdict)?.evidenceLines || [];
+}
+function collectTestAgentBrowserMultiSessionLines(report, verdict = null) {
+    return (0, test_agent_review_bridge_1.summarizeTestAgentMultiSessionBrowser)(report, verdict)?.evidenceLines || [];
+}
+function collectTestAgentBrowserAuthenticationLines(report, verdict = null) {
+    return (0, test_agent_review_bridge_1.summarizeTestAgentBrowserAuthentication)(report, verdict)?.evidenceLines || [];
+}
+function collectTestAgentBrowserActionEffectLines(report, verdict = null) {
+    return (0, test_agent_review_bridge_1.summarizeTestAgentBrowserActionEffects)(report, verdict)?.evidenceLines || [];
+}
+function collectTestAgentBrowserRecoveryLines(report, verdict = null) {
+    return (0, test_agent_review_bridge_1.summarizeTestAgentBrowserRecovery)(report, verdict)?.evidenceLines || [];
+}
+function collectTestAgentAdversarialEvidenceLines(report, verdict = null) {
+    return (0, test_agent_review_bridge_1.summarizeTestAgentAdversarialEvidence)(report, verdict)?.evidenceLines || [];
 }
 function testAgentBrowserStepType(step) {
     const name = String(step?.name || "");
@@ -15904,12 +16831,18 @@ function collectTestAgentBrowserDownloadLines(report) {
 }
 function collectTestAgentBrowserEvidenceSummaryLines(report, verdict = null) {
     return uniqueStrings([
+        ...collectTestAgentBrowserAuthenticationLines(report, verdict),
+        ...collectTestAgentBrowserActionEffectLines(report, verdict),
+        ...collectTestAgentBrowserRecoveryLines(report, verdict),
+        ...collectTestAgentAdversarialEvidenceLines(report, verdict),
+        ...collectTestAgentBrowserMultiSessionLines(report, verdict),
+        ...collectTestAgentBrowserFlowLines(report, verdict),
         ...collectTestAgentBrowserUploadLines(report, verdict),
         ...collectTestAgentBrowserDownloadLines(report),
         ...collectTestAgentBrowserTableLines(report, verdict),
         ...collectTestAgentBrowserInteractionLines(report, verdict),
         ...collectTestAgentBrowserNetworkLines(report, verdict),
-    ]).slice(0, 8);
+    ]).slice(0, 16);
 }
 function collectTestAgentVerificationLines(report, verdict = resolveTestAgentDecisionVerdict(report)) {
     return uniqueStrings([
@@ -15948,11 +16881,26 @@ function buildNativeTestAgentReceipt(targetName, report, handoff = null, workOrd
     const verdictNextActions = collectTestAgentVerdictNextActions(verdict);
     const failureSummaryLines = collectTestAgentFailureSummaryLines(report, verdict);
     const failureDiagnosticLines = collectTestAgentFailureDiagnosticLines(report, verdict);
+    const multiSessionBrowser = (0, test_agent_review_bridge_1.summarizeTestAgentMultiSessionBrowser)(report, verdict);
+    const browserAuthentication = (0, test_agent_review_bridge_1.summarizeTestAgentBrowserAuthentication)(report, verdict);
+    const browserActionEffects = (0, test_agent_review_bridge_1.summarizeTestAgentBrowserActionEffects)(report, verdict);
+    const browserRecovery = (0, test_agent_review_bridge_1.summarizeTestAgentBrowserRecovery)(report, verdict);
+    const adversarialEvidence = (0, test_agent_review_bridge_1.summarizeTestAgentAdversarialEvidence)(report, verdict);
     const reviewedFiles = getTestAgentReviewedFiles(workOrder || handoff?.work_order, report);
     const status = testAgentDecisionReceiptStatus(report, verdict);
     const decisionSummary = `TestAgent 独立复核裁决：${testAgentDecisionLabel(report, verdict)}。`;
     const blockers = uniqueStrings([
         ...failureSummaryLines,
+        ...(browserAuthentication?.failedLines || []),
+        ...(browserAuthentication?.incompleteLines || []),
+        ...(browserActionEffects?.failedLines || []),
+        ...(browserActionEffects?.recheckLines || []),
+        ...(browserRecovery?.recheckLines || []),
+        ...(adversarialEvidence?.failedLines || []),
+        ...(adversarialEvidence?.recheckLines || []),
+        ...(adversarialEvidence?.blockedLines || []),
+        ...(multiSessionBrowser?.failedLines || []),
+        ...(multiSessionBrowser?.incompleteLines || []),
         ...verdictGaps,
         ...(Array.isArray(verdict?.blockedReasons) ? verdict.blockedReasons : []),
         ...(Array.isArray(report.blockedReasons) ? report.blockedReasons : []),
@@ -15962,10 +16910,18 @@ function buildNativeTestAgentReceipt(targetName, report, handoff = null, workOrd
     const needs = status === "done"
         ? []
         : uniqueStrings([
-            "我会根据 TestAgent 复核结果决定是否返工原实现成员",
+            verdict?.needsRecheck
+                ? "我会先补齐复核工作单或可观察证据，并安排 TestAgent 重新复验"
+                : verdict?.needsEnvironment
+                    ? "我会先补齐环境、登录或运行条件，再继续 TestAgent 复核"
+                    : "我会根据 TestAgent 复核结果决定是否返工原实现成员",
             ...failureDiagnosticLines,
             ...verdictNextActions,
-            ...(verdict?.needsHuman ? ["需要用户或人工确认 TestAgent 标记的问题"] : []),
+            ...(verdict?.needsRecheck ? ["需要补齐复核证据并重新运行 TestAgent，不会直接要求原实现成员返工"] : []),
+            ...(verdict?.needsEnvironment ? ["需要先补齐环境、登录或运行条件，再继续 TestAgent 复核"] : []),
+            ...(verdict?.needsHuman && !verdict?.needsRecheck && !verdict?.needsEnvironment
+                ? ["需要用户或人工确认 TestAgent 标记的问题"]
+                : []),
             ...(Array.isArray(report.risks) ? report.risks : []),
         ]).slice(0, 12);
     return {
@@ -15988,7 +16944,19 @@ function buildNativeTestAgentReceipt(targetName, report, handoff = null, workOrd
                 reviewer: targetName || "test-agent",
                 verdict: testAgentDecisionReviewVerdict(report, verdict),
                 summary: decisionSummary,
-                evidence: uniqueStrings([...failureSummaryLines, ...failureDiagnosticLines, ...verdictGaps, ...evidence, ...verification, ...reviewedFiles]).slice(0, 30),
+                evidence: uniqueStrings([
+                    ...(browserAuthentication?.evidenceLines || []),
+                    ...(browserActionEffects?.evidenceLines || []),
+                    ...(browserRecovery?.evidenceLines || []),
+                    ...(adversarialEvidence?.evidenceLines || []),
+                    ...(multiSessionBrowser?.evidenceLines || []),
+                    ...failureSummaryLines,
+                    ...failureDiagnosticLines,
+                    ...verdictGaps,
+                    ...evidence,
+                    ...verification,
+                    ...reviewedFiles,
+                ]).slice(0, 30),
                 reviewSubject,
                 workOrderId: report.workOrderId,
                 reportId: report.id,
@@ -16007,8 +16975,115 @@ function buildNativeTestAgentReceipt(targetName, report, handoff = null, workOrd
             verdict: compactTestAgentVerdict(verdict),
             failureSummary: report.failureSummary || [],
             requiredChecks: report.requiredChecks,
+            requiredCheckSummary: verdict?.requiredCheckSummary || null,
+            acceptanceSummary: verdict?.acceptanceSummary || null,
+            browserFlowSummary: verdict?.browserFlowSummary || report.browserFlowSummary || null,
+            browserMultiSessionSummary: verdict?.browserMultiSessionSummary || report.browserMultiSessionSummary || null,
+            browserAuthenticationSummary: verdict?.browserAuthenticationSummary
+                || (0, test_agent_review_bridge_1.compactTestAgentBrowserAuthenticationSummary)(browserAuthentication),
+            browserActionEffectSummary: verdict?.browserActionEffectSummary || report.browserActionEffectSummary || null,
+            browserRecoverySummary: verdict?.browserRecoverySummary || report.browserRecoverySummary || null,
+            adversarialEvidenceSummary: verdict?.adversarialEvidenceSummary || report.adversarialEvidenceSummary || null,
             acceptanceCoverage: report.acceptanceCoverage,
             requiredCheckCoverage: report.requiredCheckCoverage,
+        },
+    };
+}
+function buildNativeTestAgentReviewSummary(targetName, report, receipt) {
+    const verdict = receipt?.testAgentReport?.verdict || resolveTestAgentDecisionVerdict(report);
+    const postReviewSpotCheck = receipt?.post_review_spot_check || receipt?.postReviewSpotCheck || null;
+    const postReviewSpotCheckSummary = receipt?.post_review_spot_check_summary
+        || receipt?.postReviewSpotCheckSummary
+        || (0, post_review_spot_check_1.buildPostReviewSpotCheckSummary)(postReviewSpotCheck);
+    const spotCheckNeedsRecheck = postReviewSpotCheck?.required === true && postReviewSpotCheck?.pass !== true;
+    const reviewer = isCoordinatorTestAgentName(targetName) ? "TestAgent" : (0, display_1.sanitizeMainAgentUserText)(targetName, "TestAgent", 60);
+    const browserFlows = (0, test_agent_review_bridge_1.summarizeTestAgentBrowserFlows)(report, verdict);
+    const multiSessionBrowser = (0, test_agent_review_bridge_1.summarizeTestAgentMultiSessionBrowser)(report, verdict);
+    const browserAuthentication = (0, test_agent_review_bridge_1.summarizeTestAgentBrowserAuthentication)(report, verdict);
+    const browserActionEffects = (0, test_agent_review_bridge_1.summarizeTestAgentBrowserActionEffects)(report, verdict);
+    const browserRecovery = (0, test_agent_review_bridge_1.summarizeTestAgentBrowserRecovery)(report, verdict);
+    const adversarialEvidence = (0, test_agent_review_bridge_1.summarizeTestAgentAdversarialEvidence)(report, verdict);
+    const implementationRework = receipt?.status === "failed"
+        || verdict?.needsRework === true
+        || !!browserActionEffects?.failedLines.length
+        || !!adversarialEvidence?.failedLines.length;
+    const evidenceRecheck = !implementationRework && (spotCheckNeedsRecheck
+        || verdict?.needsRecheck === true
+        || !!browserActionEffects?.recheckLines.length
+        || !!browserRecovery?.recheckLines.length
+        || !!adversarialEvidence?.recheckLines.length);
+    const environmentBlocked = !implementationRework && !evidenceRecheck && (verdict?.needsEnvironment === true
+        || !!adversarialEvidence?.blockedLines.length);
+    const status = receipt?.status === "done" && !spotCheckNeedsRecheck
+        ? "passed"
+        : implementationRework
+            ? "needs_rework"
+            : evidenceRecheck
+                ? "needs_recheck"
+                : "needs_user";
+    const failureLines = collectTestAgentFailureSummaryLines(report, verdict);
+    const diagnosticLines = collectTestAgentFailureDiagnosticLines(report, verdict);
+    const gapLines = collectTestAgentVerdictGapLines(verdict);
+    const statusLabel = status === "passed"
+        ? "已通过"
+        : status === "needs_recheck"
+            ? "需复验"
+            : status === "needs_rework"
+                ? "需返工"
+                : environmentBlocked
+                    ? "补条件"
+                    : "等你确认";
+    const gapPrefix = status === "needs_rework" ? "待返工" : status === "needs_recheck" ? "待复验" : environmentBlocked ? "待补条件" : "待确认";
+    const rows = uniqueStrings([
+        `${reviewer}：${statusLabel}`,
+        ...(Array.isArray(postReviewSpotCheckSummary?.rows) ? postReviewSpotCheckSummary.rows : []),
+        ...(browserAuthentication?.evidenceLines || []),
+        ...(browserActionEffects?.evidenceLines || []),
+        ...(browserRecovery?.evidenceLines || []),
+        ...(adversarialEvidence?.evidenceLines || []),
+        ...(multiSessionBrowser?.evidenceLines || []),
+        ...(browserFlows?.evidenceLines || []),
+        ...failureLines.map(item => `返工重点：${item}`),
+        ...diagnosticLines.map(item => `排查建议：${item}`),
+        ...gapLines.map(item => `${gapPrefix}：${item}`),
+    ])
+        .map(item => (0, display_1.sanitizeMainAgentUserText)(item, "复核结论已整理。", 220))
+        .slice(0, 16);
+    return {
+        schema: "ccm-main-agent-independent-review-summary-v1",
+        title: "独立复核",
+        status,
+        status_label: statusLabel,
+        headline: status === "passed"
+            ? postReviewSpotCheck?.pass === true
+                ? "TestAgent 已完成独立复核，我的关键验证抽查也已通过。"
+                : "TestAgent 已完成独立复核，我会继续核对整体交付并给出最终总结。"
+            : status === "needs_rework"
+                ? "TestAgent 发现未通过项，我会先安排原实现成员返工，再重新验收。"
+                : status === "needs_recheck"
+                    ? spotCheckNeedsRecheck
+                        ? "TestAgent 已通过，但我的完成前抽查尚未一致，我会先重新复验。"
+                        : "TestAgent 的复核证据还没有闭环，我会先补齐检查并重新复验，不会误走代码返工路线。"
+                    : environmentBlocked
+                        ? "TestAgent 的复核受环境或登录条件阻塞，我会先补齐条件再继续验收。"
+                        : "TestAgent 还有无法确认的验收项，我会先暂停最终验收。",
+        rows,
+        next_action: status === "passed"
+            ? "继续核对改动、验证证据和验收条件。"
+            : status === "needs_rework"
+                ? "先让原实现成员修复失败点；返工完成后，我会自动沿用原工作单重新运行 TestAgent 复核。"
+                : status === "needs_recheck"
+                    ? spotCheckNeedsRecheck
+                        ? "沿用原复核工作单重新运行 TestAgent，并再次抽查关键验证。"
+                        : "补齐可观察结果或目标关联的边界检查后，重新运行 TestAgent 复核。"
+                    : environmentBlocked
+                        ? "先补齐环境、登录或运行条件，再继续 TestAgent 复核和最终验收。"
+                        : "先补齐受阻或待确认的验证条件，再继续最终验收。",
+        display_policy: {
+            user_text_first: true,
+            technical_default_collapsed: true,
+            hide_internal_protocols: true,
+            show_for_ordinary_conversation: false,
         },
     };
 }
@@ -16022,6 +17097,9 @@ function formatNativeTestAgentOutput(targetName, report, receipt, handoff = null
     const browserEvidence = collectTestAgentBrowserEvidenceSummaryLines(report, verdict);
     const failureSummaryLines = collectTestAgentFailureSummaryLines(report, verdict);
     const failureDiagnosticLines = collectTestAgentFailureDiagnosticLines(report, verdict);
+    const postReviewSpotCheckSummary = receipt?.post_review_spot_check_summary
+        || receipt?.postReviewSpotCheckSummary
+        || (0, post_review_spot_check_1.buildPostReviewSpotCheckSummary)(receipt?.post_review_spot_check || receipt?.postReviewSpotCheck);
     const artifactFiles = report.metadata?.artifactFiles || {};
     const artifactLabels = uniqueStrings([
         report.artifactDir ? "报告目录" : "",
@@ -16030,16 +17108,22 @@ function formatNativeTestAgentOutput(targetName, report, receipt, handoff = null
         artifactFiles.verdictJsonPath ? "复核结论" : "",
         artifactFiles.manifestPath ? "证据清单" : "",
     ]);
+    const visibleRecommendation = verdict?.needsRecheck
+        ? "重新复验"
+        : verdict?.needsEnvironment
+            ? "补齐环境条件"
+            : testAgentRecommendationLabel(verdict?.recommendation || report.recommendation);
     const lines = [
         `TestAgent 独立复核完成：${testAgentVisibleReviewSummary(report, verdict)}`,
         reviewSubject ? `- 复核对象：${reviewSubject}` : "",
-        `- 结论：${testAgentStatusLabel(verdict?.status || report.status)}；建议：${testAgentRecommendationLabel(verdict?.recommendation || report.recommendation)}`,
+        `- 结论：${testAgentStatusLabel(verdict?.status || report.status)}；建议：${visibleRecommendation}`,
         `- 复核裁决：${testAgentDecisionLabel(report, verdict)}`,
-        verification.length ? `- 验证证据：${verification.slice(0, 6).join("；")}` : "- 验证证据：没有可执行验证，已标记为需要处理。",
-        browserEvidence.length ? `- 浏览器证据：${browserEvidence.slice(0, 5).join("；")}` : "",
+        postReviewSpotCheckSummary?.headline ? `- 完成前抽查：${postReviewSpotCheckSummary.headline}` : "",
+        verification.length ? `- 验证证据：${verification.slice(0, 6).join("；")}` : "- 验证证据：没有可执行验证，已标记为待补齐。",
+        browserEvidence.length ? `- 浏览器证据：${browserEvidence.slice(0, 16).join("；")}` : "",
         failureSummaryLines.length ? `- 返工重点：${failureSummaryLines.slice(0, 4).join("；")}` : "",
         failureDiagnosticLines.length ? `- 排查建议：${failureDiagnosticLines.slice(0, 3).join("；")}` : "",
-        verdictGaps.length ? `- 待处理缺口：${verdictGaps.slice(0, 4).join("；")}` : "",
+        verdictGaps.length ? `- 待补齐项：${verdictGaps.slice(0, 4).join("；")}` : "",
         blockers.length ? `- 阻塞/风险：${blockers.slice(0, 5).join("；")}` : "- 阻塞/风险：未发现阻塞项。",
         needs.length ? `- 下一步：${needs.slice(0, 5).join("；")}` : "",
         artifactLabels.length ? `- 证据归档：${artifactLabels.join("、")}已放入技术详情。` : "- 证据归档：复核证据已放入技术详情。",
@@ -16058,7 +17142,9 @@ function summarizeNativeTestAgentExecutionPlan(plan) {
         `${Number(summary.commands || 0)} 个命令`,
         `${Number(summary.httpChecks || 0) + Number(summary.adversarialHttpChecks || 0)} 个 HTTP 检查`,
         `${Number(summary.browserChecks || 0)} 个浏览器检查`,
-    ];
+        Number(summary.browserSessionSteps || 0) ? `${Number(summary.browserSessionSteps)} 个跨会话步骤` : "",
+        Number(summary.browserParallelGroups || 0) ? `${Number(summary.browserParallelGroups)} 组并行动作` : "",
+    ].filter(Boolean);
     const artifacts = Array.isArray(summary.expectedArtifactTypes) ? summary.expectedArtifactTypes : [];
     return [
         `TestAgent 复核计划：${parts.join("，")}`,
@@ -16242,6 +17328,7 @@ function buildCoordinatorReworkContinuationFallback(input) {
     const sourceTask = input.sourceTask || {};
     const requiresStop = coordinatorReworkRouteRequiresStop(route);
     const requiresFreshVerifier = coordinatorReworkRouteNeedsFreshVerifier(route);
+    const usesVerifier = coordinatorReworkRouteUsesVerifier(route);
     const reviewSubject = String(mention.reviewSubject || mention.review_subject || mention.originalTarget || mention.original_target || mention.continuationOf || mention.continuation_of || "").trim();
     const reason = (0, memory_1.compactMemoryText)(mention.reason || route.reason || mention.summary || mention.message || mention.task || "", 900);
     const previous = mention.previousLedger || {};
@@ -16253,20 +17340,20 @@ function buildCoordinatorReworkContinuationFallback(input) {
     ]);
     const instructions = uniqueStrings([
         requiresStop ? "先确认旧方向已经停止或不再采用；本轮只按修正后的目标执行。" : "",
-        requiresFreshVerifier ? `本轮使用独立验证视角，只读复核${reviewSubject ? ` ${reviewSubject} 的` : ""}目标覆盖、关键风险和证据，不要替原实现者补写结论。` : "",
-        !requiresStop && !requiresFreshVerifier ? "承接上一轮上下文，只处理主 Agent 点名的返工缺口。" : "",
+        usesVerifier ? `本轮使用独立验证视角，重新核对${reviewSubject ? ` ${reviewSubject} 的` : ""}目标覆盖、关键风险和最新证据，不要替原实现者补写结论。` : "",
+        !requiresStop && !usesVerifier ? "承接上一轮上下文，只处理主 Agent 点名的返工缺口。" : "",
         reason ? `本轮返工原因：${reason}` : "",
         "完成后说明本轮覆盖了哪些缺口、实际动作、文件变化、验证结果和剩余风险。",
     ]);
     const avoid = uniqueStrings([
         requiresStop ? "继续旧方向或旧方案中的已废弃实现" : "",
-        requiresFreshVerifier ? "只复述原实现者说法而不独立核验证据" : "",
+        usesVerifier ? "复用上一轮结论而不重新执行、观察和核对最新证据" : "",
         "把未运行的验证写成已通过",
     ]);
     return {
         schema: "ccm-worker-continuation-handoff-v1",
-        kind: requiresStop ? "revise_goal" : requiresFreshVerifier ? "independent_review" : "rework",
-        kind_label: requiresStop ? "方向修正" : requiresFreshVerifier ? "独立复核" : "返工补证据",
+        kind: requiresStop ? "revise_goal" : usesVerifier ? "independent_review" : "rework",
+        kind_label: requiresStop ? "方向修正" : usesVerifier ? "独立复验" : "返工补证据",
         route_label: route.user_label || route.userLabel || "继续处理缺口",
         target: input.targetName,
         latest_user_change: reason,
@@ -16365,7 +17452,8 @@ function buildCoordinatorReworkFollowUp(item, input) {
         reviewSubject,
         verifierSelection,
     };
-    const testAgentHandoff = needsFreshVerifier
+    const carriedTestAgentHandoff = item?.testAgentHandoff || item?.test_agent_handoff || null;
+    const testAgentHandoff = carriedTestAgentHandoff || (needsFreshVerifier
         ? buildCoordinatorTestAgentHandoff(effectiveItem, {
             group: input.group,
             sourceTask,
@@ -16375,7 +17463,7 @@ function buildCoordinatorReworkFollowUp(item, input) {
             userMessage: input.userMessage,
             coordinatorOutput: input.coordinatorOutput,
         })
-        : null;
+        : null);
     if (testAgentHandoff) {
         effectiveItem.testAgentHandoff = testAgentHandoff;
         effectiveItem.test_agent_handoff = testAgentHandoff;
@@ -16435,6 +17523,7 @@ function buildCoordinatorReworkTask(item, input) {
         previous.needs?.length ? `需要：${previous.needs.slice(0, 8).join("、")}` : "",
     ].filter(Boolean).join("；") : "";
     const reworkRoute = input.reworkRoute || item?.reworkRoute || buildCoordinatorReworkRoutingDecision(item, { previousLedger: previous });
+    const usesVerifier = coordinatorReworkRouteUsesVerifier(reworkRoute);
     const reviewSubject = String(item?.reviewSubject || item?.originalTarget || item?.continuationOf || "").trim();
     const hasTestAgentHandoff = !!(item?.testAgentHandoff || item?.test_agent_handoff || item?.testAgentWorkOrder || item?.test_agent_work_order);
     return [
@@ -16442,9 +17531,11 @@ function buildCoordinatorReworkTask(item, input) {
         `- 用户可见返工摘要：${visibleSummary}`,
         `- 返工轮次：第 ${input.round + 1}/${input.maxRounds} 轮执行；这是主 Agent 验收后派发的补充任务。`,
         `- 返工路由：${reworkRoute.user_label || "继续同一子 Agent 修复"}；${reworkRoute.reason || "按主 Agent 验收缺口继续处理"}`,
-        reviewSubject && reworkRoute.requires_fresh_verifier ? `- 独立复核对象：${reviewSubject}；你不是原实现者，需要只读核对目标覆盖、关键风险和实际证据。` : "",
-        reworkRoute.requires_fresh_verifier
-            ? "- 续跑语义：本轮用于独立验证/复核，请用新的验证视角检查目标覆盖、关键风险和实际证据，不要只复述原实现者结论。"
+        reviewSubject && usesVerifier ? `- 独立复核对象：${reviewSubject}；需要重新核对目标覆盖、关键风险和最新实际证据。` : "",
+        usesVerifier
+            ? reworkRoute.requires_fresh_verifier
+                ? "- 续跑语义：本轮用于独立验证/复核，请用新的验证视角检查目标覆盖、关键风险和实际证据，不要只复述原实现者结论。"
+                : "- 续跑语义：沿用原 TestAgent 工作单和验收边界，但必须重新执行验证并根据最新真实输出重新判断，不能复用上一轮结论。"
             : reworkRoute.requires_stop
                 ? "- 续跑语义：先停止沿用旧方向的动作，再按本工作单修正后的目标继续；不要把已废弃方案当作完成内容。"
                 : "- 续跑语义：优先继续同一个子 Agent 的上下文；系统会把该子 Agent 的上一轮完成通知和上下文摘要注入给你。不要从零开始猜测，也不要重复已完成且已验证的工作。",
@@ -16851,6 +17942,130 @@ function runCoordinatorReworkProtocolSelfTest() {
                 actionSteps: [{ kind: "action", name: "action:uploadFile", status: "passed", detail: "label=附件; file=notes.txt, meta.json" }],
                 failedSteps: [],
             }],
+        browserFlowSummary: {
+            total: 1,
+            statusCounts: { passed: 1, failed: 0, blocked: 0, skipped: 0 },
+            flowTypeCount: 1,
+            criteriaCount: 1,
+            actionCount: 3,
+            assertionCount: 7,
+            failedStepCount: 0,
+            items: [{
+                    flowType: "acceptance_form_flow",
+                    total: 1,
+                    statusCounts: { passed: 1, failed: 0, blocked: 0, skipped: 0 },
+                    criteriaCount: 1,
+                    criteria: ["登录恢复后进入工作台"],
+                    projects: ["web-app"],
+                    providers: ["playwright"],
+                    actionCount: 3,
+                    assertionCount: 7,
+                    failedStepCount: 0,
+                    failures: [],
+                }],
+        },
+        browserMultiSessionSummary: {
+            total: 2,
+            statusCounts: { passed: 2, failed: 0, blocked: 0, skipped: 0 },
+            sessionCount: 4,
+            uniqueSessionCount: 4,
+            sessionNames: ["sender", "receiver", "author", "observer"],
+            parallelGroupCount: 2,
+            comparisonCount: 2,
+            failedComparisonCount: 0,
+            actionCount: 7,
+            assertionCount: 8,
+            failedStepCount: 0,
+            items: [{
+                    check: "发送消息后接收方实时看到",
+                    status: "passed",
+                    sessionNames: ["sender", "receiver"],
+                    failedSessionNames: [],
+                    failedSteps: [],
+                }, {
+                    check: "作者更新后观察方同步刷新",
+                    status: "passed",
+                    sessionNames: ["author", "observer"],
+                    failedSessionNames: [],
+                    failedSteps: [],
+                }],
+        },
+        browserActionEffectSummary: {
+            checks: 1,
+            actions: 1,
+            changed: 1,
+            unchanged: 0,
+            unavailable: 0,
+            failed: 0,
+            detailSuppressed: 0,
+            crossSession: 0,
+            actionTypes: { click: 1 },
+            changedSignals: { url: 0, title: 0, page_text: 1, dom: 0, network: 0, dialog: 0, popup: 0, download: 0 },
+            items: [{
+                    project: "web-app",
+                    name: "保存登录设置",
+                    provider: "playwright",
+                    status: "passed",
+                    actions: 1,
+                    changed: 1,
+                    unchanged: 0,
+                    unavailable: 0,
+                    failed: 0,
+                    detailSuppressed: 0,
+                    crossSession: 0,
+                    actionTypes: { click: 1 },
+                    changedSignals: { url: 0, title: 0, page_text: 1, dom: 0, network: 0, dialog: 0, popup: 0, download: 0 },
+                }],
+        },
+        browserRecoverySummary: {
+            checks: 1,
+            attempted: 1,
+            recovered: 1,
+            failed: 0,
+            notRetried: 0,
+            items: [{
+                    project: "web-app",
+                    name: "登录恢复浏览器复核",
+                    provider: "playwright",
+                    status: "passed",
+                    attempted: 1,
+                    recovered: 1,
+                    failed: 0,
+                    notRetried: 0,
+                    events: [],
+                }],
+        },
+        adversarialEvidenceSummary: {
+            required: true,
+            waived: false,
+            status: "verified",
+            total: 1,
+            passed: 1,
+            failed: 0,
+            blocked: 0,
+            skipped: 0,
+            http: 0,
+            browser: 1,
+            relevant: 1,
+            unlinked: 0,
+            passedRelevant: 1,
+            goalLinked: 1,
+            criteriaCovered: ["登录恢复后重复提交不会产生重复副作用"],
+            probeTypes: ["duplicate_submit"],
+            items: [{
+                    project: "web-app",
+                    surface: "browser",
+                    name: "重复提交保护",
+                    target: "http://127.0.0.1:5173/login",
+                    status: "passed",
+                    probeType: "duplicate_submit",
+                    provider: "playwright",
+                    relevance: "explicit",
+                    linkedCriteria: ["登录恢复后重复提交不会产生重复副作用"],
+                    goalLinked: true,
+                    matchScore: 100,
+                }],
+        },
         requiredCheckCoverage: [{ check: "commands", status: "verified", evidence: ["npm test"] }],
         acceptanceCoverage: [{ criterion: "独立复核 web-app 的交付证据", status: "verified", evidence: ["npm test"] }],
         evidence: [{ type: "command", project: "web-app", title: "npm test", status: "passed", detail: "exit=0" }],
@@ -16859,6 +18074,16 @@ function runCoordinatorReworkProtocolSelfTest() {
         issues: [],
         metadata: {
             reviewSubject: "web-app",
+            browserAuthenticationSummary: {
+                configuredChecks: 2,
+                passedChecks: 2,
+                failedChecks: 0,
+                blockedChecks: 0,
+                authenticatedSessions: 2,
+                credentialEnvNames: ["TEST_EMAIL", "TEST_PASSWORD"],
+                storageStateCount: 2,
+                sensitiveArtifactSuppressionCount: 2,
+            },
             artifactFiles: {
                 reportJsonPath: "C:/tmp/test-agent-artifacts/selftest/report.json",
                 reportMarkdownPath: "C:/tmp/test-agent-artifacts/selftest/report.md",
@@ -16869,6 +18094,7 @@ function runCoordinatorReworkProtocolSelfTest() {
         },
     };
     const nativeTestAgentReceipt = buildNativeTestAgentReceipt("test-agent", fakeNativeReport, independentHandoff, independentHandoff);
+    const nativeTestAgentReviewSummary = buildNativeTestAgentReviewSummary("test-agent", fakeNativeReport, nativeTestAgentReceipt);
     const nativeTestAgentOutput = formatNativeTestAgentOutput("test-agent", fakeNativeReport, nativeTestAgentReceipt, independentHandoff);
     const nativeTestAgentVisibleOutput = nativeTestAgentOutput.split("CCM_AGENT_RECEIPT")[0] || "";
     const fakeFailedNativeReport = {
@@ -16921,6 +18147,119 @@ function runCoordinatorReworkProtocolSelfTest() {
                     { kind: "assertion", name: "assert:tableCellTextEquals", status: "failed", detail: "table=#orders; row=B-200; column=Status", error: "登录状态未恢复" },
                 ],
             }],
+        browserFlowSummary: {
+            total: 1,
+            statusCounts: { passed: 0, failed: 1, blocked: 0, skipped: 0 },
+            flowTypeCount: 1,
+            criteriaCount: 1,
+            actionCount: 2,
+            assertionCount: 3,
+            failedStepCount: 2,
+            items: [{
+                    flowType: "acceptance_form_flow",
+                    total: 1,
+                    statusCounts: { passed: 0, failed: 1, blocked: 0, skipped: 0 },
+                    criteriaCount: 1,
+                    criteria: ["登录恢复后进入工作台"],
+                    projects: ["web-app"],
+                    providers: ["playwright"],
+                    actionCount: 2,
+                    assertionCount: 3,
+                    failedStepCount: 2,
+                    failures: [{
+                            project: "web-app",
+                            name: "登录恢复浏览器复核",
+                            status: "failed",
+                            error: "会话请求未成功",
+                            failedSteps: ["assert:networkNoErrors: 会话请求未成功"],
+                        }],
+                }],
+        },
+        browserMultiSessionSummary: {
+            total: 2,
+            statusCounts: { passed: 1, failed: 1, blocked: 0, skipped: 0 },
+            sessionCount: 4,
+            uniqueSessionCount: 4,
+            sessionNames: ["sender", "receiver", "author", "observer"],
+            parallelGroupCount: 2,
+            comparisonCount: 2,
+            failedComparisonCount: 1,
+            actionCount: 7,
+            assertionCount: 8,
+            failedStepCount: 1,
+            items: [{
+                    check: "发送消息后接收方实时看到",
+                    status: "passed",
+                    sessionNames: ["sender", "receiver"],
+                    failedSessionNames: [],
+                    failedSteps: [],
+                }, {
+                    check: "作者更新后观察方同步刷新",
+                    status: "failed",
+                    sessionNames: ["author", "observer"],
+                    failedSessionNames: ["observer"],
+                    failedComparisonCount: 1,
+                    failedSteps: [{ name: "session:observer:assert:visible", error: "locator=#raw-observer" }],
+                }],
+        },
+        browserActionEffectSummary: {
+            checks: 1,
+            actions: 1,
+            changed: 0,
+            unchanged: 1,
+            unavailable: 0,
+            failed: 1,
+            detailSuppressed: 0,
+            crossSession: 0,
+            actionTypes: { click: 1 },
+            changedSignals: { url: 0, title: 0, page_text: 0, dom: 0, network: 0, dialog: 0, popup: 0, download: 0 },
+            items: [{
+                    project: "web-app",
+                    name: "保存登录设置",
+                    provider: "playwright",
+                    status: "failed",
+                    actions: 1,
+                    changed: 0,
+                    unchanged: 1,
+                    unavailable: 0,
+                    failed: 1,
+                    detailSuppressed: 0,
+                    crossSession: 0,
+                    actionTypes: { click: 1 },
+                    changedSignals: { url: 0, title: 0, page_text: 0, dom: 0, network: 0, dialog: 0, popup: 0, download: 0 },
+                }],
+        },
+        adversarialEvidenceSummary: {
+            required: true,
+            waived: false,
+            status: "failed",
+            total: 1,
+            passed: 0,
+            failed: 1,
+            blocked: 0,
+            skipped: 0,
+            http: 0,
+            browser: 1,
+            relevant: 1,
+            unlinked: 0,
+            passedRelevant: 0,
+            goalLinked: 1,
+            criteriaCovered: ["重复提交不能创建重复会话"],
+            probeTypes: ["duplicate_submit"],
+            items: [{
+                    project: "web-app",
+                    surface: "browser",
+                    name: "重复提交登录",
+                    target: "http://127.0.0.1:5173/login?token=hidden",
+                    status: "failed",
+                    probeType: "duplicate_submit",
+                    provider: "playwright",
+                    relevance: "explicit",
+                    linkedCriteria: ["重复提交不能创建重复会话"],
+                    goalLinked: true,
+                    matchScore: 100,
+                }],
+        },
         requiredCheckCoverage: [{ check: "commands", status: "not_verified", missingReason: "npm test 未通过" }],
         acceptanceCoverage: [{ criterion: "登录恢复验证必须通过", status: "not_verified", evidence: ["npm test 未通过"] }],
         failureSummary: [{
@@ -16940,6 +18279,16 @@ function runCoordinatorReworkProtocolSelfTest() {
         risks: ["命令验证未通过，不能进入最终验收"],
         metadata: {
             reviewSubject: "web-app",
+            browserAuthenticationSummary: {
+                configuredChecks: 2,
+                passedChecks: 1,
+                failedChecks: 1,
+                blockedChecks: 0,
+                authenticatedSessions: 2,
+                credentialEnvNames: ["TEST_EMAIL", "TEST_PASSWORD"],
+                storageStateCount: 2,
+                sensitiveArtifactSuppressionCount: 2,
+            },
             artifactFiles: {
                 reportJsonPath: "C:/tmp/test-agent-artifacts/failed-selftest/report.json",
                 reportMarkdownPath: "C:/tmp/test-agent-artifacts/failed-selftest/report.md",
@@ -16950,8 +18299,140 @@ function runCoordinatorReworkProtocolSelfTest() {
         },
     };
     const failedNativeTestAgentReceipt = buildNativeTestAgentReceipt("test-agent", fakeFailedNativeReport, independentHandoff, independentHandoff);
+    const failedNativeTestAgentReviewSummary = buildNativeTestAgentReviewSummary("test-agent", fakeFailedNativeReport, failedNativeTestAgentReceipt);
     const failedNativeTestAgentOutput = formatNativeTestAgentOutput("test-agent", fakeFailedNativeReport, failedNativeTestAgentReceipt, independentHandoff);
+    const failedNativeTestAgentReceiptWithHandoff = {
+        ...failedNativeTestAgentReceipt,
+        testAgentHandoff: independentHandoff,
+        test_agent_handoff: independentHandoff,
+    };
+    const failedNativeTestAgentOutputWithHandoff = formatNativeTestAgentOutput("test-agent", fakeFailedNativeReport, failedNativeTestAgentReceiptWithHandoff, independentHandoff);
     const failedNativeTestAgentVisibleOutput = failedNativeTestAgentOutput.split("CCM_AGENT_RECEIPT")[0] || "";
+    const fakeNeedsRecheckReport = {
+        ...fakeNativeReport,
+        id: "test-agent-report-needs-recheck-selftest",
+        status: "passed",
+        recommendation: "accept",
+        summary: "Legacy result says pass, but browser recovery and adversarial evidence are incomplete.",
+        browserActionEffectSummary: {
+            checks: 1,
+            actions: 1,
+            changed: 0,
+            unchanged: 0,
+            unavailable: 1,
+            failed: 1,
+            detailSuppressed: 1,
+            crossSession: 0,
+            actionTypes: { click: 1 },
+            changedSignals: { url: 0, title: 0, page_text: 0, dom: 0, network: 0, dialog: 0, popup: 0, download: 0 },
+            items: [{
+                    project: "web-app",
+                    name: "提交登录表单",
+                    provider: "playwright",
+                    status: "blocked",
+                    actions: 1,
+                    changed: 0,
+                    unchanged: 0,
+                    unavailable: 1,
+                    failed: 1,
+                    detailSuppressed: 1,
+                    crossSession: 0,
+                    actionTypes: { click: 1 },
+                    changedSignals: { url: 0, title: 0, page_text: 0, dom: 0, network: 0, dialog: 0, popup: 0, download: 0 },
+                }],
+        },
+        browserRecoverySummary: {
+            checks: 1,
+            attempted: 1,
+            recovered: 0,
+            failed: 0,
+            notRetried: 1,
+            items: [{
+                    project: "web-app",
+                    name: "提交登录表单",
+                    provider: "playwright",
+                    status: "blocked",
+                    attempted: 1,
+                    recovered: 0,
+                    failed: 0,
+                    notRetried: 1,
+                    events: [{ operation: "click", reason: "unsafe duplicate side effect", rawSessionId: "hidden-session" }],
+                }],
+        },
+        adversarialEvidenceSummary: {
+            required: true,
+            waived: false,
+            status: "missing",
+            total: 0,
+            passed: 0,
+            failed: 0,
+            blocked: 0,
+            skipped: 0,
+            http: 0,
+            browser: 0,
+            relevant: 0,
+            unlinked: 0,
+            passedRelevant: 0,
+            goalLinked: 0,
+            criteriaCovered: [],
+            probeTypes: [],
+            items: [],
+        },
+    };
+    const needsRecheckReceipt = buildNativeTestAgentReceipt("test-agent", fakeNeedsRecheckReport, independentHandoff, independentHandoff);
+    const needsRecheckReviewSummary = buildNativeTestAgentReviewSummary("test-agent", fakeNeedsRecheckReport, needsRecheckReceipt);
+    const needsRecheckOutput = formatNativeTestAgentOutput("test-agent", fakeNeedsRecheckReport, needsRecheckReceipt, independentHandoff);
+    const needsRecheckReceiptWithHandoff = {
+        ...needsRecheckReceipt,
+        testAgentHandoff: independentHandoff,
+        test_agent_handoff: independentHandoff,
+    };
+    const needsRecheckOutputWithHandoff = formatNativeTestAgentOutput("test-agent", fakeNeedsRecheckReport, needsRecheckReceiptWithHandoff, independentHandoff);
+    const needsRecheckVisibleOutput = needsRecheckOutput.split("CCM_AGENT_RECEIPT")[0] || "";
+    const fakeBlockedAuthenticationReport = {
+        ...fakeNativeReport,
+        id: "test-agent-report-authentication-blocked-selftest",
+        status: "passed",
+        recommendation: "accept",
+        summary: "Legacy report says pass, but authenticated browser verification is blocked.",
+        metadata: {
+            ...fakeNativeReport.metadata,
+            browserAuthenticationSummary: {
+                configuredChecks: 1,
+                passedChecks: 0,
+                failedChecks: 0,
+                blockedChecks: 1,
+                authenticatedSessions: 0,
+                credentialEnvNames: ["PRIVATE_TEST_LOGIN", "PRIVATE_TEST_PASSWORD"],
+                storageStateCount: 1,
+                sensitiveArtifactSuppressionCount: 1,
+            },
+        },
+    };
+    const blockedAuthenticationReceipt = buildNativeTestAgentReceipt("test-agent", fakeBlockedAuthenticationReport, independentHandoff, independentHandoff);
+    const blockedAuthenticationReviewSummary = buildNativeTestAgentReviewSummary("test-agent", fakeBlockedAuthenticationReport, blockedAuthenticationReceipt);
+    const fakeFailedAuthenticationReport = {
+        ...fakeNativeReport,
+        id: "test-agent-report-authentication-failed-selftest",
+        status: "passed",
+        recommendation: "accept",
+        summary: "Legacy report says pass, but authenticated browser verification failed.",
+        metadata: {
+            ...fakeNativeReport.metadata,
+            browserAuthenticationSummary: {
+                configuredChecks: 2,
+                passedChecks: 1,
+                failedChecks: 1,
+                blockedChecks: 0,
+                authenticatedSessions: 2,
+                credentialEnvNames: ["PRIVATE_TEST_LOGIN", "PRIVATE_TEST_PASSWORD"],
+                storageStateCount: 2,
+                sensitiveArtifactSuppressionCount: 2,
+            },
+        },
+    };
+    const failedAuthenticationReceipt = buildNativeTestAgentReceipt("test-agent", fakeFailedAuthenticationReport, independentHandoff, independentHandoff);
+    const failedAuthenticationReviewSummary = buildNativeTestAgentReviewSummary("test-agent", fakeFailedAuthenticationReport, failedAuthenticationReceipt);
     const fakeUnknownCoverageReport = {
         ...fakeNativeReport,
         id: "test-agent-report-unknown-coverage-selftest",
@@ -17050,6 +18531,8 @@ function runCoordinatorReworkProtocolSelfTest() {
             browserChecks: 0,
             autoBrowserChecks: 0,
             adversarialBrowserChecks: 0,
+            browserSessionSteps: 6,
+            browserParallelGroups: 2,
             expectedArtifactTypes: ["report_json", "report_markdown", "artifact_manifest", "browser_har"],
         },
         projects: [],
@@ -17127,7 +18610,7 @@ function runCoordinatorReworkProtocolSelfTest() {
                     }],
             },
         },
-        outputs: [(0, agent_notifications_1.formatCollectedAgentOutput)("test-agent", failedNativeTestAgentOutput, failedNativeTestAgentReceipt)],
+        outputs: [(0, agent_notifications_1.formatCollectedAgentOutput)("test-agent", failedNativeTestAgentOutputWithHandoff, failedNativeTestAgentReceiptWithHandoff)],
         existingFollowUps: [],
     });
     const failedReviewRoutedFollowUp = failedReviewReworkFollowUps[0]
@@ -17149,6 +18632,193 @@ function runCoordinatorReworkProtocolSelfTest() {
             maxRounds: 2,
         })
         : null;
+    const needsRecheckReviewFollowUps = buildIndependentReviewGateFollowUps({
+        group: verifierGroup,
+        task: {
+            id: "needs-recheck-independent-review-selftest",
+            group_id: "needs-recheck-independent-review-group",
+            assign_type: "group",
+            workflow_type: "daily_dev",
+            target_project: "web-app",
+            title: "重新核对登录恢复体验",
+            business_goal: "登录恢复必须完成 TestAgent 复验",
+            requires_independent_review: true,
+            file_changes: {
+                files: [{
+                        project: "web-app",
+                        path: "backend/routes/session.ts",
+                        statusKind: "modified",
+                        statusText: "修改",
+                        diff: { additions: 12, deletions: 3 },
+                    }],
+            },
+        },
+        outputs: [(0, agent_notifications_1.formatCollectedAgentOutput)("test-agent", needsRecheckOutputWithHandoff, needsRecheckReceiptWithHandoff)],
+        existingFollowUps: [],
+    });
+    const needsRecheckRoutedFollowUp = needsRecheckReviewFollowUps[0]
+        ? buildCoordinatorReworkFollowUp(needsRecheckReviewFollowUps[0], {
+            group: verifierGroup,
+            memorySnapshot: { workerLedger: [{ project: "test-agent", status: "blocked", receiptStatus: "blocked", summary: "上一轮复核证据未闭环" }] },
+            userMessage: "重新核对登录恢复体验。",
+            coordinatorOutput: "TestAgent 需要重新复验。",
+            round: 1,
+            maxRounds: COORDINATOR_REVIEW_MAX_ROUNDS,
+        })
+        : null;
+    const environmentReviewReceipt = {
+        agent: "test-agent",
+        reviewer: "test-agent",
+        role: "independent_verifier",
+        status: "blocked",
+        summary: "独立复核受环境或登录条件阻塞，需要先补齐条件。",
+        actions: [],
+        filesChanged: [],
+        verification: [],
+        blockers: ["测试登录账号不可用"],
+        needs: ["补齐登录或运行条件"],
+        testAgentHandoff: independentHandoff,
+        test_agent_handoff: independentHandoff,
+        testAgentReport: {
+            verdict: {
+                status: "partial",
+                recommendation: "need_human",
+                canAccept: false,
+                needsRework: false,
+                needsHuman: true,
+                needsRecheck: false,
+                needsEnvironment: true,
+                reviewRoute: "environment",
+            },
+        },
+        independentReview: [{
+                reviewer: "test-agent",
+                reviewSubject: "web-app",
+                verdict: "needs_environment",
+                summary: "登录条件不足，当前无法完成真实浏览器验收。",
+                evidence: ["需要补齐测试登录账号"],
+            }],
+    };
+    const environmentReviewOutput = [
+        "TestAgent 复核受环境条件阻塞。",
+        "",
+        "CCM_AGENT_RECEIPT",
+        "```json",
+        JSON.stringify(environmentReviewReceipt, null, 2),
+        "```",
+    ].join("\n");
+    const environmentReviewFollowUps = buildIndependentReviewGateFollowUps({
+        group: verifierGroup,
+        task: {
+            id: "needs-environment-independent-review-selftest",
+            group_id: "needs-environment-independent-review-group",
+            assign_type: "group",
+            workflow_type: "daily_dev",
+            target_project: "web-app",
+            title: "补齐登录恢复复核条件",
+            business_goal: "登录恢复必须在可用登录条件下完成验收",
+            requires_independent_review: true,
+            file_changes: {
+                files: [{
+                        project: "web-app",
+                        path: "backend/routes/session.ts",
+                        statusKind: "modified",
+                        statusText: "修改",
+                        diff: { additions: 12, deletions: 3 },
+                    }],
+            },
+        },
+        outputs: [(0, agent_notifications_1.formatCollectedAgentOutput)("test-agent", environmentReviewOutput, environmentReviewReceipt)],
+        existingFollowUps: [],
+    });
+    const environmentRoutedFollowUp = environmentReviewFollowUps[0]
+        ? buildCoordinatorReworkFollowUp(environmentReviewFollowUps[0], {
+            group: verifierGroup,
+            memorySnapshot: { workerLedger: [{ project: "web-app", status: "done", receiptStatus: "done", summary: "登录恢复实现已完成" }] },
+            userMessage: "补齐登录恢复复核条件。",
+            coordinatorOutput: "TestAgent 等待登录条件。",
+            round: 1,
+            maxRounds: COORDINATOR_REVIEW_MAX_ROUNDS,
+        })
+        : null;
+    const scheduledRechecks = scheduleTestAgentRecheckAfterFollowUps(failedReviewRoutedFollowUp ? [failedReviewRoutedFollowUp] : [], [(0, agent_notifications_1.formatCollectedAgentOutput)("web-app", "已修复复核失败点并重新运行最小验证。", {
+            agent: "web-app",
+            status: "done",
+            summary: "已修复登录恢复复核失败点",
+            actions: ["修复登录恢复交互"],
+            filesChanged: ["backend/routes/session.ts"],
+            verification: ["npm test passed"],
+            blockers: [],
+            needs: [],
+        })]);
+    const scheduledRecheckRoutedFollowUp = scheduledRechecks[0]
+        ? buildCoordinatorReworkFollowUp(scheduledRechecks[0], {
+            group: verifierGroup,
+            memorySnapshot: { workerLedger: [{ project: "test-agent", status: "failed", receiptStatus: "failed", summary: "上一轮复核未通过" }] },
+            userMessage: "修复登录恢复体验。",
+            coordinatorOutput: "web-app 已返工，准备重新运行 TestAgent。",
+            round: 2,
+            maxRounds: COORDINATOR_REVIEW_MAX_ROUNDS,
+        })
+        : null;
+    const latestReviewWinsGate = buildIndependentReviewGate({
+        requires_independent_review: true,
+        workflow_type: "daily_dev",
+    }, [{
+            project: "web-app",
+            path: "backend/routes/session.ts",
+            statusKind: "modified",
+        }], [
+        {
+            ...failedNativeTestAgentReceipt,
+            independentReview: [{
+                    reviewer: "test-agent",
+                    reviewSubject: "web-app",
+                    verdict: "failed",
+                    summary: "上一轮复核未通过。",
+                    evidence: ["旧失败证据"],
+                }],
+        },
+        {
+            ...nativeTestAgentReceipt,
+            independentReview: [{
+                    reviewer: "test-agent",
+                    reviewSubject: "web-app",
+                    verdict: "passed",
+                    summary: "返工后的最新复核已通过。",
+                    evidence: ["最新通过证据"],
+                }],
+        },
+    ], []);
+    const structuredTestAgentEvidenceFollowUps = buildEvidenceGateFollowUps(verifierGroup, [
+        (0, agent_notifications_1.formatCollectedAgentOutput)("test-agent", needsRecheckOutputWithHandoff, needsRecheckReceiptWithHandoff),
+    ]);
+    const hardRouteFilteredLlmFollowUps = filterCoordinatorLlmFollowUpsAgainstHardRoutes([
+        { targetName: "web-app", project: "web-app", summary: "再让原实现成员泛化返工" },
+        { targetName: "test-agent", project: "test-agent", reviewSubject: "web-app", summary: "另起一份泛化复核" },
+        { targetName: "docs-agent", project: "docs-agent", summary: "补充独立文档" },
+    ], scheduledRechecks, true);
+    const postReviewSpotCheckContract = (0, post_review_spot_check_1.runPostReviewSpotCheckContractSelfTest)();
+    const postReviewSpotCheckRoutedFollowUp = buildCoordinatorReworkFollowUp({
+        mention: "@test-agent",
+        targetName: "test-agent",
+        project: "test-agent",
+        summary: "完成前抽查需要 TestAgent 重新复验",
+        message: "完成前抽查发现结果不一致，请沿用原工作单重新执行并重新判断。",
+        reason: "主 Agent 抽查 2 项验证，其中 1 项不一致",
+        rework_kind: "post_review_spot_check_reverify",
+        postReviewSpotCheckReverify: true,
+        reviewSubject: "web-app",
+        originalTarget: "web-app",
+        testAgentHandoff: independentHandoff,
+    }, {
+        group: verifierGroup,
+        memorySnapshot: { workerLedger: [{ project: "test-agent", status: "done", receiptStatus: "done", summary: "上一轮复核通过" }] },
+        userMessage: "完善订单详情页。",
+        coordinatorOutput: "TestAgent 已通过，主 Agent 正在完成前抽查。",
+        round: 1,
+        maxRounds: 2,
+    });
     const blockedIndependentFollowUp = buildCoordinatorReworkFollowUp({
         project: "web-app",
         targetName: "web-app",
@@ -17174,6 +18844,25 @@ function runCoordinatorReworkProtocolSelfTest() {
         maxRounds: 3,
         reworkRoute: failedRoute,
     });
+    const directProjectEvidence = buildDirectProjectCoordinationEvidence({
+        id: "direct-project-chain-selftest",
+        title: "修复登录恢复",
+        business_goal: "修复登录恢复并完成独立验收",
+    }, "backend-api");
+    const directProjectPassedState = buildDirectProjectReviewState("backend-api", "passed", "TestAgent 与主 Agent 抽查已通过");
+    const directProjectReworkRoute = directProjectReviewRoute({
+        status: "failed",
+        testAgentReport: { verdict: { needsRework: true, reviewRoute: "implementation_rework" } },
+    });
+    const directProjectRecheckRoute = directProjectReviewRoute({ status: "done" }, { pass: false });
+    const directProjectEnvironmentRoute = directProjectReviewRoute({
+        status: "blocked",
+        testAgentReport: { verdict: { needsEnvironment: true, reviewRoute: "environment_prepare" } },
+    });
+    const directProjectNeedsUserRoute = directProjectReviewRoute({
+        status: "blocked",
+        testAgentReport: { verdict: { needsUser: true, reviewRoute: "needs_user" } },
+    });
     const checks = {
         hasReworkPacket: task.includes("主 Agent 返工工作单"),
         hasVisibleSummary: task.includes("用户可见返工摘要") && task.includes("补齐前端验证证据"),
@@ -17186,11 +18875,59 @@ function runCoordinatorReworkProtocolSelfTest() {
         hasReason: task.includes("返工原因"),
         hasVerification: task.includes("验证要求"),
         hasReceipt: task.includes("CCM_AGENT_RECEIPT"),
+        directProjectBuildsSupervisedCoordinationEvidence: directProjectEvidence.coordinationPlan.strategy === "single_project_supervised_delivery"
+            && directProjectEvidence.coordinationPlan.phases.some((item) => item.id === "independent_review")
+            && directProjectEvidence.assignments[0]?.project === "backend-api",
+        directProjectReviewRoutesRemainDistinct: directProjectReworkRoute === "needs_rework"
+            && directProjectRecheckRoute === "needs_recheck"
+            && directProjectEnvironmentRoute === "needs_environment"
+            && directProjectNeedsUserRoute === "needs_user",
+        directProjectPassWaitsForFinalSummary: directProjectPassedState.status === "passed"
+            && directProjectPassedState.next_action.includes("最终交付总结")
+            && directProjectPassedState.review_subject === "backend-api",
         failedRouteKeepsSameWorker: failedRoute.strategy === "continue_same_worker" && failedRoute.continuationStrategy === "same_worker_scratchpad",
         independentRouteUsesFreshVerifier: independentRoute.strategy === "fresh_verification_worker" && independentRoute.requires_fresh_verifier === true,
         independentVerifierSelectsTestAgent: verifierSelection.available === true && verifierSelection.targetName === "test-agent" && verifierSelection.originalTarget === "web-app",
         independentVerifierExcludesOriginalTarget: verifierSelection.candidates.every((item) => item.project !== "web-app"),
         independentVerifierReportsMissingCandidate: noVerifierSelection.available === false && noVerifierSelection.targetName === "",
+        postReviewSpotCheckContractPasses: postReviewSpotCheckContract.pass === true,
+        postReviewSpotCheckReusesSameVerifierAndHandoff: postReviewSpotCheckRoutedFollowUp.targetName === "test-agent"
+            && postReviewSpotCheckRoutedFollowUp.reworkRoute?.strategy === "resume_verifier"
+            && postReviewSpotCheckRoutedFollowUp.continuationStrategy === "same_verifier_context"
+            && postReviewSpotCheckRoutedFollowUp.testAgentHandoff?.id === independentHandoff?.id
+            && postReviewSpotCheckRoutedFollowUp.reviewSubject === "web-app",
+        coordinatorReviewLoopAllowsRepairRecheckAndFinalAcceptance: COORDINATOR_REVIEW_MAX_ROUNDS === 3,
+        structuredTestAgentReceiptSkipsGenericWorkerFollowUp: structuredTestAgentEvidenceFollowUps.length === 0,
+        hardReviewRouteSuppressesConflictingLlmFollowUps: hardRouteFilteredLlmFollowUps.length === 1
+            && hardRouteFilteredLlmFollowUps[0].targetName === "docs-agent",
+        needsRecheckCreatesSameTestAgentWorkOrderContinuation: needsRecheckReviewFollowUps.length === 1
+            && needsRecheckReviewFollowUps[0].targetName === "test-agent"
+            && needsRecheckReviewFollowUps[0].rework_kind === "test_agent_review_recheck"
+            && needsRecheckRoutedFollowUp?.targetName === "test-agent"
+            && needsRecheckRoutedFollowUp?.reworkRoute?.strategy === "resume_verifier"
+            && needsRecheckRoutedFollowUp?.continuationStrategy === "same_verifier_context"
+            && needsRecheckRoutedFollowUp?.testAgentHandoff?.id === independentHandoff?.id
+            && needsRecheckRoutedFollowUp?.message.includes("不能复用上一轮结论"),
+        needsEnvironmentPreparesConditionsBeforeRecheck: environmentReviewFollowUps.length === 1
+            && environmentReviewFollowUps[0].targetName === "web-app"
+            && environmentReviewFollowUps[0].rework_kind === "test_agent_environment_prepare"
+            && environmentReviewFollowUps[0].rerunTestAgentAfterCompletion === true
+            && environmentRoutedFollowUp?.reworkRoute?.strategy === "prepare_verification_environment"
+            && environmentRoutedFollowUp?.reworkRoute?.user_label === "补齐复核条件后自动复验"
+            && environmentRoutedFollowUp?.message.includes("主 Agent 收到可用结果后会自动沿用原复核工作单重新运行 TestAgent"),
+        implementationReworkSchedulesTestAgentRecheck: failedReviewReworkFollowUps[0]?.rerunTestAgentAfterCompletion === true
+            && failedReviewReworkFollowUps[0]?.testAgentRecheckHandoff?.id === independentHandoff?.id
+            && scheduledRechecks.length === 1
+            && scheduledRechecks[0].targetName === "test-agent"
+            && scheduledRecheckRoutedFollowUp?.reworkRoute?.strategy === "resume_verifier"
+            && scheduledRecheckRoutedFollowUp?.continuationStrategy === "same_verifier_context"
+            && scheduledRecheckRoutedFollowUp?.testAgentHandoff?.id === independentHandoff?.id,
+        latestTestAgentReviewSupersedesStaleFailure: latestReviewWinsGate.pass === true
+            && latestReviewWinsGate.status === "passed"
+            && latestReviewWinsGate.evidence_count === 1
+            && latestReviewWinsGate.passed_count === 1
+            && latestReviewWinsGate.failed_count === 0
+            && latestReviewWinsGate.evidence?.[0]?.summary.includes("最新复核已通过"),
         independentReworkDispatchesToVerifier: independentFollowUp.targetName === "test-agent"
             && independentFollowUp.project === "test-agent"
             && independentFollowUp.continuationOf === "web-app"
@@ -17229,7 +18966,7 @@ function runCoordinatorReworkProtocolSelfTest() {
             && failedNativeTestAgentReceipt.blockers.some((item) => item.includes("验收条件未通过"))
             && failedNativeTestAgentReceipt.needs.some((item) => item.includes("打开失败截图核对页面"))
             && failedNativeTestAgentReceipt.needs.some((item) => item.includes("把失败检查项带回给原实现成员返工"))
-            && failedNativeTestAgentReceipt.needs.some((item) => item.includes("返工后重新运行 TestAgent 复核"))
+            && failedNativeTestAgentReceipt.needs.some((item) => item.includes("自动重新运行 TestAgent 复核"))
             && failedNativeTestAgentReceipt.actions.some((item) => item.includes("读取 TestAgent 裁决：需要返工")),
         nativeTestAgentUnknownCoverageReportBlocksWithoutVerdictArtifact: unknownCoverageTestAgentReceipt.status === "blocked"
             && unknownCoverageTestAgentReceipt.independentReview?.[0]?.verdict === "blocked"
@@ -17259,7 +18996,7 @@ function runCoordinatorReworkProtocolSelfTest() {
             && notVerifiedCoverageTestAgentReceipt.testAgentReport?.verdict?.failedAcceptanceCriteria?.length === 1
             && notVerifiedCoverageTestAgentReceipt.blockers.some((item) => item.includes("必检项 浏览器流程未覆盖"))
             && notVerifiedCoverageTestAgentReceipt.blockers.some((item) => item.includes("验收条件未通过"))
-            && notVerifiedCoverageTestAgentReceipt.needs.some((item) => item.includes("返工后重新运行 TestAgent 复核"))
+            && notVerifiedCoverageTestAgentReceipt.needs.some((item) => item.includes("自动重新运行 TestAgent 复核"))
             && notVerifiedCoverageTestAgentReceipt.actions.some((item) => item.includes("根据报告形成 TestAgent 裁决：需要返工")),
         nativeTestAgentNotVerifiedCoverageVisibleOutputShowsRework: notVerifiedCoverageTestAgentVisibleOutput.includes("独立复核要求返工")
             && notVerifiedCoverageTestAgentVisibleOutput.includes("结论：未通过；建议：需要返工")
@@ -17275,11 +19012,11 @@ function runCoordinatorReworkProtocolSelfTest() {
             && failedNativeTestAgentVisibleOutput.includes("浏览器检查")
             && failedNativeTestAgentVisibleOutput.includes("排查建议")
             && failedNativeTestAgentVisibleOutput.includes("打开失败截图核对页面")
-            && failedNativeTestAgentVisibleOutput.includes("待处理缺口")
+            && failedNativeTestAgentVisibleOutput.includes("待补齐项")
             && failedNativeTestAgentVisibleOutput.includes("必检项 命令验证未覆盖")
             && failedNativeTestAgentVisibleOutput.includes("验收条件未通过")
             && failedNativeTestAgentVisibleOutput.includes("把失败检查项带回给原实现成员返工")
-            && failedNativeTestAgentVisibleOutput.includes("返工后重新运行 TestAgent 复核"),
+            && failedNativeTestAgentVisibleOutput.includes("自动重新运行 TestAgent 复核"),
         nativeFailedTestAgentVisibleOutputHidesRawVerdict: failedNativeTestAgentOutput.includes("CCM_AGENT_RECEIPT")
             && !/needsRework|failedRequiredChecks|report_json|verdict\.json|artifact-manifest\.json|browser-artifacts|C:\/tmp|\bfailed\b|\brework\b|networkLogPath/i.test(failedNativeTestAgentVisibleOutput),
         nativeTestAgentOutputCarriesReceiptAndArtifacts: nativeTestAgentOutput.includes("CCM_AGENT_RECEIPT")
@@ -17298,13 +19035,95 @@ function runCoordinatorReworkProtocolSelfTest() {
             && nativeTestAgentReceipt.verification.some((item) => item.includes("浏览器网络"))
             && nativeTestAgentReceipt.testAgentReport?.verdict?.browserInteractionSummary?.length === 1
             && nativeTestAgentReceipt.testAgentReport?.verdict?.browserNetworkSummary?.length === 1,
+        nativeTestAgentReceiptIncludesBrowserFlowSummary: nativeTestAgentReceipt.verification.some((item) => item.includes("真实浏览器验收") && item.includes("1 个通过"))
+            && nativeTestAgentReceipt.testAgentReport?.verdict?.browserFlowSummary?.total === 1
+            && nativeTestAgentReceipt.testAgentReport?.browserFlowSummary?.criteriaCount === 1
+            && nativeTestAgentReceipt.testAgentReport?.verdict?.requiredCheckSummary
+            && nativeTestAgentReceipt.testAgentReport?.verdict?.acceptanceSummary,
+        nativeTestAgentReceiptIncludesSafeAuthenticationSummary: nativeTestAgentReceipt.verification.some((item) => item.includes("登录态浏览器验收") && item.includes("2 项通过") && item.includes("2 个已登录会话"))
+            && nativeTestAgentReceipt.testAgentReport?.browserAuthenticationSummary?.configuredChecks === 2
+            && nativeTestAgentReceipt.testAgentReport?.verdict?.browserAuthenticationSummary?.passedChecks === 2
+            && !/credentialEnvNames|TEST_EMAIL|TEST_PASSWORD|storageState|cookie|token|sha/i.test(JSON.stringify({
+                report: nativeTestAgentReceipt.testAgentReport?.browserAuthenticationSummary,
+                verdict: nativeTestAgentReceipt.testAgentReport?.verdict?.browserAuthenticationSummary,
+                summary: nativeTestAgentReviewSummary,
+                visible: nativeTestAgentVisibleOutput,
+            })),
+        nativeTestAgentReceiptIncludesActionEffectAndAdversarialEvidence: nativeTestAgentReceipt.verification.some((item) => item.includes("操作结果验证") && item.includes("产生预期变化"))
+            && nativeTestAgentReceipt.verification.some((item) => item.includes("边界与异常验证") && item.includes("与当前目标相关并通过"))
+            && nativeTestAgentReceipt.testAgentReport?.verdict?.browserActionEffectSummary?.changed === 1
+            && nativeTestAgentReceipt.testAgentReport?.verdict?.adversarialEvidenceSummary?.status === "verified",
+        failedActionEffectAndAdversarialEvidenceOverridePass: failedNativeTestAgentReceipt.status === "failed"
+            && failedNativeTestAgentReceipt.testAgentReport?.verdict?.canAccept === false
+            && failedNativeTestAgentReceipt.testAgentReport?.verdict?.needsRework === true
+            && failedNativeTestAgentReceipt.blockers.some((item) => item.includes("没有产生可见效果"))
+            && failedNativeTestAgentReceipt.blockers.some((item) => item.includes("边界检查") && item.includes("未通过"))
+            && failedNativeTestAgentReviewSummary.rows.some((item) => item.includes("操作结果验证"))
+            && failedNativeTestAgentReviewSummary.rows.some((item) => item.includes("边界与异常验证"))
+            && !/token=hidden|duplicate_submit|playwright|changedSignals/i.test(JSON.stringify(failedNativeTestAgentReviewSummary)),
+        incompleteActionRecoveryAndAdversarialEvidenceRequireRecheck: needsRecheckReceipt.status === "blocked"
+            && needsRecheckReceipt.independentReview?.[0]?.verdict === "needs_recheck"
+            && needsRecheckReceipt.testAgentReport?.verdict?.canAccept === false
+            && needsRecheckReceipt.testAgentReport?.verdict?.needsRework === false
+            && needsRecheckReceipt.testAgentReport?.verdict?.needsRecheck === true
+            && needsRecheckReviewSummary.status === "needs_recheck"
+            && needsRecheckReviewSummary.status_label === "需复验"
+            && needsRecheckReviewSummary.rows.some((item) => item.includes("暂时无法确认页面效果"))
+            && needsRecheckReviewSummary.rows.some((item) => item.includes("不代表实现失败"))
+            && needsRecheckReviewSummary.rows.some((item) => item.includes("TestAgent 工作单"))
+            && needsRecheckReviewSummary.next_action.includes("重新运行 TestAgent")
+            && !needsRecheckReviewSummary.headline.includes("原实现成员返工")
+            && needsRecheckReceipt.needs.every((item) => !item.includes("决定是否返工原实现成员")),
+        needsRecheckVisibleOutputAvoidsImplementationRework: needsRecheckVisibleOutput.includes("独立复核还没有闭环")
+            && needsRecheckVisibleOutput.includes("建议：重新复验")
+            && needsRecheckVisibleOutput.includes("不代表实现失败")
+            && needsRecheckVisibleOutput.includes("TestAgent 工作单")
+            && !needsRecheckVisibleOutput.includes("复核裁决：需要返工")
+            && !/hidden-session|unsafe duplicate side effect|rawSessionId|token=|duplicate_submit|playwright/i.test(needsRecheckVisibleOutput),
+        failedAuthenticationOverridesLegacyPass: failedAuthenticationReceipt.status === "failed"
+            && failedAuthenticationReceipt.testAgentReport?.verdict?.canAccept === false
+            && failedAuthenticationReceipt.testAgentReport?.verdict?.needsRework === true
+            && failedAuthenticationReviewSummary.status === "needs_rework"
+            && failedAuthenticationReviewSummary.rows.some((item) => item.includes("登录态浏览器验收") && item.includes("1 项未通过"))
+            && !/PRIVATE_TEST_LOGIN|PRIVATE_TEST_PASSWORD|credentialEnvNames|storageState|cookie|token|sha/i.test(JSON.stringify(failedAuthenticationReviewSummary)),
+        blockedAuthenticationNeedsUserWithoutLeakingCredentials: blockedAuthenticationReceipt.status === "blocked"
+            && blockedAuthenticationReceipt.testAgentReport?.verdict?.canAccept === false
+            && blockedAuthenticationReceipt.testAgentReport?.verdict?.needsHuman === true
+            && blockedAuthenticationReviewSummary.status === "needs_user"
+            && blockedAuthenticationReviewSummary.rows.some((item) => item.includes("测试账号或登录条件"))
+            && !/PRIVATE_TEST_LOGIN|PRIVATE_TEST_PASSWORD|credentialEnvNames|storageState|cookie|token|sha/i.test(JSON.stringify(blockedAuthenticationReviewSummary)),
+        nativeTestAgentReceiptIncludesMultiSessionBrowserSummary: nativeTestAgentReceipt.verification.some((item) => item.includes("多人协作浏览器验收") && item.includes("2 个通过"))
+            && nativeTestAgentReceipt.testAgentReport?.verdict?.browserMultiSessionSummary?.total === 2
+            && nativeTestAgentReceipt.testAgentReport?.browserMultiSessionSummary?.parallelGroupCount === 2
+            && failedNativeTestAgentReceipt.status === "failed"
+            && failedNativeTestAgentReceipt.testAgentReport?.verdict?.canAccept === false
+            && failedNativeTestAgentReceipt.testAgentReport?.verdict?.needsRework === true
+            && failedNativeTestAgentReceipt.blockers.some((item) => item.includes("观察方") && item.includes("未通过")),
+        nativeTestAgentReviewSummaryReadyForGroupCard: nativeTestAgentReviewSummary.status === "passed"
+            && nativeTestAgentReviewSummary.rows.some((item) => item.includes("登录态浏览器验收"))
+            && nativeTestAgentReviewSummary.rows.some((item) => item.includes("真实浏览器验收"))
+            && nativeTestAgentReviewSummary.rows.some((item) => item.includes("多人协作浏览器验收"))
+            && failedNativeTestAgentReviewSummary.status === "needs_rework"
+            && failedNativeTestAgentReviewSummary.rows.some((item) => item.includes("表单流程") && item.includes("未通过"))
+            && failedNativeTestAgentReviewSummary.rows.some((item) => item.includes("观察方") && item.includes("未通过"))
+            && !/acceptance_form_flow|assert:networkNoErrors|session:observer|#raw-observer|locator|browserMultiSessionSummary|ccm-test-agent/i.test(JSON.stringify(failedNativeTestAgentReviewSummary.rows)),
+        configuredMultiSessionBrowserCheckAddsRequiredCoverage: hasConfiguredTestAgentMultiSessionBrowserCheck([{
+                sessions: [{ name: "sender" }, { name: "receiver" }],
+                sessionSteps: [{ session: "sender", action: "click" }],
+            }]) && !hasConfiguredTestAgentMultiSessionBrowserCheck([{
+                sessions: [{ name: "single" }],
+                sessionSteps: [{ session: "single", action: "click" }],
+            }]),
+        nativeTestAgentPlanSummaryShowsMultiSessionWork: nativePlanSummary.includes("6 个跨会话步骤")
+            && nativePlanSummary.includes("2 组并行动作"),
         nativeTestAgentReceiptIncludesUploadDownloadEvidenceSummary: nativeTestAgentReceipt.verification.some((item) => item.includes("文件上传") && item.includes("notes.txt") && item.includes("meta.json"))
             && nativeTestAgentReceipt.verification.some((item) => item.includes("文件下载") && item.includes("tasks.csv")),
         nativeTestAgentReceiptIncludesTableEvidenceSummary: nativeTestAgentReceipt.verification.some((item) => item.includes("表格验证") && item.includes("3 项表格")),
         nativeTestAgentVisibleOutputIncludesBrowserEvidenceSummary: nativeTestAgentVisibleOutput.includes("浏览器证据")
+            && nativeTestAgentVisibleOutput.includes("多人协作浏览器验收")
             && nativeTestAgentVisibleOutput.includes("浏览器交互")
             && nativeTestAgentVisibleOutput.includes("浏览器网络")
-            && !/networkLogPath|network\.log|127\.0\.0\.1:5173|C:\/tmp/i.test(nativeTestAgentVisibleOutput),
+            && !/session:observer|#raw-observer|locator|browserMultiSessionSummary|networkLogPath|network\.log|127\.0\.0\.1:5173|C:\/tmp/i.test(nativeTestAgentVisibleOutput),
         nativeTestAgentVisibleOutputIncludesUploadDownloadEvidenceSummary: nativeTestAgentVisibleOutput.includes("文件上传")
             && nativeTestAgentVisibleOutput.includes("notes.txt")
             && nativeTestAgentVisibleOutput.includes("meta.json")
@@ -17374,22 +19193,83 @@ function runCoordinatorReworkProtocolSelfTest() {
         checks,
         routes: { failedRoute, independentRoute, wrongDirectionRoute },
         independent_verifier: { verifierSelection, noVerifierSelection, independentFollowUp, independentGateFollowUps, independentGateRoutedFollowUp, failedReviewReworkFollowUps, failedReviewRoutedFollowUp, blockedIndependentFollowUp },
+        staged_review: {
+            needsRecheckReviewFollowUps,
+            needsRecheckRoutedFollowUp,
+            environmentReviewFollowUps,
+            environmentRoutedFollowUp,
+            scheduledRechecks,
+            scheduledRecheckRoutedFollowUp,
+            latestReviewWinsGate,
+        },
     };
+}
+const COORDINATOR_REVIEW_MAX_ROUNDS = 3;
+function followUpTargetCompleted(outputs = [], targetName = "") {
+    const target = String(targetName || "").trim().toLowerCase();
+    if (!target)
+        return false;
+    const latest = [...(outputs || [])].reverse().find((output) => String((0, agent_notifications_1.getCollectedOutputAgent)(output) || "").trim().toLowerCase() === target);
+    return !!latest && (0, agent_notifications_1.getCollectedOutputReceiptStatus)(latest) === "done";
+}
+function scheduleTestAgentRecheckAfterFollowUps(followUps = [], outputs = []) {
+    const scheduled = [];
+    for (const followUp of followUps || []) {
+        if (followUp?.rerunTestAgentAfterCompletion !== true && followUp?.rerun_test_agent_after_completion !== true)
+            continue;
+        const targetName = String(followUp?.targetName || followUp?.project || "").trim();
+        if (!followUpTargetCompleted(outputs, targetName))
+            continue;
+        const subject = String(followUp?.reviewSubject || followUp?.originalTarget || followUp?.continuationOf || targetName).trim();
+        const handoff = followUp?.testAgentRecheckHandoff
+            || followUp?.test_agent_recheck_handoff
+            || followUp?.testAgentHandoff
+            || followUp?.test_agent_handoff
+            || null;
+        const recheck = buildTestAgentReviewRecheckFollowUp({
+            subject,
+            handoff,
+            reason: `${followUp?.summary || "上一轮缺口已处理"}；需要基于最新状态重新运行 TestAgent`,
+            source: followUp?.rework_kind || "coordinator_rework_completed",
+        });
+        if (recheck)
+            scheduled.push(recheck);
+    }
+    return (0, memory_1.uniqueByKey)(scheduled, (item) => `${String(item?.reviewSubject || "").trim()}|test_agent_review_recheck`, 8);
+}
+function filterCoordinatorLlmFollowUpsAgainstHardRoutes(proposed = [], hardReviewFollowUps = [], hasScheduledTestAgentRecheck = false) {
+    const hardReviewSubjects = new Set(hardReviewFollowUps.flatMap((item) => [
+        item?.reviewSubject,
+        item?.originalTarget,
+        isCoordinatorTestAgentName(item?.targetName || item?.project) ? "test-agent" : item?.targetName || item?.project,
+    ]).map((value) => String(value || "").trim()).filter(Boolean));
+    return (proposed || []).filter((item) => {
+        const candidates = [item?.reviewSubject, item?.originalTarget, item?.targetName, item?.project]
+            .map((value) => String(value || "").trim())
+            .filter(Boolean);
+        if (hasScheduledTestAgentRecheck && candidates.some(isCoordinatorTestAgentName))
+            return false;
+        return !candidates.some((value) => hardReviewSubjects.has(value));
+    });
 }
 async function runCoordinatorReviewLoop(input) {
     const coordinator = (0, group_orchestrator_1.getCoordinatorMember)(input.group);
     const seenMentions = new Set();
     const allOutputs = [...(input.crossOutputs || [])];
-    // One automatic rework is enough for a user-facing collaboration task.
-    // More rounds tend to repeat the same evidence request and make the task
-    // appear stuck.  After that single rework, surface the remaining gap and
-    // wait for an explicit user action.
-    const maxReviewRounds = 2;
+    const pendingTestAgentRechecks = [];
+    // A bounded three-stage loop supports repair/preparation -> TestAgent
+    // recheck -> final acceptance without turning persistent gaps into an
+    // unbounded retry cycle.
+    const maxReviewRounds = COORDINATOR_REVIEW_MAX_ROUNDS;
     if (allOutputs.length === 0)
         return null;
     let lastReview = null;
     for (let round = 1; round <= maxReviewRounds; round++) {
         const allowFollowUps = round < maxReviewRounds;
+        const scheduledTestAgentRechecks = pendingTestAgentRechecks.splice(0, pendingTestAgentRechecks.length);
+        const scheduledReviewSubjects = new Set(scheduledTestAgentRechecks
+            .map((item) => String(item?.reviewSubject || item?.originalTarget || "").trim())
+            .filter(Boolean));
         let review = await (0, group_orchestrator_1.runLlmCoordinatorReview)(input.group, input.userMessage, input.coordinatorOutput, allOutputs, { allowFollowUps, round, maxRounds: maxReviewRounds });
         if (!review) {
             review = buildCodedCoordinatorReview(input.group, allOutputs, {
@@ -17399,25 +19279,39 @@ async function runCoordinatorReviewLoop(input) {
             });
         }
         lastReview = review;
-        const llmFollowUps = Array.isArray(review.followUps) ? review.followUps : [];
-        const gateFollowUps = buildEvidenceGateFollowUps(input.group, allOutputs);
+        const proposedLlmFollowUps = Array.isArray(review.followUps) ? review.followUps : [];
+        const gateFollowUps = buildEvidenceGateFollowUps(input.group, allOutputs)
+            .filter((item) => !(scheduledTestAgentRechecks.length && isCoordinatorTestAgentName(item?.targetName || item?.project)));
         const failedIndependentReviewFollowUps = buildFailedIndependentReviewReworkFollowUps({
             group: input.group,
             taskId: input.taskId || "",
             outputs: allOutputs,
-            existingFollowUps: [...llmFollowUps, ...gateFollowUps],
+            existingFollowUps: [...scheduledTestAgentRechecks, ...gateFollowUps],
+        }).filter((item) => !scheduledReviewSubjects.has(String(item?.reviewSubject || item?.targetName || item?.project || "").trim()));
+        const postReviewSpotCheckFollowUps = buildPostReviewSpotCheckFollowUps({
+            group: input.group,
+            taskId: input.taskId || "",
+            outputs: allOutputs,
+            existingFollowUps: [...scheduledTestAgentRechecks, ...gateFollowUps, ...failedIndependentReviewFollowUps],
         });
         const independentReviewGateFollowUps = buildIndependentReviewGateFollowUps({
             group: input.group,
             taskId: input.taskId || "",
             outputs: allOutputs,
-            existingFollowUps: [...llmFollowUps, ...gateFollowUps, ...failedIndependentReviewFollowUps],
-        });
+            existingFollowUps: [...scheduledTestAgentRechecks, ...gateFollowUps, ...failedIndependentReviewFollowUps, ...postReviewSpotCheckFollowUps],
+        }).filter((item) => !scheduledReviewSubjects.has(String(item?.reviewSubject || item?.targetName || item?.project || "").trim()));
+        const hardReviewFollowUps = [
+            ...scheduledTestAgentRechecks,
+            ...failedIndependentReviewFollowUps,
+            ...postReviewSpotCheckFollowUps,
+            ...independentReviewGateFollowUps,
+        ];
+        const llmFollowUps = filterCoordinatorLlmFollowUpsAgainstHardRoutes(proposedLlmFollowUps, hardReviewFollowUps, scheduledTestAgentRechecks.length > 0);
         // Never dispatch another Worker from the final review round.  Previously
         // LLM-proposed follow-ups bypassed `allowFollowUps`, so the last round could
         // start one more execution even though the loop was already exhausted.
         const followUps = allowFollowUps
-            ? (0, memory_1.uniqueByKey)([...llmFollowUps, ...gateFollowUps, ...failedIndependentReviewFollowUps, ...independentReviewGateFollowUps], (item) => `${String(item?.targetName || item?.project || "").trim()}|${normalizeMentionTask(String(item?.message || item?.task || ""))}`, 20)
+            ? (0, memory_1.uniqueByKey)([...scheduledTestAgentRechecks, ...llmFollowUps, ...gateFollowUps, ...failedIndependentReviewFollowUps, ...postReviewSpotCheckFollowUps, ...independentReviewGateFollowUps], (item) => `${String(item?.targetName || item?.project || "").trim()}|${normalizeMentionTask(String(item?.message || item?.task || ""))}`, 20)
             : [];
         const memorySnapshot = (0, memory_1.loadGroupMemory)(input.groupId);
         const reworkFollowUps = followUps.map((item) => buildCoordinatorReworkFollowUp(item, {
@@ -17445,7 +19339,7 @@ async function runCoordinatorReviewLoop(input) {
                 }
             }
         }
-        const gateReasons = [...gateFollowUps, ...failedIndependentReviewFollowUps, ...independentReviewGateFollowUps]
+        const gateReasons = [...gateFollowUps, ...failedIndependentReviewFollowUps, ...postReviewSpotCheckFollowUps, ...independentReviewGateFollowUps]
             .map((item) => String(item.reason || "").trim())
             .filter(Boolean);
         if (blockedVerifierFollowUps.length && dispatchableReworkFollowUps.length === 0) {
@@ -17532,6 +19426,7 @@ async function runCoordinatorReviewLoop(input) {
         });
         const followOutputs = await processCrossAgents(input.groupId, input.group, coordinator.project, reviewContent, dispatchableReworkFollowUps, input.configs, input.ctx, input.streamRes, round, seenMentions, input.executionOrder || "parallel", reviewMessageId, input.taskId || "");
         allOutputs.push(...followOutputs);
+        pendingTestAgentRechecks.push(...scheduleTestAgentRecheckAfterFollowUps(dispatchableReworkFollowUps, followOutputs));
     }
     const finalSummary = lastReview
         || await (0, group_orchestrator_1.runLlmCoordinatorSummary)(input.group, input.userMessage, allOutputs)
@@ -17546,6 +19441,222 @@ async function runCoordinatorReviewLoop(input) {
         });
     }
     return finalSummary;
+}
+function buildDirectProjectCoordinationEvidence(task, project) {
+    const objective = (0, memory_1.compactMemoryText)(task?.business_goal || task?.description || task?.title || "完成项目任务", 1200);
+    return {
+        coordinationPlan: {
+            strategy: "single_project_supervised_delivery",
+            phases: [
+                { id: "implement", label: "项目执行", status: "completed" },
+                { id: "independent_review", label: "TestAgent 独立复核", status: "in_progress" },
+                { id: "final_acceptance", label: "主 Agent 验收与总结", status: "pending" },
+            ],
+            targets: [{ project, objective }],
+        },
+        assignments: [{
+                project,
+                task: objective,
+                reason: "全局主 Agent 已把单项目目标交给指定项目执行，并保留独立复核与最终验收责任。",
+            }],
+        executionOrder: "sequential",
+    };
+}
+function directProjectReviewRoute(receipt, spotCheck = null) {
+    const verdict = getReceiptTestAgentVerdict(receipt) || {};
+    if (spotCheck && spotCheck.pass !== true)
+        return "needs_recheck";
+    if (verdict.needsUser === true || verdict.reviewRoute === "needs_user")
+        return "needs_user";
+    if (verdict.needsEnvironment === true || verdict.reviewRoute === "environment_prepare")
+        return "needs_environment";
+    if (verdict.needsRecheck === true || verdict.reviewRoute === "test_agent_recheck")
+        return "needs_recheck";
+    if (receipt?.status === "done")
+        return "passed";
+    if (receipt?.status === "failed")
+        return "needs_rework";
+    return "needs_environment";
+}
+function buildDirectProjectReviewState(project, route, headline = "") {
+    const rows = {
+        passed: { status: "passed", statusLabel: "已通过", nextAction: "整理最终交付总结。" },
+        needs_rework: { status: "needs_rework", statusLabel: "需返工", nextAction: "让原项目执行成员修复失败点，随后自动重新运行 TestAgent。" },
+        needs_recheck: { status: "needs_recheck", statusLabel: "需复验", nextAction: "沿用同一复核目标重新运行 TestAgent，不重复修改已通过的实现。" },
+        needs_environment: { status: "needs_environment", statusLabel: "待补条件", nextAction: "先补齐运行、登录或环境条件，再自动重新运行 TestAgent。" },
+        needs_user: { status: "needs_user", statusLabel: "等待你确认", nextAction: "等待你补充复核所需信息后继续。" },
+    };
+    const selected = rows[route] || rows.needs_recheck;
+    return {
+        schema: "ccm-direct-project-independent-review-state-v1",
+        route,
+        status: selected.status,
+        status_label: selected.statusLabel,
+        review_subject: project,
+        headline: (0, memory_1.compactMemoryText)(headline || `${project} 的独立复核状态已更新。`, 500),
+        next_action: selected.nextAction,
+        updated_at: new Date().toISOString(),
+    };
+}
+async function runDirectProjectIndependentReview(input) {
+    const { task, project, workerReceipt, workerOutput, fileChanges } = input;
+    const coordination = buildDirectProjectCoordinationEvidence(task, project);
+    const workerPacket = (0, agent_notifications_1.formatCollectedAgentOutput)(project, workerOutput, workerReceipt);
+    const actualChanges = collectTaskActualFileChanges(task, { fileChanges });
+    const gate = buildIndependentReviewGate(task, actualChanges, [workerReceipt], []);
+    if (!gate.required) {
+        return {
+            pass: true,
+            result: `${project} 已提交执行结果，当前变更未触发强制独立复核。`,
+            report: workerPacket,
+            review: { status: "done", reviewer: "global-agent", summary: "项目执行证据已通过当前验收规则。" },
+            reviewState: null,
+            ...coordination,
+        };
+    }
+    let reviewReceipt = null;
+    let reviewOutput = "";
+    let reviewSummary = null;
+    let spotCheck = null;
+    try {
+        const syntheticGroup = {
+            id: task?.group_id || `single-project-${task?.id || project}`,
+            coordinator: "global-agent",
+            members: [
+                { project: "global-agent", role: "coordinator" },
+                { project, role: "member" },
+                { project: "test-agent", role: "reviewer" },
+            ],
+        };
+        const handoff = buildCoordinatorTestAgentHandoff({
+            targetName: "test-agent",
+            originalTarget: project,
+            reviewSubject: project,
+            summary: "对单项目执行结果进行独立复核",
+            message: "基于最新项目状态核对用户目标、改动文件、验证结果和边界风险。",
+        }, {
+            group: syntheticGroup,
+            sourceTask: task,
+            taskId: task?.id,
+            previousLedger: {
+                project,
+                summary: workerReceipt?.summary || "项目执行成员已提交结果说明",
+                filesChanged: uniqueStrings(workerReceipt?.filesChanged || [], fileChanges?.files || []),
+                verification: workerReceipt?.verification || [],
+                blockers: workerReceipt?.blockers || [],
+            },
+            userMessage: task?.business_goal || task?.title || "",
+            coordinatorOutput: "全局主 Agent 单项目持久任务独立复核",
+        });
+        if (!handoff)
+            throw new Error("无法生成 TestAgent 独立复核工作单");
+        if (Array.isArray(handoff.projects) && handoff.projects[0] && input.workDir) {
+            handoff.projects[0] = {
+                ...handoff.projects[0],
+                workDir: input.workDir,
+                work_dir: input.workDir,
+            };
+            handoff.metadata.projectRuntimeSource = "direct_task_execution_workspace";
+        }
+        (0, logs_1.appendTaskTimelineEvent)(task.id, {
+            type: "test_agent_native_execution_start",
+            title: "TestAgent 开始独立复核",
+            detail: `复核对象：${project}`,
+            status: "active",
+            phase: "reviewing",
+            agent: "test-agent",
+            data: { test_agent_handoff: handoff },
+        });
+        const planDispatch = runNativeTestAgentCliPlanFromHandoff(handoff, 120000);
+        const plan = planDispatch.plan;
+        if (!plan)
+            throw new Error("TestAgent 未返回可解析的复核计划");
+        (0, logs_1.appendTaskTimelineEvent)(task.id, {
+            type: "test_agent_execution_plan_ready",
+            title: "TestAgent 复核计划已生成",
+            detail: summarizeNativeTestAgentExecutionPlan(plan),
+            status: plan.valid ? "ok" : "warn",
+            phase: "reviewing",
+            agent: "test-agent",
+            data: { test_agent_execution_plan: plan },
+        });
+        if (!plan.valid) {
+            reviewReceipt = buildNativeTestAgentPlanBlockedReceipt("test-agent", plan, planDispatch, handoff);
+            reviewOutput = formatNativeTestAgentPlanBlockedOutput("test-agent", plan, reviewReceipt, handoff);
+        }
+        else {
+            const dispatch = runNativeTestAgentCliHandoff(handoff, 900000, planDispatch.handoffPath);
+            const report = dispatch.report;
+            if (!report)
+                throw new Error("TestAgent 未返回可解析的复核报告");
+            reviewReceipt = buildNativeTestAgentReceipt("test-agent", report, handoff, plan?.metadata?.normalizedWorkOrder || handoff);
+            reviewReceipt.testAgentHandoff = handoff;
+            reviewReceipt.test_agent_handoff = handoff;
+            if (reviewReceipt.status === "done") {
+                spotCheck = await (0, post_review_spot_check_1.runMainAgentPostReviewSpotCheck)({
+                    report,
+                    taskId: task.id,
+                    projectRoot: input.workDir,
+                    required: true,
+                    maxCommands: 3,
+                    timeoutMs: 300000,
+                });
+                reviewReceipt.postReviewSpotCheck = spotCheck;
+                reviewReceipt.post_review_spot_check = spotCheck;
+                reviewReceipt.postReviewSpotCheckSummary = (0, post_review_spot_check_1.buildPostReviewSpotCheckSummary)(spotCheck);
+                reviewReceipt.post_review_spot_check_summary = reviewReceipt.postReviewSpotCheckSummary;
+            }
+            reviewSummary = buildNativeTestAgentReviewSummary("test-agent", report, reviewReceipt);
+            reviewOutput = formatNativeTestAgentOutput("test-agent", report, reviewReceipt, handoff);
+        }
+    }
+    catch (error) {
+        const summary = (0, memory_1.compactMemoryText)(error?.message || String(error) || "TestAgent 执行条件不足", 500);
+        reviewReceipt = {
+            agent: "test-agent",
+            reviewer: "test-agent",
+            role: "reviewer",
+            status: "blocked",
+            summary,
+            actions: [],
+            filesChanged: [],
+            verification: [],
+            blockers: [summary],
+            needs: ["补齐 TestAgent CLI、项目路径或运行环境后重新复验"],
+            independentReview: [{ reviewer: "test-agent", reviewedAgent: project, verdict: "blocked", summary, evidence: [] }],
+        };
+        reviewOutput = (0, agent_notifications_1.formatCollectedAgentOutput)("test-agent", summary, reviewReceipt);
+    }
+    updateTaskWorkItemFromReceipt(task.id, "test-agent", reviewReceipt, null, reviewOutput);
+    const route = directProjectReviewRoute(reviewReceipt, spotCheck);
+    const headline = reviewSummary?.headline || reviewReceipt?.summary || "独立复核已返回结果。";
+    const reviewState = buildDirectProjectReviewState(project, route, headline);
+    (0, logs_1.appendTaskTimelineEvent)(task.id, {
+        type: "test_agent_native_execution_done",
+        title: route === "passed" ? "TestAgent 复核与抽查已通过" : "TestAgent 复核仍需继续",
+        detail: reviewState.headline,
+        status: route === "passed" ? "ok" : "warn",
+        phase: "reviewing",
+        agent: "test-agent",
+        data: { direct_project_review_state: reviewState, test_agent_review_summary: reviewSummary },
+    });
+    return {
+        pass: route === "passed",
+        result: route === "passed"
+            ? `${project} 已完成执行，TestAgent 独立复核和主 Agent 完成前抽查均已通过。`
+            : `${project} 已提交执行结果，但独立复核尚未通过：${reviewState.status_label}。`,
+        report: [workerPacket, reviewOutput].filter(Boolean).join("\n\n---\n\n"),
+        review: {
+            status: route === "passed" ? "done" : route,
+            reviewer: "global-agent",
+            summary: reviewState.headline,
+            content: reviewState.headline,
+            test_agent_review_summary: reviewSummary,
+        },
+        reviewReceipt,
+        reviewState,
+        ...coordination,
+    };
 }
 // === 执行任务核心 ===
 async function executeTask(task, ctx) {
@@ -17585,6 +19696,7 @@ async function executeTask(task, ctx) {
             context,
             source: "task",
             sharedFilesContext,
+            providerSwitchRequests: buildTaskProviderSwitchRequests(task),
         });
         let coordinatorOutput = coordinatorResult.content;
         const coordinatorTranscript = [coordinatorOutput].filter(Boolean);
@@ -17632,6 +19744,7 @@ async function executeTask(task, ctx) {
                 context,
                 source: "daily-dev-dispatch-repair",
                 sharedFilesContext,
+                providerSwitchRequests: buildTaskProviderSwitchRequests(task),
             });
             const repairMentions = getCoordinatorActionMentions(repairResult, group, coordinatorProject);
             const repairAssignments = normalizePlanAssignments(repairResult.assignments || []);
@@ -17850,7 +19963,11 @@ async function executeTask(task, ctx) {
             (0, db_1.saveTasks)(directTasksForRehearsal);
         }
         (0, logs_1.appendTaskTimelineEvent)(task.id, { type: "sandbox_rehearsal", title: "任务前沙盘演练", detail: `${directSandboxRehearsal.impact_scope.areas.join("、")}；直接派发给 ${task.target_project}`, status: "ok", phase: "planning", agent: task.target_project, data: directSandboxRehearsal });
-        const changeSnapshot = workDir ? ctx.createFileChangeSnapshot(workDir) : null;
+        const priorReviewState = task?.delivery_summary?.direct_project_review_state || task?.deliverySummary?.directProjectReviewState || null;
+        const reuseWorkerDeliveryForRecheck = priorReviewState?.route === "needs_recheck"
+            && task?.receipt?.status === "done"
+            && !!task?.file_changes;
+        const changeSnapshot = !reuseWorkerDeliveryForRecheck && workDir ? ctx.createFileChangeSnapshot(workDir) : null;
         const directTaskText = buildChildAgentTaskText(`${task.title}\n${task.description || ""}`, task);
         const directGroupMemoryContext = task.group_id
             ? (0, memory_1.buildAgentMemoryContextBundle)(task.group_id, task.target_project, directTaskText, {
@@ -17953,21 +20070,47 @@ async function executeTask(task, ctx) {
   "needs": ["还需要用户或其他 Agent 补充的内容；没有填空数组"]
 }
 \`\`\``;
-        const output = await ctx.callAgent(task.target_project, message, workDir, agentType, 300000, {
-            groupId: task.group_id || "",
-            allowedTools: toolContext.allowedTools,
-            mcpConfigPath: runtimeToolContext.audit.mcpConfigPath,
-            runtimeToolSnapshot: runtimeToolSnapshotFromAudit(runtimeToolContext.audit, toolContext.allowedTools),
-            runtimeToolDispatchGate: runtimeToolContext.dispatchGate,
-            taskId: task.id,
-            executionId: task.id,
+        let output = "";
+        let fileChanges = null;
+        let receipt = null;
+        let invokedSkills = [];
+        if (reuseWorkerDeliveryForRecheck) {
+            output = task?.receipt?.summary || task?.result || `${task.target_project} 上一轮实现结果继续用于独立复验`;
+            fileChanges = task.file_changes;
+            receipt = task.receipt;
+            (0, logs_1.appendTaskTimelineEvent)(task.id, {
+                type: "direct_project_worker_reused_for_recheck",
+                title: "沿用已完成的项目实现",
+                detail: "本轮只重新运行 TestAgent 独立复核，不重复修改已通过的实现。",
+                status: "ok",
+                phase: "reviewing",
+                agent: task.target_project,
+            });
+        }
+        else {
+            output = await ctx.callAgent(task.target_project, message, workDir, agentType, 300000, {
+                groupId: task.group_id || "",
+                allowedTools: toolContext.allowedTools,
+                mcpConfigPath: runtimeToolContext.audit.mcpConfigPath,
+                runtimeToolSnapshot: runtimeToolSnapshotFromAudit(runtimeToolContext.audit, toolContext.allowedTools),
+                runtimeToolDispatchGate: runtimeToolContext.dispatchGate,
+                taskId: task.id,
+                executionId: task.id,
+            });
+            fileChanges = workDir ? ctx.getFileChanges(task.target_project, changeSnapshot) : null;
+            const detectedSkillUse = attachInvokedSkillsToReceipt((0, agent_receipts_1.extractAgentReceipt)(output, task.target_project), output, toolContext.allowedTools, runtimeToolContext.audit);
+            receipt = detectedSkillUse.receipt;
+            invokedSkills = detectedSkillUse.invoked;
+            if (receipt)
+                updateTaskWorkItemFromReceipt(task.id, task.target_project, receipt, fileChanges, output, { ctx });
+        }
+        const coordination = buildDirectProjectCoordinationEvidence(task, task.target_project);
+        const result = getTaskExecutionFromReceipt(output, receipt, {
+            fileChanges,
+            runtimeToolSync: compactRuntimeToolAudit(runtimeToolContext.audit),
+            invokedSkills,
+            ...coordination,
         });
-        const fileChanges = workDir ? ctx.getFileChanges(task.target_project, changeSnapshot) : null;
-        const detectedSkillUse = attachInvokedSkillsToReceipt((0, agent_receipts_1.extractAgentReceipt)(output, task.target_project), output, toolContext.allowedTools, runtimeToolContext.audit);
-        const receipt = detectedSkillUse.receipt;
-        if (receipt)
-            updateTaskWorkItemFromReceipt(task.id, task.target_project, receipt, fileChanges, output, { ctx });
-        const result = getTaskExecutionFromReceipt(output, receipt, { fileChanges, runtimeToolSync: compactRuntimeToolAudit(runtimeToolContext.audit), invokedSkills: detectedSkillUse.invoked });
         const green = (0, execution_kernel_1.evaluateGreenContract)({ receipt, fileChanges, requiresChanges: taskRequiresCodeChanges(task), requiresVerification: task.requires_verification !== false, requiredLevel: "project" });
         (0, execution_kernel_1.transitionExecution)(task.id, result.status === "failed" ? "failed" : "reviewing", result.status === "done" ? "项目 Agent 已交付，进入验收" : result.detail, {
             green,
@@ -17975,9 +20118,35 @@ async function executeTask(task, ctx) {
             fileChanges,
             runnerVerification: (0, agent_receipts_1.extractRunnerVerificationEvidence)(output),
             outputPreview: output,
-            data: { runtime_tool_sync: compactRuntimeToolAudit(runtimeToolContext.audit), invoked_skills: detectedSkillUse.invoked },
+            data: { runtime_tool_sync: compactRuntimeToolAudit(runtimeToolContext.audit), invoked_skills: invokedSkills },
         });
-        return { ...result, runtimeToolSync: compactRuntimeToolAudit(runtimeToolContext.audit), invokedSkills: detectedSkillUse.invoked, executionKernel: { executionId: task.id, green } };
+        if (result.status === "done" && receipt?.status === "done") {
+            const independentReview = await runDirectProjectIndependentReview({
+                task,
+                project: task.target_project,
+                workDir,
+                workerReceipt: receipt,
+                workerOutput: output,
+                fileChanges,
+            });
+            return {
+                ...result,
+                status: independentReview.pass ? "done" : "waiting",
+                detail: independentReview.result,
+                result: independentReview.result,
+                report: independentReview.report,
+                review: independentReview.review,
+                directProjectReviewState: independentReview.reviewState,
+                direct_project_review_state: independentReview.reviewState,
+                coordinationPlan: independentReview.coordinationPlan,
+                assignments: independentReview.assignments,
+                executionOrder: independentReview.executionOrder,
+                runtimeToolSync: compactRuntimeToolAudit(runtimeToolContext.audit),
+                invokedSkills,
+                executionKernel: { executionId: task.id, green },
+            };
+        }
+        return { ...result, ...coordination, runtimeToolSync: compactRuntimeToolAudit(runtimeToolContext.audit), invokedSkills, executionKernel: { executionId: task.id, green } };
     }
 }
 function ensureTaskKernelExecution(task) {
@@ -18456,48 +20625,82 @@ function backfillTaskTraceIds() {
 function resumeTaskQueues(ctx, options = {}) {
     const traceBackfilled = backfillTaskTraceIds();
     const tasks = (0, db_1.loadTasks)();
-    const autoStartupRecovery = options.force === true || options.manual === true || /^(1|true|yes|on)$/i.test(String(process.env.CCM_AUTO_STARTUP_TASK_RECOVERY || ""));
-    const resumable = tasks.filter((task) => {
-        if (isRecoverableAutoTask(task))
-            return true;
-        return autoStartupRecovery
-            && task?.auto_execute !== false
-            && task?.recovery_pending === true
-            && ["pending", "needs_user", "in_progress"].includes(String(task.status || ""));
-    });
+    const forceAuto = options.force === true
+        || options.manual === true
+        || /^(1|true|yes|on)$/i.test(String(process.env.CCM_AUTO_STARTUP_TASK_RECOVERY || ""));
+    const recoveryPlan = (0, startup_task_recovery_1.buildStartupTaskRecoveryPlan)(tasks, forceAuto);
+    const candidates = recoveryPlan.entries.filter((entry) => entry.decision.candidate);
     const results = [];
-    if (!autoStartupRecovery) {
-        for (const task of resumable) {
-            const traceId = (0, reliability_ledger_1.ensureTraceId)(task.trace_id, "task");
-            const recoveryReasoning = buildTaskPreflightReasoning(task, "服务启动发现未完成自动任务：已进入手动恢复模式，等待用户确认是否继续", true);
-            const patch = {
-                trace_id: traceId,
-                is_paused: true,
-                paused: true,
-                recovery_pending: true,
-                recovery: { ...(task.recovery || {}), pending_since: new Date().toISOString(), previous_status: task.status, mode: "manual_startup_recovery" },
-                reasoning_loop: recoveryReasoning,
-                status_detail: task.status === "in_progress"
-                    ? "服务启动时检测到未完成执行，已暂停等待用户手动恢复"
-                    : "服务启动时检测到待执行任务，已暂停等待用户手动恢复",
-            };
-            if (task.status === "in_progress")
-                patch.status = "needs_user";
-            updateTask(task.id, patch);
-            (0, logs_1.addTaskLog)(task.id, "warning", patch.status_detail);
-            (0, logs_1.appendTaskTimelineEvent)(task.id, { type: "startup_manual_recovery", title: "启动恢复已进入手动模式", detail: patch.status_detail, status: "warn", phase: "needs_user", data: { previous_status: task.status } });
-            results.push({ task_id: task.id, queued: false, manual_recovery_required: true, message: patch.status_detail });
+    for (const entry of candidates) {
+        const task = entry.task;
+        const recoveryDecision = entry.decision;
+        if (recoveryDecision.mode === "skip") {
+            results.push({
+                task_id: task.id,
+                queued: false,
+                skipped: true,
+                reason_code: recoveryDecision.reason_code,
+                message: recoveryDecision.reason,
+            });
+            continue;
         }
-        return {
-            resumed: 0,
-            total: resumable.length,
-            trace_backfilled: traceBackfilled,
-            manual_recovery: true,
-            results,
-            queue_status: getQueueStatus(),
-        };
-    }
-    for (const task of resumable) {
+        if (recoveryDecision.mode === "manual") {
+            const alreadyHeld = task?.recovery_pending === true
+                || isTaskPaused(task)
+                || task?.status === "needs_user"
+                || task?.intake_state === "awaiting_confirmation";
+            if (!alreadyHeld) {
+                const traceId = (0, reliability_ledger_1.ensureTraceId)(task.trace_id, "task");
+                const recoveryReasoning = buildTaskPreflightReasoning(task, `服务启动恢复需等待确认：${recoveryDecision.reason}`, true);
+                const now = new Date().toISOString();
+                const patch = {
+                    trace_id: traceId,
+                    status: task.status === "in_progress" ? "needs_user" : task.status,
+                    is_paused: true,
+                    paused: true,
+                    recovery_pending: true,
+                    recovery: {
+                        ...(task.recovery || {}),
+                        pending_since: now,
+                        previous_status: task.status,
+                        mode: "manual_startup_recovery",
+                        decision_code: recoveryDecision.reason_code,
+                        decision_reason: recoveryDecision.reason,
+                        authorization_preserved: false,
+                        authorization_evidence: recoveryDecision.authorization_evidence,
+                        requires_user: true,
+                        user_headline: recoveryDecision.user_headline,
+                        user_next_action: recoveryDecision.user_next_action,
+                    },
+                    reasoning_loop: recoveryReasoning,
+                    collaboration_state: {
+                        ...(task.collaboration_state || {}),
+                        phase: "needs_user",
+                        needs_user: true,
+                        updated_at: now,
+                    },
+                    status_detail: recoveryDecision.user_headline,
+                };
+                updateTask(task.id, patch);
+                (0, logs_1.addTaskLog)(task.id, "warning", recoveryDecision.reason);
+                (0, logs_1.appendTaskTimelineEvent)(task.id, {
+                    type: "startup_manual_recovery",
+                    title: "服务重启后仍在等待确认",
+                    detail: recoveryDecision.user_headline,
+                    status: "warn",
+                    phase: "needs_user",
+                    data: { previous_status: task.status, decision: recoveryDecision },
+                });
+            }
+            results.push({
+                task_id: task.id,
+                queued: false,
+                manual_recovery_required: true,
+                reason_code: recoveryDecision.reason_code,
+                message: recoveryDecision.user_headline || recoveryDecision.reason,
+            });
+            continue;
+        }
         const traceId = (0, reliability_ledger_1.ensureTraceId)(task.trace_id, "task");
         const recoveryLease = (0, reliability_ledger_1.acquireTaskLease)(task.id, traceId, 45_000);
         if (!recoveryLease.acquired) {
@@ -18506,6 +20709,22 @@ function resumeTaskQueues(ctx, options = {}) {
             continue;
         }
         const recoveryReasoning = buildTaskPreflightReasoning(task, "服务启动恢复：重新核对原始目标、当前代码状态、剩余缺口与验收条件", true);
+        const recoveredAt = new Date().toISOString();
+        const recoveryRecord = {
+            ...(task.recovery || {}),
+            recovered_at: recoveredAt,
+            revalidated_at: recoveredAt,
+            lease_recovery_count: recoveryLease.lease.recovery_count,
+            previous_status: task.status,
+            mode: "startup_auto_recovery",
+            decision_code: recoveryDecision.reason_code,
+            decision_reason: recoveryDecision.reason,
+            authorization_preserved: recoveryDecision.authorization_preserved,
+            authorization_evidence: recoveryDecision.authorization_evidence,
+            requires_user: false,
+            user_headline: recoveryDecision.user_headline,
+            user_next_action: recoveryDecision.user_next_action,
+        };
         if (task.status === "in_progress") {
             updateTask(task.id, {
                 status: "pending",
@@ -18513,11 +20732,18 @@ function resumeTaskQueues(ctx, options = {}) {
                 is_paused: false,
                 paused: false,
                 recovery_pending: false,
-                result: "服务启动时检测到未完成执行，已自动恢复排队",
-                recovery: { recovered_at: new Date().toISOString(), lease_recovery_count: recoveryLease.lease.recovery_count, previous_status: "in_progress" },
+                result: "服务重启后已自动接上未完成执行",
+                status_detail: "服务重启后已自动接上，正在重新进入执行队列",
+                recovery: recoveryRecord,
                 reasoning_loop: recoveryReasoning,
+                collaboration_state: {
+                    ...(task.collaboration_state || {}),
+                    phase: "planning",
+                    needs_user: false,
+                    updated_at: recoveredAt,
+                },
             });
-            (0, logs_1.addTaskLog)(task.id, "warning", "服务启动时检测到任务处于进行中，已恢复为待执行并重新入队");
+            (0, logs_1.addTaskLog)(task.id, "warning", "服务重启后已接上未完成任务，重新核对后恢复排队");
         }
         else {
             updateTask(task.id, {
@@ -18526,20 +20752,50 @@ function resumeTaskQueues(ctx, options = {}) {
                 paused: false,
                 recovery_pending: false,
                 reasoning_loop: recoveryReasoning,
-                recovery: { ...(task.recovery || {}), revalidated_at: new Date().toISOString(), lease_recovery_count: recoveryLease.lease.recovery_count, previous_status: task.status, mode: "manual_resume" },
+                recovery: recoveryRecord,
+                status_detail: "服务重启后已自动接上，正在重新进入执行队列",
+                collaboration_state: {
+                    ...(task.collaboration_state || {}),
+                    phase: "planning",
+                    needs_user: false,
+                    updated_at: recoveredAt,
+                },
             });
-            (0, logs_1.addTaskLog)(task.id, "info", "服务启动恢复自动执行任务，重新加入队列");
+            (0, logs_1.addTaskLog)(task.id, "info", "服务重启后自动接上已授权任务，重新加入队列");
         }
+        (0, logs_1.appendTaskTimelineEvent)(task.id, {
+            type: "startup_auto_recovery",
+            title: "服务重启后已自动接上",
+            detail: "已保留原任务授权，并重新核对目标、当前状态和验收条件。",
+            status: "active",
+            phase: "planning",
+            data: { decision: recoveryDecision, recovery_check: recoveryReasoning.recovery_checks[recoveryReasoning.recovery_checks.length - 1] || {} },
+        });
         (0, logs_1.appendTaskTimelineEvent)(task.id, { type: "reasoning_recovery_check", title: "恢复前已重新核对任务", detail: `原始目标、当前状态与验收条件已复核；剩余 ${recoveryReasoning.assertions.filter(item => item.status !== "passed").length} 项待证明`, status: recoveryReasoning.recovery_checks[recoveryReasoning.recovery_checks.length - 1]?.acceptance_revalidated ? "ok" : "warn", phase: "planning", data: recoveryReasoning.recovery_checks[recoveryReasoning.recovery_checks.length - 1] || {} });
         const queued = enqueueTask(task.id, ctx);
         if (!queued.queued)
             (0, reliability_ledger_1.releaseTaskLease)(task.id, "recovery_not_queued");
-        results.push({ task_id: task.id, ...queued });
+        results.push({
+            task_id: task.id,
+            ...queued,
+            auto_recovered: true,
+            authorization_preserved: true,
+            reason_code: recoveryDecision.reason_code,
+        });
     }
+    const resumed = results.filter(item => item.queued).length;
+    const manualPending = results.filter(item => item.manual_recovery_required).length;
+    const skipped = results.filter(item => item.skipped || item.active_elsewhere).length;
     return {
-        resumed: results.filter(item => item.queued).length,
-        total: resumable.length,
+        resumed,
+        auto_resumed: resumed,
+        manual_pending: manualPending,
+        skipped,
+        total: candidates.length,
         trace_backfilled: traceBackfilled,
+        manual_recovery: resumed === 0 && manualPending > 0,
+        mixed_recovery: resumed > 0 && manualPending > 0,
+        recovery_policy: "risk_tiered_authorization_preserving",
         results,
         queue_status: getQueueStatus(),
     };
@@ -21597,6 +23853,7 @@ function mergeCoordinatorDocumentContexts(...contexts) {
 function runCollaborationProtocolSelfTest() {
     const reworkProtocol = runCoordinatorReworkProtocolSelfTest();
     const agentCollaborationProtocol = (0, collaboration_protocol_1.runAgentCollaborationProtocolSelfTest)();
+    const startupTaskRecovery = (0, startup_task_recovery_1.runStartupTaskRecoveryDecisionSelfTest)();
     const coordinatorVisibleMessageSelfTest = getCoordinatorVisibleMessageSelfTest();
     const assignmentGroup = {
         members: [
@@ -21930,6 +24187,7 @@ function runCollaborationProtocolSelfTest() {
     return {
         pass: reworkProtocol.pass
             && agentCollaborationProtocol.pass
+            && startupTaskRecovery.pass
             && Object.values(taskDocumentChecks).every(Boolean)
             && Object.values(structuredAssignmentChecks).every(Boolean)
             && Object.values(executionFixChecks).every(Boolean)
@@ -21943,6 +24201,7 @@ function runCollaborationProtocolSelfTest() {
             && Object.values(agentQaRequirementChecks).every(Boolean),
         reworkProtocol,
         agentCollaborationProtocol,
+        startupTaskRecovery,
         taskDocumentContextPreview: taskDocumentContext.slice(0, 600),
         taskDocumentChecks,
         structuredAssignmentChecks,
@@ -23020,6 +25279,46 @@ function superviseGlobalDevelopmentMissionCycle(id, ctx, options = {}) {
             continue;
         }
         const attempts = Math.max(Number(child.retry_count || 0), Number(child.auto_gap_continue_count || 0));
+        const directProjectReviewState = child?.delivery_summary?.direct_project_review_state || null;
+        if (child.status === "in_progress" && directProjectReviewState?.route && directProjectReviewState.route !== "passed") {
+            const route = String(directProjectReviewState.route);
+            if (route === "needs_user") {
+                waitingUser.push({ task_id: child.id, reason: directProjectReviewState.next_action || "独立复核需要用户补充信息" });
+                actions.push({ type: "direct_project_review_waiting_user", task_id: child.id, route });
+                continue;
+            }
+            if (attempts >= maxAttempts) {
+                waitingUser.push({ task_id: child.id, reason: `${directProjectReviewState.status_label || "独立复核未通过"}，且已达到自动处理上限` });
+                actions.push({ type: "direct_project_review_attempts_exhausted", task_id: child.id, route });
+                continue;
+            }
+            const followup = route === "needs_recheck"
+                ? "主 Agent 已保留上一轮项目实现。本轮不要重复修改已通过的代码，只沿用同一复核目标重新运行 TestAgent，并在通过后重新执行完成前抽查。"
+                : route === "needs_environment"
+                    ? "TestAgent 当前缺少运行、登录或环境条件。请只补齐可验证条件，不改写无关业务逻辑；条件就绪后主 Agent 会自动重新运行 TestAgent。"
+                    : "TestAgent 已指出实现或验收缺口。请在原项目上下文中只修复失败点，重新运行项目验证并提交完整结果说明；随后主 Agent 会自动重新运行 TestAgent。";
+            const result = continueTaskWithMessage(child.id, followup, ctx, {
+                source: `mission_supervisor_direct_project_${route}`,
+                auto_execute: true,
+                idempotency_key: `${id}:direct-review:${child.id}:${route}:${attempts + 1}`,
+                status_detail: route === "needs_recheck"
+                    ? "全局 Agent 已安排沿用原实现重新运行 TestAgent"
+                    : route === "needs_environment"
+                        ? "全局 Agent 已安排补齐复核条件，完成后重新运行 TestAgent"
+                        : "全局 Agent 已按 TestAgent 失败点安排实现返工",
+            });
+            actions.push({
+                type: route === "needs_recheck"
+                    ? "direct_project_test_agent_recheck"
+                    : route === "needs_environment"
+                        ? "direct_project_review_environment_prepare"
+                        : "direct_project_review_rework",
+                task_id: child.id,
+                route,
+                result: { success: result.success, queued: result.queued },
+            });
+            continue;
+        }
         if (child.status === "done") {
             const evidence = getGlobalMissionChildDeliveryEvidence(child);
             if (evidence.merge_required && !evidence.merge_passed && autoMerge) {
@@ -23140,70 +25439,193 @@ async function controlGlobalDevelopmentMission(id, operation, ctx, payload = {})
         return { success: false, status: 400, error: `不支持的全局任务操作：${operation}` };
     }
     if (op === "update_goal") {
-        const goal = compactFormText(payload.business_goal || payload.businessGoal || payload.goal, current.mission.business_goal || current.mission.description || "");
+        const previousGoal = compactFormText(current.mission.business_goal || current.mission.description || current.mission.title, "");
+        const requestedGoal = compactFormText(payload.business_goal || payload.businessGoal || payload.goal, "");
         const acceptance = compactFormText(payload.acceptance || payload.acceptance_criteria || payload.acceptanceCriteria, current.mission.acceptance_criteria || "");
         const continuation = payload.continuation && typeof payload.continuation === "object" ? payload.continuation : null;
-        const continuationState = continuation ? {
+        const source = compactFormText(continuation?.source || payload.source || "mission_supervisor_goal_update", "mission_supervisor_goal_update");
+        const continuationMessage = compactFormText(payload.message
+            || payload.followup
+            || continuation?.message
+            || continuation?.reason
+            || continuation?.detail
+            || payload.reason, "");
+        const reworkKind = compactFormText(continuation?.rework_kind || continuation?.reworkKind || "", "");
+        const requestedKind = String(payload.continuation_kind
+            || payload.continuationKind
+            || continuation?.kind
+            || continuation?.continuation_kind
+            || "").trim();
+        const isNextWorkItem = reworkKind === "next_claimable_work_item"
+            || /next_work_item|user_next_work_item/i.test(`${source} ${reworkKind}`);
+        const inferredKind = requestedKind && requestedKind !== "auto"
+            ? normalizeContinuationKind(requestedKind)
+            : isNextWorkItem
+                ? "supplement"
+                : classifyTaskContinuation(continuationMessage || (requestedGoal ? `目标调整为：${requestedGoal}` : "补充当前全局任务"));
+        if (inferredKind === "new_task") {
+            return { success: false, status: 409, error: "这条要求看起来是独立新任务，请新建全局任务，不会混入当前持续跟进。" };
+        }
+        const continuationKind = normalizeContinuationKind(inferredKind);
+        const goal = requestedGoal || [
+            previousGoal,
+            continuationMessage ? `${continuationKind === "revise_goal" ? "目标调整" : "补充要求"}：${continuationMessage}` : "",
+        ].filter(Boolean).join("\n");
+        const followup = [
+            continuationKind === "revise_goal" ? "全局目标已调整，请停止旧方向并重新核对计划。" : "全局任务收到补充要求，请并入当前任务继续处理。",
+            continuationMessage ? `用户最新要求：${continuationMessage}` : "",
+            goal ? `当前全局目标：${goal}` : "",
+            `验收标准：${acceptance || "沿用原标准"}`,
+        ].filter(Boolean).join("\n");
+        const continuationResults = [];
+        for (const child of current.children) {
+            if (["cancelled"].includes(child.status))
+                continue;
+            const result = continueTaskWithMessage(child.id, followup, ctx, {
+                source,
+                continuationKind,
+                interrupt_current_run: continuationKind === "revise_goal",
+                rework_kind: reworkKind,
+                target: continuation?.target || continuation?.agent || continuation?.project || child.target_project || "",
+                reason: continuationMessage || continuation?.reason || payload.reason || "",
+                title: continuation?.title || continuation?.label || (continuationKind === "revise_goal" ? "全局目标调整" : "全局任务补充"),
+                work_item_id: continuation?.work_item_id || continuation?.workItemId || "",
+                status_detail: continuationKind === "revise_goal"
+                    ? "目标调整已接收；旧执行轮正在停止，随后会按新目标重新规划"
+                    : "补充要求已接收；继续当前任务链路",
+                idempotencyKey: payload.request_id || payload.requestId
+                    ? `${payload.request_id || payload.requestId}:${child.id}`
+                    : "",
+            });
+            if (result.success) {
+                updateTask(child.id, {
+                    business_goal: goal,
+                    acceptance_criteria: acceptance,
+                    global_mission_goal_updated_at: now,
+                    global_mission_continuation_kind: continuationKind,
+                });
+            }
+            continuationResults.push({
+                task_id: child.id,
+                target: child.target_project || child.mission_target?.name || "",
+                success: result.success === true,
+                queued: result.queued === true,
+                deferred: result.deferred === true,
+                interrupted_current_run: result.interrupted_current_run === true,
+                interruption_success: result.interruption?.success !== false,
+                continuation_kind: result.continuation_kind || continuationKind,
+                error: result.error || result.interruption?.error || "",
+            });
+        }
+        const continuationSummary = {
+            schema: "ccm-global-mission-continuation-summary-v1",
+            kind: continuationKind,
+            source,
+            replan_required: continuationKind === "revise_goal",
+            interrupt_current_run: continuationKind === "revise_goal",
+            affected_task_count: continuationResults.filter(item => item.success).length,
+            queued_task_count: continuationResults.filter(item => item.queued).length,
+            deferred_task_count: continuationResults.filter(item => item.deferred).length,
+            interruption_requested_count: continuationResults.filter(item => item.interrupted_current_run).length,
+            interrupted_task_count: continuationResults.filter(item => item.interrupted_current_run && item.interruption_success).length,
+            interruption_failed_count: continuationResults.filter(item => item.interrupted_current_run && !item.interruption_success).length,
+            failed_task_count: continuationResults.filter(item => !item.success).length,
+            results: continuationResults,
+            at: now,
+        };
+        const statusDetail = isNextWorkItem
+            ? "已接上全局任务的下一步派发，我会继续跟进"
+            : continuationKind === "revise_goal"
+                ? continuationSummary.interruption_requested_count > 0
+                    ? `目标调整已接收；已停止 ${continuationSummary.interruption_requested_count} 个旧执行轮，正在按新目标重新规划`
+                    : "目标调整已接收；正在按新目标重新规划"
+                : `补充要求已接收；已同步 ${continuationSummary.affected_task_count} 个子任务，继续当前任务链路`;
+        const continuationState = {
             ...(current.mission.collaboration_state || {}),
             phase: "reworking",
             needs_user: false,
             last_continuation: {
-                source: compactFormText(continuation.source || "mission_supervisor_goal_update", ""),
+                source,
                 at: now,
                 automatic: false,
-                kind: "revise_goal",
-                status: "accepted",
-                rework_kind: compactFormText(continuation.rework_kind || continuation.reworkKind || "", ""),
-                target: compactFormText(continuation.target || continuation.agent || continuation.project || "", ""),
-                reason: compactFormText(continuation.reason || continuation.detail || "", ""),
-                title: compactFormText(continuation.title || continuation.label || "", ""),
-                work_item_id: compactFormText(continuation.work_item_id || continuation.workItemId || "", ""),
+                kind: continuationKind,
+                status: continuationSummary.interruption_requested_count > 0 ? "interrupting" : "accepted",
+                replan_required: continuationSummary.replan_required,
+                interrupt_current_run: continuationSummary.interrupt_current_run,
+                rework_kind: reworkKind,
+                target: compactFormText(continuation?.target || continuation?.agent || continuation?.project || "", ""),
+                reason: continuationMessage,
+                title: compactFormText(continuation?.title || continuation?.label || "", ""),
+                work_item_id: compactFormText(continuation?.work_item_id || continuation?.workItemId || "", ""),
+                affected_task_count: continuationSummary.affected_task_count,
+                queued_task_count: continuationSummary.queued_task_count,
+                deferred_task_count: continuationSummary.deferred_task_count,
+                interrupted_task_count: continuationSummary.interrupted_task_count,
+                failed_task_count: continuationSummary.failed_task_count,
             },
             continuation_events: [
                 ...(Array.isArray(current.mission.collaboration_state?.continuation_events) ? current.mission.collaboration_state.continuation_events : []),
                 {
-                    source: compactFormText(continuation.source || "mission_supervisor_goal_update", ""),
+                    source,
                     at: now,
-                    kind: "revise_goal",
-                    status: "accepted",
-                    rework_kind: compactFormText(continuation.rework_kind || continuation.reworkKind || "", ""),
-                    target: compactFormText(continuation.target || continuation.agent || continuation.project || "", ""),
-                    reason: compactFormText(continuation.reason || continuation.detail || "", ""),
-                    title: compactFormText(continuation.title || continuation.label || "", ""),
-                    work_item_id: compactFormText(continuation.work_item_id || continuation.workItemId || "", ""),
+                    kind: continuationKind,
+                    status: continuationSummary.interruption_requested_count > 0 ? "interrupting" : "accepted",
+                    replan_required: continuationSummary.replan_required,
+                    interrupt_current_run: continuationSummary.interrupt_current_run,
+                    rework_kind: reworkKind,
+                    target: compactFormText(continuation?.target || continuation?.agent || continuation?.project || "", ""),
+                    reason: continuationMessage,
+                    title: compactFormText(continuation?.title || continuation?.label || "", ""),
+                    work_item_id: compactFormText(continuation?.work_item_id || continuation?.workItemId || "", ""),
+                    affected_task_count: continuationSummary.affected_task_count,
+                    queued_task_count: continuationSummary.queued_task_count,
+                    deferred_task_count: continuationSummary.deferred_task_count,
+                    interrupted_task_count: continuationSummary.interrupted_task_count,
+                    failed_task_count: continuationSummary.failed_task_count,
                 },
             ].slice(-20),
+            continuation_summary: continuationSummary,
             updated_at: now,
-        } : current.mission.collaboration_state;
+        };
         updateTask(id, {
             business_goal: goal,
             description: goal,
             acceptance_criteria: acceptance,
-            status_detail: continuation ? "已接上全局任务的下一步派发，我会按新目标继续跟进" : "用户已修改全局目标，我会按新目标继续跟进",
-            ...(continuation ? { collaboration_state: continuationState } : {}),
+            status_detail: statusDetail,
+            collaboration_state: continuationState,
+            plan_revision_required: continuationKind === "revise_goal",
+            last_goal_revision_at: continuationKind === "revise_goal" ? now : current.mission.last_goal_revision_at,
+            followup_revision: Number(current.mission.followup_revision || 0) + 1,
         });
-        if (continuation) {
-            (0, logs_1.appendTaskTimelineEvent)(id, {
-                type: "next_work_item_dispatch",
-                title: "全局任务下一步派发已接上",
-                detail: (0, memory_1.compactMemoryText)(continuation.reason || continuation.title || "继续派发已解锁工作项", 260),
-                status: "active",
-                phase: "rework",
-                agent: compactFormText(continuation.target || "", ""),
-                data: { source: continuation.source || "mission_supervisor_goal_update", work_item_id: continuation.work_item_id || continuation.workItemId || "" },
-            });
-        }
-        for (const child of current.children) {
-            if (["cancelled"].includes(child.status))
-                continue;
-            const followup = `全局目标已修改：${goal}\n新的验收标准：${acceptance || "沿用原标准"}`;
-            updateTask(child.id, {
-                business_goal: goal,
-                acceptance_criteria: acceptance,
-                description: `${child.description || ""}${buildTaskContinuationBlock(followup)}`,
-                followups: [...(Array.isArray(child.followups) ? child.followups : []), { time: now, message: followup, source: "mission_supervisor_goal_update" }],
-            });
-        }
+        (0, logs_1.appendTaskTimelineEvent)(id, {
+            type: isNextWorkItem ? "next_work_item_dispatch" : continuationKind === "revise_goal" ? "global_mission_goal_revision" : "global_mission_supplement",
+            title: isNextWorkItem ? "全局任务下一步派发已接上" : continuationKind === "revise_goal" ? "目标调整已接收" : "补充要求已接收",
+            detail: (0, memory_1.compactMemoryText)(statusDetail, 260),
+            status: continuationSummary.failed_task_count > 0 ? "warn" : "active",
+            phase: "rework",
+            agent: compactFormText(continuation?.target || "", ""),
+            data: {
+                source,
+                kind: continuationKind,
+                work_item_id: continuation?.work_item_id || continuation?.workItemId || "",
+                continuation_summary: continuationSummary,
+            },
+        });
+        (0, reliability_ledger_1.appendTraceEvent)(current.mission.trace_id, {
+            id: `mission:${id}:continuation:${Date.now()}`,
+            type: continuationKind === "revise_goal" ? "mission.goal_revised" : "mission.requirement_supplemented",
+            status: continuationSummary.failed_task_count > 0 ? "warning" : "ok",
+            task_id: id,
+            message: statusDetail,
+            data: continuationSummary,
+        });
+        return {
+            success: true,
+            operation: op,
+            continuation_kind: continuationKind,
+            continuation_summary: continuationSummary,
+            ...getGlobalDevelopmentMission(id),
+        };
     }
     else if (op === "cancel") {
         for (const child of current.children) {
@@ -23466,6 +25888,7 @@ function createGlobalDevelopmentMission(payload, ctx) {
             source_attachments: sourceAttachments,
             requires_code_changes: target.requires_code_changes !== false && payload.requires_code_changes !== false,
             requires_verification: target.requires_verification !== false && payload.requires_verification !== false,
+            requires_independent_review: target.requires_independent_review === true || payload.requires_independent_review === true,
             parent_task_id: parent.id,
             global_mission_id: parent.id,
             mission_target: target,
@@ -23571,6 +25994,8 @@ function canCompleteDailyDevFromDeliverySummary(task, execution, summary) {
     if (taskRequiresVerification(task) && summary.verification_source_gate_passed !== true)
         return false;
     if (summary.independent_review_required === true && summary.independent_review_gate_passed !== true)
+        return false;
+    if (summary.post_review_spot_check_required === true && summary.post_review_spot_check_gate_passed !== true)
         return false;
     if ((taskRequiresCodeChanges(task) || taskRequiresVerification(task)) && summary.ack_gate_passed !== true)
         return false;
@@ -23682,6 +26107,8 @@ function validateTaskManualStatusUpdate(current, updates) {
         missing.push("独立外部 Runner 验证来源");
     if (summary?.independent_review_required === true && summary?.independent_review_gate_passed !== true)
         missing.push("复杂变更独立复核通过");
+    if (summary?.post_review_spot_check_required === true && summary?.post_review_spot_check_gate_passed !== true)
+        missing.push("TestAgent 通过后主 Agent 完成前抽查");
     if ((requiresCodeChanges || requiresVerification) && summary?.ack_gate_passed !== true)
         missing.push("ACK 前置审核通过");
     if ((requiresCodeChanges || requiresVerification) && summary?.receipt_quality_gate_passed !== true)
@@ -23832,6 +26259,15 @@ function buildTaskGapContinuationDraft(task) {
             lines.push("- 让非原实现者的 Agent 使用 request_review 做只读复核，检查目标覆盖、关键风险和验证证据；主 Agent 采纳回答后必须回到原任务继续收敛。");
             lines.push("- 或让第三方写代码 Agent 在 CCM_AGENT_RECEIPT.independentReview / codeReview 中返回 reviewer、verdict=passed、summary 和 evidence。");
         }
+        lines.push("");
+    }
+    if (summary.post_review_spot_check_required === true && summary.post_review_spot_check_gate_passed !== true) {
+        const spotCheckGate = summary.post_review_spot_check_gate || {};
+        const spotCheckSummary = summary.post_review_spot_check_summary || spotCheckGate.summary || {};
+        lines.push("TestAgent 通过后的完成前抽查尚未通过：");
+        lines.push(`- ${spotCheckSummary.headline || spotCheckGate.reason || "主 Agent 还没有完成关键验证抽查。"}`);
+        lines.push("- 优先沿用原 TestAgent 工作单重新复验，并根据最新真实输出重新判断。");
+        lines.push("- 抽查与 TestAgent 结论一致前，不能进入最终完成总结。");
         lines.push("");
     }
     const receipts = [
@@ -24033,13 +26469,14 @@ function hasDailyDevContinuationGaps(task) {
         || Number(summary.worker_notification_count || 0) <= 0;
     const hasAgentQaGap = summary.agent_qa_required === true && summary.agent_qa_gate_passed !== true;
     const hasIndependentReviewGap = summary.independent_review_required === true && summary.independent_review_gate_passed !== true;
+    const hasPostReviewSpotCheckGap = summary.post_review_spot_check_required === true && summary.post_review_spot_check_gate_passed !== true;
     const hasWeakAcceptanceGap = summary.acceptance_gate_passed === true && !hasStrongTaskAcceptanceEvidence(task, [], summary);
     const hasAckGateGap = (taskRequiresCodeChanges(task) || taskRequiresVerification(task))
         && (summary.ack_gate_passed === false || (0, protocol_gates_1.getTaskAckRewriteRows)(task).length > 0);
     const contractInjection = (0, protocol_gates_1.getTaskContractInjectionRows)(task);
     const contractGate = (0, protocol_gates_1.evaluateContractInjectionGate)(contractInjection.rows, Array.isArray(summary.assignment_evidence) ? summary.assignment_evidence : [], Array.isArray(summary.receipts) ? summary.receipts : []);
     const hasContractInjectionGap = contractGate.required && !contractGate.pass;
-    return hasSummaryGaps || hasReceiptGaps || hasWorkerNotificationGaps || hasCoordinationEvidenceGaps || hasAgentQaGap || hasIndependentReviewGap || hasWeakAcceptanceGap || hasAckGateGap || hasContractInjectionGap;
+    return hasSummaryGaps || hasReceiptGaps || hasWorkerNotificationGaps || hasCoordinationEvidenceGaps || hasAgentQaGap || hasIndependentReviewGap || hasPostReviewSpotCheckGap || hasWeakAcceptanceGap || hasAckGateGap || hasContractInjectionGap;
 }
 function taskNeedsUserIntervention(task) {
     const summary = task?.delivery_summary || {};
@@ -24052,6 +26489,7 @@ function taskNeedsUserIntervention(task) {
             summary.verification_required_missing,
             summary.project_policy_violations,
             summary.independent_review_required === true && summary.independent_review_gate_passed !== true ? [summary.independent_review_gate?.reason || "复杂变更缺少独立复核"] : [],
+            summary.post_review_spot_check_required === true && summary.post_review_spot_check_gate_passed !== true ? [summary.post_review_spot_check_gate?.reason || "TestAgent 通过后主 Agent 抽查尚未通过"] : [],
         ].some((items) => Array.isArray(items) && items.length > 0)
         || [
             ...(Array.isArray(summary.receipts) ? summary.receipts : []),

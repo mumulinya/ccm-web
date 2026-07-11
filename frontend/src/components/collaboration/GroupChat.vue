@@ -38,6 +38,7 @@ const emit = defineEmits(['navigated'])
 
 const GROUP_VISIBLE_INTERNAL_TEXT_PATTERN = /CCM_AGENT_RECEIPT|CCM_AGENT_REQUESTS|<\s*\/?\s*task-notification|task-notification|receipt[-_\s]*status|trace_id|session_id|WorkerContextPacket|raw\s+receipt|raw\s+payload|raw_report|scratchpad|Runtime Kernel|workflow_timeline/i
 const GROUP_INTERNAL_PROTOCOL_FALLBACK = '执行成员已提交技术执行信息，我正在整理用户可读结论。'
+const GROUP_STREAM_ERROR_FALLBACK = '请求没有完成，我会保留当前进度；排障信息已放入技术详情。'
 const sanitizeGroupVisibleText = (value, fallback = '我正在处理当前请求。', max = 4000) => {
   const raw = String(value || '')
   if (!raw) return ''
@@ -48,6 +49,7 @@ const sanitizeGroupVisibleText = (value, fallback = '我正在处理当前请求
   const text = sanitizeUserFacingPlanText(raw, fallback, max)
   return text.length > max ? `${text.slice(0, max)}...` : text
 }
+const buildGroupStreamErrorText = (value) => `这次没有完成：${sanitizeGroupVisibleText(value || GROUP_STREAM_ERROR_FALLBACK, GROUP_STREAM_ERROR_FALLBACK, 800) || GROUP_STREAM_ERROR_FALLBACK}`
 function getVisibleGroupMessageContent(msg, fallback = '我已整理这条消息。') {
   if (!msg) return ''
   if (msg.role === 'user') return String(msg.content || '')
@@ -523,6 +525,7 @@ const getTestAgentReviewPayload = (data = {}) => {
 const testAgentReviewPhase = (status) => {
   const value = String(status || '').toLowerCase()
   if (value === 'needs_rework') return { phase: 'failed', phaseLabel: '需返工', runtimeStatus: 'blocked', agentStatus: 'failed' }
+  if (value === 'needs_recheck') return { phase: 'reviewing', phaseLabel: '需复验', runtimeStatus: 'blocked', agentStatus: 'blocked' }
   if (value === 'needs_user') return { phase: 'needs_user', phaseLabel: '等你确认', runtimeStatus: 'blocked', agentStatus: 'blocked' }
   if (value === 'passed') return { phase: 'reviewing', phaseLabel: '复核已返回', runtimeStatus: 'in_progress', agentStatus: 'done' }
   return { phase: 'reviewing', phaseLabel: '复核已记录', runtimeStatus: 'in_progress', agentStatus: 'reviewing' }
@@ -542,15 +545,17 @@ const createTestAgentReviewFallbackMessage = (data = {}, summary = {}, payload =
     goal: data.goal || '展示 TestAgent 返回的独立复核结论，并等待后续验收或返工。',
     phase: phase.phase,
     phase_label: phase.phaseLabel,
-    progress: phase.phase === 'failed' || phase.phase === 'needs_user' ? 72 : 84,
+    progress: phase.runtimeStatus === 'blocked' ? 72 : 84,
     active_agents: phase.phase === 'failed'
       ? ['正在安排返工']
+      : summary.status === 'needs_recheck'
+        ? ['正在安排重新复验']
       : phase.phase === 'needs_user'
         ? ['等待你确认复核问题']
         : ['正在纳入复核结论'],
     agents: [{ name: 'TestAgent', status: phase.agentStatus, summary: headline }],
     completed: ['已收到 TestAgent 独立复核结论'],
-    blockers: phase.phase === 'failed' || phase.phase === 'needs_user' ? rows.slice(0, 4) : [],
+    blockers: phase.runtimeStatus === 'blocked' ? rows.slice(0, 4) : [],
     next_action: nextAction,
     independent_review_summary: summary,
     independentReviewSummary: summary,
@@ -620,7 +625,7 @@ const applyTestAgentReviewReady = (data = {}) => {
   const taskId = data.taskId || data.task_id || ''
   const runtimeStatus = summary.status === 'needs_rework'
     ? 'blocked'
-    : summary.status === 'needs_user'
+    : summary.status === 'needs_recheck' || summary.status === 'needs_user'
       ? 'blocked'
       : summary.status === 'passed'
         ? 'in_progress'
@@ -998,7 +1003,7 @@ const getWorkflowPhase = (msg) => {
 
 const getWorkflowStepState = (msg, stepKey) => {
   const phase = getWorkflowPhase(msg)
-  if (phase === 'rework' || phase === 'needs_rework') {
+  if (phase === 'rework' || phase === 'needs_rework' || phase === 'needs_recheck') {
     if (stepKey === 'reviewing') return 'active warning'
     if (['understanding', 'dispatching', 'executing'].includes(stepKey)) return 'done'
     return ''
@@ -1021,6 +1026,7 @@ const getWorkflowLabel = (msg) => {
   const phase = getWorkflowPhase(msg)
   if (msg?.workflow?.label) return msg.workflow.label
   if (phase === 'rework' || phase === 'needs_rework') return '验收返工'
+  if (phase === 'needs_recheck') return '重新复验'
   if (phase === 'needs_user') return '等待用户'
   if (phase === 'reviewing') return '最终验收'
   if (phase === 'complete') return '协作完成'
@@ -1454,7 +1460,7 @@ ${filesToSend.map(f => `- ${f.name}（${formatFileSize(f.size)}）`).join('\n')}
         })
         scrollToBottom()
       } else if (data.type === 'runtime_fallback') {
-        const fallbackText = sanitizeGroupVisibleText(data.text, 'Agent 执行通道正在切换，排障信息已放入技术详情。', 600)
+        const fallbackText = sanitizeGroupVisibleText(data.text || '执行通道正在切换，我会保留当前任务进度；排障信息已放入技术详情。', '执行通道正在切换，我会保留当前任务进度；排障信息已放入技术详情。', 600)
         applyTransientTaskRuntime(data.taskId, (runtime) => {
           const agents = runtime.agents || []
           const index = agents.findIndex(item => item.project === data.agent)
@@ -1599,7 +1605,7 @@ ${filesToSend.map(f => `- ${f.name}（${formatFileSize(f.size)}）`).join('\n')}
         messages.value.push({
           role: 'assistant',
           agent: 'system',
-          content: '错误：' + sanitizeGroupVisibleText(data.text, '请求处理失败，排障信息已放入技术详情。', 800),
+          content: buildGroupStreamErrorText(data.text),
           timestamp: new Date().toISOString()
         })
         isStreaming.value = false

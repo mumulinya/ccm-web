@@ -1,7 +1,8 @@
-import { BrowserCheckResult, NormalizedTestAgentWorkOrder, TestAgentRuntimeOptions } from "../types";
+import { BrowserCheckSpec, BrowserCheckResult, NormalizedTestAgentProjectTarget, NormalizedTestAgentWorkOrder, TestAgentRuntimeOptions } from "../types";
 export interface BrowserProviderContext {
     workOrder: NormalizedTestAgentWorkOrder;
     runtime: TestAgentRuntimeOptions;
+    checkFilter?: (project: NormalizedTestAgentProjectTarget, check: BrowserCheckSpec, index: number) => boolean;
 }
 export interface BrowserProviderAvailability {
     available: boolean;

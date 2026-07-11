@@ -33,6 +33,7 @@ import {
   buildGroupTypedMemoryLoadPlan,
   buildGroupTypedMemoryIndex,
   buildGroupTypedMemoryRecall,
+  getOrRefreshGlobalProviderDispatchReliabilitySnapshot,
   buildPressureProvenancePreDispatchComplianceDispatchPolicy,
   deriveGroupTypedMemoryTargetPaths,
   distillGroupMessagesToTypedMemory,
@@ -43,6 +44,7 @@ import {
   importProjectMemoryFilesToGroupTypedMemory,
   recordGroupTypedMemoryRecall,
   recordGroupTypedMemoryPressureRecallUsageLedger,
+  readGroupTypedMemoryDistillationLedger,
   renderGroupTypedMemoryLoadPlan,
   renderGroupTypedMemoryRecall,
   runGroupTypedMemoryIndexSelfTest,
@@ -5947,6 +5949,317 @@ function buildPressureMemoryProvenanceReceiptDiscipline(input: any = {}, options
   };
 }
 
+const PROVIDER_RANKING_PROVENANCE_COMPACT_REPAIR_RECEIPT_MEMORY_REL_PATH = "provider-ranking-provenance-compact-repair-receipt-memory.md";
+const PROVIDER_RANKING_MEMORY_USAGE_RECEIPT_DISCIPLINE_REL_PATH = "provider-ranking-memory-usage-receipt-discipline.md";
+const POST_COMPACT_REINJECTION_REPAIR_RECEIPT_MEMORY_REL_PATH = "post-compact-reinjection-repair-receipt-memory.md";
+const POST_COMPACT_REINJECTION_REPAIR_RECEIPT_CAUTION_REL_PATH = "post-compact-reinjection-repair-receipt-cautions.md";
+
+function uniqueProviderRankingCompactRepairRecallStrings(values: any[] = [], limit = 40) {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const raw of values.flatMap((value: any) => Array.isArray(value) ? value : [value])) {
+    const value = String(raw || "").trim();
+    const key = value.toLowerCase();
+    if (!value || seen.has(key)) continue;
+    seen.add(key);
+    result.push(value);
+    if (result.length >= limit) break;
+  }
+  return result;
+}
+
+function isProviderRankingProvenanceCompactRepairReceiptRecallQuery(value: any) {
+  const text = String(value || "").toLowerCase();
+  return /provider[-_\s]?ranking|provider switch|provider-switch|provider_switch|provenance|compact repair|compact[-_\s]?repair|replayrepairdispatchbriefusage|replay repair dispatch|ranking evidence|fresh valid provider switch|供应商|提供商|排序|来源|压缩.*修复|修复.*压缩/.test(text);
+}
+
+function buildProviderRankingProvenanceCompactRepairReceiptWorkerContextRecall(groupId: string, task = "", memory: any = {}, options: any = {}) {
+  const disabled = options.disableProviderRankingCompactRepairReceiptRecall === true
+    || options.disable_provider_ranking_compact_repair_receipt_recall === true;
+  const empty = {
+    schema: "ccm-provider-ranking-provenance-compact-repair-receipt-worker-context-recall-v1",
+    version: 1,
+    active: false,
+    disabled,
+    reason: disabled ? "disabled" : "no_verified_archive",
+    docRelPath: PROVIDER_RANKING_PROVENANCE_COMPACT_REPAIR_RECEIPT_MEMORY_REL_PATH,
+    archivedCount: 0,
+    verifiedCount: 0,
+    preservedCount: 0,
+    receiptCount: 0,
+    relPathCount: 0,
+    rowIdCount: 0,
+    taskMatched: false,
+    recalledThisTurn: false,
+    repeatableRelPaths: [],
+    targetPaths: [],
+    queryAppend: "",
+    authorizationBoundary: "provider switch execution history is ranking evidence only, not authorization; require a fresh valid provider switch decision receipt for every explicit switch",
+    memoryUsageReceiptDocRelPaths: [],
+    memoryUsageReceiptDisciplineRelPaths: [],
+    memoryUsageReceiptDisciplineRequired: false,
+    memoryUsageReceiptDisciplineRecalledThisTurn: false,
+    rows: [],
+  };
+  if (disabled) return empty;
+  let archive: any = {};
+  let usageArchive: any = {};
+  try {
+    const ledger = readGroupTypedMemoryDistillationLedger(groupId);
+    archive = ledger.providerRankingProvenanceCompactRepairReceiptConsumptionArchive || {};
+    usageArchive = ledger.providerRankingMemoryUsageReceiptRepairArchive || {};
+  } catch {
+    archive = {};
+    usageArchive = {};
+  }
+  const rows = Array.isArray(archive.rows) ? archive.rows : [];
+  const usageRows = Array.isArray(usageArchive.rows) ? usageArchive.rows : [];
+  const archivedCount = Number(archive.archived_count || rows.length || 0) + Number(usageArchive.archived_count || usageRows.length || 0);
+  const taskMatched = isProviderRankingProvenanceCompactRepairReceiptRecallQuery([
+    task,
+    memory.goal,
+    memory.currentPhase,
+    memory.messageDigest,
+    options.providerSwitchDecisionReceipt,
+    options.provider_switch_decision_receipt,
+  ].map((item: any) => typeof item === "string" ? item : JSON.stringify(item || "")).join("\n"));
+  if (archivedCount <= 0) {
+    return {
+      ...empty,
+      reason: taskMatched ? "task_matched_but_no_verified_archive" : "no_verified_archive",
+      taskMatched,
+    };
+  }
+  const recentRows = rows.slice(-8);
+  const recentUsageRows = usageRows.slice(-8);
+  const typedRelPaths = uniqueProviderRankingCompactRepairRecallStrings([
+    archive.typed_memory_rel_paths,
+    ...recentRows.map((row: any) => row.typed_memory_rel_paths || row.provider_ranking_provenance_rel_paths),
+  ], 20);
+  const usageDocRelPaths = uniqueProviderRankingCompactRepairRecallStrings([
+    usageArchive.doc_rel_paths,
+    ...recentUsageRows.map((row: any) => row.doc_rel_paths || row.provider_ranking_provenance_rel_paths),
+  ], 20);
+  const typedRowIds = uniqueProviderRankingCompactRepairRecallStrings([
+    archive.typed_memory_row_ids,
+    ...recentRows.map((row: any) => row.typed_memory_row_ids || row.provider_ranking_provenance_row_ids),
+  ], 24);
+  const receiptIds = uniqueProviderRankingCompactRepairRecallStrings(recentRows.map((row: any) => row.provider_switch_decision_receipt_id), 12);
+  const receiptChecksums = uniqueProviderRankingCompactRepairRecallStrings(recentRows.map((row: any) => row.provider_switch_decision_receipt_checksum), 12);
+  const rowReasons = uniqueProviderRankingCompactRepairRecallStrings(recentRows.map((row: any) => row.reason), 8)
+    .map((item: string) => compactMemoryText(item, 260));
+  const queryAppend = [
+    "provider ranking provenance compact repair receipt typed MEMORY.md",
+    PROVIDER_RANKING_PROVENANCE_COMPACT_REPAIR_RECEIPT_MEMORY_REL_PATH,
+    PROVIDER_RANKING_MEMORY_USAGE_RECEIPT_DISCIPLINE_REL_PATH,
+    "provider-switch-execution-memory.md",
+    "replayRepairDispatchBriefUsage verified provider_ranking_provenance_preserved provider_ranking_provenance_compact",
+    "provider ranking memory usage receipt discipline memoryUsed memoryIgnored usageState",
+    "provider switch decision receipt checksum typed MEMORY.md rel paths row ids",
+    "ranking evidence only, not authorization",
+    "fresh valid provider switch decision receipt",
+    ...typedRelPaths,
+    ...usageDocRelPaths,
+    ...typedRowIds,
+    ...receiptIds,
+    ...receiptChecksums,
+    ...rowReasons,
+  ].filter(Boolean).join("\n");
+  return {
+    ...empty,
+    active: true,
+    reason: taskMatched ? "task_matched_verified_archive" : "verified_archive_available",
+    archivedCount,
+    verifiedCount: Number(archive.verified_count || 0),
+    preservedCount: Number(archive.preserved_count || 0),
+    receiptCount: Number(archive.receipt_count || receiptIds.length || 0),
+    relPathCount: Number(archive.rel_path_count || typedRelPaths.length || 0),
+    rowIdCount: Number(archive.row_id_count || typedRowIds.length || 0),
+    taskMatched,
+    repeatableRelPaths: [
+      PROVIDER_RANKING_PROVENANCE_COMPACT_REPAIR_RECEIPT_MEMORY_REL_PATH,
+      PROVIDER_RANKING_MEMORY_USAGE_RECEIPT_DISCIPLINE_REL_PATH,
+    ],
+    targetPaths: uniqueProviderRankingCompactRepairRecallStrings([
+      PROVIDER_RANKING_PROVENANCE_COMPACT_REPAIR_RECEIPT_MEMORY_REL_PATH,
+      PROVIDER_RANKING_MEMORY_USAGE_RECEIPT_DISCIPLINE_REL_PATH,
+      ...typedRelPaths,
+      ...usageDocRelPaths,
+    ], 24),
+    queryAppend: compactMemoryText(queryAppend, 4200),
+    typedMemoryRelPaths: typedRelPaths,
+    memoryUsageReceiptDocRelPaths: usageDocRelPaths,
+    memoryUsageReceiptDisciplineRelPaths: [PROVIDER_RANKING_MEMORY_USAGE_RECEIPT_DISCIPLINE_REL_PATH],
+    memoryUsageReceiptDisciplineRequired: usageRows.length > 0,
+    typedMemoryRowIds: typedRowIds,
+    receiptIds,
+    receiptChecksums,
+    rows: recentRows.map((row: any) => ({
+      row_id: row.row_id || "",
+      brief_id: row.brief_id || "",
+      work_item_id: row.work_item_id || "",
+      task_id: row.task_id || "",
+      project: row.project || "",
+      provider_switch_decision_receipt_id: row.provider_switch_decision_receipt_id || "",
+      provider_switch_decision_receipt_checksum: row.provider_switch_decision_receipt_checksum || "",
+      typed_memory_rel_paths: Array.isArray(row.typed_memory_rel_paths) ? row.typed_memory_rel_paths.slice(0, 8) : [],
+      typed_memory_row_ids: Array.isArray(row.typed_memory_row_ids) ? row.typed_memory_row_ids.slice(0, 8) : [],
+    })),
+  };
+}
+
+function isPostCompactReinjectionRepairReceiptRecallQuery(value: any, rows: any[] = []) {
+  const text = String(value || "").toLowerCase();
+  if (/post[-_\s]?compact|reinjection|reinject|recovered candidate|repair receipt|recovery evidence|current source|压缩后|重注入|恢复候选|修复回执|当前源/.test(text)) {
+    return true;
+  }
+  return rows.some((row: any) => [
+    row.reinjection_gate_id,
+    row.post_compact_candidate_id,
+    row.post_compact_candidate_value,
+    row.post_compact_candidate_source_message_id,
+  ].some((token: any) => {
+    const normalized = String(token || "").trim().toLowerCase();
+    return normalized.length >= 4 && text.includes(normalized);
+  }));
+}
+
+function buildPostCompactReinjectionRepairReceiptWorkerContextRecall(groupId: string, task = "", memory: any = {}, options: any = {}) {
+  const disabled = options.disablePostCompactReinjectionRepairReceiptRecall === true
+    || options.disable_post_compact_reinjection_repair_receipt_recall === true;
+  const empty = {
+    schema: "ccm-post-compact-reinjection-repair-receipt-worker-context-recall-v1",
+    version: 1,
+    active: false,
+    disabled,
+    reason: disabled ? "disabled" : "no_verified_archive",
+    archivedCount: 0,
+    restoredCount: 0,
+    cautionCount: 0,
+    usedCount: 0,
+    verifiedCount: 0,
+    ignoredCount: 0,
+    taskMatched: false,
+    recalledThisTurn: false,
+    docRelPaths: [],
+    repeatableRelPaths: [],
+    targetPaths: [],
+    gateIds: [],
+    candidateIds: [],
+    taskAgentSessionIds: [],
+    nativeSessionIds: [],
+    queryAppend: "",
+    freshnessBoundary: "historical repair completion is recovery evidence, not permanent repository truth; future use must reverify the current source",
+    requiredReceiptFields: ["memoryUsed", "memoryIgnored"],
+    rows: [],
+  };
+  if (disabled) return empty;
+  let archive: any = {};
+  try {
+    archive = readGroupTypedMemoryDistillationLedger(groupId).postCompactReinjectionRepairReceiptConsumptionArchive || {};
+  } catch {
+    archive = {};
+  }
+  const rows = Array.isArray(archive.rows) ? archive.rows : [];
+  const archivedCount = Number(archive.archived_count || rows.length || 0);
+  if (archivedCount <= 0) return empty;
+  const recentRows = rows.slice(-12);
+  const taskText = [
+    task,
+    memory.goal,
+    memory.currentPhase,
+    memory.messageDigest,
+    options.targetPaths,
+    options.target_paths,
+  ].map((item: any) => typeof item === "string" ? item : JSON.stringify(item || "")).join("\n");
+  const taskMatched = options.forcePostCompactReinjectionRepairReceiptRecall === true
+    || options.force_post_compact_reinjection_repair_receipt_recall === true
+    || isPostCompactReinjectionRepairReceiptRecallQuery(taskText, recentRows);
+  const restoredCount = Number(archive.restored_count || rows.filter((row: any) => row.category !== "caution").length || 0);
+  const cautionCount = Number(archive.caution_count || rows.filter((row: any) => row.category === "caution").length || 0);
+  const docRelPaths = uniqueProviderRankingCompactRepairRecallStrings([
+    restoredCount > 0 ? POST_COMPACT_REINJECTION_REPAIR_RECEIPT_MEMORY_REL_PATH : "",
+    cautionCount > 0 ? POST_COMPACT_REINJECTION_REPAIR_RECEIPT_CAUTION_REL_PATH : "",
+  ], 4);
+  if (!taskMatched) {
+    return {
+      ...empty,
+      reason: "verified_archive_available_but_task_not_matched",
+      archivedCount,
+      restoredCount,
+      cautionCount,
+      usedCount: Number(archive.used_count || 0),
+      verifiedCount: Number(archive.verified_count || 0),
+      ignoredCount: Number(archive.ignored_count || 0),
+      taskMatched: false,
+      docRelPaths,
+    };
+  }
+  const gateIds = uniqueProviderRankingCompactRepairRecallStrings(recentRows.map((row: any) => row.reinjection_gate_id), 16);
+  const candidateIds = uniqueProviderRankingCompactRepairRecallStrings(recentRows.map((row: any) => row.post_compact_candidate_id), 16);
+  const candidateValues = uniqueProviderRankingCompactRepairRecallStrings(recentRows.map((row: any) => row.post_compact_candidate_value), 16);
+  const sourceMessageIds = uniqueProviderRankingCompactRepairRecallStrings(recentRows.map((row: any) => row.post_compact_candidate_source_message_id), 16);
+  const taskAgentSessionIds = uniqueProviderRankingCompactRepairRecallStrings(recentRows.map((row: any) => row.task_agent_session_id), 16);
+  const nativeSessionIds = uniqueProviderRankingCompactRepairRecallStrings(recentRows.map((row: any) => row.native_session_id), 16);
+  const rowIds = uniqueProviderRankingCompactRepairRecallStrings(recentRows.map((row: any) => row.row_id), 16);
+  const queryAppend = [
+    "post-compact reinjection repair receipt typed MEMORY.md",
+    ...docRelPaths,
+    "postCompactCandidateUsage memoryUsed memoryIgnored currentSourceVerified",
+    "historical repair completion is recovery evidence, not permanent repository truth",
+    "future use must reverify the current source",
+    ...gateIds,
+    ...candidateIds,
+    ...candidateValues,
+    ...sourceMessageIds,
+    ...rowIds,
+  ].filter(Boolean).join("\n");
+  return {
+    ...empty,
+    active: true,
+    reason: "task_matched_verified_archive",
+    archivedCount,
+    restoredCount,
+    cautionCount,
+    usedCount: Number(archive.used_count || 0),
+    verifiedCount: Number(archive.verified_count || 0),
+    ignoredCount: Number(archive.ignored_count || 0),
+    currentSourceVerifiedCount: Number(archive.current_source_verified_count || 0),
+    taskMatched: true,
+    docRelPaths,
+    repeatableRelPaths: docRelPaths,
+    targetPaths: uniqueProviderRankingCompactRepairRecallStrings([
+      ...docRelPaths,
+      ...candidateValues,
+    ], 24),
+    gateIds,
+    candidateIds,
+    candidateValues,
+    sourceMessageIds,
+    taskAgentSessionIds,
+    nativeSessionIds,
+    rowIds,
+    queryAppend: compactMemoryText(queryAppend, 4200),
+    rows: recentRows.map((row: any) => ({
+      row_id: row.row_id || "",
+      timeline_binding_id: row.timeline_binding_id || "",
+      brief_id: row.brief_id || "",
+      work_item_id: row.work_item_id || "",
+      reinjection_gate_id: row.reinjection_gate_id || "",
+      post_compact_candidate_id: row.post_compact_candidate_id || "",
+      post_compact_candidate_kind: row.post_compact_candidate_kind || "",
+      post_compact_candidate_value: row.post_compact_candidate_value || "",
+      post_compact_candidate_source_message_id: row.post_compact_candidate_source_message_id || "",
+      usage_state: row.usage_state || "",
+      current_source_verified: row.current_source_verified === true,
+      historical_task_agent_session_id: row.task_agent_session_id || "",
+      historical_native_session_id: row.native_session_id || "",
+      completion_source: row.completion_source || "",
+      resolution_reason: row.resolution_reason || "",
+    })),
+  };
+}
+
 export function buildAgentMemoryContextBundle(groupId: string, targetProject: string, task = "", options: any = {}) {
   const project = normalizeAgentMemoryProject(targetProject);
   const ignoreMemory = shouldIgnoreGroupMemoryRequest(task, options);
@@ -6125,13 +6438,24 @@ export function buildAgentMemoryContextBundle(groupId: string, targetProject: st
     })
     : null;
   const typedMemorySync: any = syncGroupTypedMemoryFromGroupMemory(groupId, memory);
-  const typedMemoryTargetPaths = deriveGroupTypedMemoryTargetPaths(task, [
+  const providerRankingCompactRepairReceiptRecall = buildProviderRankingProvenanceCompactRepairReceiptWorkerContextRecall(groupId, task, memory, options);
+  const postCompactReinjectionRepairReceiptRecall = buildPostCompactReinjectionRepairReceiptWorkerContextRecall(groupId, task, memory, options);
+  const typedMemoryRecallQuery = [
+    task,
+    memory.goal,
+    project,
+    providerRankingCompactRepairReceiptRecall.active ? providerRankingCompactRepairReceiptRecall.queryAppend : "",
+    postCompactReinjectionRepairReceiptRecall.active ? postCompactReinjectionRepairReceiptRecall.queryAppend : "",
+  ].filter(Boolean).join("\n");
+  const typedMemoryTargetPaths = deriveGroupTypedMemoryTargetPaths(typedMemoryRecallQuery, [
     ...(Array.isArray(options.targetPaths || options.target_paths) ? (options.targetPaths || options.target_paths) : []),
     ...(agentMemory.frequentFiles || []),
+    ...(providerRankingCompactRepairReceiptRecall.active ? providerRankingCompactRepairReceiptRecall.targetPaths || [] : []),
+    ...(postCompactReinjectionRepairReceiptRecall.active ? postCompactReinjectionRepairReceiptRecall.targetPaths || [] : []),
   ]);
   const typedMemoryLoadPlan = buildGroupTypedMemoryLoadPlan(groupId, {
     maxEntries: options.maxTypedMemoryLoadEntries || options.max_typed_memory_load_entries,
-    query: [task, memory.goal, project].filter(Boolean).join("\n"),
+    query: typedMemoryRecallQuery,
     targetPaths: typedMemoryTargetPaths,
   });
   const recentTools = [
@@ -6143,6 +6467,12 @@ export function buildAgentMemoryContextBundle(groupId: string, targetProject: st
   ].map((item: any) => String(item || "").replace(/^Skill\s*[:：]\s*/i, "")).filter(Boolean).slice(-12);
   const ledgerAlreadySurfaced = getAlreadySurfacedGroupTypedMemory(groupId, project);
   const explicitAlreadySurfaced = options.alreadySurfacedMemory || options.already_surfaced_memory || [];
+  const repeatableRecallRelPaths = new Set([
+    ...(providerRankingCompactRepairReceiptRecall.repeatableRelPaths || []),
+    ...(postCompactReinjectionRepairReceiptRecall.repeatableRelPaths || []),
+  ].map((item: any) => String(item || "").trim().toLowerCase()).filter(Boolean));
+  const alreadySurfacedForRecall = [...ledgerAlreadySurfaced, ...explicitAlreadySurfaced]
+    .filter((item: any) => !repeatableRecallRelPaths.has(String(item || "").trim().toLowerCase()));
   const preliminaryPressureProvenanceDispatchFeedbackPolicy = buildPressureProvenancePreDispatchComplianceDispatchPolicy(groupId, {
     targetProject: project,
     agentType: options.agentType || options.agent_type || "unknown",
@@ -6154,9 +6484,13 @@ export function buildAgentMemoryContextBundle(groupId: string, targetProject: st
   });
   const typedMemoryRecall = buildGroupTypedMemoryRecall(
     groupId,
-    [task, memory.goal, project].filter(Boolean).join("\n"),
+    typedMemoryRecallQuery,
     {
-      alreadySurfaced: [...ledgerAlreadySurfaced, ...explicitAlreadySurfaced],
+      alreadySurfaced: alreadySurfacedForRecall,
+      requiredRelPaths: uniqueProviderRankingCompactRepairRecallStrings([
+        ...(providerRankingCompactRepairReceiptRecall.active ? providerRankingCompactRepairReceiptRecall.repeatableRelPaths || [] : []),
+        ...(postCompactReinjectionRepairReceiptRecall.active ? postCompactReinjectionRepairReceiptRecall.repeatableRelPaths || [] : []),
+      ], 16),
       recentTools,
       targetPaths: typedMemoryTargetPaths,
       targetProject: project,
@@ -6197,16 +6531,20 @@ export function buildAgentMemoryContextBundle(groupId: string, targetProject: st
   const effectiveTypedMemoryLoadPlan = globalMemoryArbitrationDistillation?.index?.schema
     ? buildGroupTypedMemoryLoadPlan(groupId, {
       maxEntries: options.maxTypedMemoryLoadEntries || options.max_typed_memory_load_entries,
-      query: [task, memory.goal, project].filter(Boolean).join("\n"),
+      query: typedMemoryRecallQuery,
       targetPaths: typedMemoryTargetPaths,
     })
     : typedMemoryLoadPlan;
   const effectiveTypedMemoryRecall = globalMemoryArbitrationDistillation?.index?.schema
     ? buildGroupTypedMemoryRecall(
       groupId,
-      [task, memory.goal, project].filter(Boolean).join("\n"),
+      typedMemoryRecallQuery,
       {
-        alreadySurfaced: [...ledgerAlreadySurfaced, ...explicitAlreadySurfaced],
+        alreadySurfaced: alreadySurfacedForRecall,
+        requiredRelPaths: uniqueProviderRankingCompactRepairRecallStrings([
+          ...(providerRankingCompactRepairReceiptRecall.active ? providerRankingCompactRepairReceiptRecall.repeatableRelPaths || [] : []),
+          ...(postCompactReinjectionRepairReceiptRecall.active ? postCompactReinjectionRepairReceiptRecall.repeatableRelPaths || [] : []),
+        ], 16),
         recentTools,
         targetPaths: typedMemoryTargetPaths,
         targetProject: project,
@@ -6217,6 +6555,31 @@ export function buildAgentMemoryContextBundle(groupId: string, targetProject: st
       }
     )
     : typedMemoryRecall;
+  const effectiveProviderRankingCompactRepairReceiptRecall = {
+    ...providerRankingCompactRepairReceiptRecall,
+    recalledThisTurn: providerRankingCompactRepairReceiptRecall.active === true
+      && (effectiveTypedMemoryRecall.surfaced || []).some((item: any) => String(item || "").toLowerCase() === PROVIDER_RANKING_PROVENANCE_COMPACT_REPAIR_RECEIPT_MEMORY_REL_PATH),
+    surfacedRelPaths: (effectiveTypedMemoryRecall.surfaced || []).filter((item: any) =>
+      [
+        PROVIDER_RANKING_PROVENANCE_COMPACT_REPAIR_RECEIPT_MEMORY_REL_PATH,
+        PROVIDER_RANKING_MEMORY_USAGE_RECEIPT_DISCIPLINE_REL_PATH,
+      ].includes(String(item || "").toLowerCase())
+    ),
+    memoryUsageReceiptDisciplineRecalledThisTurn: providerRankingCompactRepairReceiptRecall.active === true
+      && (effectiveTypedMemoryRecall.surfaced || []).some((item: any) => String(item || "").toLowerCase() === PROVIDER_RANKING_MEMORY_USAGE_RECEIPT_DISCIPLINE_REL_PATH),
+  };
+  const effectivePostCompactReinjectionRepairReceiptRecall = {
+    ...postCompactReinjectionRepairReceiptRecall,
+    recalledThisTurn: postCompactReinjectionRepairReceiptRecall.active === true
+      && (postCompactReinjectionRepairReceiptRecall.docRelPaths || []).some((relPath: any) =>
+        (effectiveTypedMemoryRecall.surfaced || []).some((item: any) => String(item || "").toLowerCase() === String(relPath || "").toLowerCase())
+      ),
+    surfacedRelPaths: (effectiveTypedMemoryRecall.surfaced || []).filter((item: any) =>
+      (postCompactReinjectionRepairReceiptRecall.docRelPaths || []).some((relPath: any) =>
+        String(item || "").toLowerCase() === String(relPath || "").toLowerCase()
+      )
+    ),
+  };
   const pressureMemoryProvenanceReceiptDiscipline = buildPressureMemoryProvenanceReceiptDiscipline(
     { recall: effectiveTypedMemoryRecall },
     { targetProject: project, generatedAt }
@@ -6231,7 +6594,7 @@ export function buildAgentMemoryContextBundle(groupId: string, targetProject: st
     disablePressureProvenanceFeedbackRecovery: options.disablePressureProvenanceFeedbackRecovery || options.disable_pressure_provenance_feedback_recovery,
     disabled: options.disablePressureProvenanceFeedbackDispatchPolicy || options.disable_pressure_provenance_feedback_dispatch_policy,
   });
-  const typedMemoryLedger = recordGroupTypedMemoryRecall(groupId, project, effectiveTypedMemoryRecall, [task, memory.goal, project].filter(Boolean).join("\n"));
+  const typedMemoryLedger = recordGroupTypedMemoryRecall(groupId, project, effectiveTypedMemoryRecall, typedMemoryRecallQuery);
   const sourceManifest = buildGroupMemorySourceManifest(groupId, {
     generatedAt,
     typedMemorySync: effectiveTypedMemorySync,
@@ -6421,12 +6784,14 @@ export function buildAgentMemoryContextBundle(groupId: string, targetProject: st
         loadPlan: effectiveTypedMemoryLoadPlan,
         targetPaths: typedMemoryTargetPaths,
         recall: effectiveTypedMemoryRecall,
+        providerRankingCompactRepairReceiptRecall: effectiveProviderRankingCompactRepairReceiptRecall,
+        postCompactReinjectionRepairReceiptRecall: effectivePostCompactReinjectionRepairReceiptRecall,
         pressureProvenanceReceiptDiscipline: pressureMemoryProvenanceReceiptDiscipline.active ? pressureMemoryProvenanceReceiptDiscipline : null,
         pressureProvenanceDispatchFeedbackPolicy: pressureProvenanceDispatchFeedbackPolicy.active ? pressureProvenanceDispatchFeedbackPolicy : null,
         ledger: {
           file: typedMemoryLedger.file,
           alreadySurfaced: ledgerAlreadySurfaced.slice(-20),
-          recordedThisTurn: typedMemoryRecall.surfaced || [],
+          recordedThisTurn: effectiveTypedMemoryRecall.surfaced || [],
         },
       },
     },
@@ -6482,6 +6847,14 @@ export function buildAgentMemoryContextBundle(groupId: string, targetProject: st
       group_tool_continuity_summary_file: toolContinuitySnapshot?.summaryFile || getGroupToolContinuityMarkdownFile(groupId),
       project_memory_root: projectMemoryRoot,
     },
+    typed_memory_recall: effectiveTypedMemoryRecall,
+    typedMemoryRecall: effectiveTypedMemoryRecall,
+    typed_memory_load_plan: effectiveTypedMemoryLoadPlan,
+    typedMemoryLoadPlan: effectiveTypedMemoryLoadPlan,
+    provider_ranking_compact_repair_receipt_recall: effectiveProviderRankingCompactRepairReceiptRecall,
+    post_compact_reinjection_repair_receipt_recall: effectivePostCompactReinjectionRepairReceiptRecall,
+    global_agent_memory_recall: globalAgentMemoryRecall,
+    globalAgentMemoryRecall,
   };
   bundle.compact_file_references = buildGroupCompactFileReferences(groupId, {
     generatedAt,
@@ -6534,6 +6907,16 @@ export function renderGroupMemoryContextBundle(bundle: any) {
   const compaction = bundle.compaction || {};
   const related = bundle.related_work || {};
   const typedMemory = groupState.typedMemory || {};
+  const providerRankingCompactRepairReceiptRecall = typedMemory.providerRankingCompactRepairReceiptRecall
+    || typedMemory.provider_ranking_compact_repair_receipt_recall
+    || bundle.provider_ranking_compact_repair_receipt_recall
+    || bundle.providerRankingCompactRepairReceiptRecall
+    || {};
+  const postCompactReinjectionRepairReceiptRecall = typedMemory.postCompactReinjectionRepairReceiptRecall
+    || typedMemory.post_compact_reinjection_repair_receipt_recall
+    || bundle.post_compact_reinjection_repair_receipt_recall
+    || bundle.postCompactReinjectionRepairReceiptRecall
+    || {};
   const globalAgentMemory = bundle.global_agent_memory || bundle.globalAgentMemory || {};
   const globalMemoryHealthGate = bundle.global_memory_health_gate || bundle.globalMemoryHealthGate || globalAgentMemory.memory_health_gate || globalAgentMemory.memoryHealthGate || {};
   const globalMemoryArbitrationLedger = bundle.global_memory_arbitration_ledger || bundle.globalMemoryArbitrationLedger || {};
@@ -6621,6 +7004,49 @@ export function renderGroupMemoryContextBundle(bundle: any) {
     const examples = Array.isArray(pressureMemoryProvenanceReceiptDiscipline.exampleRows) ? pressureMemoryProvenanceReceiptDiscipline.exampleRows : [];
     if (examples.length) {
       lines.push(`- memoryProvenanceUsage 示例：${compactMemoryText(JSON.stringify(examples.slice(0, 2)), 900)}`);
+    }
+  }
+  if (providerRankingCompactRepairReceiptRecall.active === true) {
+    const relPaths = Array.isArray(providerRankingCompactRepairReceiptRecall.typedMemoryRelPaths || providerRankingCompactRepairReceiptRecall.typed_memory_rel_paths)
+      ? (providerRankingCompactRepairReceiptRecall.typedMemoryRelPaths || providerRankingCompactRepairReceiptRecall.typed_memory_rel_paths).slice(0, 6)
+      : [];
+    const rowIds = Array.isArray(providerRankingCompactRepairReceiptRecall.typedMemoryRowIds || providerRankingCompactRepairReceiptRecall.typed_memory_row_ids)
+      ? (providerRankingCompactRepairReceiptRecall.typedMemoryRowIds || providerRankingCompactRepairReceiptRecall.typed_memory_row_ids).slice(0, 6)
+      : [];
+    const receiptDisciplineRelPaths = uniqueProviderRankingCompactRepairRecallStrings([
+      providerRankingCompactRepairReceiptRecall.memoryUsageReceiptDisciplineRelPaths,
+      providerRankingCompactRepairReceiptRecall.memory_usage_receipt_discipline_rel_paths,
+      providerRankingCompactRepairReceiptRecall.targetPaths,
+      providerRankingCompactRepairReceiptRecall.target_paths,
+    ], 12).filter((item: string) => item === PROVIDER_RANKING_MEMORY_USAGE_RECEIPT_DISCIPLINE_REL_PATH);
+    lines.push(`- provider ranking compact repair receipt memory：doc=${providerRankingCompactRepairReceiptRecall.docRelPath || PROVIDER_RANKING_PROVENANCE_COMPACT_REPAIR_RECEIPT_MEMORY_REL_PATH}；archived=${providerRankingCompactRepairReceiptRecall.archivedCount || providerRankingCompactRepairReceiptRecall.archived_count || 0}；recalled=${providerRankingCompactRepairReceiptRecall.recalledThisTurn === true}；reason=${providerRankingCompactRepairReceiptRecall.reason || "verified_archive_available"}。`);
+    lines.push("- provider switch boundary：provider switch execution history is ranking evidence only, not authorization；future explicit provider switches still require a fresh valid provider switch decision receipt/checksum/local authority/task compatibility.");
+    if (receiptDisciplineRelPaths.length) {
+      lines.push(`- provider ranking memory usage receipt discipline：docs=${receiptDisciplineRelPaths.join("、")}；最终 CCM_AGENT_RECEIPT.memoryUsed 或 memoryIgnored 必须引用已浮现的 receipt discipline doc，声明 usageState，并继续写明 ranking evidence only, not authorization 与 fresh valid provider switch decision receipt 要求。`);
+    }
+    if (relPaths.length || rowIds.length) {
+      lines.push(`  - compact-safe provenance anchors：relPaths=${relPaths.join("、") || "none"}；rowIds=${rowIds.join("、") || "none"}。`);
+    }
+  }
+  if (postCompactReinjectionRepairReceiptRecall.active === true) {
+    const docRelPaths = uniqueProviderRankingCompactRepairRecallStrings([
+      postCompactReinjectionRepairReceiptRecall.surfacedRelPaths,
+      postCompactReinjectionRepairReceiptRecall.docRelPaths,
+      postCompactReinjectionRepairReceiptRecall.doc_rel_paths,
+    ], 6);
+    const gateIds = uniqueProviderRankingCompactRepairRecallStrings([
+      postCompactReinjectionRepairReceiptRecall.gateIds,
+      postCompactReinjectionRepairReceiptRecall.gate_ids,
+    ], 6);
+    const candidateIds = uniqueProviderRankingCompactRepairRecallStrings([
+      postCompactReinjectionRepairReceiptRecall.candidateIds,
+      postCompactReinjectionRepairReceiptRecall.candidate_ids,
+    ], 6);
+    lines.push(`- post-compact reinjection repair receipt memory：docs=${docRelPaths.join("、") || POST_COMPACT_REINJECTION_REPAIR_RECEIPT_MEMORY_REL_PATH}；archived=${postCompactReinjectionRepairReceiptRecall.archivedCount || postCompactReinjectionRepairReceiptRecall.archived_count || 0}；recalled=${postCompactReinjectionRepairReceiptRecall.recalledThisTurn === true}；reason=${postCompactReinjectionRepairReceiptRecall.reason || "task_matched_verified_archive"}。`);
+    lines.push("- freshness boundary：historical repair completion is recovery evidence, not permanent repository truth；future use must reverify the current source before accepting a recovered candidate.");
+    lines.push("- receipt requirement：最终 CCM_AGENT_RECEIPT.memoryUsed 或 memoryIgnored 必须引用每个 surfaced receipt MEMORY.md；used/verified 必须写 currentSourceVerified=true，ignored 必须写 reason。");
+    if (gateIds.length || candidateIds.length) {
+      lines.push(`  - historical repair identities：reinjection_gate_ids=${gateIds.join("、") || "none"}；candidate_ids=${candidateIds.join("、") || "none"}。`);
     }
   }
   if (pressureProvenanceDispatchFeedbackPolicy?.active === true) {
@@ -7445,6 +7871,20 @@ export function buildGlobalGroupMemoryContext(query = "", options: any = {}) {
       raw_sources: rawSources,
     };
   });
+  const providerReliabilitySnapshotFile = options.providerReliabilitySnapshotFile || options.provider_reliability_snapshot_file;
+  const providerReliabilitySnapshot = options.disableCrossGroupProviderReliability === true
+    || options.disable_cross_group_provider_reliability === true
+    || ((options.disableLedger === true || options.disable_ledger === true) && !providerReliabilitySnapshotFile && options.enableProviderReliabilitySnapshot !== true && options.enable_provider_reliability_snapshot !== true)
+    ? null
+    : getOrRefreshGlobalProviderDispatchReliabilitySnapshot({
+      snapshotFile: providerReliabilitySnapshotFile,
+      ttlMs: options.providerReliabilitySnapshotTtlMs || options.provider_reliability_snapshot_ttl_ms,
+      crossGroupProviderReliabilityGroupIds: options.crossGroupProviderReliabilityGroupIds || options.cross_group_provider_reliability_group_ids,
+      minSourceGroups: options.crossGroupProviderReliabilityMinSourceGroups || options.cross_group_provider_reliability_min_source_groups || options.minSourceGroups || options.min_source_groups || 2,
+      providerReliabilityHalfLifeDays: options.providerReliabilityHalfLifeDays || options.provider_reliability_half_life_days || 14,
+      nowMs: options.providerReliabilitySnapshotNowMs || options.provider_reliability_snapshot_now_ms,
+      generatedAt,
+    });
   const bundle: any = {
     schema: "ccm-global-group-memory-context-v1",
     version: 1,
@@ -7459,6 +7899,23 @@ export function buildGlobalGroupMemoryContext(query = "", options: any = {}) {
       boundary: "bounded_multi_group_summary_typed_recall_raw_paths",
       raw_recovery: "group memory JSON, group messages JSON, and MEMORY.md typed docs remain the source of truth",
     },
+    provider_reliability_snapshot: providerReliabilitySnapshot?.snapshot ? {
+      snapshot_id: providerReliabilitySnapshot.snapshot.snapshot_id || "",
+      generation_id: providerReliabilitySnapshot.snapshot.generation_id || "",
+      snapshot_checksum: providerReliabilitySnapshot.snapshot.snapshot_checksum || "",
+      status: providerReliabilitySnapshot.status || "",
+      usable: providerReliabilitySnapshot.usable === true,
+      refreshed: providerReliabilitySnapshot.refreshed === true,
+      generated_at: providerReliabilitySnapshot.snapshot.generated_at || "",
+      expires_at: providerReliabilitySnapshot.snapshot.expires_at || "",
+      source_generation_checksum: providerReliabilitySnapshot.snapshot.source_provenance?.generation_checksum || "",
+      guidance_only: true,
+      local_policy_override_allowed: false,
+      contains_private_memory: false,
+    } : null,
+    provider_reliability_guidance: providerReliabilitySnapshot?.usable === true
+      ? providerReliabilitySnapshot.snapshot?.signals || null
+      : null,
     groups: contextGroups,
   };
   const rendered = renderGlobalGroupMemoryContextBundle(bundle);
@@ -7485,6 +7942,16 @@ export function renderGlobalGroupMemoryContextBundle(bundle: any) {
     "- 使用策略：这里只放压缩摘要、typed MEMORY.md 召回、质量/边界和原始路径线索；涉及文件/函数/flag 的长期记忆必须按当前仓库重新核验。",
   ];
   if (bundle.query) lines.push(`- 当前查询：${bundle.query}`);
+  const providerReliability = bundle.provider_reliability_guidance || bundle.providerReliabilityGuidance || null;
+  if (providerReliability?.schema) {
+    const snapshot = bundle.provider_reliability_snapshot || bundle.providerReliabilitySnapshot || {};
+    lines.push(`- provider reliability snapshot：status=${snapshot.status || "missing"}；snapshot=${snapshot.snapshot_id || "none"}；generation=${snapshot.generation_id || "none"}；expires=${snapshot.expires_at || "unknown"}；checksum=${snapshot.snapshot_checksum || "missing"}。`);
+    lines.push(`- 全局 provider reliability（脱敏聚合）：signals=${providerReliability.signal_count || 0}；actionable=${providerReliability.actionable_signal_count || 0}；highRisk=${providerReliability.high_risk_signal_count || 0}；guidanceOnly=${providerReliability.guidance_only === true}；localPolicyOverrideAllowed=${providerReliability.local_policy_override_allowed === true}。`);
+    for (const signal of (providerReliability.signals || []).filter((item: any) => item.actionable).slice(0, 6)) {
+      lines.push(`  - provider=${signal.agent_type || "unknown"}；risk=${signal.risk_status || "empty"}；score=${signal.risk_score || 0}；confidence=${signal.confidence || 0}；sourceGroups=${signal.source_group_count || 0}；recommendation=${signal.recommendation || "observe"}。`);
+    }
+    lines.push("  - 隐私/权限边界：不包含群 ID、项目名、记忆路径或回执证据；只能提示 sampling/provider preference，不能覆盖任一群聊的 local-first gate。 ");
+  }
   const addList = (title: string, items: any[], mapper: (item: any) => string, limit = 5) => {
     const list = (items || []).filter(Boolean).slice(-limit);
     if (!list.length) return;

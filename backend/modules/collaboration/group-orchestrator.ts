@@ -28,7 +28,14 @@ import {
   distillPressureProvenancePreDispatchComplianceRecoveryToTypedMemory,
   distillPressureProvenancePreDispatchComplianceToTypedMemory,
   distillProviderDispatchOverrideFollowupToTypedMemory,
+  distillProviderDispatchOverrideFollowupReceiptValidationToTypedMemory,
+  distillPostCompactReinjectionRepairReceiptConsumptionToTypedMemory,
+  distillPostCompactReceiptMemoryUsageRepairCompletionToTypedMemory,
+  distillProviderRankingProvenanceCompactRepairReceiptConsumptionToTypedMemory,
+  distillProviderSwitchExecutionToTypedMemory,
   distillProviderReproofReceiptConsumptionToTypedMemory,
+  getOrRefreshGlobalProviderDispatchReliabilitySnapshot,
+  readGlobalProviderDispatchReliabilitySnapshot,
   getGroupTypedMemoryDir,
   getGroupTypedMemoryPressureRecallUsageLedgerFile,
   recordGroupTypedMemoryPressureRecallUsageLedger,
@@ -1145,9 +1152,46 @@ function buildAssignment(member: any, task: string, reason = "", dependsOn = "",
   const initialWorkerContextPacket = buildWorkerContextPacketForAssignment(baseAssignment, dependsOn, replayRepairDispatchBriefs, options);
   const initialPreDispatchGate = buildWorkerContextPreDispatchGateForCoordinator(baseAssignment, initialWorkerContextPacket);
   const retryResult = maybeRetryWorkerContextPacketCompactionForCoordinator(baseAssignment, dependsOn, replayRepairDispatchBriefs, initialWorkerContextPacket, initialPreDispatchGate, options);
-  const workerContextPacket = retryResult.packet;
-  const preDispatchGate = retryResult.gate;
-  const providerDispatchDecision = buildWorkerContextProviderDispatchDecisionForCoordinator(baseAssignment, workerContextPacket, preDispatchGate);
+  const providerSwitchRequest = providerSwitchRequestForAssignmentForCoordinator(member, project, options);
+  const providerSwitchDecisionReceipt = providerSwitchRequest
+    ? buildProviderSwitchDecisionReceiptForCoordinator(groupId, {
+      ...baseAssignment,
+      task: retryResult.task,
+      worker_context_packet: retryResult.packet,
+      worker_context_pre_dispatch_gate: retryResult.gate,
+    }, providerSwitchRequest, options)
+    : null;
+  const effectiveBaseAssignment = providerSwitchDecisionReceipt?.valid === true
+    ? {
+      ...baseAssignment,
+      original_agent_type: agentType,
+      originalAgentType: agentType,
+      agentType: providerSwitchDecisionReceipt.new_provider?.agent_type || agentType,
+      agent_type: providerSwitchDecisionReceipt.new_provider?.agent_type || agentType,
+    }
+    : baseAssignment;
+  const switchedPacket = providerSwitchDecisionReceipt?.valid === true
+    ? buildWorkerContextPacketForAssignment(effectiveBaseAssignment, dependsOn, replayRepairDispatchBriefs, {
+      ...options,
+      providerSwitchDecisionReceipt,
+    })
+    : retryResult.packet;
+  const switchedGate = providerSwitchDecisionReceipt?.valid === true
+    ? buildWorkerContextPreDispatchGateForCoordinator(effectiveBaseAssignment, switchedPacket)
+    : retryResult.gate;
+  const effectiveRetryResult = providerSwitchDecisionReceipt?.valid === true
+    ? maybeRetryWorkerContextPacketCompactionForCoordinator(
+      effectiveBaseAssignment,
+      dependsOn,
+      replayRepairDispatchBriefs,
+      switchedPacket,
+      switchedGate,
+      { ...options, providerSwitchDecisionReceipt }
+    )
+    : retryResult;
+  const workerContextPacket = effectiveRetryResult.packet;
+  const preDispatchGate = effectiveRetryResult.gate;
+  const providerDispatchDecision = buildWorkerContextProviderDispatchDecisionForCoordinator(effectiveBaseAssignment, workerContextPacket, preDispatchGate);
   const needs = preDispatchGate.dispatch_ready === false
     ? [
       preDispatchGate.provider_dispatch_hold === true ? "先完成 pressure provenance provider repair/recovery，再启动第三方子 Agent 会话" : "",
@@ -1155,10 +1199,10 @@ function buildAssignment(member: any, task: string, reason = "", dependsOn = "",
     ].filter(Boolean)
     : [];
   const assignment: any = {
-    ...baseAssignment,
-    task: retryResult.task,
-    original_task_hash: retryResult.retry ? retryResult.retry.original_task_hash : "",
-    context_compaction_retry: retryResult.retry,
+    ...effectiveBaseAssignment,
+    task: effectiveRetryResult.task,
+    original_task_hash: effectiveRetryResult.retry ? effectiveRetryResult.retry.original_task_hash : "",
+    context_compaction_retry: effectiveRetryResult.retry,
     status: preDispatchGate.dispatch_ready === false ? "blocked" : "pending",
     dispatchReady: preDispatchGate.dispatch_ready !== false,
     dispatch_ready: preDispatchGate.dispatch_ready !== false,
@@ -1168,6 +1212,9 @@ function buildAssignment(member: any, task: string, reason = "", dependsOn = "",
     needs,
     worker_context_provider_dispatch_decision: providerDispatchDecision,
     provider_dispatch_decision: providerDispatchDecision,
+    provider_switch_decision_receipt: providerSwitchDecisionReceipt,
+    providerSwitchDecisionReceipt: providerSwitchDecisionReceipt,
+    provider_switch_request: providerSwitchRequest,
     worker_context_packet: workerContextPacket,
   };
   if (groupId) recordWorkerContextPacketAssignmentBindingForCoordinator(groupId, assignment);
@@ -1186,7 +1233,10 @@ function buildAssignment(member: any, task: string, reason = "", dependsOn = "",
 
 function buildAssignmentsFromTargets(targets: any[], options: any = {}) {
   return (targets || [])
-    .map((item: any) => buildAssignment(item.member, item.task, item.reason, item.dependsOn, options))
+    .map((item: any) => buildAssignment(item.member, item.task, item.reason, item.dependsOn, {
+      ...options,
+      providerSwitchRequest: item.providerSwitchRequest || item.provider_switch_request || options.providerSwitchRequest || options.provider_switch_request || null,
+    }))
     .filter((item: any) => item.project && item.task);
 }
 
@@ -1286,6 +1336,8 @@ export function runCodedGroupOrchestrator(input: {
   workerContextUsageOptions?: any;
   autoWorkerContextCompactRetry?: boolean;
   workerContextRetryOptions?: any;
+  providerSwitchRequests?: any;
+  provider_switch_requests?: any;
 }) {
   const group = normalizeGroupOrchestrator(input.group);
   const coordinator = getCoordinatorMember(group);
@@ -1409,6 +1461,7 @@ export function runCodedGroupOrchestrator(input: {
     workerContextUsageOptions: input.workerContextUsageOptions || null,
     autoWorkerContextCompactRetry: input.autoWorkerContextCompactRetry,
     workerContextRetryOptions: input.workerContextRetryOptions || null,
+    providerSwitchRequests: input.providerSwitchRequests || input.provider_switch_requests || null,
   });
   const blockedAssignments = assignments.filter((item: any) => item.worker_context_pre_dispatch_gate?.dispatch_ready === false || item.dispatchReady === false || item.dispatch_ready === false);
   const delegationLines = blockedAssignments.length
@@ -3739,6 +3792,8 @@ export function runWorkerContextPressureProvenanceProviderDispatchOverrideFollow
 export function runWorkerContextProviderDispatchOverrideFollowupReceiptContractValidationSelfTest() {
   const groupId = `worker-context-provider-override-followup-receipt-contract-validation-selftest-${process.pid}-${Date.now()}`;
   const bindingFile = getReplayRepairDispatchBindingsFileForCoordinator(groupId);
+  const workItemsFile = getReplayRepairWorkItemsFileForCoordinator(groupId);
+  const typedDir = getGroupTypedMemoryDir(groupId);
   const targetProject = "api";
   const agentType = "codex";
   const relPath = "pressure-provider-dispatch-override-followup-validation.md";
@@ -3868,7 +3923,1579 @@ export function runWorkerContextProviderDispatchOverrideFollowupReceiptContractV
       },
     };
   } finally {
-    for (const file of [bindingFile, `${bindingFile}.bak`]) {
+    for (const file of [bindingFile, `${bindingFile}.bak`, workItemsFile, `${workItemsFile}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+    try { if (typedDir && fs.existsSync(typedDir)) fs.rmSync(typedDir, { recursive: true, force: true }); } catch {}
+  }
+}
+
+export function runWorkerContextProviderDispatchOverrideFollowupReceiptValidationPolicySelfTest() {
+  const groupId = `worker-context-provider-override-followup-receipt-validation-policy-selftest-${process.pid}-${Date.now()}`;
+  const bindingFile = getReplayRepairDispatchBindingsFileForCoordinator(groupId);
+  const workItemsFile = getReplayRepairWorkItemsFileForCoordinator(groupId);
+  const typedDir = getGroupTypedMemoryDir(groupId);
+  const targetProject = "api";
+  const agentType = "codex";
+  const relPath = "pressure-provider-dispatch-override-followup-receipt-validation-policy.md";
+  const followupWorkItemId = "work-phase154-provider-override-followup";
+  const overrideId = "provider-dispatch-override:phase154-validation-policy";
+  try {
+    const initialAdvisory = {
+      schema: "ccm-pressure-provenance-provider-dispatch-advisory-selection-v1",
+      groupId,
+      project: targetProject,
+      agent_type: agentType,
+      health_status: "monitor",
+      dispatch_policy: "allow_with_receipt_sampling",
+      should_hold_dispatch: false,
+      selected_candidate: {
+        groupId,
+        project: targetProject,
+        agent_type: agentType,
+        health_status: "monitor",
+        dispatch_policy: "allow_with_receipt_sampling",
+        should_hold_dispatch: false,
+        provider_override_followup_repaired: true,
+        provider_override_followup_repaired_count: 1,
+        provider_override_followup_last_completed_at: "2026-07-10T06:00:00.000Z",
+        provider_override_followup_fresh_after_last_violation: true,
+        provider_override_followup_rel_paths: [relPath],
+        provider_override_followup_work_item_ids: [followupWorkItemId],
+        provider_override_followup_override_ids: [overrideId],
+      },
+    };
+    const initialPacket = buildWorkerContextPacket({
+      group: { id: groupId, members: [{ project: targetProject }] },
+      project: targetProject,
+      agentType,
+      task: "Phase 154 corrected receipt validation policy selftest.",
+      pressureProvenanceProviderDispatchAdvisory: initialAdvisory,
+      contextUsageOptions: { maxTokens: 5000, autoCompactBufferTokens: 120 },
+    });
+    const assignment: any = {
+      scopeId: groupId,
+      project: targetProject,
+      agentType,
+      assignmentId: "assignment-phase154-provider-override-followup-validation-policy",
+      dispatchKey: "dispatch-phase154-provider-override-followup-validation-policy",
+      taskFingerprint: "phase154 provider override followup receipt validation policy",
+      worker_context_packet: initialPacket,
+      dispatch_ready: true,
+    };
+    const binding = recordWorkerContextPacketAssignmentBindingForCoordinator(groupId, assignment, { at: "2026-07-10T06:00:01.000Z" }) || {};
+    const recordFailedAttempt = (executionId: string, at: string) => recordWorkerContextProviderDispatchOverrideFollowupReceiptContractValidationForCoordinator(groupId, {
+      binding_id: binding.binding_id,
+      assignment_id: assignment.assignmentId,
+      worker_context_packet_id: initialPacket.packet_id,
+      task_id: "task-phase154-provider-override-followup-validation-policy",
+      task_agent_session_id: `tas-${executionId}`,
+      execution_id: executionId,
+      receipt_status: "done",
+      receipt: {
+        status: "done",
+        memoryProvenanceUsage: [{
+          relPath,
+          usageState: "used",
+          repairStatus: "completed",
+          repairGapType: "provider_dispatch_override_followup",
+          currentSourceVerified: true,
+          reason: "corrected receipt still misses work-item, override-id, and reverified history evidence",
+        }],
+      },
+    }, { at });
+    const failedOne = recordFailedAttempt("execution-phase154-validation-failed-1", "2026-07-10T06:00:02.000Z");
+    const failedTwo = recordFailedAttempt("execution-phase154-validation-failed-2", "2026-07-10T06:00:03.000Z");
+    const escalatedPolicy = buildPressureProvenancePreDispatchComplianceDispatchPolicy(groupId, {
+      targetProject,
+      agentType,
+      providerOverrideFollowupReceiptValidationFailureThreshold: 2,
+      generatedAt: "2026-07-10T06:00:04.000Z",
+    });
+    const escalatedAdvisory: any = buildPressureProvenanceProviderDispatchAdvisoryForCoordinator(groupId, targetProject, agentType, escalatedPolicy) || {};
+    const escalatedPacket = buildWorkerContextPacket({
+      group: { id: groupId, members: [{ project: targetProject }] },
+      project: targetProject,
+      agentType,
+      task: "Phase 154 dispatch must hold after repeated corrected receipt failures.",
+      pressureProvenanceDispatchFeedbackPolicy: escalatedPolicy,
+      pressureProvenanceProviderDispatchAdvisory: escalatedAdvisory,
+      contextUsageOptions: { maxTokens: 5000, autoCompactBufferTokens: 120 },
+    });
+    const escalatedAssignment = {
+      scopeId: groupId,
+      project: targetProject,
+      agentType,
+      assignmentId: "assignment-phase154-escalated-provider",
+      dispatchKey: "dispatch-phase154-escalated-provider",
+    };
+    const escalatedGate = buildWorkerContextPreDispatchGateForCoordinator(escalatedAssignment, escalatedPacket);
+    const escalatedDecision = buildWorkerContextProviderDispatchDecisionForCoordinator(escalatedAssignment, escalatedPacket, escalatedGate, { at: "2026-07-10T06:00:04.000Z" });
+    const passed = recordWorkerContextProviderDispatchOverrideFollowupReceiptContractValidationForCoordinator(groupId, {
+      binding_id: binding.binding_id,
+      assignment_id: assignment.assignmentId,
+      worker_context_packet_id: initialPacket.packet_id,
+      task_id: "task-phase154-provider-override-followup-validation-policy",
+      task_agent_session_id: "tas-execution-phase154-validation-passed",
+      execution_id: "execution-phase154-validation-passed",
+      receipt_status: "done",
+      receipt: {
+        status: "done",
+        memoryProvenanceUsage: [{
+          relPath,
+          usageState: "verified",
+          repairStatus: "completed",
+          repairGapType: "provider_dispatch_override_followup",
+          repairWorkItemId: followupWorkItemId,
+          providerDispatchOverrideId: overrideId,
+          currentSourceVerified: true,
+          providerDispatchOverrideFollowupHistoryReverified: true,
+          reason: "Phase 154 corrected receipt satisfies the complete provider override follow-up contract.",
+        }],
+      },
+    }, { at: "2026-07-10T06:00:05.000Z" });
+    const repairedPolicy = buildPressureProvenancePreDispatchComplianceDispatchPolicy(groupId, {
+      targetProject,
+      agentType,
+      providerOverrideFollowupReceiptValidationFailureThreshold: 2,
+      generatedAt: "2026-07-10T06:00:06.000Z",
+    });
+    const repairedAdvisory: any = buildPressureProvenanceProviderDispatchAdvisoryForCoordinator(groupId, targetProject, agentType, repairedPolicy) || {};
+    const repairedPacket = buildWorkerContextPacket({
+      group: { id: groupId, members: [{ project: targetProject }] },
+      project: targetProject,
+      agentType,
+      task: "Phase 154 dispatch returns to monitored receipt sampling after verified repair.",
+      pressureProvenanceDispatchFeedbackPolicy: repairedPolicy,
+      pressureProvenanceProviderDispatchAdvisory: repairedAdvisory,
+      contextUsageOptions: { maxTokens: 5000, autoCompactBufferTokens: 120 },
+    });
+    const repairedAssignment = {
+      scopeId: groupId,
+      project: targetProject,
+      agentType,
+      assignmentId: "assignment-phase154-repaired-provider",
+      dispatchKey: "dispatch-phase154-repaired-provider",
+    };
+    const repairedGate = buildWorkerContextPreDispatchGateForCoordinator(repairedAssignment, repairedPacket);
+    const repairedDecision = buildWorkerContextProviderDispatchDecisionForCoordinator(repairedAssignment, repairedPacket, repairedGate, { at: "2026-07-10T06:00:06.000Z" });
+    const { readGroupTypedMemoryDistillationLedger, scanGroupTypedMemoryDocuments } = require("./group-memory-index");
+    const typedLedger = readGroupTypedMemoryDistillationLedger(groupId);
+    const archive = typedLedger.pressureProvenanceProviderDispatchOverrideFollowupReceiptValidationArchive || {};
+    const attribution = archive.attributions?.[0] || {};
+    const docs = scanGroupTypedMemoryDocuments(groupId);
+    const escalatedCandidate = escalatedAdvisory.selected_candidate || {};
+    const repairedCandidate = repairedAdvisory.selected_candidate || {};
+    const checks = {
+      everyAttemptIsArchived: failedOne?.status === "failed"
+        && failedTwo?.status === "failed"
+        && passed?.status === "passed"
+        && Number(archive.attempt_count || 0) === 3
+        && Number(archive.failed_count || 0) === 2
+        && Number(archive.passed_count || 0) === 1,
+      typedFeedbackDocumentWritten: docs.some((doc: any) => doc.relPath === "provider-dispatch-override-followup-receipt-validation-history.md" && doc.type === "feedback"),
+      repeatedFailuresEscalatePolicy: escalatedPolicy.active === true
+        && escalatedPolicy.action === "hold_provider_after_repeated_override_followup_receipt_validation_failures"
+        && Number(escalatedCandidate.provider_override_followup_receipt_validation_consecutive_failure_count || 0) === 2
+        && escalatedCandidate.provider_override_followup_receipt_validation_escalated === true,
+      repeatedFailuresBlockDispatch: escalatedAdvisory.health_status === "critical"
+        && escalatedAdvisory.dispatch_policy === "hold_until_repair"
+        && escalatedGate.dispatch_ready === false
+        && escalatedGate.provider_dispatch_hold === true
+        && escalatedDecision.action === "hold_until_repair",
+      verifiedRepairClearsOnlyActiveStreak: attribution.attempt_count === 3
+        && attribution.failed_count === 2
+        && attribution.passed_count === 1
+        && attribution.consecutive_failure_count === 0
+        && attribution.repair_verified === true,
+      repairedProviderReturnsToSampling: repairedPolicy.active === false
+        && repairedPolicy.action === "monitor_repaired_provider_override_followup_receipt_validation"
+        && repairedCandidate.provider_override_followup_receipt_validation_repair_verified === true
+        && repairedAdvisory.health_status === "monitor"
+        && repairedAdvisory.dispatch_policy === "allow_with_receipt_sampling"
+        && repairedGate.dispatch_ready === true
+        && repairedDecision.action === "dispatch_with_receipt_sampling",
+      repairedPacketCarriesSamplingContract: repairedPacket.pressure_provenance_provider_dispatch_override_followup_receipt_contract?.active === true
+        && repairedPacket.pressure_provenance_provider_dispatch_override_followup_receipt_contract?.rel_paths?.includes(relPath)
+        && renderWorkerContextPacket(repairedPacket).includes("Corrected receipt validation history"),
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      archive: {
+        attempt_count: archive.attempt_count || 0,
+        failed_count: archive.failed_count || 0,
+        passed_count: archive.passed_count || 0,
+        consecutive_failure_count: attribution.consecutive_failure_count || 0,
+        repair_verified: attribution.repair_verified === true,
+      },
+      escalated: {
+        action: escalatedPolicy.action || "",
+        health_status: escalatedAdvisory.health_status || "",
+        dispatch_policy: escalatedAdvisory.dispatch_policy || "",
+        dispatch_ready: escalatedGate.dispatch_ready,
+      },
+      repaired: {
+        action: repairedPolicy.action || "",
+        health_status: repairedAdvisory.health_status || "",
+        dispatch_policy: repairedAdvisory.dispatch_policy || "",
+        dispatch_ready: repairedGate.dispatch_ready,
+      },
+    };
+  } finally {
+    for (const file of [bindingFile, `${bindingFile}.bak`, workItemsFile, `${workItemsFile}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+    try { if (typedDir && fs.existsSync(typedDir)) fs.rmSync(typedDir, { recursive: true, force: true }); } catch {}
+  }
+}
+
+export function runWorkerContextCrossGroupProviderReliabilityGuidanceSelfTest() {
+  const sourceGroupA = `worker-context-provider-reliability-source-a-${process.pid}-${Date.now()}`;
+  const sourceGroupB = `worker-context-provider-reliability-source-b-${process.pid}-${Date.now()}`;
+  const targetGroup = `worker-context-provider-reliability-target-${process.pid}-${Date.now()}`;
+  const sourceTypedDirA = getGroupTypedMemoryDir(sourceGroupA);
+  const sourceTypedDirB = getGroupTypedMemoryDir(sourceGroupB);
+  const targetTypedDir = getGroupTypedMemoryDir(targetGroup);
+  const agentType = "codex";
+  const targetProject = "api";
+  const nowAt = "2026-07-10T07:00:00.000Z";
+  try {
+    const {
+      buildCrossGroupProviderDispatchReliabilitySignal,
+      buildGlobalProviderDispatchReliabilitySignals,
+      distillProviderDispatchOverrideFollowupReceiptValidationToTypedMemory,
+    } = require("./group-memory-index");
+    const validation = (groupId: string, project: string, id: string, status: "failed" | "passed", at: string) => ({
+      schema: "ccm-worker-context-provider-dispatch-override-followup-receipt-contract-validation-v1",
+      validation_id: id,
+      groupId,
+      project,
+      agent_type: agentType,
+      binding_id: `binding-${id}`,
+      execution_id: `execution-${id}`,
+      receipt_status: "done",
+      status,
+      contract_satisfied: status === "passed",
+      repair_work_item_id: `repair-${id}`,
+      repair_work_item_status: status === "passed" ? "completed" : "pending",
+      contract: {
+        rel_paths: [`private-${project}-evidence.md`],
+        followup_work_item_ids: [`private-${project}-followup`],
+        override_ids: [`private-${project}-override`],
+      },
+      gaps: status === "failed" ? [{ code: "private_missing_override", reason: `private ${project} receipt evidence missing` }] : [],
+      receipt: {
+        status: "done",
+        memoryProvenanceUsage: [{ reason: `private ${project} receipt detail`, currentSourceVerified: status === "passed" }],
+      },
+      at,
+    });
+    distillProviderDispatchOverrideFollowupReceiptValidationToTypedMemory(sourceGroupA, {
+      rows: [
+        { validation: validation(sourceGroupA, "private-alpha-project", "source-a-old-failed-1", "failed", "2026-01-10T07:00:00.000Z") },
+        { validation: validation(sourceGroupA, "private-alpha-project", "source-a-old-failed-2", "failed", "2026-01-11T07:00:00.000Z") },
+        { validation: validation(sourceGroupA, "private-alpha-project", "source-a-recent-passed", "passed", "2026-07-10T06:50:00.000Z") },
+      ],
+    }, { updatedAt: "2026-07-10T06:50:00.000Z" });
+    distillProviderDispatchOverrideFollowupReceiptValidationToTypedMemory(sourceGroupB, {
+      rows: [
+        { validation: validation(sourceGroupB, "private-beta-project", "source-b-recent-failed-1", "failed", "2026-07-10T06:40:00.000Z") },
+        { validation: validation(sourceGroupB, "private-beta-project", "source-b-recent-failed-2", "failed", "2026-07-10T06:45:00.000Z") },
+      ],
+    }, { updatedAt: "2026-07-10T06:45:00.000Z" });
+    const oldRepairedSignal = buildCrossGroupProviderDispatchReliabilitySignal(targetGroup, {
+      agentType,
+      crossGroupProviderReliabilityGroupIds: [sourceGroupA],
+      minSourceGroups: 1,
+      halfLifeDays: 14,
+      generatedAt: nowAt,
+    });
+    const recentFailureSignal = buildCrossGroupProviderDispatchReliabilitySignal(targetGroup, {
+      agentType,
+      crossGroupProviderReliabilityGroupIds: [sourceGroupB],
+      minSourceGroups: 1,
+      halfLifeDays: 14,
+      generatedAt: nowAt,
+    });
+    const crossSignal = buildCrossGroupProviderDispatchReliabilitySignal(targetGroup, {
+      agentType,
+      crossGroupProviderReliabilityGroupIds: [sourceGroupA, sourceGroupB],
+      minSourceGroups: 2,
+      halfLifeDays: 14,
+      generatedAt: nowAt,
+    });
+    const globalSignals = buildGlobalProviderDispatchReliabilitySignals({
+      crossGroupProviderReliabilityGroupIds: [sourceGroupA, sourceGroupB],
+      minSourceGroups: 2,
+      halfLifeDays: 14,
+      generatedAt: nowAt,
+    });
+    const crossPolicy = buildPressureProvenancePreDispatchComplianceDispatchPolicy(targetGroup, {
+      targetProject,
+      agentType,
+      crossGroupProviderReliabilityGroupIds: [sourceGroupA, sourceGroupB],
+      minSourceGroups: 2,
+      providerReliabilityHalfLifeDays: 14,
+      generatedAt: nowAt,
+    });
+    const disabledCrossPolicy = buildPressureProvenancePreDispatchComplianceDispatchPolicy(targetGroup, {
+      targetProject,
+      agentType,
+      crossGroupProviderReliabilityGroupIds: [sourceGroupA, sourceGroupB],
+      minSourceGroups: 2,
+      providerReliabilityHalfLifeDays: 14,
+      disablePressureProvenanceFeedbackDispatchPolicy: true,
+      generatedAt: nowAt,
+    });
+    const disabledCrossAdvisory = buildPressureProvenanceProviderDispatchAdvisoryForCoordinator(targetGroup, targetProject, agentType, disabledCrossPolicy);
+    const crossAdvisory: any = buildPressureProvenanceProviderDispatchAdvisoryForCoordinator(targetGroup, targetProject, agentType, crossPolicy) || {};
+    const crossPacket = buildWorkerContextPacket({
+      group: { id: targetGroup, members: [{ project: targetProject }] },
+      project: targetProject,
+      agentType,
+      task: "Phase 155 privacy-redacted cross-group provider reliability guidance selftest.",
+      pressureProvenanceDispatchFeedbackPolicy: crossPolicy,
+      pressureProvenanceProviderDispatchAdvisory: crossAdvisory,
+      contextUsageOptions: { maxTokens: 5000, autoCompactBufferTokens: 120 },
+    });
+    const crossAssignment = {
+      scopeId: targetGroup,
+      project: targetProject,
+      agentType,
+      assignmentId: "assignment-phase155-cross-provider-guidance",
+      dispatchKey: "dispatch-phase155-cross-provider-guidance",
+    };
+    const crossGate = buildWorkerContextPreDispatchGateForCoordinator(crossAssignment, crossPacket);
+    const crossDecision = buildWorkerContextProviderDispatchDecisionForCoordinator(crossAssignment, crossPacket, crossGate, { at: nowAt });
+    distillProviderDispatchOverrideFollowupReceiptValidationToTypedMemory(targetGroup, {
+      rows: [
+        { validation: validation(targetGroup, targetProject, "target-local-failed-1", "failed", "2026-07-10T06:55:00.000Z") },
+        { validation: validation(targetGroup, targetProject, "target-local-failed-2", "failed", "2026-07-10T06:56:00.000Z") },
+      ],
+    }, { updatedAt: "2026-07-10T06:56:00.000Z" });
+    const localPolicy = buildPressureProvenancePreDispatchComplianceDispatchPolicy(targetGroup, {
+      targetProject,
+      agentType,
+      crossGroupProviderReliabilityGroupIds: [sourceGroupA, sourceGroupB],
+      minSourceGroups: 2,
+      providerReliabilityHalfLifeDays: 14,
+      generatedAt: nowAt,
+    });
+    const localAdvisory: any = buildPressureProvenanceProviderDispatchAdvisoryForCoordinator(targetGroup, targetProject, agentType, localPolicy) || {};
+    const localPacket = buildWorkerContextPacket({
+      group: { id: targetGroup, members: [{ project: targetProject }] },
+      project: targetProject,
+      agentType,
+      task: "Phase 155 local provider failure must remain authoritative.",
+      pressureProvenanceDispatchFeedbackPolicy: localPolicy,
+      pressureProvenanceProviderDispatchAdvisory: localAdvisory,
+      contextUsageOptions: { maxTokens: 5000, autoCompactBufferTokens: 120 },
+    });
+    const localGate = buildWorkerContextPreDispatchGateForCoordinator({
+      ...crossAssignment,
+      assignmentId: "assignment-phase155-local-provider-hold",
+      dispatchKey: "dispatch-phase155-local-provider-hold",
+    }, localPacket);
+    const serializedSignals = JSON.stringify({ crossSignal, globalSignals });
+    const checks = {
+      recentEvidenceOutweighsOldRepairedHistory: Number(recentFailureSignal.risk_score || 0) > Number(oldRepairedSignal.risk_score || 0)
+        && Number(recentFailureSignal.weighted_failure_score || 0) > Number(oldRepairedSignal.weighted_failure_score || 0)
+        && oldRepairedSignal.risk_status === "low",
+      crossGroupSignalIsActionableAndDecayed: crossSignal.actionable === true
+        && Number(crossSignal.source_group_count || 0) === 2
+        && Number(crossSignal.half_life_days || 0) === 14
+        && ["high", "medium"].includes(crossSignal.risk_status),
+      privacyBoundaryRemovesGroupContent: crossSignal.guidance_only === true
+        && crossSignal.local_policy_override_allowed === false
+        && crossSignal.contains_private_memory === false
+        && globalSignals.contains_private_memory === false
+        && !serializedSignals.includes(sourceGroupA)
+        && !serializedSignals.includes(sourceGroupB)
+        && !serializedSignals.includes("private-alpha-project")
+        && !serializedSignals.includes("private-beta-project")
+        && !serializedSignals.includes("private-alpha-project-evidence.md")
+        && !serializedSignals.includes("source-b-recent-failed-2"),
+      crossGroupGuidanceOnlyAddsSampling: crossPolicy.active === false
+        && crossPolicy.action === "monitor_cross_group_provider_reliability_guidance"
+        && crossAdvisory.health_status === "monitor"
+        && crossAdvisory.dispatch_policy === "allow_with_receipt_sampling"
+        && crossAdvisory.should_hold_dispatch === false
+        && crossGate.dispatch_ready === true
+        && crossGate.provider_dispatch_hold !== true
+        && crossDecision.action === "dispatch_with_receipt_sampling"
+        && crossPacket.acceptance?.cross_group_provider_reliability_sampling_required === true,
+      explicitPolicyDisableSuppressesCrossGuidance: disabledCrossPolicy.disabled === true
+        && disabledCrossPolicy.crossGroupProviderReliabilityEnabled === false
+        && disabledCrossPolicy.crossGroupProviderReliabilityActionable === false
+        && disabledCrossAdvisory === null,
+      workerPacketCarriesOnlySanitizedGuidance: crossGate.cross_group_provider_reliability_guidance?.guidance_only === true
+        && crossGate.cross_group_provider_reliability_guidance?.local_policy_override_allowed === false
+        && !renderWorkerContextPacket(crossPacket).includes("private-alpha-project")
+        && renderWorkerContextPacket(crossPacket).includes("Cross-group provider reliability guidance"),
+      localPolicyRemainsAuthoritative: localPolicy.active === true
+        && localPolicy.action === "hold_provider_after_repeated_override_followup_receipt_validation_failures"
+        && localAdvisory.health_status === "critical"
+        && localAdvisory.dispatch_policy === "hold_until_repair"
+        && localGate.dispatch_ready === false
+        && localGate.provider_dispatch_hold === true,
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      oldRepaired: {
+        risk_status: oldRepairedSignal.risk_status,
+        risk_score: oldRepairedSignal.risk_score,
+        weighted_failure_score: oldRepairedSignal.weighted_failure_score,
+      },
+      recentFailure: {
+        risk_status: recentFailureSignal.risk_status,
+        risk_score: recentFailureSignal.risk_score,
+        weighted_failure_score: recentFailureSignal.weighted_failure_score,
+      },
+      cross: {
+        risk_status: crossSignal.risk_status,
+        source_group_count: crossSignal.source_group_count,
+        action: crossPolicy.action,
+        dispatch_policy: crossAdvisory.dispatch_policy,
+        dispatch_ready: crossGate.dispatch_ready,
+      },
+      local: {
+        action: localPolicy.action,
+        dispatch_policy: localAdvisory.dispatch_policy,
+        dispatch_ready: localGate.dispatch_ready,
+      },
+    };
+  } finally {
+    for (const dir of [sourceTypedDirA, sourceTypedDirB, targetTypedDir]) {
+      try { if (dir && fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+    }
+  }
+}
+
+export function runWorkerContextProviderReliabilitySnapshotRankingSelfTest() {
+  const sourceGroupA = `worker-context-provider-snapshot-source-a-${process.pid}-${Date.now()}`;
+  const sourceGroupB = `worker-context-provider-snapshot-source-b-${process.pid}-${Date.now()}`;
+  const targetGroup = `worker-context-provider-snapshot-target-${process.pid}-${Date.now()}`;
+  const sourceTypedDirA = getGroupTypedMemoryDir(sourceGroupA);
+  const sourceTypedDirB = getGroupTypedMemoryDir(sourceGroupB);
+  const targetTypedDir = getGroupTypedMemoryDir(targetGroup);
+  const snapshotFile = path.join(CCM_DIR, "global-provider-reliability", `phase156-selftest-${process.pid}-${Date.now()}.json`);
+  const targetProject = "api";
+  const nowAt = "2026-07-10T08:00:00.000Z";
+  const nowMs = Date.parse(nowAt);
+  try {
+    const {
+      distillProviderDispatchOverrideFollowupReceiptValidationToTypedMemory,
+      getOrRefreshGlobalProviderDispatchReliabilitySnapshot,
+      readGlobalProviderDispatchReliabilitySnapshot,
+      writeGlobalProviderDispatchReliabilitySnapshot,
+    } = require("./group-memory-index");
+    const validation = (groupId: string, project: string, agentType: string, id: string, status: "failed" | "passed", at: string) => ({
+      schema: "ccm-worker-context-provider-dispatch-override-followup-receipt-contract-validation-v1",
+      validation_id: id,
+      groupId,
+      project,
+      agent_type: agentType,
+      binding_id: `binding-${id}`,
+      execution_id: `execution-${id}`,
+      receipt_status: "done",
+      status,
+      contract_satisfied: status === "passed",
+      repair_work_item_id: `repair-${id}`,
+      contract: {
+        rel_paths: [`private-${project}-${agentType}.md`],
+        followup_work_item_ids: [`private-followup-${id}`],
+        override_ids: [`private-override-${id}`],
+      },
+      gaps: status === "failed" ? [{ code: "missing_private_evidence", reason: "private receipt detail" }] : [],
+      receipt: { memoryProvenanceUsage: [{ reason: "private receipt detail", currentSourceVerified: status === "passed" }] },
+      at,
+    });
+    const seedSource = (groupId: string, project: string, suffix: string, atOffsetMinutes: number) => {
+      const rows = [
+        { validation: validation(groupId, project, "codex", `${suffix}-codex-failed-1`, "failed", new Date(nowMs - (atOffsetMinutes + 2) * 60_000).toISOString()) },
+        { validation: validation(groupId, project, "codex", `${suffix}-codex-failed-2`, "failed", new Date(nowMs - (atOffsetMinutes + 1) * 60_000).toISOString()) },
+        { validation: validation(groupId, project, "cursor", `${suffix}-cursor-passed`, "passed", new Date(nowMs - atOffsetMinutes * 60_000).toISOString()) },
+      ];
+      distillProviderDispatchOverrideFollowupReceiptValidationToTypedMemory(groupId, { rows }, {
+        updatedAt: new Date(nowMs - atOffsetMinutes * 60_000).toISOString(),
+      });
+    };
+    seedSource(sourceGroupA, "private-source-a", "source-a", 10);
+    seedSource(sourceGroupB, "private-source-b", "source-b", 5);
+    const snapshotOptions = {
+      snapshotFile,
+      ttlMs: 5 * 60_000,
+      crossGroupProviderReliabilityGroupIds: [sourceGroupA, sourceGroupB],
+      minSourceGroups: 2,
+      providerReliabilityHalfLifeDays: 14,
+      nowMs,
+      generatedAt: nowAt,
+    };
+    const written = writeGlobalProviderDispatchReliabilitySnapshot(snapshotOptions);
+    const fresh = readGlobalProviderDispatchReliabilitySnapshot(snapshotOptions);
+    const policy = buildPressureProvenancePreDispatchComplianceDispatchPolicy(targetGroup, {
+      targetProject,
+      agentType: "codex",
+      crossGroupProviderReliabilityGroupIds: [sourceGroupA, sourceGroupB],
+      minSourceGroups: 2,
+      providerReliabilityHalfLifeDays: 14,
+      generatedAt: nowAt,
+    });
+    const advisory: any = buildPressureProvenanceProviderDispatchAdvisoryForCoordinator(targetGroup, targetProject, "codex", policy, {
+      group: {
+        id: targetGroup,
+        members: [{
+          project: targetProject,
+          agent: "codex",
+          providerCandidates: [
+            { agent_type: "cursor", project: targetProject, configured: true },
+            { agent_type: "claude-code", project: "web", configured: true },
+          ],
+        }],
+      },
+      providerCandidates: [
+        { agent_type: "cursor", project: targetProject, configured: true },
+        { agent_type: "unconfigured-runner", project: targetProject, configured: false },
+      ],
+      providerReliabilitySnapshotFile: snapshotFile,
+      providerReliabilitySnapshotTtlMs: 5 * 60_000,
+      providerReliabilitySnapshotNowMs: nowMs,
+      crossGroupProviderReliabilityGroupIds: [sourceGroupA, sourceGroupB],
+      crossGroupProviderReliabilityMinSourceGroups: 2,
+      providerReliabilityHalfLifeDays: 14,
+    }) || {};
+    const packet = buildWorkerContextPacket({
+      group: { id: targetGroup, members: [{ project: targetProject }] },
+      project: targetProject,
+      agentType: "codex",
+      task: "Phase 156 snapshot-backed configured provider ranking selftest.",
+      pressureProvenanceDispatchFeedbackPolicy: policy,
+      pressureProvenanceProviderDispatchAdvisory: advisory,
+      contextUsageOptions: { maxTokens: 50000, autoCompactBufferTokens: 120 },
+    });
+    const assignment = {
+      scopeId: targetGroup,
+      project: targetProject,
+      agentType: "codex",
+      assignmentId: "assignment-phase156-provider-ranking",
+      dispatchKey: "dispatch-phase156-provider-ranking",
+    };
+    const gate = buildWorkerContextPreDispatchGateForCoordinator(assignment, packet);
+    const decision = buildWorkerContextProviderDispatchDecisionForCoordinator(assignment, packet, gate, { at: nowAt });
+    const expired = readGlobalProviderDispatchReliabilitySnapshot({
+      ...snapshotOptions,
+      nowMs: nowMs + 5 * 60_000 + 1,
+      allowBackupRecovery: false,
+    });
+    const originalText = fs.readFileSync(snapshotFile, "utf-8");
+    const tamperedPayload = JSON.parse(originalText);
+    tamperedPayload.signals.signals[0].risk_score = 0;
+    fs.writeFileSync(snapshotFile, JSON.stringify(tamperedPayload, null, 2), "utf-8");
+    const tampered = readGlobalProviderDispatchReliabilitySnapshot({
+      ...snapshotOptions,
+      allowBackupRecovery: false,
+    });
+    fs.writeFileSync(snapshotFile, originalText, "utf-8");
+    distillProviderDispatchOverrideFollowupReceiptValidationToTypedMemory(sourceGroupB, {
+      rows: [{
+        validation: validation(sourceGroupB, "private-source-b", "cursor", "source-b-cursor-new-pass", "passed", "2026-07-10T07:59:00.000Z"),
+      }],
+    }, { updatedAt: "2026-07-10T07:59:00.000Z" });
+    const staleGeneration = readGlobalProviderDispatchReliabilitySnapshot({
+      ...snapshotOptions,
+      allowBackupRecovery: false,
+    });
+    const refreshed = getOrRefreshGlobalProviderDispatchReliabilitySnapshot({
+      ...snapshotOptions,
+      allowBackupRecovery: false,
+    });
+    distillProviderDispatchOverrideFollowupReceiptValidationToTypedMemory(targetGroup, {
+      rows: [
+        { validation: validation(targetGroup, targetProject, "codex", "target-codex-local-failed-1", "failed", "2026-07-10T07:58:00.000Z") },
+        { validation: validation(targetGroup, targetProject, "codex", "target-codex-local-failed-2", "failed", "2026-07-10T07:59:00.000Z") },
+      ],
+    }, { updatedAt: "2026-07-10T07:59:00.000Z" });
+    const localPolicy = buildPressureProvenancePreDispatchComplianceDispatchPolicy(targetGroup, {
+      targetProject,
+      agentType: "codex",
+      crossGroupProviderReliabilityGroupIds: [sourceGroupA, sourceGroupB],
+      minSourceGroups: 2,
+      generatedAt: nowAt,
+    });
+    const localAdvisory: any = buildPressureProvenanceProviderDispatchAdvisoryForCoordinator(targetGroup, targetProject, "codex", localPolicy, {
+      providerCandidates: [{ agent_type: "cursor", project: targetProject, configured: true }],
+      providerReliabilitySnapshotFile: snapshotFile,
+      providerReliabilitySnapshotNowMs: nowMs,
+      crossGroupProviderReliabilityGroupIds: [sourceGroupA, sourceGroupB],
+      crossGroupProviderReliabilityMinSourceGroups: 2,
+    }) || {};
+    const localPacket = buildWorkerContextPacket({
+      group: { id: targetGroup, members: [{ project: targetProject }] },
+      project: targetProject,
+      agentType: "codex",
+      task: "Phase 156 local hold remains authoritative even with safer alternatives.",
+      pressureProvenanceDispatchFeedbackPolicy: localPolicy,
+      pressureProvenanceProviderDispatchAdvisory: localAdvisory,
+      contextUsageOptions: { maxTokens: 5000, autoCompactBufferTokens: 120 },
+    });
+    const localGate = buildWorkerContextPreDispatchGateForCoordinator({
+      ...assignment,
+      assignmentId: "assignment-phase156-local-hold",
+      dispatchKey: "dispatch-phase156-local-hold",
+    }, localPacket);
+    const alternatives = advisory.safer_alternatives || [];
+    const checks = {
+      snapshotIsFreshAndChecksummed: fresh.usable === true
+        && fresh.status === "fresh"
+        && written.snapshot_checksum === fresh.snapshot?.snapshot_checksum
+        && written.payload_checksum === fresh.snapshot?.payload_checksum
+        && String(written.generation_id || "").startsWith("provider-reliability-generation:"),
+      expiredSnapshotIsRejected: expired.usable === false
+        && expired.status === "expired"
+        && expired.validation?.gaps?.includes("expired"),
+      tamperedSnapshotIsRejected: tampered.usable === false
+        && tampered.status === "tampered"
+        && (tampered.validation?.gaps || []).some((gap: string) => gap.includes("checksum")),
+      sourceGenerationChangeInvalidatesSnapshot: staleGeneration.usable === false
+        && staleGeneration.status === "stale_source_generation"
+        && staleGeneration.validation?.source_generation_matches === false,
+      staleSnapshotRefreshesToFreshGeneration: refreshed.usable === true
+        && refreshed.status === "fresh"
+        && refreshed.refreshed === true
+        && refreshed.previous_status === "stale_source_generation",
+      onlyExplicitSameProjectCandidateIsRanked: alternatives.length === 1
+        && alternatives[0].agent_type === "cursor"
+        && alternatives[0].project === targetProject
+        && alternatives[0].safer_than_selected === true
+        && !JSON.stringify(alternatives).includes("unconfigured-runner")
+        && !JSON.stringify(alternatives).includes("claude-code"),
+      rankingDoesNotAutoSwitchCurrentAssignment: advisory.selected_candidate?.agent_type === "codex"
+        && decision.selected_provider?.agent_type === "codex"
+        && decision.action === "dispatch_with_receipt_sampling"
+        && gate.dispatch_ready === true,
+      localHoldRemainsAuthoritativeWithAlternative: localPolicy.active === true
+        && localAdvisory.selected_candidate?.agent_type === "codex"
+        && localAdvisory.safer_alternative_count >= 1
+        && localGate.dispatch_ready === false
+        && localGate.provider_dispatch_hold === true,
+      workerPacketRendersSnapshotAndAlternative: renderWorkerContextPacket(packet).includes("Safer alternatives")
+        && renderWorkerContextPacket(packet).includes("snapshot"),
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      snapshot: {
+        snapshot_id: fresh.snapshot?.snapshot_id || "",
+        status: fresh.status,
+        expires_at: fresh.snapshot?.expires_at || "",
+        generation_id: fresh.snapshot?.generation_id || "",
+      },
+      ranking: {
+        selected: advisory.selected_candidate?.agent_type || "",
+        alternatives: alternatives.map((item: any) => ({
+          agent_type: item.agent_type,
+          local_health_status: item.local_health_status,
+          global_risk_status: item.global_risk_status,
+          composite_rank: item.composite_rank,
+        })),
+        dispatch_ready: gate.dispatch_ready,
+      },
+      local: {
+        selected: localAdvisory.selected_candidate?.agent_type || "",
+        alternative_count: localAdvisory.safer_alternative_count || 0,
+        dispatch_ready: localGate.dispatch_ready,
+      },
+    };
+  } finally {
+    for (const dir of [sourceTypedDirA, sourceTypedDirB, targetTypedDir]) {
+      try { if (dir && fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+    }
+    for (const file of [snapshotFile, `${snapshotFile}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+  }
+}
+
+export function runWorkerContextProviderSwitchExecutionRankingSelfTest() {
+  const groupId = `worker-context-provider-switch-execution-ranking-${process.pid}-${Date.now()}`;
+  const typedDir = getGroupTypedMemoryDir(groupId);
+  const snapshotFile = path.join(CCM_DIR, "global-provider-reliability", `phase159-selftest-${process.pid}-${Date.now()}.json`);
+  const compactHookFile = getWorkerContextCompactHookLedgerFileForCoordinator(groupId);
+  const compactOutcomeFile = getWorkerContextCompactOutcomeLedgerFileForCoordinator(groupId);
+  const project = "api";
+  const nowAt = "2026-07-10T10:00:00.000Z";
+  const nowMs = Date.parse(nowAt);
+  const oldMismatchAt = "2026-06-26T10:00:00.000Z";
+  const currentProvider = "codex";
+  const saferProvider = "cursor";
+  const riskyProvider = "windsurf";
+  try {
+    const { writeGlobalProviderDispatchReliabilitySnapshot } = require("./group-memory-index");
+    writeGlobalProviderDispatchReliabilitySnapshot({
+      snapshotFile,
+      ttlMs: 5 * 60_000,
+      crossGroupProviderReliabilityGroupIds: [groupId],
+      minSourceGroups: 1,
+      providerReliabilityHalfLifeDays: 14,
+      nowMs,
+      generatedAt: nowAt,
+      allowBackupRecovery: false,
+    });
+    const execution = (expectedProvider: string, actualProvider: string, suffix: string, at: string) => ({
+      schema: "ccm-provider-switch-execution-receipt-v1",
+      groupId,
+      project,
+      expected_provider: expectedProvider,
+      actually_executed_provider: actualProvider,
+      provider_switch_decision_receipt_id: `provider-switch-decision:phase159-${suffix}`,
+      provider_switch_decision_receipt_checksum: `phase159-checksum-${suffix}`,
+      execution_receipt_id: `provider-switch-execution:phase159-${suffix}`,
+      task_agent_session_id: `tas-phase159-${suffix}`,
+      native_session_id: `native-phase159-${suffix}`,
+      execution_id: `execution-phase159-${suffix}`,
+      receipt_status: "done",
+      approved_switch: true,
+      system_attested: true,
+      child_declared: true,
+      final_child_receipt_present: true,
+      status: "failed",
+      executed_as_approved: false,
+      gaps: ["executed_provider_mismatch"],
+      reason: `Phase 159 ${expectedProvider} expected but ${actualProvider} executed.`,
+      at,
+    });
+    distillProviderSwitchExecutionToTypedMemory(groupId, {
+      rows: [
+        execution(saferProvider, currentProvider, "candidate-old-mismatch", oldMismatchAt),
+      ],
+    }, {
+      updatedAt: oldMismatchAt,
+    });
+    distillProviderSwitchExecutionToTypedMemory(groupId, {
+      rows: [
+        execution(currentProvider, saferProvider, "selected-recent-mismatch", nowAt),
+        execution(riskyProvider, currentProvider, "candidate-recent-mismatch", nowAt),
+      ],
+    }, {
+      updatedAt: nowAt,
+    });
+    const policy = buildPressureProvenancePreDispatchComplianceDispatchPolicy(groupId, {
+      targetProject: project,
+      agentType: currentProvider,
+      providerSwitchExecutionMismatchThreshold: 2,
+      providerReliabilityHalfLifeDays: 14,
+      generatedAt: nowAt,
+      nowMs,
+      disableCrossGroupProviderReliability: true,
+    });
+    const advisory: any = buildPressureProvenanceProviderDispatchAdvisoryForCoordinator(groupId, project, currentProvider, policy, {
+      group: {
+        id: groupId,
+        members: [{
+          project,
+          agent: currentProvider,
+          providerCandidates: [
+            { agent_type: saferProvider, project, configured: true },
+            { agent_type: riskyProvider, project, configured: true },
+            { agent_type: "wrong-project-runner", project: "web", configured: true },
+          ],
+        }],
+      },
+      providerCandidates: [
+        { agent_type: saferProvider, project, configured: true },
+        { agent_type: riskyProvider, project, configured: true },
+        { agent_type: "unconfigured-runner", project, configured: false },
+      ],
+      providerReliabilitySnapshotFile: snapshotFile,
+      providerReliabilitySnapshotTtlMs: 5 * 60_000,
+      providerReliabilitySnapshotNowMs: nowMs,
+      crossGroupProviderReliabilityGroupIds: [groupId],
+      crossGroupProviderReliabilityMinSourceGroups: 1,
+      providerReliabilityHalfLifeDays: 14,
+      providerSwitchExecutionMismatchThreshold: 2,
+      generatedAt: nowAt,
+    }) || {};
+    const packet = buildWorkerContextPacket({
+      group: { id: groupId, members: [{ project }] },
+      project,
+      agentType: currentProvider,
+      task: "Phase 159 provider switch execution decayed ranking selftest.",
+      pressureProvenanceDispatchFeedbackPolicy: policy,
+      pressureProvenanceProviderDispatchAdvisory: advisory,
+      contextUsageOptions: { maxTokens: 5000, autoCompactBufferTokens: 120 },
+    });
+    const assignment = {
+      scopeId: groupId,
+      project,
+      agentType: currentProvider,
+      assignmentId: "assignment-phase159-provider-switch-execution-ranking",
+      dispatchKey: "dispatch-phase159-provider-switch-execution-ranking",
+    };
+    const gate = buildWorkerContextPreDispatchGateForCoordinator(assignment, packet);
+    const decision = buildWorkerContextProviderDispatchDecisionForCoordinator(assignment, packet, gate, { at: nowAt });
+    const selected = advisory.selected_candidate || {};
+    const rankedCandidates = advisory.ranked_provider_candidates || [];
+    const alternatives = advisory.safer_alternatives || [];
+    const saferAlternative = alternatives.find((item: any) => item.agent_type === saferProvider) || {};
+    const riskyAlternative = alternatives.find((item: any) => item.agent_type === riskyProvider) || {};
+    const policyRow = (policy.policyRows || [])[0] || {};
+    const rendered = renderWorkerContextPacket(packet);
+    const switchReceipt = buildProviderSwitchDecisionReceiptForCoordinator(groupId, {
+      ...assignment,
+      worker_context_packet: packet,
+    }, {
+      requested_agent_type: saferProvider,
+      compatibility_confirmed: true,
+      compatibility_evidence: ["cursor remains explicitly configured for the api project and has lower decayed provider switch execution risk"],
+      reason: "Phase 160 provider ranking provenance selftest",
+      authority: {
+        kind: "local_user",
+        authority_id: "phase160-provider-ranking-provenance-authority",
+        approved: true,
+        local_policy_authority: true,
+        allow_switch_away_from_held_provider: true,
+      },
+    }, {
+      verifySnapshot: false,
+      nowMs,
+      at: nowAt,
+    });
+    const receiptPacket = buildWorkerContextPacket({
+      group: { id: groupId, members: [{ project }] },
+      project,
+      agentType: saferProvider,
+      task: "Phase 160 provider ranking provenance receipt rendering selftest.",
+      pressureProvenanceProviderDispatchAdvisory: advisory,
+      providerSwitchDecisionReceipt: switchReceipt,
+      contextUsageOptions: { maxTokens: 50000, autoCompactBufferTokens: 120 },
+    });
+    const receiptRendered = renderWorkerContextPacket(receiptPacket);
+    const compactAnalysis = {
+      summary: "Phase 161 provider ranking provenance compact retry preservation selftest",
+      constraints: Array.from({ length: 10 }, (_, index) =>
+        `PROVIDER_RANKING_PROVENANCE_COMPACT_CONSTRAINT_${index}: ${"provider provenance ".repeat(180)}`
+      ),
+      documentFindings: Array.from({ length: 14 }, (_, index) =>
+        `docs/provider-ranking-provenance-${index}.md: ${"compact proof ".repeat(180)}`
+      ),
+    };
+    const compactAssignment = {
+      ...assignment,
+      agentType: saferProvider,
+      agent_type: saferProvider,
+      assignmentId: "assignment-phase161-provider-ranking-provenance-compact",
+      dispatchKey: "dispatch-phase161-provider-ranking-provenance-compact",
+      task: "Phase 161 provider ranking provenance compact retry selftest.",
+    };
+    const compactOptions = {
+      group: { id: groupId, members: [{ project, agent: saferProvider }] },
+      analysis: compactAnalysis,
+      providerSwitchDecisionReceipt: switchReceipt,
+      disableCrossGroupProviderReliability: true,
+      providerReliabilityHalfLifeDays: 14,
+      providerSwitchExecutionMismatchThreshold: 2,
+      nowMs,
+      generatedAt: nowAt,
+      workerContextUsageOptions: { maxTokens: 9000, autoCompactBufferTokens: 120 },
+      workerContextRetryOptions: {
+        metadata: {
+          maxCategories: 1,
+          maxItems: 4,
+          maxStringChars: 160,
+        },
+        maxTaskChars: 1800,
+      },
+    };
+    const compactInitialPacket = buildWorkerContextPacketForAssignment(compactAssignment, "", [], compactOptions);
+    const compactInitialGate = buildWorkerContextPreDispatchGateForCoordinator(compactAssignment, compactInitialPacket);
+    const compactRetry = maybeRetryWorkerContextPacketCompactionForCoordinator(
+      compactAssignment,
+      "",
+      [],
+      compactInitialPacket,
+      compactInitialGate,
+      compactOptions
+    );
+    const compactRetryReceipt = compactRetry.packet?.provider_switch_decision_receipt || {};
+    const compactRetryProvenancePreservation = compactRetry.retry?.provider_ranking_provenance_preservation
+      || compactRetry.packet?.context_compaction_retry?.provider_ranking_provenance_preservation
+      || {};
+    const compactOutcomeLedger = readWorkerContextCompactOutcomeLedgerForCoordinator(groupId);
+    const compactOutcome = (compactOutcomeLedger.entries || []).find((item: any) =>
+      item.retry_id === (compactRetry.retry?.retry_id || compactRetry.packet?.context_compaction_retry?.retry_id || "")
+      || item.hook_run_id === (compactRetry.retry?.compact_hook_run_id || compactRetry.packet?.context_compaction_retry?.compact_hook_run_id || "")
+    ) || {};
+    const compactRetryRendered = renderWorkerContextPacket(compactRetry.packet);
+    const checks = {
+      policyCarriesDecayedExecutionRisk: Number(policyRow.provider_switch_execution_weighted_risk_score || 0) > 0
+        && Number(policyRow.provider_switch_execution_decayed_mismatch_score || 0) > 0
+        && Number(policyRow.provider_switch_execution_half_life_days || 0) === 14,
+      policyCarriesTypedMemoryProvenance: Array.isArray(policyRow.provider_switch_execution_row_ids)
+        && policyRow.provider_switch_execution_row_ids.some((id: string) => String(id || "").startsWith("provider-switch-execution:"))
+        && Array.isArray(policyRow.provider_switch_execution_memory_rel_paths)
+        && policyRow.provider_switch_execution_memory_rel_paths.includes("provider-switch-execution-memory.md"),
+      rankingUsesExecutionDecayForSaferAlternative: saferAlternative.agent_type === saferProvider
+        && Number(saferAlternative.local_execution_rank_penalty || 0) < Number(selected.local_execution_rank_penalty || 0)
+        && Number(saferAlternative.composite_rank || 0) < Number(selected.composite_rank || 0),
+      advisoryCarriesCompactSafeRankingProvenance: selected.provider_ranking_provenance?.compact_safe === true
+        && selected.provider_ranking_provenance?.typed_memory_rel_paths?.includes("provider-switch-execution-memory.md")
+        && selected.provider_ranking_provenance?.typed_memory_row_ids?.some((id: string) => String(id || "").startsWith("provider-switch-execution:"))
+        && saferAlternative.provider_ranking_provenance?.compact_safe === true
+        && saferAlternative.provider_ranking_provenance?.typed_memory_rel_paths?.includes("provider-switch-execution-memory.md"),
+      equallyRecentMismatchIsNotPreferred: !riskyAlternative.agent_type,
+      rankingDoesNotAutoSwitchCurrentAssignment: selected.agent_type === currentProvider
+        && decision.selected_provider?.agent_type === currentProvider
+        && decision.action !== "switch_provider"
+        && gate.provider_dispatch_hold !== true,
+      renderedPacketShowsRankingProvenance: rendered.includes("Provider switch execution history")
+        && rendered.includes("rank=")
+        && rendered.includes("execPenalty=")
+        && rendered.includes("Provider ranking provenance")
+        && rendered.includes("provider-switch-execution-memory.md")
+        && rendered.includes("Current assignment is unchanged"),
+      switchReceiptPreservesRankingProvenance: switchReceipt.valid === true
+        && switchReceipt.provider_ranking_provenance?.requested_candidate?.typed_memory_rel_paths?.includes("provider-switch-execution-memory.md")
+        && switchReceipt.provider_ranking_provenance?.requested_candidate?.typed_memory_row_ids?.some((id: string) => String(id || "").startsWith("provider-switch-execution:"))
+        && receiptRendered.includes("Ranking provenance")
+        && receiptRendered.includes("provider-switch-execution-memory.md"),
+      compactRetryPreservesProviderRankingProvenance: compactInitialGate.dispatch_ready === false
+        && compactRetry.gate?.dispatch_ready !== false
+        && compactRetry.retry?.schema === "ccm-worker-context-compaction-retry-v1"
+        && compactRetryProvenancePreservation.required === true
+        && compactRetryProvenancePreservation.preserved === true
+        && compactRetryProvenancePreservation.before?.provider_switch_decision_receipt_id === switchReceipt.receipt_id
+        && compactRetryProvenancePreservation.after?.provider_switch_decision_receipt_id === switchReceipt.receipt_id
+        && compactRetryProvenancePreservation.after?.typed_memory_rel_paths?.includes("provider-switch-execution-memory.md")
+        && compactRetryReceipt.receipt_id === switchReceipt.receipt_id
+        && compactRetryReceipt.receipt_checksum === switchReceipt.receipt_checksum,
+      compactOutcomeLedgerCarriesProviderRankingProvenance: compactOutcome.provider_ranking_provenance_preservation?.required === true
+        && compactOutcome.provider_ranking_provenance_preservation?.preserved === true
+        && compactOutcome.provider_ranking_provenance_preserved === true
+        && Number(compactOutcomeLedger.stats?.providerRankingProvenanceRequired || 0) >= 1
+        && Number(compactOutcomeLedger.stats?.providerRankingProvenancePreserved || 0) >= 1,
+      compactRenderedPacketStillShowsRankingProvenance: compactRetryRendered.includes("Ranking provenance")
+        && compactRetryRendered.includes("provider-switch-execution-memory.md")
+        && compactRetryRendered.includes(switchReceipt.receipt_id),
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      selected: {
+        agent_type: selected.agent_type || "",
+        composite_rank: selected.composite_rank || 0,
+        local_execution_rank_penalty: selected.local_execution_rank_penalty || 0,
+        weighted_risk_score: selected.provider_switch_execution_weighted_risk_score || 0,
+      },
+      alternatives: alternatives.map((item: any) => ({
+        agent_type: item.agent_type,
+        composite_rank: item.composite_rank,
+        selected_composite_rank: item.selected_composite_rank,
+        local_execution_rank_penalty: item.local_execution_rank_penalty,
+        weighted_risk_score: item.provider_switch_execution_weighted_risk_score,
+        provenance: item.provider_ranking_provenance,
+      })),
+      rankedCandidates: rankedCandidates.map((item: any) => ({
+        agent_type: item.agent_type,
+        local_health_status: item.local_health_status,
+        local_dispatch_policy: item.local_dispatch_policy,
+        composite_rank: item.composite_rank,
+        selected_composite_rank: item.selected_composite_rank,
+        safer_than_selected: item.safer_than_selected,
+        local_execution_rank_penalty: item.local_execution_rank_penalty,
+        weighted_risk_score: item.provider_switch_execution_weighted_risk_score,
+      })),
+      decision: {
+        action: decision.action || "",
+        selected_provider: decision.selected_provider?.agent_type || "",
+        dispatch_ready: gate.dispatch_ready,
+      },
+      switchReceipt: {
+        valid: switchReceipt.valid === true,
+        status: switchReceipt.status || "",
+        requested_provider: switchReceipt.new_provider?.agent_type || "",
+        provenance: switchReceipt.provider_ranking_provenance?.requested_candidate || null,
+      },
+      compactRetry: {
+        status: compactRetry.retry?.status || "",
+        method: compactRetry.retry?.method || "",
+        dispatch_ready: compactRetry.gate?.dispatch_ready !== false,
+        gate_reason: compactRetry.gate?.reason || "",
+        pressure_status: compactRetry.gate?.pressure_status || "",
+        provider_dispatch_hold: compactRetry.gate?.provider_dispatch_hold === true,
+        total_tokens: compactRetry.packet?.context_usage?.total_tokens || 0,
+        max_tokens: compactRetry.packet?.context_usage?.max_tokens || 0,
+        free_tokens: compactRetry.packet?.context_usage?.free_tokens || 0,
+        provider_ranking_provenance_required: compactRetryProvenancePreservation.required === true,
+        provider_ranking_provenance_preserved: compactRetryProvenancePreservation.preserved === true,
+        outcome_provider_ranking_provenance_preserved: compactOutcome.provider_ranking_provenance_preserved === true,
+      },
+    };
+  } finally {
+    try { if (typedDir && fs.existsSync(typedDir)) fs.rmSync(typedDir, { recursive: true, force: true }); } catch {}
+    for (const file of [snapshotFile, `${snapshotFile}.bak`, compactHookFile, `${compactHookFile}.bak`, compactOutcomeFile, `${compactOutcomeFile}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+  }
+}
+
+export function runWorkerContextProviderSwitchDecisionReceiptSelfTest() {
+  const sourceGroup = `worker-context-provider-switch-source-${process.pid}-${Date.now()}`;
+  const targetGroup = `worker-context-provider-switch-target-${process.pid}-${Date.now()}`;
+  const sourceTypedDir = getGroupTypedMemoryDir(sourceGroup);
+  const targetTypedDir = getGroupTypedMemoryDir(targetGroup);
+  const bindingFile = getReplayRepairDispatchBindingsFileForCoordinator(targetGroup);
+  const snapshotFile = path.join(CCM_DIR, "global-provider-reliability", `phase157-selftest-${process.pid}-${Date.now()}.json`);
+  const project = "api";
+  const oldProvider = "codex";
+  const newProvider = "cursor";
+  const nowAt = "2026-07-10T09:00:00.000Z";
+  const nowMs = Date.parse(nowAt);
+  const snapshotOptions = {
+    snapshotFile,
+    ttlMs: 5 * 60_000,
+    crossGroupProviderReliabilityGroupIds: [sourceGroup],
+    minSourceGroups: 1,
+    nowMs,
+    generatedAt: nowAt,
+    allowBackupRecovery: false,
+  };
+  try {
+    const {
+      buildGroupTypedMemoryRecall,
+      distillProviderDispatchOverrideFollowupReceiptValidationToTypedMemory,
+      readGroupTypedMemoryDistillationLedger,
+      writeGlobalProviderDispatchReliabilitySnapshot,
+    } = require("./group-memory-index");
+    const snapshot = writeGlobalProviderDispatchReliabilitySnapshot(snapshotOptions);
+    const snapshotRef = {
+      schema: "ccm-provider-dispatch-reliability-snapshot-ref-v1",
+      snapshot_id: snapshot.snapshot_id,
+      generation_id: snapshot.generation_id,
+      snapshot_checksum: snapshot.snapshot_checksum,
+      payload_checksum: snapshot.payload_checksum,
+      status: "fresh",
+      usable: true,
+      generated_at: snapshot.generated_at,
+      expires_at: snapshot.expires_at,
+      source_generation_checksum: snapshot.source_provenance?.generation_checksum || "",
+      guidance_only: true,
+      local_policy_override_allowed: false,
+      contains_private_memory: false,
+    };
+    const advisory = {
+      schema: "ccm-pressure-provenance-provider-dispatch-advisory-selection-v1",
+      version: 1,
+      groupId: targetGroup,
+      project,
+      agent_type: oldProvider,
+      health_status: "monitor",
+      dispatch_policy: "allow_with_receipt_sampling",
+      should_hold_dispatch: false,
+      selected_candidate: {
+        project,
+        agent_type: oldProvider,
+        health_status: "monitor",
+        dispatch_policy: "allow_with_receipt_sampling",
+        should_hold_dispatch: false,
+      },
+      provider_reliability_snapshot: snapshotRef,
+      safer_alternative_count: 1,
+      safer_alternatives: [{
+        schema: "ccm-provider-dispatch-safer-alternative-v1",
+        agent_type: newProvider,
+        project,
+        configured: true,
+        local_health_status: "healthy",
+        local_dispatch_policy: "preferred",
+        global_risk_status: "low",
+        global_risk_score: 0,
+        composite_rank: 8,
+        selected_composite_rank: 20,
+        safer_than_selected: true,
+        snapshot_id: snapshot.snapshot_id,
+        snapshot_checksum: snapshot.snapshot_checksum,
+        snapshot_status: "fresh",
+      }],
+    };
+    const packet = buildWorkerContextPacket({
+      group: { id: targetGroup, members: [{ project }] },
+      project,
+      agentType: oldProvider,
+      task: "Phase 157 provider switch decision receipt selftest.",
+      pressureProvenanceProviderDispatchAdvisory: advisory,
+      contextUsageOptions: { maxTokens: 5000, autoCompactBufferTokens: 120 },
+    });
+    const baseAssignment: any = {
+      scopeId: targetGroup,
+      project,
+      agentType: oldProvider,
+      agent_type: oldProvider,
+      assignmentId: "assignment-phase157-provider-switch-match",
+      dispatchKey: "dispatch-phase157-provider-switch-match",
+      taskFingerprint: "phase157 provider switch match",
+      task: "Phase 157 provider switch decision receipt selftest.",
+      worker_context_packet: packet,
+    };
+    const gate = buildWorkerContextPreDispatchGateForCoordinator(baseAssignment, packet);
+    baseAssignment.worker_context_pre_dispatch_gate = gate;
+    const request = {
+      requested_agent_type: newProvider,
+      compatibility_confirmed: true,
+      compatibility_evidence: ["cursor supports this repository task and required toolchain"],
+      reason: "use the ranked safer provider for this task",
+      authority: {
+        kind: "task_runtime_override",
+        authority_id: "task-runtime-override-phase157",
+        approved: true,
+        local_policy_authority: true,
+        allow_switch_away_from_held_provider: true,
+        reason: "explicit local task authority",
+      },
+    };
+    const receipt = buildProviderSwitchDecisionReceiptForCoordinator(targetGroup, baseAssignment, request, {
+      ...snapshotOptions,
+      at: nowAt,
+    });
+    const rehash = (value: any) => {
+      const next = JSON.parse(JSON.stringify(value));
+      next.receipt_checksum = providerSwitchDecisionReceiptChecksumForCoordinator(next);
+      return next;
+    };
+    const expiredValidation = validateProviderSwitchDecisionReceiptForCoordinator(receipt, {
+      ...snapshotOptions,
+      groupId: targetGroup,
+      project,
+      assignmentId: baseAssignment.assignmentId,
+      dispatchKey: baseAssignment.dispatchKey,
+      nowMs: Date.parse(snapshot.expires_at) + 1,
+    });
+    const tamperedReceipt = JSON.parse(JSON.stringify(receipt));
+    tamperedReceipt.new_provider.agent_type = "claude-code";
+    const tamperedValidation = validateProviderSwitchDecisionReceiptForCoordinator(tamperedReceipt, {
+      ...snapshotOptions,
+      groupId: targetGroup,
+      project,
+      assignmentId: baseAssignment.assignmentId,
+      dispatchKey: baseAssignment.dispatchKey,
+    });
+    const projectMismatchReceipt = rehash({
+      ...receipt,
+      new_provider: { ...receipt.new_provider, project: "web" },
+      task_compatibility: { ...receipt.task_compatibility, project_match: false },
+    });
+    const projectMismatchValidation = validateProviderSwitchDecisionReceiptForCoordinator(projectMismatchReceipt, {
+      ...snapshotOptions,
+      groupId: targetGroup,
+      project,
+      assignmentId: baseAssignment.assignmentId,
+      dispatchKey: baseAssignment.dispatchKey,
+    });
+    const unconfiguredReceipt = rehash({
+      ...receipt,
+      new_provider: { ...receipt.new_provider, configured: false },
+    });
+    const unconfiguredValidation = validateProviderSwitchDecisionReceiptForCoordinator(unconfiguredReceipt, {
+      ...snapshotOptions,
+      groupId: targetGroup,
+      project,
+      assignmentId: baseAssignment.assignmentId,
+      dispatchKey: baseAssignment.dispatchKey,
+    });
+    const missingCompatibilityReceipt = rehash({
+      ...receipt,
+      task_compatibility: { ...receipt.task_compatibility, confirmed: false, evidence: [] },
+    });
+    const missingCompatibilityValidation = validateProviderSwitchDecisionReceiptForCoordinator(missingCompatibilityReceipt, {
+      ...snapshotOptions,
+      groupId: targetGroup,
+      project,
+      assignmentId: baseAssignment.assignmentId,
+      dispatchKey: baseAssignment.dispatchKey,
+    });
+    const missingAuthorityReceipt = rehash({
+      ...receipt,
+      authority: {
+        ...receipt.authority,
+        kind: "cross_group_reliability_guidance",
+        approved: false,
+        local_policy_authority: false,
+      },
+    });
+    const missingAuthorityValidation = validateProviderSwitchDecisionReceiptForCoordinator(missingAuthorityReceipt, {
+      ...snapshotOptions,
+      groupId: targetGroup,
+      project,
+      assignmentId: baseAssignment.assignmentId,
+      dispatchKey: baseAssignment.dispatchKey,
+    });
+    const heldWithoutPermissionReceipt = rehash({
+      ...receipt,
+      old_provider: { ...receipt.old_provider, local_hold: true, local_dispatch_policy: "hold_until_repair" },
+      authority: { ...receipt.authority, allow_switch_away_from_held_provider: false },
+    });
+    const heldWithoutPermissionValidation = validateProviderSwitchDecisionReceiptForCoordinator(heldWithoutPermissionReceipt, {
+      ...snapshotOptions,
+      groupId: targetGroup,
+      project,
+      assignmentId: baseAssignment.assignmentId,
+      dispatchKey: baseAssignment.dispatchKey,
+    });
+    const crossGroupValidation = validateProviderSwitchDecisionReceiptForCoordinator(receipt, {
+      ...snapshotOptions,
+      groupId: `${targetGroup}-wrong`,
+      project,
+      assignmentId: baseAssignment.assignmentId,
+      dispatchKey: baseAssignment.dispatchKey,
+    });
+
+    const switchedPacket = buildWorkerContextPacket({
+      group: { id: targetGroup, members: [{ project }] },
+      project,
+      agentType: newProvider,
+      task: baseAssignment.task,
+      pressureProvenanceProviderDispatchAdvisory: advisory,
+      providerSwitchDecisionReceipt: receipt,
+      contextUsageOptions: { maxTokens: 5000, autoCompactBufferTokens: 120 },
+    });
+    const switchedAssignment: any = {
+      ...baseAssignment,
+      original_agent_type: oldProvider,
+      agentType: newProvider,
+      agent_type: newProvider,
+      provider_switch_decision_receipt: receipt,
+      worker_context_packet: switchedPacket,
+    };
+    switchedAssignment.worker_context_pre_dispatch_gate = buildWorkerContextPreDispatchGateForCoordinator(switchedAssignment, switchedPacket);
+    switchedAssignment.worker_context_provider_dispatch_decision = buildWorkerContextProviderDispatchDecisionForCoordinator(
+      switchedAssignment,
+      switchedPacket,
+      switchedAssignment.worker_context_pre_dispatch_gate,
+      { at: nowAt }
+    );
+    recordWorkerContextPacketAssignmentBindingForCoordinator(targetGroup, switchedAssignment, { at: nowAt });
+    const rejectedProjectBinding = recordWorkerContextProviderSwitchSessionBindingForCoordinator(targetGroup, {
+      assignment_id: switchedAssignment.assignmentId,
+      dispatch_key: switchedAssignment.dispatchKey,
+      provider_switch_decision_receipt: receipt,
+      project: "web",
+      agent_type: newProvider,
+      task_agent_session_id: "tas-phase157-match",
+      native_session_id: "native-phase157-match",
+      execution_id: "execution-phase157-match",
+    }, snapshotOptions);
+    const matchedSessionBinding = recordWorkerContextProviderSwitchSessionBindingForCoordinator(targetGroup, {
+      assignment_id: switchedAssignment.assignmentId,
+      dispatch_key: switchedAssignment.dispatchKey,
+      provider_switch_decision_receipt: receipt,
+      project,
+      agent_type: newProvider,
+      task_agent_session_id: "tas-phase157-match",
+      native_session_id: "native-phase157-match",
+      execution_id: "execution-phase157-match",
+    }, snapshotOptions);
+    const matchedExecution = recordWorkerContextProviderSwitchExecutionReceiptForCoordinator(targetGroup, {
+      assignment_id: switchedAssignment.assignmentId,
+      dispatch_key: switchedAssignment.dispatchKey,
+      project,
+      executed_provider: newProvider,
+      task_agent_session_id: "tas-phase157-match",
+      native_session_id: "native-phase157-match",
+      execution_id: "execution-phase157-match",
+      receipt_status: "done",
+      receipt: {
+        status: "done",
+        providerSwitchExecution: {
+          decisionReceiptId: receipt.receipt_id,
+          expectedProvider: newProvider,
+          executedProvider: newProvider,
+          taskAgentSessionId: "tas-phase157-match",
+          nativeSessionId: "native-phase157-match",
+          executionId: "execution-phase157-match",
+          usageState: "executed",
+          reason: "executed with the approved provider",
+        },
+      },
+    }, snapshotOptions);
+
+    const mismatchAssignmentBase: any = {
+      ...baseAssignment,
+      assignmentId: "assignment-phase157-provider-switch-mismatch",
+      dispatchKey: "dispatch-phase157-provider-switch-mismatch",
+      taskFingerprint: "phase157 provider switch mismatch",
+    };
+    const mismatchReceipt = buildProviderSwitchDecisionReceiptForCoordinator(targetGroup, mismatchAssignmentBase, request, {
+      ...snapshotOptions,
+      at: nowAt,
+    });
+    const mismatchPacket = buildWorkerContextPacket({
+      group: { id: targetGroup, members: [{ project }] },
+      project,
+      agentType: newProvider,
+      task: mismatchAssignmentBase.task,
+      pressureProvenanceProviderDispatchAdvisory: advisory,
+      providerSwitchDecisionReceipt: mismatchReceipt,
+      contextUsageOptions: { maxTokens: 5000, autoCompactBufferTokens: 120 },
+    });
+    const mismatchAssignment: any = {
+      ...mismatchAssignmentBase,
+      original_agent_type: oldProvider,
+      agentType: newProvider,
+      agent_type: newProvider,
+      provider_switch_decision_receipt: mismatchReceipt,
+      worker_context_packet: mismatchPacket,
+    };
+    mismatchAssignment.worker_context_pre_dispatch_gate = buildWorkerContextPreDispatchGateForCoordinator(mismatchAssignment, mismatchPacket);
+    mismatchAssignment.worker_context_provider_dispatch_decision = buildWorkerContextProviderDispatchDecisionForCoordinator(
+      mismatchAssignment,
+      mismatchPacket,
+      mismatchAssignment.worker_context_pre_dispatch_gate,
+      { at: nowAt }
+    );
+    recordWorkerContextPacketAssignmentBindingForCoordinator(targetGroup, mismatchAssignment, { at: nowAt });
+    recordWorkerContextProviderSwitchSessionBindingForCoordinator(targetGroup, {
+      assignment_id: mismatchAssignment.assignmentId,
+      dispatch_key: mismatchAssignment.dispatchKey,
+      provider_switch_decision_receipt: mismatchReceipt,
+      project,
+      agent_type: newProvider,
+      task_agent_session_id: "tas-phase157-mismatch",
+      native_session_id: "native-phase157-mismatch",
+      execution_id: "execution-phase157-mismatch",
+    }, snapshotOptions);
+    const mismatchedExecution = recordWorkerContextProviderSwitchExecutionReceiptForCoordinator(targetGroup, {
+      assignment_id: mismatchAssignment.assignmentId,
+      dispatch_key: mismatchAssignment.dispatchKey,
+      project,
+      executed_provider: oldProvider,
+      task_agent_session_id: "tas-phase157-mismatch",
+      native_session_id: "native-phase157-mismatch",
+      execution_id: "execution-phase157-mismatch",
+      receipt_status: "done",
+      receipt: {
+        status: "done",
+        providerSwitchExecution: {
+          decisionReceiptId: mismatchReceipt.receipt_id,
+          expectedProvider: newProvider,
+          executedProvider: oldProvider,
+          taskAgentSessionId: "tas-phase157-mismatch",
+          nativeSessionId: "native-phase157-mismatch",
+          executionId: "execution-phase157-mismatch",
+          usageState: "mismatch",
+          reason: "runtime fallback executed with the original provider",
+        },
+      },
+    }, snapshotOptions);
+
+    const advisedOnlyAssignment: any = {
+      ...baseAssignment,
+      assignmentId: "assignment-phase157-provider-advised-only",
+      dispatchKey: "dispatch-phase157-provider-advised-only",
+      taskFingerprint: "phase157 provider advised only",
+    };
+    advisedOnlyAssignment.worker_context_pre_dispatch_gate = buildWorkerContextPreDispatchGateForCoordinator(advisedOnlyAssignment, packet);
+    advisedOnlyAssignment.worker_context_provider_dispatch_decision = buildWorkerContextProviderDispatchDecisionForCoordinator(
+      advisedOnlyAssignment,
+      packet,
+      advisedOnlyAssignment.worker_context_pre_dispatch_gate,
+      { at: nowAt }
+    );
+    recordWorkerContextPacketAssignmentBindingForCoordinator(targetGroup, advisedOnlyAssignment, { at: nowAt });
+
+    const largeTask = [
+      "Phase 157 provider switch receipt compact retry preservation.",
+      "PROVIDER_SWITCH_COMPACT_BLOCK ".repeat(1600),
+      "The approved provider switch receipt must remain in the final WorkerContextPacket.",
+    ].join("\n");
+    const largeAssignment: any = {
+      ...switchedAssignment,
+      assignmentId: "assignment-phase157-provider-switch-compact",
+      dispatchKey: "dispatch-phase157-provider-switch-compact",
+      task: largeTask,
+    };
+    const largePacket = buildWorkerContextPacketForAssignment(largeAssignment, "", [], {
+      group: { id: targetGroup, members: [{ project, agent: newProvider }] },
+      providerSwitchDecisionReceipt: receipt,
+      workerContextUsageOptions: { maxTokens: 2200, autoCompactBufferTokens: 120 },
+    });
+    const largeGate = buildWorkerContextPreDispatchGateForCoordinator(largeAssignment, largePacket);
+    const compactRetry = maybeRetryWorkerContextPacketCompactionForCoordinator(
+      largeAssignment,
+      "",
+      [],
+      largePacket,
+      largeGate,
+      {
+        group: { id: targetGroup, members: [{ project, agent: newProvider }] },
+        providerSwitchDecisionReceipt: receipt,
+        workerContextUsageOptions: { maxTokens: 2200, autoCompactBufferTokens: 120 },
+        workerContextRetryOptions: { maxTaskChars: 1400 },
+      }
+    );
+    const compactRetryDecision = buildWorkerContextProviderDispatchDecisionForCoordinator(
+      largeAssignment,
+      compactRetry.packet,
+      compactRetry.gate,
+      { at: nowAt }
+    );
+
+    distillProviderDispatchOverrideFollowupReceiptValidationToTypedMemory(sourceGroup, {
+      rows: [{
+        validation: {
+          schema: "ccm-worker-context-provider-dispatch-override-followup-receipt-contract-validation-v1",
+          validation_id: "phase157-source-generation-change",
+          groupId: sourceGroup,
+          project: "private-source-project",
+          agent_type: newProvider,
+          binding_id: "binding-phase157-source-generation-change",
+          execution_id: "execution-phase157-source-generation-change",
+          receipt_status: "done",
+          status: "passed",
+          contract_satisfied: true,
+          contract: { rel_paths: ["private-source-evidence.md"] },
+          gaps: [],
+          at: "2026-07-10T09:01:00.000Z",
+        },
+      }],
+    }, { updatedAt: "2026-07-10T09:01:00.000Z" });
+    const staleValidation = validateProviderSwitchDecisionReceiptForCoordinator(receipt, {
+      ...snapshotOptions,
+      groupId: targetGroup,
+      project,
+      assignmentId: baseAssignment.assignmentId,
+      dispatchKey: baseAssignment.dispatchKey,
+    });
+    const ledger = readReplayRepairDispatchBindingLedgerForCoordinator(targetGroup);
+    const typedLedger = readGroupTypedMemoryDistillationLedger(targetGroup);
+    const providerSwitchExecutionArchive = typedLedger.providerSwitchExecutionArchive || {};
+    const providerSwitchExecutionRecall = buildGroupTypedMemoryRecall(targetGroup, [
+      "Phase 158 provider switch execution typed memory",
+      "execution-phase157-mismatch",
+      "runtime fallback executed with the original provider",
+      "provider switch execution mismatch history",
+    ].join("\n"), {
+      disableLedger: true,
+      forceMemory: true,
+      max: 8,
+      snippetChars: 320,
+    });
+    const providerSwitchExecutionPolicy = buildPressureProvenancePreDispatchComplianceDispatchPolicy(targetGroup, {
+      targetProject: project,
+      agentType: newProvider,
+      providerSwitchExecutionMismatchThreshold: 1,
+      generatedAt: nowAt,
+      disableCrossGroupProviderReliability: true,
+    });
+    const matchedEntry = (ledger.entries || []).find((entry: any) => entry.assignment_id === switchedAssignment.assignmentId) || {};
+    const mismatchEntry = (ledger.entries || []).find((entry: any) => entry.assignment_id === mismatchAssignment.assignmentId) || {};
+    const advisedEntry = (ledger.entries || []).find((entry: any) => entry.assignment_id === advisedOnlyAssignment.assignmentId) || {};
+    const checks = {
+      validSwitchIsApprovedAndChecksummed: receipt.valid === true
+        && receipt.status === "approved"
+        && receipt.old_provider?.agent_type === oldProvider
+        && receipt.new_provider?.agent_type === newProvider
+        && receipt.validation?.snapshot_status === "fresh",
+      expiredSnapshotRejectsReceipt: expiredValidation.valid === false
+        && expiredValidation.gaps.some((gap: string) => gap === "snapshot_expired" || gap.includes("snapshot_read_expired")),
+      tamperedReceiptIsRejected: tamperedValidation.valid === false
+        && tamperedValidation.gaps.includes("receipt_checksum"),
+      staleSourceGenerationRejectsReceipt: staleValidation.valid === false
+        && staleValidation.gaps.some((gap: string) => gap.includes("stale_source_generation")),
+      projectAndGroupMismatchAreRejected: projectMismatchValidation.gaps.includes("candidate_project_mismatch")
+        && crossGroupValidation.gaps.includes("group_id_mismatch"),
+      unconfiguredCandidateIsRejected: unconfiguredValidation.gaps.includes("candidate_not_configured"),
+      compatibilityEvidenceIsRequired: missingCompatibilityValidation.gaps.includes("task_compatibility_not_confirmed")
+        && missingCompatibilityValidation.gaps.includes("task_compatibility_evidence_missing"),
+      localAuthorityIsRequired: missingAuthorityValidation.gaps.includes("authority_not_approved")
+        && missingAuthorityValidation.gaps.includes("local_policy_authority_missing"),
+      heldProviderNeedsExplicitSwitchPermission: heldWithoutPermissionValidation.gaps.includes("held_provider_switch_not_authorized"),
+      sessionBindingRejectsWrongProjectThenBindsActualSession: rejectedProjectBinding?.status === "rejected"
+        && rejectedProjectBinding?.gaps?.includes("project_mismatch")
+        && matchedSessionBinding?.status === "bound"
+        && matchedSessionBinding?.task_agent_session_id === "tas-phase157-match",
+      matchedExecutionIsSystemAttested: matchedExecution?.status === "passed"
+        && matchedExecution?.executed_as_approved === true
+        && matchedExecution?.system_attested === true
+        && matchedExecution?.child_declared === true,
+      runtimeFallbackMismatchIsNotDisguisedAsApprovedExecution: mismatchedExecution?.status === "failed"
+        && mismatchedExecution?.executed_as_approved === false
+        && mismatchedExecution?.gaps?.includes("executed_provider_mismatch")
+        && mismatchedExecution?.actually_executed_provider === oldProvider,
+      ledgerSeparatesAdvisedApprovedAndExecutedStates: advisedEntry.provider_switch_ledger_state?.advised_alternative === true
+        && advisedEntry.provider_switch_ledger_state?.approved_switch === false
+        && !advisedEntry.provider_switch_ledger_state?.actually_executed_provider
+        && matchedEntry.provider_switch_ledger_state?.approved_switch === true
+        && matchedEntry.provider_switch_ledger_state?.actually_executed_provider === newProvider
+        && mismatchEntry.provider_switch_ledger_state?.approved_switch === true
+        && mismatchEntry.provider_switch_ledger_state?.actually_executed_provider === oldProvider
+        && Number(ledger.providerSwitchAdvisedCount || 0) === 3
+        && Number(ledger.providerSwitchApprovedCount || 0) === 2
+        && Number(ledger.providerSwitchSessionBoundCount || 0) === 2
+        && Number(ledger.providerSwitchExecutedCount || 0) === 2
+        && Number(ledger.providerSwitchExecutionPassedCount || 0) === 1
+        && Number(ledger.providerSwitchExecutionFailedCount || 0) === 1,
+      compactRetryPreservesDecisionReceipt: largeGate.dispatch_ready === false
+        && compactRetry.packet?.provider_switch_decision_receipt?.receipt_id === receipt.receipt_id
+        && compactRetry.packet?.provider_switch_decision_receipt?.receipt_checksum === receipt.receipt_checksum
+        && renderWorkerContextPacket(compactRetry.packet || {}).includes(receipt.receipt_id)
+        && compactRetryDecision.advised_alternative === true
+        && compactRetryDecision.approved_switch === true,
+      providerSwitchExecutionDistillsToTypedMemory: providerSwitchExecutionArchive.schema === "ccm-provider-switch-execution-distillation-v1"
+        && Number(providerSwitchExecutionArchive.executed_count || 0) === 2
+        && Number(providerSwitchExecutionArchive.passed_count || 0) === 1
+        && Number(providerSwitchExecutionArchive.failed_count || 0) === 1
+        && Number(providerSwitchExecutionArchive.mismatch_count || 0) === 1
+        && (matchedExecution as any)?.typed_memory_distillation?.writeCount >= 1
+        && (mismatchedExecution as any)?.typed_memory_distillation?.writeCount >= 1,
+      providerSwitchExecutionTypedMemoryIsRecallable: JSON.stringify(providerSwitchExecutionRecall.recalled || []).includes("provider-switch-execution-memory.md")
+        && JSON.stringify(providerSwitchExecutionRecall.recalled || []).includes("Provider switch execution"),
+      providerSwitchExecutionPolicySeesMismatchHistory: providerSwitchExecutionPolicy.action === "hold_provider_after_repeated_provider_switch_execution_mismatches"
+        && providerSwitchExecutionPolicy.active === true
+        && Number(providerSwitchExecutionPolicy.providerSwitchExecutionMismatchCount || 0) === 1
+        && providerSwitchExecutionPolicy.policyRows?.[0]?.provider_switch_execution_mismatch_escalated === true,
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      receipt: {
+        receipt_id: receipt.receipt_id || "",
+        status: receipt.status || "",
+        snapshot_id: receipt.provider_reliability_snapshot?.snapshot_id || "",
+        old_provider: receipt.old_provider?.agent_type || "",
+        new_provider: receipt.new_provider?.agent_type || "",
+      },
+      sessionBinding: matchedSessionBinding,
+      matchedExecution,
+      mismatchedExecution,
+      ledger: {
+        providerSwitchAdvisedCount: ledger.providerSwitchAdvisedCount || 0,
+        providerSwitchApprovedCount: ledger.providerSwitchApprovedCount || 0,
+        providerSwitchSessionBoundCount: ledger.providerSwitchSessionBoundCount || 0,
+        providerSwitchExecutedCount: ledger.providerSwitchExecutedCount || 0,
+        providerSwitchExecutionPassedCount: ledger.providerSwitchExecutionPassedCount || 0,
+        providerSwitchExecutionFailedCount: ledger.providerSwitchExecutionFailedCount || 0,
+      },
+      typedMemory: {
+        archiveSchema: providerSwitchExecutionArchive.schema || "",
+        executedCount: providerSwitchExecutionArchive.executed_count || 0,
+        passedCount: providerSwitchExecutionArchive.passed_count || 0,
+        failedCount: providerSwitchExecutionArchive.failed_count || 0,
+        mismatchCount: providerSwitchExecutionArchive.mismatch_count || 0,
+        recallCount: Array.isArray(providerSwitchExecutionRecall.recalled) ? providerSwitchExecutionRecall.recalled.length : 0,
+        policyAction: providerSwitchExecutionPolicy.action || "",
+      },
+      compactRetry: {
+        status: compactRetry.retry?.status || "",
+        receipt_id: compactRetry.packet?.provider_switch_decision_receipt?.receipt_id || "",
+        usage_status: compactRetry.packet?.context_usage?.status || "",
+      },
+    };
+  } finally {
+    for (const dir of [sourceTypedDir, targetTypedDir]) {
+      try { if (dir && fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+    }
+    for (const file of [snapshotFile, `${snapshotFile}.bak`, bindingFile, `${bindingFile}.bak`]) {
       try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
     }
   }
@@ -4948,6 +6575,9 @@ function normalizeWorkerContextCompactOutcomeEntryForCoordinator(raw: any = {}) 
   const status = String(raw.status || raw.retry_status || raw.retryStatus || "").trim() || (raw.dispatch_ready === false || raw.dispatchReady === false ? "blocked" : "recovered");
   const partialPolicy = raw.partial_compact_policy || raw.partialCompactPolicy || {};
   const ptlHint = raw.ptl_emergency_hint || raw.ptlEmergencyHint || null;
+  const providerRankingProvenancePreservation = normalizeProviderRankingProvenancePreservationForCoordinator(
+    raw.provider_ranking_provenance_preservation || raw.providerRankingProvenancePreservation || null
+  );
   const selectedCategories = Array.isArray(partialPolicy.selected_categories || partialPolicy.selectedCategories)
     ? (partialPolicy.selected_categories || partialPolicy.selectedCategories).map((item: any) => String(item || "")).filter(Boolean)
     : [];
@@ -5033,6 +6663,10 @@ function normalizeWorkerContextCompactOutcomeEntryForCoordinator(raw: any = {}) 
     partial_omitted_chars: Number(raw.partial_omitted_chars || raw.partialOmittedChars || 0),
     original_task_hash: String(raw.original_task_hash || raw.originalTaskHash || ""),
     compacted_task_hash: String(raw.compacted_task_hash || raw.compactedTaskHash || ""),
+    provider_ranking_provenance_preservation: providerRankingProvenancePreservation,
+    provider_ranking_provenance_preserved: providerRankingProvenancePreservation
+      ? providerRankingProvenancePreservation.preserved === true
+      : raw.provider_ranking_provenance_preserved === true || raw.providerRankingProvenancePreserved === true,
     source: String(raw.source || "worker_context_packet_compaction_retry"),
     distillation_candidate: raw.distillation_candidate === false || raw.distillationCandidate === false ? false : true,
     at: String(raw.at || new Date().toISOString()),
@@ -5058,6 +6692,8 @@ function buildWorkerContextCompactOutcomeStatsForCoordinator(entries: any[] = []
     partialCompactPolicy: partialPolicyRows.length,
     taskCompacted: entries.filter((item: any) => item.task_compacted === true).length,
     taskPreserved: entries.filter((item: any) => item.task_hash_unchanged === true).length,
+    providerRankingProvenanceRequired: entries.filter((item: any) => item.provider_ranking_provenance_preservation?.required === true).length,
+    providerRankingProvenancePreserved: entries.filter((item: any) => item.provider_ranking_provenance_preservation?.required === true && item.provider_ranking_provenance_preservation?.preserved === true).length,
     totalOmittedChars: entries.reduce((sum, item) => sum + Number(item.omitted_chars || 0), 0),
     partialOmittedChars: entries.reduce((sum, item) => sum + Number(item.partial_omitted_chars || 0), 0),
     selectedCategoryCounts: selectedCounts,
@@ -5527,7 +7163,13 @@ const WORKER_CONTEXT_REPLAY_BRIEF_PARTIAL_COMPACT_FIELDS = [
   "brief_id",
   "work_item_id",
   "source",
+  "component",
   "target_project",
+  "reinjection_gate_id",
+  "post_compact_candidate_id",
+  "post_compact_candidate_kind",
+  "post_compact_candidate_value",
+  "post_compact_candidate_source_message_id",
   "proof_entry_id",
   "request_patch_checksum",
   "provider_reproof_status",
@@ -5546,6 +7188,11 @@ function replayBriefPartialCompactValue(raw: any = {}, key: string) {
     brief_id: ["brief_id", "briefId"],
     work_item_id: ["work_item_id", "workItemId"],
     target_project: ["target_project", "targetProject"],
+    reinjection_gate_id: ["reinjection_gate_id", "reinjectionGateId"],
+    post_compact_candidate_id: ["post_compact_candidate_id", "postCompactCandidateId"],
+    post_compact_candidate_kind: ["post_compact_candidate_kind", "postCompactCandidateKind"],
+    post_compact_candidate_value: ["post_compact_candidate_value", "postCompactCandidateValue"],
+    post_compact_candidate_source_message_id: ["post_compact_candidate_source_message_id", "postCompactCandidateSourceMessageId"],
     proof_entry_id: ["proof_entry_id", "proofEntryId"],
     request_patch_checksum: ["request_patch_checksum", "requestPatchChecksum"],
     provider_reproof_status: ["provider_reproof_status", "providerReproofStatus"],
@@ -6030,6 +7677,16 @@ function buildWorkerContextPacketForAssignment(baseAssignment: any, dependsOn: s
       || null,
     frequentThreshold: options.pressureProvenanceFeedbackFrequentThreshold || options.pressure_provenance_feedback_frequent_threshold,
     recoveryCreditPerCompliant: options.pressureProvenanceFeedbackRecoveryCreditPerCompliant || options.pressure_provenance_feedback_recovery_credit_per_compliant,
+    providerOverrideFollowupReceiptValidationFailureThreshold: options.providerOverrideFollowupReceiptValidationFailureThreshold
+      || options.provider_override_followup_receipt_validation_failure_threshold,
+    crossGroupProviderReliabilityGroupIds: options.crossGroupProviderReliabilityGroupIds
+      || options.cross_group_provider_reliability_group_ids,
+    providerReliabilityHalfLifeDays: options.providerReliabilityHalfLifeDays
+      || options.provider_reliability_half_life_days,
+    minSourceGroups: options.crossGroupProviderReliabilityMinSourceGroups
+      || options.cross_group_provider_reliability_min_source_groups,
+    disableCrossGroupProviderReliability: options.disableCrossGroupProviderReliability
+      || options.disable_cross_group_provider_reliability,
     disablePressureProvenanceFeedbackRecovery: options.disablePressureProvenanceFeedbackRecovery || options.disable_pressure_provenance_feedback_recovery,
     disabled: options.disablePressureProvenanceFeedbackDispatchPolicy || options.disable_pressure_provenance_feedback_dispatch_policy,
   }) : null;
@@ -6053,6 +7710,7 @@ function buildWorkerContextPacketForAssignment(baseAssignment: any, dependsOn: s
     memoryPolicy,
     pressureProvenanceDispatchFeedbackPolicy,
     pressureProvenanceProviderDispatchAdvisory,
+    providerSwitchDecisionReceipt: options.providerSwitchDecisionReceipt || options.provider_switch_decision_receipt || null,
     contextUsageOptions: options.workerContextUsageOptions || options.worker_context_usage_options || null,
   });
 }
@@ -6066,12 +7724,131 @@ function pressureProvenanceProviderDispatchPolicyForCoordinator(healthStatus: st
 }
 
 function pressureProvenanceProviderHealthForCoordinator(policy: any = {}, row: any = {}) {
+  if (policy?.active === true && (row?.provider_switch_execution_mismatch_escalated === true || row?.providerSwitchExecutionMismatchEscalated === true)) return "critical";
+  if (policy?.active === true && (row?.provider_override_followup_receipt_validation_escalated === true || row?.providerOverrideFollowupReceiptValidationEscalated === true)) return "critical";
   if (policy?.active === true && row?.relapsed === true) return "critical";
   if (policy?.active === true) return "warning";
+  if (Number(row?.provider_switch_execution_mismatch_count || row?.providerSwitchExecutionMismatchCount || 0) > 0) return "monitor";
   if (row?.recovered === true) return "monitor";
   if (row?.provider_override_followup_repaired === true || row?.providerOverrideFollowupRepaired === true) return "monitor";
   if (Number(row?.violation_count || row?.violationCount || 0) > 0) return "watch";
+  if (row?.cross_group_provider_reliability_actionable === true || row?.crossGroupProviderReliabilityActionable === true) {
+    return ["high", "medium"].includes(String(row?.cross_group_provider_reliability_risk_status || row?.crossGroupProviderReliabilityRiskStatus || "")) ? "monitor" : "watch";
+  }
   return "healthy";
+}
+
+function providerReliabilityConfiguredCandidatesForCoordinator(project: string, selectedAgentType: string, options: any = {}) {
+  const group = options.group && typeof options.group === "object" ? options.group : null;
+  const member = Array.isArray(group?.members)
+    ? group.members.find((item: any) => String(item.project || "").trim().toLowerCase() === String(project || "").trim().toLowerCase())
+    : null;
+  const raw = [
+    ...(Array.isArray(options.providerCandidates || options.provider_candidates) ? (options.providerCandidates || options.provider_candidates) : []),
+    ...(Array.isArray(options.configuredProviderCandidates || options.configured_provider_candidates) ? (options.configuredProviderCandidates || options.configured_provider_candidates) : []),
+    ...(Array.isArray(member?.providerCandidates || member?.provider_candidates) ? (member.providerCandidates || member.provider_candidates) : []),
+    ...(Array.isArray(member?.alternativeAgents || member?.alternative_agents) ? (member.alternativeAgents || member.alternative_agents) : []),
+    ...(Array.isArray(member?.agents) ? member.agents : []),
+  ];
+  const seen = new Set<string>();
+  const selectedKey = String(selectedAgentType || "").trim().toLowerCase();
+  const candidates: any[] = [];
+  for (const item of raw) {
+    const row = typeof item === "string" ? { agent_type: item } : item || {};
+    const agentType = String(row.agent_type || row.agentType || row.agent || row.provider || row.runner || "").trim();
+    const candidateProject = String(row.project || row.target_project || row.targetProject || project || "").trim();
+    const key = `${agentType.toLowerCase()}|${candidateProject.toLowerCase()}`;
+    if (!agentType || agentType.toLowerCase() === selectedKey || candidateProject.toLowerCase() !== String(project || "").trim().toLowerCase()) continue;
+    if (row.enabled === false || row.configured === false || seen.has(key)) continue;
+    seen.add(key);
+    candidates.push({
+      agent_type: agentType,
+      project: candidateProject,
+      configured: true,
+      source: "explicit_same_project_provider_candidate",
+    });
+  }
+  return candidates.slice(0, 12);
+}
+
+function providerReliabilityHealthRankForCoordinator(healthStatus: any) {
+  const rank: Record<string, number> = {
+    healthy: 0,
+    watch: 1,
+    monitor: 2,
+    warning: 3,
+    critical: 4,
+  };
+  return rank[String(healthStatus || "healthy")] ?? 5;
+}
+
+function providerReliabilityRiskRankForCoordinator(riskStatus: any) {
+  const rank: Record<string, number> = {
+    low: 0,
+    empty: 1,
+    medium: 2,
+    high: 3,
+  };
+  return rank[String(riskStatus || "empty")] ?? 4;
+}
+
+function providerSwitchExecutionRankPenaltyForCoordinator(row: any = {}) {
+  const weightedRiskScore = Math.max(0, Number(
+    row.provider_switch_execution_weighted_risk_score
+      || row.providerSwitchExecutionWeightedRiskScore
+      || 0
+  ));
+  const riskScore = Math.max(0, Number(row.provider_switch_execution_risk_score || row.providerSwitchExecutionRiskScore || 0));
+  const confidence = Math.max(0, Math.min(1, Number(row.provider_switch_execution_risk_confidence || row.providerSwitchExecutionRiskConfidence || 0)));
+  const mismatchCount = Math.max(0, Number(row.provider_switch_execution_mismatch_count || row.providerSwitchExecutionMismatchCount || 0));
+  if (!weightedRiskScore && !riskScore && !mismatchCount) return 0;
+  const weightedPenalty = Math.min(8, weightedRiskScore * 4);
+  const confidencePenalty = Math.min(4, riskScore * confidence * 4);
+  const mismatchFloor = mismatchCount > 0 ? 1 : 0;
+  return Math.max(mismatchFloor, Math.round(weightedPenalty + confidencePenalty));
+}
+
+function providerSwitchExecutionRankingProvenanceForCoordinator(row: any = {}, role = "candidate") {
+  const memoryRelPaths = Array.isArray(row.provider_switch_execution_memory_rel_paths || row.providerSwitchExecutionMemoryRelPaths)
+    ? (row.provider_switch_execution_memory_rel_paths || row.providerSwitchExecutionMemoryRelPaths).slice(0, 8)
+    : [];
+  const rowIds = Array.isArray(row.provider_switch_execution_row_ids || row.providerSwitchExecutionRowIds)
+    ? (row.provider_switch_execution_row_ids || row.providerSwitchExecutionRowIds).slice(0, 12)
+    : [];
+  const receiptIds = Array.isArray(row.provider_switch_execution_receipt_ids || row.providerSwitchExecutionReceiptIds)
+    ? (row.provider_switch_execution_receipt_ids || row.providerSwitchExecutionReceiptIds).slice(0, 8)
+    : [];
+  const decisionIds = Array.isArray(row.provider_switch_execution_decision_receipt_ids || row.providerSwitchExecutionDecisionReceiptIds)
+    ? (row.provider_switch_execution_decision_receipt_ids || row.providerSwitchExecutionDecisionReceiptIds).slice(0, 8)
+    : [];
+  const hasExecutionEvidence = memoryRelPaths.length > 0
+    || rowIds.length > 0
+    || Number(row.provider_switch_execution_executed_count || row.providerSwitchExecutionExecutedCount || 0) > 0;
+  return {
+    schema: "ccm-provider-ranking-provenance-v1",
+    role,
+    source: hasExecutionEvidence ? "typed-memory:provider-switch-execution-memory" : "none",
+    typed_memory_rel_paths: memoryRelPaths,
+    typed_memory_row_ids: rowIds,
+    execution_receipt_ids: receiptIds,
+    decision_receipt_ids: decisionIds,
+    provider_switch_execution_executed_count: Number(row.provider_switch_execution_executed_count || row.providerSwitchExecutionExecutedCount || 0),
+    provider_switch_execution_mismatch_count: Number(row.provider_switch_execution_mismatch_count || row.providerSwitchExecutionMismatchCount || 0),
+    provider_switch_execution_weighted_risk_score: Number(row.provider_switch_execution_weighted_risk_score || row.providerSwitchExecutionWeightedRiskScore || 0),
+    provider_switch_execution_risk_score: Number(row.provider_switch_execution_risk_score || row.providerSwitchExecutionRiskScore || 0),
+    provider_switch_execution_risk_confidence: Number(row.provider_switch_execution_risk_confidence || row.providerSwitchExecutionRiskConfidence || 0),
+    local_execution_rank_penalty: Number(row.local_execution_rank_penalty || row.localExecutionRankPenalty || 0),
+    composite_rank: Number(row.composite_rank || row.compositeRank || 0),
+    selected_composite_rank: Number(row.selected_composite_rank || row.selectedCompositeRank || 0),
+    compact_safe: true,
+    boundary: "ranking evidence only; passed history is not future switch authorization",
+  };
+}
+
+function providerReliabilitySignalForAgentForCoordinator(snapshotRead: any = {}, agentType = "") {
+  const envelope = snapshotRead?.snapshot?.signals || {};
+  const signals = Array.isArray(envelope.signals) ? envelope.signals : [];
+  return signals.find((signal: any) => String(signal.agent_type || signal.agentType || "").trim().toLowerCase() === String(agentType || "").trim().toLowerCase()) || null;
 }
 
 function buildPressureProvenanceProviderDispatchAdvisoryForCoordinator(groupId: string, project: string, agentType: string, policy: any = null, options: any = {}) {
@@ -6086,7 +7863,12 @@ function buildPressureProvenanceProviderDispatchAdvisoryForCoordinator(groupId: 
   const hasEvidence = policy.active === true
     || row.recovered === true
     || Number(row.violation_count || row.violationCount || 0) > 0
-    || Number(row.effective_violation_count || row.effectiveViolationCount || 0) > 0;
+    || Number(row.effective_violation_count || row.effectiveViolationCount || 0) > 0
+    || Number(row.provider_override_followup_receipt_validation_attempt_count || row.providerOverrideFollowupReceiptValidationAttemptCount || 0) > 0
+    || Number(row.provider_switch_execution_executed_count || row.providerSwitchExecutionExecutedCount || 0) > 0
+    || Number(row.provider_switch_execution_mismatch_count || row.providerSwitchExecutionMismatchCount || 0) > 0
+    || row.cross_group_provider_reliability_actionable === true
+    || row.crossGroupProviderReliabilityActionable === true;
   if (!hasEvidence) return null;
   const healthStatus = pressureProvenanceProviderHealthForCoordinator(policy, row);
   const dispatchPolicy = pressureProvenanceProviderDispatchPolicyForCoordinator(healthStatus);
@@ -6095,6 +7877,94 @@ function buildPressureProvenanceProviderDispatchAdvisoryForCoordinator(groupId: 
     || options.disableProviderDispatchHold === true
     || options.disable_provider_dispatch_hold === true;
   const shouldHoldDispatch = dispatchPolicy === "hold_until_repair" && !holdDisabled;
+  const configuredCandidates = providerReliabilityConfiguredCandidatesForCoordinator(project, agentType, options);
+  const snapshotEnabled = configuredCandidates.length > 0
+    || options.enableProviderReliabilitySnapshot === true
+    || options.enable_provider_reliability_snapshot === true;
+  const snapshotRead = snapshotEnabled
+    ? getOrRefreshGlobalProviderDispatchReliabilitySnapshot({
+      snapshotFile: options.providerReliabilitySnapshotFile || options.provider_reliability_snapshot_file,
+      ttlMs: options.providerReliabilitySnapshotTtlMs || options.provider_reliability_snapshot_ttl_ms,
+      crossGroupProviderReliabilityGroupIds: options.crossGroupProviderReliabilityGroupIds || options.cross_group_provider_reliability_group_ids,
+      minSourceGroups: options.crossGroupProviderReliabilityMinSourceGroups || options.cross_group_provider_reliability_min_source_groups || options.minSourceGroups || options.min_source_groups,
+      providerReliabilityHalfLifeDays: options.providerReliabilityHalfLifeDays || options.provider_reliability_half_life_days,
+      providerOverrideFollowupReceiptValidationFailureThreshold: options.providerOverrideFollowupReceiptValidationFailureThreshold || options.provider_override_followup_receipt_validation_failure_threshold,
+      nowMs: options.providerReliabilitySnapshotNowMs || options.provider_reliability_snapshot_now_ms,
+      generatedAt: options.generatedAt || options.generated_at,
+    })
+    : null;
+  const selectedGlobalSignal = providerReliabilitySignalForAgentForCoordinator(snapshotRead, agentType);
+  const selectedExecutionRankPenalty = providerSwitchExecutionRankPenaltyForCoordinator(row);
+  const selectedCompositeRank = providerReliabilityHealthRankForCoordinator(healthStatus) * 10
+    + providerReliabilityRiskRankForCoordinator(selectedGlobalSignal?.risk_status || row.cross_group_provider_reliability_risk_status || "empty")
+    + selectedExecutionRankPenalty;
+  const rankedProviderCandidates = configuredCandidates.map((candidate: any) => {
+      const candidatePolicy: any = buildPressureProvenancePreDispatchComplianceDispatchPolicy(groupId, {
+        ...options,
+        targetProject: project,
+        agentType: candidate.agent_type,
+      });
+      const candidateRows = Array.isArray(candidatePolicy.policyRows || candidatePolicy.policy_rows)
+        ? (candidatePolicy.policyRows || candidatePolicy.policy_rows)
+        : [];
+      const candidateRow = candidateRows.find((item: any) =>
+        String(item.agent_type || item.agentType || "").trim().toLowerCase() === String(candidate.agent_type || "").trim().toLowerCase()
+        && String(item.project || "").trim().toLowerCase() === String(project || "").trim().toLowerCase()
+      ) || candidateRows[0] || {};
+      const candidateHealth = pressureProvenanceProviderHealthForCoordinator(candidatePolicy, candidateRow);
+      const candidateDispatchPolicy = pressureProvenanceProviderDispatchPolicyForCoordinator(candidateHealth);
+      const candidateSignal = providerReliabilitySignalForAgentForCoordinator(snapshotRead, candidate.agent_type);
+      const candidateExecutionRankPenalty = providerSwitchExecutionRankPenaltyForCoordinator(candidateRow);
+      const compositeRank = providerReliabilityHealthRankForCoordinator(candidateHealth) * 10
+        + providerReliabilityRiskRankForCoordinator(candidateSignal?.risk_status || candidateRow.cross_group_provider_reliability_risk_status || "empty")
+        + candidateExecutionRankPenalty;
+      return {
+        schema: "ccm-provider-dispatch-safer-alternative-v1",
+        agent_type: candidate.agent_type,
+        project,
+        configured: true,
+        source: candidate.source,
+        local_health_status: candidateHealth,
+        local_dispatch_policy: candidateDispatchPolicy,
+        local_policy_active: candidatePolicy.active === true,
+        global_risk_status: candidateSignal?.risk_status || "empty",
+        global_risk_score: Number(candidateSignal?.risk_score || 0),
+        global_confidence: Number(candidateSignal?.confidence || 0),
+        global_source_group_count: Number(candidateSignal?.source_group_count || 0),
+        local_execution_rank_penalty: candidateExecutionRankPenalty,
+        selected_local_execution_rank_penalty: selectedExecutionRankPenalty,
+        provider_switch_execution_executed_count: Number(candidateRow.provider_switch_execution_executed_count || candidateRow.providerSwitchExecutionExecutedCount || 0),
+        provider_switch_execution_passed_count: Number(candidateRow.provider_switch_execution_passed_count || candidateRow.providerSwitchExecutionPassedCount || 0),
+        provider_switch_execution_failed_count: Number(candidateRow.provider_switch_execution_failed_count || candidateRow.providerSwitchExecutionFailedCount || 0),
+        provider_switch_execution_mismatch_count: Number(candidateRow.provider_switch_execution_mismatch_count || candidateRow.providerSwitchExecutionMismatchCount || 0),
+        provider_switch_execution_decayed_mismatch_score: Number(candidateRow.provider_switch_execution_decayed_mismatch_score || candidateRow.providerSwitchExecutionDecayedMismatchScore || 0),
+        provider_switch_execution_decayed_failed_score: Number(candidateRow.provider_switch_execution_decayed_failed_score || candidateRow.providerSwitchExecutionDecayedFailedScore || 0),
+        provider_switch_execution_decayed_passed_score: Number(candidateRow.provider_switch_execution_decayed_passed_score || candidateRow.providerSwitchExecutionDecayedPassedScore || 0),
+        provider_switch_execution_weighted_risk_score: Number(candidateRow.provider_switch_execution_weighted_risk_score || candidateRow.providerSwitchExecutionWeightedRiskScore || 0),
+        provider_switch_execution_risk_score: Number(candidateRow.provider_switch_execution_risk_score || candidateRow.providerSwitchExecutionRiskScore || 0),
+        provider_switch_execution_risk_confidence: Number(candidateRow.provider_switch_execution_risk_confidence || candidateRow.providerSwitchExecutionRiskConfidence || 0),
+        provider_switch_execution_row_ids: Array.isArray(candidateRow.provider_switch_execution_row_ids || candidateRow.providerSwitchExecutionRowIds) ? (candidateRow.provider_switch_execution_row_ids || candidateRow.providerSwitchExecutionRowIds).slice(0, 12) : [],
+        provider_switch_execution_memory_rel_paths: Array.isArray(candidateRow.provider_switch_execution_memory_rel_paths || candidateRow.providerSwitchExecutionMemoryRelPaths) ? (candidateRow.provider_switch_execution_memory_rel_paths || candidateRow.providerSwitchExecutionMemoryRelPaths).slice(0, 8) : [],
+        composite_rank: compositeRank,
+        selected_composite_rank: selectedCompositeRank,
+        provider_ranking_provenance: providerSwitchExecutionRankingProvenanceForCoordinator({
+          ...candidateRow,
+          local_execution_rank_penalty: candidateExecutionRankPenalty,
+          composite_rank: compositeRank,
+          selected_composite_rank: selectedCompositeRank,
+        }, "candidate"),
+        safer_than_selected: compositeRank < selectedCompositeRank
+          && !["critical", "warning"].includes(candidateHealth)
+          && candidateDispatchPolicy !== "hold_until_repair",
+        snapshot_id: snapshotRead?.snapshot?.snapshot_id || "",
+        snapshot_checksum: snapshotRead?.snapshot?.snapshot_checksum || "",
+        snapshot_status: snapshotRead?.status || "",
+      };
+    })
+    .sort((a: any, b: any) => Number(a.composite_rank || 0) - Number(b.composite_rank || 0) || String(a.agent_type || "").localeCompare(String(b.agent_type || "")));
+  const saferAlternatives = rankedProviderCandidates
+    .filter((candidate: any) => candidate.safer_than_selected)
+    .slice(0, 6);
   const selected = {
     schema: "ccm-pressure-provenance-feedback-provider-dispatch-selected-candidate-v1",
     groupId,
@@ -6119,7 +7989,12 @@ function buildPressureProvenanceProviderDispatchAdvisoryForCoordinator(groupId: 
     post_recovery_violation_count: Number(row.post_recovery_violation_count || row.postRecoveryViolationCount || 0),
     recovery_last_compliant_at: row.recovery_last_compliant_at || row.recoveryLastCompliantAt || "",
     recovery_streak_broken_at: row.recovery_streak_broken_at || row.recoveryStreakBrokenAt || "",
-    current_open_repair_item_ids: Array.isArray(row.repair_work_item_ids || row.repairWorkItemIds) ? (row.repair_work_item_ids || row.repairWorkItemIds).slice(0, 8) : [],
+    current_open_repair_item_ids: [...new Set([
+      ...(Array.isArray(row.repair_work_item_ids || row.repairWorkItemIds) ? (row.repair_work_item_ids || row.repairWorkItemIds) : []),
+      ...(Array.isArray(row.provider_override_followup_receipt_validation_repair_work_item_ids || row.providerOverrideFollowupReceiptValidationRepairWorkItemIds)
+        ? (row.provider_override_followup_receipt_validation_repair_work_item_ids || row.providerOverrideFollowupReceiptValidationRepairWorkItemIds)
+        : []),
+    ])].slice(0, 8),
     provider_override_followup_repaired: row.provider_override_followup_repaired === true || row.providerOverrideFollowupRepaired === true,
     provider_override_followup_only: row.provider_override_followup_only === true || row.providerOverrideFollowupOnly === true,
     provider_override_followup_repaired_count: Number(row.provider_override_followup_repaired_count || row.providerOverrideFollowupRepairedCount || 0),
@@ -6130,6 +8005,68 @@ function buildPressureProvenanceProviderDispatchAdvisoryForCoordinator(groupId: 
     provider_override_followup_rel_paths: Array.isArray(row.provider_override_followup_rel_paths || row.providerOverrideFollowupRelPaths) ? (row.provider_override_followup_rel_paths || row.providerOverrideFollowupRelPaths).slice(0, 8) : [],
     provider_override_followup_work_item_ids: Array.isArray(row.provider_override_followup_work_item_ids || row.providerOverrideFollowupWorkItemIds) ? (row.provider_override_followup_work_item_ids || row.providerOverrideFollowupWorkItemIds).slice(0, 8) : [],
     provider_override_followup_override_ids: Array.isArray(row.provider_override_followup_override_ids || row.providerOverrideFollowupOverrideIds) ? (row.provider_override_followup_override_ids || row.providerOverrideFollowupOverrideIds).slice(0, 8) : [],
+    provider_override_followup_receipt_validation_attempt_count: Number(row.provider_override_followup_receipt_validation_attempt_count || row.providerOverrideFollowupReceiptValidationAttemptCount || 0),
+    provider_override_followup_receipt_validation_failed_count: Number(row.provider_override_followup_receipt_validation_failed_count || row.providerOverrideFollowupReceiptValidationFailedCount || 0),
+    provider_override_followup_receipt_validation_passed_count: Number(row.provider_override_followup_receipt_validation_passed_count || row.providerOverrideFollowupReceiptValidationPassedCount || 0),
+    provider_override_followup_receipt_validation_consecutive_failure_count: Number(row.provider_override_followup_receipt_validation_consecutive_failure_count || row.providerOverrideFollowupReceiptValidationConsecutiveFailureCount || 0),
+    provider_override_followup_receipt_validation_latest_status: row.provider_override_followup_receipt_validation_latest_status || row.providerOverrideFollowupReceiptValidationLatestStatus || "",
+    provider_override_followup_receipt_validation_escalated: row.provider_override_followup_receipt_validation_escalated === true || row.providerOverrideFollowupReceiptValidationEscalated === true,
+    provider_override_followup_receipt_validation_repair_verified: row.provider_override_followup_receipt_validation_repair_verified === true || row.providerOverrideFollowupReceiptValidationRepairVerified === true,
+    provider_override_followup_receipt_validation_last_failed_at: row.provider_override_followup_receipt_validation_last_failed_at || row.providerOverrideFollowupReceiptValidationLastFailedAt || "",
+    provider_override_followup_receipt_validation_last_passed_at: row.provider_override_followup_receipt_validation_last_passed_at || row.providerOverrideFollowupReceiptValidationLastPassedAt || "",
+    provider_override_followup_receipt_validation_ids: Array.isArray(row.provider_override_followup_receipt_validation_ids || row.providerOverrideFollowupReceiptValidationIds) ? (row.provider_override_followup_receipt_validation_ids || row.providerOverrideFollowupReceiptValidationIds).slice(0, 8) : [],
+    provider_override_followup_receipt_validation_repair_work_item_ids: Array.isArray(row.provider_override_followup_receipt_validation_repair_work_item_ids || row.providerOverrideFollowupReceiptValidationRepairWorkItemIds) ? (row.provider_override_followup_receipt_validation_repair_work_item_ids || row.providerOverrideFollowupReceiptValidationRepairWorkItemIds).slice(0, 8) : [],
+    provider_override_followup_receipt_validation_gap_codes: Array.isArray(row.provider_override_followup_receipt_validation_gap_codes || row.providerOverrideFollowupReceiptValidationGapCodes) ? (row.provider_override_followup_receipt_validation_gap_codes || row.providerOverrideFollowupReceiptValidationGapCodes).slice(0, 8) : [],
+    provider_override_followup_receipt_validation_decayed_failure_score: Number(row.provider_override_followup_receipt_validation_decayed_failure_score || row.providerOverrideFollowupReceiptValidationDecayedFailureScore || 0),
+    provider_override_followup_receipt_validation_decayed_passed_score: Number(row.provider_override_followup_receipt_validation_decayed_passed_score || row.providerOverrideFollowupReceiptValidationDecayedPassedScore || 0),
+    provider_override_followup_receipt_validation_risk_score: Number(row.provider_override_followup_receipt_validation_risk_score || row.providerOverrideFollowupReceiptValidationRiskScore || 0),
+    provider_override_followup_receipt_validation_risk_confidence: Number(row.provider_override_followup_receipt_validation_risk_confidence || row.providerOverrideFollowupReceiptValidationRiskConfidence || 0),
+    provider_switch_execution_history_present: row.provider_switch_execution_history_present === true || row.providerSwitchExecutionHistoryPresent === true,
+    provider_switch_execution_executed_count: Number(row.provider_switch_execution_executed_count || row.providerSwitchExecutionExecutedCount || 0),
+    provider_switch_execution_approved_count: Number(row.provider_switch_execution_approved_count || row.providerSwitchExecutionApprovedCount || 0),
+    provider_switch_execution_passed_count: Number(row.provider_switch_execution_passed_count || row.providerSwitchExecutionPassedCount || 0),
+    provider_switch_execution_failed_count: Number(row.provider_switch_execution_failed_count || row.providerSwitchExecutionFailedCount || 0),
+    provider_switch_execution_mismatch_count: Number(row.provider_switch_execution_mismatch_count || row.providerSwitchExecutionMismatchCount || 0),
+    provider_switch_execution_mismatch_escalated: row.provider_switch_execution_mismatch_escalated === true || row.providerSwitchExecutionMismatchEscalated === true,
+    provider_switch_execution_mismatch_threshold: Number(row.provider_switch_execution_mismatch_threshold || row.providerSwitchExecutionMismatchThreshold || 0),
+    provider_switch_execution_expected_provider: row.provider_switch_execution_expected_provider || row.providerSwitchExecutionExpectedProvider || "",
+    provider_switch_execution_actual_providers: Array.isArray(row.provider_switch_execution_actual_providers || row.providerSwitchExecutionActualProviders) ? (row.provider_switch_execution_actual_providers || row.providerSwitchExecutionActualProviders).slice(0, 8) : [],
+    provider_switch_execution_last_executed_at: row.provider_switch_execution_last_executed_at || row.providerSwitchExecutionLastExecutedAt || "",
+    provider_switch_execution_last_failed_at: row.provider_switch_execution_last_failed_at || row.providerSwitchExecutionLastFailedAt || "",
+    provider_switch_execution_last_passed_at: row.provider_switch_execution_last_passed_at || row.providerSwitchExecutionLastPassedAt || "",
+    provider_switch_execution_receipt_ids: Array.isArray(row.provider_switch_execution_receipt_ids || row.providerSwitchExecutionReceiptIds) ? (row.provider_switch_execution_receipt_ids || row.providerSwitchExecutionReceiptIds).slice(0, 8) : [],
+    provider_switch_execution_decision_receipt_ids: Array.isArray(row.provider_switch_execution_decision_receipt_ids || row.providerSwitchExecutionDecisionReceiptIds) ? (row.provider_switch_execution_decision_receipt_ids || row.providerSwitchExecutionDecisionReceiptIds).slice(0, 8) : [],
+    provider_switch_execution_gap_codes: Array.isArray(row.provider_switch_execution_gap_codes || row.providerSwitchExecutionGapCodes) ? (row.provider_switch_execution_gap_codes || row.providerSwitchExecutionGapCodes).slice(0, 8) : [],
+    provider_switch_execution_decayed_mismatch_score: Number(row.provider_switch_execution_decayed_mismatch_score || row.providerSwitchExecutionDecayedMismatchScore || 0),
+    provider_switch_execution_decayed_failed_score: Number(row.provider_switch_execution_decayed_failed_score || row.providerSwitchExecutionDecayedFailedScore || 0),
+    provider_switch_execution_decayed_passed_score: Number(row.provider_switch_execution_decayed_passed_score || row.providerSwitchExecutionDecayedPassedScore || 0),
+    provider_switch_execution_weighted_risk_score: Number(row.provider_switch_execution_weighted_risk_score || row.providerSwitchExecutionWeightedRiskScore || 0),
+    provider_switch_execution_risk_score: Number(row.provider_switch_execution_risk_score || row.providerSwitchExecutionRiskScore || 0),
+    provider_switch_execution_risk_confidence: Number(row.provider_switch_execution_risk_confidence || row.providerSwitchExecutionRiskConfidence || 0),
+    provider_switch_execution_half_life_days: Number(row.provider_switch_execution_half_life_days || row.providerSwitchExecutionHalfLifeDays || 0),
+    provider_switch_execution_row_ids: Array.isArray(row.provider_switch_execution_row_ids || row.providerSwitchExecutionRowIds) ? (row.provider_switch_execution_row_ids || row.providerSwitchExecutionRowIds).slice(0, 12) : [],
+    provider_switch_execution_memory_rel_paths: Array.isArray(row.provider_switch_execution_memory_rel_paths || row.providerSwitchExecutionMemoryRelPaths) ? (row.provider_switch_execution_memory_rel_paths || row.providerSwitchExecutionMemoryRelPaths).slice(0, 8) : [],
+    local_execution_rank_penalty: selectedExecutionRankPenalty,
+    composite_rank: selectedCompositeRank,
+    provider_ranking_provenance: providerSwitchExecutionRankingProvenanceForCoordinator({
+      ...row,
+      local_execution_rank_penalty: selectedExecutionRankPenalty,
+      composite_rank: selectedCompositeRank,
+      selected_composite_rank: selectedCompositeRank,
+    }, "selected"),
+    cross_group_provider_reliability_guidance: row.cross_group_provider_reliability_guidance || row.crossGroupProviderReliabilityGuidance || null,
+    cross_group_provider_reliability_actionable: row.cross_group_provider_reliability_actionable === true || row.crossGroupProviderReliabilityActionable === true,
+    cross_group_provider_reliability_risk_status: row.cross_group_provider_reliability_risk_status || row.crossGroupProviderReliabilityRiskStatus || "empty",
+    cross_group_provider_reliability_risk_score: Number(row.cross_group_provider_reliability_risk_score || row.crossGroupProviderReliabilityRiskScore || 0),
+    cross_group_provider_reliability_confidence: Number(row.cross_group_provider_reliability_confidence || row.crossGroupProviderReliabilityConfidence || 0),
+    cross_group_provider_reliability_source_group_count: Number(row.cross_group_provider_reliability_source_group_count || row.crossGroupProviderReliabilitySourceGroupCount || 0),
+    ...(snapshotRead?.snapshot ? {
+      provider_reliability_snapshot_id: snapshotRead.snapshot.snapshot_id || "",
+      provider_reliability_snapshot_checksum: snapshotRead.snapshot.snapshot_checksum || "",
+      provider_reliability_snapshot_status: snapshotRead.status || "missing",
+      provider_reliability_snapshot_expires_at: snapshotRead.snapshot.expires_at || "",
+      provider_reliability_snapshot_generation_id: snapshotRead.snapshot.generation_id || "",
+    } : {}),
     should_hold_dispatch: shouldHoldDispatch,
   };
   return {
@@ -6145,14 +8082,466 @@ function buildPressureProvenanceProviderDispatchAdvisoryForCoordinator(groupId: 
     dispatch_policy: dispatchPolicy,
     health_status: healthStatus,
     should_hold_dispatch: shouldHoldDispatch,
-    safer_alternative_count: 0,
-    safer_alternatives: [],
+    ...(snapshotRead?.snapshot ? { provider_reliability_snapshot: {
+      schema: "ccm-provider-dispatch-reliability-snapshot-ref-v1",
+      snapshot_id: snapshotRead.snapshot.snapshot_id || "",
+      generation_id: snapshotRead.snapshot.generation_id || "",
+      snapshot_checksum: snapshotRead.snapshot.snapshot_checksum || "",
+      payload_checksum: snapshotRead.snapshot.payload_checksum || "",
+      status: snapshotRead.status || "",
+      usable: snapshotRead.usable === true,
+      refreshed: snapshotRead.refreshed === true,
+      generated_at: snapshotRead.snapshot.generated_at || "",
+      expires_at: snapshotRead.snapshot.expires_at || "",
+      source_generation_checksum: snapshotRead.snapshot.source_provenance?.generation_checksum || "",
+      source_ledger_count: Number(snapshotRead.snapshot.source_provenance?.source_ledger_count || 0),
+      guidance_only: true,
+      local_policy_override_allowed: false,
+      contains_private_memory: false,
+    } } : {}),
+    ranked_provider_candidate_count: rankedProviderCandidates.length,
+    ranked_provider_candidates: rankedProviderCandidates.slice(0, 12),
+    safer_alternative_count: saferAlternatives.length,
+    safer_alternatives: saferAlternatives,
     recommendation: shouldHoldDispatch
-      ? `hold ${agentType}/${project} child-agent dispatch until pressure provenance repair closes`
+      ? selected.provider_switch_execution_mismatch_escalated
+        ? `hold ${agentType}/${project} provider switches after ${selected.provider_switch_execution_mismatch_count || 0} system-attested execution mismatch(es)`
+        : selected.provider_override_followup_receipt_validation_escalated
+        ? `hold ${agentType}/${project} child-agent dispatch after ${selected.provider_override_followup_receipt_validation_consecutive_failure_count || 0} consecutive corrected-receipt validation failures`
+        : `hold ${agentType}/${project} child-agent dispatch until pressure provenance repair closes`
+      : saferAlternatives.length
+        ? `keep current ${agentType}/${project} assignment unchanged, but prefer configured safer candidate ${saferAlternatives[0].agent_type} on the next dispatch decision when task/provider compatibility is confirmed`
+      : selected.provider_switch_execution_mismatch_count > 0
+        ? `allow ${agentType}/${project} with receipt sampling; provider switch execution history has ${selected.provider_switch_execution_mismatch_count || 0} mismatch(es), and passed history is not future switch authorization`
       : selected.provider_override_followup_repaired
       ? `allow ${agentType}/${project} dispatch with receipt sampling; verified provider override follow-up history exists but current evidence is still required`
+      : selected.cross_group_provider_reliability_actionable
+        ? `allow ${agentType}/${project} only with receipt sampling based on privacy-redacted cross-group reliability guidance; local group policy remains authoritative`
       : selected.dispatch_recommendation,
     generated_at: new Date().toISOString(),
+  };
+}
+
+function providerSwitchDecisionReceiptComparableForCoordinator(receipt: any = {}) {
+  const comparable = { ...receipt };
+  delete comparable.receipt_checksum;
+  delete comparable.validation;
+  delete comparable.gaps;
+  delete comparable.valid;
+  return comparable;
+}
+
+function providerSwitchDecisionReceiptChecksumForCoordinator(receipt: any = {}) {
+  return hashCoordinator(providerSwitchDecisionReceiptComparableForCoordinator(receipt), 48);
+}
+
+function normalizeProviderSwitchAuthorityForCoordinator(value: any = {}) {
+  const authority = value && typeof value === "object" ? value : {};
+  const kind = String(authority.kind || authority.type || authority.source || "").trim().toLowerCase();
+  const localKinds = new Set(["local_user", "user", "task_runtime_override", "group_local_policy", "local_policy"]);
+  return {
+    kind,
+    authority_id: String(authority.authority_id || authority.authorityId || authority.id || "").trim(),
+    approved: authority.approved === true || authority.allowed === true,
+    local_policy_authority: authority.local_policy_authority === true
+      || authority.localPolicyAuthority === true
+      || localKinds.has(kind),
+    allow_switch_away_from_held_provider: authority.allow_switch_away_from_held_provider === true
+      || authority.allowSwitchAwayFromHeldProvider === true,
+    reason: compactText(authority.reason || authority.note || "", 360),
+  };
+}
+
+function normalizeProviderSwitchRequestForCoordinator(value: any = {}) {
+  const request = value && typeof value === "object" ? value : {};
+  const evidence = Array.isArray(request.compatibility_evidence || request.compatibilityEvidence)
+    ? (request.compatibility_evidence || request.compatibilityEvidence)
+    : request.compatibility_evidence || request.compatibilityEvidence
+      ? [request.compatibility_evidence || request.compatibilityEvidence]
+      : [];
+  return {
+    requested_agent_type: String(
+      request.requested_agent_type
+      || request.requestedAgentType
+      || request.new_agent_type
+      || request.newAgentType
+      || request.provider
+      || request.runner
+      || ""
+    ).trim(),
+    compatibility_confirmed: request.compatibility_confirmed === true || request.compatibilityConfirmed === true,
+    compatibility_evidence: uniqueCoordinatorStrings(evidence).slice(0, 12),
+    reason: compactText(request.reason || request.switch_reason || request.switchReason || "", 500),
+    authority: normalizeProviderSwitchAuthorityForCoordinator(request.authority || request.approval || {}),
+  };
+}
+
+function providerSwitchRequestForAssignmentForCoordinator(member: any = {}, project = "", options: any = {}) {
+  const requests = options.providerSwitchRequests || options.provider_switch_requests || {};
+  const mapped = requests && typeof requests === "object"
+    ? requests[project] || requests["*"] || null
+    : null;
+  return mapped
+    || member.providerSwitchRequest
+    || member.provider_switch_request
+    || options.providerSwitchRequest
+    || options.provider_switch_request
+    || null;
+}
+
+export function validateProviderSwitchDecisionReceiptForCoordinator(receipt: any = {}, options: any = {}) {
+  const gaps: string[] = [];
+  const oldProvider = receipt.old_provider || receipt.oldProvider || {};
+  const newProvider = receipt.new_provider || receipt.newProvider || {};
+  const snapshotRef = receipt.provider_reliability_snapshot || receipt.providerReliabilitySnapshot || {};
+  const compatibility = receipt.task_compatibility || receipt.taskCompatibility || {};
+  const authority = normalizeProviderSwitchAuthorityForCoordinator(receipt.authority || {});
+  const receiptGroupId = String(receipt.groupId || receipt.group_id || "").trim();
+  const expectedGroupId = String(options.groupId || options.group_id || options.expectedGroupId || options.expected_group_id || "").trim();
+  const expectedProject = String(options.project || options.expectedProject || options.expected_project || "").trim();
+  const expectedAssignmentId = String(options.assignmentId || options.assignment_id || options.expectedAssignmentId || options.expected_assignment_id || "").trim();
+  const expectedDispatchKey = String(options.dispatchKey || options.dispatch_key || options.expectedDispatchKey || options.expected_dispatch_key || "").trim();
+  const expectedChecksum = providerSwitchDecisionReceiptChecksumForCoordinator(receipt);
+  if (receipt.schema !== "ccm-provider-switch-decision-receipt-v1") gaps.push("schema");
+  if (!receipt.receipt_id) gaps.push("receipt_id");
+  if (!receiptGroupId) gaps.push("group_id");
+  if (!receipt.project) gaps.push("project");
+  if (expectedGroupId && receiptGroupId !== expectedGroupId) gaps.push("group_id_mismatch");
+  if (expectedProject && String(receipt.project || "").trim().toLowerCase() !== expectedProject.toLowerCase()) gaps.push("project_mismatch");
+  if (expectedAssignmentId && String(receipt.assignment_id || receipt.assignmentId || "").trim() !== expectedAssignmentId) gaps.push("assignment_id_mismatch");
+  if (expectedDispatchKey && String(receipt.dispatch_key || receipt.dispatchKey || "").trim() !== expectedDispatchKey) gaps.push("dispatch_key_mismatch");
+  if (receipt.status !== "approved") gaps.push("status_not_approved");
+  if (!receipt.receipt_checksum || receipt.receipt_checksum !== expectedChecksum) gaps.push("receipt_checksum");
+  if (!oldProvider.agent_type || !newProvider.agent_type) gaps.push("provider_identity");
+  if (String(oldProvider.agent_type || "").toLowerCase() === String(newProvider.agent_type || "").toLowerCase()) gaps.push("provider_unchanged");
+  if (newProvider.configured !== true) gaps.push("candidate_not_configured");
+  if (String(newProvider.project || "").trim().toLowerCase() !== String(receipt.project || "").trim().toLowerCase()) gaps.push("candidate_project_mismatch");
+  if (newProvider.safer_than_selected !== true) gaps.push("candidate_not_ranked_safer");
+  if (newProvider.local_hold === true || newProvider.local_dispatch_policy === "hold_until_repair") gaps.push("candidate_local_hold");
+  if (compatibility.confirmed !== true) gaps.push("task_compatibility_not_confirmed");
+  if (!Array.isArray(compatibility.evidence) || compatibility.evidence.length === 0) gaps.push("task_compatibility_evidence_missing");
+  if (!authority.approved) gaps.push("authority_not_approved");
+  if (!authority.local_policy_authority) gaps.push("local_policy_authority_missing");
+  if (oldProvider.local_hold === true && authority.allow_switch_away_from_held_provider !== true) gaps.push("held_provider_switch_not_authorized");
+  if (snapshotRef.status !== "fresh" || snapshotRef.usable !== true) gaps.push("snapshot_not_fresh");
+  if (!snapshotRef.snapshot_id || !snapshotRef.snapshot_checksum || !snapshotRef.generation_id) gaps.push("snapshot_identity_missing");
+  const expiresMs = Date.parse(String(snapshotRef.expires_at || ""));
+  const nowMs = Number(options.nowMs || options.now_ms || Date.now());
+  if (!Number.isFinite(expiresMs) || expiresMs <= nowMs) gaps.push("snapshot_expired");
+  let snapshotRead: any = null;
+  if (options.verifySnapshot !== false && options.verify_snapshot !== false) {
+    snapshotRead = readGlobalProviderDispatchReliabilitySnapshot({
+      snapshotFile: options.snapshotFile || options.snapshot_file,
+      crossGroupProviderReliabilityGroupIds: options.crossGroupProviderReliabilityGroupIds || options.cross_group_provider_reliability_group_ids,
+      minSourceGroups: options.minSourceGroups || options.min_source_groups,
+      providerReliabilityHalfLifeDays: options.providerReliabilityHalfLifeDays || options.provider_reliability_half_life_days,
+      providerOverrideFollowupReceiptValidationFailureThreshold: options.providerOverrideFollowupReceiptValidationFailureThreshold
+        || options.provider_override_followup_receipt_validation_failure_threshold,
+      nowMs,
+      allowBackupRecovery: options.allowBackupRecovery,
+      verifySourceGeneration: options.verifySourceGeneration,
+    });
+    if (snapshotRead.usable !== true || snapshotRead.status !== "fresh") gaps.push(`snapshot_read_${snapshotRead.status || "invalid"}`);
+    if (snapshotRead.snapshot?.snapshot_id !== snapshotRef.snapshot_id) gaps.push("snapshot_id_mismatch");
+    if (snapshotRead.snapshot?.snapshot_checksum !== snapshotRef.snapshot_checksum) gaps.push("snapshot_checksum_mismatch");
+    if (snapshotRead.snapshot?.generation_id !== snapshotRef.generation_id) gaps.push("snapshot_generation_mismatch");
+  }
+  const valid = gaps.length === 0;
+  return {
+    schema: "ccm-provider-switch-decision-receipt-validation-v1",
+    valid,
+    status: valid ? "approved" : "rejected",
+    gaps: uniqueCoordinatorStrings(gaps),
+    snapshot_status: snapshotRead?.status || snapshotRef.status || "missing",
+    checked_at: new Date(nowMs).toISOString(),
+  };
+}
+
+export function buildProviderSwitchDecisionReceiptForCoordinator(groupId: string, assignment: any = {}, requestValue: any = {}, options: any = {}) {
+  const packet = assignment.worker_context_packet || assignment.workerContextPacket || {};
+  const gate = assignment.worker_context_pre_dispatch_gate
+    || assignment.workerContextPreDispatchGate
+    || buildWorkerContextPreDispatchGateForCoordinator(assignment, packet);
+  const advisory = packet.pressure_provenance_provider_dispatch_advisory
+    || packet.pressureProvenanceProviderDispatchAdvisory
+    || gate.pressure_provenance_provider_dispatch_advisory
+    || gate.pressureProvenanceProviderDispatchAdvisory
+    || {};
+  const request = normalizeProviderSwitchRequestForCoordinator(requestValue);
+  const selected = advisory.selected_candidate || advisory.selectedCandidate || {};
+  const alternatives = Array.isArray(advisory.safer_alternatives || advisory.saferAlternatives)
+    ? (advisory.safer_alternatives || advisory.saferAlternatives)
+    : [];
+  const rankedCandidates = Array.isArray(advisory.ranked_provider_candidates || advisory.rankedProviderCandidates)
+    ? (advisory.ranked_provider_candidates || advisory.rankedProviderCandidates)
+    : [];
+  const candidate = alternatives.find((item: any) =>
+    String(item.agent_type || item.agentType || "").trim().toLowerCase() === request.requested_agent_type.toLowerCase()
+  ) || {};
+  const snapshot = advisory.provider_reliability_snapshot || advisory.providerReliabilitySnapshot || {};
+  const project = String(assignment.project || packet.project || advisory.project || candidate.project || "").trim();
+  const oldAgentType = String(
+    assignment.original_agent_type
+    || assignment.originalAgentType
+    || assignment.agentType
+    || assignment.agent_type
+    || packet.agent_type
+    || selected.agent_type
+    || selected.agentType
+    || ""
+  ).trim();
+  const decidedAt = String(options.at || options.generatedAt || options.generated_at || new Date().toISOString());
+  const receiptBase: any = {
+    schema: "ccm-provider-switch-decision-receipt-v1",
+    version: 1,
+    receipt_id: `provider-switch-decision:${hashCoordinator([
+      groupId,
+      assignment.assignmentId || assignment.assignment_id || "",
+      assignment.dispatchKey || assignment.dispatch_key || "",
+      packet.packet_id || "",
+      oldAgentType,
+      request.requested_agent_type,
+      snapshot.snapshot_id || "",
+    ], 18)}`,
+    groupId,
+    project,
+    source: "group_main_agent_ranked_provider_switch_approval",
+    status: "approved",
+    assignment_id: assignment.assignmentId || assignment.assignment_id || "",
+    dispatch_key: assignment.dispatchKey || assignment.dispatch_key || "",
+    task_id: packet.task_id || assignment.taskId || assignment.task_id || "",
+    task_fingerprint: assignment.taskFingerprint || assignment.task_fingerprint || hashCoordinator(String(assignment.task || packet.task || ""), 24),
+    advisory_worker_context_packet_id: packet.packet_id || "",
+    old_provider: {
+      agent_type: oldAgentType,
+      project,
+      local_hold: gate.provider_dispatch_hold === true || selected.should_hold_dispatch === true || selected.dispatch_policy === "hold_until_repair",
+      local_health_status: selected.health_status || selected.healthStatus || advisory.health_status || "",
+      local_dispatch_policy: selected.dispatch_policy || selected.dispatchPolicy || advisory.dispatch_policy || "",
+      local_execution_rank_penalty: Number(selected.local_execution_rank_penalty || selected.localExecutionRankPenalty || 0),
+      composite_rank: Number(selected.composite_rank || selected.compositeRank || 0),
+      provider_ranking_provenance: selected.provider_ranking_provenance || selected.providerRankingProvenance || null,
+    },
+    new_provider: {
+      agent_type: request.requested_agent_type,
+      project: candidate.project || project,
+      configured: candidate.configured === true,
+      safer_than_selected: candidate.safer_than_selected === true,
+      local_hold: candidate.local_dispatch_policy === "hold_until_repair"
+        || ["critical", "warning"].includes(String(candidate.local_health_status || "")),
+      local_health_status: candidate.local_health_status || "",
+      local_dispatch_policy: candidate.local_dispatch_policy || "",
+      global_risk_status: candidate.global_risk_status || "",
+      global_risk_score: Number(candidate.global_risk_score || 0),
+      local_execution_rank_penalty: Number(candidate.local_execution_rank_penalty || candidate.localExecutionRankPenalty || 0),
+      provider_switch_execution_risk_score: Number(candidate.provider_switch_execution_risk_score || candidate.providerSwitchExecutionRiskScore || 0),
+      provider_switch_execution_risk_confidence: Number(candidate.provider_switch_execution_risk_confidence || candidate.providerSwitchExecutionRiskConfidence || 0),
+      composite_rank: Number(candidate.composite_rank || 0),
+      selected_composite_rank: Number(candidate.selected_composite_rank || 0),
+      provider_ranking_provenance: candidate.provider_ranking_provenance || candidate.providerRankingProvenance || null,
+    },
+    provider_ranking_provenance: {
+      schema: "ccm-provider-switch-decision-ranking-provenance-v1",
+      source: "worker_context_packet_provider_dispatch_advisory",
+      compact_safe: true,
+      selected: selected.provider_ranking_provenance || selected.providerRankingProvenance || null,
+      requested_candidate: candidate.provider_ranking_provenance || candidate.providerRankingProvenance || null,
+      ranked_provider_candidate_count: rankedCandidates.length,
+      ranked_provider_candidates: rankedCandidates.slice(0, 8).map((item: any) => ({
+        agent_type: item.agent_type || item.agentType || "",
+        project: item.project || "",
+        composite_rank: Number(item.composite_rank || item.compositeRank || 0),
+        selected_composite_rank: Number(item.selected_composite_rank || item.selectedCompositeRank || 0),
+        local_execution_rank_penalty: Number(item.local_execution_rank_penalty || item.localExecutionRankPenalty || 0),
+        provider_switch_execution_weighted_risk_score: Number(item.provider_switch_execution_weighted_risk_score || item.providerSwitchExecutionWeightedRiskScore || 0),
+        typed_memory_rel_paths: Array.isArray(item.provider_ranking_provenance?.typed_memory_rel_paths || item.providerRankingProvenance?.typedMemoryRelPaths)
+          ? (item.provider_ranking_provenance?.typed_memory_rel_paths || item.providerRankingProvenance?.typedMemoryRelPaths).slice(0, 6)
+          : [],
+        typed_memory_row_ids: Array.isArray(item.provider_ranking_provenance?.typed_memory_row_ids || item.providerRankingProvenance?.typedMemoryRowIds)
+          ? (item.provider_ranking_provenance?.typed_memory_row_ids || item.providerRankingProvenance?.typedMemoryRowIds).slice(0, 8)
+          : [],
+      })),
+      boundary: "ranking evidence only; requires explicit fresh provider switch receipt for execution",
+    },
+    provider_reliability_snapshot: {
+      schema: "ccm-provider-switch-snapshot-ref-v1",
+      snapshot_id: snapshot.snapshot_id || candidate.snapshot_id || "",
+      snapshot_checksum: snapshot.snapshot_checksum || candidate.snapshot_checksum || "",
+      generation_id: snapshot.generation_id || "",
+      status: snapshot.status || candidate.snapshot_status || "",
+      usable: snapshot.usable === true,
+      generated_at: snapshot.generated_at || "",
+      expires_at: snapshot.expires_at || "",
+      source_generation_checksum: snapshot.source_generation_checksum || "",
+    },
+    task_compatibility: {
+      confirmed: request.compatibility_confirmed,
+      evidence: request.compatibility_evidence,
+      project_match: String(candidate.project || "").trim().toLowerCase() === project.toLowerCase(),
+      task_fingerprint: assignment.taskFingerprint || assignment.task_fingerprint || hashCoordinator(String(assignment.task || packet.task || ""), 24),
+    },
+    authority: request.authority,
+    switch_reason: request.reason,
+    advised_alternative: !!candidate.agent_type,
+    approved_switch: true,
+    actual_execution_expected: request.requested_agent_type,
+    decided_at: decidedAt,
+  };
+  receiptBase.receipt_checksum = providerSwitchDecisionReceiptChecksumForCoordinator(receiptBase);
+  const validation = validateProviderSwitchDecisionReceiptForCoordinator(receiptBase, {
+    ...options,
+    groupId,
+    project,
+    assignmentId: assignment.assignmentId || assignment.assignment_id || "",
+    dispatchKey: assignment.dispatchKey || assignment.dispatch_key || "",
+    nowMs: options.nowMs || options.now_ms || Date.parse(decidedAt) || Date.now(),
+  });
+  if (validation.valid) {
+    return {
+      ...receiptBase,
+      valid: true,
+      gaps: [],
+      validation,
+    };
+  }
+  const rejected: any = {
+    ...receiptBase,
+    status: "rejected",
+    approved_switch: false,
+  };
+  rejected.receipt_checksum = providerSwitchDecisionReceiptChecksumForCoordinator(rejected);
+  return {
+    ...rejected,
+    valid: false,
+    gaps: validation.gaps,
+    validation: {
+      ...validation,
+      valid: false,
+      status: "rejected",
+    },
+  };
+}
+
+function providerRankingProvenanceListForCoordinator(packet: any = {}) {
+  const advisory = packet.pressure_provenance_provider_dispatch_advisory
+    || packet.pressureProvenanceProviderDispatchAdvisory
+    || {};
+  const selected = advisory.selected_candidate || advisory.selectedCandidate || {};
+  const alternatives = Array.isArray(advisory.safer_alternatives || advisory.saferAlternatives)
+    ? (advisory.safer_alternatives || advisory.saferAlternatives)
+    : [];
+  const ranked = Array.isArray(advisory.ranked_provider_candidates || advisory.rankedProviderCandidates)
+    ? (advisory.ranked_provider_candidates || advisory.rankedProviderCandidates)
+    : [];
+  const receipt = packet.provider_switch_decision_receipt || packet.providerSwitchDecisionReceipt || {};
+  const receiptProvenance = receipt.provider_ranking_provenance || receipt.providerRankingProvenance || {};
+  return [
+    selected.provider_ranking_provenance || selected.providerRankingProvenance,
+    ...alternatives.map((item: any) => item.provider_ranking_provenance || item.providerRankingProvenance),
+    ...ranked.map((item: any) => item.provider_ranking_provenance || item.providerRankingProvenance),
+    receiptProvenance.selected || receiptProvenance.selected_candidate || receiptProvenance.selectedCandidate,
+    receiptProvenance.requested_candidate || receiptProvenance.requestedCandidate,
+    receipt.old_provider?.provider_ranking_provenance || receipt.oldProvider?.providerRankingProvenance,
+    receipt.new_provider?.provider_ranking_provenance || receipt.newProvider?.providerRankingProvenance,
+  ].filter((item: any) => item && typeof item === "object");
+}
+
+function providerRankingProvenancePacketSummaryForCoordinator(packet: any = {}) {
+  const receipt = packet.provider_switch_decision_receipt || packet.providerSwitchDecisionReceipt || {};
+  const receiptProvenance = receipt.provider_ranking_provenance || receipt.providerRankingProvenance || {};
+  const provenances = providerRankingProvenanceListForCoordinator(packet);
+  const relPaths = uniqueCoordinatorStrings(provenances.flatMap((item: any) =>
+    Array.isArray(item.typed_memory_rel_paths || item.typedMemoryRelPaths) ? (item.typed_memory_rel_paths || item.typedMemoryRelPaths) : []
+  )).slice(0, 16);
+  const rowIds = uniqueCoordinatorStrings(provenances.flatMap((item: any) =>
+    Array.isArray(item.typed_memory_row_ids || item.typedMemoryRowIds) ? (item.typed_memory_row_ids || item.typedMemoryRowIds) : []
+  )).slice(0, 32);
+  const executionReceiptIds = uniqueCoordinatorStrings(provenances.flatMap((item: any) =>
+    Array.isArray(item.execution_receipt_ids || item.executionReceiptIds) ? (item.execution_receipt_ids || item.executionReceiptIds) : []
+  )).slice(0, 24);
+  const decisionReceiptIds = uniqueCoordinatorStrings([
+    ...provenances.flatMap((item: any) =>
+      Array.isArray(item.decision_receipt_ids || item.decisionReceiptIds) ? (item.decision_receipt_ids || item.decisionReceiptIds) : []
+    ),
+    receipt.receipt_id || receipt.receiptId || "",
+  ]).filter(Boolean).slice(0, 24);
+  const providerSwitchDecisionReceiptPresent = receipt.schema === "ccm-provider-switch-decision-receipt-v1";
+  const present = provenances.length > 0 || relPaths.length > 0 || rowIds.length > 0 || (providerSwitchDecisionReceiptPresent && receiptProvenance?.schema);
+  return {
+    schema: "ccm-provider-ranking-provenance-packet-summary-v1",
+    present,
+    compact_safe: provenances.some((item: any) => item.compact_safe === true || item.compactSafe === true)
+      || receiptProvenance.compact_safe === true
+      || receiptProvenance.compactSafe === true,
+    provider_switch_decision_receipt_present: providerSwitchDecisionReceiptPresent,
+    provider_switch_decision_receipt_id: receipt.receipt_id || receipt.receiptId || "",
+    provider_switch_decision_receipt_checksum: receipt.receipt_checksum || receipt.receiptChecksum || "",
+    typed_memory_rel_paths: relPaths,
+    typed_memory_row_ids: rowIds,
+    execution_receipt_ids: executionReceiptIds,
+    decision_receipt_ids: decisionReceiptIds,
+    provenance_count: provenances.length,
+  };
+}
+
+function buildProviderRankingProvenancePreservationForCoordinator(beforePacket: any = {}, afterPacket: any = {}, options: any = {}) {
+  const before = providerRankingProvenancePacketSummaryForCoordinator(beforePacket);
+  const after = providerRankingProvenancePacketSummaryForCoordinator(afterPacket);
+  const required = before.present === true || before.provider_switch_decision_receipt_present === true;
+  const missingRelPaths = before.typed_memory_rel_paths.filter((item: string) => !after.typed_memory_rel_paths.includes(item));
+  const missingRowIds = before.typed_memory_row_ids.filter((item: string) => !after.typed_memory_row_ids.includes(item));
+  const gaps = uniqueCoordinatorStrings([
+    required && after.present !== true ? "provider_ranking_provenance_missing_after_compact" : "",
+    before.provider_switch_decision_receipt_present === true && after.provider_switch_decision_receipt_present !== true ? "provider_switch_decision_receipt_missing_after_compact" : "",
+    before.provider_switch_decision_receipt_id && after.provider_switch_decision_receipt_id && before.provider_switch_decision_receipt_id !== after.provider_switch_decision_receipt_id ? "provider_switch_decision_receipt_id_changed" : "",
+    missingRelPaths.length ? "typed_memory_rel_paths_missing_after_compact" : "",
+    missingRowIds.length ? "typed_memory_row_ids_missing_after_compact" : "",
+  ]);
+  const preserved = !required || gaps.length === 0;
+  return {
+    schema: "ccm-provider-ranking-provenance-preservation-v1",
+    required,
+    preserved,
+    compact_safe_preserved: !required || (after.compact_safe === true && gaps.length === 0),
+    source: "worker_context_packet_compaction_retry",
+    retry_id: options.retry_id || options.retryId || "",
+    before,
+    after,
+    missing_typed_memory_rel_paths: missingRelPaths,
+    missing_typed_memory_row_ids: missingRowIds,
+    gaps,
+  };
+}
+
+function normalizeProviderRankingProvenancePreservationForCoordinator(raw: any = null) {
+  if (!raw || typeof raw !== "object" || raw.schema !== "ccm-provider-ranking-provenance-preservation-v1") return null;
+  const before = raw.before || {};
+  const after = raw.after || {};
+  const summary = (value: any = {}) => ({
+    schema: "ccm-provider-ranking-provenance-packet-summary-v1",
+    present: value.present === true,
+    compact_safe: value.compact_safe === true || value.compactSafe === true,
+    provider_switch_decision_receipt_present: value.provider_switch_decision_receipt_present === true || value.providerSwitchDecisionReceiptPresent === true,
+    provider_switch_decision_receipt_id: String(value.provider_switch_decision_receipt_id || value.providerSwitchDecisionReceiptId || ""),
+    provider_switch_decision_receipt_checksum: String(value.provider_switch_decision_receipt_checksum || value.providerSwitchDecisionReceiptChecksum || ""),
+    typed_memory_rel_paths: uniqueCoordinatorStrings(Array.isArray(value.typed_memory_rel_paths || value.typedMemoryRelPaths) ? (value.typed_memory_rel_paths || value.typedMemoryRelPaths) : []).slice(0, 16),
+    typed_memory_row_ids: uniqueCoordinatorStrings(Array.isArray(value.typed_memory_row_ids || value.typedMemoryRowIds) ? (value.typed_memory_row_ids || value.typedMemoryRowIds) : []).slice(0, 32),
+    execution_receipt_ids: uniqueCoordinatorStrings(Array.isArray(value.execution_receipt_ids || value.executionReceiptIds) ? (value.execution_receipt_ids || value.executionReceiptIds) : []).slice(0, 24),
+    decision_receipt_ids: uniqueCoordinatorStrings(Array.isArray(value.decision_receipt_ids || value.decisionReceiptIds) ? (value.decision_receipt_ids || value.decisionReceiptIds) : []).slice(0, 24),
+    provenance_count: Number(value.provenance_count || value.provenanceCount || 0),
+  });
+  return {
+    schema: "ccm-provider-ranking-provenance-preservation-v1",
+    required: raw.required === true,
+    preserved: raw.preserved === true,
+    compact_safe_preserved: raw.compact_safe_preserved === true || raw.compactSafePreserved === true,
+    source: String(raw.source || "worker_context_packet_compaction_retry"),
+    retry_id: String(raw.retry_id || raw.retryId || ""),
+    before: summary(before),
+    after: summary(after),
+    missing_typed_memory_rel_paths: uniqueCoordinatorStrings(Array.isArray(raw.missing_typed_memory_rel_paths || raw.missingTypedMemoryRelPaths) ? (raw.missing_typed_memory_rel_paths || raw.missingTypedMemoryRelPaths) : []).slice(0, 16),
+    missing_typed_memory_row_ids: uniqueCoordinatorStrings(Array.isArray(raw.missing_typed_memory_row_ids || raw.missingTypedMemoryRowIds) ? (raw.missing_typed_memory_row_ids || raw.missingTypedMemoryRowIds) : []).slice(0, 32),
+    gaps: uniqueCoordinatorStrings(Array.isArray(raw.gaps) ? raw.gaps : []).slice(0, 16),
   };
 }
 
@@ -6171,6 +8560,7 @@ function maybeRetryWorkerContextPacketCompactionForCoordinator(baseAssignment: a
   const partialCompactionSummaries: any[] = [];
   const originalMemory = options.memory || options.workerMemory || options.worker_memory || null;
   const groupId = String(baseAssignment.scopeId || options.group?.id || options.groupId || options.group_id || "conversation");
+  const originalPacketForProvenance = initialPacket;
   const strategyMemoryDisabled = rawRetryOptions.disableCompactStrategyMemory === true
     || rawRetryOptions.disable_compact_strategy_memory === true
     || options.disableCompactStrategyMemory === true
@@ -6245,6 +8635,13 @@ function maybeRetryWorkerContextPacketCompactionForCoordinator(baseAssignment: a
   }]);
   const recordPostHook = (packet: any = initialPacket, gate: any = initialGate, retry: any = null, summary: any = {}) => {
     const at = new Date().toISOString();
+    const providerRankingProvenancePreservation = retry?.provider_ranking_provenance_preservation
+      || retry?.providerRankingProvenancePreservation
+      || summary.provider_ranking_provenance_preservation
+      || summary.providerRankingProvenancePreservation
+      || buildProviderRankingProvenancePreservationForCoordinator(originalPacketForProvenance, packet, {
+        retry_id: retry?.retry_id || retry?.retryId || "",
+      });
     const hookLedger = appendWorkerContextCompactHookEntriesForCoordinator(groupId, [{
       hook_run_id: compactHookRunId,
       phase: "post",
@@ -6271,6 +8668,7 @@ function maybeRetryWorkerContextPacketCompactionForCoordinator(baseAssignment: a
         omitted_chars: Number(retry?.omitted_chars || 0),
         ptl_emergency_engaged: retry?.ptl_emergency_hint?.engaged === true || retry?.ptlEmergencyHint?.engaged === true,
         ptl_emergency_level: retry?.ptl_emergency_hint?.emergency_level || retry?.ptlEmergencyHint?.emergencyLevel || "",
+        provider_ranking_provenance_preserved: providerRankingProvenancePreservation?.preserved === true,
         ...summary,
       },
       at,
@@ -6330,6 +8728,8 @@ function maybeRetryWorkerContextPacketCompactionForCoordinator(baseAssignment: a
           : partialItems.reduce((sum: number, item: any) => sum + Number(item?.omitted_chars || 0), 0),
         original_task_hash: retryObj.original_task_hash || "",
         compacted_task_hash: retryObj.compacted_task_hash || "",
+        provider_ranking_provenance_preservation: providerRankingProvenancePreservation,
+        provider_ranking_provenance_preserved: providerRankingProvenancePreservation?.preserved === true,
         at,
       }]);
     }
@@ -6340,6 +8740,7 @@ function maybeRetryWorkerContextPacketCompactionForCoordinator(baseAssignment: a
     const memoryRetryOptions = { ...options, memory: memoryCompact.memory };
     const memoryRetryAssignment = { ...baseAssignment };
     const memoryRetryBasePacket = buildWorkerContextPacketForAssignment(memoryRetryAssignment, dependsOn, activeReplayRepairDispatchBriefs, memoryRetryOptions);
+    const memoryRetryProvenancePreservation = buildProviderRankingProvenancePreservationForCoordinator(originalPacketForProvenance, memoryRetryBasePacket);
     const memoryRetryBase = {
       schema: "ccm-worker-context-compaction-retry-v1",
       retry_id: `worker-context-retry:${hashCoordinator([baseAssignment.scopeId, baseAssignment.assignmentId, initialPacket.packet_id, memoryRetryBasePacket.packet_id, "memory-first"], 14)}`,
@@ -6362,6 +8763,8 @@ function maybeRetryWorkerContextPacketCompactionForCoordinator(baseAssignment: a
       omitted_chars: Number(memoryCompact.summary?.omitted_chars || 0),
       critical_line_count: 0,
       preserved_receipt_contract: true,
+      provider_ranking_provenance_preservation: memoryRetryProvenancePreservation,
+      provider_ranking_provenance_preserved: memoryRetryProvenancePreservation.preserved === true,
       generated_at: new Date().toISOString(),
     };
     let memoryRetryPacket = refreshWorkerContextPacketUsage({
@@ -6371,6 +8774,10 @@ function maybeRetryWorkerContextPacketCompactionForCoordinator(baseAssignment: a
     let memoryRetryGate = buildWorkerContextPreDispatchGateForCoordinator(memoryRetryAssignment, memoryRetryPacket);
     const memoryRetry = {
       ...memoryRetryBase,
+      provider_ranking_provenance_preservation: {
+        ...memoryRetryBase.provider_ranking_provenance_preservation,
+        retry_id: memoryRetryBase.retry_id,
+      },
       status: memoryRetryGate.dispatch_ready === false ? "blocked" : "recovered",
       retry_usage_status: memoryRetryPacket.context_usage?.status || "",
       retry_total_tokens: Number(memoryRetryPacket.context_usage?.total_tokens || 0),
@@ -6412,6 +8819,7 @@ function maybeRetryWorkerContextPacketCompactionForCoordinator(baseAssignment: a
     partialCompactionSummaries.push(replayBriefPartialCompact.summary);
     const partialRetryAssignment = { ...baseAssignment };
     const partialRetryBasePacket = buildWorkerContextPacketForAssignment(partialRetryAssignment, dependsOn, activeReplayRepairDispatchBriefs, options);
+    const partialRetryProvenancePreservation = buildProviderRankingProvenancePreservationForCoordinator(originalPacketForProvenance, partialRetryBasePacket);
     const partialRetryBase = {
       schema: "ccm-worker-context-compaction-retry-v1",
       retry_id: `worker-context-retry:${hashCoordinator([baseAssignment.scopeId, baseAssignment.assignmentId, initialPacket.packet_id, partialRetryBasePacket.packet_id, "replay-brief-partial"], 14)}`,
@@ -6437,6 +8845,8 @@ function maybeRetryWorkerContextPacketCompactionForCoordinator(baseAssignment: a
       omitted_chars: Number(memoryCompact.summary?.omitted_chars || 0) + Number(replayBriefPartialCompact.summary?.omitted_chars || 0),
       critical_line_count: 0,
       preserved_receipt_contract: true,
+      provider_ranking_provenance_preservation: partialRetryProvenancePreservation,
+      provider_ranking_provenance_preserved: partialRetryProvenancePreservation.preserved === true,
       generated_at: new Date().toISOString(),
     };
     let partialRetryPacket = refreshWorkerContextPacketUsage({
@@ -6446,6 +8856,10 @@ function maybeRetryWorkerContextPacketCompactionForCoordinator(baseAssignment: a
     let partialRetryGate = buildWorkerContextPreDispatchGateForCoordinator(partialRetryAssignment, partialRetryPacket);
     const partialRetry = {
       ...partialRetryBase,
+      provider_ranking_provenance_preservation: {
+        ...partialRetryBase.provider_ranking_provenance_preservation,
+        retry_id: partialRetryBase.retry_id,
+      },
       status: partialRetryGate.dispatch_ready === false ? "blocked" : "recovered",
       retry_usage_status: partialRetryPacket.context_usage?.status || "",
       retry_total_tokens: Number(partialRetryPacket.context_usage?.total_tokens || 0),
@@ -6494,6 +8908,7 @@ function maybeRetryWorkerContextPacketCompactionForCoordinator(baseAssignment: a
     partialCompactionSummaries.push(metadataPartialCompact.summary);
     const metadataRetryAssignment = { ...baseAssignment };
     const metadataRetryBasePacket = buildWorkerContextPacketForAssignment(metadataRetryAssignment, dependsOn, activeReplayRepairDispatchBriefs, options);
+    const metadataRetryProvenancePreservation = buildProviderRankingProvenancePreservationForCoordinator(originalPacketForProvenance, metadataRetryBasePacket);
     const partialCompaction = combineWorkerContextPartialCompactionSummariesForCoordinator(partialCompactionSummaries);
     const metadataRetryBase = {
       schema: "ccm-worker-context-compaction-retry-v1",
@@ -6523,6 +8938,8 @@ function maybeRetryWorkerContextPacketCompactionForCoordinator(baseAssignment: a
         + partialCompactionSummaries.reduce((sum, item) => sum + Number(item?.omitted_chars || 0), 0),
       critical_line_count: 0,
       preserved_receipt_contract: true,
+      provider_ranking_provenance_preservation: metadataRetryProvenancePreservation,
+      provider_ranking_provenance_preserved: metadataRetryProvenancePreservation.preserved === true,
       generated_at: new Date().toISOString(),
     };
     let metadataRetryPacket = refreshWorkerContextPacketUsage({
@@ -6532,6 +8949,10 @@ function maybeRetryWorkerContextPacketCompactionForCoordinator(baseAssignment: a
     let metadataRetryGate = buildWorkerContextPreDispatchGateForCoordinator(metadataRetryAssignment, metadataRetryPacket);
     const metadataRetry = {
       ...metadataRetryBase,
+      provider_ranking_provenance_preservation: {
+        ...metadataRetryBase.provider_ranking_provenance_preservation,
+        retry_id: metadataRetryBase.retry_id,
+      },
       status: metadataRetryGate.dispatch_ready === false ? "blocked" : "recovered",
       retry_usage_status: metadataRetryPacket.context_usage?.status || "",
       retry_total_tokens: Number(metadataRetryPacket.context_usage?.total_tokens || 0),
@@ -6591,6 +9012,7 @@ function maybeRetryWorkerContextPacketCompactionForCoordinator(baseAssignment: a
   }
   const retryAssignment = { ...baseAssignment, task: compactedTask.text };
   const retryBasePacket = buildWorkerContextPacketForAssignment(retryAssignment, dependsOn, activeReplayRepairDispatchBriefs, options);
+  const retryProvenancePreservation = buildProviderRankingProvenancePreservationForCoordinator(originalPacketForProvenance, retryBasePacket);
   const taskPartialCompaction = combineWorkerContextPartialCompactionSummariesForCoordinator(partialCompactionSummaries);
   const taskRetryMethod = workerContextPartialCompactMethodForCoordinator(memoryCompact.compacted === true, partialCompactionSummaries, true);
   const retryBase = {
@@ -6623,6 +9045,8 @@ function maybeRetryWorkerContextPacketCompactionForCoordinator(baseAssignment: a
       + partialCompactionSummaries.reduce((sum, item) => sum + Number(item?.omitted_chars || 0), 0),
     critical_line_count: compactedTask.criticalLines.length,
     preserved_receipt_contract: true,
+    provider_ranking_provenance_preservation: retryProvenancePreservation,
+    provider_ranking_provenance_preserved: retryProvenancePreservation.preserved === true,
     generated_at: new Date().toISOString(),
   };
   let retryPacket = refreshWorkerContextPacketUsage({
@@ -6632,6 +9056,10 @@ function maybeRetryWorkerContextPacketCompactionForCoordinator(baseAssignment: a
   let retryGate = buildWorkerContextPreDispatchGateForCoordinator(retryAssignment, retryPacket);
   const retry = {
     ...retryBase,
+    provider_ranking_provenance_preservation: {
+      ...retryBase.provider_ranking_provenance_preservation,
+      retry_id: retryBase.retry_id,
+    },
     status: retryGate.dispatch_ready === false ? "blocked" : "recovered",
     retry_usage_status: retryPacket.context_usage?.status || "",
     retry_total_tokens: Number(retryPacket.context_usage?.total_tokens || 0),
@@ -6803,6 +9231,31 @@ function buildWorkerContextPreDispatchGateForCoordinator(assignment: any = {}, p
       followup_work_item_ids: Array.isArray(selectedProvider.provider_override_followup_work_item_ids) ? selectedProvider.provider_override_followup_work_item_ids.slice(0, 8) : [],
       override_ids: Array.isArray(selectedProvider.provider_override_followup_override_ids) ? selectedProvider.provider_override_followup_override_ids.slice(0, 8) : [],
     } : null,
+    provider_dispatch_override_followup_receipt_validation_history: Number(selectedProvider?.provider_override_followup_receipt_validation_attempt_count || 0) > 0 ? {
+      attempt_count: Number(selectedProvider.provider_override_followup_receipt_validation_attempt_count || 0),
+      failed_count: Number(selectedProvider.provider_override_followup_receipt_validation_failed_count || 0),
+      passed_count: Number(selectedProvider.provider_override_followup_receipt_validation_passed_count || 0),
+      consecutive_failure_count: Number(selectedProvider.provider_override_followup_receipt_validation_consecutive_failure_count || 0),
+      latest_status: selectedProvider.provider_override_followup_receipt_validation_latest_status || "",
+      escalated: selectedProvider.provider_override_followup_receipt_validation_escalated === true,
+      repair_verified: selectedProvider.provider_override_followup_receipt_validation_repair_verified === true,
+      last_failed_at: selectedProvider.provider_override_followup_receipt_validation_last_failed_at || "",
+      last_passed_at: selectedProvider.provider_override_followup_receipt_validation_last_passed_at || "",
+      validation_ids: Array.isArray(selectedProvider.provider_override_followup_receipt_validation_ids) ? selectedProvider.provider_override_followup_receipt_validation_ids.slice(0, 8) : [],
+      repair_work_item_ids: Array.isArray(selectedProvider.provider_override_followup_receipt_validation_repair_work_item_ids) ? selectedProvider.provider_override_followup_receipt_validation_repair_work_item_ids.slice(0, 8) : [],
+      gap_codes: Array.isArray(selectedProvider.provider_override_followup_receipt_validation_gap_codes) ? selectedProvider.provider_override_followup_receipt_validation_gap_codes.slice(0, 8) : [],
+    } : null,
+    cross_group_provider_reliability_guidance: selectedProvider?.cross_group_provider_reliability_actionable === true ? {
+      schema: "ccm-cross-group-provider-dispatch-reliability-gate-guidance-v1",
+      agent_type: selectedProvider.agent_type || selectedProvider.agentType || packet.agent_type || packet.agentType || "unknown",
+      risk_status: selectedProvider.cross_group_provider_reliability_risk_status || "empty",
+      risk_score: Number(selectedProvider.cross_group_provider_reliability_risk_score || 0),
+      confidence: Number(selectedProvider.cross_group_provider_reliability_confidence || 0),
+      source_group_count: Number(selectedProvider.cross_group_provider_reliability_source_group_count || 0),
+      guidance_only: true,
+      local_policy_override_allowed: false,
+      contains_private_memory: false,
+    } : null,
     pressure_provenance_provider_dispatch_advisory: providerAdvisory,
     reason: providerHoldBlocked
       ? `Pressure provenance provider dispatch hold: agentType=${selectedProvider.agent_type || selectedProvider.agentType || packet.agent_type || "unknown"} project=${assignment.project || packet.project || "unknown"} health=${selectedProvider.health_status || selectedProvider.healthStatus || providerAdvisory?.health_status || "critical"}; repair/recovery required before child dispatch.`
@@ -6845,6 +9298,18 @@ function buildWorkerContextProviderDispatchDecisionForCoordinator(assignment: an
   const selectedProvider = providerAdvisory?.selected_candidate
     || providerAdvisory?.selectedCandidate
     || {};
+  const providerSwitchDecisionReceipt = assignment.provider_switch_decision_receipt
+    || assignment.providerSwitchDecisionReceipt
+    || packet.provider_switch_decision_receipt
+    || packet.providerSwitchDecisionReceipt
+    || null;
+  const advisedAlternative = Number(providerAdvisory?.safer_alternative_count || providerAdvisory?.saferAlternativeCount || 0) > 0
+    || (Array.isArray(providerAdvisory?.safer_alternatives || providerAdvisory?.saferAlternatives)
+      && (providerAdvisory?.safer_alternatives || providerAdvisory?.saferAlternatives).length > 0)
+    || providerSwitchDecisionReceipt?.advised_alternative === true;
+  const approvedProviderSwitch = providerSwitchDecisionReceipt?.schema === "ccm-provider-switch-decision-receipt-v1"
+    && providerSwitchDecisionReceipt.valid === true
+    && providerSwitchDecisionReceipt.status === "approved";
   const project = String(assignment.project || packet.project || providerAdvisory?.project || selectedProvider.project || "unknown").trim() || "unknown";
   const agentType = String(
     assignment.agentType
@@ -6892,7 +9357,9 @@ function buildWorkerContextProviderDispatchDecisionForCoordinator(assignment: an
       healthStatus,
       dispatchPolicy,
     });
-  const action = providerHoldOverridden && dispatchReady
+  const action = approvedProviderSwitch && dispatchReady
+    ? "dispatch_with_provider_switch"
+    : providerHoldOverridden && dispatchReady
     ? "dispatch_with_provider_override"
     : providerHoldBlocked
     ? "hold_until_repair"
@@ -6914,6 +9381,7 @@ function buildWorkerContextProviderDispatchDecisionForCoordinator(assignment: an
     packet.packet_id || "",
     agentType,
     project,
+    providerSwitchDecisionReceipt?.receipt_id || "",
   ], 14)}`;
   const openRepairItemIds = Array.isArray(selectedProvider.current_open_repair_item_ids || selectedProvider.currentOpenRepairItemIds)
     ? (selectedProvider.current_open_repair_item_ids || selectedProvider.currentOpenRepairItemIds).slice(0, 8)
@@ -6935,6 +9403,18 @@ function buildWorkerContextProviderDispatchDecisionForCoordinator(assignment: an
       provider_override_followup_repaired: selectedProvider.provider_override_followup_repaired === true,
       provider_override_followup_repaired_count: Number(selectedProvider.provider_override_followup_repaired_count || 0),
       provider_override_followup_last_completed_at: selectedProvider.provider_override_followup_last_completed_at || "",
+      provider_override_followup_receipt_validation_attempt_count: Number(selectedProvider.provider_override_followup_receipt_validation_attempt_count || 0),
+      provider_override_followup_receipt_validation_consecutive_failure_count: Number(selectedProvider.provider_override_followup_receipt_validation_consecutive_failure_count || 0),
+      provider_override_followup_receipt_validation_escalated: selectedProvider.provider_override_followup_receipt_validation_escalated === true,
+      provider_override_followup_receipt_validation_repair_verified: selectedProvider.provider_override_followup_receipt_validation_repair_verified === true,
+      cross_group_provider_reliability_actionable: selectedProvider.cross_group_provider_reliability_actionable === true,
+      cross_group_provider_reliability_risk_status: selectedProvider.cross_group_provider_reliability_risk_status || "empty",
+      cross_group_provider_reliability_risk_score: Number(selectedProvider.cross_group_provider_reliability_risk_score || 0),
+      cross_group_provider_reliability_confidence: Number(selectedProvider.cross_group_provider_reliability_confidence || 0),
+      cross_group_provider_reliability_source_group_count: Number(selectedProvider.cross_group_provider_reliability_source_group_count || 0),
+      provider_reliability_snapshot_id: selectedProvider.provider_reliability_snapshot_id || "",
+      provider_reliability_snapshot_checksum: selectedProvider.provider_reliability_snapshot_checksum || "",
+      provider_reliability_snapshot_status: selectedProvider.provider_reliability_snapshot_status || "",
     },
     assignment_id: assignment.assignmentId || assignment.assignment_id || "",
     dispatch_key: assignment.dispatchKey || assignment.dispatch_key || "",
@@ -6955,9 +9435,21 @@ function buildWorkerContextProviderDispatchDecisionForCoordinator(assignment: an
     requires_repair_before_dispatch: providerHoldBlocked || (gate.dispatch_ready === false && !!gate.repair_source),
     requires_repair_followup: providerHoldOverridden,
     requires_receipt_sampling: dispatchPolicy === "allow_with_receipt_sampling",
+    safer_alternative_count: Number(providerAdvisory?.safer_alternative_count || 0),
+    safer_alternatives: Array.isArray(providerAdvisory?.safer_alternatives) ? providerAdvisory.safer_alternatives.slice(0, 6) : [],
+    provider_reliability_snapshot: providerAdvisory?.provider_reliability_snapshot || null,
+    auto_switch_provider_allowed: false,
+    provider_switch_decision_receipt: providerSwitchDecisionReceipt,
+    advised_alternative: advisedAlternative,
+    approved_switch: approvedProviderSwitch,
+    actually_executed_provider: "",
     repair_source: gate.repair_source || (providerHoldBlocked ? "worker_context_pressure_provenance_feedback_provider_dispatch_advisory" : ""),
-    next_step: gate.next_step || (providerHold ? "repair_pressure_provenance_provider_before_child_dispatch" : "dispatch_child_agent"),
-    reason: gate.reason || providerAdvisory?.recommendation || "",
+    next_step: approvedProviderSwitch
+      ? "dispatch_child_agent_with_provider_switch_receipt"
+      : gate.next_step || (providerHold ? "repair_pressure_provenance_provider_before_child_dispatch" : "dispatch_child_agent"),
+    reason: approvedProviderSwitch
+      ? `Approved provider switch ${providerSwitchDecisionReceipt.old_provider?.agent_type || "unknown"} -> ${providerSwitchDecisionReceipt.new_provider?.agent_type || agentType} using fresh snapshot ${providerSwitchDecisionReceipt.provider_reliability_snapshot?.snapshot_id || "unknown"}.`
+      : gate.reason || providerAdvisory?.recommendation || "",
     evidence: {
       advisory_schema: providerAdvisory?.schema || "",
       source_policy_action: providerAdvisory?.source_policy_action || providerAdvisory?.sourcePolicyAction || "",
@@ -6968,6 +9460,34 @@ function buildWorkerContextProviderDispatchDecisionForCoordinator(assignment: an
       provider_override_followup_last_completed_at: selectedProvider.provider_override_followup_last_completed_at || "",
       provider_override_followup_fresh_after_last_violation: selectedProvider.provider_override_followup_fresh_after_last_violation === true,
       provider_override_followup_work_item_ids: Array.isArray(selectedProvider.provider_override_followup_work_item_ids) ? selectedProvider.provider_override_followup_work_item_ids.slice(0, 8) : [],
+      provider_override_followup_receipt_validation_attempt_count: Number(selectedProvider.provider_override_followup_receipt_validation_attempt_count || 0),
+      provider_override_followup_receipt_validation_failed_count: Number(selectedProvider.provider_override_followup_receipt_validation_failed_count || 0),
+      provider_override_followup_receipt_validation_passed_count: Number(selectedProvider.provider_override_followup_receipt_validation_passed_count || 0),
+      provider_override_followup_receipt_validation_consecutive_failure_count: Number(selectedProvider.provider_override_followup_receipt_validation_consecutive_failure_count || 0),
+      provider_override_followup_receipt_validation_escalated: selectedProvider.provider_override_followup_receipt_validation_escalated === true,
+      provider_override_followup_receipt_validation_repair_verified: selectedProvider.provider_override_followup_receipt_validation_repair_verified === true,
+      provider_override_followup_receipt_validation_ids: Array.isArray(selectedProvider.provider_override_followup_receipt_validation_ids) ? selectedProvider.provider_override_followup_receipt_validation_ids.slice(0, 8) : [],
+      cross_group_provider_reliability_actionable: selectedProvider.cross_group_provider_reliability_actionable === true,
+      cross_group_provider_reliability_risk_status: selectedProvider.cross_group_provider_reliability_risk_status || "empty",
+      cross_group_provider_reliability_risk_score: Number(selectedProvider.cross_group_provider_reliability_risk_score || 0),
+      cross_group_provider_reliability_confidence: Number(selectedProvider.cross_group_provider_reliability_confidence || 0),
+      cross_group_provider_reliability_source_group_count: Number(selectedProvider.cross_group_provider_reliability_source_group_count || 0),
+      cross_group_provider_reliability_guidance_only: selectedProvider.cross_group_provider_reliability_guidance?.guidance_only === true,
+      cross_group_provider_reliability_local_policy_override_allowed: selectedProvider.cross_group_provider_reliability_guidance?.local_policy_override_allowed === true,
+      provider_reliability_snapshot_id: selectedProvider.provider_reliability_snapshot_id || "",
+      provider_reliability_snapshot_checksum: selectedProvider.provider_reliability_snapshot_checksum || "",
+      provider_reliability_snapshot_status: selectedProvider.provider_reliability_snapshot_status || "",
+      provider_reliability_snapshot_generation_id: selectedProvider.provider_reliability_snapshot_generation_id || "",
+      safer_alternative_count: Number(providerAdvisory?.safer_alternative_count || 0),
+      safer_alternative_agent_types: Array.isArray(providerAdvisory?.safer_alternatives)
+        ? providerAdvisory.safer_alternatives.map((candidate: any) => candidate.agent_type || "").filter(Boolean).slice(0, 6)
+        : [],
+      auto_switch_provider_allowed: false,
+      provider_switch_decision_receipt_id: providerSwitchDecisionReceipt?.receipt_id || "",
+      provider_switch_decision_receipt_checksum: providerSwitchDecisionReceipt?.receipt_checksum || "",
+      advised_alternative: advisedAlternative,
+      approved_switch: approvedProviderSwitch,
+      actually_executed_provider: "",
       pre_dispatch_gate_dispatch_ready: gate.dispatch_ready !== false,
       pre_dispatch_gate_repair_source: gate.repair_source || "",
     },
@@ -7149,6 +9669,23 @@ export function recordWorkerContextPacketAssignmentBindingForCoordinator(groupId
     worker_context_packet_pressure_provenance_provider_dispatch_override_followup_receipt_contract: packet.pressure_provenance_provider_dispatch_override_followup_receipt_contract || packet.pressureProvenanceProviderDispatchOverrideFollowupReceiptContract || null,
     worker_context_provider_dispatch_decision: providerDispatchDecision,
     provider_dispatch_decision: providerDispatchDecision,
+    worker_context_provider_switch_decision_receipt: assignment.provider_switch_decision_receipt
+      || assignment.providerSwitchDecisionReceipt
+      || packet.provider_switch_decision_receipt
+      || packet.providerSwitchDecisionReceipt
+      || providerDispatchDecision?.provider_switch_decision_receipt
+      || null,
+    provider_switch_decision_receipt: assignment.provider_switch_decision_receipt
+      || assignment.providerSwitchDecisionReceipt
+      || packet.provider_switch_decision_receipt
+      || packet.providerSwitchDecisionReceipt
+      || providerDispatchDecision?.provider_switch_decision_receipt
+      || null,
+    provider_switch_ledger_state: {
+      advised_alternative: providerDispatchDecision?.advised_alternative === true,
+      approved_switch: providerDispatchDecision?.approved_switch === true,
+      actually_executed_provider: "",
+    },
     worker_context_provider_dispatch_override_receipt: providerDispatchDecision?.provider_dispatch_override_receipt || providerDispatchDecision?.override || null,
     worker_context_packet_compaction_retry: packet.context_compaction_retry || packet.contextCompactionRetry || null,
     worker_context_packet_partial_compaction: (packet.context_compaction_retry || packet.contextCompactionRetry || {})?.partial_compaction
@@ -7177,6 +9714,7 @@ export function recordWorkerContextPacketAssignmentBindingForCoordinator(groupId
         has_pressure_memory_provenance_receipt_discipline: rendered.includes("Pressure memory provenance receipt discipline"),
         has_pressure_provenance_dispatch_feedback_policy: rendered.includes("Pressure provenance dispatch feedback policy"),
         has_pressure_provenance_provider_dispatch_advisory: rendered.includes("Pressure provenance provider dispatch advisory"),
+        has_provider_switch_decision_receipt: rendered.includes("Provider switch decision receipt"),
         has_pressure_provenance_provider_dispatch_override_followup_receipt_contract: rendered.includes("Provider dispatch override follow-up receipt contract"),
         has_memory_provenance_usage_example: rendered.includes("memoryProvenanceUsage"),
         has_memory_compaction_hash: !!(packet.memory_reinjection_proof?.expected_compacted_memory_hash || packet.memoryReinjectionProof?.expectedCompactedMemoryHash)
@@ -7218,10 +9756,270 @@ export function recordWorkerContextPacketAssignmentBindingForCoordinator(groupId
     providerDispatchOverrideFollowupRepairCount: entries.filter((item: any) => item.worker_context_provider_dispatch_override_followup_repair?.work_item_id).length,
     providerDispatchOverrideCompletionCount: entries.filter((item: any) => item.worker_context_provider_dispatch_override_completion?.completion_ok === true).length,
     providerDispatchOverrideFollowupReceiptContractCount: entries.filter((item: any) => item.worker_context_packet_pressure_provenance_provider_dispatch_override_followup_receipt_contract?.active === true).length,
+    ...providerSwitchBindingLedgerCountersForCoordinator(entries),
     entries: entries.slice(-160),
   };
   writeJsonAtomicForCoordinator(next.file, next);
   return entry;
+}
+
+function providerSwitchBindingLedgerCountersForCoordinator(entries: any[] = []) {
+  return {
+    providerSwitchAdvisedCount: entries.filter((item: any) => item.provider_switch_ledger_state?.advised_alternative === true).length,
+    providerSwitchApprovedCount: entries.filter((item: any) => item.provider_switch_ledger_state?.approved_switch === true).length,
+    providerSwitchSessionBoundCount: entries.filter((item: any) => item.worker_context_provider_switch_session_binding?.status === "bound").length,
+    providerSwitchExecutedCount: entries.filter((item: any) => !!item.provider_switch_ledger_state?.actually_executed_provider).length,
+    providerSwitchExecutionPassedCount: entries.filter((item: any) => item.worker_context_provider_switch_execution_receipt?.status === "passed").length,
+    providerSwitchExecutionFailedCount: entries.filter((item: any) => item.worker_context_provider_switch_execution_receipt?.status === "failed").length,
+  };
+}
+
+function findWorkerContextBindingIndexForCoordinator(entries: any[] = [], input: any = {}) {
+  const bindingId = String(input.binding_id || input.bindingId || "").trim();
+  const assignmentId = String(input.assignment_id || input.assignmentId || "").trim();
+  const dispatchKey = String(input.dispatch_key || input.dispatchKey || "").trim();
+  const packetId = String(input.worker_context_packet_id || input.workerContextPacketId || "").trim();
+  return entries.findIndex((entry: any) => {
+    if (bindingId && String(entry.binding_id || "") === bindingId) return true;
+    if (assignmentId && String(entry.assignment_id || "") === assignmentId) return true;
+    if (dispatchKey && String(entry.dispatch_key || "") === dispatchKey) return true;
+    return !!packetId && String(entry.worker_context_packet_id || "") === packetId;
+  });
+}
+
+export function recordWorkerContextProviderSwitchSessionBindingForCoordinator(groupId: string, input: any = {}, options: any = {}) {
+  if (!groupId) return null;
+  const at = String(options.at || input.at || new Date().toISOString());
+  const ledger = readReplayRepairDispatchBindingLedgerForCoordinator(groupId);
+  const entries = Array.isArray(ledger.entries) ? [...ledger.entries] : [];
+  const index = findWorkerContextBindingIndexForCoordinator(entries, input);
+  if (index < 0) return null;
+  const entry = entries[index];
+  const receipt = input.provider_switch_decision_receipt
+    || input.providerSwitchDecisionReceipt
+    || entry.worker_context_provider_switch_decision_receipt
+    || entry.provider_switch_decision_receipt
+    || {};
+  if (receipt.schema !== "ccm-provider-switch-decision-receipt-v1") return null;
+  const expectedProvider = String(receipt.new_provider?.agent_type || receipt.newProvider?.agentType || "").trim();
+  const actualProvider = String(input.agent_type || input.agentType || input.provider || input.runner || "").trim();
+  const taskAgentSessionId = String(input.task_agent_session_id || input.taskAgentSessionId || "").trim();
+  const nativeSessionId = String(input.native_session_id || input.nativeSessionId || "").trim();
+  const validation = validateProviderSwitchDecisionReceiptForCoordinator(receipt, {
+    ...options,
+    groupId,
+    project: input.project || entry.project || "",
+    assignmentId: input.assignment_id || input.assignmentId || entry.assignment_id || "",
+    dispatchKey: input.dispatch_key || input.dispatchKey || entry.dispatch_key || "",
+    nowMs: options.nowMs || options.now_ms || Date.parse(at) || Date.now(),
+  });
+  const gaps = [
+    ...validation.gaps,
+    !taskAgentSessionId ? "task_agent_session_id_missing" : "",
+    actualProvider.toLowerCase() !== expectedProvider.toLowerCase() ? "session_provider_mismatch" : "",
+    String(input.project || entry.project || "").trim().toLowerCase() !== String(receipt.project || "").trim().toLowerCase() ? "session_project_mismatch" : "",
+  ].filter(Boolean);
+  const binding = {
+    schema: "ccm-provider-switch-child-session-binding-v1",
+    binding_id: `provider-switch-session:${hashCoordinator([
+      receipt.receipt_id || "",
+      taskAgentSessionId,
+      nativeSessionId,
+      input.execution_id || input.executionId || "",
+    ], 16)}`,
+    provider_switch_decision_receipt_id: receipt.receipt_id || "",
+    provider_switch_decision_receipt_checksum: receipt.receipt_checksum || "",
+    groupId,
+    project: receipt.project || entry.project || "",
+    expected_provider: expectedProvider,
+    session_provider: actualProvider,
+    task_agent_session_id: taskAgentSessionId,
+    native_session_id: nativeSessionId,
+    execution_id: input.execution_id || input.executionId || "",
+    worker_context_packet_id: entry.worker_context_packet_id || input.worker_context_packet_id || input.workerContextPacketId || "",
+    status: gaps.length ? "rejected" : "bound",
+    valid: gaps.length === 0,
+    gaps: uniqueCoordinatorStrings(gaps),
+    validation,
+    bound_at: at,
+  };
+  entries[index] = {
+    ...entry,
+    worker_context_provider_switch_session_binding: binding,
+    provider_switch_session_binding: binding,
+    task_agent_session_id: taskAgentSessionId || entry.task_agent_session_id || "",
+    native_session_id: nativeSessionId || entry.native_session_id || "",
+    execution_id: input.execution_id || input.executionId || entry.execution_id || "",
+    at,
+  };
+  const next = {
+    ...ledger,
+    schema: "ccm-replay-repair-main-agent-dispatch-brief-assignment-ledger-v1",
+    version: ledger.version || 1,
+    groupId,
+    file: ledger.file || getReplayRepairDispatchBindingsFileForCoordinator(groupId),
+    updatedAt: at,
+    bindingCount: entries.length,
+    ...providerSwitchBindingLedgerCountersForCoordinator(entries),
+    entries: entries.slice(-160),
+  };
+  writeJsonAtomicForCoordinator(next.file, next);
+  return binding;
+}
+
+export function recordWorkerContextProviderSwitchExecutionReceiptForCoordinator(groupId: string, input: any = {}, options: any = {}) {
+  if (!groupId) return null;
+  const at = String(options.at || input.at || new Date().toISOString());
+  const ledger = readReplayRepairDispatchBindingLedgerForCoordinator(groupId);
+  const entries = Array.isArray(ledger.entries) ? [...ledger.entries] : [];
+  const index = findWorkerContextBindingIndexForCoordinator(entries, input);
+  if (index < 0) return null;
+  const entry = entries[index];
+  const decisionReceipt = entry.worker_context_provider_switch_decision_receipt
+    || entry.provider_switch_decision_receipt
+    || input.provider_switch_decision_receipt
+    || input.providerSwitchDecisionReceipt
+    || {};
+  if (decisionReceipt.schema !== "ccm-provider-switch-decision-receipt-v1") return null;
+  const sessionBinding = entry.worker_context_provider_switch_session_binding
+    || entry.provider_switch_session_binding
+    || {};
+  const finalReceipt = input.receipt || input.ccm_receipt || input.delivery_summary || {};
+  const rawChildSwitchExecution = finalReceipt.providerSwitchExecution
+    || finalReceipt.provider_switch_execution
+    || finalReceipt.providerSwitchExecutionReceipt
+    || finalReceipt.provider_switch_execution_receipt
+    || null;
+  const childSwitchExecution = Array.isArray(rawChildSwitchExecution)
+    ? rawChildSwitchExecution[rawChildSwitchExecution.length - 1] || null
+    : rawChildSwitchExecution;
+  const expectedProvider = String(decisionReceipt.new_provider?.agent_type || decisionReceipt.newProvider?.agentType || "").trim();
+  const actualProvider = String(input.executed_provider || input.executedProvider || input.agent_type || input.agentType || finalReceipt.agent_type || finalReceipt.agentType || "").trim();
+  const taskAgentSessionId = String(input.task_agent_session_id || input.taskAgentSessionId || finalReceipt.task_agent_session_id || finalReceipt.taskAgentSessionId || "").trim();
+  const nativeSessionId = String(input.native_session_id || input.nativeSessionId || finalReceipt.native_session_id || finalReceipt.nativeSessionId || "").trim();
+  const executionId = String(input.execution_id || input.executionId || finalReceipt.execution_id || finalReceipt.executionId || "").trim();
+  const receiptStatus = String(input.receipt_status || input.receiptStatus || finalReceipt.status || "").trim().toLowerCase();
+  const childDecisionReceiptId = String(childSwitchExecution?.decisionReceiptId || childSwitchExecution?.decision_receipt_id || childSwitchExecution?.providerSwitchDecisionReceiptId || childSwitchExecution?.provider_switch_decision_receipt_id || "").trim();
+  const childExpectedProvider = String(childSwitchExecution?.expectedProvider || childSwitchExecution?.expected_provider || childSwitchExecution?.approvedProvider || childSwitchExecution?.approved_provider || "").trim();
+  const childExecutedProvider = String(childSwitchExecution?.executedProvider || childSwitchExecution?.executed_provider || childSwitchExecution?.actualProvider || childSwitchExecution?.actual_provider || "").trim();
+  const childTaskAgentSessionId = String(childSwitchExecution?.taskAgentSessionId || childSwitchExecution?.task_agent_session_id || "").trim();
+  const childNativeSessionId = String(childSwitchExecution?.nativeSessionId || childSwitchExecution?.native_session_id || "").trim();
+  const childExecutionId = String(childSwitchExecution?.executionId || childSwitchExecution?.execution_id || "").trim();
+  const childUsageState = String(childSwitchExecution?.usageState || childSwitchExecution?.usage_state || childSwitchExecution?.status || "").trim().toLowerCase();
+  const actualMatchesExpected = actualProvider.toLowerCase() === expectedProvider.toLowerCase();
+  const decisionValidation = validateProviderSwitchDecisionReceiptForCoordinator(decisionReceipt, {
+    ...options,
+    verifySnapshot: false,
+    groupId,
+    project: input.project || entry.project || "",
+    assignmentId: input.assignment_id || input.assignmentId || entry.assignment_id || "",
+    dispatchKey: input.dispatch_key || input.dispatchKey || entry.dispatch_key || "",
+    nowMs: Date.parse(String(decisionReceipt.decided_at || "")) || Date.now(),
+  });
+  const gaps = [
+    ...decisionValidation.gaps,
+    sessionBinding.status !== "bound" ? "approved_switch_session_not_bound" : "",
+    !finalReceipt || typeof finalReceipt !== "object" || Object.keys(finalReceipt).length === 0 ? "final_child_receipt_missing" : "",
+    !childSwitchExecution || typeof childSwitchExecution !== "object" ? "provider_switch_execution_declaration_missing" : "",
+    childSwitchExecution && childDecisionReceiptId !== String(decisionReceipt.receipt_id || "") ? "declared_decision_receipt_id_mismatch" : "",
+    childSwitchExecution && childExpectedProvider.toLowerCase() !== expectedProvider.toLowerCase() ? "declared_expected_provider_mismatch" : "",
+    childSwitchExecution && childExecutedProvider.toLowerCase() !== actualProvider.toLowerCase() ? "declared_executed_provider_mismatch" : "",
+    childSwitchExecution && childTaskAgentSessionId !== taskAgentSessionId ? "declared_task_agent_session_id_mismatch" : "",
+    childSwitchExecution && nativeSessionId && childNativeSessionId !== nativeSessionId ? "declared_native_session_id_mismatch" : "",
+    childSwitchExecution && childExecutionId !== executionId ? "declared_execution_id_mismatch" : "",
+    childSwitchExecution && childUsageState !== (actualMatchesExpected ? "executed" : "mismatch") ? "declared_usage_state_mismatch" : "",
+    !actualMatchesExpected ? "executed_provider_mismatch" : "",
+    !taskAgentSessionId ? "task_agent_session_id_missing" : "",
+    sessionBinding.task_agent_session_id && sessionBinding.task_agent_session_id !== taskAgentSessionId ? "task_agent_session_id_mismatch" : "",
+    sessionBinding.native_session_id && nativeSessionId && sessionBinding.native_session_id !== nativeSessionId ? "native_session_id_mismatch" : "",
+    !executionId ? "execution_id_missing" : "",
+  ].filter(Boolean);
+  const executionReceipt = {
+    schema: "ccm-provider-switch-execution-receipt-v1",
+    execution_receipt_id: `provider-switch-execution:${hashCoordinator([
+      decisionReceipt.receipt_id || "",
+      taskAgentSessionId,
+      executionId,
+      actualProvider,
+    ], 18)}`,
+    provider_switch_decision_receipt_id: decisionReceipt.receipt_id || "",
+    provider_switch_decision_receipt_checksum: decisionReceipt.receipt_checksum || "",
+    groupId,
+    project: decisionReceipt.project || entry.project || "",
+    advised_alternative: decisionReceipt.advised_alternative === true,
+    approved_switch: decisionReceipt.approved_switch === true && decisionValidation.valid,
+    expected_provider: expectedProvider,
+    actually_executed_provider: actualProvider,
+    task_agent_session_id: taskAgentSessionId,
+    native_session_id: nativeSessionId,
+    execution_id: executionId,
+    worker_context_packet_id: entry.worker_context_packet_id || "",
+    receipt_status: receiptStatus,
+    system_attested: true,
+    child_declared: !!childSwitchExecution && typeof childSwitchExecution === "object",
+    child_declaration: childSwitchExecution && typeof childSwitchExecution === "object" ? {
+      decision_receipt_id: childDecisionReceiptId,
+      expected_provider: childExpectedProvider,
+      executed_provider: childExecutedProvider,
+      task_agent_session_id: childTaskAgentSessionId,
+      native_session_id: childNativeSessionId,
+      execution_id: childExecutionId,
+      usage_state: childUsageState,
+    } : null,
+    status: gaps.length ? "failed" : "passed",
+    executed_as_approved: gaps.length === 0,
+    gaps: uniqueCoordinatorStrings(gaps),
+    final_child_receipt_present: !!finalReceipt && typeof finalReceipt === "object" && Object.keys(finalReceipt).length > 0,
+    at,
+  };
+  entries[index] = {
+    ...entry,
+    worker_context_provider_switch_execution_receipt: executionReceipt,
+    provider_switch_execution_receipt: executionReceipt,
+    provider_switch_ledger_state: {
+      advised_alternative: decisionReceipt.advised_alternative === true,
+      approved_switch: decisionReceipt.approved_switch === true && decisionValidation.valid,
+      actually_executed_provider: actualProvider,
+    },
+    worker_context_packet_receipt: finalReceipt,
+    receipt_status: receiptStatus,
+    task_agent_session_id: taskAgentSessionId || entry.task_agent_session_id || "",
+    native_session_id: nativeSessionId || entry.native_session_id || "",
+    execution_id: executionId || entry.execution_id || "",
+    at,
+  };
+  const next = {
+    ...ledger,
+    schema: "ccm-replay-repair-main-agent-dispatch-brief-assignment-ledger-v1",
+    version: ledger.version || 1,
+    groupId,
+    file: ledger.file || getReplayRepairDispatchBindingsFileForCoordinator(groupId),
+    updatedAt: at,
+    bindingCount: entries.length,
+    ...providerSwitchBindingLedgerCountersForCoordinator(entries),
+    entries: entries.slice(-160),
+  };
+  writeJsonAtomicForCoordinator(next.file, next);
+  let typedMemoryDistillation: any = null;
+  try {
+    typedMemoryDistillation = distillProviderSwitchExecutionToTypedMemory(groupId, {
+      rows: [entries[index]],
+    }, {
+      reason: "worker-context-provider-switch-execution-receipt",
+      updatedAt: at,
+      ...(options.providerSwitchExecutionDistillationOptions || options.provider_switch_execution_distillation_options || {}),
+    });
+  } catch (error: any) {
+    typedMemoryDistillation = {
+      schema: "ccm-provider-switch-execution-distillation-error-v1",
+      status: "failed",
+      reason: compactText(error?.message || String(error || ""), 500),
+    };
+  }
+  return {
+    ...executionReceipt,
+    typed_memory_distillation: typedMemoryDistillation,
+  };
 }
 
 export function recordWorkerContextProviderDispatchOverrideCompletionForCoordinator(groupId: string, input: any = {}, options: any = {}) {
@@ -7344,6 +10142,15 @@ function isApiMicrocompactNativeProofRepairSourceForCoordinator(source: any) {
 
 function isTimelineClosableNativeRepairSourceForCoordinator(source: any) {
   return String(source || "").trim() === "api_microcompact_native_apply_binding_repair";
+}
+
+function isProviderRankingProvenanceCompactRepairSourceForCoordinator(source: any) {
+  return String(source || "").trim() === "worker_context_provider_ranking_provenance_compact_repair";
+}
+
+function isPostCompactReinjectionRepairForCoordinator(value: any = {}) {
+  return String(value.source || "").trim() === "compact_boundary_replay_repair"
+    && String(value.component || "").trim() === "post_compact_reinject";
 }
 
 function replayRepairWorkItemStatsForCoordinator(items: any[] = []) {
@@ -7698,6 +10505,108 @@ function buildProviderDispatchOverrideFollowupReceiptContractValidationForCoordi
   };
 }
 
+function providerDispatchOverrideFollowupReceiptValidationRepairWorkItemIdForCoordinator(groupId: string, entry: any = {}) {
+  return `provider-dispatch-override-followup-receipt-validation-repair:${hashCoordinator([
+    groupId,
+    entry.binding_id || "",
+    entry.assignment_id || "",
+    entry.worker_context_packet_id || "",
+  ], 14)}`;
+}
+
+function syncProviderDispatchOverrideFollowupReceiptValidationRepairWorkItemForCoordinator(groupId: string, entry: any = {}, validation: any = {}, at = new Date().toISOString()) {
+  if (!groupId || !entry.worker_context_packet_id || validation.contract_required !== true) return null;
+  const ledger = readReplayRepairWorkItemLedgerForCoordinator(groupId);
+  const items = Array.isArray(ledger.items) ? [...ledger.items] : [];
+  const workItemId = providerDispatchOverrideFollowupReceiptValidationRepairWorkItemIdForCoordinator(groupId, entry);
+  const existingIndex = items.findIndex((item: any) => String(item.work_item_id || item.id || "") === workItemId);
+  const contract = validation.contract || {};
+  const relPaths = providerOverrideFollowupContractStringListForCoordinator(contract.rel_paths || contract.relPaths, 24);
+  const followupWorkItemIds = providerOverrideFollowupContractStringListForCoordinator(contract.followup_work_item_ids || contract.followupWorkItemIds, 24);
+  const overrideIds = providerOverrideFollowupContractStringListForCoordinator(contract.override_ids || contract.overrideIds, 24);
+  const gapCodes = providerOverrideFollowupContractStringListForCoordinator((validation.gaps || []).map((gap: any) => gap.code || gap.reason), 24);
+  const completed = validation.contract_satisfied === true && validation.status === "passed";
+  const base = existingIndex >= 0 ? items[existingIndex] : {};
+  const nextItem = {
+    ...base,
+    schema: "ccm-provider-dispatch-override-followup-receipt-validation-repair-work-item-v1",
+    id: workItemId,
+    work_item_id: workItemId,
+    source: "worker_context_provider_dispatch_override_followup_receipt_contract_validation_repair",
+    component: "worker_context_provider_dispatch_override_followup_receipt_contract",
+    subject: `Repair provider override follow-up receipt contract for ${entry.project || validation.project || "unknown"}`,
+    status: completed ? "completed" : "pending",
+    priority: "high",
+    owner: completed ? base.owner || "group-main-agent" : "group-main-agent",
+    groupId,
+    project: entry.project || validation.project || "",
+    target_project: entry.project || validation.project || "",
+    dispatch_target: completed ? "" : entry.project || validation.project || "",
+    agent_type: entry.agent_type || validation.agent_type || "unknown",
+    repair_target: entry.project || validation.project || "provider-dispatch-receipt",
+    binding_id: entry.binding_id || validation.binding_id || "",
+    worker_context_packet_binding_id: entry.binding_id || validation.binding_id || "",
+    assignment_id: entry.assignment_id || validation.assignment_id || "",
+    dispatch_key: entry.dispatch_key || validation.dispatch_key || "",
+    worker_context_packet_id: entry.worker_context_packet_id || validation.worker_context_packet_id || "",
+    task_id: validation.task_id || "",
+    task_agent_session_id: validation.task_agent_session_id || "",
+    execution_id: validation.execution_id || "",
+    provider_override_followup_contract_validation_id: validation.validation_id || "",
+    provider_override_followup_contract_rel_paths: relPaths,
+    provider_override_followup_contract_work_item_ids: followupWorkItemIds,
+    provider_override_followup_contract_override_ids: overrideIds,
+    provider_override_followup_contract_gap_codes: gapCodes,
+    instruction: "Return a corrected CCM_AGENT_RECEIPT.memoryProvenanceUsage covering every provider override follow-up repaired-history relPath, work item, and override id.",
+    expected: "validation.status=passed; providerDispatchOverrideFollowupHistoryReverified=true; currentSourceVerified=true for every required row",
+    prompt_patch: [
+      "Only repair the final receipt evidence; do not redo unrelated implementation.",
+      relPaths.length ? `Required relPath: ${relPaths.join(", ")}.` : "",
+      followupWorkItemIds.length ? `Required repairWorkItemId: ${followupWorkItemIds.join(", ")}.` : "",
+      overrideIds.length ? `Required providerDispatchOverrideId: ${overrideIds.join(", ")}.` : "",
+      gapCodes.length ? `Validation gaps: ${gapCodes.join(", ")}.` : "",
+      "Each corrected memoryProvenanceUsage row must set repairGapType=provider_dispatch_override_followup, currentSourceVerified=true, and providerDispatchOverrideFollowupHistoryReverified=true.",
+    ].filter(Boolean).join("\n"),
+    reason: validation.reason || "provider override follow-up receipt contract validation failed",
+    blockers: completed ? [] : gapCodes,
+    needs: completed ? [] : ["corrected CCM_AGENT_RECEIPT.memoryProvenanceUsage"],
+    evidence: uniqueCoordinatorStrings([
+      ...(Array.isArray(base.evidence) ? base.evidence : []),
+      `validation_id=${validation.validation_id || ""}`,
+      `binding_id=${entry.binding_id || ""}`,
+      `worker_context_packet_id=${entry.worker_context_packet_id || ""}`,
+      `validation_status=${validation.status || ""}`,
+      ...gapCodes.map((code: string) => `gap=${code}`),
+    ]).slice(-32),
+    verification: completed
+      ? uniqueCoordinatorStrings([...(Array.isArray(base.verification) ? base.verification : []), "provider override follow-up receipt contract validation passed"]).slice(-24)
+      : Array.isArray(base.verification) ? base.verification : [],
+    createdAt: base.createdAt || base.created_at || at,
+    updatedAt: at,
+    completedAt: completed ? base.completedAt || base.completed_at || at : "",
+    completion_source: completed ? "provider_dispatch_override_followup_receipt_contract_validation" : "",
+    resolutionReason: completed ? "corrected_child_agent_receipt_satisfied_provider_override_followup_contract" : "",
+  };
+  if (existingIndex >= 0) items[existingIndex] = nextItem;
+  else items.push(nextItem);
+  const next = writeReplayRepairWorkItemLedgerForCoordinator(groupId, items, at, {
+    latestProviderDispatchOverrideFollowupReceiptValidationRepair: {
+      work_item_id: workItemId,
+      validation_id: validation.validation_id || "",
+      status: nextItem.status,
+      binding_id: entry.binding_id || "",
+      at,
+    },
+  });
+  return {
+    schema: "ccm-provider-dispatch-override-followup-receipt-validation-repair-work-item-ref-v1",
+    work_item_id: workItemId,
+    status: nextItem.status,
+    file: next.file,
+    source: nextItem.source,
+  };
+}
+
 export function recordWorkerContextProviderDispatchOverrideFollowupReceiptContractValidationForCoordinator(groupId: string, input: any = {}, options: any = {}) {
   if (!groupId) return null;
   const at = String(options.at || input.at || new Date().toISOString());
@@ -7715,7 +10624,51 @@ export function recordWorkerContextProviderDispatchOverrideFollowupReceiptContra
   });
   if (index < 0) return null;
   const entry = entries[index];
-  const validation = buildProviderDispatchOverrideFollowupReceiptContractValidationForCoordinator(entry, input, at);
+  const validationBase = buildProviderDispatchOverrideFollowupReceiptContractValidationForCoordinator(entry, input, at);
+  const repairWorkItem = syncProviderDispatchOverrideFollowupReceiptValidationRepairWorkItemForCoordinator(groupId, entry, validationBase, at);
+  const validationDraft = {
+    ...validationBase,
+    repair_work_item: repairWorkItem,
+    repair_work_item_id: repairWorkItem?.work_item_id || "",
+    repair_work_item_status: repairWorkItem?.status || "",
+  };
+  let typedMemoryDistillation: any = null;
+  let typedMemoryDistillationError = "";
+  try {
+    typedMemoryDistillation = distillProviderDispatchOverrideFollowupReceiptValidationToTypedMemory(groupId, {
+      rows: [{
+        entry: {
+          ...entry,
+          task_id: input.task_id || input.taskId || entry.task_id || "",
+          worker_handoff_id: input.worker_handoff_id || input.workerHandoffId || entry.worker_handoff_id || "",
+          task_agent_session_id: input.task_agent_session_id || input.taskAgentSessionId || entry.task_agent_session_id || "",
+          native_session_id: input.native_session_id || input.nativeSessionId || entry.native_session_id || "",
+          execution_id: input.execution_id || input.executionId || entry.execution_id || "",
+          at,
+        },
+        validation: validationDraft,
+      }],
+    }, {
+      reason: "group-orchestrator-provider-dispatch-override-followup-receipt-validation",
+      updatedAt: at,
+    });
+  } catch (error: any) {
+    typedMemoryDistillationError = String(error?.message || error || "provider override follow-up receipt validation distillation failed");
+  }
+  const validation = {
+    ...validationDraft,
+    typed_memory_distillation: typedMemoryDistillation ? {
+      schema: typedMemoryDistillation.schema || "",
+      archived_count: Number(typedMemoryDistillation.archivedCount || 0),
+      attempt_count: Number(typedMemoryDistillation.attemptCount || 0),
+      failed_count: Number(typedMemoryDistillation.failedCount || 0),
+      passed_count: Number(typedMemoryDistillation.passedCount || 0),
+      attribution_count: Number(typedMemoryDistillation.attributionCount || 0),
+      write_count: Number(typedMemoryDistillation.writeCount || 0),
+      ledger_file: typedMemoryDistillation.ledgerFile || "",
+    } : null,
+    typed_memory_distillation_error: typedMemoryDistillationError,
+  };
   const nextEntry = {
     ...entry,
     worker_context_provider_dispatch_override_followup_receipt_contract_validation: validation,
@@ -7855,8 +10808,267 @@ function timelineBindingMatchesRepairWorkItem(binding: any = {}, item: any = {})
   return !!bindingProof && !!itemProof && bindingProof === itemProof;
 }
 
+function providerRankingProvenanceProofString(value: any) {
+  return String(value || "").trim();
+}
+
+function providerRankingProvenanceProofStringListForCoordinator(...values: any[]) {
+  const flattened: string[] = [];
+  for (const value of values) {
+    if (Array.isArray(value)) flattened.push(...value.map((item: any) => providerRankingProvenanceProofString(item)));
+    else if (value !== undefined && value !== null && value !== "") flattened.push(providerRankingProvenanceProofString(value));
+  }
+  return uniqueCoordinatorStrings(flattened);
+}
+
+function providerRankingProvenanceProofBooleanForCoordinator(value: any) {
+  if (value === true) return true;
+  if (value === false) return false;
+  const text = String(value || "").trim().toLowerCase();
+  if (["true", "yes", "1", "preserved", "ok", "completed", "verified"].includes(text)) return true;
+  if (["false", "no", "0", "missing", "lost", "blocked", "failed"].includes(text)) return false;
+  return false;
+}
+
+function providerRankingProvenanceRepairStatusForCoordinator(value: any) {
+  const status = String(value || "").trim().toLowerCase();
+  if (["completed", "complete", "done", "resolved", "ok", "verified"].includes(status)) return "completed";
+  if (["blocked", "failed", "needs_info", "needs_user"].includes(status)) return "blocked";
+  if (["running", "in_progress", "claimed"].includes(status)) return "in_progress";
+  return status;
+}
+
+function providerRankingProvenanceGapTypeForCoordinator(value: any) {
+  return String(value || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+}
+
+function providerRankingProvenanceProofFromConsumptionRowForCoordinator(row: any = {}, brief: any = {}, status = "") {
+  const preservation = row.provider_ranking_provenance_preservation
+    || row.providerRankingProvenancePreservation
+    || row.preservation
+    || {};
+  const typedMemoryRelPaths = providerRankingProvenanceProofStringListForCoordinator(
+    row.typedMemoryRelPaths,
+    row.typed_memory_rel_paths,
+    row.provider_ranking_provenance_rel_paths,
+    row.providerRankingProvenanceRelPaths,
+    preservation.typed_memory_rel_paths,
+    preservation.typedMemoryRelPaths,
+  );
+  const typedMemoryRowIds = providerRankingProvenanceProofStringListForCoordinator(
+    row.typedMemoryRowIds,
+    row.typed_memory_row_ids,
+    row.provider_ranking_provenance_row_ids,
+    row.providerRankingProvenanceRowIds,
+    preservation.typed_memory_row_ids,
+    preservation.typedMemoryRowIds,
+  );
+  const receiptId = providerRankingProvenanceProofString(
+    row.providerSwitchDecisionReceiptId
+      || row.provider_switch_decision_receipt_id
+      || row.providerSwitchReceiptId
+      || row.provider_switch_receipt_id
+      || preservation.provider_switch_decision_receipt_id
+      || preservation.providerSwitchDecisionReceiptId
+      || "",
+  );
+  const receiptChecksum = providerRankingProvenanceProofString(
+    row.providerSwitchDecisionReceiptChecksum
+      || row.provider_switch_decision_receipt_checksum
+      || row.providerSwitchReceiptChecksum
+      || row.provider_switch_receipt_checksum
+      || preservation.provider_switch_decision_receipt_checksum
+      || preservation.providerSwitchDecisionReceiptChecksum
+      || "",
+  );
+  const repairStatus = providerRankingProvenanceRepairStatusForCoordinator(
+    row.repairStatus
+      || row.repair_status
+      || row.providerRankingProvenanceRepairStatus
+      || row.provider_ranking_provenance_repair_status
+      || preservation.repair_status
+      || preservation.repairStatus
+      || "",
+  );
+  const repairGapType = providerRankingProvenanceGapTypeForCoordinator(
+    row.repairGapType
+      || row.repair_gap_type
+      || row.providerRankingProvenanceRepairGapType
+      || row.provider_ranking_provenance_repair_gap_type
+      || preservation.repair_gap_type
+      || preservation.repairGapType
+      || "",
+  );
+  const preserved = providerRankingProvenanceProofBooleanForCoordinator(
+    row.providerRankingProvenancePreserved
+      ?? row.provider_ranking_provenance_preserved
+      ?? preservation.preserved
+      ?? preservation.provider_ranking_provenance_preserved
+      ?? preservation.providerRankingProvenancePreserved
+      ?? false,
+  );
+  const required = providerRankingProvenanceProofBooleanForCoordinator(
+    row.providerRankingProvenanceRequired
+      ?? row.provider_ranking_provenance_required
+      ?? preservation.required
+      ?? preservation.provider_ranking_provenance_required
+      ?? preservation.providerRankingProvenanceRequired
+      ?? false,
+  );
+  const rowBriefId = providerRankingProvenanceProofString(row.brief_id || row.briefId || "");
+  const rowWorkItemId = providerRankingProvenanceProofString(row.work_item_id || row.workItemId || "");
+  const briefId = providerRankingProvenanceProofString(brief.brief_id || brief.briefId || "");
+  const workItemId = providerRankingProvenanceProofString(brief.work_item_id || brief.workItemId || "");
+  const statusOk = String(status || "").trim().toLowerCase() === "verified";
+  const matchesBrief = !!briefId && rowBriefId === briefId;
+  const matchesWorkItem = !!workItemId && rowWorkItemId === workItemId;
+  const verified = statusOk
+    && matchesBrief
+    && matchesWorkItem
+    && !!receiptId
+    && !!receiptChecksum
+    && typedMemoryRelPaths.length > 0
+    && typedMemoryRowIds.length > 0
+    && preserved === true
+    && repairStatus === "completed"
+    && repairGapType === "provider_ranking_provenance_compact";
+  return {
+    verified,
+    receiptId,
+    receiptChecksum,
+    typedMemoryRelPaths,
+    typedMemoryRowIds,
+    preserved,
+    required,
+    repairStatus,
+    repairGapType,
+    rowBriefId,
+    rowWorkItemId,
+  };
+}
+
+function timelineBindingMatchesProviderRankingProvenanceRepairWorkItem(binding: any = {}, item: any = {}) {
+  if (!isProviderRankingProvenanceCompactRepairSourceForCoordinator(item.source)) return false;
+  const bindingWorkItemId = providerRankingProvenanceProofString(binding.work_item_id || "");
+  const itemId = providerRankingProvenanceProofString(item.work_item_id || item.id || "");
+  if (!bindingWorkItemId || !itemId || bindingWorkItemId !== itemId) return false;
+  const expectedReceiptId = providerRankingProvenanceProofString(item.provider_switch_decision_receipt_id || "");
+  const expectedReceiptChecksum = providerRankingProvenanceProofString(item.provider_switch_decision_receipt_checksum || "");
+  if (expectedReceiptId && binding.provider_switch_decision_receipt_id !== expectedReceiptId) return false;
+  if (expectedReceiptChecksum && binding.provider_switch_decision_receipt_checksum !== expectedReceiptChecksum) return false;
+  const bindingRelPaths = new Set(providerRankingProvenanceProofStringListForCoordinator(binding.provider_ranking_provenance_rel_paths));
+  const bindingRowIds = new Set(providerRankingProvenanceProofStringListForCoordinator(binding.provider_ranking_provenance_row_ids));
+  const expectedRelPaths = providerRankingProvenanceProofStringListForCoordinator(item.provider_ranking_provenance_rel_paths);
+  const expectedRowIds = providerRankingProvenanceProofStringListForCoordinator(item.provider_ranking_provenance_row_ids);
+  if (expectedRelPaths.length && !expectedRelPaths.every(value => bindingRelPaths.has(value))) return false;
+  if (expectedRowIds.length && !expectedRowIds.every(value => bindingRowIds.has(value))) return false;
+  return true;
+}
+
+function timelineBindingHasRequiredProviderRankingProvenanceRepairEvidence(binding: any = {}, item: any = null) {
+  if (!isProviderRankingProvenanceCompactRepairSourceForCoordinator(binding.source)) return false;
+  const eventTypes = new Set((Array.isArray(binding.event_types) ? binding.event_types : []).map((event: any) => String(event || "").trim()).filter(Boolean));
+  if (!REPLAY_REPAIR_TIMELINE_REQUIRED_EVENTS_FOR_COORDINATOR.every(type => eventTypes.has(type))) return false;
+  const receiptStatus = String(binding.receipt_status || binding.receiptStatus || "").trim().toLowerCase();
+  if (!["done", "completed", "ok", "success"].includes(receiptStatus)) return false;
+  if (binding.replay_repair_consumption_source !== "receipt.replayRepairDispatchBriefUsage") return false;
+  if (binding.provider_ranking_provenance_receipt_consumption_verified !== true) return false;
+  if (!binding.brief_id || !binding.work_item_id || !binding.task_id || !binding.assignment_id || !binding.dispatch_key) return false;
+  if (!binding.worker_context_packet_id || !binding.task_agent_session_id || !binding.memory_context_snapshot_id || !binding.execution_id) return false;
+  if (!binding.provider_switch_decision_receipt_id || !binding.provider_switch_decision_receipt_checksum) return false;
+  if (!Array.isArray(binding.provider_ranking_provenance_rel_paths) || binding.provider_ranking_provenance_rel_paths.length === 0) return false;
+  if (!Array.isArray(binding.provider_ranking_provenance_row_ids) || binding.provider_ranking_provenance_row_ids.length === 0) return false;
+  if (binding.provider_ranking_provenance_preserved !== true) return false;
+  if (binding.provider_ranking_provenance_repair_status !== "completed") return false;
+  if (binding.provider_ranking_provenance_repair_gap_type !== "provider_ranking_provenance_compact") return false;
+  return item ? timelineBindingMatchesProviderRankingProvenanceRepairWorkItem(binding, item) : true;
+}
+
+function timelineBindingMatchesPostCompactReinjectionRepairWorkItem(binding: any = {}, item: any = {}) {
+  if (!isPostCompactReinjectionRepairForCoordinator(binding) || !isPostCompactReinjectionRepairForCoordinator(item)) return false;
+  const bindingWorkItemId = String(binding.work_item_id || "").trim();
+  const itemId = String(item.work_item_id || item.id || "").trim();
+  if (!bindingWorkItemId || !itemId || bindingWorkItemId !== itemId) return false;
+  const mirroredFields = [
+    "reinjection_gate_id",
+    "post_compact_candidate_id",
+    "post_compact_candidate_kind",
+    "post_compact_candidate_value",
+  ];
+  for (const field of mirroredFields) {
+    const expected = String(item[field] || "").trim();
+    if (expected && String(binding[field] || "").trim() !== expected) return false;
+  }
+  return true;
+}
+
+function timelineBindingHasRequiredPostCompactReinjectionRepairEvidence(binding: any = {}, item: any = null) {
+  if (!isPostCompactReinjectionRepairForCoordinator(binding)) return false;
+  const eventTypes = new Set((Array.isArray(binding.event_types) ? binding.event_types : []).map((event: any) => String(event || "").trim()).filter(Boolean));
+  if (!REPLAY_REPAIR_TIMELINE_REQUIRED_EVENTS_FOR_COORDINATOR.every(type => eventTypes.has(type))) return false;
+  const receiptStatus = String(binding.receipt_status || binding.receiptStatus || "").trim().toLowerCase();
+  if (!["done", "completed", "ok", "success"].includes(receiptStatus)) return false;
+  if (binding.replay_repair_consumption_source !== "receipt.replayRepairDispatchBriefUsage") return false;
+  if (!["used", "verified", "ignored"].includes(String(binding.replay_repair_consumption_status || "").trim().toLowerCase())) return false;
+  if (binding.post_compact_reinjection_receipt_verified !== true) return false;
+  if (!binding.reinjection_gate_id || !binding.post_compact_candidate_id || !binding.post_compact_candidate_kind) return false;
+  if (!binding.brief_id || !binding.work_item_id || !binding.task_id || !binding.assignment_id || !binding.dispatch_key) return false;
+  if (!binding.worker_context_packet_id || !binding.worker_handoff_id || !binding.memory_context_snapshot_id) return false;
+  if (!binding.task_agent_session_id || !binding.native_session_id || !binding.execution_id) return false;
+  if (binding.post_compact_reinjection_task_session_matched !== true || binding.post_compact_reinjection_native_session_matched !== true) return false;
+  const usageState = String(binding.post_compact_reinjection_receipt_usage_state || "").trim().toLowerCase();
+  if (!["used", "verified", "ignored"].includes(usageState)) return false;
+  if (usageState === "ignored") {
+    if (!String(binding.post_compact_reinjection_receipt_reason || "").trim()) return false;
+  } else if (binding.post_compact_reinjection_current_source_verified !== true) {
+    return false;
+  }
+  if (binding.post_compact_reinjection_memory_receipt_matched !== true) return false;
+  return item ? timelineBindingMatchesPostCompactReinjectionRepairWorkItem(binding, item) : true;
+}
+
+function timelineBindingMatchesPostCompactReceiptMemoryUsageRepairWorkItem(binding: any = {}, item: any = {}) {
+  if (!isPostCompactReceiptMemoryUsageRepairForCoordinator(binding) || !isPostCompactReceiptMemoryUsageRepairForCoordinator(item)) return false;
+  const bindingWorkItemId = String(binding.work_item_id || "").trim();
+  const itemId = String(item.work_item_id || item.id || "").trim();
+  if (!bindingWorkItemId || bindingWorkItemId !== itemId) return false;
+  const expectedDocs = uniqueCoordinatorStrings(item.post_compact_receipt_memory_required_doc_rel_paths || []);
+  const bindingDocs = new Set(uniqueCoordinatorStrings([
+    ...(binding.post_compact_receipt_memory_required_doc_rel_paths || []),
+    ...(binding.post_compact_receipt_memory_usage_repair_required_doc_rel_paths || []),
+  ]));
+  return expectedDocs.length > 0 && expectedDocs.every((relPath: string) => bindingDocs.has(relPath));
+}
+
+function timelineBindingHasRequiredPostCompactReceiptMemoryUsageRepairEvidence(binding: any = {}, item: any = null) {
+  if (!isPostCompactReceiptMemoryUsageRepairForCoordinator(binding)) return false;
+  const eventTypes = new Set((Array.isArray(binding.event_types) ? binding.event_types : []).map((event: any) => String(event || "").trim()).filter(Boolean));
+  if (!REPLAY_REPAIR_TIMELINE_REQUIRED_EVENTS_FOR_COORDINATOR.every(type => eventTypes.has(type))) return false;
+  const receiptStatus = String(binding.receipt_status || "").trim().toLowerCase();
+  if (!["done", "completed", "ok", "success"].includes(receiptStatus)) return false;
+  if (binding.replay_repair_consumption_source !== "receipt.replayRepairDispatchBriefUsage") return false;
+  if (!["used", "verified"].includes(String(binding.replay_repair_consumption_status || "").trim().toLowerCase())) return false;
+  if (binding.post_compact_receipt_memory_usage_repair_verified !== true) return false;
+  if (binding.post_compact_receipt_memory_usage_repair_all_docs_compliant !== true) return false;
+  if (binding.post_compact_receipt_memory_usage_repair_historical_boundary_covered !== true) return false;
+  if (binding.post_compact_receipt_memory_usage_repair_task_session_matched !== true
+    || binding.post_compact_receipt_memory_usage_repair_native_session_matched !== true) return false;
+  if (!binding.brief_id || !binding.work_item_id || !binding.task_id || !binding.assignment_id || !binding.dispatch_key) return false;
+  if (!binding.worker_context_packet_id || !binding.worker_handoff_id || !binding.memory_context_snapshot_id) return false;
+  if (!binding.task_agent_session_id || !binding.native_session_id || !binding.execution_id) return false;
+  const requiredDocs = uniqueCoordinatorStrings(binding.post_compact_receipt_memory_usage_repair_required_doc_rel_paths || []);
+  const coveredDocs = new Set(uniqueCoordinatorStrings(binding.post_compact_receipt_memory_usage_repair_covered_doc_rel_paths || []));
+  if (!requiredDocs.length || !requiredDocs.every((relPath: string) => coveredDocs.has(relPath))) return false;
+  return item ? timelineBindingMatchesPostCompactReceiptMemoryUsageRepairWorkItem(binding, item) : true;
+}
+
 function closeReplayRepairWorkItemsFromTimelineBindingForCoordinator(groupId: string, binding: any = {}, at = new Date().toISOString()) {
-  if (!groupId || !timelineBindingHasRequiredNativeRepairEvidence(binding)) return { closed: 0, itemIds: [] };
+  if (!groupId) return { closed: 0, itemIds: [] };
+  const nativeTimelineClosable = timelineBindingHasRequiredNativeRepairEvidence(binding);
+  const providerRankingTimelineClosable = timelineBindingHasRequiredProviderRankingProvenanceRepairEvidence(binding);
+  const postCompactReinjectionTimelineClosable = timelineBindingHasRequiredPostCompactReinjectionRepairEvidence(binding);
+  const postCompactReceiptMemoryUsageTimelineClosable = timelineBindingHasRequiredPostCompactReceiptMemoryUsageRepairEvidence(binding);
+  if (!nativeTimelineClosable && !providerRankingTimelineClosable && !postCompactReinjectionTimelineClosable && !postCompactReceiptMemoryUsageTimelineClosable) return { closed: 0, itemIds: [] };
   const file = getReplayRepairWorkItemsFileForCoordinator(groupId);
   let ledger: any = null;
   try { ledger = JSON.parse(fs.readFileSync(file, "utf-8")); } catch { return { closed: 0, itemIds: [] }; }
@@ -7864,9 +11076,20 @@ function closeReplayRepairWorkItemsFromTimelineBindingForCoordinator(groupId: st
   let closed = 0;
   const itemIds: string[] = [];
   const nextItems = items.map((item: any) => {
-    if (!isTimelineClosableNativeRepairSourceForCoordinator(item.source)) return item;
+    const closeAsNative = nativeTimelineClosable
+      && isTimelineClosableNativeRepairSourceForCoordinator(item.source)
+      && timelineBindingMatchesRepairWorkItem(binding, item);
+    const closeAsProviderRanking = providerRankingTimelineClosable
+      && isProviderRankingProvenanceCompactRepairSourceForCoordinator(item.source)
+      && timelineBindingHasRequiredProviderRankingProvenanceRepairEvidence(binding, item);
+    const closeAsPostCompactReinjection = postCompactReinjectionTimelineClosable
+      && isPostCompactReinjectionRepairForCoordinator(item)
+      && timelineBindingHasRequiredPostCompactReinjectionRepairEvidence(binding, item);
+    const closeAsPostCompactReceiptMemoryUsage = postCompactReceiptMemoryUsageTimelineClosable
+      && isPostCompactReceiptMemoryUsageRepairForCoordinator(item)
+      && timelineBindingHasRequiredPostCompactReceiptMemoryUsageRepairEvidence(binding, item);
+    if (!closeAsNative && !closeAsProviderRanking && !closeAsPostCompactReinjection && !closeAsPostCompactReceiptMemoryUsage) return item;
     if (!replayRepairWorkItemOpenForCoordinator(item.status)) return item;
-    if (!timelineBindingMatchesRepairWorkItem(binding, item)) return item;
     closed += 1;
     itemIds.push(String(item.work_item_id || item.id || ""));
     const evidence = [
@@ -7874,18 +11097,49 @@ function closeReplayRepairWorkItemsFromTimelineBindingForCoordinator(groupId: st
       `timeline_binding=${binding.timeline_binding_id || ""}`,
       `timeline_events=${(binding.event_types || []).join(",")}`,
       binding.receipt_status ? `receipt_status=${binding.receipt_status}` : "",
+      closeAsProviderRanking && binding.provider_switch_decision_receipt_id ? `provider_switch_decision_receipt_id=${binding.provider_switch_decision_receipt_id}` : "",
+      closeAsProviderRanking && binding.provider_switch_decision_receipt_checksum ? `provider_switch_decision_receipt_checksum=${binding.provider_switch_decision_receipt_checksum}` : "",
+      closeAsProviderRanking && binding.provider_ranking_provenance_rel_paths?.length ? `provider_ranking_rel_paths=${binding.provider_ranking_provenance_rel_paths.join(";")}` : "",
+      closeAsProviderRanking && binding.provider_ranking_provenance_row_ids?.length ? `provider_ranking_row_ids=${binding.provider_ranking_provenance_row_ids.slice(0, 8).join(";")}` : "",
+      closeAsPostCompactReinjection && binding.reinjection_gate_id ? `reinjection_gate_id=${binding.reinjection_gate_id}` : "",
+      closeAsPostCompactReinjection && binding.post_compact_candidate_id ? `post_compact_candidate_id=${binding.post_compact_candidate_id}` : "",
+      closeAsPostCompactReinjection && binding.post_compact_reinjection_receipt_usage_state ? `post_compact_candidate_usage=${binding.post_compact_reinjection_receipt_usage_state}` : "",
+      closeAsPostCompactReinjection ? `post_compact_current_source_verified=${binding.post_compact_reinjection_current_source_verified === true}` : "",
+      closeAsPostCompactReceiptMemoryUsage && binding.post_compact_receipt_memory_usage_repair_required_doc_rel_paths?.length ? `post_compact_receipt_memory_required_docs=${binding.post_compact_receipt_memory_usage_repair_required_doc_rel_paths.join(";")}` : "",
+      closeAsPostCompactReceiptMemoryUsage ? `post_compact_receipt_memory_historical_boundary=${binding.post_compact_receipt_memory_usage_repair_historical_boundary_covered === true}` : "",
+      closeAsPostCompactReceiptMemoryUsage ? `post_compact_receipt_memory_repair_session=${binding.task_agent_session_id || ""}/${binding.native_session_id || ""}` : "",
     ].filter(Boolean);
     const verification = [
       ...(Array.isArray(item.verification) ? item.verification : []),
-      "timeline binding 已证明 dispatch->session->snapshot->execution->receipt 闭环",
+      closeAsProviderRanking
+        ? "receipt replayRepairDispatchBriefUsage 已证明 provider ranking provenance compact repair 完成"
+        : closeAsPostCompactReceiptMemoryUsage
+        ? "corrected receipt 已在新 repair session 覆盖全部 post-compact receipt MEMORY.md，并满足 current-source / ignored-reason / historical-boundary 合同"
+        : closeAsPostCompactReinjection
+        ? "receipt postCompactCandidateUsage 已证明精确 reinjection gate/candidate 在绑定子 Agent 会话中完成 used/ignored/verified 分类"
+        : "timeline binding 已证明 dispatch->session->snapshot->execution->receipt 闭环",
     ];
+    const completionSource = closeAsProviderRanking
+      ? "provider_ranking_provenance_replay_repair_receipt_consumption"
+      : closeAsPostCompactReceiptMemoryUsage
+      ? "post_compact_reinjection_receipt_memory_usage_repair_receipt_consumption"
+      : closeAsPostCompactReinjection
+      ? "post_compact_reinjection_replay_repair_receipt_consumption"
+      : "replay_repair_timeline_binding";
+    const resolutionReason = closeAsProviderRanking
+      ? "provider_ranking_provenance_compact_repair_receipt_verified"
+      : closeAsPostCompactReceiptMemoryUsage
+      ? "post_compact_reinjection_receipt_memory_usage_corrected_receipt_verified"
+      : closeAsPostCompactReinjection
+      ? "post_compact_reinjection_repair_receipt_verified"
+      : "timeline_binding_child_receipt_proved_native_repair";
     return {
       ...item,
       status: "completed",
       updatedAt: at,
       completedAt: item.completedAt || item.completed_at || at,
-      resolutionReason: "timeline_binding_child_receipt_proved_native_repair",
-      completion_source: "replay_repair_timeline_binding",
+      resolutionReason,
+      completion_source: completionSource,
       replay_repair_timeline_binding: {
         timeline_binding_id: binding.timeline_binding_id || "",
         brief_id: binding.brief_id || "",
@@ -7900,6 +11154,62 @@ function closeReplayRepairWorkItemsFromTimelineBindingForCoordinator(groupId: st
         event_types: binding.event_types || [],
         completed_at: at,
       },
+      provider_ranking_provenance_repair_receipt: closeAsProviderRanking ? {
+        timeline_binding_id: binding.timeline_binding_id || "",
+        brief_id: binding.brief_id || "",
+        work_item_id: binding.work_item_id || "",
+        provider_switch_decision_receipt_id: binding.provider_switch_decision_receipt_id || "",
+        provider_switch_decision_receipt_checksum: binding.provider_switch_decision_receipt_checksum || "",
+        typed_memory_rel_paths: binding.provider_ranking_provenance_rel_paths || [],
+        typed_memory_row_ids: binding.provider_ranking_provenance_row_ids || [],
+        provider_ranking_provenance_preserved: binding.provider_ranking_provenance_preserved === true,
+        repair_status: binding.provider_ranking_provenance_repair_status || "",
+        repair_gap_type: binding.provider_ranking_provenance_repair_gap_type || "",
+        consumption_status: binding.replay_repair_consumption_status || "",
+        consumption_source: binding.replay_repair_consumption_source || "",
+        completed_at: at,
+      } : item.provider_ranking_provenance_repair_receipt,
+      post_compact_reinjection_repair_receipt: closeAsPostCompactReinjection ? {
+        timeline_binding_id: binding.timeline_binding_id || "",
+        brief_id: binding.brief_id || "",
+        work_item_id: binding.work_item_id || "",
+        reinjection_gate_id: binding.reinjection_gate_id || "",
+        post_compact_candidate_id: binding.post_compact_candidate_id || "",
+        post_compact_candidate_kind: binding.post_compact_candidate_kind || "",
+        post_compact_candidate_value: binding.post_compact_candidate_value || "",
+        usage_state: binding.post_compact_reinjection_receipt_usage_state || "",
+        current_source_verified: binding.post_compact_reinjection_current_source_verified === true,
+        memory_receipt_matched: binding.post_compact_reinjection_memory_receipt_matched === true,
+        task_agent_session_id: binding.task_agent_session_id || "",
+        native_session_id: binding.native_session_id || "",
+        execution_id: binding.execution_id || "",
+        completed_at: at,
+      } : item.post_compact_reinjection_repair_receipt,
+      post_compact_receipt_memory_usage_repair_receipt: closeAsPostCompactReceiptMemoryUsage ? {
+        schema: "ccm-post-compact-reinjection-repair-receipt-memory-usage-repair-proof-v1",
+        verified: true,
+        timeline_binding_id: binding.timeline_binding_id || "",
+        brief_id: binding.brief_id || "",
+        work_item_id: binding.work_item_id || "",
+        original_worker_context_packet_id: binding.original_worker_context_packet_id || item.original_worker_context_packet_id || "",
+        original_binding_id: binding.original_binding_id || item.original_binding_id || "",
+        required_doc_rel_paths: binding.post_compact_receipt_memory_usage_repair_required_doc_rel_paths || [],
+        covered_doc_rel_paths: binding.post_compact_receipt_memory_usage_repair_covered_doc_rel_paths || [],
+        coverage_rows: binding.post_compact_receipt_memory_usage_repair_coverage_rows || [],
+        all_docs_compliant: binding.post_compact_receipt_memory_usage_repair_all_docs_compliant === true,
+        historical_boundary_covered: binding.post_compact_receipt_memory_usage_repair_historical_boundary_covered === true,
+        task_session_matched: binding.post_compact_receipt_memory_usage_repair_task_session_matched === true,
+        native_session_matched: binding.post_compact_receipt_memory_usage_repair_native_session_matched === true,
+        original_task_agent_session_id: binding.original_task_agent_session_id || item.original_task_agent_session_id || "",
+        original_native_session_id: binding.original_native_session_id || item.original_native_session_id || "",
+        original_assignment_id: binding.original_assignment_id || item.original_assignment_id || "",
+        original_dispatch_key: binding.original_dispatch_key || item.original_dispatch_key || "",
+        event_types: binding.event_types || [],
+        task_agent_session_id: binding.task_agent_session_id || "",
+        native_session_id: binding.native_session_id || "",
+        execution_id: binding.execution_id || "",
+        completed_at: at,
+      } : item.post_compact_receipt_memory_usage_repair_receipt,
       blockers: [],
       needs: [],
       evidence: uniqueCoordinatorStrings(evidence).slice(-24),
@@ -7919,6 +11229,14 @@ function closeReplayRepairWorkItemsFromTimelineBindingForCoordinator(groupId: st
     latestTimelineCompletion: {
       timeline_binding_id: binding.timeline_binding_id || "",
       brief_id: binding.brief_id || "",
+      source: binding.source || "",
+      completion_source: providerRankingTimelineClosable
+        ? "provider_ranking_provenance_replay_repair_receipt_consumption"
+        : postCompactReceiptMemoryUsageTimelineClosable
+        ? "post_compact_reinjection_receipt_memory_usage_repair_receipt_consumption"
+        : postCompactReinjectionTimelineClosable
+        ? "post_compact_reinjection_replay_repair_receipt_consumption"
+        : "replay_repair_timeline_binding",
       closed,
       itemIds,
       at,
@@ -7952,6 +11270,7 @@ function mergeReplayRepairTimelineBinding(current: any = {}, incoming: any = {})
   for (const key of [
     "task_id",
     "project",
+    "component",
     "assignment_id",
     "dispatch_key",
     "worker_context_packet_id",
@@ -7962,6 +11281,23 @@ function mergeReplayRepairTimelineBinding(current: any = {}, incoming: any = {})
     "native_session_id",
     "execution_id",
     "runner_request_id",
+    "reinjection_gate_id",
+    "post_compact_candidate_id",
+    "post_compact_candidate_kind",
+    "post_compact_candidate_value",
+    "post_compact_candidate_source_message_id",
+    "post_compact_reinjection_receipt_usage_state",
+    "post_compact_reinjection_receipt_reason",
+    "post_compact_reinjection_receipt_task_agent_session_id",
+    "post_compact_reinjection_receipt_native_session_id",
+    "original_worker_context_packet_id",
+    "original_binding_id",
+    "original_assignment_id",
+    "original_dispatch_key",
+    "original_task_agent_session_id",
+    "original_native_session_id",
+    "post_compact_receipt_memory_usage_repair_receipt_task_agent_session_id",
+    "post_compact_receipt_memory_usage_repair_receipt_native_session_id",
     "proof_entry_id",
     "request_patch_checksum",
     "provider_reproof_status",
@@ -7976,9 +11312,81 @@ function mergeReplayRepairTimelineBinding(current: any = {}, incoming: any = {})
     "replay_repair_consumption_reason",
     "replay_repair_consumption_source",
     "replay_repair_consumption_state",
+    "provider_switch_decision_receipt_id",
+    "provider_switch_decision_receipt_checksum",
+    "provider_ranking_provenance_repair_status",
+    "provider_ranking_provenance_repair_gap_type",
   ]) {
     merged[key] = incoming[key] || current[key] || "";
   }
+  merged.provider_ranking_provenance_rel_paths = uniqueCoordinatorStrings([
+    ...(Array.isArray(current.provider_ranking_provenance_rel_paths) ? current.provider_ranking_provenance_rel_paths : []),
+    ...(Array.isArray(incoming.provider_ranking_provenance_rel_paths) ? incoming.provider_ranking_provenance_rel_paths : []),
+  ]).slice(0, 24);
+  merged.provider_ranking_provenance_row_ids = uniqueCoordinatorStrings([
+    ...(Array.isArray(current.provider_ranking_provenance_row_ids) ? current.provider_ranking_provenance_row_ids : []),
+    ...(Array.isArray(incoming.provider_ranking_provenance_row_ids) ? incoming.provider_ranking_provenance_row_ids : []),
+  ]).slice(0, 32);
+  merged.provider_ranking_provenance_preserved = incoming.provider_ranking_provenance_preserved === true
+    || current.provider_ranking_provenance_preserved === true;
+  merged.provider_ranking_provenance_required = incoming.provider_ranking_provenance_required === true
+    || current.provider_ranking_provenance_required === true;
+  merged.provider_ranking_provenance_receipt_consumption_verified = incoming.provider_ranking_provenance_receipt_consumption_verified === true
+    || current.provider_ranking_provenance_receipt_consumption_verified === true;
+  merged.post_compact_reinjection_current_source_verified = incoming.post_compact_reinjection_current_source_verified === true
+    || current.post_compact_reinjection_current_source_verified === true;
+  merged.post_compact_reinjection_memory_receipt_matched = incoming.post_compact_reinjection_memory_receipt_matched === true
+    || current.post_compact_reinjection_memory_receipt_matched === true;
+  merged.post_compact_reinjection_task_session_matched = incoming.post_compact_reinjection_task_session_matched === true
+    || current.post_compact_reinjection_task_session_matched === true;
+  merged.post_compact_reinjection_native_session_matched = incoming.post_compact_reinjection_native_session_matched === true
+    || current.post_compact_reinjection_native_session_matched === true;
+  merged.post_compact_reinjection_receipt_verified = incoming.post_compact_reinjection_receipt_verified === true
+    || current.post_compact_reinjection_receipt_verified === true;
+  merged.post_compact_reinjection_receipt_gaps = incoming.post_compact_reinjection_receipt_verified === true
+    ? []
+    : uniqueCoordinatorStrings([
+      ...(Array.isArray(current.post_compact_reinjection_receipt_gaps) ? current.post_compact_reinjection_receipt_gaps : []),
+      ...(Array.isArray(incoming.post_compact_reinjection_receipt_gaps) ? incoming.post_compact_reinjection_receipt_gaps : []),
+    ]).slice(0, 24);
+  merged.post_compact_receipt_memory_required_doc_rel_paths = uniqueCoordinatorStrings([
+    ...(Array.isArray(current.post_compact_receipt_memory_required_doc_rel_paths) ? current.post_compact_receipt_memory_required_doc_rel_paths : []),
+    ...(Array.isArray(incoming.post_compact_receipt_memory_required_doc_rel_paths) ? incoming.post_compact_receipt_memory_required_doc_rel_paths : []),
+  ]).slice(0, 16);
+  merged.post_compact_receipt_memory_usage_repair_required_doc_rel_paths = uniqueCoordinatorStrings([
+    ...(Array.isArray(current.post_compact_receipt_memory_usage_repair_required_doc_rel_paths) ? current.post_compact_receipt_memory_usage_repair_required_doc_rel_paths : []),
+    ...(Array.isArray(incoming.post_compact_receipt_memory_usage_repair_required_doc_rel_paths) ? incoming.post_compact_receipt_memory_usage_repair_required_doc_rel_paths : []),
+  ]).slice(0, 16);
+  merged.post_compact_receipt_memory_usage_repair_covered_doc_rel_paths = uniqueCoordinatorStrings([
+    ...(Array.isArray(current.post_compact_receipt_memory_usage_repair_covered_doc_rel_paths) ? current.post_compact_receipt_memory_usage_repair_covered_doc_rel_paths : []),
+    ...(Array.isArray(incoming.post_compact_receipt_memory_usage_repair_covered_doc_rel_paths) ? incoming.post_compact_receipt_memory_usage_repair_covered_doc_rel_paths : []),
+  ]).slice(0, 16);
+  merged.post_compact_receipt_memory_gap_codes = uniqueCoordinatorStrings([
+    ...(Array.isArray(current.post_compact_receipt_memory_gap_codes) ? current.post_compact_receipt_memory_gap_codes : []),
+    ...(Array.isArray(incoming.post_compact_receipt_memory_gap_codes) ? incoming.post_compact_receipt_memory_gap_codes : []),
+  ]).slice(0, 24);
+  merged.post_compact_receipt_memory_usage_repair_coverage_rows = Array.isArray(incoming.post_compact_receipt_memory_usage_repair_coverage_rows)
+    && incoming.post_compact_receipt_memory_usage_repair_coverage_rows.length
+    ? incoming.post_compact_receipt_memory_usage_repair_coverage_rows
+    : Array.isArray(current.post_compact_receipt_memory_usage_repair_coverage_rows)
+    ? current.post_compact_receipt_memory_usage_repair_coverage_rows
+    : [];
+  merged.post_compact_receipt_memory_usage_repair_historical_boundary_covered = incoming.post_compact_receipt_memory_usage_repair_historical_boundary_covered === true
+    || current.post_compact_receipt_memory_usage_repair_historical_boundary_covered === true;
+  merged.post_compact_receipt_memory_usage_repair_all_docs_compliant = incoming.post_compact_receipt_memory_usage_repair_all_docs_compliant === true
+    || current.post_compact_receipt_memory_usage_repair_all_docs_compliant === true;
+  merged.post_compact_receipt_memory_usage_repair_task_session_matched = incoming.post_compact_receipt_memory_usage_repair_task_session_matched === true
+    || current.post_compact_receipt_memory_usage_repair_task_session_matched === true;
+  merged.post_compact_receipt_memory_usage_repair_native_session_matched = incoming.post_compact_receipt_memory_usage_repair_native_session_matched === true
+    || current.post_compact_receipt_memory_usage_repair_native_session_matched === true;
+  merged.post_compact_receipt_memory_usage_repair_verified = incoming.post_compact_receipt_memory_usage_repair_verified === true
+    || current.post_compact_receipt_memory_usage_repair_verified === true;
+  merged.post_compact_receipt_memory_usage_repair_gaps = incoming.post_compact_receipt_memory_usage_repair_verified === true
+    ? []
+    : uniqueCoordinatorStrings([
+      ...(Array.isArray(current.post_compact_receipt_memory_usage_repair_gaps) ? current.post_compact_receipt_memory_usage_repair_gaps : []),
+      ...(Array.isArray(incoming.post_compact_receipt_memory_usage_repair_gaps) ? incoming.post_compact_receipt_memory_usage_repair_gaps : []),
+    ]).slice(0, 24);
   return merged;
 }
 
@@ -8022,8 +11430,159 @@ function normalizeReplayRepairConsumptionStatusForCoordinator(value: any, fallba
   return "";
 }
 
+function postCompactCandidateUsageRowsForCoordinator(receipt: any = {}) {
+  return [
+    ...(Array.isArray(receipt.postCompactCandidateUsage) ? receipt.postCompactCandidateUsage : []),
+    ...(Array.isArray(receipt.post_compact_candidate_usage) ? receipt.post_compact_candidate_usage : []),
+    ...(Array.isArray(receipt.postCompactCandidateUsageRows) ? receipt.postCompactCandidateUsageRows : []),
+    ...(Array.isArray(receipt.post_compact_candidate_usage_rows) ? receipt.post_compact_candidate_usage_rows : []),
+  ].filter((row: any) => row && typeof row === "object");
+}
+
+function normalizePostCompactCandidateUsageStateForCoordinator(value: any) {
+  const state = String(value || "").trim().toLowerCase();
+  if (["used", "applied", "consumed"].includes(state)) return "used";
+  if (["verified", "checked", "reviewed", "validated", "confirmed"].includes(state)) return "verified";
+  if (["ignored", "skipped", "unused", "not_used", "not-used", "not used"].includes(state)) return "ignored";
+  return "";
+}
+
+function postCompactReinjectionReceiptProofForCoordinator(brief: any = {}, receipt: any = null) {
+  if (!isPostCompactReinjectionRepairForCoordinator(brief) || !receipt || typeof receipt !== "object") return null;
+  const expectedGateId = String(brief.reinjection_gate_id || brief.reinjectionGateId || "").trim();
+  const expectedCandidateId = String(brief.post_compact_candidate_id || brief.postCompactCandidateId || "").trim();
+  const expectedCandidateKind = String(brief.post_compact_candidate_kind || brief.postCompactCandidateKind || "").trim();
+  const expectedCandidateValue = String(brief.post_compact_candidate_value || brief.postCompactCandidateValue || "").trim();
+  const rows = postCompactCandidateUsageRowsForCoordinator(receipt);
+  const row = rows.find((item: any) => {
+    const gateId = String(item.gateId || item.gate_id || item.reinjectionGateId || item.reinjection_gate_id || "").trim();
+    const candidateId = String(item.candidateId || item.candidate_id || item.postCompactCandidateId || item.post_compact_candidate_id || "").trim();
+    return !!expectedGateId && !!expectedCandidateId && gateId === expectedGateId && candidateId === expectedCandidateId;
+  }) || null;
+  const usageState = normalizePostCompactCandidateUsageStateForCoordinator(
+    row?.usageState || row?.usage_state || row?.status || row?.state || "",
+  );
+  const currentSourceVerified = row?.currentSourceVerified === true
+    || row?.current_source_verified === true
+    || ["true", "yes", "1", "verified"].includes(String(row?.currentSourceVerified || row?.current_source_verified || "").trim().toLowerCase());
+  const reason = compactText(row?.reason || row?.summary || "", 360);
+  const usedText = replayRepairConsumptionStringListForCoordinator(receipt.memoryUsed || receipt.memory_used || receipt.used).join("\n");
+  const ignoredText = replayRepairConsumptionStringListForCoordinator(receipt.memoryIgnored || receipt.memory_ignored || receipt.ignored).join("\n");
+  const expectedTokens = [expectedGateId, expectedCandidateId].filter(Boolean);
+  const memoryText = usageState === "ignored" ? ignoredText : usedText;
+  const memoryReceiptMatched = expectedTokens.length === 2 && expectedTokens.every(token => memoryText.includes(token));
+  const receiptTaskAgentSessionId = String(
+    receipt.task_agent_session_id
+      || receipt.taskAgentSessionId
+      || receipt.session?.task_agent_session_id
+      || receipt.session?.taskAgentSessionId
+      || ""
+  ).trim();
+  const receiptNativeSessionId = String(
+    receipt.native_session_id
+      || receipt.nativeSessionId
+      || receipt.session?.native_session_id
+      || receipt.session?.nativeSessionId
+      || ""
+  ).trim();
+  const usageValid = ["used", "verified", "ignored"].includes(usageState);
+  const verificationValid = usageState === "ignored" ? !!reason : currentSourceVerified === true;
+  const gaps = [
+    !row ? "post_compact_candidate_usage_row" : "",
+    !expectedGateId ? "reinjection_gate_id" : "",
+    !expectedCandidateId ? "post_compact_candidate_id" : "",
+    !usageValid ? "usage_state" : "",
+    usageState !== "ignored" && currentSourceVerified !== true ? "current_source_verified" : "",
+    usageState === "ignored" && !reason ? "ignored_reason" : "",
+    !memoryReceiptMatched ? usageState === "ignored" ? "memoryIgnored_gate_candidate" : "memoryUsed_gate_candidate" : "",
+    !receiptTaskAgentSessionId ? "receipt_task_agent_session_id" : "",
+    !receiptNativeSessionId ? "receipt_native_session_id" : "",
+  ].filter(Boolean);
+  return {
+    schema: "ccm-post-compact-reinjection-repair-receipt-proof-v1",
+    verified: gaps.length === 0 && usageValid && verificationValid && memoryReceiptMatched,
+    reinjectionGateId: expectedGateId,
+    candidateId: expectedCandidateId,
+    candidateKind: expectedCandidateKind,
+    candidateValue: expectedCandidateValue,
+    usageState,
+    currentSourceVerified,
+    reason,
+    memoryReceiptMatched,
+    receiptTaskAgentSessionId,
+    receiptNativeSessionId,
+    gaps,
+  };
+}
+
+function isPostCompactReceiptMemoryUsageRepairForCoordinator(value: any = {}) {
+  return String(value.source || value.dispatch_source || "").trim() === "post_compact_reinjection_repair_receipt_memory_usage_receipt_repair";
+}
+
+function postCompactReceiptMemoryUsageRepairProofForCoordinator(brief: any = {}, receipt: any = null) {
+  if (!isPostCompactReceiptMemoryUsageRepairForCoordinator(brief) || !receipt || typeof receipt !== "object") return null;
+  const requiredDocRelPaths = uniqueCoordinatorStrings(brief.post_compact_receipt_memory_required_doc_rel_paths || []).slice(0, 12);
+  const memoryUsed = replayRepairConsumptionStringListForCoordinator(receipt.memoryUsed || receipt.memory_used || receipt.used);
+  const memoryIgnored = replayRepairConsumptionStringListForCoordinator(receipt.memoryIgnored || receipt.memory_ignored || receipt.ignored);
+  const coverageRows = requiredDocRelPaths.map((relPath: string) => {
+    const usedRows = memoryUsed.filter((item: string) => item.includes(relPath));
+    const ignoredRows = memoryIgnored.filter((item: string) => item.includes(relPath));
+    const usedCovered = usedRows.some((item: string) => /usageState\s*=\s*(used|verified)|\b(used|verified)\b/i.test(item));
+    const currentSourceVerified = usedRows.some((item: string) => /currentSourceVerified\s*=\s*true/i.test(item));
+    const ignoredCovered = ignoredRows.some((item: string) => /usageState\s*=\s*(ignored|not_used|not used)|\bignored\b/i.test(item));
+    const ignoredReasonCovered = ignoredRows.some((item: string) => /reason\s*=\s*[^;\s][^;]*/i.test(item));
+    const ignoredReason = ignoredRows.map((item: string) => item.match(/reason\s*=\s*([^;]+)/i)?.[1]?.trim() || "").find(Boolean) || "";
+    return {
+      relPath,
+      usageState: usedCovered ? "verified" : ignoredCovered ? "ignored" : "missing",
+      covered: usedCovered || ignoredCovered,
+      compliant: usedCovered ? currentSourceVerified : ignoredCovered ? ignoredReasonCovered : false,
+      usedCovered,
+      currentSourceVerified,
+      ignoredCovered,
+      ignoredReasonCovered,
+      reason: ignoredReason,
+    };
+  });
+  const receiptText = [...memoryUsed, ...memoryIgnored].join("\n");
+  const historicalBoundaryCovered = /historical repair completion is recovery evidence|recovery evidence.*not permanent repository truth|历史.*恢复证据.*不是.*永久/i.test(receiptText);
+  const receiptTaskAgentSessionId = String(receipt.task_agent_session_id || receipt.taskAgentSessionId || receipt.session?.task_agent_session_id || "").trim();
+  const receiptNativeSessionId = String(receipt.native_session_id || receipt.nativeSessionId || receipt.session?.native_session_id || "").trim();
+  const originalTaskAgentSessionId = String(brief.original_task_agent_session_id || brief.originalTaskAgentSessionId || "").trim();
+  const originalNativeSessionId = String(brief.original_native_session_id || brief.originalNativeSessionId || "").trim();
+  const allDocsCovered = requiredDocRelPaths.length > 0 && coverageRows.every((row: any) => row.covered === true);
+  const allDocsCompliant = requiredDocRelPaths.length > 0 && coverageRows.every((row: any) => row.compliant === true);
+  const gaps = [
+    !requiredDocRelPaths.length ? "required_doc_rel_paths" : "",
+    !allDocsCovered ? "required_docs_missing" : "",
+    !allDocsCompliant ? "usage_state_or_freshness_invalid" : "",
+    !historicalBoundaryCovered ? "historical_freshness_boundary_missing" : "",
+    !receiptTaskAgentSessionId ? "receipt_task_agent_session_id" : "",
+    !receiptNativeSessionId ? "receipt_native_session_id" : "",
+    originalTaskAgentSessionId && receiptTaskAgentSessionId === originalTaskAgentSessionId ? "repair_task_session_reused_original" : "",
+    originalNativeSessionId && receiptNativeSessionId === originalNativeSessionId ? "repair_native_session_reused_original" : "",
+  ].filter(Boolean);
+  return {
+    schema: "ccm-post-compact-reinjection-repair-receipt-memory-usage-repair-proof-v1",
+    verified: gaps.length === 0,
+    requiredDocRelPaths,
+    coveredDocRelPaths: coverageRows.filter((row: any) => row.covered).map((row: any) => row.relPath),
+    coverageRows,
+    historicalBoundaryCovered,
+    allDocsCovered,
+    allDocsCompliant,
+    receiptTaskAgentSessionId,
+    receiptNativeSessionId,
+    originalTaskAgentSessionId,
+    originalNativeSessionId,
+    gaps,
+  };
+}
+
 function classifyReplayRepairBriefConsumptionForCoordinator(brief: any = {}, receipt: any = null) {
   if (!receipt || typeof receipt !== "object" || !Object.keys(receipt).length) return null;
+  const postCompactReinjectionProof = postCompactReinjectionReceiptProofForCoordinator(brief, receipt);
+  const postCompactReceiptMemoryUsageRepairProof = postCompactReceiptMemoryUsageRepairProofForCoordinator(brief, receipt);
   const rows = replayRepairConsumptionRowsForCoordinator(receipt);
   const matchedRow = rows.find((row: any) => replayRepairConsumptionMatchesBriefForCoordinator(row, brief));
   if (matchedRow) {
@@ -8031,11 +11590,15 @@ function classifyReplayRepairBriefConsumptionForCoordinator(brief: any = {}, rec
       matchedRow.usage_state || matchedRow.usageState || matchedRow.status || matchedRow.provider_reproof_status || matchedRow.providerReproofStatus,
       String(matchedRow.provider_reproof_status || matchedRow.providerReproofStatus || "").trim().toLowerCase() === "strong" ? "strong" : "used",
     );
+    const providerRankingProof = providerRankingProvenanceProofFromConsumptionRowForCoordinator(matchedRow, brief, status || "used");
     return {
       status: status || "used",
       state: String(matchedRow.usage_state || matchedRow.usageState || matchedRow.status || ""),
       reason: compactText(matchedRow.reason || matchedRow.summary || "", 360),
       source: "receipt.replayRepairDispatchBriefUsage",
+      providerRankingProof,
+      postCompactReinjectionProof,
+      postCompactReceiptMemoryUsageRepairProof,
     };
   }
   const tokens = [
@@ -8056,6 +11619,8 @@ function classifyReplayRepairBriefConsumptionForCoordinator(brief: any = {}, rec
       state: "",
       reason: compactText(text, 360),
       source: "receipt.memoryUsed",
+      postCompactReinjectionProof,
+      postCompactReceiptMemoryUsageRepairProof,
     };
   }
   if (containsToken(receipt.memoryIgnored || receipt.memory_ignored || receipt.ignored)) {
@@ -8065,6 +11630,8 @@ function classifyReplayRepairBriefConsumptionForCoordinator(brief: any = {}, rec
       state: "",
       reason: compactText(text, 360),
       source: "receipt.memoryIgnored",
+      postCompactReinjectionProof,
+      postCompactReceiptMemoryUsageRepairProof,
     };
   }
   const blockerText = replayRepairConsumptionStringListForCoordinator([
@@ -8078,6 +11645,7 @@ function classifyReplayRepairBriefConsumptionForCoordinator(brief: any = {}, rec
       state: String(receipt.status || ""),
       reason: compactText(blockerText || receipt.summary || "receipt blocked without replay repair usage declaration", 360),
       source: "receipt.blockers",
+      postCompactReinjectionProof,
     };
   }
   return {
@@ -8085,6 +11653,7 @@ function classifyReplayRepairBriefConsumptionForCoordinator(brief: any = {}, rec
     state: "",
     reason: "receipt did not declare replay repair brief usage",
     source: "receipt",
+    postCompactReinjectionProof,
   };
 }
 
@@ -8096,10 +11665,23 @@ export function recordReplayRepairDispatchBriefTimelineBinding(groupId: string, 
   const event = input.timeline_event || input.timelineEvent || null;
   const eventType = String(input.timeline_event_type || input.timelineEventType || event?.type || options.timelineEventType || "").trim();
   const consumption = classifyReplayRepairBriefConsumptionForCoordinator(brief, input.receipt || input.ccm_receipt || input.delivery_summary || null);
+  const postCompactReinjectionProof: any = consumption?.postCompactReinjectionProof || {};
+  const postCompactReceiptMemoryUsageRepairProof: any = consumption?.postCompactReceiptMemoryUsageRepairProof || {};
   const assignmentId = String(input.assignment_id || input.assignmentId || "").trim();
   const dispatchKey = String(input.dispatch_key || input.dispatchKey || "").trim();
   const taskId = String(input.task_id || input.taskId || "").trim();
   const project = String(input.project || input.target_project || input.targetProject || brief.target_project || brief.targetProject || "").trim();
+  const taskAgentSessionId = String(input.task_agent_session_id || input.taskAgentSessionId || "").trim();
+  const nativeSessionId = String(input.native_session_id || input.nativeSessionId || "").trim();
+  const postCompactTaskSessionMatched = !!taskAgentSessionId
+    && postCompactReinjectionProof.receiptTaskAgentSessionId === taskAgentSessionId;
+  const postCompactNativeSessionMatched = !!nativeSessionId
+    && postCompactReinjectionProof.receiptNativeSessionId === nativeSessionId;
+  const postCompactReceiptMemoryUsageRepairTaskSessionMatched = !!taskAgentSessionId
+    && postCompactReceiptMemoryUsageRepairProof.receiptTaskAgentSessionId === taskAgentSessionId;
+  const postCompactReceiptMemoryUsageRepairNativeSessionMatched = !!nativeSessionId
+    && postCompactReceiptMemoryUsageRepairProof.receiptNativeSessionId === nativeSessionId;
+  const providerRankingProof: any = consumption?.providerRankingProof || {};
   const timelineBindingId = `replay-repair-brief-timeline:${hashCoordinator([
     groupId,
     taskId,
@@ -8117,16 +11699,30 @@ export function recordReplayRepairDispatchBriefTimelineBinding(groupId: string, 
     brief_id: briefId,
     work_item_id: brief.work_item_id || brief.workItemId || input.work_item_id || "",
     source: brief.source || input.source || "",
+    component: brief.component || input.component || "",
     assignment_id: assignmentId,
     dispatch_key: dispatchKey,
     worker_context_packet_id: input.worker_context_packet_id || input.workerContextPacketId || "",
     worker_handoff_id: input.worker_handoff_id || input.workerHandoffId || "",
     memory_context_snapshot_id: input.memory_context_snapshot_id || input.memoryContextSnapshotId || "",
     memory_context_snapshot_checksum: input.memory_context_snapshot_checksum || input.memoryContextSnapshotChecksum || "",
-    task_agent_session_id: input.task_agent_session_id || input.taskAgentSessionId || "",
-    native_session_id: input.native_session_id || input.nativeSessionId || "",
+    task_agent_session_id: taskAgentSessionId,
+    native_session_id: nativeSessionId,
     execution_id: input.execution_id || input.executionId || brief.execution_id || brief.executionId || "",
     proof_entry_id: brief.proof_entry_id || brief.proofEntryId || input.proof_entry_id || "",
+    reinjection_gate_id: brief.reinjection_gate_id || brief.reinjectionGateId || input.reinjection_gate_id || "",
+    post_compact_candidate_id: brief.post_compact_candidate_id || brief.postCompactCandidateId || input.post_compact_candidate_id || "",
+    post_compact_candidate_kind: brief.post_compact_candidate_kind || brief.postCompactCandidateKind || input.post_compact_candidate_kind || "",
+    post_compact_candidate_value: brief.post_compact_candidate_value || brief.postCompactCandidateValue || input.post_compact_candidate_value || "",
+    post_compact_candidate_source_message_id: brief.post_compact_candidate_source_message_id || brief.postCompactCandidateSourceMessageId || input.post_compact_candidate_source_message_id || "",
+    original_worker_context_packet_id: brief.original_worker_context_packet_id || brief.originalWorkerContextPacketId || "",
+    original_binding_id: brief.original_binding_id || brief.originalBindingId || "",
+    original_assignment_id: brief.original_assignment_id || brief.originalAssignmentId || "",
+    original_dispatch_key: brief.original_dispatch_key || brief.originalDispatchKey || "",
+    original_task_agent_session_id: brief.original_task_agent_session_id || brief.originalTaskAgentSessionId || "",
+    original_native_session_id: brief.original_native_session_id || brief.originalNativeSessionId || "",
+    post_compact_receipt_memory_required_doc_rel_paths: uniqueCoordinatorStrings(brief.post_compact_receipt_memory_required_doc_rel_paths || []).slice(0, 12),
+    post_compact_receipt_memory_gap_codes: uniqueCoordinatorStrings(brief.post_compact_receipt_memory_gap_codes || []).slice(0, 24),
     request_patch_checksum: brief.request_patch_checksum || brief.requestPatchChecksum || input.request_patch_checksum || "",
     provider_reproof_status: brief.provider_reproof_status || brief.providerReproofStatus || input.provider_reproof_status || "",
     provider_reproof_reason: brief.provider_reproof_reason || brief.providerReproofReason || input.provider_reproof_reason || "",
@@ -8141,6 +11737,64 @@ export function recordReplayRepairDispatchBriefTimelineBinding(groupId: string, 
     replay_repair_consumption_reason: consumption?.reason || "",
     replay_repair_consumption_source: consumption?.source || "",
     replay_repair_consumption_state: consumption?.state || "",
+    post_compact_reinjection_receipt_usage_state: postCompactReinjectionProof.usageState || "",
+    post_compact_reinjection_receipt_reason: postCompactReinjectionProof.reason || "",
+    post_compact_reinjection_current_source_verified: postCompactReinjectionProof.currentSourceVerified === true,
+    post_compact_reinjection_memory_receipt_matched: postCompactReinjectionProof.memoryReceiptMatched === true,
+    post_compact_reinjection_receipt_task_agent_session_id: postCompactReinjectionProof.receiptTaskAgentSessionId || "",
+    post_compact_reinjection_receipt_native_session_id: postCompactReinjectionProof.receiptNativeSessionId || "",
+    post_compact_reinjection_task_session_matched: postCompactTaskSessionMatched,
+    post_compact_reinjection_native_session_matched: postCompactNativeSessionMatched,
+    post_compact_reinjection_receipt_gaps: Array.isArray(postCompactReinjectionProof.gaps) ? postCompactReinjectionProof.gaps : [],
+    post_compact_reinjection_receipt_verified: postCompactReinjectionProof.verified === true
+      && postCompactTaskSessionMatched
+      && postCompactNativeSessionMatched,
+    post_compact_receipt_memory_usage_repair_required_doc_rel_paths: postCompactReceiptMemoryUsageRepairProof.requiredDocRelPaths || [],
+    post_compact_receipt_memory_usage_repair_covered_doc_rel_paths: postCompactReceiptMemoryUsageRepairProof.coveredDocRelPaths || [],
+    post_compact_receipt_memory_usage_repair_coverage_rows: postCompactReceiptMemoryUsageRepairProof.coverageRows || [],
+    post_compact_receipt_memory_usage_repair_historical_boundary_covered: postCompactReceiptMemoryUsageRepairProof.historicalBoundaryCovered === true,
+    post_compact_receipt_memory_usage_repair_all_docs_compliant: postCompactReceiptMemoryUsageRepairProof.allDocsCompliant === true,
+    post_compact_receipt_memory_usage_repair_receipt_task_agent_session_id: postCompactReceiptMemoryUsageRepairProof.receiptTaskAgentSessionId || "",
+    post_compact_receipt_memory_usage_repair_receipt_native_session_id: postCompactReceiptMemoryUsageRepairProof.receiptNativeSessionId || "",
+    post_compact_receipt_memory_usage_repair_task_session_matched: postCompactReceiptMemoryUsageRepairTaskSessionMatched,
+    post_compact_receipt_memory_usage_repair_native_session_matched: postCompactReceiptMemoryUsageRepairNativeSessionMatched,
+    post_compact_receipt_memory_usage_repair_gaps: postCompactReceiptMemoryUsageRepairProof.gaps || [],
+    post_compact_receipt_memory_usage_repair_verified: postCompactReceiptMemoryUsageRepairProof.verified === true
+      && postCompactReceiptMemoryUsageRepairTaskSessionMatched
+      && postCompactReceiptMemoryUsageRepairNativeSessionMatched,
+    provider_switch_decision_receipt_id: providerRankingProof.receiptId
+      || brief.provider_switch_decision_receipt_id
+      || brief.providerSwitchDecisionReceiptId
+      || input.provider_switch_decision_receipt_id
+      || input.providerSwitchDecisionReceiptId
+      || "",
+    provider_switch_decision_receipt_checksum: providerRankingProof.receiptChecksum
+      || brief.provider_switch_decision_receipt_checksum
+      || brief.providerSwitchDecisionReceiptChecksum
+      || input.provider_switch_decision_receipt_checksum
+      || input.providerSwitchDecisionReceiptChecksum
+      || "",
+    provider_ranking_provenance_rel_paths: providerRankingProof.typedMemoryRelPaths?.length
+      ? providerRankingProof.typedMemoryRelPaths
+      : providerRankingProvenanceProofStringListForCoordinator(
+        brief.provider_ranking_provenance_rel_paths,
+        brief.providerRankingProvenanceRelPaths,
+        input.provider_ranking_provenance_rel_paths,
+        input.providerRankingProvenanceRelPaths,
+      ).slice(0, 24),
+    provider_ranking_provenance_row_ids: providerRankingProof.typedMemoryRowIds?.length
+      ? providerRankingProof.typedMemoryRowIds
+      : providerRankingProvenanceProofStringListForCoordinator(
+        brief.provider_ranking_provenance_row_ids,
+        brief.providerRankingProvenanceRowIds,
+        input.provider_ranking_provenance_row_ids,
+        input.providerRankingProvenanceRowIds,
+      ).slice(0, 32),
+    provider_ranking_provenance_preserved: providerRankingProof.preserved === true,
+    provider_ranking_provenance_required: providerRankingProof.required === true,
+    provider_ranking_provenance_repair_status: providerRankingProof.repairStatus || "",
+    provider_ranking_provenance_repair_gap_type: providerRankingProof.repairGapType || "",
+    provider_ranking_provenance_receipt_consumption_verified: providerRankingProof.verified === true,
     should_create_real_task: false,
     event_types: eventType ? [eventType] : [],
     event_refs: eventType || event?.id ? [{
@@ -8172,6 +11826,14 @@ export function recordReplayRepairDispatchBriefTimelineBinding(groupId: string, 
   };
   writeJsonAtomicForCoordinator(next.file, next);
   const finalEntry = existingIndex >= 0 ? entries[existingIndex] : entry;
+  if (eventType === "child_agent_receipt") {
+    attachReplayRepairAssignmentReceiptForCoordinator(
+      groupId,
+      finalEntry,
+      input.receipt || input.ccm_receipt || input.delivery_summary || null,
+      at,
+    );
+  }
   if (String(finalEntry.source || "") === "api_microcompact_native_apply_provider_reproof"
     && ["strong", "used", "verified", "ignored", "blocked"].includes(String(finalEntry.replay_repair_consumption_status || "").trim().toLowerCase())) {
     try {
@@ -8181,7 +11843,51 @@ export function recordReplayRepairDispatchBriefTimelineBinding(groupId: string, 
       });
     } catch {}
   }
+  if (String(finalEntry.source || "") === "worker_context_provider_ranking_provenance_compact_repair"
+    && finalEntry.provider_ranking_provenance_receipt_consumption_verified === true
+    && String(finalEntry.replay_repair_consumption_status || "").trim().toLowerCase() === "verified") {
+    try {
+      distillProviderRankingProvenanceCompactRepairReceiptConsumptionToTypedMemory(groupId, { rows: [finalEntry] }, {
+        reason: "provider-ranking-provenance-compact-repair-receipt-consumption",
+        updatedAt: at,
+      });
+    } catch {}
+  }
   const completion = closeReplayRepairWorkItemsFromTimelineBindingForCoordinator(groupId, finalEntry, at);
+  if (completion.closed > 0
+    && isPostCompactReinjectionRepairForCoordinator(finalEntry)
+    && timelineBindingHasRequiredPostCompactReinjectionRepairEvidence(finalEntry)) {
+    try {
+      distillPostCompactReinjectionRepairReceiptConsumptionToTypedMemory(groupId, {
+        rows: [{
+          ...finalEntry,
+          completion_source: "post_compact_reinjection_replay_repair_receipt_consumption",
+          resolution_reason: "post_compact_reinjection_repair_receipt_verified",
+          completed_at: at,
+        }],
+      }, {
+        reason: "post-compact-reinjection-repair-receipt-consumption",
+        updatedAt: at,
+      });
+    } catch {}
+  }
+  if (completion.closed > 0
+    && isPostCompactReceiptMemoryUsageRepairForCoordinator(finalEntry)
+    && timelineBindingHasRequiredPostCompactReceiptMemoryUsageRepairEvidence(finalEntry)) {
+    try {
+      distillPostCompactReceiptMemoryUsageRepairCompletionToTypedMemory(groupId, {
+        rows: [{
+          ...finalEntry,
+          completion_source: "post_compact_reinjection_receipt_memory_usage_repair_receipt_consumption",
+          resolution_reason: "post_compact_reinjection_receipt_memory_usage_corrected_receipt_verified",
+          completed_at: at,
+        }],
+      }, {
+        reason: "post-compact-receipt-memory-usage-repair-completion",
+        updatedAt: at,
+      });
+    } catch {}
+  }
   return completion.closed > 0 ? { ...finalEntry, repair_work_item_completion: completion } : finalEntry;
 }
 
@@ -8214,6 +11920,14 @@ function candidateNativeBindingForCoordinator(candidate: any = {}) {
     candidate.request_telemetry_dispatch_status ? `dispatch=${candidate.request_telemetry_dispatch_status}` : "",
     candidate.runner_request_id ? `runner=${candidate.runner_request_id}` : "",
     candidate.execution_id ? `execution=${candidate.execution_id}` : "",
+    candidate.provider_switch_decision_receipt_id ? `provider_receipt=${candidate.provider_switch_decision_receipt_id}` : "",
+    candidate.provider_switch_decision_receipt_checksum ? `provider_receipt_checksum=${candidate.provider_switch_decision_receipt_checksum}` : "",
+    Array.isArray(candidate.provider_ranking_provenance_rel_paths) && candidate.provider_ranking_provenance_rel_paths.length
+      ? `provider_memory=${candidate.provider_ranking_provenance_rel_paths.slice(0, 3).join("|")}`
+      : "",
+    Array.isArray(candidate.provider_ranking_provenance_gap_codes) && candidate.provider_ranking_provenance_gap_codes.length
+      ? `provider_gaps=${candidate.provider_ranking_provenance_gap_codes.slice(0, 3).join("|")}`
+      : "",
   ].filter(Boolean);
 }
 
@@ -8280,7 +11994,18 @@ function normalizeReplayRepairPacketBriefForCoordinator(item: any = {}) {
     brief_id: item.brief_id || item.briefId || "",
     work_item_id: item.work_item_id || item.workItemId || "",
     source: item.source || "",
+    component: item.component || "",
     target_project: item.target_project || item.targetProject || "",
+    reinjection_gate_id: item.reinjection_gate_id || item.reinjectionGateId || "",
+    post_compact_candidate_id: item.post_compact_candidate_id || item.postCompactCandidateId || "",
+    post_compact_candidate_kind: item.post_compact_candidate_kind || item.postCompactCandidateKind || "",
+    post_compact_candidate_value: item.post_compact_candidate_value || item.postCompactCandidateValue || "",
+    post_compact_candidate_source_message_id: item.post_compact_candidate_source_message_id || item.postCompactCandidateSourceMessageId || "",
+    original_worker_context_packet_id: item.original_worker_context_packet_id || item.originalWorkerContextPacketId || "",
+    original_binding_id: item.original_binding_id || item.originalBindingId || "",
+    original_task_agent_session_id: item.original_task_agent_session_id || item.originalTaskAgentSessionId || "",
+    original_native_session_id: item.original_native_session_id || item.originalNativeSessionId || "",
+    post_compact_receipt_memory_required_doc_rel_paths: item.post_compact_receipt_memory_required_doc_rel_paths || item.postCompactReceiptMemoryRequiredDocRelPaths || [],
     proof_entry_id: item.proof_entry_id || item.proofEntryId || "",
     request_patch_checksum: item.request_patch_checksum || item.requestPatchChecksum || "",
     provider_reproof_status: item.provider_reproof_status || item.providerReproofStatus || "",
@@ -8326,6 +12051,12 @@ function buildReplayRepairWorkerContextPacketProbeForCoordinator(assignment: any
       has_brief_id: renderedIncludes(brief.brief_id),
       has_work_item_id: renderedIncludes(brief.work_item_id),
       has_source: renderedIncludes(brief.source),
+      has_component: renderedIncludes(brief.component),
+      has_reinjection_gate_id: renderedIncludes(brief.reinjection_gate_id),
+      has_post_compact_candidate_id: renderedIncludes(brief.post_compact_candidate_id),
+      has_post_compact_candidate_kind: renderedIncludes(brief.post_compact_candidate_kind),
+      has_post_compact_candidate_value: renderedIncludes(brief.post_compact_candidate_value),
+      has_post_compact_candidate_source_message_id: renderedIncludes(brief.post_compact_candidate_source_message_id),
       has_proof_entry_id: renderedIncludes(brief.proof_entry_id),
       has_request_patch_checksum: renderedIncludes(brief.request_patch_checksum),
       has_provider_reproof_status: renderedIncludes(brief.provider_reproof_status),
@@ -8355,6 +12086,7 @@ export function recordReplayRepairDispatchBriefAssignmentBinding(groupId: string
   const at = String(options.at || new Date().toISOString());
   const ledger = readReplayRepairDispatchBindingLedgerForCoordinator(groupId);
   const entries = Array.isArray(ledger.entries) ? [...ledger.entries] : [];
+  const workerContextPacket = assignment.worker_context_packet || assignment.workerContextPacket || null;
   const packetProbe = buildReplayRepairWorkerContextPacketProbeForCoordinator(assignment, brief);
   const bindingId = `replay-repair-brief-assignment:${hashCoordinator([
     groupId,
@@ -8369,6 +12101,7 @@ export function recordReplayRepairDispatchBriefAssignmentBinding(groupId: string
     brief_id: brief.brief_id || "",
     work_item_id: brief.work_item_id || "",
     source: brief.source || "",
+    component: brief.component || "",
     project: assignment.project || assignment.targetName || "",
     assignment_id: assignment.assignmentId || assignment.assignment_id || "",
     dispatch_key: assignment.dispatchKey || assignment.dispatch_key || "",
@@ -8377,7 +12110,29 @@ export function recordReplayRepairDispatchBriefAssignmentBinding(groupId: string
     source_worker_context_packet_id: brief.worker_context_packet_id || "",
     source_worker_context_packet_binding_id: brief.worker_context_packet_binding_id || brief.binding_id || "",
     source_worker_context_packet_memory_policy_reason: brief.worker_context_packet_memory_policy_reason || "",
+    reinjection_gate_id: brief.reinjection_gate_id || "",
+    post_compact_candidate_id: brief.post_compact_candidate_id || "",
+    post_compact_candidate_kind: brief.post_compact_candidate_kind || "",
+    post_compact_candidate_value: brief.post_compact_candidate_value || "",
+    post_compact_candidate_source_message_id: brief.post_compact_candidate_source_message_id || "",
+    original_worker_context_packet_id: brief.original_worker_context_packet_id || "",
+    original_binding_id: brief.original_binding_id || "",
+    original_assignment_id: brief.original_assignment_id || "",
+    original_dispatch_key: brief.original_dispatch_key || "",
+    original_task_agent_session_id: brief.original_task_agent_session_id || "",
+    original_native_session_id: brief.original_native_session_id || "",
+    post_compact_receipt_memory_required_doc_rel_paths: brief.post_compact_receipt_memory_required_doc_rel_paths || [],
     worker_context_packet_context_usage: packetProbe.context_usage,
+    worker_context_packet_acceptance: workerContextPacket?.acceptance || null,
+    post_compact_reinjection_repair_receipt_memory_contract: workerContextPacket?.post_compact_reinjection_repair_receipt_memory_contract
+      || workerContextPacket?.postCompactReinjectionRepairReceiptMemoryContract
+      || null,
+    worker_context_packet_post_compact_reinjection_repair_receipt_memory_contract: workerContextPacket?.post_compact_reinjection_repair_receipt_memory_contract
+      || workerContextPacket?.postCompactReinjectionRepairReceiptMemoryContract
+      || null,
+    provider_ranking_compact_repair_receipt_memory_contract: workerContextPacket?.provider_ranking_compact_repair_receipt_memory_contract
+      || workerContextPacket?.providerRankingCompactRepairReceiptMemoryContract
+      || null,
     worker_context_provider_dispatch_decision: assignment.worker_context_provider_dispatch_decision
       || assignment.workerContextProviderDispatchDecision
       || assignment.provider_dispatch_decision
@@ -8435,6 +12190,46 @@ export function recordReplayRepairDispatchBriefAssignmentBinding(groupId: string
   return entry;
 }
 
+function attachReplayRepairAssignmentReceiptForCoordinator(groupId: string, binding: any = {}, receipt: any = null, at = new Date().toISOString()) {
+  if (!groupId || !receipt || typeof receipt !== "object") return null;
+  const ledger = readReplayRepairDispatchBindingLedgerForCoordinator(groupId);
+  const entries = Array.isArray(ledger.entries) ? [...ledger.entries] : [];
+  const index = entries.findIndex((entry: any) => {
+    if (binding.brief_id && String(entry.brief_id || "") !== String(binding.brief_id || "")) return false;
+    if (binding.assignment_id && String(entry.assignment_id || "") === String(binding.assignment_id || "")) return true;
+    if (binding.dispatch_key && String(entry.dispatch_key || "") === String(binding.dispatch_key || "")) return true;
+    return !!binding.worker_context_packet_id
+      && String(entry.worker_context_packet_id || "") === String(binding.worker_context_packet_id || "");
+  });
+  if (index < 0) return null;
+  entries[index] = {
+    ...entries[index],
+    worker_context_packet_receipt: receipt,
+    receipt_status: binding.receipt_status || receipt.status || entries[index].receipt_status || "",
+    task_id: binding.task_id || entries[index].task_id || "",
+    worker_handoff_id: binding.worker_handoff_id || entries[index].worker_handoff_id || "",
+    task_agent_session_id: binding.task_agent_session_id || entries[index].task_agent_session_id || "",
+    native_session_id: binding.native_session_id || entries[index].native_session_id || "",
+    execution_id: binding.execution_id || entries[index].execution_id || "",
+    receipt_attached_at: at,
+    at,
+  };
+  const next = {
+    ...ledger,
+    schema: "ccm-replay-repair-main-agent-dispatch-brief-assignment-ledger-v1",
+    version: ledger.version || 1,
+    groupId,
+    file: ledger.file || getReplayRepairDispatchBindingsFileForCoordinator(groupId),
+    updatedAt: at,
+    bindingCount: entries.length,
+    receiptAttachedCount: entries.filter((entry: any) => entry.worker_context_packet_receipt && typeof entry.worker_context_packet_receipt === "object").length,
+    ...providerSwitchBindingLedgerCountersForCoordinator(entries),
+    entries: entries.slice(-160),
+  };
+  writeJsonAtomicForCoordinator(next.file, next);
+  return entries[index];
+}
+
 export function buildReplayRepairDispatchBriefForCoordinator(groupId: string, candidate: any = {}, index = 0, existing: any = {}, at = new Date().toISOString()) {
   const workItemId = String(candidate.work_item_id || candidate.workItemId || `repair-${index}`).trim();
   const targetProject = compactText(candidate.dispatch_target || candidate.targetProject || candidate.target_project || candidate.repair_target || "memory-context", 120);
@@ -8442,6 +12237,25 @@ export function buildReplayRepairDispatchBriefForCoordinator(groupId: string, ca
   const nativeProofSource = isApiMicrocompactNativeProofRepairSourceForCoordinator(candidate.source);
   const ignoreMemoryReceiptSource = String(candidate.source || "") === "worker_context_ignore_memory_receipt_repair";
   const pressureMemoryProvenanceReceiptSource = String(candidate.source || "") === "worker_context_pressure_memory_provenance_receipt_repair";
+  const providerOverrideFollowupReceiptValidationSource = String(candidate.source || "") === "worker_context_provider_dispatch_override_followup_receipt_contract_validation_repair";
+  const providerRankingProvenanceCompactRepairSource = String(candidate.source || "") === "worker_context_provider_ranking_provenance_compact_repair";
+  const providerRankingMemoryUsageReceiptRepairSource = String(candidate.source || "") === "worker_context_provider_ranking_compact_repair_receipt_memory_usage_receipt_repair";
+  const postCompactReceiptMemoryUsageRepairSource = String(candidate.source || "") === "post_compact_reinjection_repair_receipt_memory_usage_receipt_repair";
+  const readPlanRevalidationRepairSource = String(candidate.source || "") === "compact_read_plan_revalidation_repair";
+  const postCompactReinjectionRepairSource = String(candidate.source || "") === "compact_boundary_replay_repair"
+    && String(candidate.component || "") === "post_compact_reinject";
+  const revalidationGateId = String(candidate.revalidation_gate_id || candidate.revalidationGateId || "").trim();
+  const readPlanId = String(candidate.read_plan_id || candidate.readPlanId || "").trim();
+  const referenceId = String(candidate.reference_id || candidate.referenceId || "").trim();
+  const reinjectionGateId = String(candidate.reinjection_gate_id || candidate.reinjectionGateId || "").trim();
+  const postCompactCandidateId = String(candidate.post_compact_candidate_id || candidate.postCompactCandidateId || "").trim();
+  const postCompactCandidateKind = String(candidate.post_compact_candidate_kind || candidate.postCompactCandidateKind || "").trim();
+  const postCompactCandidateValue = compactText(candidate.post_compact_candidate_value || candidate.postCompactCandidateValue || "", 520);
+  const postCompactCandidateSourceMessageId = String(candidate.post_compact_candidate_source_message_id || candidate.postCompactCandidateSourceMessageId || "").trim();
+  const expectedTaskAgentSessionId = String(candidate.expected_task_agent_session_id || candidate.expectedTaskAgentSessionId || "").trim();
+  const expectedNativeSessionId = String(candidate.expected_native_session_id || candidate.expectedNativeSessionId || "").trim();
+  const receiptTaskAgentSessionId = String(candidate.receipt_task_agent_session_id || candidate.receiptTaskAgentSessionId || "").trim();
+  const receiptNativeSessionId = String(candidate.receipt_native_session_id || candidate.receiptNativeSessionId || "").trim();
   const pressureProvenanceRelPaths = Array.isArray(candidate.pressure_memory_provenance_rel_paths)
     ? candidate.pressure_memory_provenance_rel_paths.map((item: any) => String(item || "").trim()).filter(Boolean).slice(0, 12)
     : [];
@@ -8450,6 +12264,60 @@ export function buildReplayRepairDispatchBriefForCoordinator(groupId: string, ca
     : [];
   const pressureProvenanceGapCodes = Array.isArray(candidate.pressure_memory_provenance_gap_codes)
     ? candidate.pressure_memory_provenance_gap_codes.map((item: any) => String(item || "").trim()).filter(Boolean).slice(0, 12)
+    : [];
+  const providerOverrideFollowupRelPaths = Array.isArray(candidate.provider_override_followup_contract_rel_paths)
+    ? candidate.provider_override_followup_contract_rel_paths.map((item: any) => String(item || "").trim()).filter(Boolean).slice(0, 12)
+    : [];
+  const providerOverrideFollowupWorkItemIds = Array.isArray(candidate.provider_override_followup_contract_work_item_ids)
+    ? candidate.provider_override_followup_contract_work_item_ids.map((item: any) => String(item || "").trim()).filter(Boolean).slice(0, 12)
+    : [];
+  const providerOverrideFollowupOverrideIds = Array.isArray(candidate.provider_override_followup_contract_override_ids)
+    ? candidate.provider_override_followup_contract_override_ids.map((item: any) => String(item || "").trim()).filter(Boolean).slice(0, 12)
+    : [];
+  const providerOverrideFollowupGapCodes = Array.isArray(candidate.provider_override_followup_contract_gap_codes)
+    ? candidate.provider_override_followup_contract_gap_codes.map((item: any) => String(item || "").trim()).filter(Boolean).slice(0, 12)
+    : [];
+  const providerRankingProvenanceRelPaths = Array.isArray(candidate.provider_ranking_provenance_rel_paths)
+    ? candidate.provider_ranking_provenance_rel_paths.map((item: any) => String(item || "").trim()).filter(Boolean).slice(0, 12)
+    : [];
+  const providerRankingProvenanceRowIds = Array.isArray(candidate.provider_ranking_provenance_row_ids)
+    ? candidate.provider_ranking_provenance_row_ids.map((item: any) => String(item || "").trim()).filter(Boolean).slice(0, 16)
+    : [];
+  const providerRankingProvenanceGapCodes = Array.isArray(candidate.provider_ranking_provenance_gap_codes)
+    ? candidate.provider_ranking_provenance_gap_codes.map((item: any) => String(item || "").trim()).filter(Boolean).slice(0, 12)
+    : [];
+  const providerRankingProvenanceMissingRelPaths = Array.isArray(candidate.provider_ranking_provenance_missing_rel_paths)
+    ? candidate.provider_ranking_provenance_missing_rel_paths.map((item: any) => String(item || "").trim()).filter(Boolean).slice(0, 12)
+    : [];
+  const providerRankingProvenanceMissingRowIds = Array.isArray(candidate.provider_ranking_provenance_missing_row_ids)
+    ? candidate.provider_ranking_provenance_missing_row_ids.map((item: any) => String(item || "").trim()).filter(Boolean).slice(0, 16)
+    : [];
+  const providerRankingMemoryReceiptRequiredDocRelPaths = providerRankingMemoryUsageReceiptRepairSource
+    ? uniqueCoordinatorStrings([
+      ...(Array.isArray(candidate.provider_ranking_memory_receipt_required_doc_rel_paths) ? candidate.provider_ranking_memory_receipt_required_doc_rel_paths : []),
+      ...providerRankingProvenanceRelPaths,
+    ]).slice(0, 12)
+    : [];
+  const providerRankingMemoryReceiptMissingDocRelPaths = providerRankingMemoryUsageReceiptRepairSource && Array.isArray(candidate.provider_ranking_memory_receipt_missing_doc_rel_paths)
+    ? candidate.provider_ranking_memory_receipt_missing_doc_rel_paths.map((item: any) => String(item || "").trim()).filter(Boolean).slice(0, 12)
+    : [];
+  const providerRankingMemoryReceiptMissingUsageStateDocRelPaths = providerRankingMemoryUsageReceiptRepairSource && Array.isArray(candidate.provider_ranking_memory_receipt_missing_usage_state_doc_rel_paths)
+    ? candidate.provider_ranking_memory_receipt_missing_usage_state_doc_rel_paths.map((item: any) => String(item || "").trim()).filter(Boolean).slice(0, 12)
+    : [];
+  const postCompactReceiptMemoryRequiredDocRelPaths = postCompactReceiptMemoryUsageRepairSource
+    ? uniqueCoordinatorStrings(candidate.post_compact_receipt_memory_required_doc_rel_paths || []).slice(0, 12)
+    : [];
+  const postCompactReceiptMemoryMissingDocRelPaths = postCompactReceiptMemoryUsageRepairSource
+    ? uniqueCoordinatorStrings(candidate.post_compact_receipt_memory_missing_doc_rel_paths || []).slice(0, 12)
+    : [];
+  const postCompactReceiptMemoryMissingCurrentSourceVerifiedDocRelPaths = postCompactReceiptMemoryUsageRepairSource
+    ? uniqueCoordinatorStrings(candidate.post_compact_receipt_memory_missing_current_source_verified_doc_rel_paths || []).slice(0, 12)
+    : [];
+  const postCompactReceiptMemoryMissingIgnoredReasonDocRelPaths = postCompactReceiptMemoryUsageRepairSource
+    ? uniqueCoordinatorStrings(candidate.post_compact_receipt_memory_missing_ignored_reason_doc_rel_paths || []).slice(0, 12)
+    : [];
+  const postCompactReceiptMemoryGapCodes = postCompactReceiptMemoryUsageRepairSource
+    ? uniqueCoordinatorStrings(candidate.post_compact_receipt_memory_gap_codes || []).slice(0, 12)
     : [];
   const briefId = `replay-repair-dispatch-brief:${hashCoordinator([groupId, workItemId, targetProject, candidate.candidate_id || ""], 14)}`;
   const workerTask = [
@@ -8465,6 +12333,55 @@ export function buildReplayRepairDispatchBriefForCoordinator(groupId: string, ca
     pressureMemoryProvenanceReceiptSource && pressureProvenanceRelPaths.length ? `pressure memory docs：${pressureProvenanceRelPaths.join("；")}` : "",
     pressureMemoryProvenanceReceiptSource && pressureProvenanceRepairIds.length ? `pressure repair work items：${pressureProvenanceRepairIds.join("；")}` : "",
     pressureMemoryProvenanceReceiptSource && pressureProvenanceGapCodes.length ? `provenance receipt gaps：${pressureProvenanceGapCodes.join("；")}` : "",
+    providerOverrideFollowupReceiptValidationSource && candidate.provider_override_followup_contract_validation_id ? `contract validation：${candidate.provider_override_followup_contract_validation_id}` : "",
+    providerOverrideFollowupReceiptValidationSource && providerOverrideFollowupRelPaths.length ? `required relPath：${providerOverrideFollowupRelPaths.join("；")}` : "",
+    providerOverrideFollowupReceiptValidationSource && providerOverrideFollowupWorkItemIds.length ? `required follow-up work items：${providerOverrideFollowupWorkItemIds.join("；")}` : "",
+    providerOverrideFollowupReceiptValidationSource && providerOverrideFollowupOverrideIds.length ? `required provider override ids：${providerOverrideFollowupOverrideIds.join("；")}` : "",
+    providerOverrideFollowupReceiptValidationSource && providerOverrideFollowupGapCodes.length ? `validation gaps：${providerOverrideFollowupGapCodes.join("；")}` : "",
+    providerRankingProvenanceCompactRepairSource && candidate.provider_switch_decision_receipt_id ? `provider_switch_decision_receipt_id：${candidate.provider_switch_decision_receipt_id}` : "",
+    providerRankingProvenanceCompactRepairSource && candidate.provider_switch_decision_receipt_checksum ? `provider_switch_decision_receipt_checksum：${candidate.provider_switch_decision_receipt_checksum}` : "",
+    providerRankingProvenanceCompactRepairSource && candidate.compact_retry_id ? `compact retry：${candidate.compact_retry_id}` : "",
+    providerRankingProvenanceCompactRepairSource && candidate.compact_outcome_id ? `compact outcome：${candidate.compact_outcome_id}` : "",
+    providerRankingProvenanceCompactRepairSource && candidate.compact_hook_run_id ? `compact hook：${candidate.compact_hook_run_id}` : "",
+    providerRankingProvenanceCompactRepairSource && providerRankingProvenanceRelPaths.length ? `provider ranking typed MEMORY.md：${providerRankingProvenanceRelPaths.join("；")}` : "",
+    providerRankingMemoryUsageReceiptRepairSource && providerRankingProvenanceRelPaths.length ? `provider ranking memory usage receipt doc：${providerRankingProvenanceRelPaths.join("；")}` : "",
+    providerRankingMemoryUsageReceiptRepairSource && providerRankingMemoryReceiptRequiredDocRelPaths.length ? `required memory docs：${providerRankingMemoryReceiptRequiredDocRelPaths.join("；")}` : "",
+    providerRankingMemoryUsageReceiptRepairSource && providerRankingMemoryReceiptMissingDocRelPaths.length ? `missing memory docs：${providerRankingMemoryReceiptMissingDocRelPaths.join("；")}` : "",
+    providerRankingMemoryUsageReceiptRepairSource && providerRankingMemoryReceiptMissingUsageStateDocRelPaths.length ? `missing usageState docs：${providerRankingMemoryReceiptMissingUsageStateDocRelPaths.join("；")}` : "",
+    providerRankingMemoryUsageReceiptRepairSource && providerRankingProvenanceGapCodes.length ? `provider ranking memory usage receipt gaps：${providerRankingProvenanceGapCodes.join("；")}` : "",
+    providerRankingMemoryUsageReceiptRepairSource ? "required receipt fields：CCM_AGENT_RECEIPT.memoryUsed 或 CCM_AGENT_RECEIPT.memoryIgnored；每个 required memory doc 必须有 usageState。" : "",
+    providerRankingMemoryUsageReceiptRepairSource ? "authorization boundary：ranking evidence only, not authorization。" : "",
+    providerRankingMemoryUsageReceiptRepairSource ? "provider switch boundary：fresh valid provider switch decision receipt required for any explicit provider switch。" : "",
+    postCompactReceiptMemoryUsageRepairSource && candidate.original_worker_context_packet_id ? `original worker context packet：${candidate.original_worker_context_packet_id}` : "",
+    postCompactReceiptMemoryUsageRepairSource && candidate.original_binding_id ? `original binding：${candidate.original_binding_id}` : "",
+    postCompactReceiptMemoryUsageRepairSource && candidate.original_task_agent_session_id ? `original task Agent session（evidence only）：${candidate.original_task_agent_session_id}` : "",
+    postCompactReceiptMemoryUsageRepairSource && candidate.original_native_session_id ? `original native session（evidence only）：${candidate.original_native_session_id}` : "",
+    postCompactReceiptMemoryUsageRepairSource && postCompactReceiptMemoryRequiredDocRelPaths.length ? `required post-compact receipt memory docs：${postCompactReceiptMemoryRequiredDocRelPaths.join("；")}` : "",
+    postCompactReceiptMemoryUsageRepairSource && postCompactReceiptMemoryMissingDocRelPaths.length ? `missing memory docs：${postCompactReceiptMemoryMissingDocRelPaths.join("；")}` : "",
+    postCompactReceiptMemoryUsageRepairSource && postCompactReceiptMemoryMissingCurrentSourceVerifiedDocRelPaths.length ? `missing currentSourceVerified docs：${postCompactReceiptMemoryMissingCurrentSourceVerifiedDocRelPaths.join("；")}` : "",
+    postCompactReceiptMemoryUsageRepairSource && postCompactReceiptMemoryMissingIgnoredReasonDocRelPaths.length ? `missing ignored reason docs：${postCompactReceiptMemoryMissingIgnoredReasonDocRelPaths.join("；")}` : "",
+    postCompactReceiptMemoryUsageRepairSource && postCompactReceiptMemoryGapCodes.length ? `receipt gaps：${postCompactReceiptMemoryGapCodes.join("；")}` : "",
+    postCompactReceiptMemoryUsageRepairSource ? "required corrected receipt：memoryUsed used/verified 必须 currentSourceVerified=true；memoryIgnored ignored 必须 reason；每个 required doc 都必须覆盖。" : "",
+    postCompactReceiptMemoryUsageRepairSource ? "required brief usage：CCM_AGENT_RECEIPT.replayRepairDispatchBriefUsage 必须引用本 brief_id/work_item_id 并声明 verified。" : "",
+    postCompactReceiptMemoryUsageRepairSource ? "freshness boundary：historical repair completion is recovery evidence, not permanent repository truth。" : "",
+    postCompactReceiptMemoryUsageRepairSource ? "session boundary：corrected receipt 必须绑定本次新 repair task/native session；原 session id 仅作历史证据。" : "",
+    postCompactReinjectionRepairSource && reinjectionGateId ? `post-compact reinjection gate：${reinjectionGateId}` : "",
+    postCompactReinjectionRepairSource && postCompactCandidateId ? `required post-compact candidate_id：${postCompactCandidateId}` : "",
+    postCompactReinjectionRepairSource && postCompactCandidateKind ? `candidate kind：${postCompactCandidateKind}` : "",
+    postCompactReinjectionRepairSource && postCompactCandidateValue ? `candidate value：${postCompactCandidateValue}` : "",
+    postCompactReinjectionRepairSource && postCompactCandidateSourceMessageId ? `source message id：${postCompactCandidateSourceMessageId}` : "",
+    postCompactReinjectionRepairSource ? "required receipt：CCM_AGENT_RECEIPT.postCompactCandidateUsage 必须引用 gate/candidate_id 并声明 used / ignored / verified；used/verified 时 currentSourceVerified=true；ignored 时给出原因；同时回传 task_agent_session_id/native_session_id。" : "",
+    readPlanRevalidationRepairSource && revalidationGateId ? `compact read plan revalidation gate：${revalidationGateId}` : "",
+    readPlanRevalidationRepairSource && readPlanId ? `required read_plan_id：${readPlanId}` : "",
+    readPlanRevalidationRepairSource && referenceId ? `reference_id：${referenceId}` : "",
+    readPlanRevalidationRepairSource && expectedTaskAgentSessionId ? `expected task_agent_session_id：${expectedTaskAgentSessionId}` : "",
+    readPlanRevalidationRepairSource && expectedNativeSessionId ? `expected native_session_id：${expectedNativeSessionId}` : "",
+    readPlanRevalidationRepairSource && receiptTaskAgentSessionId ? `invalid receipt task_agent_session_id：${receiptTaskAgentSessionId}` : "",
+    readPlanRevalidationRepairSource && receiptNativeSessionId ? `invalid receipt native_session_id：${receiptNativeSessionId}` : "",
+    readPlanRevalidationRepairSource ? "required receipt：CCM_AGENT_RECEIPT.readPlanRevalidationUsage 或 memoryUsed/memoryIgnored 必须引用 gate/read_plan_id，声明 currentSourceVerified=true 或明确 ignored 原因，并匹配绑定 session。" : "",
+    providerRankingProvenanceCompactRepairSource && providerRankingProvenanceRowIds.length ? `provider ranking row ids：${providerRankingProvenanceRowIds.slice(0, 8).join("；")}` : "",
+    providerRankingProvenanceCompactRepairSource && providerRankingProvenanceGapCodes.length ? `compact preservation gaps：${providerRankingProvenanceGapCodes.join("；")}` : "",
+    providerRankingProvenanceCompactRepairSource ? "required proof：CCM_AGENT_RECEIPT；provider_ranking_provenance_preservation.required=true；provider_ranking_provenance_preservation.preserved=true；provider_ranking_provenance_preserved=true；providerRankingProvenancePreserved=true；replayRepairDispatchBriefUsage；ranking evidence only, not authorization" : "",
     "",
     "执行边界：只有当前用户消息或主 Agent 明确把本简报派发给你时，才执行修复；如果只是作为上下文注入，不要自行创建额外任务。",
     "",
@@ -8481,12 +12398,36 @@ export function buildReplayRepairDispatchBriefForCoordinator(groupId: string, ca
       ? "- 对 ignore-memory receipt 修复，不得重新注入或使用群聊/typed/global 记忆；只要求补齐 corrected CCM_AGENT_RECEIPT.memoryIgnored，并证明 memoryUsed 未声明历史记忆。"
       : pressureMemoryProvenanceReceiptSource
       ? "- 对 pressure memory provenance receipt 修复，只要求补齐 corrected CCM_AGENT_RECEIPT.memoryProvenanceUsage；每条 under-repair pressure MEMORY.md 必须声明 relPath、usageState、provenanceStatus、repairWorkItemId、repairStatus、repairGapType；若 used/verified，必须 currentSourceVerified=true。"
+      : providerOverrideFollowupReceiptValidationSource
+      ? "- 对 provider override follow-up receipt contract 修复，只补齐 corrected CCM_AGENT_RECEIPT.memoryProvenanceUsage；不重做无关代码实现。每条必须覆盖 required relPath / repairWorkItemId / providerDispatchOverrideId，并设置 currentSourceVerified=true、providerDispatchOverrideFollowupHistoryReverified=true。"
+      : providerRankingProvenanceCompactRepairSource
+      ? "- 对 provider ranking provenance compact 修复，必须从 typed MEMORY.md 与 provider switch decision receipt 重新渲染 WorkerContextPacket；证明 provider_ranking_provenance_preservation.required=true、preserved=true，compact outcome ledger 记录 provider_ranking_provenance_preserved=true。provider switch execution history 只能作为 ranking evidence，不能作为授权。"
+      : providerRankingMemoryUsageReceiptRepairSource
+      ? "- 对 provider ranking memory usage receipt 修复，只补齐 corrected CCM_AGENT_RECEIPT.memoryUsed 或 memoryIgnored；必须引用每一个 required memory doc relPath，声明 usageState，并再次声明 ranking evidence only, not authorization；任何显式 provider switch 仍需要 fresh valid provider switch decision receipt。"
+      : postCompactReceiptMemoryUsageRepairSource
+      ? "- 对 post-compact receipt memory usage 修复，在本次新 repair session 中重新核验当前源并返回 corrected CCM_AGENT_RECEIPT；每个 required doc 必须在 memoryUsed 或 memoryIgnored 中出现，used/verified 要 currentSourceVerified=true，ignored 要 reason；原 task/native session 只能作为历史证据。"
+      : postCompactReinjectionRepairSource
+      ? "- 对 post-compact reinjection 修复，必须从 raw transcript 或 typed MEMORY.md 恢复指定候选，并在实际子 Agent 会话中核验当前源；回执必须逐条声明 postCompactCandidateUsage=used/ignored/verified，不能只提 gate。"
+      : readPlanRevalidationRepairSource
+      ? "- 对 compact read plan revalidation 修复，必须在绑定子 Agent 会话中重新读取当前源；回执用 readPlanRevalidationUsage 或 memoryUsed/memoryIgnored 引用 revalidation_gate_id、read_plan_id，并声明 currentSourceVerified=true；未使用时必须明确 ignored 原因。"
       : "- 必须证明压缩后子 Agent 记忆包能重新包含缺失上下文。",
     "",
     ignoreMemoryReceiptSource
       ? "回执要求：最后追加 corrected CCM_AGENT_RECEIPT，写明 status、summary、actions、filesChanged、verification、blockers、needs、memoryUsed、memoryIgnored；memoryIgnored 必须声明 user_requested_ignore_memory / must_not_use_group_memory，memoryUsed 不得声明任何群聊/typed/global 历史记忆。"
       : pressureMemoryProvenanceReceiptSource
       ? "回执要求：最后追加 corrected CCM_AGENT_RECEIPT，写明 status、summary、actions、filesChanged、verification、blockers、needs、memoryUsed、memoryIgnored、memoryProvenanceUsage；memoryProvenanceUsage 必须逐条覆盖上述 pressure memory docs / repair work items，disputed_under_repair 或 stale_evidence_under_repair 被 used/verified 时必须 currentSourceVerified=true。"
+      : providerOverrideFollowupReceiptValidationSource
+      ? "回执要求：最后追加 corrected CCM_AGENT_RECEIPT.memoryProvenanceUsage；逐条引用 required relPath、repairWorkItemId、providerDispatchOverrideId，设置 usageState=verified、repairStatus=completed、repairGapType=provider_dispatch_override_followup、currentSourceVerified=true、providerDispatchOverrideFollowupHistoryReverified=true。"
+      : providerRankingProvenanceCompactRepairSource
+      ? "回执要求：最后追加 corrected CCM_AGENT_RECEIPT，写明 status、summary、actions、filesChanged、verification、blockers、needs、replayRepairDispatchBriefUsage；replayRepairDispatchBriefUsage 必须引用本 brief/work_item_id，usageState=verified，repairStatus=completed，repairGapType=provider_ranking_provenance_compact，并声明 providerSwitchDecisionReceiptId、providerSwitchDecisionReceiptChecksum、typedMemoryRelPaths、typedMemoryRowIds、providerRankingProvenancePreserved=true。"
+      : providerRankingMemoryUsageReceiptRepairSource
+      ? "回执要求：最后追加 corrected CCM_AGENT_RECEIPT，写明 status、summary、actions、filesChanged、verification、blockers、needs、memoryUsed、memoryIgnored；memoryUsed 或 memoryIgnored 必须引用每一个 required memory doc relPath，声明 usageState=verified/used/background 或 ignored/not_used，并写明 ranking evidence only, not authorization；fresh valid provider switch decision receipt required for any explicit provider switch。"
+      : postCompactReceiptMemoryUsageRepairSource
+      ? "回执要求：最后追加 corrected CCM_AGENT_RECEIPT，包含 replayRepairDispatchBriefUsage、memoryUsed、memoryIgnored、task_agent_session_id、native_session_id；replayRepairDispatchBriefUsage 必须引用本 brief/work_item_id 并声明 verified；每个 required memory doc 都必须声明 used/verified+currentSourceVerified=true 或 ignored+reason；必须写明 historical repair completion is recovery evidence, not permanent repository truth。"
+      : postCompactReinjectionRepairSource
+      ? "回执要求：最后追加 corrected CCM_AGENT_RECEIPT，写明 status、summary、actions、filesChanged、verification、blockers、needs、memoryUsed、memoryIgnored、postCompactCandidateUsage、task_agent_session_id、native_session_id；postCompactCandidateUsage 必须引用本 brief 的 reinjection_gate_id 与 candidate_id，并声明 used/ignored/verified；used/verified 时 currentSourceVerified=true，ignored 时必须写 reason。"
+      : readPlanRevalidationRepairSource
+      ? "回执要求：最后追加 corrected CCM_AGENT_RECEIPT；readPlanRevalidationUsage 或 memoryUsed/memoryIgnored 必须引用本 brief 的 revalidation_gate_id、read_plan_id，声明 currentSourceVerified=true 或 ignored 原因，并回传与 expected task_agent_session_id/native_session_id 一致的会话标识。"
       : "回执要求：最后追加 CCM_AGENT_RECEIPT，写明 status、summary、actions、filesChanged、verification、blockers、needs；如果是 native proof 修复，还要写明 proof_entry_id、request_patch_checksum、runner_request_id。"
   ].filter(Boolean).join("\n");
   return {
@@ -8506,6 +12447,19 @@ export function buildReplayRepairDispatchBriefForCoordinator(groupId: string, ca
     proof_entry_id: candidate.proof_entry_id || "",
     plan_checksum: candidate.plan_checksum || "",
     request_patch_checksum: candidate.request_patch_checksum || "",
+    revalidation_gate_id: revalidationGateId,
+    read_plan_id: readPlanId,
+    reference_id: referenceId,
+    reinjection_gate_id: reinjectionGateId,
+    post_compact_candidate_id: postCompactCandidateId,
+    post_compact_candidate_kind: postCompactCandidateKind,
+    post_compact_candidate_value: postCompactCandidateValue,
+    post_compact_candidate_source_message_id: postCompactCandidateSourceMessageId,
+    expected_task_agent_session_id: expectedTaskAgentSessionId,
+    expected_native_session_id: expectedNativeSessionId,
+    receipt_task_agent_session_id: receiptTaskAgentSessionId,
+    receipt_native_session_id: receiptNativeSessionId,
+    session_mismatch: candidate.session_mismatch === true,
     worker_context_packet_id: candidate.worker_context_packet_id || "",
     worker_context_packet_binding_id: candidate.worker_context_packet_binding_id || candidate.binding_id || "",
     worker_context_packet_memory_policy_reason: candidate.worker_context_packet_memory_policy_reason || "",
@@ -8515,6 +12469,35 @@ export function buildReplayRepairDispatchBriefForCoordinator(groupId: string, ca
     pressure_memory_provenance_gap_codes: pressureProvenanceGapCodes,
     pressure_memory_provenance_repair_work_item_ids: pressureProvenanceRepairIds,
     pressure_memory_provenance_rel_paths: pressureProvenanceRelPaths,
+    provider_override_followup_contract_validation_id: candidate.provider_override_followup_contract_validation_id || "",
+    provider_override_followup_contract_rel_paths: providerOverrideFollowupRelPaths,
+    provider_override_followup_contract_work_item_ids: providerOverrideFollowupWorkItemIds,
+    provider_override_followup_contract_override_ids: providerOverrideFollowupOverrideIds,
+    provider_override_followup_contract_gap_codes: providerOverrideFollowupGapCodes,
+    provider_switch_decision_receipt_id: candidate.provider_switch_decision_receipt_id || "",
+    provider_switch_decision_receipt_checksum: candidate.provider_switch_decision_receipt_checksum || "",
+    provider_ranking_provenance_gap_codes: providerRankingProvenanceGapCodes,
+    provider_ranking_provenance_rel_paths: providerRankingProvenanceRelPaths,
+    provider_ranking_provenance_row_ids: providerRankingProvenanceRowIds,
+    provider_ranking_provenance_missing_rel_paths: providerRankingProvenanceMissingRelPaths,
+    provider_ranking_provenance_missing_row_ids: providerRankingProvenanceMissingRowIds,
+    provider_ranking_memory_receipt_required_doc_rel_paths: providerRankingMemoryReceiptRequiredDocRelPaths,
+    provider_ranking_memory_receipt_missing_doc_rel_paths: providerRankingMemoryReceiptMissingDocRelPaths,
+    provider_ranking_memory_receipt_missing_usage_state_doc_rel_paths: providerRankingMemoryReceiptMissingUsageStateDocRelPaths,
+    post_compact_receipt_memory_gap_codes: postCompactReceiptMemoryGapCodes,
+    post_compact_receipt_memory_required_doc_rel_paths: postCompactReceiptMemoryRequiredDocRelPaths,
+    post_compact_receipt_memory_missing_doc_rel_paths: postCompactReceiptMemoryMissingDocRelPaths,
+    post_compact_receipt_memory_missing_current_source_verified_doc_rel_paths: postCompactReceiptMemoryMissingCurrentSourceVerifiedDocRelPaths,
+    post_compact_receipt_memory_missing_ignored_reason_doc_rel_paths: postCompactReceiptMemoryMissingIgnoredReasonDocRelPaths,
+    original_worker_context_packet_id: candidate.original_worker_context_packet_id || "",
+    original_binding_id: candidate.original_binding_id || "",
+    original_assignment_id: candidate.original_assignment_id || "",
+    original_dispatch_key: candidate.original_dispatch_key || "",
+    original_task_agent_session_id: candidate.original_task_agent_session_id || "",
+    original_native_session_id: candidate.original_native_session_id || "",
+    compact_outcome_id: candidate.compact_outcome_id || "",
+    compact_retry_id: candidate.compact_retry_id || "",
+    compact_hook_run_id: candidate.compact_hook_run_id || "",
     provider_reproof_status: candidate.provider_reproof_status || "",
     provider_reproof_reason: candidate.provider_reproof_reason || "",
     reproof_candidate_id: candidate.reproof_candidate_id || "",
@@ -8533,6 +12516,41 @@ export function buildReplayRepairDispatchBriefForCoordinator(groupId: string, ca
         "runMemoryCenterApiMicrocompactNativeApplyProviderReproofDispatchTimelineSelfTest 或同等 provider re-proof 派发链检查",
         "buildMemoryQualityReport({checkIds:['api_microcompact_native_apply_proof_repair_dispatch_candidates']})",
         "buildMemoryQualityReport({checkIds:['api_microcompact_native_apply_proof_repair_closure_reproof_work_items']})",
+      ]
+      : providerOverrideFollowupReceiptValidationSource
+      ? [
+        "runMemoryCenterWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptContractValidationSelfTest 或同等 validation 检查",
+        "buildMemoryQualityReport({checkIds:['worker_context_packet_pressure_provenance_provider_dispatch_override_followup_receipt_contract_validation']})",
+      ]
+      : providerRankingProvenanceCompactRepairSource
+      ? [
+        "runMemoryCenterWorkerContextProviderRankingProvenanceCompactRepairDispatchBriefSelfTest 或同等 provider ranking provenance compact repair brief 检查",
+        "buildMemoryQualityReport({checkIds:['worker_context_provider_ranking_provenance_compact_repair_dispatch_briefs']})",
+        "buildMemoryQualityReport({checkIds:['worker_context_packet_compact_outcome_ledger']})",
+      ]
+      : providerRankingMemoryUsageReceiptRepairSource
+      ? [
+        "runMemoryCenterWorkerContextProviderRankingProvenanceCompactRepairReceiptMemoryUsageReceiptRepairDispatchBriefSelfTest 或同等 corrected receipt brief 检查",
+        "buildMemoryQualityReport({checkIds:['worker_context_provider_ranking_provenance_compact_repair_receipt_memory_usage_receipt_repair_dispatch_briefs']})",
+        "buildMemoryQualityReport({checkIds:['worker_context_provider_ranking_provenance_compact_repair_receipt_memory_usage_receipt']})",
+      ]
+      : postCompactReceiptMemoryUsageRepairSource
+      ? [
+        "runMemoryCenterPostCompactReinjectionRepairReceiptMemoryUsageRepairSelfTest 或同等 corrected receipt repair 检查",
+        "buildMemoryQualityReport({checkIds:['post_compact_reinjection_repair_receipt_memory_usage_repair_dispatch_briefs']})",
+        "buildMemoryQualityReport({checkIds:['post_compact_reinjection_repair_receipt_memory_usage_repair_receipt_consumption']})",
+      ]
+      : postCompactReinjectionRepairSource
+      ? [
+        "runMemoryCenterPostCompactReinjectionRepairDispatchSelfTest 或同等 post-compact reinjection repair dispatch 检查",
+        "buildMemoryQualityReport({checkIds:['post_compact_reinjection_repair_dispatch_candidates','post_compact_reinjection_repair_dispatch_briefs']})",
+        "buildMemoryQualityReport({checkIds:['post_compact_candidate_discipline','worker_context_packet_memory_reinjection_proof']})",
+      ]
+      : readPlanRevalidationRepairSource
+      ? [
+        "runMemoryCenterCompactFileReferenceReadPlanRevalidationRepairDispatchSelfTest 或同等 read-plan revalidation repair dispatch 检查",
+        "buildMemoryQualityReport({checkIds:['compact_file_reference_read_plan_revalidation_repair_dispatch_candidates','compact_file_reference_read_plan_revalidation_repair_dispatch_briefs']})",
+        "buildMemoryQualityReport({checkIds:['compact_file_reference_read_plan_revalidation_session_binding']})",
       ]
       : ["重新运行 compact boundary replay repair dispatch candidate 检查"],
     createdAt: existing.createdAt || existing.created_at || at,
@@ -8630,6 +12648,11 @@ function readReplayRepairDispatchCandidatesForCoordinator(groupId: string, limit
           targetProject,
           dispatch_target: dispatchTarget,
           repair_target: item.repair_target || "",
+          reinjection_gate_id: item.reinjection_gate_id || "",
+          post_compact_candidate_id: item.post_compact_candidate_id || "",
+          post_compact_candidate_kind: item.post_compact_candidate_kind || "",
+          post_compact_candidate_value: item.post_compact_candidate_value || "",
+          post_compact_candidate_source_message_id: item.post_compact_candidate_source_message_id || "",
           proof_entry_id: item.proof_entry_id || "",
           plan_checksum: item.plan_checksum || "",
           apply_plan_checksum: item.apply_plan_checksum || "",
@@ -8640,6 +12663,35 @@ function readReplayRepairDispatchCandidatesForCoordinator(groupId: string, limit
           binding_id: item.binding_id || item.worker_context_packet_binding_id || "",
           assignment_id: item.assignment_id || "",
           dispatch_key: item.dispatch_key || "",
+          provider_override_followup_contract_validation_id: item.provider_override_followup_contract_validation_id || "",
+          provider_override_followup_contract_rel_paths: item.provider_override_followup_contract_rel_paths || [],
+          provider_override_followup_contract_work_item_ids: item.provider_override_followup_contract_work_item_ids || [],
+          provider_override_followup_contract_override_ids: item.provider_override_followup_contract_override_ids || [],
+          provider_override_followup_contract_gap_codes: item.provider_override_followup_contract_gap_codes || [],
+          provider_switch_decision_receipt_id: item.provider_switch_decision_receipt_id || "",
+          provider_switch_decision_receipt_checksum: item.provider_switch_decision_receipt_checksum || "",
+          provider_ranking_provenance_gap_codes: item.provider_ranking_provenance_gap_codes || [],
+          provider_ranking_provenance_rel_paths: item.provider_ranking_provenance_rel_paths || [],
+          provider_ranking_provenance_row_ids: item.provider_ranking_provenance_row_ids || [],
+          provider_ranking_provenance_missing_rel_paths: item.provider_ranking_provenance_missing_rel_paths || [],
+          provider_ranking_provenance_missing_row_ids: item.provider_ranking_provenance_missing_row_ids || [],
+          provider_ranking_memory_receipt_required_doc_rel_paths: item.provider_ranking_memory_receipt_required_doc_rel_paths || [],
+          provider_ranking_memory_receipt_missing_doc_rel_paths: item.provider_ranking_memory_receipt_missing_doc_rel_paths || [],
+          provider_ranking_memory_receipt_missing_usage_state_doc_rel_paths: item.provider_ranking_memory_receipt_missing_usage_state_doc_rel_paths || [],
+          post_compact_receipt_memory_gap_codes: item.post_compact_receipt_memory_gap_codes || [],
+          post_compact_receipt_memory_required_doc_rel_paths: item.post_compact_receipt_memory_required_doc_rel_paths || [],
+          post_compact_receipt_memory_missing_doc_rel_paths: item.post_compact_receipt_memory_missing_doc_rel_paths || [],
+          post_compact_receipt_memory_missing_current_source_verified_doc_rel_paths: item.post_compact_receipt_memory_missing_current_source_verified_doc_rel_paths || [],
+          post_compact_receipt_memory_missing_ignored_reason_doc_rel_paths: item.post_compact_receipt_memory_missing_ignored_reason_doc_rel_paths || [],
+          original_worker_context_packet_id: item.original_worker_context_packet_id || "",
+          original_binding_id: item.original_binding_id || "",
+          original_assignment_id: item.original_assignment_id || "",
+          original_dispatch_key: item.original_dispatch_key || "",
+          original_task_agent_session_id: item.original_task_agent_session_id || "",
+          original_native_session_id: item.original_native_session_id || "",
+          compact_outcome_id: item.compact_outcome_id || "",
+          compact_retry_id: item.compact_retry_id || "",
+          compact_hook_run_id: item.compact_hook_run_id || "",
           provider_reproof_status: item.provider_reproof_status || "",
           provider_reproof_reason: item.provider_reproof_reason || "",
           reproof_candidate_id: item.reproof_candidate_id || "",
@@ -8944,7 +12996,7 @@ function normalizeLlmAnalysis(parsed: any, fallback: any) {
   };
 }
 
-function buildCoordinatorResultFromAnalysis(group: any, message: string, analysis: any, targets: any[], runtime: string, parsed: any = null) {
+function buildCoordinatorResultFromAnalysis(group: any, message: string, analysis: any, targets: any[], runtime: string, parsed: any = null, options: any = {}) {
   const coordinator = getCoordinatorMember(group);
   // 优化6：优先使用 LLM 生成的 friendlyResponse
   const friendlyText = String(parsed?.friendlyResponse || "").trim();
@@ -8983,7 +13035,11 @@ function buildCoordinatorResultFromAnalysis(group: any, message: string, analysi
   return {
     agent: coordinator.project,
     delegated,
-    assignments: buildAssignmentsFromTargets(effectiveTargets, { group, analysis }),
+    assignments: buildAssignmentsFromTargets(effectiveTargets, {
+      group,
+      analysis,
+      providerSwitchRequests: options.providerSwitchRequests || options.provider_switch_requests || null,
+    }),
     analysis,
     coordinationPlan,
     dispatchPolicy,
@@ -9013,6 +13069,8 @@ async function runLlmGroupOrchestrator(input: {
   ragScoped?: boolean;
   source?: string;
   extraInstructions?: string;
+  providerSwitchRequests?: any;
+  provider_switch_requests?: any;
 }) {
   const group = normalizeGroupOrchestrator(input.group);
   const config = loadOrchestratorConfig();
@@ -9033,7 +13091,7 @@ async function runLlmGroupOrchestrator(input: {
       });
   const analysis = normalizeLlmAnalysis(parsed, fallbackAnalysis);
   const targets = sanitizeLlmTargets(group, parsed, input.message, analysis, !!config.fallbackToRules && isStructuredCoordinatorFallbackAllowed(input));
-  return buildCoordinatorResultFromAnalysis(group, input.message, analysis, targets, "llm-api", parsed);
+  return buildCoordinatorResultFromAnalysis(group, input.message, analysis, targets, "llm-api", parsed, input);
 }
 
 export function isStructuredCoordinatorFallbackAllowed(input: { source?: string; message?: string }) {
@@ -9056,6 +13114,8 @@ export async function runGroupOrchestrator(input: {
   ragCitations?: string[];
   ragScoped?: boolean;
   extraInstructions?: string;
+  providerSwitchRequests?: any;
+  provider_switch_requests?: any;
 }) {
   const raggedInput = withGroupRagContext(input);
   const group = normalizeGroupOrchestrator(raggedInput.group);

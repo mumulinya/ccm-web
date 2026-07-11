@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import { computed, ref, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { toast, confirmDialog } from '../../utils/toast.js'
 import TaskExperienceCard from '../tasks/TaskExperienceCard.vue'
 import AgentCodeChangeDrawer from '../agents/AgentCodeChangeDrawer.vue'
@@ -79,6 +79,9 @@ const scrollToMessage = (originalIndex) => {
 
 const chatInput = ref('')
 const isSending = ref(false)
+const isSteering = ref(false)
+const activeGlobalRunId = ref('')
+const activeGlobalRunMessage = ref(null)
 const executingAction = ref(null)
 const chatBody = ref(null)
 const chatContentInner = ref(null)
@@ -129,6 +132,51 @@ const {
   })
 })
 
+const GLOBAL_SUPERVISION_CONTINUATION_PATTERN = /^(?:再)?(?:补充|继续(?:当前|这个|刚才|上面)?|接着(?:处理)?|目标调整|调整目标|改成|改为|换成|不要再|不再|先别|停止当前|忽略之前|重新规划|(?:这个任务|刚才的任务|上面的任务).{0,12}(?:继续|补充|调整|改|加|删|不要|停止|保留|只做))/i
+
+const currentSupervisedRunMessage = computed(() => {
+  const rows = Array.isArray(messages.value) ? messages.value : []
+  return [...rows].reverse().find(message => {
+    const run = message?.agenticRun || {}
+    const status = String(run.status || '').toLowerCase()
+    const supervisionState = String(run.supervision_state || run.supervisionState || '').toLowerCase()
+    return message?.role === 'assistant'
+      && !!(run.supervisor_id || run.supervisorId)
+      && ['supervising', 'paused'].includes(status)
+      && !['completed', 'failed', 'cancelled'].includes(supervisionState)
+  }) || null
+})
+
+const isExplicitSupervisionContinuation = (value = '') => GLOBAL_SUPERVISION_CONTINUATION_PATTERN.test(String(value || '').trim())
+const isSupervisionContinuationInput = computed(() => {
+  return !isSending.value
+    && !!currentSupervisedRunMessage.value
+    && isExplicitSupervisionContinuation(chatInput.value)
+})
+
+const globalInputPlaceholder = computed(() => {
+  if (!isSending.value) {
+    return isSupervisionContinuationInput.value
+      ? '补充要求或调整当前任务...'
+      : '对全局助手说点什么... (例如: 帮我把桌宠打开)'
+  }
+  return activeGlobalRunId.value
+    ? '补充要求或调整当前目标...'
+    : '正在建立当前任务，请稍候...'
+})
+
+const globalSendButtonLabel = computed(() => {
+  if (isSteering.value) return '接收中'
+  if (isSending.value) return '补充要求'
+  return isSupervisionContinuationInput.value ? '更新任务' : '发送'
+})
+
+const canSendGlobalMessage = computed(() => {
+  if (isSteering.value) return false
+  if (isSending.value) return !!chatInput.value.trim() && !!activeGlobalRunId.value
+  return !!chatInput.value.trim() || selectedFiles.value.length > 0
+})
+
 const SYSTEM_RESULT_MARKER = '[处理结果]'
 const LEGACY_SYSTEM_RECEIPT_MARKER = '[系统回执]'
 const SYSTEM_RESULT_MARKERS = [SYSTEM_RESULT_MARKER, LEGACY_SYSTEM_RECEIPT_MARKER]
@@ -156,10 +204,7 @@ const GLOBAL_VISIBLE_INTERNAL_TEXT_PATTERN = /CCM_AGENT_RECEIPT|CCM_AGENT_REQUES
 const sanitizeGlobalVisibleStreamText = (value, fallback = '我正在处理当前请求。', max = 8000) => {
   const raw = String(value || '')
   if (!raw) return ''
-  if (GLOBAL_VISIBLE_INTERNAL_TEXT_PATTERN.test(raw)) {
-    return sanitizeUserFacingAgentText(raw, fallback, Math.min(max, 1200))
-  }
-  const text = sanitizeUserFacingLegacyTerminology(raw)
+  const text = visibleGlobalPlanText(raw, fallback, GLOBAL_VISIBLE_INTERNAL_TEXT_PATTERN.test(raw) ? Math.min(max, 1200) : max)
   return text.length > max ? `${text.slice(0, max)}...` : text
 }
 
@@ -541,6 +586,17 @@ const globalStreamTodoTone = (status) => {
 }
 
 const globalStreamCurrentTodoTone = (summary = {}) => globalStreamTodoTone(summary.status)
+const isGlobalStreamSupervising = (msg = {}) => String(msg.agenticRun?.status || '').toLowerCase() === 'supervising'
+const globalStreamHeaderTitle = (msg = {}) => isGlobalStreamSupervising(msg)
+  ? '持续跟进中'
+  : msg.streaming
+    ? '我正在处理'
+    : '处理过程'
+const globalStreamHeaderSubtitle = (msg = {}) => isGlobalStreamSupervising(msg)
+  ? '正在持续跟踪执行、验收和最终总结'
+  : msg.streaming
+    ? '正在实时更新理解、规划和工具执行状态'
+    : '本轮过程已结束'
 
 const getGlobalDisplayStream = (msg = {}) => msg.display_stream
   || msg.displayStream
@@ -631,32 +687,32 @@ const buildGlobalDispatchTodoSteps = (msg = {}) => {
       : 'in_progress'
   return {
     title: summary?.title || '全局派发进度',
-    next_action: summary?.next_action || '等待下游执行成员更新结果，我会继续验收并总结。',
+    next_action: summary?.next_action || '等待执行目标更新结果，我会继续验收并总结。',
     steps: [
       {
         id: 'global-dispatch-understand',
         label: '理解并整理需求',
-        detail: summary?.headline || '已明确这次需求需要交给下游 Agent 执行。',
+        detail: summary?.headline || '已明确这次需求需要交给执行目标处理。',
         status: 'completed',
       },
       {
         id: 'global-dispatch-launch',
         label: '派发执行目标',
-        detail: targets ? `已派发给：${targets}。` : '已把执行目标交给下游 Agent。',
+        detail: targets ? `已派发给：${targets}。` : '已把任务交给执行目标。',
         status: 'completed',
       },
       {
         id: 'global-dispatch-track',
         label: '跟踪执行、验收和最终总结',
-        active_form: '正在跟踪下游执行和验收结果',
-        detail: summary?.next_action || '等待下游执行成员更新任务卡，我会汇总最终结果。',
+        active_form: '正在跟踪执行和验收结果',
+        detail: summary?.next_action || '等待执行目标更新任务卡，我会汇总最终结果。',
         status: trackStatus,
       },
     ],
   }
 }
 
-const GLOBAL_TODO_VERIFICATION_PATTERN = /验证|测试|运行检查|执行检查|检查(?:命令|结果|通过|失败)|verify|verification|test|qa|typecheck|lint|build|check/i
+const GLOBAL_TODO_VERIFICATION_PATTERN = /验证|测试|验收|复核|运行检查|执行检查|检查(?:命令|结果|通过|失败)|verify|verification|test|qa|typecheck|lint|build|check/i
 const globalTodoHasVerificationStep = (step = {}) => GLOBAL_TODO_VERIFICATION_PATTERN.test([
   step.label,
   step.title,
@@ -1071,11 +1127,25 @@ const getGlobalTestAgentReviewPayload = (source = {}) => {
     : Array.isArray(source.independentReview)
       ? source.independentReview
       : []
-  if (!summary && !rows.length) return null
+  const postReviewSpotCheckSummary = source.post_review_spot_check_summary
+    || source.postReviewSpotCheckSummary
+    || source.technical?.post_review_spot_check_summary
+    || source.technical?.postReviewSpotCheckSummary
+    || null
+  const postReviewSpotCheck = source.post_review_spot_check
+    || source.postReviewSpotCheck
+    || source.technical?.post_review_spot_check
+    || source.technical?.postReviewSpotCheck
+    || null
+  if (!summary && !rows.length && !postReviewSpotCheckSummary && !postReviewSpotCheck) return null
   return {
     summary: summary ? sanitizeUserFacingStructure(summary, { fallback: 'TestAgent 独立复核结论已整理。', max: 420 }) : null,
     rows: sanitizeUserFacingStructure(rows, { fallback: 'TestAgent 独立复核证据已整理。', max: 240 }),
-    report: source.test_agent_report || source.testAgentReport || source.technical?.test_agent_report || null,
+    report: source.test_agent_report || source.testAgentReport || source.technical?.test_agent_report || source.technical?.testAgentReport || null,
+    postReviewSpotCheckSummary: postReviewSpotCheckSummary
+      ? sanitizeUserFacingStructure(postReviewSpotCheckSummary, { fallback: '完成前抽查结论已整理。', max: 420 })
+      : null,
+    postReviewSpotCheck,
     detail: source.detail || source.message || source.text || '',
   }
 }
@@ -1086,7 +1156,16 @@ const mergeGlobalRunTestAgentExecutionPlan = (run = {}, previousRun = {}) => {
   const previousReviewSummary = previousRun.test_agent_review_summary || previousRun.testAgentReviewSummary || previousRun.independent_review_summary || previousRun.independentReviewSummary || null
   const previousReviewRows = Array.isArray(previousRun.independent_review) ? previousRun.independent_review : Array.isArray(previousRun.independentReview) ? previousRun.independentReview : []
   const previousReport = previousRun.test_agent_report || previousRun.testAgentReport || null
-  if (!previousPlan && !previousSummary && !previousReviewSummary && !previousReviewRows.length && !previousReport) return run
+  const previousPostReviewSpotCheckSummary = previousRun.post_review_spot_check_summary
+    || previousRun.postReviewSpotCheckSummary
+    || previousRun.technical?.post_review_spot_check_summary
+    || previousRun.technical?.postReviewSpotCheckSummary
+    || null
+  const previousPostReviewSpotCheck = previousRun.post_review_spot_check
+    || previousRun.postReviewSpotCheck
+    || previousRun.technical?.post_review_spot_check
+    || previousRun.technical?.postReviewSpotCheck
+    || null
   const next = { ...run }
   if (!next.test_agent_execution_plan && !next.testAgentExecutionPlan) {
     next.test_agent_execution_plan = previousPlan
@@ -1113,6 +1192,24 @@ const mergeGlobalRunTestAgentExecutionPlan = (run = {}, previousRun = {}) => {
   if (!next.test_agent_report && !next.testAgentReport && previousReport) {
     next.test_agent_report = previousReport
     next.testAgentReport = previousReport
+  }
+  const postReviewSpotCheckSummary = next.post_review_spot_check_summary
+    || next.postReviewSpotCheckSummary
+    || next.technical?.post_review_spot_check_summary
+    || next.technical?.postReviewSpotCheckSummary
+    || previousPostReviewSpotCheckSummary
+  if (postReviewSpotCheckSummary) {
+    next.post_review_spot_check_summary = postReviewSpotCheckSummary
+    next.postReviewSpotCheckSummary = postReviewSpotCheckSummary
+  }
+  const postReviewSpotCheck = next.post_review_spot_check
+    || next.postReviewSpotCheck
+    || next.technical?.post_review_spot_check
+    || next.technical?.postReviewSpotCheck
+    || previousPostReviewSpotCheck
+  if (postReviewSpotCheck) {
+    next.post_review_spot_check = postReviewSpotCheck
+    next.postReviewSpotCheck = postReviewSpotCheck
   }
   return next
 }
@@ -1146,7 +1243,7 @@ const applyGlobalTestAgentExecutionPlanReady = (agentMsg, event = {}) => {
 
 const applyGlobalTestAgentReviewReady = (agentMsg, event = {}) => {
   const payload = getGlobalTestAgentReviewPayload(event)
-  if (!payload?.summary && !payload?.rows?.length) return null
+  if (!payload?.summary && !payload?.rows?.length && !payload?.postReviewSpotCheckSummary && !payload?.postReviewSpotCheck) return null
   const previousRun = agentMsg.agenticRun || {}
   const userMessage = previousRun.user_message || agentMsg.user_message || agentMsg.userMessage || ''
   agentMsg.agenticRun = mergeGlobalRunTestAgentExecutionPlan({
@@ -1168,12 +1265,48 @@ const applyGlobalTestAgentReviewReady = (agentMsg, event = {}) => {
     independentReview: payload.rows?.length ? payload.rows : previousRun.independentReview || previousRun.independent_review || [],
     test_agent_report: payload.report || previousRun.test_agent_report || previousRun.testAgentReport || null,
     testAgentReport: payload.report || previousRun.testAgentReport || previousRun.test_agent_report || null,
+    post_review_spot_check_summary: payload.postReviewSpotCheckSummary || previousRun.post_review_spot_check_summary || previousRun.postReviewSpotCheckSummary || null,
+    postReviewSpotCheckSummary: payload.postReviewSpotCheckSummary || previousRun.postReviewSpotCheckSummary || previousRun.post_review_spot_check_summary || null,
+    post_review_spot_check: payload.postReviewSpotCheck || previousRun.post_review_spot_check || previousRun.postReviewSpotCheck || null,
+    postReviewSpotCheck: payload.postReviewSpotCheck || previousRun.postReviewSpotCheck || previousRun.post_review_spot_check || null,
   }, previousRun)
-  return payload.summary
+  return payload.summary || payload.postReviewSpotCheckSummary
 }
 
 const globalEventToVisibleLine = (event = {}) => {
   const type = String(event.type || '')
+  if (type === 'user_steer_queued') {
+    const steering = event.steering || event.user_steer || event.userSteer || {}
+    const revised = steering.kind === 'revise_goal'
+    return {
+      tone: 'running',
+      icon: revised ? '🧭' : '✍️',
+      title: revised ? '目标调整已接收' : '补充要求已接收',
+      text: revised
+        ? '我会在当前任务里先重新核对目标和计划，再继续执行。'
+        : '我会把这条要求接到当前任务里继续处理。'
+    }
+  }
+  if (type === 'user_steer_applied') {
+    const steering = event.steering || event.user_steer || event.userSteer || {}
+    const revised = steering.kind === 'revise_goal' || event.replan_required === true
+    return {
+      tone: 'running',
+      icon: revised ? '🧭' : '✅',
+      title: revised ? '目标调整已纳入' : '补充要求已纳入',
+      text: compactVisibleStreamText(event.message, revised
+        ? '新的目标边界已纳入，下一步会重新核对计划。'
+        : '补充要求已纳入当前任务，我会带着它继续处理。')
+    }
+  }
+  if (type === 'user_steer_failed') {
+    return {
+      tone: 'error',
+      icon: '⚠️',
+      title: '补充要求未接入',
+      text: compactVisibleStreamText(event.message, '这条补充没有接入当前任务，请重新发送。')
+    }
+  }
   if (type === 'test_agent_execution_plan_ready') {
     const payload = getGlobalTestAgentExecutionPlanPayload(event)
     const summary = payload?.summary || {}
@@ -1188,10 +1321,20 @@ const globalEventToVisibleLine = (event = {}) => {
     const payload = getGlobalTestAgentReviewPayload(event)
     const summary = payload?.summary || {}
     return {
-      tone: summary.status === 'passed' ? 'ok' : summary.status === 'needs_rework' ? 'waiting' : 'running',
-      icon: '✅',
+      tone: summary.status === 'passed' ? 'ok' : ['needs_rework', 'needs_recheck', 'needs_user'].includes(summary.status) ? 'waiting' : 'running',
+      icon: summary.status === 'passed' ? '✅' : '⚠️',
       title: summary.title || '独立复核',
       text: compactVisibleStreamText(summary.headline || event.detail, 'TestAgent 已提交独立复核结论，我会纳入最终验收。')
+    }
+  }
+  if (type === 'post_review_spot_check_ready') {
+    const payload = getGlobalTestAgentReviewPayload(event)
+    const summary = payload?.postReviewSpotCheckSummary || {}
+    return {
+      tone: summary.status === 'passed' ? 'ok' : summary.status === 'needs_recheck' ? 'waiting' : 'running',
+      icon: summary.status === 'passed' ? '✅' : '⚠️',
+      title: summary.title || '完成前抽查',
+      text: compactVisibleStreamText(summary.headline || event.detail, '完成前抽查已返回，我正在核对最终验收条件。')
     }
   }
   if (event.ui?.title || event.ui?.text) {
@@ -1225,7 +1368,7 @@ const globalEventToVisibleLine = (event = {}) => {
     const targets = rows.map(row => [visibleGlobalPlanText(row.role || '执行成员', '执行成员', 80), row.agent].filter(Boolean).join(' · ')).filter(Boolean).slice(0, 4).join('、')
     const text = visibleGlobalPlanText(
       [summary.headline || (targets ? `我已把这次需求交给：${targets}。` : ''), summary.next_action ? `下一步：${summary.next_action}` : ''].filter(Boolean).join(' '),
-      '安排已发出，正在等待下游执行成员更新结果。',
+      '安排已发出，正在等待执行目标更新结果。',
       220
     )
     return { tone: 'ok', icon: '📨', title: summary.title || '已派发的工作', text }
@@ -1270,15 +1413,60 @@ const ensureGlobalStreamMessage = (agentMsg, addedRef) => {
   }
 }
 
+const syncActiveGlobalRunEnvelope = (agentMsg, event = {}) => {
+  const runId = event.run_id || event.runId || event.run?.id || ''
+  if (!runId) return
+  const previousRun = agentMsg.agenticRun || {}
+  const steering = event.steering || event.user_steer || event.userSteer || null
+  agentMsg.agenticRun = {
+    ...previousRun,
+    id: previousRun.id || runId,
+    trace_id: previousRun.trace_id || event.trace_id || event.traceId || '',
+    status: event.status || event.run?.status || previousRun.status || 'running',
+    phase: event.phase || event.run?.phase || previousRun.phase || 'plan',
+    user_message: previousRun.user_message || agentMsg.user_message || agentMsg.userMessage || '',
+    original_user_message: previousRun.original_user_message || agentMsg.user_message || agentMsg.userMessage || '',
+    ...(steering ? {
+      last_user_steer: steering,
+      lastUserSteer: steering,
+      pending_user_messages: event.run?.pending_user_messages || previousRun.pending_user_messages || [],
+      pendingUserMessages: event.run?.pendingUserMessages || previousRun.pendingUserMessages || [],
+    } : {}),
+  }
+  activeGlobalRunId.value = runId
+  activeGlobalRunMessage.value = agentMsg
+}
+
 const appendGlobalStreamEvent = (agentMsg, event) => {
+  syncActiveGlobalRunEnvelope(agentMsg, event)
   const visible = globalEventToVisibleLine(event)
   if (!visible) return false
   if (!Array.isArray(agentMsg.streamEvents)) agentMsg.streamEvents = []
+  const eventType = String(event.type || '')
+  const steering = event.steering || event.user_steer || event.userSteer || null
+  const steeringId = String(steering?.id || '')
+  if (steeringId && ['user_steer_queued', 'user_steer_applied'].includes(eventType)) {
+    const alreadyQueued = agentMsg.streamEvents.some(item => item.eventType === 'user_steer_queued' && item.steeringId === steeringId)
+    const alreadyApplied = agentMsg.streamEvents.some(item => item.eventType === 'user_steer_applied' && item.steeringId === steeringId)
+    if (eventType === 'user_steer_queued' && (alreadyQueued || alreadyApplied)) return false
+    if (eventType === 'user_steer_applied' && alreadyApplied) return false
+    if (eventType === 'user_steer_applied' && !alreadyQueued) {
+      const queuedVisible = globalEventToVisibleLine({ type: 'user_steer_queued', steering })
+      if (queuedVisible) {
+        agentMsg.streamEvents.push({
+          ...queuedVisible,
+          eventType: 'user_steer_queued',
+          steeringId,
+          at: steering.at || new Date().toISOString()
+        })
+      }
+    }
+  }
   updateGlobalStreamToolUseSummary(agentMsg, event)
   if (event.type === 'test_agent_execution_plan_ready') {
     applyGlobalTestAgentExecutionPlanReady(agentMsg, event)
   }
-  if (event.type === 'test_agent_review_ready') {
+  if (event.type === 'test_agent_review_ready' || event.type === 'post_review_spot_check_ready') {
     applyGlobalTestAgentReviewReady(agentMsg, event)
   }
   const dispatchLaunchSummary = event.dispatch_launch_summary || event.dispatchLaunchSummary || null
@@ -1341,7 +1529,7 @@ const appendGlobalStreamEvent = (agentMsg, event) => {
   const key = `${visible.title}:${visible.text}`
   const previous = agentMsg.streamEvents[agentMsg.streamEvents.length - 1]
   if (previous && `${previous.title}:${previous.text}` === key) return false
-  agentMsg.streamEvents.push({ ...visible, at: new Date().toISOString() })
+  agentMsg.streamEvents.push({ ...visible, eventType, steeringId, at: new Date().toISOString() })
   if (agentMsg.streamEvents.length > GLOBAL_STREAM_EVENT_LIMIT) {
     agentMsg.streamEvents.splice(0, agentMsg.streamEvents.length - GLOBAL_STREAM_EVENT_LIMIT)
   }
@@ -1358,8 +1546,112 @@ watch(currentSessionId, () => {
   scrollToBottom()
 }, { flush: 'post' })
 
+const findActiveGlobalRunMessage = (runId = activeGlobalRunId.value) => {
+  if (activeGlobalRunMessage.value?.agenticRun?.id === runId) return activeGlobalRunMessage.value
+  const rows = currentSession.value?.messages || []
+  return [...rows].reverse().find(message => message?.role === 'assistant'
+    && message?.agenticRun?.id === runId) || null
+}
+
+const sendGlobalRunSteer = async (options = {}) => {
+  const userText = chatInput.value.trim()
+  const runId = options.runId || activeGlobalRunId.value
+  if (!userText || !runId || isSteering.value) return
+  const agentMsg = options.agentMsg || findActiveGlobalRunMessage(runId)
+  if (!agentMsg || !currentSession.value) {
+    toast.error('当前任务还没有准备好接收补充要求')
+    return
+  }
+
+  const supervisionSteer = options.supervision === true
+  const source = supervisionSteer ? 'global_web_supervision_steer' : 'global_web_mid_turn'
+  const requestId = `steer-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+  const userMessage = {
+    role: 'user',
+    content: userText,
+    timestamp: new Date().toISOString(),
+    type: supervisionSteer ? 'global_supervision_steer' : 'global_run_steer',
+    run_id: runId,
+    delivery_status: 'sending'
+  }
+  currentSession.value.messages.push(userMessage)
+  chatInput.value = ''
+  isSteering.value = true
+  saveHistory()
+  scrollToBottom()
+
+  try {
+    const res = await fetch('/api/global-agent/runs/steer', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: runId,
+        message: userText,
+        kind: 'auto',
+        source,
+        request_id: requestId
+      })
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok || data.success === false) throw new Error(data.error || `HTTP ${res.status}`)
+    userMessage.delivery_status = 'accepted'
+    if (data.run) {
+      agentMsg.agenticRun = mergeGlobalRunTestAgentExecutionPlan(data.run, agentMsg.agenticRun || {})
+      activeGlobalRunId.value = agentMsg.agenticRun.id || runId
+      activeGlobalRunMessage.value = agentMsg
+    }
+    if (data.mission) applyGlobalMissionPayload(agentMsg, data)
+    else if (data.supervisor) agentMsg.globalMissionSupervisor = data.supervisor
+    if (supervisionSteer) {
+      agentMsg.type = 'global_stream'
+      agentMsg.streaming = false
+    }
+    appendGlobalStreamEvent(agentMsg, {
+      type: data.applied === true ? 'user_steer_applied' : 'user_steer_queued',
+      run_id: runId,
+      status: data.run?.status || 'running',
+      phase: data.run?.phase || 'plan',
+      steering: data.steering || { message: userText, kind: 'supplement', status: 'queued' },
+      replan_required: data.steering?.kind === 'revise_goal',
+      message: data.message || ''
+    })
+    saveHistory()
+    scrollToBottom()
+  } catch (error) {
+    userMessage.delivery_status = 'failed'
+    if (!chatInput.value.trim()) chatInput.value = userText
+    appendGlobalStreamEvent(agentMsg, {
+      type: 'user_steer_failed',
+      run_id: runId,
+      message: error?.message || '这条补充没有接入当前任务，请重新发送。'
+    })
+    toast.error(error?.message || '补充要求发送失败')
+    saveHistory()
+  } finally {
+    isSteering.value = false
+    if (supervisionSteer) {
+      activeGlobalRunId.value = ''
+      activeGlobalRunMessage.value = null
+    }
+    scrollToBottom()
+  }
+}
+
 const sendMessage = async () => {
-  if ((!chatInput.value.trim() && selectedFiles.value.length === 0) || isSending.value) return
+  if (isSending.value) return sendGlobalRunSteer()
+  if (!chatInput.value.trim() && selectedFiles.value.length === 0) return
+  const supervisionTarget = currentSupervisedRunMessage.value
+  if (
+    selectedFiles.value.length === 0
+    && supervisionTarget?.agenticRun?.id
+    && isExplicitSupervisionContinuation(chatInput.value)
+  ) {
+    return sendGlobalRunSteer({
+      runId: supervisionTarget.agenticRun.id,
+      agentMsg: supervisionTarget,
+      supervision: true,
+    })
+  }
   if (!currentSession.value) {
     createNewSession()
   }
@@ -1412,6 +1704,8 @@ const sendMessage = async () => {
       user_message: userText,
       userMessage: userText
     }
+    activeGlobalRunMessage.value = agentMsg
+    activeGlobalRunId.value = ''
     const agentMsgAdded = { value: false }
     const requestId = `web-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
     
@@ -1479,6 +1773,8 @@ const sendMessage = async () => {
           agentMsg.content = sanitizeGlobalVisibleStreamText(run.final_reply || GLOBAL_RESULT_VISIBLE_FALLBACK, GLOBAL_RESULT_VISIBLE_FALLBACK, 8000) + confirmationHint
           agentMsg.files = data.files || []
           agentMsg.agenticRun = run
+          activeGlobalRunId.value = run.id || activeGlobalRunId.value
+          activeGlobalRunMessage.value = agentMsg
           agentMsg.streaming = false
           agentMsg.type = 'global_agent_result'
           if (run.status === 'supervising' && run.mission_id) trackGlobalMission(run.mission_id, currentSessionId.value)
@@ -1535,6 +1831,8 @@ const sendMessage = async () => {
     saveHistory()
   } finally {
     isSending.value = false
+    activeGlobalRunId.value = ''
+    activeGlobalRunMessage.value = null
     scrollToBottom()
   }
 }
@@ -2721,12 +3019,16 @@ const handleGitCommitCardSubmit = async (msg) => {
             <div class="chat-bubble">
               <!-- 助手消息判定 -->
               <template v-if="msg.role === 'assistant'">
-                <div v-if="msg.type === 'global_stream'" class="global-stream-card">
+                <div
+                  v-if="msg.type === 'global_stream'"
+                  class="global-stream-card"
+                  :data-run-id="msg.agenticRun?.id || undefined"
+                >
                   <div class="global-stream-head">
                     <span class="stream-dot" :class="{ active: msg.streaming }"></span>
                     <div>
-                      <strong>{{ msg.streaming ? '我正在处理' : '处理过程' }}</strong>
-                      <p>{{ msg.streaming ? '正在实时更新理解、规划和工具执行状态' : '本轮过程已结束' }}</p>
+                      <strong>{{ globalStreamHeaderTitle(msg) }}</strong>
+                      <p>{{ globalStreamHeaderSubtitle(msg) }}</p>
                     </div>
                   </div>
                   <div
@@ -3072,7 +3374,7 @@ const handleGitCommitCardSubmit = async (msg) => {
           </div>
         </div>
 
-        <div class="input-wrapper">
+                <div class="input-wrapper" :class="{ 'steering-mode': (isSending && !!activeGlobalRunId) || isSupervisionContinuationInput }">
           <input 
             type="file" 
             ref="fileInput" 
@@ -3080,8 +3382,14 @@ const handleGitCommitCardSubmit = async (msg) => {
             style="display: none" 
             @change="handleFileChange"
             accept="image/*,.txt,.md,.json,.pdf,.docx,.xlsx"
+            :disabled="isSending"
           />
-          <button class="attach-btn" @click="triggerFileUpload" title="上传图片或文件附件">
+          <button
+            class="attach-btn"
+            @click="triggerFileUpload"
+            :title="isSending ? '当前任务执行中，附件请在下一条消息发送' : '上传图片或文件附件'"
+            :disabled="isSending"
+          >
             <svg class="icon-attach" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
             </svg>
@@ -3089,16 +3397,20 @@ const handleGitCommitCardSubmit = async (msg) => {
           <input 
             type="text" 
             v-model="chatInput" 
-            placeholder="对全局助手说点什么... (例如: 帮我把桌宠打开)"
-            @keydown.enter="sendMessage"
-            :disabled="isSending"
+            :placeholder="globalInputPlaceholder"
+            @keydown.enter.prevent="sendMessage"
           />
-          <button class="send-btn" :class="{ 'pulse-glow': isSending }" @click="sendMessage" :disabled="isSending || (!chatInput.trim() && selectedFiles.length === 0)">
+          <button
+            class="send-btn"
+            :class="{ 'pulse-glow': isSending && !isSteering, 'steering-submit': isSending }"
+            @click="sendMessage"
+            :disabled="!canSendGlobalMessage"
+          >
             <svg class="icon-send" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
               <line x1="22" y1="2" x2="11" y2="13"></line>
               <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
             </svg>
-            <span>发送</span>
+            <span>{{ globalSendButtonLabel }}</span>
           </button>
         </div>
       </div>
@@ -4498,6 +4810,10 @@ const handleGitCommitCardSubmit = async (msg) => {
   box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.18);
   background: rgba(255, 255, 255, 0.9);
 }
+.input-wrapper.steering-mode {
+  border-color: rgba(14, 116, 144, 0.48);
+  box-shadow: 0 0 0 3px rgba(6, 182, 212, 0.12);
+}
 :global([data-theme="dark"]) .input-wrapper:focus-within {
   background: rgba(20, 20, 30, 0.88);
 }
@@ -4522,6 +4838,14 @@ const handleGitCommitCardSubmit = async (msg) => {
 .attach-btn:hover .icon-attach {
   color: #6366f1;
   transform: rotate(15deg) scale(1.1);
+}
+.attach-btn:disabled {
+  cursor: not-allowed;
+  color: var(--text-muted);
+  opacity: 0.55;
+}
+.attach-btn:disabled .icon-attach {
+  transform: none;
 }
 
 .input-wrapper input[type="text"] {
@@ -4548,6 +4872,11 @@ const handleGitCommitCardSubmit = async (msg) => {
   gap: 6px;
   transition: all 0.25s ease;
   box-shadow: 0 4px 12px rgba(99, 102, 241, 0.2);
+  min-width: 92px;
+  justify-content: center;
+}
+.send-btn.steering-submit {
+  background: linear-gradient(135deg, #0f766e, #0891b2);
 }
 .icon-send {
   width: 14px;

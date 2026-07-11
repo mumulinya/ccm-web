@@ -1,11 +1,19 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.buildTestAgentReport = buildTestAgentReport;
+const adversarial_summary_1 = require("./adversarial-summary");
+const acceptance_gate_1 = require("./acceptance-gate");
+const http_concurrency_1 = require("./http-concurrency");
 const coverage_1 = require("./coverage");
 const interaction_summary_1 = require("./browser/interaction-summary");
+const flow_summary_1 = require("./browser/flow-summary");
+const multi_session_summary_1 = require("./browser/multi-session-summary");
 const network_summary_1 = require("./browser/network-summary");
 const provider_gaps_1 = require("./browser/provider-gaps");
 const provider_summary_1 = require("./browser/provider-summary");
+const recovery_summary_1 = require("./browser/recovery-summary");
+const action_effect_summary_1 = require("./browser/action-effect-summary");
+const stability_summary_1 = require("./browser/stability-summary");
 const failure_summary_1 = require("./failure-summary");
 const required_checks_1 = require("./required-checks");
 const utils_1 = require("./utils");
@@ -51,7 +59,7 @@ function buildEvidence(commandResults, devServerResults, httpResults, browserRes
             project: result.project,
             title: `${result.adversarial ? "Adversarial " : ""}${result.name || "HTTP probe"}: ${result.method || "GET"} ${result.url}`,
             status: resultStatusToAgent(result.status),
-            detail: result.error || `status=${result.statusCode}; resources=${result.resourceChecks.length}${result.probeType ? `; probe=${result.probeType}` : ""}`,
+            detail: result.error || `status=${result.statusCode}; resources=${result.resourceChecks.length}${result.concurrency ? `; concurrentRequests=${result.concurrency.requested}; maxInFlight=${result.concurrency.maxInFlight}` : ""}${result.probeType ? `; probe=${result.probeType}` : ""}`,
         });
     }
     for (const result of browserResults) {
@@ -137,7 +145,7 @@ function buildEvidence(commandResults, devServerResults, httpResults, browserRes
     }
     return evidence;
 }
-function computeStatus(commandResults, devServerResults, httpResults, browserResults, issues, requiredCheckCoverage) {
+function computeOperationalStatus(commandResults, devServerResults, httpResults, browserResults, issues, requiredCheckCoverage, adversarialEvidenceSummary) {
     if (issues.some(issue => issue.severity === "error"))
         return "blocked";
     const executableCount = commandResults.length + httpResults.length + browserResults.length;
@@ -153,9 +161,23 @@ function computeStatus(commandResults, devServerResults, httpResults, browserRes
         const anyPassed = commandResults.some(item => item.status === "passed") || httpResults.some(item => item.status === "passed") || browserResults.some(item => item.status === "passed");
         return anyPassed ? "partial" : "blocked";
     }
+    if ((adversarialEvidenceSummary.status === "missing" || adversarialEvidenceSummary.status === "unlinked")
+        && (adversarialEvidenceSummary.required || !adversarialEvidenceSummary.waived))
+        return "partial";
     if (requiredCheckCoverage.some(item => item.status === "unknown"))
         return "partial";
     return "passed";
+}
+function applyAcceptanceEvidenceGate(status, gate) {
+    if (status === "blocked")
+        return status;
+    if (gate.status === "failed")
+        return "failed";
+    if (status !== "passed")
+        return status;
+    if (gate.status === "incomplete" || gate.status === "weak")
+        return "partial";
+    return status;
 }
 function buildTestAgentReport(input) {
     const { workOrder, startedAt, issues, commandResults, devServerResults, browserResults } = input;
@@ -163,6 +185,22 @@ function buildTestAgentReport(input) {
     const browserToolCalls = input.browserToolCalls || [];
     const finishedAt = (0, utils_1.nowIso)();
     const browserInteractionSummary = (0, interaction_summary_1.buildBrowserInteractionSummary)(browserResults);
+    const browserFlowSummary = (0, flow_summary_1.buildBrowserFlowSummary)(browserResults);
+    const browserMultiSessionSummary = (0, multi_session_summary_1.buildBrowserMultiSessionSummary)(browserResults);
+    const browserStabilitySummary = (0, stability_summary_1.buildBrowserStabilitySummary)(browserResults);
+    const browserRecoverySummary = (0, recovery_summary_1.buildBrowserRecoverySummary)(browserResults);
+    const browserActionEffectSummary = (0, action_effect_summary_1.buildBrowserActionEffectSummary)(browserResults);
+    const httpConcurrencySummary = (0, http_concurrency_1.buildHttpConcurrencySummary)(httpResults);
+    const adversarialRequired = workOrder.options.requireAdversarialProbe
+        || workOrder.requiredChecks.some(check => /adversarial|boundary|orphan|idempot|concurr|race/i.test(String(check || "")));
+    const adversarialEvidenceSummary = (0, adversarial_summary_1.buildAdversarialEvidenceSummary)({
+        required: adversarialRequired,
+        waiverReason: adversarialRequired ? "" : workOrder.options.adversarialProbeWaiver,
+        originalUserGoal: workOrder.originalUserGoal,
+        acceptanceCriteria: workOrder.acceptanceCriteria,
+        httpResults,
+        browserResults,
+    });
     const browserNetworkSummary = (0, network_summary_1.buildBrowserNetworkSummary)(browserResults);
     const browserProviderSummary = (0, provider_summary_1.buildBrowserProviderSummary)(workOrder, browserResults);
     const browserProviderGaps = (0, provider_gaps_1.buildBrowserProviderGaps)(browserResults);
@@ -174,7 +212,21 @@ function buildTestAgentReport(input) {
         browserResults,
         browserToolCalls,
     });
-    const status = computeStatus(commandResults, devServerResults, httpResults, browserResults, issues, requiredCheckCoverage);
+    const operationalStatus = computeOperationalStatus(commandResults, devServerResults, httpResults, browserResults, issues, requiredCheckCoverage, adversarialEvidenceSummary);
+    const evidence = buildEvidence(commandResults, devServerResults, httpResults, browserResults, browserToolCalls);
+    const acceptanceCoverage = (0, coverage_1.buildAcceptanceCoverage)({
+        workOrder,
+        status: operationalStatus,
+        issues,
+        commandResults,
+        devServerResults,
+        httpResults,
+        browserResults,
+        browserToolCalls,
+        evidence,
+    });
+    const acceptanceEvidenceGateSummary = (0, acceptance_gate_1.buildAcceptanceEvidenceGateSummary)(acceptanceCoverage);
+    const status = applyAcceptanceEvidenceGate(operationalStatus, acceptanceEvidenceGateSummary);
     const failedCommands = commandResults.filter(item => item.status === "failed" || item.status === "timed_out");
     const failedHttp = httpResults.filter(item => item.status === "failed");
     const failedBrowser = browserResults.filter(item => item.status === "failed");
@@ -189,22 +241,40 @@ function buildTestAgentReport(input) {
         ...workOrder.projects.flatMap(project => project.risks.map(risk => `${project.name}: ${risk}`)),
         ...failedCommands.map(item => `${item.project}: command failed: ${item.command}`),
         ...failedHttp.map(item => `${item.project}: ${item.adversarial ? "adversarial " : ""}HTTP probe failed: ${item.error || item.url}`),
+        ...httpConcurrencySummary.items
+            .filter(item => item.failed > 0 || item.blocked > 0 || !item.overlapObserved)
+            .map(item => `${item.project}: concurrent HTTP probe incomplete: ${item.name}; failed=${item.failed}; blocked=${item.blocked}; maxInFlight=${item.maxInFlight}`),
         ...failedBrowser.map(item => `${item.project}: ${item.adversarial ? "adversarial " : ""}browser check failed: ${item.name}`),
+        ...browserStabilitySummary.items
+            .filter(item => item.status === "flaky" || item.status === "stable_fail")
+            .map(item => `${item.project}: browser stability ${item.status}: ${item.name}; failedRuns=${item.failedRuns.join(",") || "none"}`),
+        ...browserRecoverySummary.items
+            .filter(item => item.failed > 0 || item.notRetried > 0)
+            .map(item => `${item.project}: browser recovery incomplete: ${item.name}; failed=${item.failed}; unsafeRetriesPrevented=${item.notRetried}`),
+        ...browserActionEffectSummary.items
+            .filter(item => item.failed > 0)
+            .map(item => `${item.project}: browser action produced no verified effect: ${item.name}; unchanged=${item.unchanged}; unavailable=${item.unavailable}`),
+        ...(adversarialEvidenceSummary.status === "missing" && adversarialEvidenceSummary.required
+            ? ["required adversarial probe: no executed adversarial HTTP or browser evidence was recorded"]
+            : []),
+        ...(adversarialEvidenceSummary.status === "unlinked" && adversarialEvidenceSummary.required
+            ? ["required adversarial probe: executed probes were not linked to the original goal or acceptance criteria"]
+            : []),
+        ...(adversarialEvidenceSummary.status === "waived" && adversarialEvidenceSummary.waiverReason
+            ? [`adversarial probe waived: ${adversarialEvidenceSummary.waiverReason}`]
+            : []),
+        ...(acceptanceEvidenceGateSummary.status === "failed"
+            ? acceptanceEvidenceGateSummary.failedCriteria.map(criterion => `acceptance criterion has failing matched evidence: ${criterion}`)
+            : []),
+        ...(acceptanceEvidenceGateSummary.status === "incomplete"
+            ? acceptanceEvidenceGateSummary.incompleteCriteria.map(criterion => `acceptance criterion lacks matched execution evidence: ${criterion}`)
+            : []),
+        ...(acceptanceEvidenceGateSummary.status === "weak"
+            ? acceptanceEvidenceGateSummary.weakCriteria.map(criterion => `acceptance criterion has only report-status fallback evidence: ${criterion}`)
+            : []),
         ...browserProviderGaps.map(item => `${item.project || "browser"}: provider gap ${item.provider} ${item.step || item.check}: ${item.reason}`),
         ...requiredCheckCoverage.filter(item => item.status !== "verified").map(item => `required check ${item.check}: ${item.missingReason || item.status}`),
     ];
-    const evidence = buildEvidence(commandResults, devServerResults, httpResults, browserResults, browserToolCalls);
-    const acceptanceCoverage = (0, coverage_1.buildAcceptanceCoverage)({
-        workOrder,
-        status,
-        issues,
-        commandResults,
-        devServerResults,
-        httpResults,
-        browserResults,
-        browserToolCalls,
-        evidence,
-    });
     const failureSummary = (0, failure_summary_1.buildTestAgentFailureSummary)({
         issues,
         commandResults,
@@ -215,11 +285,19 @@ function buildTestAgentReport(input) {
         acceptanceCoverage,
     });
     const summary = status === "passed"
-        ? `TestAgent verified ${commandResults.filter(item => item.status === "passed").length} command checks, ${httpResults.filter(item => item.status === "passed").length} HTTP probes, ${browserResults.filter(item => item.status === "passed").length} browser checks, and ${browserToolCalls.length} browser tool calls.`
+        ? `TestAgent verified ${commandResults.filter(item => item.status === "passed").length} command checks, ${httpResults.filter(item => item.status === "passed").length} HTTP probes (${httpConcurrencySummary.requests} concurrent requests), ${browserResults.filter(item => item.status === "passed").length} browser checks, ${adversarialEvidenceSummary.passedRelevant} relevant adversarial probes, and ${browserToolCalls.length} browser tool calls.`
         : status === "failed"
             ? `TestAgent found failing verification evidence: ${risks.slice(0, 3).join("; ") || "one or more checks failed"}.`
             : status === "partial"
-                ? `TestAgent completed part of the verification, but some checks were blocked.`
+                ? adversarialEvidenceSummary.status === "missing" && adversarialEvidenceSummary.required
+                    ? "TestAgent completed happy-path verification, but no required adversarial probe produced execution evidence."
+                    : adversarialEvidenceSummary.status === "unlinked" && adversarialEvidenceSummary.required
+                        ? "TestAgent ran adversarial probes, but none were linked to the original goal or acceptance criteria."
+                        : acceptanceEvidenceGateSummary.status === "weak"
+                            ? "TestAgent execution passed, but acceptance criteria have only report-status fallback evidence and are not independently verified."
+                            : acceptanceEvidenceGateSummary.status === "incomplete"
+                                ? "TestAgent execution passed, but one or more acceptance criteria lack matched execution evidence."
+                                : `TestAgent completed part of the verification, but some checks were blocked or missing.`
                 : `TestAgent could not verify completion: ${blockedReasons.slice(0, 3).join("; ") || "missing executable checks"}.`;
     return {
         schema: "ccm-test-agent-report-v1",
@@ -228,6 +306,8 @@ function buildTestAgentReport(input) {
         workOrderId: workOrder.id,
         taskId: workOrder.taskId,
         groupId: workOrder.groupId,
+        originalUserGoal: workOrder.originalUserGoal,
+        acceptanceCriteria: workOrder.acceptanceCriteria,
         status,
         recommendation: status === "passed" ? "accept" : status === "failed" ? "rework" : "need_human",
         summary,
@@ -241,8 +321,16 @@ function buildTestAgentReport(input) {
         httpResults,
         browserResults,
         browserToolCalls,
+        httpConcurrencySummary,
         browserNetworkSummary,
         browserInteractionSummary,
+        browserFlowSummary,
+        browserMultiSessionSummary,
+        browserStabilitySummary,
+        browserRecoverySummary,
+        browserActionEffectSummary,
+        adversarialEvidenceSummary,
+        acceptanceEvidenceGateSummary,
         browserProviderSummary,
         browserProviderGaps,
         failureSummary,

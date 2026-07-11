@@ -76,6 +76,23 @@ function normalizeMemoryProvenanceUsageEntries(value: any) {
   }).filter((item: any) => item && (item.relPath || item.name || item.usageState || item.provenanceStatus || item.repairWorkItemId || item.reason)).slice(0, 80);
 }
 
+function normalizeProviderSwitchExecution(value: any) {
+  const raw = Array.isArray(value) ? value[value.length - 1] : value;
+  if (!raw || typeof raw !== "object") return null;
+  const item = raw as any;
+  const normalized = {
+    decisionReceiptId: String(item.decisionReceiptId || item.decision_receipt_id || item.providerSwitchDecisionReceiptId || item.provider_switch_decision_receipt_id || "").trim(),
+    expectedProvider: String(item.expectedProvider || item.expected_provider || item.approvedProvider || item.approved_provider || "").trim(),
+    executedProvider: String(item.executedProvider || item.executed_provider || item.actualProvider || item.actual_provider || "").trim(),
+    taskAgentSessionId: String(item.taskAgentSessionId || item.task_agent_session_id || "").trim(),
+    nativeSessionId: String(item.nativeSessionId || item.native_session_id || "").trim(),
+    executionId: String(item.executionId || item.execution_id || "").trim(),
+    usageState: String(item.usageState || item.usage_state || item.status || "").trim().toLowerCase(),
+    reason: compactMemoryText(item.reason || item.note || item.evidence || "", 600),
+  };
+  return Object.values(normalized).some(Boolean) ? normalized : null;
+}
+
 function uniqueReceiptStrings(...lists: any[]) {
   const seen = new Set<string>();
   const result: string[] = [];
@@ -169,6 +186,12 @@ function normalizeAgentReceipt(raw: any, agent: string) {
       || raw.pressureMemoryUsage
       || raw.pressure_memory_usage
   );
+  const providerSwitchExecution = normalizeProviderSwitchExecution(
+    raw.providerSwitchExecution
+      || raw.provider_switch_execution
+      || raw.providerSwitchExecutionReceipt
+      || raw.provider_switch_execution_receipt
+  );
   const ackRaw = raw.ack || raw.ACK || raw.acknowledgement || raw.acknowledgment || null;
   const ack = ackRaw && typeof ackRaw === "object" ? {
     understoodGoal: String(ackRaw.understoodGoal || ackRaw.goal || ackRaw.summary || "").trim(),
@@ -220,6 +243,7 @@ function normalizeAgentReceipt(raw: any, agent: string) {
     postCompactCandidateUsage,
     globalMemoryUsage,
     memoryProvenanceUsage,
+    providerSwitchExecution,
   };
 }
 
@@ -256,6 +280,7 @@ export function getReceiptAssignmentStatus(response: string, receipt: any) {
 export function formatAgentReceiptForReview(receipt: any) {
   if (!receipt) return "结构化回执：缺失";
   const independentReview = normalizeIndependentReviewEntries(receipt.independentReview || receipt.independent_review || receipt.codeReview || receipt.code_review);
+  const memoryProvenanceUsage = normalizeMemoryProvenanceUsageEntries(receipt.memoryProvenanceUsage || receipt.memory_provenance_usage || []);
   const independentReviewLine = independentReview.length
     ? independentReview.map((item: any) => [
       item.reviewer || "reviewer",
@@ -276,7 +301,90 @@ export function formatAgentReceiptForReview(receipt: any) {
     `- 未用记忆：${receipt.memoryIgnored?.length ? receipt.memoryIgnored.join("；") : "无"}`,
     `- 全局记忆：${receipt.globalMemoryUsage?.length ? receipt.globalMemoryUsage.map((item: any) => `${item.globalMemoryId || "global"}=${item.usageState || "declared"}${item.currentSourceVerified ? "/verified" : ""}`).join("；") : "未声明"}`,
     `- 压缩候选：${receipt.postCompactCandidateUsage?.length ? receipt.postCompactCandidateUsage.map((item: any) => `${item.candidateId || item.value || "candidate"}=${item.usageState || "unknown"}`).join("；") : "未声明"}`,
+    `- 记忆溯源：${memoryProvenanceUsage.length ? memoryProvenanceUsage.map((item: any) => [
+      item.relPath || item.name || "memory",
+      item.usageState || "unknown",
+      item.currentSourceVerified ? "current-source-verified" : "current-source-unverified",
+      item.providerDispatchOverrideId ? `override=${item.providerDispatchOverrideId}` : "",
+      item.providerDispatchOverrideFollowupHistoryReverified ? "override-followup-reverified" : "",
+    ].filter(Boolean).join("/")).join("；") : "未声明"}`,
+    `- Provider switch：${receipt.providerSwitchExecution ? `${receipt.providerSwitchExecution.decisionReceiptId || "missing"} / expected=${receipt.providerSwitchExecution.expectedProvider || "missing"} / executed=${receipt.providerSwitchExecution.executedProvider || "missing"} / state=${receipt.providerSwitchExecution.usageState || "unknown"}` : "未声明"}`,
     `- 阻塞：${receipt.blockers.length ? receipt.blockers.join("；") : "无"}`,
     `- 需要补充：${receipt.needs.length ? receipt.needs.join("；") : "无"}`,
   ].join("\n");
+}
+
+export function runAgentReceiptProviderDispatchOverrideFollowupSelfTest() {
+  const response = [
+    "CCM_AGENT_RECEIPT",
+    "```json",
+    JSON.stringify({
+      ccm_receipt: true,
+      status: "done",
+      summary: "provider override follow-up receipt parser selftest",
+      memoryProvenanceUsage: [{
+        relPath: "pressure-provider-dispatch-override-followup-validation.md",
+        usageState: "verified",
+        repairStatus: "completed",
+        repairGapType: "provider_dispatch_override_followup",
+        repairWorkItemId: "work-agent-receipt-provider-override-followup",
+        providerDispatchOverrideId: "provider-dispatch-override:agent-receipt-selftest",
+        currentSourceVerified: true,
+        providerDispatchOverrideFollowupHistoryReverified: true,
+        reason: "reverified current source",
+      }],
+    }),
+    "```",
+  ].join("\n");
+  const receipt = extractAgentReceipt(response, "codex") || {};
+  const row = receipt.memoryProvenanceUsage?.[0] || {};
+  const review = formatAgentReceiptForReview(receipt);
+  const checks = {
+    parsesProviderOverrideId: row.providerDispatchOverrideId === "provider-dispatch-override:agent-receipt-selftest",
+    parsesHistoryReverifiedFlag: row.providerDispatchOverrideFollowupHistoryReverified === true,
+    preservesCurrentSourceVerified: row.currentSourceVerified === true,
+    reviewShowsProviderEvidence: review.includes("override=provider-dispatch-override:agent-receipt-selftest")
+      && review.includes("override-followup-reverified"),
+  };
+  return { pass: Object.values(checks).every(Boolean), checks, row, review };
+}
+
+export function runAgentReceiptProviderSwitchExecutionSelfTest() {
+  const response = [
+    "CCM_AGENT_RECEIPT",
+    "```json",
+    JSON.stringify({
+      ccm_receipt: true,
+      status: "done",
+      summary: "provider switch execution receipt parser selftest",
+      provider_switch_execution: {
+        provider_switch_decision_receipt_id: "provider-switch-decision:agent-receipt-selftest",
+        expected_provider: "cursor",
+        actual_provider: "cursor",
+        task_agent_session_id: "tas-agent-receipt-provider-switch",
+        native_session_id: "native-agent-receipt-provider-switch",
+        execution_id: "execution-agent-receipt-provider-switch",
+        usage_state: "executed",
+        reason: "executed with the approved provider",
+      },
+    }),
+    "```",
+  ].join("\n");
+  const receipt = extractAgentReceipt(response, "cursor") || {};
+  const row = receipt.providerSwitchExecution || {};
+  const review = formatAgentReceiptForReview(receipt);
+  const checks = {
+    parsesDecisionReceiptId: row.decisionReceiptId === "provider-switch-decision:agent-receipt-selftest",
+    parsesExpectedAndExecutedProvider: row.expectedProvider === "cursor"
+      && row.executedProvider === "cursor",
+    parsesSessionAndExecutionBinding: row.taskAgentSessionId === "tas-agent-receipt-provider-switch"
+      && row.nativeSessionId === "native-agent-receipt-provider-switch"
+      && row.executionId === "execution-agent-receipt-provider-switch",
+    normalizesUsageState: row.usageState === "executed",
+    reviewShowsSwitchExecution: review.includes("provider-switch-decision:agent-receipt-selftest")
+      && review.includes("expected=cursor")
+      && review.includes("executed=cursor")
+      && review.includes("state=executed"),
+  };
+  return { pass: Object.values(checks).every(Boolean), checks, row, review };
 }

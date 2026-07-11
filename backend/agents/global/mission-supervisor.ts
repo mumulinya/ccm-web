@@ -358,7 +358,7 @@ export async function controlGlobalMissionSupervisor(id: string, operation: stri
   }
   if (!["pause", "resume", "cancel", "takeover", "update_goal"].includes(op)) throw new Error(`不支持的持续跟进操作：${operation}`);
   if (["completed", "failed", "cancelled"].includes(record.status)) throw new Error("持续跟进已进入终态，不能再修改；请创建新的全局任务");
-  await runtime.controlMission(record.mission_id, op, payload);
+  const controlResult = await runtime.controlMission(record.mission_id, op, payload);
   if (op === "pause") { record.status = "paused"; record.phase = "paused"; }
   if (op === "resume") { record.status = "monitoring"; record.phase = "supervising"; record.next_check_at = now; }
   if (op === "cancel") { record.status = "cancelled"; record.phase = "cancelled"; record.completed_at = now; }
@@ -366,26 +366,60 @@ export async function controlGlobalMissionSupervisor(id: string, operation: stri
   if (op === "update_goal") {
     record.business_goal = String(payload.business_goal || payload.businessGoal || payload.goal || record.business_goal);
     record.acceptance = String(payload.acceptance || payload.acceptance_criteria || record.acceptance);
-    if (payload.continuation && typeof payload.continuation === "object") {
-      record.last_continuation = {
-        source: payload.continuation.source || "mission_supervisor_goal_update",
-        at: now,
-        automatic: false,
-        kind: "revise_goal",
-        status: "accepted",
-        rework_kind: payload.continuation.rework_kind || payload.continuation.reworkKind || "",
-        target: payload.continuation.target || payload.continuation.agent || payload.continuation.project || "",
-        reason: payload.continuation.reason || payload.continuation.detail || "",
-        title: payload.continuation.title || payload.continuation.label || "",
-        work_item_id: payload.continuation.work_item_id || payload.continuation.workItemId || "",
-      };
-    }
+    const continuation = payload.continuation && typeof payload.continuation === "object" ? payload.continuation : {};
+    const summary = controlResult?.continuation_summary || controlResult?.continuationSummary || {};
+    const kind = String(
+      summary.kind
+        || controlResult?.continuation_kind
+        || payload.continuation_kind
+        || payload.continuationKind
+        || continuation.kind
+        || "revise_goal",
+    ) === "supplement" ? "supplement" : "revise_goal";
+    const affectedTaskCount = Number(summary.affected_task_count || 0);
+    const queuedTaskCount = Number(summary.queued_task_count || 0);
+    const deferredTaskCount = Number(summary.deferred_task_count || 0);
+    const interruptedTaskCount = Number(summary.interrupted_task_count || summary.interruption_requested_count || 0);
+    const failedTaskCount = Number(summary.failed_task_count || 0);
+    record.last_continuation = {
+      source: continuation.source || summary.source || payload.source || "mission_supervisor_goal_update",
+      at: now,
+      automatic: false,
+      kind,
+      status: kind === "revise_goal" && interruptedTaskCount > 0 ? "interrupting" : failedTaskCount > 0 ? "partial" : "accepted",
+      replan_required: kind === "revise_goal",
+      interrupt_current_run: kind === "revise_goal",
+      rework_kind: continuation.rework_kind || continuation.reworkKind || "",
+      target: continuation.target || continuation.agent || continuation.project || "",
+      reason: continuation.reason || continuation.detail || payload.message || payload.reason || "",
+      title: continuation.title || continuation.label || "",
+      work_item_id: continuation.work_item_id || continuation.workItemId || "",
+      affected_task_count: affectedTaskCount,
+      queued_task_count: queuedTaskCount,
+      deferred_task_count: deferredTaskCount,
+      interrupted_task_count: interruptedTaskCount,
+      failed_task_count: failedTaskCount,
+      continuation_summary: summary,
+    };
     if (["waiting_user", "paused"].includes(record.status)) record.status = "monitoring";
-    record.phase = "supervising";
+    record.phase = kind === "revise_goal" ? "replanning" : "supervising";
     record.next_check_at = now;
   }
   record.updated_at = now;
-  record.actions = [...record.actions, { at: now, type: `user_${op}`, payload: { reason: payload.reason || "", goal_changed: op === "update_goal" } }].slice(-100);
+  record.actions = [...record.actions, {
+    at: now,
+    type: `user_${op}`,
+    payload: {
+      reason: payload.reason || "",
+      goal_changed: op === "update_goal",
+      continuation_kind: record.last_continuation?.kind || "",
+      affected_task_count: Number(record.last_continuation?.affected_task_count || 0),
+      queued_task_count: Number(record.last_continuation?.queued_task_count || 0),
+      deferred_task_count: Number(record.last_continuation?.deferred_task_count || 0),
+      interrupted_task_count: Number(record.last_continuation?.interrupted_task_count || 0),
+      failed_task_count: Number(record.last_continuation?.failed_task_count || 0),
+    },
+  }].slice(-100);
   saveRecord(record);
   appendTraceEvent(record.trace_id, { id: `${record.id}:control:${op}:${now}`, type: `mission.supervisor_${op}`, status: op === "cancel" ? "warning" : "info", task_id: record.mission_id, message: `用户调整持续跟进：${op}` });
   if (record.status === "monitoring") void checkGlobalMissionSupervisorNow(record.id, runtime);
@@ -461,6 +495,7 @@ export async function runGlobalMissionSupervisorAsyncSelfTest() {
   const missionId = `selftest_${Date.now().toString(36)}_${crypto.randomBytes(3).toString("hex")}`;
   let phase: "failed" | "recovering" | "done" = "failed";
   const controlCalls: string[] = [];
+  const controlPayloads: any[] = [];
   const completedReports: any[] = [];
   const snapshot = () => phase === "done"
     ? {
@@ -489,7 +524,25 @@ export async function runGlobalMissionSupervisorAsyncSelfTest() {
       const value = snapshot();
       return { success: true, ...value, terminal: phase === "done", waiting_user: [], actions: [] };
     },
-    controlMission: (_id, operation) => { controlCalls.push(operation); return { success: true }; },
+    controlMission: (_id, operation, payload) => {
+      controlCalls.push(operation);
+      controlPayloads.push(payload);
+      return operation === "update_goal"
+        ? {
+            success: true,
+            continuation_kind: "revise_goal",
+            continuation_summary: {
+              kind: "revise_goal",
+              affected_task_count: 1,
+              queued_task_count: 0,
+              deferred_task_count: 1,
+              interruption_requested_count: 1,
+              interrupted_task_count: 1,
+              failed_task_count: 0,
+            },
+          }
+        : { success: true };
+    },
     onCompleted: (_record, report) => { completedReports.push(report); },
   };
   const record = startGlobalMissionSupervisor({ mission_id: missionId, trace_id: `trace_${missionId}`, business_goal: "持续跟进 E2E", source: "self-test", poll_interval_ms: 2_000, defer_check: true });
@@ -498,6 +551,16 @@ export async function runGlobalMissionSupervisorAsyncSelfTest() {
     const reloaded = getGlobalMissionSupervisor(record.id);
     const paused = await controlGlobalMissionSupervisor(record.id, "pause", runtime);
     const resumed = await controlGlobalMissionSupervisor(record.id, "resume", runtime);
+    const updatedGoal = await controlGlobalMissionSupervisor(record.id, "update_goal", runtime, {
+      business_goal: "只保留兼容字段，不再删除旧表",
+      message: "目标调整为只保留兼容字段，不再删除旧表",
+      continuation_kind: "revise_goal",
+      continuation: {
+        kind: "revise_goal",
+        source: "self-test",
+        reason: "目标边界发生变化",
+      },
+    });
     await new Promise(resolve => setTimeout(resolve, 20));
     phase = "done";
     const completed = await checkGlobalMissionSupervisorNow(record.id, runtime);
@@ -506,6 +569,14 @@ export async function runGlobalMissionSupervisorAsyncSelfTest() {
       restartReloadKeepsIdentity: reloaded?.id === record.id && reloaded?.mission_id === missionId,
       pauseWorks: paused.status === "paused" && controlCalls.includes("pause"),
       resumeWorks: ["monitoring", "completed"].includes(resumed.status) && controlCalls.includes("resume"),
+      updateGoalUsesActualContinuationKind: controlCalls.includes("update_goal")
+        && controlPayloads.some(item => item?.continuation_kind === "revise_goal")
+        && updatedGoal.business_goal.includes("只保留兼容字段")
+        && updatedGoal.last_continuation?.kind === "revise_goal",
+      updateGoalPersistsInterruptionStats: updatedGoal.last_continuation?.affected_task_count === 1
+        && updatedGoal.last_continuation?.deferred_task_count === 1
+        && updatedGoal.last_continuation?.interrupted_task_count === 1
+        && updatedGoal.last_continuation?.replan_required === true,
       finalGateCompletes: completed.status === "completed" && completed.final_report?.acceptance_gate_passed === true,
       fixedFinalReport: completed.final_report?.files_modified?.includes("src/e2e.ts") && completed.final_report?.verification_results?.includes("npm test"),
       completionNotifiedOnce: completedReports.length === 1,

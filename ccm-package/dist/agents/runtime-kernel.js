@@ -64,6 +64,21 @@ function compact(value, max = 1200) {
 function hash(value, len = 12) {
     return crypto.createHash("sha256").update(typeof value === "string" ? value : JSON.stringify(value || {})).digest("hex").slice(0, len);
 }
+function uniqueRuntimeStrings(values = [], limit = 24) {
+    const seen = new Set();
+    const result = [];
+    for (const raw of values.flatMap((value) => Array.isArray(value) ? value : [value])) {
+        const value = String(raw || "").trim();
+        const key = value.toLowerCase();
+        if (!value || seen.has(key))
+            continue;
+        seen.add(key);
+        result.push(value);
+        if (result.length >= limit)
+            break;
+    }
+    return result;
+}
 function renderWorkerPacketMemory(memory) {
     if (!memory)
         return "";
@@ -219,6 +234,14 @@ function renderPressureProvenanceProviderDispatchAdvisory(advisory = {}) {
     const openRepairIds = Array.isArray(selected.current_open_repair_item_ids || selected.currentOpenRepairItemIds)
         ? (selected.current_open_repair_item_ids || selected.currentOpenRepairItemIds).slice(0, 6)
         : [];
+    const reliabilitySnapshot = advisory.provider_reliability_snapshot || advisory.providerReliabilitySnapshot || null;
+    const selectedRankingProvenance = selected.provider_ranking_provenance || selected.providerRankingProvenance || {};
+    const selectedTypedMemoryRelPaths = Array.isArray(selectedRankingProvenance.typed_memory_rel_paths || selectedRankingProvenance.typedMemoryRelPaths)
+        ? (selectedRankingProvenance.typed_memory_rel_paths || selectedRankingProvenance.typedMemoryRelPaths).slice(0, 4)
+        : [];
+    const selectedTypedMemoryRowIds = Array.isArray(selectedRankingProvenance.typed_memory_row_ids || selectedRankingProvenance.typedMemoryRowIds)
+        ? (selectedRankingProvenance.typed_memory_row_ids || selectedRankingProvenance.typedMemoryRowIds).slice(0, 4)
+        : [];
     return [
         `Pressure provenance provider dispatch advisory：agentType=${selected.agent_type || selected.agentType || advisory.agent_type || advisory.agentType || "unknown"}；project=${selected.project || advisory.project || "unknown"}；health=${selected.health_status || selected.healthStatus || advisory.health_status || advisory.healthStatus || "unknown"}；policy=${selected.dispatch_policy || selected.dispatchPolicy || advisory.dispatch_policy || advisory.dispatchPolicy || "normal_dispatch"}`,
         advisory.should_hold_dispatch === true || advisory.shouldHoldDispatch === true || selected.dispatch_policy === "hold_until_repair" || selected.dispatchPolicy === "hold_until_repair"
@@ -226,8 +249,272 @@ function renderPressureProvenanceProviderDispatchAdvisory(advisory = {}) {
             : "",
         selected.dispatch_recommendation || selected.dispatchRecommendation ? `- Recommendation: ${selected.dispatch_recommendation || selected.dispatchRecommendation}.` : "",
         Number(selected.effective_violation_count || selected.effectiveViolationCount || 0) > 0 ? `- effectiveViolations=${selected.effective_violation_count || selected.effectiveViolationCount || 0}; recoveryCredit=${selected.recovery_credit || selected.recoveryCredit || 0}; relapsed=${selected.relapsed === true}.` : "",
+        Number(selected.provider_override_followup_receipt_validation_attempt_count || selected.providerOverrideFollowupReceiptValidationAttemptCount || 0) > 0
+            ? `- Corrected receipt validation history: attempts=${selected.provider_override_followup_receipt_validation_attempt_count || selected.providerOverrideFollowupReceiptValidationAttemptCount || 0}; failed=${selected.provider_override_followup_receipt_validation_failed_count || selected.providerOverrideFollowupReceiptValidationFailedCount || 0}; passed=${selected.provider_override_followup_receipt_validation_passed_count || selected.providerOverrideFollowupReceiptValidationPassedCount || 0}; consecutiveFailures=${selected.provider_override_followup_receipt_validation_consecutive_failure_count || selected.providerOverrideFollowupReceiptValidationConsecutiveFailureCount || 0}; escalated=${selected.provider_override_followup_receipt_validation_escalated === true || selected.providerOverrideFollowupReceiptValidationEscalated === true}; repairVerified=${selected.provider_override_followup_receipt_validation_repair_verified === true || selected.providerOverrideFollowupReceiptValidationRepairVerified === true}.`
+            : "",
+        Number(selected.provider_switch_execution_executed_count || selected.providerSwitchExecutionExecutedCount || 0) > 0
+            ? `- Provider switch execution history: executed=${selected.provider_switch_execution_executed_count || selected.providerSwitchExecutionExecutedCount || 0}; passed=${selected.provider_switch_execution_passed_count || selected.providerSwitchExecutionPassedCount || 0}; failed=${selected.provider_switch_execution_failed_count || selected.providerSwitchExecutionFailedCount || 0}; mismatch=${selected.provider_switch_execution_mismatch_count || selected.providerSwitchExecutionMismatchCount || 0}; escalated=${selected.provider_switch_execution_mismatch_escalated === true || selected.providerSwitchExecutionMismatchEscalated === true}; decayedRisk=${selected.provider_switch_execution_weighted_risk_score || selected.providerSwitchExecutionWeightedRiskScore || 0}; riskScore=${selected.provider_switch_execution_risk_score || selected.providerSwitchExecutionRiskScore || 0}; rankPenalty=${selected.local_execution_rank_penalty || selected.localExecutionRankPenalty || 0}; actualProviders=${(selected.provider_switch_execution_actual_providers || selected.providerSwitchExecutionActualProviders || []).slice(0, 6).join(",") || "unknown"}. Passed history is not future switch authorization.`
+            : "",
+        selectedTypedMemoryRelPaths.length || selectedTypedMemoryRowIds.length
+            ? `- Provider ranking provenance: memory=${selectedTypedMemoryRelPaths.join(",") || "unknown"}; rows=${selectedTypedMemoryRowIds.join(",") || "unknown"}; compactSafe=true.`
+            : "",
+        selected.cross_group_provider_reliability_actionable === true || selected.crossGroupProviderReliabilityActionable === true
+            ? `- Cross-group provider reliability guidance: risk=${selected.cross_group_provider_reliability_risk_status || selected.crossGroupProviderReliabilityRiskStatus || "unknown"}; score=${selected.cross_group_provider_reliability_risk_score || selected.crossGroupProviderReliabilityRiskScore || 0}; confidence=${selected.cross_group_provider_reliability_confidence || selected.crossGroupProviderReliabilityConfidence || 0}; sourceGroups=${selected.cross_group_provider_reliability_source_group_count || selected.crossGroupProviderReliabilitySourceGroupCount || 0}; guidanceOnly=true; localPolicyOverrideAllowed=false; no private group memory is included.`
+            : "",
+        reliabilitySnapshot?.snapshot_id
+            ? `- Provider reliability snapshot: id=${reliabilitySnapshot.snapshot_id}; generation=${reliabilitySnapshot.generation_id || "unknown"}; status=${reliabilitySnapshot.status || "unknown"}; expires=${reliabilitySnapshot.expires_at || "unknown"}; checksum=${reliabilitySnapshot.snapshot_checksum || "missing"}.`
+            : "",
         openRepairIds.length ? `- Open repair work items: ${openRepairIds.join(", ")}.` : "",
-        alternatives.length ? `- Safer alternatives: ${alternatives.map((item) => `${item.agent_type || item.agentType || "unknown"}(${item.health_status || item.healthStatus || "healthy"})`).join(", ")}.` : "",
+        alternatives.length ? `- Safer alternatives: ${alternatives.map((item) => {
+            const provenance = item.provider_ranking_provenance || item.providerRankingProvenance || {};
+            const relPaths = Array.isArray(provenance.typed_memory_rel_paths || provenance.typedMemoryRelPaths) ? (provenance.typed_memory_rel_paths || provenance.typedMemoryRelPaths).slice(0, 2).join(",") : "";
+            const rowIds = Array.isArray(provenance.typed_memory_row_ids || provenance.typedMemoryRowIds) ? (provenance.typed_memory_row_ids || provenance.typedMemoryRowIds).slice(0, 2).join(",") : "";
+            return `${item.agent_type || item.agentType || "unknown"}(${item.local_health_status || item.localHealthStatus || item.health_status || item.healthStatus || "healthy"}; risk=${item.global_risk_status || item.globalRiskStatus || "empty"}; rank=${item.composite_rank || item.compositeRank || 0}<${item.selected_composite_rank || item.selectedCompositeRank || 0}; execPenalty=${item.local_execution_rank_penalty || item.localExecutionRankPenalty || 0}; execRisk=${item.provider_switch_execution_weighted_risk_score || item.providerSwitchExecutionWeightedRiskScore || 0}; mem=${relPaths || "none"}; rows=${rowIds || "none"}; configured=${item.configured === true})`;
+        }).join(", ")}. Current assignment is unchanged.` : "",
+    ].filter(Boolean).join("\n");
+}
+function renderProviderSwitchDecisionReceipt(receipt = {}) {
+    if (receipt?.schema !== "ccm-provider-switch-decision-receipt-v1")
+        return "";
+    const oldProvider = receipt.old_provider || receipt.oldProvider || {};
+    const newProvider = receipt.new_provider || receipt.newProvider || {};
+    const snapshot = receipt.provider_reliability_snapshot || receipt.providerReliabilitySnapshot || {};
+    const authority = receipt.authority || {};
+    const compatibility = receipt.task_compatibility || receipt.taskCompatibility || {};
+    const rankingProvenance = receipt.provider_ranking_provenance || receipt.providerRankingProvenance || {};
+    const requestedProvenance = rankingProvenance.requested_candidate || rankingProvenance.requestedCandidate || newProvider.provider_ranking_provenance || newProvider.providerRankingProvenance || {};
+    const rankingRelPaths = Array.isArray(requestedProvenance.typed_memory_rel_paths || requestedProvenance.typedMemoryRelPaths)
+        ? (requestedProvenance.typed_memory_rel_paths || requestedProvenance.typedMemoryRelPaths).slice(0, 4)
+        : [];
+    const rankingRowIds = Array.isArray(requestedProvenance.typed_memory_row_ids || requestedProvenance.typedMemoryRowIds)
+        ? (requestedProvenance.typed_memory_row_ids || requestedProvenance.typedMemoryRowIds).slice(0, 4)
+        : [];
+    return [
+        `Provider switch decision receipt: id=${receipt.receipt_id || receipt.receiptId || ""}; status=${receipt.status || "unknown"}; old=${oldProvider.agent_type || oldProvider.agentType || "unknown"}; new=${newProvider.agent_type || newProvider.agentType || "unknown"}; project=${receipt.project || newProvider.project || "unknown"}.`,
+        `- Snapshot: id=${snapshot.snapshot_id || snapshot.snapshotId || "missing"}; generation=${snapshot.generation_id || snapshot.generationId || "missing"}; status=${snapshot.status || "missing"}; checksum=${snapshot.snapshot_checksum || snapshot.snapshotChecksum || "missing"}; expires=${snapshot.expires_at || snapshot.expiresAt || "missing"}.`,
+        `- Task compatibility: confirmed=${compatibility.confirmed === true}; evidence=${Array.isArray(compatibility.evidence) ? compatibility.evidence.slice(0, 4).join("; ") : "missing"}.`,
+        `- Authority: kind=${authority.kind || "missing"}; approved=${authority.approved === true}; localPolicyAuthority=${authority.local_policy_authority === true || authority.localPolicyAuthority === true}.`,
+        rankingRelPaths.length || rankingRowIds.length
+            ? `- Ranking provenance: memory=${rankingRelPaths.join(",") || "unknown"}; rows=${rankingRowIds.join(",") || "unknown"}; candidateRank=${newProvider.composite_rank || newProvider.compositeRank || 0}; selectedRank=${newProvider.selected_composite_rank || newProvider.selectedCompositeRank || 0}; compactSafe=${rankingProvenance.compact_safe === true || rankingProvenance.compactSafe === true}.`
+            : "",
+        receipt.valid === true && receipt.status === "approved"
+            ? "- This is an approved explicit provider switch. The child session must bind this receipt, and the final CCM_AGENT_RECEIPT must preserve the system-attested executed provider."
+            : "- This provider switch is not valid. Do not execute the proposed alternative as an approved switch.",
+    ].filter(Boolean).join("\n");
+}
+function extractProviderRankingCompactRepairReceiptMemoryContract(memory = {}, fallback = null) {
+    const candidate = fallback
+        || memory?.provider_ranking_compact_repair_receipt_memory_contract
+        || memory?.providerRankingCompactRepairReceiptMemoryContract
+        || memory?.provider_ranking_compact_repair_receipt_recall
+        || memory?.providerRankingCompactRepairReceiptRecall
+        || memory?.group_state?.typedMemory?.providerRankingCompactRepairReceiptRecall
+        || memory?.group_state?.typed_memory?.provider_ranking_compact_repair_receipt_recall
+        || memory?.typedMemory?.providerRankingCompactRepairReceiptRecall
+        || null;
+    if (!candidate?.schema && !candidate?.docRelPath && !candidate?.doc_rel_path)
+        return null;
+    const active = candidate.active === true
+        || candidate.recalledThisTurn === true
+        || candidate.recalled_this_turn === true
+        || Number(candidate.archivedCount || candidate.archived_count || 0) > 0;
+    const docRelPath = String(candidate.docRelPath || candidate.doc_rel_path || "provider-ranking-provenance-compact-repair-receipt-memory.md").trim();
+    const typedMemoryRelPaths = Array.isArray(candidate.typedMemoryRelPaths || candidate.typed_memory_rel_paths)
+        ? (candidate.typedMemoryRelPaths || candidate.typed_memory_rel_paths).map((item) => String(item || "").trim()).filter(Boolean).slice(0, 12)
+        : [];
+    const typedMemoryRowIds = Array.isArray(candidate.typedMemoryRowIds || candidate.typed_memory_row_ids)
+        ? (candidate.typedMemoryRowIds || candidate.typed_memory_row_ids).map((item) => String(item || "").trim()).filter(Boolean).slice(0, 12)
+        : [];
+    const receiptIds = Array.isArray(candidate.receiptIds || candidate.receipt_ids)
+        ? (candidate.receiptIds || candidate.receipt_ids).map((item) => String(item || "").trim()).filter(Boolean).slice(0, 8)
+        : [];
+    const receiptChecksums = Array.isArray(candidate.receiptChecksums || candidate.receipt_checksums)
+        ? (candidate.receiptChecksums || candidate.receipt_checksums).map((item) => String(item || "").trim()).filter(Boolean).slice(0, 8)
+        : [];
+    const targetPaths = uniqueRuntimeStrings([
+        candidate.targetPaths,
+        candidate.target_paths,
+        candidate.repeatableRelPaths,
+        candidate.repeatable_rel_paths,
+    ], 24);
+    const memoryUsageReceiptDocRelPaths = uniqueRuntimeStrings([
+        candidate.memoryUsageReceiptDocRelPaths,
+        candidate.memory_usage_receipt_doc_rel_paths,
+    ], 12);
+    const memoryUsageReceiptDisciplineRelPaths = uniqueRuntimeStrings([
+        candidate.memoryUsageReceiptDisciplineRelPaths,
+        candidate.memory_usage_receipt_discipline_rel_paths,
+        targetPaths.filter((item) => item === "provider-ranking-memory-usage-receipt-discipline.md"),
+    ], 8);
+    if (!active || !docRelPath)
+        return null;
+    return {
+        schema: "ccm-provider-ranking-compact-repair-receipt-memory-usage-contract-v1",
+        version: 1,
+        active: true,
+        source_schema: candidate.schema || "",
+        doc_rel_path: docRelPath,
+        archived_count: Number(candidate.archivedCount || candidate.archived_count || 0),
+        recalled_this_turn: candidate.recalledThisTurn === true || candidate.recalled_this_turn === true,
+        required_receipt_fields: ["memoryUsed", "memoryIgnored"],
+        allowed_usage_states: ["used", "verified", "ignored", "background"],
+        typed_memory_rel_paths: typedMemoryRelPaths,
+        typed_memory_row_ids: typedMemoryRowIds,
+        receipt_ids: receiptIds,
+        receipt_checksums: receiptChecksums,
+        memory_usage_receipt_doc_rel_paths: memoryUsageReceiptDocRelPaths,
+        memory_usage_receipt_discipline_rel_paths: memoryUsageReceiptDisciplineRelPaths,
+        memory_usage_receipt_discipline_required: memoryUsageReceiptDisciplineRelPaths.length > 0,
+        memory_receipt_required_doc_rel_paths: uniqueRuntimeStrings([docRelPath, ...memoryUsageReceiptDisciplineRelPaths], 10),
+        authorization_boundary: "provider switch execution history is ranking evidence only, not authorization; every explicit provider switch still requires a fresh valid provider switch decision receipt/checksum/local authority/task compatibility proof",
+        memory_used_template: `${docRelPath}; usageState=verified|background; ranking evidence only, not authorization; fresh valid provider switch decision receipt required for any explicit switch`,
+        memory_ignored_template: `${docRelPath}; usageState=ignored; reason=<why this recalled memory was not used>; ranking evidence only, not authorization`,
+    };
+}
+function renderProviderRankingCompactRepairReceiptMemoryContract(contract = {}) {
+    if (!contract?.schema || contract.active === false)
+        return "";
+    const relPaths = Array.isArray(contract.typed_memory_rel_paths || contract.typedMemoryRelPaths)
+        ? (contract.typed_memory_rel_paths || contract.typedMemoryRelPaths).slice(0, 6)
+        : [];
+    const rowIds = Array.isArray(contract.typed_memory_row_ids || contract.typedMemoryRowIds)
+        ? (contract.typed_memory_row_ids || contract.typedMemoryRowIds).slice(0, 6)
+        : [];
+    const disciplineRelPaths = uniqueRuntimeStrings([
+        contract.memory_usage_receipt_discipline_rel_paths,
+        contract.memoryUsageReceiptDisciplineRelPaths,
+    ], 6);
+    const requiredReceiptDocRelPaths = uniqueRuntimeStrings([
+        contract.memory_receipt_required_doc_rel_paths,
+        contract.memoryReceiptRequiredDocRelPaths,
+        contract.doc_rel_path || contract.docRelPath || "provider-ranking-provenance-compact-repair-receipt-memory.md",
+    ], 10);
+    return [
+        `Provider ranking compact repair receipt memory usage contract：doc=${contract.doc_rel_path || contract.docRelPath || "provider-ranking-provenance-compact-repair-receipt-memory.md"}；archived=${contract.archived_count || contract.archivedCount || 0}；recalled=${contract.recalled_this_turn === true || contract.recalledThisTurn === true}.`,
+        "- Final CCM_AGENT_RECEIPT.memoryUsed or memoryIgnored must cite this doc relPath and declare used/verified/ignored/background.",
+        disciplineRelPaths.length ? `- Receipt discipline typed MEMORY.md surfaced: ${disciplineRelPaths.join(", ")}. Final CCM_AGENT_RECEIPT.memoryUsed or memoryIgnored must also cite surfaced receipt discipline docs with usageState.` : "",
+        requiredReceiptDocRelPaths.length ? `- Required receipt doc relPaths: ${requiredReceiptDocRelPaths.join(", ")}.` : "",
+        "- Boundary: provider switch execution history is ranking evidence only, not authorization; any explicit provider switch still requires a fresh valid provider switch decision receipt/checksum/local authority/task compatibility proof.",
+        relPaths.length || rowIds.length ? `- Compact-safe provenance anchors: relPaths=${relPaths.join(",") || "none"}; rowIds=${rowIds.join(",") || "none"}.` : "",
+        contract.memory_used_template ? `- memoryUsed template: ${contract.memory_used_template}` : "",
+        contract.memory_ignored_template ? `- memoryIgnored template: ${contract.memory_ignored_template}` : "",
+    ].filter(Boolean).join("\n");
+}
+function extractPostCompactReinjectionRepairReceiptMemoryContract(memory = {}, fallback = null) {
+    const candidate = fallback
+        || memory?.post_compact_reinjection_repair_receipt_memory_contract
+        || memory?.postCompactReinjectionRepairReceiptMemoryContract
+        || memory?.post_compact_reinjection_repair_receipt_recall
+        || memory?.postCompactReinjectionRepairReceiptRecall
+        || memory?.group_state?.typedMemory?.postCompactReinjectionRepairReceiptRecall
+        || memory?.group_state?.typed_memory?.post_compact_reinjection_repair_receipt_recall
+        || memory?.typedMemory?.postCompactReinjectionRepairReceiptRecall
+        || null;
+    if (!candidate?.schema && !candidate?.docRelPaths && !candidate?.doc_rel_paths)
+        return null;
+    const sourceSchema = String(candidate.schema || "");
+    const recallSource = sourceSchema === "ccm-post-compact-reinjection-repair-receipt-worker-context-recall-v1";
+    const recalledThisTurn = candidate.recalledThisTurn === true || candidate.recalled_this_turn === true;
+    const active = candidate.active === true && (!recallSource || recalledThisTurn);
+    const docRelPaths = uniqueRuntimeStrings([
+        candidate.surfacedRelPaths,
+        candidate.surfaced_rel_paths,
+        candidate.docRelPaths,
+        candidate.doc_rel_paths,
+        candidate.docRelPath,
+        candidate.doc_rel_path,
+    ], 8);
+    if (!active || !docRelPaths.length)
+        return null;
+    const rows = Array.isArray(candidate.rows) ? candidate.rows.slice(-12) : [];
+    const sessionBinding = memory?.session_binding || memory?.sessionBinding || {};
+    const gateIds = uniqueRuntimeStrings([
+        candidate.gateIds,
+        candidate.gate_ids,
+        rows.map((row) => row.reinjection_gate_id || row.reinjectionGateId),
+    ], 16);
+    const candidateIds = uniqueRuntimeStrings([
+        candidate.candidateIds,
+        candidate.candidate_ids,
+        rows.map((row) => row.post_compact_candidate_id || row.postCompactCandidateId),
+    ], 16);
+    const candidateValues = uniqueRuntimeStrings([
+        candidate.candidateValues,
+        candidate.candidate_values,
+        rows.map((row) => row.post_compact_candidate_value || row.postCompactCandidateValue),
+    ], 16);
+    const historicalTaskAgentSessionIds = uniqueRuntimeStrings([
+        candidate.taskAgentSessionIds,
+        candidate.task_agent_session_ids,
+        rows.map((row) => row.historical_task_agent_session_id || row.task_agent_session_id),
+    ], 16);
+    const historicalNativeSessionIds = uniqueRuntimeStrings([
+        candidate.nativeSessionIds,
+        candidate.native_session_ids,
+        rows.map((row) => row.historical_native_session_id || row.native_session_id),
+    ], 16);
+    return {
+        schema: "ccm-post-compact-reinjection-repair-receipt-memory-usage-contract-v1",
+        version: 1,
+        active: true,
+        source_schema: sourceSchema,
+        recalled_this_turn: recalledThisTurn,
+        archived_count: Number(candidate.archivedCount || candidate.archived_count || rows.length || 0),
+        doc_rel_paths: docRelPaths,
+        memory_receipt_required_doc_rel_paths: docRelPaths,
+        required_receipt_fields: ["memoryUsed", "memoryIgnored"],
+        allowed_usage_states: ["used", "verified", "ignored"],
+        used_current_source_verified_required: true,
+        ignored_reason_required: true,
+        freshness_boundary: "historical repair completion is recovery evidence, not permanent repository truth; future use must reverify the current source",
+        current_session_binding_id: String(sessionBinding.binding_id || sessionBinding.bindingId || ""),
+        current_task_agent_session_id: String(sessionBinding.task_agent_session_id || sessionBinding.taskAgentSessionId || ""),
+        current_native_session_id: String(sessionBinding.native_session_id || sessionBinding.nativeSessionId || ""),
+        reinjection_gate_ids: gateIds,
+        post_compact_candidate_ids: candidateIds,
+        post_compact_candidate_values: candidateValues,
+        historical_task_agent_session_ids: historicalTaskAgentSessionIds,
+        historical_native_session_ids: historicalNativeSessionIds,
+        rows: rows.map((row) => ({
+            row_id: row.row_id || "",
+            reinjection_gate_id: row.reinjection_gate_id || "",
+            post_compact_candidate_id: row.post_compact_candidate_id || "",
+            post_compact_candidate_kind: row.post_compact_candidate_kind || "",
+            post_compact_candidate_value: row.post_compact_candidate_value || "",
+            usage_state: row.usage_state || "",
+            historical_task_agent_session_id: row.historical_task_agent_session_id || "",
+            historical_native_session_id: row.historical_native_session_id || "",
+            completion_source: row.completion_source || "",
+            resolution_reason: row.resolution_reason || "",
+        })),
+        memory_used_templates: docRelPaths.map((relPath) => `${relPath}; usageState=verified|used; currentSourceVerified=true; historical repair completion is recovery evidence, not permanent repository truth`),
+        memory_ignored_templates: docRelPaths.map((relPath) => `${relPath}; usageState=ignored; reason=<why this recalled repair memory was not used>`),
+    };
+}
+function renderPostCompactReinjectionRepairReceiptMemoryContract(contract = {}) {
+    if (!contract?.schema || contract.active === false)
+        return "";
+    const docRelPaths = uniqueRuntimeStrings([
+        contract.doc_rel_paths,
+        contract.docRelPaths,
+        contract.memory_receipt_required_doc_rel_paths,
+        contract.memoryReceiptRequiredDocRelPaths,
+    ], 8);
+    const gateIds = uniqueRuntimeStrings([contract.reinjection_gate_ids, contract.reinjectionGateIds], 8);
+    const candidateIds = uniqueRuntimeStrings([contract.post_compact_candidate_ids, contract.postCompactCandidateIds], 8);
+    const historicalTaskSessions = uniqueRuntimeStrings([contract.historical_task_agent_session_ids, contract.historicalTaskAgentSessionIds], 6);
+    const historicalNativeSessions = uniqueRuntimeStrings([contract.historical_native_session_ids, contract.historicalNativeSessionIds], 6);
+    return [
+        `Post-compact reinjection repair receipt memory usage contract：docs=${docRelPaths.join(",") || "none"}；archived=${contract.archived_count || contract.archivedCount || 0}；recalled=${contract.recalled_this_turn === true || contract.recalledThisTurn === true}.`,
+        "- Final CCM_AGENT_RECEIPT.memoryUsed or memoryIgnored must cite every surfaced receipt MEMORY.md.",
+        "- memoryUsed with usageState=used/verified requires currentSourceVerified=true in this new child Agent session.",
+        "- memoryIgnored with usageState=ignored requires an explicit reason.",
+        "- Freshness boundary: historical repair completion is recovery evidence, not permanent repository truth; future use must reverify the current source.",
+        contract.current_session_binding_id ? `- Current child session binding: ${contract.current_session_binding_id}; task_agent_session=${contract.current_task_agent_session_id || ""}; native_session=${contract.current_native_session_id || ""}.` : "",
+        gateIds.length || candidateIds.length ? `- Historical repair identities: gates=${gateIds.join(",") || "none"}; candidates=${candidateIds.join(",") || "none"}.` : "",
+        historicalTaskSessions.length || historicalNativeSessions.length ? `- Historical sessions are evidence only: task_agent_sessions=${historicalTaskSessions.join(",") || "none"}; native_sessions=${historicalNativeSessions.join(",") || "none"}.` : "",
+        ...(Array.isArray(contract.memory_used_templates) ? contract.memory_used_templates.slice(0, 4).map((item) => `- memoryUsed template: ${item}`) : []),
+        ...(Array.isArray(contract.memory_ignored_templates) ? contract.memory_ignored_templates.slice(0, 4).map((item) => `- memoryIgnored template: ${item}`) : []),
     ].filter(Boolean).join("\n");
 }
 function providerOverrideFollowupStringList(value, limit = 8) {
@@ -560,6 +847,11 @@ function buildWorkerContextUsage(packet = {}, options = {}) {
     const pressureProvenanceDispatchFeedbackPolicy = extractPressureProvenanceDispatchFeedbackPolicy(memory, packet?.pressure_provenance_dispatch_feedback_policy || packet?.pressureProvenanceDispatchFeedbackPolicy || null);
     const pressureProvenanceProviderDispatchAdvisory = extractPressureProvenanceProviderDispatchAdvisory(memory, packet?.pressure_provenance_provider_dispatch_advisory || packet?.pressureProvenanceProviderDispatchAdvisory || null);
     const pressureProvenanceProviderDispatchOverrideFollowupReceiptContract = extractPressureProvenanceProviderDispatchOverrideFollowupReceiptContract(memory, packet?.pressure_provenance_provider_dispatch_override_followup_receipt_contract || packet?.pressureProvenanceProviderDispatchOverrideFollowupReceiptContract || null, pressureProvenanceProviderDispatchAdvisory);
+    const providerRankingCompactRepairReceiptMemoryContract = extractProviderRankingCompactRepairReceiptMemoryContract(memory, packet?.provider_ranking_compact_repair_receipt_memory_contract || packet?.providerRankingCompactRepairReceiptMemoryContract || null);
+    const postCompactReinjectionRepairReceiptMemoryContract = extractPostCompactReinjectionRepairReceiptMemoryContract(memory, packet?.post_compact_reinjection_repair_receipt_memory_contract || packet?.postCompactReinjectionRepairReceiptMemoryContract || null);
+    const providerSwitchDecisionReceipt = packet?.provider_switch_decision_receipt
+        || packet?.providerSwitchDecisionReceipt
+        || null;
     const categories = [
         workerContextUsageCategory("worker_packet_envelope", "Worker packet envelope", {
             packet_id: packet?.packet_id || "",
@@ -580,6 +872,9 @@ function buildWorkerContextUsage(packet = {}, options = {}) {
         workerContextUsageCategory("pressure_provenance_dispatch_feedback_policy", "Pressure provenance dispatch feedback policy", pressureProvenanceDispatchFeedbackPolicy || "", { source: "typed-feedback-memory", required: pressureProvenanceDispatchFeedbackPolicy?.active === true }),
         workerContextUsageCategory("pressure_provenance_provider_dispatch_advisory", "Pressure provenance provider dispatch advisory", pressureProvenanceProviderDispatchAdvisory || "", { source: "typed-feedback-memory", required: pressureProvenanceProviderDispatchAdvisory?.should_hold_dispatch === true }),
         workerContextUsageCategory("pressure_provenance_provider_dispatch_override_followup_receipt_contract", "Provider dispatch override follow-up receipt contract", pressureProvenanceProviderDispatchOverrideFollowupReceiptContract || "", { source: "typed-feedback-memory", required: pressureProvenanceProviderDispatchOverrideFollowupReceiptContract?.active === true }),
+        workerContextUsageCategory("provider_ranking_compact_repair_receipt_memory_contract", "Provider ranking compact repair receipt memory contract", providerRankingCompactRepairReceiptMemoryContract || "", { source: "typed-provider-ranking-memory", required: providerRankingCompactRepairReceiptMemoryContract?.active === true }),
+        workerContextUsageCategory("post_compact_reinjection_repair_receipt_memory_contract", "Post-compact reinjection repair receipt memory contract", postCompactReinjectionRepairReceiptMemoryContract || "", { source: "typed-post-compact-repair-memory", required: postCompactReinjectionRepairReceiptMemoryContract?.active === true }),
+        workerContextUsageCategory("provider_switch_decision_receipt", "Provider switch decision receipt", providerSwitchDecisionReceipt || "", { source: "group-main-agent-provider-decision", required: providerSwitchDecisionReceipt?.valid === true }),
         workerContextUsageCategory("global_memory", "Global memory recall", memory?.globalAgentMemoryRecall || memory?.global_agent_memory_recall || memory?.global_memory || memory?.globalMemory || "", { source: "global-agent-memory" }),
         workerContextUsageCategory("replay_repair_dispatch_briefs", "Replay repair dispatch briefs", packet?.replay_repair_dispatch_briefs || [], { source: "replay-repair", required: Array.isArray(packet?.replay_repair_dispatch_briefs) && packet.replay_repair_dispatch_briefs.length > 0 }),
         workerContextUsageCategory("contract_injections", "Contract injections", packet?.contract_injections || [], { source: "contract-injection" }),
@@ -767,12 +1062,24 @@ function buildWorkerContextPacket(input) {
     const pressureMemoryProvenanceReceiptDiscipline = extractPressureMemoryProvenanceReceiptDiscipline(input.memory || null, input.pressureMemoryProvenanceReceiptDiscipline || input.pressure_memory_provenance_receipt_discipline || null);
     const pressureProvenanceDispatchFeedbackPolicy = extractPressureProvenanceDispatchFeedbackPolicy(input.memory || null, input.pressureProvenanceDispatchFeedbackPolicy || input.pressure_provenance_dispatch_feedback_policy || null);
     const pressureProvenanceProviderDispatchAdvisory = extractPressureProvenanceProviderDispatchAdvisory(input.memory || null, input.pressureProvenanceProviderDispatchAdvisory || input.pressure_provenance_provider_dispatch_advisory || null);
+    const pressureProvenanceProviderSelectedCandidate = pressureProvenanceProviderDispatchAdvisory?.selected_candidate
+        || pressureProvenanceProviderDispatchAdvisory?.selectedCandidate
+        || {};
     const pressureProvenanceProviderDispatchOverrideFollowupReceiptContract = extractPressureProvenanceProviderDispatchOverrideFollowupReceiptContract(input.memory || null, input.pressureProvenanceProviderDispatchOverrideFollowupReceiptContract
         || input.pressure_provenance_provider_dispatch_override_followup_receipt_contract
         || null, pressureProvenanceProviderDispatchAdvisory);
+    const providerRankingCompactRepairReceiptMemoryContract = extractProviderRankingCompactRepairReceiptMemoryContract(input.memory || null, input.providerRankingCompactRepairReceiptMemoryContract
+        || input.provider_ranking_compact_repair_receipt_memory_contract
+        || null);
+    const postCompactReinjectionRepairReceiptMemoryContract = extractPostCompactReinjectionRepairReceiptMemoryContract(input.memory || null, input.postCompactReinjectionRepairReceiptMemoryContract
+        || input.post_compact_reinjection_repair_receipt_memory_contract
+        || null);
     const agentType = String(input.agentType || input.agent_type || "").trim();
+    const providerSwitchDecisionReceipt = input.providerSwitchDecisionReceipt
+        || input.provider_switch_decision_receipt
+        || null;
     const packet = {
-        packet_id: `wcp_${hash([input.project, input.task, input.traceId, agentType, contractInjections, replayRepairDispatchBriefs, pressureProvenanceDispatchFeedbackPolicy?.active ? pressureProvenanceDispatchFeedbackPolicy : null, pressureProvenanceProviderDispatchAdvisory?.schema ? pressureProvenanceProviderDispatchAdvisory : null, pressureProvenanceProviderDispatchOverrideFollowupReceiptContract?.active ? pressureProvenanceProviderDispatchOverrideFollowupReceiptContract : null], 14)}`,
+        packet_id: `wcp_${hash([input.project, input.task, input.traceId, agentType, contractInjections, replayRepairDispatchBriefs, pressureProvenanceDispatchFeedbackPolicy?.active ? pressureProvenanceDispatchFeedbackPolicy : null, pressureProvenanceProviderDispatchAdvisory?.schema ? pressureProvenanceProviderDispatchAdvisory : null, pressureProvenanceProviderDispatchOverrideFollowupReceiptContract?.active ? pressureProvenanceProviderDispatchOverrideFollowupReceiptContract : null, providerRankingCompactRepairReceiptMemoryContract?.active ? providerRankingCompactRepairReceiptMemoryContract : null, postCompactReinjectionRepairReceiptMemoryContract?.active ? postCompactReinjectionRepairReceiptMemoryContract : null, providerSwitchDecisionReceipt?.valid ? providerSwitchDecisionReceipt : null], 14)}`,
         version: 1,
         project: input.project,
         agent_type: agentType,
@@ -797,7 +1104,13 @@ function buildWorkerContextPacket(input) {
             brief_id: item.brief_id || item.briefId || "",
             work_item_id: item.work_item_id || item.workItemId || "",
             source: item.source || "",
+            component: item.component || "",
             target_project: item.target_project || item.targetProject || input.project,
+            reinjection_gate_id: item.reinjection_gate_id || item.reinjectionGateId || "",
+            post_compact_candidate_id: item.post_compact_candidate_id || item.postCompactCandidateId || "",
+            post_compact_candidate_kind: item.post_compact_candidate_kind || item.postCompactCandidateKind || "",
+            post_compact_candidate_value: item.post_compact_candidate_value || item.postCompactCandidateValue || "",
+            post_compact_candidate_source_message_id: item.post_compact_candidate_source_message_id || item.postCompactCandidateSourceMessageId || "",
             proof_entry_id: item.proof_entry_id || item.proofEntryId || "",
             request_patch_checksum: item.request_patch_checksum || item.requestPatchChecksum || "",
             worker_context_packet_id: item.worker_context_packet_id || item.workerContextPacketId || "",
@@ -824,6 +1137,9 @@ function buildWorkerContextPacket(input) {
         pressure_provenance_dispatch_feedback_policy: pressureProvenanceDispatchFeedbackPolicy?.active ? pressureProvenanceDispatchFeedbackPolicy : null,
         pressure_provenance_provider_dispatch_advisory: pressureProvenanceProviderDispatchAdvisory?.schema ? pressureProvenanceProviderDispatchAdvisory : null,
         pressure_provenance_provider_dispatch_override_followup_receipt_contract: pressureProvenanceProviderDispatchOverrideFollowupReceiptContract?.active ? pressureProvenanceProviderDispatchOverrideFollowupReceiptContract : null,
+        provider_ranking_compact_repair_receipt_memory_contract: providerRankingCompactRepairReceiptMemoryContract?.active ? providerRankingCompactRepairReceiptMemoryContract : null,
+        post_compact_reinjection_repair_receipt_memory_contract: postCompactReinjectionRepairReceiptMemoryContract?.active ? postCompactReinjectionRepairReceiptMemoryContract : null,
+        provider_switch_decision_receipt: providerSwitchDecisionReceipt?.schema ? providerSwitchDecisionReceipt : null,
         verification: input.verification || null,
         acceptance: {
             ack_required_before_implementation: true,
@@ -843,6 +1159,27 @@ function buildWorkerContextPacket(input) {
             pressure_provenance_provider_dispatch_override_followup_sampling_required: pressureProvenanceProviderDispatchOverrideFollowupReceiptContract?.active === true,
             pressure_provenance_provider_dispatch_override_followup_receipt_required: pressureProvenanceProviderDispatchOverrideFollowupReceiptContract?.active === true,
             provider_dispatch_override_followup_history_reverification_required: pressureProvenanceProviderDispatchOverrideFollowupReceiptContract?.active === true,
+            provider_ranking_compact_repair_receipt_memory_usage_required: providerRankingCompactRepairReceiptMemoryContract?.active === true,
+            provider_ranking_compact_repair_receipt_memory_authorization_boundary_required: providerRankingCompactRepairReceiptMemoryContract?.active === true,
+            provider_ranking_memory_usage_receipt_discipline_required: providerRankingCompactRepairReceiptMemoryContract?.memory_usage_receipt_discipline_required === true,
+            provider_ranking_memory_receipt_required_doc_rel_paths: providerRankingCompactRepairReceiptMemoryContract?.memory_receipt_required_doc_rel_paths || [],
+            post_compact_reinjection_repair_receipt_memory_usage_required: postCompactReinjectionRepairReceiptMemoryContract?.active === true,
+            post_compact_reinjection_repair_receipt_memory_current_source_reverification_required: postCompactReinjectionRepairReceiptMemoryContract?.active === true,
+            post_compact_reinjection_repair_receipt_memory_ignored_reason_required: postCompactReinjectionRepairReceiptMemoryContract?.active === true,
+            post_compact_reinjection_repair_receipt_memory_required_doc_rel_paths: postCompactReinjectionRepairReceiptMemoryContract?.memory_receipt_required_doc_rel_paths || [],
+            cross_group_provider_reliability_sampling_required: pressureProvenanceProviderSelectedCandidate.cross_group_provider_reliability_actionable === true
+                && pressureProvenanceProviderDispatchAdvisory?.should_hold_dispatch !== true,
+            cross_group_provider_reliability_local_policy_override_allowed: false,
+            ...(pressureProvenanceProviderDispatchAdvisory?.provider_reliability_snapshot?.snapshot_id ? {
+                provider_reliability_snapshot_fresh_required: true,
+                provider_reliability_safer_alternative_review_required: Number(pressureProvenanceProviderDispatchAdvisory?.safer_alternative_count || 0) > 0,
+                provider_reliability_safer_alternative_auto_switch_allowed: false,
+            } : {}),
+            ...(providerSwitchDecisionReceipt?.schema ? {
+                provider_switch_decision_receipt_required: providerSwitchDecisionReceipt.valid === true,
+                provider_switch_child_session_binding_required: providerSwitchDecisionReceipt.valid === true,
+                provider_switch_executed_provider_receipt_required: providerSwitchDecisionReceipt.valid === true,
+            } : {}),
         },
     };
     return refreshWorkerContextPacketUsage(packet, input.contextUsageOptions || {});
@@ -862,7 +1199,20 @@ function renderWorkerContextPacket(packet) {
                 `- brief_id=${item.brief_id || ""}`,
                 `work_item_id=${item.work_item_id || ""}`,
                 `source=${item.source || ""}`,
+                item.component ? `component=${item.component}` : "",
                 `target=${item.target_project || packet?.project || ""}`,
+                item.reinjection_gate_id ? `reinjection_gate=${item.reinjection_gate_id}` : "",
+                item.post_compact_candidate_id ? `post_compact_candidate=${item.post_compact_candidate_id}` : "",
+                item.post_compact_candidate_kind ? `candidate_kind=${item.post_compact_candidate_kind}` : "",
+                item.post_compact_candidate_value ? `candidate_value=${item.post_compact_candidate_value}` : "",
+                item.post_compact_candidate_source_message_id ? `source_message=${item.post_compact_candidate_source_message_id}` : "",
+                item.original_worker_context_packet_id ? `original_worker_context_packet=${item.original_worker_context_packet_id}` : "",
+                item.original_binding_id ? `original_binding=${item.original_binding_id}` : "",
+                item.original_task_agent_session_id ? `original_task_agent_session=${item.original_task_agent_session_id}` : "",
+                item.original_native_session_id ? `original_native_session=${item.original_native_session_id}` : "",
+                Array.isArray(item.post_compact_receipt_memory_required_doc_rel_paths) && item.post_compact_receipt_memory_required_doc_rel_paths.length
+                    ? `required_receipt_memory_docs=${item.post_compact_receipt_memory_required_doc_rel_paths.join(",")}`
+                    : "",
                 item.proof_entry_id ? `proof=${item.proof_entry_id}` : "",
                 item.request_patch_checksum ? `request=${item.request_patch_checksum}` : "",
                 item.worker_context_packet_id ? `worker_context_packet=${item.worker_context_packet_id}` : "",
@@ -881,7 +1231,7 @@ function renderWorkerContextPacket(packet) {
                 item.execution_id ? `execution=${item.execution_id}` : "",
                 "shouldCreateRealTask=false",
             ].filter(Boolean).join("；")),
-            "- 回执 replayRepairDispatchBriefUsage 必须引用 brief_id/work_item_id，并声明 used/verified/ignored/blocked/strong；provider re-proof 的 strong 仍需 native provider proof ledger 证明；ignore-memory receipt 修复必须同时更正 CCM_AGENT_RECEIPT.memoryIgnored。",
+            "- 回执 replayRepairDispatchBriefUsage 必须引用 brief_id/work_item_id，并声明 used/verified/ignored/blocked/strong；post-compact reinjection 修复还必须提交 postCompactCandidateUsage、memoryUsed/memoryIgnored、task_agent_session_id、native_session_id；provider re-proof 的 strong 仍需 native provider proof ledger 证明；ignore-memory receipt 修复必须同时更正 CCM_AGENT_RECEIPT.memoryIgnored。",
         ]
         : [];
     const memoryText = renderWorkerPacketMemory(packet?.memory || null);
@@ -890,6 +1240,9 @@ function renderWorkerContextPacket(packet) {
     const pressureProvenanceDispatchFeedbackPolicyText = renderPressureProvenanceDispatchFeedbackPolicy(extractPressureProvenanceDispatchFeedbackPolicy(packet?.memory || null, packet?.pressure_provenance_dispatch_feedback_policy || packet?.pressureProvenanceDispatchFeedbackPolicy || null));
     const pressureProvenanceProviderDispatchAdvisoryText = renderPressureProvenanceProviderDispatchAdvisory(extractPressureProvenanceProviderDispatchAdvisory(packet?.memory || null, packet?.pressure_provenance_provider_dispatch_advisory || packet?.pressureProvenanceProviderDispatchAdvisory || null));
     const pressureProvenanceProviderDispatchOverrideFollowupReceiptContractText = renderPressureProvenanceProviderDispatchOverrideFollowupReceiptContract(extractPressureProvenanceProviderDispatchOverrideFollowupReceiptContract(packet?.memory || null, packet?.pressure_provenance_provider_dispatch_override_followup_receipt_contract || packet?.pressureProvenanceProviderDispatchOverrideFollowupReceiptContract || null, packet?.pressure_provenance_provider_dispatch_advisory || packet?.pressureProvenanceProviderDispatchAdvisory || null));
+    const providerRankingCompactRepairReceiptMemoryContractText = renderProviderRankingCompactRepairReceiptMemoryContract(extractProviderRankingCompactRepairReceiptMemoryContract(packet?.memory || null, packet?.provider_ranking_compact_repair_receipt_memory_contract || packet?.providerRankingCompactRepairReceiptMemoryContract || null));
+    const postCompactReinjectionRepairReceiptMemoryContractText = renderPostCompactReinjectionRepairReceiptMemoryContract(extractPostCompactReinjectionRepairReceiptMemoryContract(packet?.memory || null, packet?.post_compact_reinjection_repair_receipt_memory_contract || packet?.postCompactReinjectionRepairReceiptMemoryContract || null));
+    const providerSwitchDecisionReceiptText = renderProviderSwitchDecisionReceipt(packet?.provider_switch_decision_receipt || packet?.providerSwitchDecisionReceipt || null);
     const retry = packet?.context_compaction_retry || packet?.contextCompactionRetry || null;
     const memoryProof = packet?.memory_reinjection_proof || packet?.memoryReinjectionProof || null;
     const partialCompaction = retry?.partial_compaction || retry?.partialCompaction || null;
@@ -939,6 +1292,9 @@ function renderWorkerContextPacket(packet) {
         pressureProvenanceDispatchFeedbackPolicyText,
         pressureProvenanceProviderDispatchAdvisoryText,
         pressureProvenanceProviderDispatchOverrideFollowupReceiptContractText,
+        providerRankingCompactRepairReceiptMemoryContractText,
+        postCompactReinjectionRepairReceiptMemoryContractText,
+        providerSwitchDecisionReceiptText,
         memoryProofText,
         retryText,
         renderWorkerContextUsage(packet?.context_usage || null),

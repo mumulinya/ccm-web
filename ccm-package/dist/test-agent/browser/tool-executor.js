@@ -50,7 +50,14 @@ function previewOutput(output) {
         return (0, utils_1.compactText)(String(output), 2000);
     }
 }
-function createRecordingBrowserToolExecutor(input, artifactDir) {
+function suppressedInputMetadata(input) {
+    const action = String(input?.action || input?.type || "").trim();
+    return {
+        inputKeys: Object.keys(input || {}).sort(),
+        ...(action && /^[A-Za-z0-9_.:-]{1,80}$/.test(action) ? { action } : {}),
+    };
+}
+function createRecordingBrowserToolExecutor(input, artifactDir, options = {}) {
     const records = [];
     const transcriptDir = (0, utils_1.ensureDir)(path.join(artifactDir, "browser-tools"));
     const transcriptPath = path.join(transcriptDir, "tool-calls.jsonl");
@@ -72,12 +79,14 @@ function createRecordingBrowserToolExecutor(input, artifactDir) {
                     appendRecord({
                         id,
                         toolName,
-                        input: toolInput,
+                        input: options.suppressDetails ? suppressedInputMetadata(toolInput) : toolInput,
                         status: "passed",
                         startedAt,
                         finishedAt: (0, utils_1.nowIso)(),
                         durationMs: Date.now() - started,
-                        outputPreview: previewOutput(output),
+                        outputPreview: options.suppressDetails
+                            ? "[suppressed for existing authenticated browser session]"
+                            : previewOutput(output),
                     });
                     return output;
                 }
@@ -85,12 +94,14 @@ function createRecordingBrowserToolExecutor(input, artifactDir) {
                     appendRecord({
                         id,
                         toolName,
-                        input: toolInput,
+                        input: options.suppressDetails ? suppressedInputMetadata(toolInput) : toolInput,
                         status: "failed",
                         startedAt,
                         finishedAt: (0, utils_1.nowIso)(),
                         durationMs: Date.now() - started,
-                        error: error.message || String(error),
+                        error: options.suppressDetails
+                            ? "Browser tool call failed; raw provider error suppressed."
+                            : error.message || String(error),
                     });
                     throw error;
                 }

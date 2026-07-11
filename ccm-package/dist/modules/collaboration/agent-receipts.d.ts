@@ -11,3 +11,26 @@ export declare function getReceiptAssignmentStatus(response: string, receipt: an
     text: string;
 };
 export declare function formatAgentReceiptForReview(receipt: any): string;
+export declare function runAgentReceiptProviderDispatchOverrideFollowupSelfTest(): {
+    pass: boolean;
+    checks: {
+        parsesProviderOverrideId: boolean;
+        parsesHistoryReverifiedFlag: boolean;
+        preservesCurrentSourceVerified: boolean;
+        reviewShowsProviderEvidence: boolean;
+    };
+    row: any;
+    review: string;
+};
+export declare function runAgentReceiptProviderSwitchExecutionSelfTest(): {
+    pass: boolean;
+    checks: {
+        parsesDecisionReceiptId: boolean;
+        parsesExpectedAndExecutedProvider: boolean;
+        parsesSessionAndExecutionBinding: boolean;
+        normalizesUsageState: boolean;
+        reviewShowsSwitchExecution: boolean;
+    };
+    row: any;
+    review: string;
+};

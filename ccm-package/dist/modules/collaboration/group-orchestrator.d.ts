@@ -90,6 +90,8 @@ export declare function runCodedGroupOrchestrator(input: {
     workerContextUsageOptions?: any;
     autoWorkerContextCompactRetry?: boolean;
     workerContextRetryOptions?: any;
+    providerSwitchRequests?: any;
+    provider_switch_requests?: any;
 }): {
     agent: any;
     delegated: any[];
@@ -773,6 +775,295 @@ export declare function runWorkerContextProviderDispatchOverrideFollowupReceiptC
         covered_override_id_count: number;
     };
 };
+export declare function runWorkerContextProviderDispatchOverrideFollowupReceiptValidationPolicySelfTest(): {
+    pass: boolean;
+    checks: {
+        everyAttemptIsArchived: boolean;
+        typedFeedbackDocumentWritten: any;
+        repeatedFailuresEscalatePolicy: boolean;
+        repeatedFailuresBlockDispatch: boolean;
+        verifiedRepairClearsOnlyActiveStreak: boolean;
+        repairedProviderReturnsToSampling: boolean;
+        repairedPacketCarriesSamplingContract: boolean;
+    };
+    archive: {
+        attempt_count: any;
+        failed_count: any;
+        passed_count: any;
+        consecutive_failure_count: any;
+        repair_verified: boolean;
+    };
+    escalated: {
+        action: string;
+        health_status: any;
+        dispatch_policy: any;
+        dispatch_ready: boolean;
+    };
+    repaired: {
+        action: string;
+        health_status: any;
+        dispatch_policy: any;
+        dispatch_ready: boolean;
+    };
+};
+export declare function runWorkerContextCrossGroupProviderReliabilityGuidanceSelfTest(): {
+    pass: boolean;
+    checks: {
+        recentEvidenceOutweighsOldRepairedHistory: boolean;
+        crossGroupSignalIsActionableAndDecayed: boolean;
+        privacyBoundaryRemovesGroupContent: boolean;
+        crossGroupGuidanceOnlyAddsSampling: boolean;
+        explicitPolicyDisableSuppressesCrossGuidance: boolean;
+        workerPacketCarriesOnlySanitizedGuidance: boolean;
+        localPolicyRemainsAuthoritative: boolean;
+    };
+    oldRepaired: {
+        risk_status: any;
+        risk_score: any;
+        weighted_failure_score: any;
+    };
+    recentFailure: {
+        risk_status: any;
+        risk_score: any;
+        weighted_failure_score: any;
+    };
+    cross: {
+        risk_status: any;
+        source_group_count: any;
+        action: string;
+        dispatch_policy: any;
+        dispatch_ready: boolean;
+    };
+    local: {
+        action: string;
+        dispatch_policy: any;
+        dispatch_ready: boolean;
+    };
+};
+export declare function runWorkerContextProviderReliabilitySnapshotRankingSelfTest(): {
+    pass: boolean;
+    checks: {
+        snapshotIsFreshAndChecksummed: boolean;
+        expiredSnapshotIsRejected: any;
+        tamperedSnapshotIsRejected: any;
+        sourceGenerationChangeInvalidatesSnapshot: boolean;
+        staleSnapshotRefreshesToFreshGeneration: boolean;
+        onlyExplicitSameProjectCandidateIsRanked: boolean;
+        rankingDoesNotAutoSwitchCurrentAssignment: boolean;
+        localHoldRemainsAuthoritativeWithAlternative: boolean;
+        workerPacketRendersSnapshotAndAlternative: boolean;
+    };
+    snapshot: {
+        snapshot_id: any;
+        status: any;
+        expires_at: any;
+        generation_id: any;
+    };
+    ranking: {
+        selected: any;
+        alternatives: any;
+        dispatch_ready: boolean;
+    };
+    local: {
+        selected: any;
+        alternative_count: any;
+        dispatch_ready: boolean;
+    };
+};
+export declare function runWorkerContextProviderSwitchExecutionRankingSelfTest(): {
+    pass: boolean;
+    checks: {
+        policyCarriesDecayedExecutionRisk: boolean;
+        policyCarriesTypedMemoryProvenance: any;
+        rankingUsesExecutionDecayForSaferAlternative: boolean;
+        advisoryCarriesCompactSafeRankingProvenance: any;
+        equallyRecentMismatchIsNotPreferred: boolean;
+        rankingDoesNotAutoSwitchCurrentAssignment: boolean;
+        renderedPacketShowsRankingProvenance: boolean;
+        switchReceiptPreservesRankingProvenance: boolean;
+        compactRetryPreservesProviderRankingProvenance: boolean;
+        compactOutcomeLedgerCarriesProviderRankingProvenance: boolean;
+        compactRenderedPacketStillShowsRankingProvenance: boolean;
+    };
+    selected: {
+        agent_type: any;
+        composite_rank: any;
+        local_execution_rank_penalty: any;
+        weighted_risk_score: any;
+    };
+    alternatives: any;
+    rankedCandidates: any;
+    decision: {
+        action: string;
+        selected_provider: string;
+        dispatch_ready: boolean;
+    };
+    switchReceipt: {
+        valid: boolean;
+        status: any;
+        requested_provider: any;
+        provenance: any;
+    };
+    compactRetry: {
+        status: any;
+        method: any;
+        dispatch_ready: boolean;
+        gate_reason: any;
+        pressure_status: any;
+        provider_dispatch_hold: boolean;
+        total_tokens: any;
+        max_tokens: any;
+        free_tokens: any;
+        provider_ranking_provenance_required: boolean;
+        provider_ranking_provenance_preserved: boolean;
+        outcome_provider_ranking_provenance_preserved: boolean;
+    };
+};
+export declare function runWorkerContextProviderSwitchDecisionReceiptSelfTest(): {
+    pass: boolean;
+    checks: {
+        validSwitchIsApprovedAndChecksummed: boolean;
+        expiredSnapshotRejectsReceipt: boolean;
+        tamperedReceiptIsRejected: boolean;
+        staleSourceGenerationRejectsReceipt: boolean;
+        projectAndGroupMismatchAreRejected: boolean;
+        unconfiguredCandidateIsRejected: boolean;
+        compatibilityEvidenceIsRequired: boolean;
+        localAuthorityIsRequired: boolean;
+        heldProviderNeedsExplicitSwitchPermission: boolean;
+        sessionBindingRejectsWrongProjectThenBindsActualSession: boolean;
+        matchedExecutionIsSystemAttested: boolean;
+        runtimeFallbackMismatchIsNotDisguisedAsApprovedExecution: boolean;
+        ledgerSeparatesAdvisedApprovedAndExecutedStates: boolean;
+        compactRetryPreservesDecisionReceipt: boolean;
+        providerSwitchExecutionDistillsToTypedMemory: boolean;
+        providerSwitchExecutionTypedMemoryIsRecallable: boolean;
+        providerSwitchExecutionPolicySeesMismatchHistory: boolean;
+    };
+    receipt: {
+        receipt_id: any;
+        status: any;
+        snapshot_id: any;
+        old_provider: any;
+        new_provider: any;
+    };
+    sessionBinding: {
+        schema: string;
+        binding_id: string;
+        provider_switch_decision_receipt_id: any;
+        provider_switch_decision_receipt_checksum: any;
+        groupId: string;
+        project: any;
+        expected_provider: string;
+        session_provider: string;
+        task_agent_session_id: string;
+        native_session_id: string;
+        execution_id: any;
+        worker_context_packet_id: any;
+        status: string;
+        valid: boolean;
+        gaps: string[];
+        validation: {
+            schema: string;
+            valid: boolean;
+            status: string;
+            gaps: string[];
+            snapshot_status: any;
+            checked_at: string;
+        };
+        bound_at: string;
+    };
+    matchedExecution: {
+        typed_memory_distillation: any;
+        schema: string;
+        execution_receipt_id: string;
+        provider_switch_decision_receipt_id: any;
+        provider_switch_decision_receipt_checksum: any;
+        groupId: string;
+        project: any;
+        advised_alternative: boolean;
+        approved_switch: boolean;
+        expected_provider: string;
+        actually_executed_provider: string;
+        task_agent_session_id: string;
+        native_session_id: string;
+        execution_id: string;
+        worker_context_packet_id: any;
+        receipt_status: string;
+        system_attested: boolean;
+        child_declared: boolean;
+        child_declaration: {
+            decision_receipt_id: string;
+            expected_provider: string;
+            executed_provider: string;
+            task_agent_session_id: string;
+            native_session_id: string;
+            execution_id: string;
+            usage_state: string;
+        };
+        status: string;
+        executed_as_approved: boolean;
+        gaps: string[];
+        final_child_receipt_present: boolean;
+        at: string;
+    };
+    mismatchedExecution: {
+        typed_memory_distillation: any;
+        schema: string;
+        execution_receipt_id: string;
+        provider_switch_decision_receipt_id: any;
+        provider_switch_decision_receipt_checksum: any;
+        groupId: string;
+        project: any;
+        advised_alternative: boolean;
+        approved_switch: boolean;
+        expected_provider: string;
+        actually_executed_provider: string;
+        task_agent_session_id: string;
+        native_session_id: string;
+        execution_id: string;
+        worker_context_packet_id: any;
+        receipt_status: string;
+        system_attested: boolean;
+        child_declared: boolean;
+        child_declaration: {
+            decision_receipt_id: string;
+            expected_provider: string;
+            executed_provider: string;
+            task_agent_session_id: string;
+            native_session_id: string;
+            execution_id: string;
+            usage_state: string;
+        };
+        status: string;
+        executed_as_approved: boolean;
+        gaps: string[];
+        final_child_receipt_present: boolean;
+        at: string;
+    };
+    ledger: {
+        providerSwitchAdvisedCount: any;
+        providerSwitchApprovedCount: any;
+        providerSwitchSessionBoundCount: any;
+        providerSwitchExecutedCount: any;
+        providerSwitchExecutionPassedCount: any;
+        providerSwitchExecutionFailedCount: any;
+    };
+    typedMemory: {
+        archiveSchema: any;
+        executedCount: any;
+        passedCount: any;
+        failedCount: any;
+        mismatchCount: any;
+        recallCount: any;
+        policyAction: string;
+    };
+    compactRetry: {
+        status: any;
+        receipt_id: any;
+        usage_status: any;
+    };
+};
 export declare function runWorkerContextPressureProvenanceProviderDispatchDecisionLedgerSelfTest(): {
     pass: boolean;
     checks: {
@@ -948,12 +1239,101 @@ export declare function readWorkerContextPtlEmergencyHintForCoordinator(groupId:
     updatedAt: string;
 };
 export declare function readWorkerContextCompactOutcomeLedgerForCoordinator(groupId: string): any;
+export declare function validateProviderSwitchDecisionReceiptForCoordinator(receipt?: any, options?: any): {
+    schema: string;
+    valid: boolean;
+    status: string;
+    gaps: string[];
+    snapshot_status: any;
+    checked_at: string;
+};
+export declare function buildProviderSwitchDecisionReceiptForCoordinator(groupId: string, assignment?: any, requestValue?: any, options?: any): any;
 export declare function readReplayRepairDispatchPlanLedgerForCoordinator(groupId: string): any;
 export declare function readReplayRepairDispatchBindingLedgerForCoordinator(groupId: string): any;
 export declare function recordWorkerContextPacketAssignmentBindingForCoordinator(groupId: string, assignment?: any, options?: any): any;
+export declare function recordWorkerContextProviderSwitchSessionBindingForCoordinator(groupId: string, input?: any, options?: any): {
+    schema: string;
+    binding_id: string;
+    provider_switch_decision_receipt_id: any;
+    provider_switch_decision_receipt_checksum: any;
+    groupId: string;
+    project: any;
+    expected_provider: string;
+    session_provider: string;
+    task_agent_session_id: string;
+    native_session_id: string;
+    execution_id: any;
+    worker_context_packet_id: any;
+    status: string;
+    valid: boolean;
+    gaps: string[];
+    validation: {
+        schema: string;
+        valid: boolean;
+        status: string;
+        gaps: string[];
+        snapshot_status: any;
+        checked_at: string;
+    };
+    bound_at: string;
+};
+export declare function recordWorkerContextProviderSwitchExecutionReceiptForCoordinator(groupId: string, input?: any, options?: any): {
+    typed_memory_distillation: any;
+    schema: string;
+    execution_receipt_id: string;
+    provider_switch_decision_receipt_id: any;
+    provider_switch_decision_receipt_checksum: any;
+    groupId: string;
+    project: any;
+    advised_alternative: boolean;
+    approved_switch: boolean;
+    expected_provider: string;
+    actually_executed_provider: string;
+    task_agent_session_id: string;
+    native_session_id: string;
+    execution_id: string;
+    worker_context_packet_id: any;
+    receipt_status: string;
+    system_attested: boolean;
+    child_declared: boolean;
+    child_declaration: {
+        decision_receipt_id: string;
+        expected_provider: string;
+        executed_provider: string;
+        task_agent_session_id: string;
+        native_session_id: string;
+        execution_id: string;
+        usage_state: string;
+    };
+    status: string;
+    executed_as_approved: boolean;
+    gaps: string[];
+    final_child_receipt_present: boolean;
+    at: string;
+};
 export declare function recordWorkerContextProviderDispatchOverrideCompletionForCoordinator(groupId: string, input?: any, options?: any): any;
 export declare function readReplayRepairDispatchTimelineBindingLedgerForCoordinator(groupId: string): any;
 export declare function recordWorkerContextProviderDispatchOverrideFollowupReceiptContractValidationForCoordinator(groupId: string, input?: any, options?: any): {
+    typed_memory_distillation: {
+        schema: any;
+        archived_count: number;
+        attempt_count: number;
+        failed_count: number;
+        passed_count: number;
+        attribution_count: number;
+        write_count: number;
+        ledger_file: any;
+    };
+    typed_memory_distillation_error: string;
+    repair_work_item: {
+        schema: string;
+        work_item_id: string;
+        status: any;
+        file: any;
+        source: any;
+    };
+    repair_work_item_id: string;
+    repair_work_item_status: any;
     schema: string;
     validation_id: string;
     groupId: any;
@@ -996,6 +1376,7 @@ export declare function recordReplayRepairDispatchBriefAssignmentBinding(groupId
     brief_id: any;
     work_item_id: any;
     source: any;
+    component: any;
     project: any;
     assignment_id: any;
     dispatch_key: any;
@@ -1004,7 +1385,23 @@ export declare function recordReplayRepairDispatchBriefAssignmentBinding(groupId
     source_worker_context_packet_id: any;
     source_worker_context_packet_binding_id: any;
     source_worker_context_packet_memory_policy_reason: any;
+    reinjection_gate_id: any;
+    post_compact_candidate_id: any;
+    post_compact_candidate_kind: any;
+    post_compact_candidate_value: any;
+    post_compact_candidate_source_message_id: any;
+    original_worker_context_packet_id: any;
+    original_binding_id: any;
+    original_assignment_id: any;
+    original_dispatch_key: any;
+    original_task_agent_session_id: any;
+    original_native_session_id: any;
+    post_compact_receipt_memory_required_doc_rel_paths: any;
     worker_context_packet_context_usage: any;
+    worker_context_packet_acceptance: any;
+    post_compact_reinjection_repair_receipt_memory_contract: any;
+    worker_context_packet_post_compact_reinjection_repair_receipt_memory_contract: any;
+    provider_ranking_compact_repair_receipt_memory_contract: any;
     worker_context_provider_dispatch_decision: any;
     worker_context_provider_dispatch_override_receipt: any;
     proof_entry_id: any;
@@ -1028,6 +1425,12 @@ export declare function recordReplayRepairDispatchBriefAssignmentBinding(groupId
             has_brief_id: boolean;
             has_work_item_id: boolean;
             has_source: boolean;
+            has_component: boolean;
+            has_reinjection_gate_id: boolean;
+            has_post_compact_candidate_id: boolean;
+            has_post_compact_candidate_kind: boolean;
+            has_post_compact_candidate_value: boolean;
+            has_post_compact_candidate_source_message_id: boolean;
             has_proof_entry_id: boolean;
             has_request_patch_checksum: boolean;
             has_provider_reproof_status: boolean;
@@ -1068,6 +1471,19 @@ export declare function buildReplayRepairDispatchBriefForCoordinator(groupId: st
     proof_entry_id: any;
     plan_checksum: any;
     request_patch_checksum: any;
+    revalidation_gate_id: string;
+    read_plan_id: string;
+    reference_id: string;
+    reinjection_gate_id: string;
+    post_compact_candidate_id: string;
+    post_compact_candidate_kind: string;
+    post_compact_candidate_value: string;
+    post_compact_candidate_source_message_id: string;
+    expected_task_agent_session_id: string;
+    expected_native_session_id: string;
+    receipt_task_agent_session_id: string;
+    receipt_native_session_id: string;
+    session_mismatch: boolean;
     worker_context_packet_id: any;
     worker_context_packet_binding_id: any;
     worker_context_packet_memory_policy_reason: any;
@@ -1077,6 +1493,35 @@ export declare function buildReplayRepairDispatchBriefForCoordinator(groupId: st
     pressure_memory_provenance_gap_codes: any;
     pressure_memory_provenance_repair_work_item_ids: any;
     pressure_memory_provenance_rel_paths: any;
+    provider_override_followup_contract_validation_id: any;
+    provider_override_followup_contract_rel_paths: any;
+    provider_override_followup_contract_work_item_ids: any;
+    provider_override_followup_contract_override_ids: any;
+    provider_override_followup_contract_gap_codes: any;
+    provider_switch_decision_receipt_id: any;
+    provider_switch_decision_receipt_checksum: any;
+    provider_ranking_provenance_gap_codes: any;
+    provider_ranking_provenance_rel_paths: any;
+    provider_ranking_provenance_row_ids: any;
+    provider_ranking_provenance_missing_rel_paths: any;
+    provider_ranking_provenance_missing_row_ids: any;
+    provider_ranking_memory_receipt_required_doc_rel_paths: string[];
+    provider_ranking_memory_receipt_missing_doc_rel_paths: any;
+    provider_ranking_memory_receipt_missing_usage_state_doc_rel_paths: any;
+    post_compact_receipt_memory_gap_codes: string[];
+    post_compact_receipt_memory_required_doc_rel_paths: string[];
+    post_compact_receipt_memory_missing_doc_rel_paths: string[];
+    post_compact_receipt_memory_missing_current_source_verified_doc_rel_paths: string[];
+    post_compact_receipt_memory_missing_ignored_reason_doc_rel_paths: string[];
+    original_worker_context_packet_id: any;
+    original_binding_id: any;
+    original_assignment_id: any;
+    original_dispatch_key: any;
+    original_task_agent_session_id: any;
+    original_native_session_id: any;
+    compact_outcome_id: any;
+    compact_retry_id: any;
+    compact_hook_run_id: any;
     provider_reproof_status: any;
     provider_reproof_reason: any;
     reproof_candidate_id: any;
@@ -1108,6 +1553,8 @@ export declare function runGroupOrchestrator(input: {
     ragCitations?: string[];
     ragScoped?: boolean;
     extraInstructions?: string;
+    providerSwitchRequests?: any;
+    provider_switch_requests?: any;
 }): Promise<{
     agent: any;
     delegated: any[];

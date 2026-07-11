@@ -47,6 +47,9 @@ exports.findClarifyingGlobalAgentRun = findClarifyingGlobalAgentRun;
 exports.getGlobalAgentToolSpec = getGlobalAgentToolSpec;
 exports.classifyGlobalAgentToolRisk = classifyGlobalAgentToolRisk;
 exports.parseGlobalAgentDecision = parseGlobalAgentDecision;
+exports.classifyGlobalAgentUserSteer = classifyGlobalAgentUserSteer;
+exports.steerGlobalAgentRun = steerGlobalAgentRun;
+exports.applyGlobalAgentSupervisionSteer = applyGlobalAgentSupervisionSteer;
 exports.startGlobalAgentRun = startGlobalAgentRun;
 exports.resumeGlobalAgentRun = resumeGlobalAgentRun;
 exports.continueGlobalAgentRunWithClarification = continueGlobalAgentRunWithClarification;
@@ -76,6 +79,7 @@ const activeRuns = new Set();
 const pauseRequests = new Set();
 const cancelRequests = new Set();
 const volatileRuns = new Map();
+const activeRunObjects = new Map();
 exports.GLOBAL_AGENT_TOOL_SPECS = [
     { name: "inspect_system", description: "读取 CCM 服务、项目、群聊、任务、定时任务和执行器概况。", risk: "read" },
     { name: "list_projects", description: "列出真实项目及 Agent 配置。", risk: "read" },
@@ -92,7 +96,7 @@ exports.GLOBAL_AGENT_TOOL_SPECS = [
     { name: "orchestrate_development", description: "创建跨项目开发任务并持久派发给真实群聊或项目 Agent。", required: ["business_goal", "targets"], risk: "write" },
     { name: "manage_supervision", description: "暂停、恢复、立即检查、修改目标、取消、归档或人工接管长期任务跟进。", required: ["id", "operation"], risk: args => ["cancel", "archive"].includes(String(args?.operation || "").toLowerCase()) ? "high" : "write" },
     { name: "create_task", description: "创建并派发单群聊开发任务。", required: ["title", "business_goal", "group_id"], risk: "write" },
-    { name: "send_project_cmd", description: "让指定项目 Agent 执行代码调查、修改或验证。", required: ["project", "message"], risk: "write" },
+    { name: "send_project_cmd", description: "创建受持续监督的单项目任务，让指定项目 Agent 执行并在独立复核通过后总结。", required: ["project", "message"], risk: "write" },
     { name: "send_group_cmd", description: "向指定群聊主 Agent 下发协作任务。", required: ["group_id", "message"], risk: "write" },
     { name: "manage_cron", description: "管理定时任务。", required: ["operation"], risk: args => destructiveOperation(args) ? "high" : "write" },
     { name: "manage_group", description: "管理群聊和成员。", required: ["operation"], risk: args => destructiveOperation(args) ? "high" : "write" },
@@ -505,7 +509,34 @@ function writeJsonAtomic(file, value) {
     fs.writeFileSync(temp, JSON.stringify(value, null, 2), "utf-8");
     fs.renameSync(temp, file);
 }
+function normalizeGlobalAgentUserSteer(value) {
+    const message = String(value?.message || "").trim().slice(0, 8_000);
+    if (!message)
+        return null;
+    const kind = String(value?.kind || "") === "revise_goal" ? "revise_goal" : "supplement";
+    const status = String(value?.status || "") === "applied" ? "applied" : "queued";
+    return {
+        id: String(value?.id || `steer_${Date.now().toString(36)}_${crypto.randomBytes(3).toString("hex")}`),
+        message,
+        kind,
+        source: String(value?.source || "user").trim().slice(0, 120) || "user",
+        request_id: String(value?.request_id || value?.requestId || "").trim().slice(0, 160) || undefined,
+        at: String(value?.at || new Date().toISOString()),
+        status,
+        applied_at: status === "applied" ? String(value?.applied_at || value?.appliedAt || value?.at || new Date().toISOString()) : undefined,
+        authorization_preserved: value?.authorization_preserved === true || value?.authorizationPreserved === true,
+    };
+}
+function normalizeGlobalAgentUserSteers(value, status, limit = 30) {
+    return (Array.isArray(value) ? value : [])
+        .map(normalizeGlobalAgentUserSteer)
+        .filter((item) => !!item && (!status || item.status === status))
+        .slice(-limit);
+}
 function normalizeRun(run) {
+    const pendingUserMessages = normalizeGlobalAgentUserSteers(run?.pending_user_messages || run?.pendingUserMessages, "queued", 20);
+    const userSteerHistory = normalizeGlobalAgentUserSteers(run?.user_steer_history || run?.userSteerHistory, undefined, 40);
+    const lastUserSteer = normalizeGlobalAgentUserSteer(run?.last_user_steer || run?.lastUserSteer);
     return {
         version: 1,
         id: String(run?.id || ""),
@@ -540,6 +571,8 @@ function normalizeRun(run) {
         final_report: run?.final_report || null,
         display_stream: run?.display_stream || null,
         workchain: run?.workchain || null,
+        todo_plan: run?.todo_plan || run?.todoPlan || run?.workchain?.todo_plan || run?.workchain?.todoPlan || null,
+        todoPlan: run?.todoPlan || run?.todo_plan || run?.workchain?.todoPlan || run?.workchain?.todo_plan || null,
         test_agent_execution_plan: run?.test_agent_execution_plan || run?.testAgentExecutionPlan || null,
         testAgentExecutionPlan: run?.testAgentExecutionPlan || run?.test_agent_execution_plan || null,
         test_agent_execution_plan_summary: run?.test_agent_execution_plan_summary || run?.testAgentExecutionPlanSummary || null,
@@ -570,6 +603,12 @@ function normalizeRun(run) {
         lastResumeFeedbackAt: String(run?.lastResumeFeedbackAt || run?.last_resume_feedback_at || ""),
         resume_feedback_history: Array.isArray(run?.resume_feedback_history) ? run.resume_feedback_history.slice(-20) : Array.isArray(run?.resumeFeedbackHistory) ? run.resumeFeedbackHistory.slice(-20) : [],
         resumeFeedbackHistory: Array.isArray(run?.resumeFeedbackHistory) ? run.resumeFeedbackHistory.slice(-20) : Array.isArray(run?.resume_feedback_history) ? run.resume_feedback_history.slice(-20) : [],
+        pending_user_messages: pendingUserMessages,
+        pendingUserMessages,
+        user_steer_history: userSteerHistory,
+        userSteerHistory,
+        last_user_steer: lastUserSteer,
+        lastUserSteer,
         shadow_mode: run?.shadow_mode === true,
         original_user_message: String(run?.original_user_message || run?.user_message || "").slice(0, 50_000),
         reasoning_loop: (0, reasoning_loop_1.normalizeAgentReasoningState)(run?.reasoning_loop, run?.original_user_message || run?.user_message || ""),
@@ -606,7 +645,7 @@ function saveRun(run, persist = true) {
     writeJsonAtomic(STORE_FILE, store);
 }
 function getGlobalAgentRun(id) {
-    return volatileRuns.get(id) || loadStore().runs.find(run => run.id === id) || null;
+    return activeRunObjects.get(id) || volatileRuns.get(id) || loadStore().runs.find(run => run.id === id) || null;
 }
 function attachGlobalAgentRunSupervision(run, link) {
     run.mission_id = String(link.mission_id || "");
@@ -871,7 +910,7 @@ function normalizeGlobalDispatchLaunchRowStatus(target = {}, fallback = "dispatc
     if (["running", "in_progress", "executing"].includes(raw))
         return { status: "running", label: "执行中" };
     if (["failed", "error", "blocked"].includes(raw))
-        return { status: "failed", label: "执行异常" };
+        return { status: "failed", label: "待排查" };
     return { status: raw || "dispatched", label: "已派发" };
 }
 function buildGlobalDispatchLaunchSummary(run, status, stepsOverride) {
@@ -896,9 +935,9 @@ function buildGlobalDispatchLaunchSummary(run, status, stepsOverride) {
                     id: `global-dispatch-${toolName}-${index}-${agent}`,
                     kind: targetType === "group" ? "group" : "project",
                     agent,
-                    role: targetType === "group" ? "群聊主 Agent" : "项目 Agent",
+                    role: targetType === "group" ? "协作群" : "项目执行成员",
                     task: target.task || target.message || baseTask,
-                    reason: target.reason || "全局主 Agent 已创建跨项目开发任务，并交给目标执行方处理。",
+                    reason: target.reason || "我已创建跨项目开发任务，并交给对应执行目标处理。",
                     status: rowStatus.status,
                     statusLabel: rowStatus.label,
                     dependsOn: target.depends_on || target.dependsOn || target.dependencies || [],
@@ -913,11 +952,11 @@ function buildGlobalDispatchLaunchSummary(run, status, stepsOverride) {
                 id: `global-dispatch-${toolName}-${groupId}`,
                 kind: "group",
                 agent: groupId,
-                role: "群聊主 Agent",
+                role: "协作群",
                 task: baseTask,
                 reason: toolName === "create_task"
-                    ? "全局主 Agent 已创建协作任务，并交给群聊主 Agent 跟踪执行。"
-                    : "全局主 Agent 判断该需求需要群聊主 Agent 接管并继续拆分执行。",
+                    ? "我已创建协作任务，并交给协作群跟踪执行。"
+                    : "我判断该需求需要协作群接管并继续拆分执行。",
                 status: "dispatched",
                 statusLabel: observation.taskId || observation.task?.id ? "已进入任务链路" : "已派发",
             });
@@ -930,11 +969,11 @@ function buildGlobalDispatchLaunchSummary(run, status, stepsOverride) {
                 id: `global-dispatch-${toolName}-${project}`,
                 kind: "project",
                 agent: project,
-                role: "项目 Agent",
+                role: "项目执行成员",
                 task: baseTask,
-                reason: "全局主 Agent 判断该需求适合由这个项目 Agent 直接处理。",
-                status: status === "completed" ? "reviewing" : "dispatched",
-                statusLabel: status === "completed" ? "已回传结果，待验收" : "已派发",
+                reason: "我判断该需求适合由这个项目的执行成员直接处理。",
+                status: run.supervisor_id ? "running" : status === "completed" ? "reviewing" : "dispatched",
+                statusLabel: run.supervisor_id ? "已进入持续监督" : status === "completed" ? "已回传结果，待验收" : "已派发",
             });
             if (row)
                 rows.push(row);
@@ -1068,6 +1107,8 @@ async function buildMessages(run, runtime) {
 - 每次都必须输出 intent：category、goal、action_required、target_refs、impact_scope、confidence、authorization_basis、reason。
 - 必须核对“推理闭环”：原始目标、澄清链、当前事实快照、计划版本、验证断言和已知偏差。事实变化、工具失败或验收缺口出现后必须重规划，不能机械继续旧计划。
 - 完成前必须逐项说明哪些目标断言已被证据证明；执行过写工具却没有可核验观察时不得声称完成。
+- 运行期间可能收到“执行中补充要求”或“执行中目标调整”。最新补充必须进入下一轮判断；目标调整与旧计划冲突时，以最新目标边界为准并重新规划。
+- 执行中的目标调整不会自动继承旧目标范围的写入授权；需要写入时必须重新满足服务端授权或确认规则。
 - category 只能是 conversation、question、analysis、execution、high_risk、ambiguous；confidence 为 0~1。
 - 目标没有在用户当前消息或读取工具结果中出现时，不得猜测；confidence 不足时使用 needs_confirmation 并提出一个具体澄清问题。
 
@@ -1078,7 +1119,16 @@ ${buildToolPrompt()}
 {"state":"investigate|plan|execute|needs_confirmation|answer|complete","message":"非终态写进度；终态写直接回答用户的完整内容","intent":{"category":"conversation|question|analysis|execution|high_risk|ambiguous","goal":"用户真实目标","action_required":false,"target_refs":[],"impact_scope":[],"confidence":0.95,"authorization_basis":"current_message|confirmation|none","reason":"判断依据"},"plan":["步骤"],"tool":{"name":"工具名","arguments":{}},"completion":{"summary":"结论","evidence":[],"risks":[],"next_action":""}}
 不调用工具时 tool 必须为 null。`;
     const state = JSON.stringify({
-        run: { id: run.id, status: run.status, phase: run.phase, explicit_write_authorization: run.explicit_write_authorization, max_steps: run.max_steps, remaining_steps: Math.max(0, run.max_steps - run.steps.length) },
+        run: {
+            id: run.id,
+            status: run.status,
+            phase: run.phase,
+            explicit_write_authorization: run.explicit_write_authorization,
+            max_steps: run.max_steps,
+            remaining_steps: Math.max(0, run.max_steps - run.steps.length),
+            latest_user_steer: run.last_user_steer || run.lastUserSteer || null,
+            replan_required: run.reasoning_loop.replan_required === true,
+        },
         reasoning_loop: run.reasoning_loop,
         context,
         prior_steps: priorSteps,
@@ -1086,7 +1136,7 @@ ${buildToolPrompt()}
     return [
         { role: "system", content: system },
         ...run.history.slice(-10),
-        { role: "user", content: `【用户当前目标】\n${run.user_message}\n\n【当前运行状态】\n${state}\n\n请决定下一步。` },
+        { role: "user", content: `【用户当前目标】\n${run.reasoning_loop.effective_goal || run.user_message}\n\n【当前运行状态】\n${state}\n\n请决定下一步。` },
     ];
 }
 function emit(runtime, event, run) {
@@ -1094,6 +1144,390 @@ function emit(runtime, event, run) {
         runtime.onEvent?.({ ...event, run_id: run.id, trace_id: run.trace_id, status: run.status, phase: run.phase }, run);
     }
     catch { }
+}
+function classifyGlobalAgentUserSteer(message, requestedKind = "auto") {
+    const requested = String(requestedKind || "auto").trim().toLowerCase();
+    if (requested === "supplement" || requested === "revise_goal")
+        return requested;
+    const text = String(message || "").replace(/\s+/g, " ").trim();
+    const revisesGoal = /(?:目标|范围|方案|方向|优先级|验收|交付).{0,12}(?:调整|改为|改成|变更|缩小|扩大|取消|替换)|(?:改为|改成|换成|只做|仅做|不要再|不再|先别|停止当前|忽略之前|重新开始|新任务|换个任务|另外一个任务)/i.test(text);
+    return revisesGoal ? "revise_goal" : "supplement";
+}
+function buildGlobalAgentEffectiveGoal(run) {
+    const applied = normalizeGlobalAgentUserSteers(run.user_steer_history || run.userSteerHistory, "applied", 16);
+    return [
+        run.original_user_message || run.user_message,
+        ...applied.map(item => `${item.kind === "revise_goal" ? "执行中目标调整" : "执行中补充要求"}：${item.message}`),
+    ].filter(Boolean).join("\n").slice(0, 50_000);
+}
+function steerGlobalAgentRun(id, message, options = {}) {
+    const active = activeRunObjects.get(id);
+    if (!active || !activeRuns.has(id) || active.status !== "running") {
+        const stored = getGlobalAgentRun(id);
+        if (!stored)
+            throw new Error("全局 Agent 运行不存在");
+        throw new Error("这次运行当前不在执行中；请使用继续、确认或新消息进入下一步");
+    }
+    const normalizedMessage = String(message || "").trim().slice(0, 8_000);
+    if (!normalizedMessage)
+        throw new Error("补充要求不能为空");
+    const requestId = String(options.requestId || "").trim().slice(0, 160);
+    const existing = requestId
+        ? normalizeGlobalAgentUserSteers(active.user_steer_history || active.userSteerHistory, undefined, 40).find(item => item.request_id === requestId)
+        : null;
+    if (existing)
+        return { run: active, steering: existing, duplicate: true };
+    const kind = classifyGlobalAgentUserSteer(normalizedMessage, options.kind || "auto");
+    const at = new Date().toISOString();
+    const steering = {
+        id: `steer_${Date.now().toString(36)}_${crypto.randomBytes(4).toString("hex")}`,
+        message: normalizedMessage,
+        kind,
+        source: String(options.source || "user").trim().slice(0, 120) || "user",
+        request_id: requestId || undefined,
+        at,
+        status: "queued",
+        authorization_preserved: kind === "supplement" && active.explicit_write_authorization,
+    };
+    active.pending_user_messages = [...normalizeGlobalAgentUserSteers(active.pending_user_messages || active.pendingUserMessages, "queued", 19), steering];
+    active.pendingUserMessages = active.pending_user_messages;
+    active.user_steer_history = [...normalizeGlobalAgentUserSteers(active.user_steer_history || active.userSteerHistory, undefined, 39), steering];
+    active.userSteerHistory = active.user_steer_history;
+    active.last_user_steer = steering;
+    active.lastUserSteer = steering;
+    active.max_steps = Math.max(active.max_steps, Math.min(16, active.steps.length + 3));
+    active.updated_at = at;
+    saveRun(active, !volatileRuns.has(id));
+    (0, runtime_1.recordGlobalAgentRuntimeOutput)(active, { type: "user_steer_queued", steering });
+    (0, reliability_ledger_1.appendTraceEvent)(active.trace_id, {
+        id: `${active.id}:user-steer-queued:${steering.id}`,
+        type: "global_agent.user_steer_queued",
+        status: "info",
+        message: kind === "revise_goal" ? "执行中的目标调整已进入当前运行" : "执行中的补充要求已进入当前运行",
+        data: { steering_id: steering.id, kind, source: steering.source, request_id: steering.request_id || "" },
+    });
+    return { run: active, steering, duplicate: false };
+}
+function applyGlobalAgentSupervisionSteer(id, message, options = {}) {
+    const stored = getGlobalAgentRun(id);
+    if (!stored)
+        throw new Error("全局 Agent 运行不存在");
+    if (!stored.supervisor_id || !["supervising", "paused"].includes(stored.status)) {
+        throw new Error("这次运行当前不在持续跟进阶段");
+    }
+    const normalizedMessage = String(message || "").trim().slice(0, 8_000);
+    if (!normalizedMessage)
+        throw new Error("补充要求不能为空");
+    const run = normalizeRun(stored);
+    const requestId = String(options.requestId || "").trim().slice(0, 160);
+    const existing = requestId
+        ? normalizeGlobalAgentUserSteers(run.user_steer_history || run.userSteerHistory, undefined, 40).find(item => item.request_id === requestId)
+        : null;
+    if (existing)
+        return { run, steering: existing, duplicate: true, applied: existing.status === "applied" };
+    const kind = classifyGlobalAgentUserSteer(normalizedMessage, options.kind || "auto");
+    const source = String(options.source || "global_supervision_steer").trim().slice(0, 120) || "global_supervision_steer";
+    const at = new Date().toISOString();
+    const steering = {
+        id: `steer_${Date.now().toString(36)}_${crypto.randomBytes(4).toString("hex")}`,
+        message: normalizedMessage,
+        kind,
+        source,
+        request_id: requestId || undefined,
+        at,
+        status: "applied",
+        applied_at: at,
+        authorization_preserved: kind === "supplement" && run.explicit_write_authorization,
+    };
+    run.pending_user_messages = [];
+    run.pendingUserMessages = run.pending_user_messages;
+    run.user_steer_history = [
+        ...normalizeGlobalAgentUserSteers(run.user_steer_history || run.userSteerHistory, undefined, 39),
+        steering,
+    ].slice(-40);
+    run.userSteerHistory = run.user_steer_history;
+    run.last_user_steer = steering;
+    run.lastUserSteer = steering;
+    run.history.push({
+        role: "user",
+        content: `${kind === "revise_goal" ? "持续跟进中的目标调整" : "持续跟进中的补充要求"}：${normalizedMessage}`,
+    });
+    run.history = run.history.slice(-12);
+    const summary = options.continuationSummary && typeof options.continuationSummary === "object"
+        ? options.continuationSummary
+        : {};
+    const nestedSummary = summary.continuation_summary && typeof summary.continuation_summary === "object"
+        ? summary.continuation_summary
+        : summary;
+    const affectedTaskCount = Number(summary.affected_task_count ?? nestedSummary.affected_task_count ?? 0);
+    const queuedTaskCount = Number(summary.queued_task_count ?? nestedSummary.queued_task_count ?? 0);
+    const deferredTaskCount = Number(summary.deferred_task_count ?? nestedSummary.deferred_task_count ?? 0);
+    const interruptedTaskCount = Number(summary.interrupted_task_count
+        ?? nestedSummary.interrupted_task_count
+        ?? nestedSummary.interruption_requested_count
+        ?? 0);
+    const failedTaskCount = Number(summary.failed_task_count ?? nestedSummary.failed_task_count ?? 0);
+    const supervisionContinuation = {
+        schema: "ccm-global-supervision-steering-v1",
+        kind,
+        source,
+        affected_task_count: affectedTaskCount,
+        queued_task_count: queuedTaskCount,
+        deferred_task_count: deferredTaskCount,
+        interrupted_task_count: interruptedTaskCount,
+        failed_task_count: failedTaskCount,
+        replan_required: kind === "revise_goal",
+        authorization_preserved: steering.authorization_preserved,
+        at,
+    };
+    (0, reasoning_loop_1.captureReasoningFacts)(run.reasoning_loop, `supervision_steer:${steering.id}`, {
+        message: normalizedMessage,
+        kind,
+        source,
+        supervisor_id: run.supervisor_id,
+        mission_id: run.mission_id,
+        continuation: supervisionContinuation,
+    });
+    (0, reasoning_loop_1.setReasoningAssertion)(run.reasoning_loop, {
+        id: `supervision_steer_${steering.id}`,
+        label: kind === "revise_goal" ? "持续跟进中的最新目标已同步到子任务" : "持续跟进中的补充要求已同步到子任务",
+        kind: "intent",
+        status: failedTaskCount > 0 && affectedTaskCount === 0 ? "failed" : "passed",
+        evidence: [
+            normalizedMessage,
+            `影响 ${affectedTaskCount} 个子任务`,
+            kind === "revise_goal" ? `停止 ${interruptedTaskCount} 个旧执行轮` : `延后接续 ${deferredTaskCount} 个执行轮`,
+        ],
+        reason: failedTaskCount > 0 ? "部分子任务接续失败，技术详情保留失败统计" : "监督控制面已接收并同步最新用户要求",
+    });
+    if (kind === "revise_goal") {
+        run.explicit_write_authorization = false;
+        run.approved_tool_signatures = [];
+        run.reasoning_loop.authorization_scope = [];
+        (0, reasoning_loop_1.recordReasoningDeviation)(run.reasoning_loop, "supervision_goal_revised", `用户在持续跟进阶段调整目标：${normalizedMessage}`, "warning");
+        (0, reasoning_loop_1.explainReasoningDecision)(run.reasoning_loop, "replan_supervised_mission", "旧目标对应的执行轮已停止或退出队列；重新规划前不沿用旧范围写入授权。");
+    }
+    else {
+        (0, reasoning_loop_1.explainReasoningDecision)(run.reasoning_loop, "continue_supervised_mission", "补充要求已并入同一全局任务，不改变当前目标边界和已确认授权。");
+    }
+    run.user_message = buildGlobalAgentEffectiveGoal(run);
+    run.reasoning_loop.effective_goal = run.user_message.slice(0, 8_000);
+    run.status = "supervising";
+    run.phase = kind === "revise_goal" ? "plan" : "execute";
+    run.supervision_state = kind === "revise_goal" ? "replanning" : String(options.supervisorState || "monitoring");
+    const friendlyReply = kind === "revise_goal"
+        ? interruptedTaskCount > 0
+            ? `目标调整已接收。旧执行已停止，正在按新目标重新规划。${affectedTaskCount > 0 ? `已同步 ${affectedTaskCount} 个子任务。` : ""}`
+            : `目标调整已接收。当前没有仍在运行的旧执行轮，正在按新目标重新规划。${affectedTaskCount > 0 ? `已同步 ${affectedTaskCount} 个子任务。` : ""}`
+        : `补充要求已接收，已并入当前任务继续处理。${affectedTaskCount > 0 ? `已同步 ${affectedTaskCount} 个子任务。` : ""}`;
+    const nextAction = kind === "revise_goal"
+        ? "重新核对目标、执行范围和验收标准后继续派发，并重新运行验收与复核。"
+        : "继续跟踪当前执行、验收和复核结果，完成后给出最终总结。";
+    const todoStep = (id, label, activeForm, status, detail = "") => ({
+        id,
+        label,
+        content: label,
+        active_form: activeForm,
+        activeForm,
+        status,
+        ...(detail ? { detail } : {}),
+    });
+    const supervisionTodoPlan = {
+        schema: "ccm-main-agent-workchain-todo-v1",
+        source: "global-supervision-steering",
+        title: kind === "revise_goal" ? "调整后的执行计划" : "当前执行计划",
+        steps: kind === "revise_goal"
+            ? [
+                todoStep("recheck_goal", "重新核对目标和范围", "已重新核对目标和范围", "completed"),
+                todoStep("interrupt_previous_run", "停止旧执行轮", "旧执行已停止", "completed", "旧目标对应的执行轮不会继续写入。"),
+                todoStep("replan_supervised_mission", "按新目标重新规划", "正在按新目标重新规划", "in_progress", "正在重新核对执行范围和验收标准。"),
+                todoStep("rerun_acceptance_review", "重新执行验收和复核", "等待重新执行验收和复核", "pending"),
+            ]
+            : [
+                todoStep("receive_supplement", "接收补充要求", "已接收补充要求", "completed"),
+                todoStep("sync_execution_targets", "同步补充要求到执行目标", "已同步到执行目标", "completed"),
+                todoStep("continue_execution_acceptance", "继续执行和验收", "正在继续执行和验收", "in_progress"),
+                todoStep("prepare_final_summary", "整理最终总结", "等待整理最终总结", "pending"),
+            ],
+        next_action: nextAction,
+        nextAction,
+        display_policy: {
+            user_visible: true,
+            technical_default_collapsed: true,
+            hide_internal_protocols: true,
+            show_for_ordinary_conversation: false,
+        },
+    };
+    const technicalContent = JSON.stringify({
+        supervision_continuation: supervisionContinuation,
+        supervisor_state: options.supervisorState || "",
+        raw_continuation_summary: nestedSummary,
+    });
+    const report = {
+        ...(run.final_report && typeof run.final_report === "object" ? run.final_report : {}),
+        summary: friendlyReply,
+        next_action: nextAction,
+        risks: failedTaskCount > 0 ? [`有 ${failedTaskCount} 个子任务未成功接入最新要求，正在等待后续监督检查。`] : [],
+        supervision_continuation: supervisionContinuation,
+        todo_plan: supervisionTodoPlan,
+        todoPlan: supervisionTodoPlan,
+        technical_content: technicalContent,
+    };
+    run.final_reply = friendlyReply;
+    run.final_report = report;
+    run.workchain = buildGlobalRunWorkchain(run, run.status, friendlyReply, report);
+    run.todo_plan = supervisionTodoPlan;
+    run.todoPlan = supervisionTodoPlan;
+    run.workchain.todo_plan = supervisionTodoPlan;
+    run.workchain.todoPlan = supervisionTodoPlan;
+    if (Array.isArray(run.workchain?.technical_details)) {
+        run.workchain.technical_details.push({
+            id: "supervision_continuation",
+            title: "持续跟进接续统计",
+            items: [
+                { label: "接续类型", value: kind },
+                { label: "受影响子任务", value: String(affectedTaskCount) },
+                { label: "重新排队", value: String(queuedTaskCount) },
+                { label: "等待当前轮结束", value: String(deferredTaskCount) },
+                { label: "停止旧执行轮", value: String(interruptedTaskCount) },
+                { label: "接续失败", value: String(failedTaskCount) },
+            ],
+        });
+    }
+    run.display_stream = buildGlobalDisplayStreamFromWorkchain(run.workchain);
+    run.display_stream.todo_plan = supervisionTodoPlan;
+    run.display_stream.todoPlan = supervisionTodoPlan;
+    const supervisionDecision = run.display_stream.main_agent_decision || run.display_stream.mainAgentDecision;
+    if (supervisionDecision) {
+        supervisionDecision.mode = kind === "revise_goal" ? "goal_revision" : "followup";
+        supervisionDecision.decision = {
+            ...(supervisionDecision.decision || {}),
+            selected_actions: kind === "revise_goal"
+                ? ["replan_from_observation", "dispatch_child_agent", "read_child_agent_receipts", "generate_final_reply"]
+                : ["dispatch_child_agent", "read_child_agent_receipts", "generate_final_reply"],
+            dispatch_policy: {
+                action: kind === "revise_goal" ? "replan" : "continue",
+                reason: friendlyReply,
+                nextStep: nextAction,
+            },
+            reason: friendlyReply,
+        };
+        supervisionDecision.todo_plan = supervisionTodoPlan;
+        supervisionDecision.todoPlan = supervisionTodoPlan;
+        supervisionDecision.user_plan_steps = supervisionTodoPlan.steps;
+        supervisionDecision.verify = {
+            passed: false,
+            blocked_actions: [],
+            conclusion: kind === "revise_goal" ? "正在按新目标重新规划" : "正在继续执行和验收",
+        };
+        if (supervisionDecision.display_stream) {
+            supervisionDecision.display_stream.todo_plan = supervisionTodoPlan;
+            supervisionDecision.display_stream.todoPlan = supervisionTodoPlan;
+        }
+        run.display_stream.main_agent_decision = supervisionDecision;
+        run.display_stream.mainAgentDecision = supervisionDecision;
+    }
+    run.updated_at = at;
+    saveRun(run, !volatileRuns.has(id));
+    (0, runtime_1.recordGlobalAgentRuntimeOutput)(run, {
+        type: "user_steer_applied",
+        steering,
+        supervision_continuation: supervisionContinuation,
+    });
+    (0, reliability_ledger_1.appendTraceEvent)(run.trace_id, {
+        id: `${run.id}:supervision-steer:${steering.id}`,
+        type: kind === "revise_goal" ? "global_agent.supervision_goal_revised" : "global_agent.supervision_supplemented",
+        status: failedTaskCount > 0 ? "warning" : "ok",
+        task_id: run.mission_id || "",
+        message: friendlyReply,
+        data: {
+            steering_id: steering.id,
+            supervisor_id: run.supervisor_id,
+            mission_id: run.mission_id,
+            continuation: supervisionContinuation,
+        },
+    });
+    return { run, steering, duplicate: false, applied: true, continuation: supervisionContinuation };
+}
+function applyPendingGlobalAgentUserSteers(run, runtime) {
+    const pending = normalizeGlobalAgentUserSteers(run.pending_user_messages || run.pendingUserMessages, "queued", 20);
+    if (!pending.length)
+        return [];
+    const appliedAt = nowIso(runtime);
+    run.pending_user_messages = [];
+    run.pendingUserMessages = run.pending_user_messages;
+    const history = normalizeGlobalAgentUserSteers(run.user_steer_history || run.userSteerHistory, undefined, 40);
+    const applied = pending.map(item => ({
+        ...item,
+        status: "applied",
+        applied_at: appliedAt,
+        authorization_preserved: item.kind === "supplement" && run.explicit_write_authorization,
+    }));
+    const appliedById = new Map(applied.map(item => [item.id, item]));
+    run.user_steer_history = history
+        .map(item => appliedById.get(item.id) || item)
+        .concat(applied.filter(item => !history.some(existing => existing.id === item.id)))
+        .slice(-40);
+    run.userSteerHistory = run.user_steer_history;
+    for (const steering of applied) {
+        const label = steering.kind === "revise_goal" ? "执行中目标调整" : "执行中补充要求";
+        run.history.push({ role: "user", content: `${label}：${steering.message}` });
+        (0, reasoning_loop_1.captureReasoningFacts)(run.reasoning_loop, `user_steer:${steering.id}`, {
+            kind: steering.kind,
+            message: steering.message,
+            source: steering.source,
+            at: steering.at,
+        });
+        (0, reasoning_loop_1.setReasoningAssertion)(run.reasoning_loop, {
+            id: `user_steer_${steering.id}`,
+            label: steering.kind === "revise_goal" ? "最新目标调整已纳入当前运行" : "执行中的补充要求已纳入当前运行",
+            kind: "intent",
+            status: "passed",
+            evidence: [steering.message],
+            reason: "用户在当前运行尚未结束时补充了上下文",
+        });
+        if (steering.kind === "revise_goal") {
+            run.explicit_write_authorization = false;
+            run.approved_tool_signatures = [];
+            run.reasoning_loop.authorization_scope = [];
+            (0, reasoning_loop_1.recordReasoningDeviation)(run.reasoning_loop, "user_goal_revised", `用户在执行中调整目标：${steering.message}`, "warning");
+            (0, reasoning_loop_1.explainReasoningDecision)(run.reasoning_loop, "replan_after_user_steer", "最新目标边界优先于旧计划；重新规划前不沿用旧范围的写入授权。");
+        }
+        else {
+            (0, reasoning_loop_1.explainReasoningDecision)(run.reasoning_loop, "continue_with_user_steer", "把用户的补充要求合并到同一运行，下一轮决策必须读取这条上下文。");
+        }
+        run.last_user_steer = steering;
+        run.lastUserSteer = steering;
+        (0, runtime_1.recordGlobalAgentRuntimeOutput)(run, { type: "user_steer_applied", steering });
+        (0, reliability_ledger_1.appendTraceEvent)(run.trace_id, {
+            id: `${run.id}:user-steer-applied:${steering.id}`,
+            type: "global_agent.user_steer_applied",
+            status: "ok",
+            message: steering.kind === "revise_goal" ? "目标调整已纳入当前运行，等待重核计划" : "补充要求已纳入当前运行",
+            data: {
+                steering_id: steering.id,
+                kind: steering.kind,
+                source: steering.source,
+                authorization_preserved: steering.authorization_preserved,
+            },
+        });
+        emit(runtime, {
+            type: "user_steer_applied",
+            steering,
+            user_steer: steering,
+            userSteer: steering,
+            replan_required: steering.kind === "revise_goal",
+            message: steering.kind === "revise_goal"
+                ? "新的目标边界已纳入，我会先重新核对计划再继续。"
+                : "补充要求已纳入当前任务，我会带着它继续处理。",
+        }, run);
+    }
+    run.history = run.history.slice(-12);
+    run.user_message = buildGlobalAgentEffectiveGoal(run);
+    run.reasoning_loop.effective_goal = run.user_message.slice(0, 8_000);
+    run.updated_at = appliedAt;
+    saveRun(run, runtime.persist !== false);
+    return applied;
 }
 function applyGlobalResumeFeedback(run, runtime, value, options = {}) {
     const feedback = compactGlobalUserSummaryText(value, "", 720);
@@ -1373,8 +1807,9 @@ function completeRun(run, runtime, status, reply, error = "") {
 }
 async function continueLoop(run, runtime) {
     if (activeRuns.has(run.id))
-        return run;
+        return activeRunObjects.get(run.id) || run;
     activeRuns.add(run.id);
+    activeRunObjects.set(run.id, run);
     try {
         run.status = "running";
         run.updated_at = nowIso(runtime);
@@ -1393,6 +1828,7 @@ async function continueLoop(run, runtime) {
                 emit(runtime, { type: "paused", reply: "我已暂停这次运行。" }, run);
                 return run;
             }
+            applyPendingGlobalAgentUserSteers(run, runtime);
             const now = runtime.now ? runtime.now() : Date.now();
             if (now > Date.parse(run.deadline_at))
                 return completeRun(run, runtime, "failed", "本次运行已达到执行时间上限，我已安全停止。", "deadline_exceeded");
@@ -1403,9 +1839,14 @@ async function continueLoop(run, runtime) {
             try {
                 const messages = await buildMessages(run, runtime);
                 run.model_calls += 1;
-                decision = parseGlobalAgentDecision(await runtime.callModel(messages, run));
+                const rawDecision = await runtime.callModel(messages, run);
+                if (applyPendingGlobalAgentUserSteers(run, runtime).length)
+                    continue;
+                decision = parseGlobalAgentDecision(rawDecision);
             }
             catch (error) {
+                if (applyPendingGlobalAgentUserSteers(run, runtime).length)
+                    continue;
                 const fallback = runtime.fallbackDecision ? await runtime.fallbackDecision(run, error) : null;
                 if (!fallback)
                     return completeRun(run, runtime, "failed", `我暂时无法形成可靠决策：${error?.message || error}`, error?.message || String(error));
@@ -1794,6 +2235,8 @@ async function continueLoop(run, runtime) {
     }
     finally {
         activeRuns.delete(run.id);
+        if (activeRunObjects.get(run.id) === run)
+            activeRunObjects.delete(run.id);
     }
 }
 async function startGlobalAgentRun(input, runtime) {
@@ -2087,6 +2530,19 @@ async function runGlobalAgentLoopSelfTest() {
     });
     const supervisedWaiting = updateGlobalAgentSupervisionState(supervised.id, "waiting_user");
     const supervisedReworking = updateGlobalAgentSupervisionState(supervised.id, "reworking");
+    const supervisedGoalSteer = applyGlobalAgentSupervisionSteer(supervised.id, "目标调整为只保留兼容字段，不再删除旧表", {
+        kind: "revise_goal",
+        source: "self-test",
+        requestId: "supervised-goal-revision",
+        supervisorState: "monitoring",
+        continuationSummary: {
+            affected_task_count: 2,
+            queued_task_count: 1,
+            deferred_task_count: 1,
+            interrupted_task_count: 1,
+            failed_task_count: 0,
+        },
+    });
     const supervisedCompleted = completeGlobalAgentSupervision(supervised.id, { summary: "最终交付", acceptance_gate_passed: true }, "completed");
     const consultationEvents = [];
     const consultation = await startGlobalAgentRun({ message: "知识库压缩是怎么实现的" }, {
@@ -2217,6 +2673,95 @@ async function runGlobalAgentLoopSelfTest() {
     const paused = await pausingPromise;
     const resumeFeedback = "继续时补齐交付证据、验证结果和验收结论";
     const resumed = await resumeGlobalAgentRun(paused.id, pauseRuntime, { feedback: resumeFeedback, source: "quality_followup" });
+    let steeringRunId = "";
+    let releaseSteeringDecision = null;
+    let steeringModelCall = 0;
+    const steeringMessages = [];
+    const steeringEvents = [];
+    const steeringPromise = startGlobalAgentRun({
+        message: "请说明 demo 的登录恢复方案",
+        explicitWriteAuthorization: true,
+    }, {
+        persist: false,
+        onEvent: event => {
+            steeringEvents.push(event);
+            if (event.type === "started")
+                steeringRunId = event.run_id;
+        },
+        callModel: async (messages) => {
+            steeringMessages.push(messages);
+            steeringModelCall += 1;
+            if (steeringModelCall === 1) {
+                return new Promise(resolve => { releaseSteeringDecision = resolve; });
+            }
+            return {
+                state: "answer",
+                message: "已把失败回滚策略纳入方案。",
+                intent: { category: "analysis", goal: "说明登录恢复与失败回滚方案", action_required: false, target_refs: ["demo"], confidence: .98, authorization_basis: "none", reason: "用户补充了失败回滚要求" },
+                tool: null,
+            };
+        },
+        executeTool: async () => { throw new Error("不应执行工具"); },
+    });
+    while (!steeringRunId || !releaseSteeringDecision)
+        await new Promise(resolve => setTimeout(resolve, 0));
+    const steeringRequestId = "selftest-steer-supplement";
+    const queuedSteering = steerGlobalAgentRun(steeringRunId, "再补充失败时的回滚策略", {
+        kind: "supplement",
+        source: "selftest",
+        requestId: steeringRequestId,
+    });
+    const duplicateSteering = steerGlobalAgentRun(steeringRunId, "这条重复请求不应再次入队", {
+        kind: "supplement",
+        source: "selftest",
+        requestId: steeringRequestId,
+    });
+    releaseSteeringDecision({ state: "answer", message: "这是未读取补充要求的旧回答", tool: null });
+    const steered = await steeringPromise;
+    let revisionRunId = "";
+    let releaseRevisionDecision = null;
+    let revisionModelCall = 0;
+    const revisionMessages = [];
+    const revisionEvents = [];
+    const revisionPromise = startGlobalAgentRun({
+        message: "请直接修改 demo 登录模块并验证",
+        explicitWriteAuthorization: true,
+    }, {
+        persist: false,
+        onEvent: event => {
+            revisionEvents.push(event);
+            if (event.type === "started")
+                revisionRunId = event.run_id;
+        },
+        callModel: async (messages) => {
+            revisionMessages.push(messages);
+            revisionModelCall += 1;
+            if (revisionModelCall === 1) {
+                return new Promise(resolve => { releaseRevisionDecision = resolve; });
+            }
+            return {
+                state: "answer",
+                message: "已按最新目标改为只分析风险，不修改代码。",
+                intent: { category: "analysis", goal: "只分析 demo 登录风险", action_required: false, target_refs: ["demo"], confidence: .99, authorization_basis: "none", reason: "用户执行中调整目标并撤销修改范围" },
+                tool: null,
+            };
+        },
+        executeTool: async () => { throw new Error("目标调整后不应执行旧工具"); },
+    });
+    while (!revisionRunId || !releaseRevisionDecision)
+        await new Promise(resolve => setTimeout(resolve, 0));
+    steerGlobalAgentRun(revisionRunId, "目标调整为只分析登录风险，不执行、不修改代码", {
+        kind: "revise_goal",
+        source: "selftest",
+        requestId: "selftest-steer-revision",
+    });
+    releaseRevisionDecision({
+        state: "execute",
+        message: "这是目标调整前的旧执行决定",
+        intent: { category: "execution", goal: "修改 demo 登录模块", action_required: true, target_refs: ["demo"], confidence: .98, authorization_basis: "current_message", reason: "旧目标要求修改" },
+        tool: { name: "send_project_cmd", arguments: { project: "demo", message: "修改登录模块" } },
+    });
+    const revisedDuringRun = await revisionPromise;
     const parsedFence = parseGlobalAgentDecision("```json\n{\"state\":\"answer\",\"message\":\"ok\",\"tool\":null}\n```");
     let shadowExecutions = 0;
     const shadow = await startGlobalAgentRun({ message: "请给 demo 修复登录问题", explicitWriteAuthorization: true }, {
@@ -2279,6 +2824,19 @@ async function runGlobalAgentLoopSelfTest() {
             && supervisedReworking?.final_reply.includes("返工")
             && supervisedReworking?.final_reply.includes("重新复核")
             && supervisedReworking?.display_stream?.workchain?.completion_summary?.next_action?.includes("重新运行 TestAgent"),
+        globalSupervisionGoalRevisionStopsOldRunAndReplans: supervisedGoalSteer.applied === true
+            && supervisedGoalSteer.run.status === "supervising"
+            && supervisedGoalSteer.run.phase === "plan"
+            && supervisedGoalSteer.run.supervision_state === "replanning"
+            && supervisedGoalSteer.run.final_reply.includes("旧执行已停止")
+            && supervisedGoalSteer.run.explicit_write_authorization === false
+            && supervisedGoalSteer.run.reasoning_loop.authorization_scope.length === 0
+            && supervisedGoalSteer.run.reasoning_loop.replan_required === true
+            && supervisedGoalSteer.run.user_steer_history?.some(item => item.request_id === "supervised-goal-revision" && item.status === "applied")
+            && supervisedGoalSteer.run.todo_plan?.steps?.find((item) => item.id === "replan_supervised_mission")?.status === "in_progress"
+            && supervisedGoalSteer.run.todo_plan?.steps?.find((item) => item.id === "rerun_acceptance_review")?.status === "pending"
+            && supervisedGoalSteer.run.display_stream?.main_agent_decision?.todo_plan === supervisedGoalSteer.run.todo_plan
+            && JSON.stringify(supervisedGoalSteer.run.display_stream?.technical_details || []).includes("停止旧执行轮"),
         modelObservesAndContinues: calls.join(",") === "inspect_system,orchestrate_development",
         consultationDoesNotDispatch: consultation.tool_calls === 0,
         globalVisibleReplySanitizesProtocol: !GLOBAL_USER_SUMMARY_INTERNAL_PATTERN.test(protocolLeak.final_reply)
@@ -2324,6 +2882,27 @@ async function runGlobalAgentLoopSelfTest() {
             && resumed.reasoning_loop.fact_snapshots.some(item => item.source === "resume_feedback" && item.summary.includes(resumeFeedback))
             && resumed.reasoning_loop.assertions.some(item => item.id === "resume_feedback" && item.status === "passed")
             && pauseEvents.some(event => event.type === "resume_feedback" && event.feedback === resumeFeedback && event.source === "quality_followup"),
+        globalMidTurnSteerUsesSameRun: steered.id === steeringRunId
+            && steered.status === "completed"
+            && steeringModelCall === 2
+            && steeringMessages[1]?.some(item => item.content.includes("再补充失败时的回滚策略")),
+        globalMidTurnSteerConsumesOnce: queuedSteering.duplicate === false
+            && duplicateSteering.duplicate === true
+            && steered.pending_user_messages?.length === 0
+            && steered.user_steer_history?.filter(item => item.request_id === steeringRequestId).length === 1
+            && steered.user_steer_history?.some(item => item.request_id === steeringRequestId && item.status === "applied")
+            && steered.history.filter(item => item.role === "user" && item.content.includes("再补充失败时的回滚策略")).length === 1,
+        globalMidTurnSteerStreamsFriendlyAppliedEvent: steeringEvents.some(event => event.type === "user_steer_applied"
+            && event.steering?.kind === "supplement"
+            && event.message.includes("补充要求已纳入")),
+        globalMidTurnGoalRevisionForcesReplanAndRevokesAuthorization: revisedDuringRun.status === "completed"
+            && revisionModelCall === 2
+            && revisionMessages[1]?.some(item => item.content.includes("目标调整为只分析登录风险"))
+            && revisedDuringRun.explicit_write_authorization === false
+            && revisedDuringRun.reasoning_loop.authorization_scope.length === 0
+            && revisedDuringRun.reasoning_loop.replan_required === true
+            && revisedDuringRun.tool_calls === 0
+            && revisionEvents.some(event => event.type === "user_steer_applied" && event.replan_required === true),
         fencedJsonParses: parsedFence.state === "answer",
         shadowModeHasNoSideEffect: shadow.status === "completed" && shadow.shadow_mode === true && shadow.tool_calls === 0 && shadowExecutions === 0,
         completedRunsHaveWorkchain: !!multi.display_stream?.workchain && !!supervisedCompleted?.display_stream?.workchain,
