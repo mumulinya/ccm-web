@@ -33,6 +33,8 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.mergeGlobalMissionWaitingUserIncidents = mergeGlobalMissionWaitingUserIncidents;
+exports.shouldScheduleGlobalMissionSupervisor = shouldScheduleGlobalMissionSupervisor;
 exports.buildGlobalMissionFinalReport = buildGlobalMissionFinalReport;
 exports.formatGlobalMissionFinalReport = formatGlobalMissionFinalReport;
 exports.getGlobalMissionSupervisor = getGlobalMissionSupervisor;
@@ -56,6 +58,38 @@ const MAX_RECORDS = 200;
 const activeChecks = new Set();
 let scheduler = null;
 let schedulerRuntime = null;
+function waitingUserIncidentKey(value) {
+    return [
+        value?.task_id || value?.taskId || value?.execution_id || value?.executionId || "",
+        value?.reason || value?.message || value?.detail || "",
+    ].map(item => String(item || "").trim().toLowerCase()).join(":");
+}
+function mergeGlobalMissionWaitingUserIncidents(existing = [], incoming = [], at = new Date().toISOString()) {
+    const merged = [...(Array.isArray(existing) ? existing : [])];
+    for (const item of Array.isArray(incoming) ? incoming : []) {
+        const incident = { at, type: "waiting_user", ...item };
+        const key = waitingUserIncidentKey(incident);
+        const index = key ? merged.findIndex(row => row?.type === "waiting_user" && !row?.resolved_at && waitingUserIncidentKey(row) === key) : -1;
+        if (index >= 0) {
+            merged[index] = {
+                ...merged[index],
+                ...incident,
+                at: merged[index].at || at,
+                last_seen_at: at,
+                occurrence_count: Number(merged[index].occurrence_count || 1) + 1,
+            };
+        }
+        else {
+            merged.push({ ...incident, occurrence_count: 1 });
+        }
+    }
+    return merged.slice(-100);
+}
+function shouldScheduleGlobalMissionSupervisor(record, now = Date.now()) {
+    if (!record || record.source === "self-test" || record.status !== "monitoring")
+        return false;
+    return Date.parse(record.next_check_at || record.updated_at || "") <= now;
+}
 function nowIso(runtime) {
     return new Date(runtime?.now ? runtime.now() : Date.now()).toISOString();
 }
@@ -328,7 +362,7 @@ async function checkGlobalMissionSupervisorNow(id, runtime) {
         record.status = waiting.length > 0 ? "waiting_user" : "monitoring";
         record.phase = waiting.length > 0 ? "needs_user" : actions.length > 0 ? "recovering" : "supervising";
         if (waiting.length > 0) {
-            record.incidents = [...record.incidents, ...waiting.map((item) => ({ at: checkedAt, type: "waiting_user", ...item }))].slice(-100);
+            record.incidents = mergeGlobalMissionWaitingUserIncidents(record.incidents, waiting, checkedAt);
             if (previousStatus !== "waiting_user")
                 await runtime.onProgress?.(record, { type: "waiting_user", items: waiting });
         }
@@ -367,7 +401,15 @@ async function controlGlobalMissionSupervisor(id, operation, runtime, payload = 
         throw new Error(`不支持的持续跟进操作：${operation}`);
     if (["completed", "failed", "cancelled"].includes(record.status))
         throw new Error("持续跟进已进入终态，不能再修改；请创建新的全局任务");
+    const wasWaitingUser = record.status === "waiting_user";
+    const waitingUserResolutionRequested = op === "update_goal" && (payload.resolve_waiting_user === true
+        || payload.resolveWaitingUser === true
+        || payload.continuation?.resolve_waiting_user === true
+        || payload.continuation?.resolveWaitingUser === true);
     const controlResult = await runtime.controlMission(record.mission_id, op, payload);
+    if (controlResult?.success === false)
+        throw new Error(controlResult.error || "全局任务接续失败");
+    let waitingUserResolved = false;
     if (op === "pause") {
         record.status = "paused";
         record.phase = "paused";
@@ -421,7 +463,19 @@ async function controlGlobalMissionSupervisor(id, operation, runtime, payload = 
             interrupted_task_count: interruptedTaskCount,
             failed_task_count: failedTaskCount,
             continuation_summary: summary,
+            resolves_waiting_user: waitingUserResolutionRequested && wasWaitingUser && kind === "supplement",
         };
+        if (waitingUserResolutionRequested && wasWaitingUser && kind === "supplement") {
+            waitingUserResolved = true;
+            record.incidents = record.incidents.map((incident) => (incident?.type === "waiting_user" && !incident?.resolved_at
+                ? {
+                    ...incident,
+                    resolved_at: now,
+                    resolution_source: continuation.source || payload.source || "user_supplement",
+                    resolution: "用户已补充所需条件，原任务继续执行",
+                }
+                : incident)).slice(-100);
+        }
         if (["waiting_user", "paused"].includes(record.status))
             record.status = "monitoring";
         record.phase = kind === "revise_goal" ? "replanning" : "supervising";
@@ -440,6 +494,7 @@ async function controlGlobalMissionSupervisor(id, operation, runtime, payload = 
                 deferred_task_count: Number(record.last_continuation?.deferred_task_count || 0),
                 interrupted_task_count: Number(record.last_continuation?.interrupted_task_count || 0),
                 failed_task_count: Number(record.last_continuation?.failed_task_count || 0),
+                waiting_user_resolved: waitingUserResolved,
             },
         }].slice(-100);
     saveRecord(record);
@@ -455,11 +510,7 @@ function startGlobalMissionSupervisorScheduler(runtime, intervalMs = 2_000) {
     const tick = () => {
         const now = runtime.now ? runtime.now() : Date.now();
         for (const record of loadStore()) {
-            if (record.source === "self-test")
-                continue;
-            if (!["monitoring", "waiting_user"].includes(record.status))
-                continue;
-            if (Date.parse(record.next_check_at || record.updated_at) > now)
+            if (!shouldScheduleGlobalMissionSupervisor(record, now))
                 continue;
             void checkGlobalMissionSupervisorNow(record.id, runtime);
         }
@@ -550,21 +601,22 @@ async function runGlobalMissionSupervisorAsyncSelfTest() {
         controlMission: (_id, operation, payload) => {
             controlCalls.push(operation);
             controlPayloads.push(payload);
-            return operation === "update_goal"
-                ? {
-                    success: true,
-                    continuation_kind: "revise_goal",
-                    continuation_summary: {
-                        kind: "revise_goal",
-                        affected_task_count: 1,
-                        queued_task_count: 0,
-                        deferred_task_count: 1,
-                        interruption_requested_count: 1,
-                        interrupted_task_count: 1,
-                        failed_task_count: 0,
-                    },
-                }
-                : { success: true };
+            if (operation !== "update_goal")
+                return { success: true };
+            const kind = payload?.continuation_kind === "supplement" ? "supplement" : "revise_goal";
+            return {
+                success: true,
+                continuation_kind: kind,
+                continuation_summary: {
+                    kind,
+                    affected_task_count: 1,
+                    queued_task_count: kind === "supplement" ? 1 : 0,
+                    deferred_task_count: kind === "revise_goal" ? 1 : 0,
+                    interruption_requested_count: kind === "revise_goal" ? 1 : 0,
+                    interrupted_task_count: kind === "revise_goal" ? 1 : 0,
+                    failed_task_count: 0,
+                },
+            };
         },
         onCompleted: (_record, report) => { completedReports.push(report); },
     };
@@ -572,6 +624,28 @@ async function runGlobalMissionSupervisorAsyncSelfTest() {
     try {
         const recovery = await checkGlobalMissionSupervisorNow(record.id, runtime);
         const reloaded = getGlobalMissionSupervisor(record.id);
+        const waitingRecord = getGlobalMissionSupervisor(record.id);
+        waitingRecord.status = "waiting_user";
+        waitingRecord.phase = "needs_user";
+        waitingRecord.incidents = [...waitingRecord.incidents, {
+                at: new Date().toISOString(),
+                type: "waiting_user",
+                task_id: "child",
+                reason: "请补充测试账号",
+            }];
+        saveRecord(waitingRecord);
+        const resolvedWaiting = await controlGlobalMissionSupervisor(record.id, "update_goal", runtime, {
+            business_goal: "持续跟进 E2E\n补充任务条件：测试账号已提供",
+            message: "测试账号已提供",
+            continuation_kind: "supplement",
+            resolve_waiting_user: true,
+            source: "self-test-waiting-resolution",
+            continuation: {
+                kind: "supplement",
+                source: "self-test-waiting-resolution",
+                resolve_waiting_user: true,
+            },
+        });
         const paused = await controlGlobalMissionSupervisor(record.id, "pause", runtime);
         const resumed = await controlGlobalMissionSupervisor(record.id, "resume", runtime);
         const updatedGoal = await controlGlobalMissionSupervisor(record.id, "update_goal", runtime, {
@@ -590,6 +664,20 @@ async function runGlobalMissionSupervisorAsyncSelfTest() {
         const checks = {
             asyncRecoveryActionPersisted: recovery.actions.some((item) => item.type === "runtime_recovery"),
             restartReloadKeepsIdentity: reloaded?.id === record.id && reloaded?.mission_id === missionId,
+            waitingUserIsRestoredWithoutAutomaticAdvance: shouldScheduleGlobalMissionSupervisor({ status: "waiting_user", source: "global-agent", next_check_at: "2000-01-01T00:00:00.000Z" }) === false,
+            monitoringRunRemainsSchedulable: shouldScheduleGlobalMissionSupervisor({ status: "monitoring", source: "global-agent", next_check_at: "2000-01-01T00:00:00.000Z" }) === true,
+            repeatedWaitingIncidentIsMerged: mergeGlobalMissionWaitingUserIncidents([{ at: "2026-07-12T00:00:00.000Z", type: "waiting_user", task_id: "child", reason: "请补充测试账号", occurrence_count: 1 }], [{ task_id: "child", reason: "请补充测试账号" }], "2026-07-12T00:01:00.000Z").filter((item) => item.type === "waiting_user" && item.task_id === "child").length === 1,
+            waitingUserSupplementResumesSameMission: resolvedWaiting.id === record.id
+                && resolvedWaiting.mission_id === missionId
+                && resolvedWaiting.status === "monitoring"
+                && resolvedWaiting.phase === "supervising"
+                && resolvedWaiting.last_continuation?.kind === "supplement"
+                && resolvedWaiting.last_continuation?.replan_required === false
+                && resolvedWaiting.last_continuation?.interrupt_current_run === false,
+            waitingIncidentMarkedResolved: resolvedWaiting.incidents.some((item) => item.type === "waiting_user"
+                && item.reason === "请补充测试账号"
+                && !!item.resolved_at)
+                && resolvedWaiting.actions.some((item) => item.type === "user_update_goal" && item.payload?.waiting_user_resolved === true),
             pauseWorks: paused.status === "paused" && controlCalls.includes("pause"),
             resumeWorks: ["monitoring", "completed"].includes(resumed.status) && controlCalls.includes("resume"),
             updateGoalUsesActualContinuationKind: controlCalls.includes("update_goal")

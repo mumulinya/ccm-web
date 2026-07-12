@@ -12,7 +12,7 @@ import {
 } from "../../core/utils";
 
 const PET_WEB_ASSETS_DIR = path.join(PUBLIC_DIR, "pets");
-const PET_DESKTOP_ASSETS_DIR = path.resolve(__dirname, "..", "..", "pet", "assets");
+const PET_DESKTOP_ASSETS_DIR = path.resolve(__dirname, "..", "..", "..", "pet", "assets");
 const MAX_PET_ASSET_BYTES = 2 * 1024 * 1024;
 
 function isPetRunning() {
@@ -28,14 +28,14 @@ function isPetRunning() {
 }
 
 function findElectronBin() {
-  const petExe = path.resolve(__dirname, "..", "..", "pet", "node_modules", "electron", "dist", "electron.exe");
+  const petExe = path.resolve(__dirname, "..", "..", "..", "pet", "node_modules", "electron", "dist", "electron.exe");
   if (fs.existsSync(petExe)) return petExe;
-  const mainExe = path.resolve(__dirname, "..", "..", "node_modules", "electron", "dist", "electron.exe");
+  const mainExe = path.resolve(__dirname, "..", "..", "..", "node_modules", "electron", "dist", "electron.exe");
   if (fs.existsSync(mainExe)) return mainExe;
   
-  const petBin = path.resolve(__dirname, "..", "..", "pet", "node_modules", ".bin", "electron");
+  const petBin = path.resolve(__dirname, "..", "..", "..", "pet", "node_modules", ".bin", "electron");
   if (fs.existsSync(petBin)) return petBin;
-  const mainBin = path.resolve(__dirname, "..", "..", "node_modules", ".bin", "electron");
+  const mainBin = path.resolve(__dirname, "..", "..", "..", "node_modules", ".bin", "electron");
   if (fs.existsSync(mainBin)) return mainBin;
   return null;
 }
@@ -43,7 +43,7 @@ function findElectronBin() {
 function launchPet(port: number) {
   try {
     if (isPetRunning()) return { success: false, error: "桌面宠物已在运行" };
-    const petDir = path.resolve(__dirname, "..", "..", "pet");
+    const petDir = path.resolve(__dirname, "..", "..", "..", "pet");
     if (!fs.existsSync(path.join(petDir, "main.js"))) return { success: false, error: "宠物应用未安装" };
     const electronBin = findElectronBin();
     const cmd = electronBin || "npx";

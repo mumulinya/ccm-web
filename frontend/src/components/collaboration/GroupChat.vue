@@ -24,7 +24,7 @@ import UnifiedDiffModal from '../common/UnifiedDiffModal.vue'
 import TemplateVariablesModal from '../common/TemplateVariablesModal.vue'
 import AgentPipelineModal from '../agents/AgentPipelineModal.vue'
 import { useSlashCommands } from '../../composables/useSlashCommands.js'
-import { createGroupTaskCardActionHandler } from '../../composables/useGroupTaskCardActions.js'
+import { buildGroupClarificationResponseFields, buildWaitingUserTaskContinuationFields, createGroupTaskCardActionHandler } from '../../composables/useGroupTaskCardActions.js'
 import { useChatTemplates } from '../../composables/useChatTemplates.js'
 import { useCodeChangeDrawer } from '../../composables/useCodeChangeDrawer.js'
 import { useMessageNavigation } from '../../composables/useMessageNavigation.js'
@@ -184,6 +184,91 @@ const {
 const messageFiles = ref([])
 const targetAgent = ref('all')
 const messageMode = ref('conversation')
+const pendingGroupTaskInput = ref(null)
+const pendingGroupClarificationInput = ref(null)
+const isTaskSupplementMode = computed(() => !!pendingGroupTaskInput.value
+  && pendingGroupTaskInput.value.groupId === currentGroup.value?.id)
+const isClarificationResponseMode = computed(() => !!pendingGroupClarificationInput.value
+  && pendingGroupClarificationInput.value.groupId === currentGroup.value?.id)
+const isDirectedGroupInputMode = computed(() => isTaskSupplementMode.value || isClarificationResponseMode.value)
+const groupComposerPlaceholder = computed(() => isTaskSupplementMode.value
+  ? '补充当前任务需要的信息，发送后会沿用原任务继续执行和验收...'
+  : isClarificationResponseMode.value
+    ? '补充主 Agent 刚才询问的信息，发送后会接着原请求继续判断...'
+    : '输入消息...（可 @ 项目执行成员，输入 / 打开命令中心）')
+const groupComposerSendLabel = computed(() => isStreaming.value
+  ? '正在提交...'
+  : isTaskSupplementMode.value ? '提交并继续' : isClarificationResponseMode.value ? '提交补充' : '发送 ➤')
+const cancelTaskSupplementInput = () => {
+  pendingGroupTaskInput.value = null
+  newMessage.value = ''
+  messageFiles.value = []
+  nextTick(focusGroupInput)
+}
+const beginTaskSupplementInput = (msg, card, action = {}) => {
+  const taskId = String(action.task_id || card?.task_id || msg?.task_id || '').trim()
+  const groupId = String(currentGroup.value?.id || '').trim()
+  if (!taskId || !groupId) return
+  pendingGroupClarificationInput.value = null
+  pendingGroupTaskInput.value = {
+    taskId,
+    groupId,
+    title: card?.title || '当前任务',
+  }
+  newMessage.value = ''
+  messageFiles.value = []
+  targetAgent.value = 'all'
+  messageMode.value = 'project_task'
+  mentionDropdown.value = false
+  hideTemplateAssist()
+  nextTick(focusGroupInput)
+}
+const getGroupClarificationContext = (msg) => msg?.clarificationContext || msg?.clarification_context || null
+const getGroupClarificationSummary = (msg) => msg?.clarificationSummary || msg?.clarification_summary || null
+const isPendingGroupClarification = (msg) => {
+  const context = getGroupClarificationContext(msg)
+  return !!context
+    && String(context.status || 'pending') === 'pending'
+    && !context.resolved_at
+    && !context.resolvedAt
+}
+const beginGroupClarificationInput = (msg, { focus = true, clear = true } = {}) => {
+  const context = getGroupClarificationContext(msg)
+  if (!context || !isPendingGroupClarification(msg) || !currentGroup.value?.id) return false
+  const summary = getGroupClarificationSummary(msg)
+  pendingGroupTaskInput.value = null
+  pendingGroupClarificationInput.value = {
+    requestId: context.id || context.request_id || context.requestId || '',
+    messageId: msg.id || context.response_message_id || context.responseMessageId || '',
+    groupId: currentGroup.value.id,
+    title: summary?.question || summary?.title || '补充当前请求',
+    messageMode: context.message_mode || context.messageMode || 'conversation',
+  }
+  if (clear) {
+    newMessage.value = ''
+    messageFiles.value = []
+  }
+  targetAgent.value = 'all'
+  messageMode.value = pendingGroupClarificationInput.value.messageMode
+  mentionDropdown.value = false
+  hideTemplateAssist()
+  if (focus) nextTick(focusGroupInput)
+  return true
+}
+const cancelGroupClarificationInput = () => {
+  pendingGroupClarificationInput.value = null
+  newMessage.value = ''
+  messageFiles.value = []
+  nextTick(focusGroupInput)
+}
+const syncPendingGroupClarificationInput = () => {
+  const pending = [...messages.value].reverse().find(isPendingGroupClarification)
+  if (!pending) {
+    pendingGroupClarificationInput.value = null
+    return
+  }
+  beginGroupClarificationInput(pending, { focus: false, clear: false })
+}
 let activeAgentStreamMsgs = {}
 const diffViewer = ref({ visible: false, file: null })
 const {
@@ -362,6 +447,7 @@ const handleTaskCardAction = createGroupTaskCardActionHandler({
     slashNavigate?.('trace-replay')
     window.dispatchEvent(new CustomEvent('trace-replay-target', { detail: { scope: target.scope || 'orchestrator', trace_id: target.trace_id || '' } }))
   },
+  beginTaskInput: beginTaskSupplementInput,
   loadMessages: () => loadMessages(),
 })
 const taskRuntimeStatusLabel = (status) => ({ pending: '待执行', in_progress: '执行中', blocked: '受阻', done: '已完成', failed: '失败', cancelled: '已取消' }[status] || status || '执行中')
@@ -827,6 +913,16 @@ const loadProjects = async () => {
 
 // 选择群聊
 let selectGroup = async (id) => {
+  if (pendingGroupTaskInput.value && pendingGroupTaskInput.value.groupId !== id) {
+    pendingGroupTaskInput.value = null
+    newMessage.value = ''
+    messageFiles.value = []
+  }
+  if (pendingGroupClarificationInput.value && pendingGroupClarificationInput.value.groupId !== id) {
+    pendingGroupClarificationInput.value = null
+    newMessage.value = ''
+    messageFiles.value = []
+  }
   currentGroup.value = groups.value.find(g => g.id === id)
   isGroupMessagesPinnedToBottom.value = true
   await loadMessages()
@@ -854,6 +950,7 @@ const loadMessages = async () => {
   mainAgentStatus.value = data.mainAgentStatus || null
   groupAgentQa.value = data.agentQa || []
   messages.value = (data.messages || []).filter(m => !m.content?.startsWith('📤'))
+  syncPendingGroupClarificationInput()
   scrollToBottom({ force: true })
   // 延迟多次滚动，防范 Markdown/Diff 渲染等重排引起的高度时差
   setTimeout(() => scrollToBottom({ force: true }), 60)
@@ -896,6 +993,8 @@ const mergeIncomingMessage = (msg) => {
       main_agent_decision: msg.main_agent_decision || msg.mainAgentDecision || current.main_agent_decision || current.mainAgentDecision,
       clarificationSummary: msg.clarificationSummary || msg.clarification_summary || current.clarificationSummary || current.clarification_summary,
       clarification_summary: msg.clarification_summary || msg.clarificationSummary || current.clarification_summary || current.clarificationSummary,
+      clarificationContext: msg.clarificationContext || msg.clarification_context || current.clarificationContext || current.clarification_context,
+      clarification_context: msg.clarification_context || msg.clarificationContext || current.clarification_context || current.clarificationContext,
       taskRuntime: msg.taskRuntime || msg.task_runtime || current.taskRuntime || current.task_runtime,
       task_runtime: msg.task_runtime || msg.taskRuntime || current.task_runtime || current.taskRuntime,
       delivery_summary: msg.delivery_summary || current.delivery_summary,
@@ -1143,6 +1242,12 @@ const handleInput = (e) => {
   const cursorPos = e.target.selectionStart
   const beforeCursor = value.substring(0, cursorPos)
 
+  if (isDirectedGroupInputMode.value) {
+    mentionDropdown.value = false
+    hideTemplateAssist()
+    return
+  }
+
   if (slash.onInput()) {
     mentionDropdown.value = false
     hideTemplateAssist()
@@ -1177,6 +1282,13 @@ const insertMention = (agent) => {
 }
 
 const handleKeydown = async (e) => {
+  if (isDirectedGroupInputMode.value) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      sendMessage()
+    }
+    return
+  }
   if (await slash.onKeydown(e)) return
   // 1. 处理 @提及下拉菜单键盘控制
   if (mentionDropdown.value) {
@@ -1310,12 +1422,45 @@ const saveCurrentGroupConversationKnowledge = async () => {
 // 发送消息
 const isStreaming = ref(false)
 const thinkingMessages = ref([])
+const pendingGroupSendRetry = ref(null)
+
+const groupSendRetrySignature = ({ groupId, target, mode, message, files, directed }) => JSON.stringify({
+  groupId,
+  target,
+  mode,
+  message,
+  files: (files || []).map(file => [file.name, file.size]),
+  continuationTaskId: directed?.continuation_task_id || '',
+  clarificationRequestId: directed?.clarification_request_id || '',
+})
 
 const sendMessage = async () => {
   if ((!newMessage.value.trim() && messageFiles.value.length === 0) || !currentGroup.value) return
   const msg = newMessage.value.trim()
   const filesToSend = [...messageFiles.value]
-  const clientMessageId = createLocalMessageId()
+  const taskSupplementTarget = isTaskSupplementMode.value ? { ...pendingGroupTaskInput.value } : null
+  const clarificationResponseTarget = !taskSupplementTarget && isClarificationResponseMode.value
+    ? { ...pendingGroupClarificationInput.value }
+    : null
+  const taskContinuationFields = taskSupplementTarget
+    ? buildWaitingUserTaskContinuationFields(taskSupplementTarget)
+    : null
+  const clarificationResponseFields = clarificationResponseTarget
+    ? buildGroupClarificationResponseFields(clarificationResponseTarget)
+    : null
+  const directedInputFields = taskContinuationFields || clarificationResponseFields
+  const retrySignature = groupSendRetrySignature({
+    groupId: currentGroup.value.id,
+    target: targetAgent.value,
+    mode: directedInputFields?.message_mode || messageMode.value,
+    message: msg,
+    files: filesToSend,
+    directed: directedInputFields,
+  })
+  const clientMessageId = pendingGroupSendRetry.value?.signature === retrySignature
+    ? pendingGroupSendRetry.value.clientMessageId
+    : createLocalMessageId()
+  pendingGroupSendRetry.value = { signature: retrySignature, clientMessageId }
   newMessage.value = ''
   messageFiles.value = []
   mentionDropdown.value = false
@@ -1326,13 +1471,20 @@ const sendMessage = async () => {
 [附件]
 ${filesToSend.map(f => `- ${f.name}（${formatFileSize(f.size)}）`).join('\n')}`
     : ''
-  messages.value.push({
-    id: clientMessageId,
-    role: 'user',
-    target: targetAgent.value === 'all' ? 'coordinator' : targetAgent.value,
-    content: `${msg || '请处理附件'}${attachmentText}`,
-    timestamp: new Date().toISOString()
-  })
+  if (!messages.value.some(item => item.id === clientMessageId)) {
+    messages.value.push({
+      id: clientMessageId,
+      role: 'user',
+      target: targetAgent.value === 'all' ? 'coordinator' : targetAgent.value,
+      content: `${msg || '请处理附件'}${attachmentText}`,
+      timestamp: new Date().toISOString(),
+      ...(taskSupplementTarget ? { task_id: taskSupplementTarget.taskId } : {}),
+      ...(clarificationResponseTarget ? {
+        clarification_request_id: clarificationResponseTarget.requestId,
+        clarification_response_to: clarificationResponseTarget.messageId,
+      } : {})
+    })
+  }
   scrollToBottom()
 
   // 创建思考过程消息
@@ -1371,7 +1523,12 @@ ${filesToSend.map(f => `- ${f.name}（${formatFileSize(f.size)}）`).join('\n')}
     payload.append('target_project', targetAgent.value === 'all' ? 'all' : targetAgent.value)
     payload.append('message', msg)
     payload.append('client_message_id', clientMessageId)
-    payload.append('message_mode', messageMode.value)
+    payload.append('message_mode', directedInputFields?.message_mode || messageMode.value)
+    if (directedInputFields) {
+      Object.entries(directedInputFields)
+        .filter(([key]) => key !== 'message_mode')
+        .forEach(([key, value]) => payload.append(key, String(value)))
+    }
     filesToSend.forEach(file => payload.append('files', file))
   } else {
     payload = {
@@ -1379,20 +1536,40 @@ ${filesToSend.map(f => `- ${f.name}（${formatFileSize(f.size)}）`).join('\n')}
       target_project: targetAgent.value === 'all' ? undefined : targetAgent.value,
       message: msg,
       client_message_id: clientMessageId,
-      message_mode: messageMode.value
+      message_mode: messageMode.value,
+      ...(directedInputFields || {})
     }
   }
 
-  const res = await groupsApi.send(payload)
+  let res
+  try {
+    res = await groupsApi.send(payload)
+  } catch (error) {
+    newMessage.value = msg
+    messageFiles.value = filesToSend
+    const optimisticIdx = messages.value.findIndex(item => item.id === clientMessageId)
+    if (optimisticIdx !== -1) messages.value.splice(optimisticIdx, 1)
+    isStreaming.value = false
+    const thinkingIdx = messages.value.indexOf(thinkingMsg)
+    if (thinkingIdx !== -1) messages.value.splice(thinkingIdx, 1)
+    toast.error(error?.message || '消息提交失败，请检查后重试')
+    nextTick(focusGroupInput)
+    return
+  }
 
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
   let sseBuffer = ''
+  let streamFailed = false
+  const seenStreamEventIds = new Set()
 
   const handleStreamLine = (line) => {
     if (!line.startsWith('data: ')) return
     try {
       const data = JSON.parse(line.slice(6))
+      const eventId = String(data.event_id || data.eventId || '')
+      if (eventId && seenStreamEventIds.has(eventId)) return
+      if (eventId) seenStreamEventIds.add(eventId)
       if (data.type === 'status') {
         applyMainAgentProgressCheckpoint(data)
         // 更新思考状态
@@ -1440,6 +1617,24 @@ ${filesToSend.map(f => `- ${f.name}（${formatFileSize(f.size)}）`).join('\n')}
         mergeIncomingMessage(taskMessage)
         waitingCrossReply.value = true
         toast.success('项目任务已创建：' + (data.task?.id || ''))
+        scrollToBottom()
+      } else if (data.type === 'task_updated') {
+        const taskId = data.taskId || data.task_id || data.task?.id || ''
+        const taskMessageIndex = messages.value.findIndex(item => getMessageTaskId(item) === taskId && getTaskCard(item))
+        if (taskMessageIndex >= 0) {
+          const current = messages.value[taskMessageIndex]
+          messages.value[taskMessageIndex] = {
+            ...current,
+            task: data.task || current.task,
+            workflow: {
+              ...(current.workflow || {}),
+              phase: data.task?.collaboration_state?.phase || current.workflow?.phase || 'reworking',
+              label: '补充信息已收到',
+            },
+          }
+        }
+        thinkingMsg.content = sanitizeGroupVisibleText(data.text || '补充信息已收到，正在沿用原任务继续处理。', '补充信息已收到，正在沿用原任务继续处理。', 600)
+        waitingCrossReply.value = true
         scrollToBottom()
       } else if (data.type === 'main_agent_decision') {
         if (attachMainAgentDecision(data.decision)) {
@@ -1540,6 +1735,8 @@ ${filesToSend.map(f => `- ${f.name}（${formatFileSize(f.size)}）`).join('\n')}
           streamMsg.main_agent_decision = data.main_agent_decision || data.mainAgentDecision || streamMsg.main_agent_decision || streamMsg.mainAgentDecision
           streamMsg.clarificationSummary = data.clarificationSummary || data.clarification_summary || streamMsg.clarificationSummary || streamMsg.clarification_summary
           streamMsg.clarification_summary = data.clarification_summary || data.clarificationSummary || streamMsg.clarification_summary || streamMsg.clarificationSummary
+          streamMsg.clarificationContext = data.clarificationContext || data.clarification_context || streamMsg.clarificationContext || streamMsg.clarification_context
+          streamMsg.clarification_context = data.clarification_context || data.clarificationContext || streamMsg.clarification_context || streamMsg.clarificationContext
           streamMsg.workEvents = data.workEvents || streamMsg.workEvents
           if (data.fileChanges && data.fileChanges.count > 0) {
             streamMsg.fileChanges = data.fileChanges
@@ -1562,6 +1759,8 @@ ${filesToSend.map(f => `- ${f.name}（${formatFileSize(f.size)}）`).join('\n')}
               main_agent_decision: data.main_agent_decision || data.mainAgentDecision || null,
               clarificationSummary: data.clarificationSummary || data.clarification_summary || null,
               clarification_summary: data.clarification_summary || data.clarificationSummary || null,
+              clarificationContext: data.clarificationContext || data.clarification_context || null,
+              clarification_context: data.clarification_context || data.clarificationContext || null,
               fileChanges: data.fileChanges || null,
               workEvents: data.workEvents || []
             })
@@ -1569,6 +1768,12 @@ ${filesToSend.map(f => `- ${f.name}（${formatFileSize(f.size)}）`).join('\n')}
         }
         delete agentStreamRawBuffers[agentKey]
         delete agentStreamHiddenBuffers[agentKey]
+        if (data.clarificationContext || data.clarification_context) {
+          const clarificationMessage = (data.messageId ? messages.value.find(item => item.id === data.messageId) : null)
+            || streamMsg
+            || messages.value[messages.value.length - 1]
+          beginGroupClarificationInput(clarificationMessage)
+        }
         if (String(data.text || '').includes('@')) {
           hasMention = true
           waitingCrossReply.value = true
@@ -1608,26 +1813,34 @@ ${filesToSend.map(f => `- ${f.name}（${formatFileSize(f.size)}）`).join('\n')}
           content: buildGroupStreamErrorText(data.text),
           timestamp: new Date().toISOString()
         })
+        streamFailed = true
         isStreaming.value = false
       }
     } catch {}
   }
 
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    sseBuffer += decoder.decode(value, { stream: true })
-    const lines = sseBuffer.split('\n')
-    sseBuffer = lines.pop() || ''
-    for (const line of lines) {
-      handleStreamLine(line.trimEnd())
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      sseBuffer += decoder.decode(value, { stream: true })
+      const lines = sseBuffer.split('\n')
+      sseBuffer = lines.pop() || ''
+      for (const line of lines) {
+        handleStreamLine(line.trimEnd())
+      }
     }
-  }
-  sseBuffer += decoder.decode()
-  if (sseBuffer.trim()) {
-    for (const line of sseBuffer.split('\n')) {
-      handleStreamLine(line.trimEnd())
+    sseBuffer += decoder.decode()
+    if (sseBuffer.trim()) {
+      for (const line of sseBuffer.split('\n')) {
+        handleStreamLine(line.trimEnd())
+      }
     }
+  } catch (error) {
+    streamFailed = true
+    newMessage.value = msg
+    messageFiles.value = filesToSend
+    toast.error('连接中断，重新发送会继续同一次请求')
   }
 
   isStreaming.value = false
@@ -1648,6 +1861,22 @@ ${filesToSend.map(f => `- ${f.name}（${formatFileSize(f.size)}）`).join('\n')}
       groupAgentQa.value = data.agentQa || groupAgentQa.value
       lastGroupMsgCount.value = (data.messages || []).length
     } catch {}
+  }
+  if (!streamFailed && taskSupplementTarget
+    && pendingGroupTaskInput.value?.taskId === taskSupplementTarget.taskId
+    && pendingGroupTaskInput.value?.groupId === taskSupplementTarget.groupId) {
+    pendingGroupTaskInput.value = null
+  }
+  if (!streamFailed && clarificationResponseTarget
+    && pendingGroupClarificationInput.value?.requestId === clarificationResponseTarget.requestId
+    && pendingGroupClarificationInput.value?.groupId === clarificationResponseTarget.groupId) {
+    pendingGroupClarificationInput.value = null
+  }
+  if (!streamFailed && pendingGroupSendRetry.value?.clientMessageId === clientMessageId) {
+    pendingGroupSendRetry.value = null
+  } else if (streamFailed && !newMessage.value.trim()) {
+    newMessage.value = msg
+    messageFiles.value = filesToSend
   }
 }
 
@@ -2150,8 +2379,9 @@ if (activeSelectedTemplate) {
           v-if="currentGroup"
           v-model="newMessage"
           input-id="groupChatInput"
-          placeholder="输入消息...（可 @ 项目执行成员，输入 / 打开命令中心）"
-          send-label="发送 ➤"
+          :placeholder="groupComposerPlaceholder"
+          :send-label="groupComposerSendLabel"
+          :disabled="isStreaming"
           :files="messageFiles"
           :slash="slash"
           :templates-open="showTemplateSelector"
@@ -2170,7 +2400,17 @@ if (activeSelectedTemplate) {
           @send="sendMessage"
         >
           <template #prefix>
-            <div class="message-mode" aria-label="消息模式">
+            <div v-if="isTaskSupplementMode" class="task-supplement-context" aria-live="polite">
+              <span class="task-supplement-label">正在补充</span>
+              <strong :title="pendingGroupTaskInput?.title">{{ pendingGroupTaskInput?.title }}</strong>
+              <button type="button" title="取消补充" aria-label="取消补充" @click="cancelTaskSupplementInput">×</button>
+            </div>
+            <div v-else-if="isClarificationResponseMode" class="task-supplement-context clarification-response-context" aria-live="polite">
+              <span class="task-supplement-label">正在回答</span>
+              <strong :title="pendingGroupClarificationInput?.title">{{ pendingGroupClarificationInput?.title }}</strong>
+              <button type="button" title="取消回答并发送新消息" aria-label="取消回答并发送新消息" @click="cancelGroupClarificationInput">×</button>
+            </div>
+            <div v-else class="message-mode" aria-label="消息模式">
               <button type="button" :class="{ active: messageMode === 'conversation' }" @click="messageMode = 'conversation'">对话</button>
               <button type="button" :class="{ active: messageMode === 'project_analysis' }" @click="messageMode = 'project_analysis'; targetAgent = 'all'">项目分析</button>
               <button type="button" :class="{ active: messageMode === 'project_task' }" @click="messageMode = 'project_task'; targetAgent = 'all'">项目任务</button>
@@ -2394,6 +2634,52 @@ if (activeSelectedTemplate) {
   background: var(--accent-blue);
   color: #fff;
   box-shadow: 0 4px 12px rgba(37, 99, 235, 0.18);
+}
+.task-supplement-context {
+  display: flex;
+  flex: 0 1 260px;
+  min-width: 0;
+  height: 38px;
+  align-items: center;
+  gap: 7px;
+  padding: 0 7px 0 10px;
+  border: 1px solid rgba(37, 99, 235, 0.18);
+  border-radius: 8px;
+  background: rgba(37, 99, 235, 0.06);
+  color: var(--text-secondary);
+  font-size: 11.5px;
+}
+.task-supplement-context strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.task-supplement-label {
+  flex: 0 0 auto;
+  color: var(--accent-blue);
+  font-weight: 800;
+}
+.task-supplement-context button {
+  display: inline-flex;
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 18px;
+}
+.task-supplement-context button:hover {
+  background: rgba(37, 99, 235, 0.1);
+  color: var(--accent-blue);
 }
 .select { padding: 8px 12px; border-radius: 8px; border: 1px solid rgba(0, 0, 0, 0.08); background: rgba(255, 255, 255, 0.8); color: var(--text-primary); font-size: 13px; outline: none; }
 .mention-dropdown { position: absolute; bottom: 100%; left: 0; right: 0; background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(20px); border: 1px solid rgba(0, 0, 0, 0.08); border-radius: 10px; max-height: 200px; overflow-y: auto; z-index: 10001; box-shadow: var(--shadow-lg); margin-bottom: 6px; padding: 6px; }
@@ -2764,6 +3050,11 @@ if (activeSelectedTemplate) {
 [data-theme="dark"] .message-mode button.active {
   background: var(--accent-blue) !important;
   color: #fff !important;
+}
+
+[data-theme="dark"] .task-supplement-context {
+  border-color: rgba(96, 165, 250, 0.24);
+  background: rgba(59, 130, 246, 0.12);
 }
 
 [data-theme="dark"] .select {

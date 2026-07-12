@@ -178,6 +178,7 @@ export declare function runMainAgentWorkItemSelfTest(): {
     pass: boolean;
     checks: {
         derivesAssignments: boolean;
+        rehearsalPlanTargetsExecutingProject: boolean;
         receiptCompletesDependency: boolean;
         blocksBeforeDependencyDone: boolean;
         claimAfterDependencyDone: boolean;

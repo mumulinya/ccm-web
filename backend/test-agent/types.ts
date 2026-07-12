@@ -50,8 +50,12 @@ export interface TestAgentOptions {
 }
 
 export interface TestAgentBrowserToolExecutor {
-  listTools?: () => Promise<string[]> | string[];
-  callTool: (toolName: string, input: Record<string, any>) => Promise<any>;
+  listTools?: (options?: { signal?: AbortSignal; timeoutMs?: number }) => Promise<string[]> | string[];
+  callTool: (
+    toolName: string,
+    input: Record<string, any>,
+    options?: { signal?: AbortSignal; timeoutMs?: number },
+  ) => Promise<any>;
 }
 
 export interface BrowserToolCallRecord {
@@ -62,12 +66,19 @@ export interface BrowserToolCallRecord {
   startedAt: string;
   finishedAt: string;
   durationMs: number;
+  browserExecution?: BrowserCheckExecutionIdentity;
+  timeoutMs?: number;
+  timedOut?: boolean;
+  abortRequested?: boolean;
   outputPreview?: string;
   error?: string;
 }
 
 export interface TestAgentRuntimeOptions extends Partial<TestAgentOptions> {
   browserToolExecutor?: TestAgentBrowserToolExecutor;
+  browserToolCallScope?: <T>(execution: BrowserCheckExecutionIdentity, task: () => Promise<T>) => Promise<T>;
+  browserToolCallIdsForExecution?: (execution: BrowserCheckExecutionIdentity) => string[];
+  browserResourceLifecycle?: BrowserResourceLifecycleRecorder;
 }
 
 export interface TestAgentProjectTarget {
@@ -917,6 +928,7 @@ export interface BrowserAuthenticationEvidence {
 }
 
 export interface BrowserCheckExecutionIdentity {
+  planId: string;
   checkId: string;
   projectIndex: number;
   checkIndex: number;
@@ -978,6 +990,7 @@ export interface BrowserCheckResult {
   recovery?: BrowserRecoveryEvidence;
   actionEffects?: BrowserActionEffectEvidence[];
   execution?: BrowserCheckExecutionIdentity;
+  browserToolCallIds?: string[];
   adversarial?: boolean;
   probeType?: string;
   context?: Record<string, any>;
@@ -1263,6 +1276,51 @@ export interface HttpResourceCheckResult {
   error?: string;
 }
 
+export type BrowserResourceType = "browser" | "browser_context" | "external_browser_session";
+export type BrowserResourceLifecycleStatus = "open" | "released" | "retained" | "cleanup_failed";
+
+export interface BrowserResourceLifecycleEvent {
+  id: string;
+  planId: string;
+  provider: "playwright" | "mcp";
+  resourceType: BrowserResourceType;
+  scope: string;
+  ownership: "owned" | "external";
+  acquiredAt: string;
+  releaseAttemptedAt?: string;
+  releasedAt?: string;
+  status: BrowserResourceLifecycleStatus;
+  error?: string;
+}
+
+export interface BrowserResourceLifecycleRecorder {
+  acquire: (input: Omit<BrowserResourceLifecycleEvent, "id" | "acquiredAt" | "status" | "ownership">) => string;
+  retainExternal: (input: Omit<BrowserResourceLifecycleEvent, "id" | "acquiredAt" | "status" | "ownership">) => string;
+  released: (id: string) => void;
+  cleanupFailed: (id: string, error: string) => void;
+  getEvents: () => BrowserResourceLifecycleEvent[];
+}
+
+export type BrowserResourceLifecycleSummaryStatus = "complete" | "incomplete" | "invalid";
+
+export interface BrowserResourceLifecycleSummary {
+  status: BrowserResourceLifecycleSummaryStatus;
+  eventCount: number;
+  ownedResourceCount: number;
+  externalResourceCount: number;
+  releasedResourceCount: number;
+  retainedExternalResourceCount: number;
+  openResourceCount: number;
+  cleanupFailureCount: number;
+  planMismatchCount: number;
+  duplicateResourceCount: number;
+  invalidOwnershipCount: number;
+  invalidTimestampCount: number;
+  outsideReportWindowCount: number;
+  resourceTypeCounts: Record<BrowserResourceType, number>;
+  events: BrowserResourceLifecycleEvent[];
+}
+
 export interface BrowserCheckExecutionPlanItem {
   checkId: string;
   project: string;
@@ -1279,10 +1337,41 @@ export interface BrowserCheckExecutionPlanItem {
 
 export interface BrowserCheckExecutionPlan {
   schema: "ccm-test-agent-browser-execution-plan-v1";
+  planId: string;
+  createdAt: string;
   preferredProvider: string;
   plannedCheckCount: number;
   expectedRunCount: number;
   items: BrowserCheckExecutionPlanItem[];
+}
+
+export type BrowserEvidenceTemporalIntegrityStatus = "complete" | "invalid";
+
+export interface BrowserEvidenceTemporalIntegrityItem {
+  kind: "report" | "execution_plan" | "browser_result" | "browser_tool_call";
+  id: string;
+  checkId?: string;
+  run?: number;
+  startedAt: string;
+  finishedAt: string;
+  durationMs: number;
+  status: BrowserEvidenceTemporalIntegrityStatus;
+  errors: string[];
+}
+
+export interface BrowserEvidenceTemporalIntegritySummary {
+  status: BrowserEvidenceTemporalIntegrityStatus;
+  toleranceMs: number;
+  reportDurationMs: number;
+  browserResultCount: number;
+  browserToolCallCount: number;
+  invalidItemCount: number;
+  invalidTimestampCount: number;
+  durationMismatchCount: number;
+  outsideReportWindowCount: number;
+  outsideResultWindowCount: number;
+  planMismatchCount: number;
+  items: BrowserEvidenceTemporalIntegrityItem[];
 }
 
 export type BrowserCheckExecutionCoverageStatus = "complete" | "incomplete" | "invalid";
@@ -1313,6 +1402,64 @@ export interface BrowserCheckExecutionCoverageSummary {
   syntheticBlockedCount: number;
   statusCounts: Record<BrowserCheckExecutionCoverageStatus, number>;
   items: BrowserCheckExecutionCoverageItem[];
+}
+
+export type BrowserToolEvidenceLineageStatus = "complete" | "incomplete" | "invalid";
+
+export interface BrowserToolEvidenceLineageItem {
+  checkId: string;
+  run: number;
+  project: string;
+  name: string;
+  resultStatus: BrowserCheckResult["status"];
+  evidenceRequired: boolean;
+  toolCallIds: string[];
+  linkedToolCallCount: number;
+  failedToolCallCount: number;
+  missingToolCallIds: string[];
+  foreignToolCallIds: string[];
+  duplicateToolCallIds: string[];
+  status: BrowserToolEvidenceLineageStatus;
+}
+
+export interface BrowserToolEvidenceLineageSummary {
+  status: BrowserToolEvidenceLineageStatus;
+  mcpResultCount: number;
+  evidenceRequiredResultCount: number;
+  linkedResultCount: number;
+  toolCallCount: number;
+  scopedToolCallCount: number;
+  linkedToolCallCount: number;
+  failedToolCallCount: number;
+  unlinkedRequiredResultCount: number;
+  missingToolCallReferenceCount: number;
+  foreignToolCallReferenceCount: number;
+  duplicateToolCallReferenceCount: number;
+  duplicateToolCallRecordCount: number;
+  orphanScopedToolCallCount: number;
+  unscopedToolCallCount: number;
+  statusCounts: Record<BrowserToolEvidenceLineageStatus, number>;
+  items: BrowserToolEvidenceLineageItem[];
+}
+
+export interface BrowserToolCallTimeoutSummaryItem {
+  id: string;
+  toolName: string;
+  checkId?: string;
+  run?: number;
+  timeoutMs: number;
+  durationMs: number;
+  abortRequested: boolean;
+}
+
+export interface BrowserToolCallTimeoutSummary {
+  totalCalls: number;
+  passedCalls: number;
+  failedCalls: number;
+  timedOutCalls: number;
+  abortRequestedCalls: number;
+  timedOutByTool: Record<string, number>;
+  items: BrowserToolCallTimeoutSummaryItem[];
 }
 
 export type HttpPageResourceKind =
@@ -1652,6 +1799,14 @@ export interface TestAgentVerdict {
     httpConcurrentBlocked?: number;
     browserChecks: Record<string, number>;
     browserToolCalls: Record<string, number>;
+    browserToolLinkedResults?: number;
+    browserToolUnlinkedResults?: number;
+    browserToolLinkedCalls?: number;
+    browserToolOrphanCalls?: number;
+    browserToolUnscopedCalls?: number;
+    browserToolInvalidLinks?: number;
+    browserToolTimedOutCalls?: number;
+    browserToolAbortRequestedCalls?: number;
     browserNetworkErrors?: number;
     browserActions?: number;
     browserFailedActions?: number;
@@ -1675,6 +1830,13 @@ export interface TestAgentVerdict {
     browserMissingRuns?: number;
     browserDuplicateResults?: number;
     browserInvalidResults?: number;
+    browserTemporalInvalidItems?: number;
+    browserTemporalPlanMismatches?: number;
+    browserTemporalWindowViolations?: number;
+    browserOwnedResources?: number;
+    browserReleasedResources?: number;
+    browserOpenResources?: number;
+    browserCleanupFailures?: number;
     browserRecoveryAttempts?: number;
     browserRecoveredOperations?: number;
     browserFailedRecoveries?: number;
@@ -1703,6 +1865,10 @@ export interface TestAgentVerdict {
   browserMultiSessionSummary?: BrowserMultiSessionSummary;
   browserStabilitySummary?: BrowserStabilitySummary;
   browserCheckExecutionCoverage?: BrowserCheckExecutionCoverageSummary;
+  browserEvidenceTemporalIntegrity?: BrowserEvidenceTemporalIntegritySummary;
+  browserResourceLifecycleSummary?: BrowserResourceLifecycleSummary;
+  browserToolEvidenceLineage?: BrowserToolEvidenceLineageSummary;
+  browserToolCallTimeoutSummary?: BrowserToolCallTimeoutSummary;
   browserRecoverySummary?: BrowserRecoverySummary;
   browserActionEffectSummary?: BrowserActionEffectSummary;
   adversarialEvidenceSummary: AdversarialEvidenceSummary;
@@ -1743,6 +1909,7 @@ export interface TestAgentReport {
   httpResults: HttpCheckResult[];
   browserResults: BrowserCheckResult[];
   browserToolCalls: BrowserToolCallRecord[];
+  browserResourceLifecycleEvents: BrowserResourceLifecycleEvent[];
   browserNetworkSummary: BrowserNetworkSummaryItem[];
   httpConcurrencySummary?: HttpConcurrencySummary;
   browserInteractionSummary: BrowserInteractionSummaryItem[];
@@ -1750,6 +1917,10 @@ export interface TestAgentReport {
   browserMultiSessionSummary?: BrowserMultiSessionSummary;
   browserStabilitySummary?: BrowserStabilitySummary;
   browserCheckExecutionCoverage?: BrowserCheckExecutionCoverageSummary;
+  browserEvidenceTemporalIntegrity?: BrowserEvidenceTemporalIntegritySummary;
+  browserResourceLifecycleSummary?: BrowserResourceLifecycleSummary;
+  browserToolEvidenceLineage?: BrowserToolEvidenceLineageSummary;
+  browserToolCallTimeoutSummary?: BrowserToolCallTimeoutSummary;
   browserRecoverySummary?: BrowserRecoverySummary;
   browserActionEffectSummary?: BrowserActionEffectSummary;
   adversarialEvidenceSummary: AdversarialEvidenceSummary;

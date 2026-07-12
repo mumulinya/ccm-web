@@ -63,6 +63,7 @@ const {
 } = useMusicAtmosphere({ currentTrack, playlist, currentIndex, playMode })
 
 const floatingComments = ref([])
+let lastTrackIndex = 0
 
 const addBubbleComment = (text, type = 'lyric') => {
   if (!text || !text.trim()) return

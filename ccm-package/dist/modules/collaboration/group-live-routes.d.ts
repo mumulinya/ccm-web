@@ -43,6 +43,20 @@ type GroupLiveRoutesDeps = {
     extractActionableMentions: (text: string, group: any, sourceProject: string) => any[];
     extractAgentReceipt: (text: string, project: string) => any;
 };
+export declare function resolveExplicitGroupContinuationTask(tasks: any[], groupId: string, taskId: string): {
+    task: any;
+    status: number;
+    error: string;
+};
+export declare function runGroupExplicitContinuationRoutingSelfTest(): {
+    pass: boolean;
+    checks: {
+        selectsRequestedTaskInsteadOfMostRecent: boolean;
+        rejectsCrossGroupTask: boolean;
+        rejectsCancelledTask: boolean;
+        acceptsMultipartBoolean: boolean;
+    };
+};
 export declare function buildGroupClarificationSummary(input: {
     group: any;
     userMessage?: string;
@@ -95,6 +109,23 @@ export declare function runGroupClarificationSummarySelfTest(): {
             technical_details_default_collapsed: boolean;
             hide_internal_protocols: boolean;
         };
+    };
+};
+export declare function resolvePendingGroupClarification(messages: any[], requestId: string, messageId?: string): {
+    message: any;
+    context: any;
+    status: number;
+    error: string;
+};
+export declare function buildGroupClarificationContinuationMessage(context: any, answerForAgent: string): string;
+export declare function runGroupClarificationContinuationSelfTest(): {
+    pass: boolean;
+    checks: {
+        selectsExactPendingQuestion: boolean;
+        ignoresResolvedQuestion: boolean;
+        preservesOriginalRequest: boolean;
+        carriesQuestionAndAnswer: boolean;
+        preventsStandaloneAnswerRouting: boolean;
     };
 };
 export declare function handleGroupLiveRoutes(req: IncomingMessage, res: ServerResponse, parsed: UrlWithParsedQuery, ctx: any, deps: GroupLiveRoutesDeps): boolean;

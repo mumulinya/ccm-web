@@ -56,8 +56,9 @@
 .speech {
   order: 2;
   position: relative;
-  width: min(318px, calc(100vw - 12px));
-  min-height: 64px;
+  width: fit-content;
+  max-width: min(318px, calc(100vw - 12px));
+  min-height: unset;
   margin-top: calc(var(--pet-sprite-size, 64px) * -0.13 + 6px);
   padding: 9px 34px 10px 11px;
   border: 1px solid rgba(15, 23, 42, 0.12);

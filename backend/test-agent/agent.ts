@@ -1,6 +1,7 @@
 import { runBrowserVerification } from "./browser-verifier";
 import { collectBrowserProviderPreflight } from "./browser/registry";
 import { createRecordingBrowserToolExecutor } from "./browser/tool-executor";
+import { createBrowserResourceLifecycleRecorder } from "./browser/resource-lifecycle";
 import { buildBrowserAuthenticationSummary } from "./browser/authentication-summary";
 import { browserExistingSessionUsesMinimalEvidence } from "./browser/existing-session";
 import { checksForProject, wantsBrowser } from "./browser/shared";
@@ -39,12 +40,24 @@ export async function runTestAgent(input: TestAgentWorkOrder, options: TestAgent
     ? createRecordingBrowserToolExecutor(
         options.browserToolExecutor,
         workOrder.options.artifactDir,
-        { suppressDetails: suppressBrowserToolDetails },
+        {
+          suppressDetails: suppressBrowserToolDetails,
+          toolCallTimeoutMs: workOrder.options.browserTimeoutMs,
+        },
       )
     : null;
-  const runtimeOptions: TestAgentRuntimeOptions = browserToolRecorder
-    ? { ...options, browserToolExecutor: browserToolRecorder.executor }
-    : options;
+  const browserResourceLifecycle = wantsBrowser(workOrder)
+    ? createBrowserResourceLifecycleRecorder()
+    : null;
+  const runtimeOptions: TestAgentRuntimeOptions = {
+    ...options,
+    ...(browserToolRecorder ? {
+      browserToolExecutor: browserToolRecorder.executor,
+      browserToolCallScope: browserToolRecorder.runWithExecutionScope,
+      browserToolCallIdsForExecution: browserToolRecorder.getRecordIdsForExecution,
+    } : {}),
+    ...(browserResourceLifecycle ? { browserResourceLifecycle } : {}),
+  };
   let commandResults = [] as Awaited<ReturnType<typeof runVerificationCommands>>;
   let devServers = [] as Awaited<ReturnType<typeof startDevServersForBrowserChecks>>;
   let httpResults = [] as Awaited<ReturnType<typeof runHttpVerification>>;
@@ -98,6 +111,7 @@ export async function runTestAgent(input: TestAgentWorkOrder, options: TestAgent
     httpResults,
     browserResults,
     browserToolCalls,
+    browserResourceLifecycleEvents: browserResourceLifecycle?.getEvents() || [],
   });
   return writeTestAgentArtifacts(report);
 }

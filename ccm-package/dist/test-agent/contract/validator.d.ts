@@ -30,6 +30,11 @@ export interface TestAgentVerdictContractValidation {
     errors: TestAgentContractIssue[];
     warnings: TestAgentContractIssue[];
 }
+export interface TestAgentInvocationContractValidation {
+    valid: boolean;
+    errors: TestAgentContractIssue[];
+    warnings: TestAgentContractIssue[];
+}
 export declare function handoffBuilderWarningIssues(warnings: string[]): TestAgentContractIssue[];
 export declare function validateTestAgentHandoffContract(input: unknown, overrides?: Partial<TestAgentOptions>): TestAgentHandoffContractValidation;
 export declare function assertTestAgentHandoffContract(input: unknown, overrides?: Partial<TestAgentOptions>): TestAgentHandoffContractValidation;
@@ -37,5 +42,7 @@ export declare function validateTestAgentWorkOrderContract(input: unknown, overr
 export declare function assertTestAgentWorkOrderContract(input: unknown, overrides?: Partial<TestAgentOptions>): import("..").NormalizedTestAgentWorkOrder;
 export declare function validateTestAgentReportContract(input: unknown): TestAgentReportContractValidation;
 export declare function validateTestAgentVerdictContract(input: unknown): TestAgentVerdictContractValidation;
+export declare function validateTestAgentInvocationRequestContract(input: unknown): TestAgentInvocationContractValidation;
+export declare function validateTestAgentInvocationResultContract(input: unknown): TestAgentInvocationContractValidation;
 export declare function assertTestAgentReportContract(input: unknown): TestAgentReport;
 export declare function assertTestAgentVerdictContract(input: unknown): TestAgentVerdict;

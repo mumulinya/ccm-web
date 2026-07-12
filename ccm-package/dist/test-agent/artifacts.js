@@ -47,6 +47,10 @@ const flow_summary_1 = require("./browser/flow-summary");
 const multi_session_summary_1 = require("./browser/multi-session-summary");
 const stability_summary_1 = require("./browser/stability-summary");
 const check_execution_coverage_1 = require("./browser/check-execution-coverage");
+const evidence_temporal_integrity_1 = require("./browser/evidence-temporal-integrity");
+const resource_lifecycle_1 = require("./browser/resource-lifecycle");
+const tool_evidence_lineage_1 = require("./browser/tool-evidence-lineage");
+const tool_call_timeout_1 = require("./browser/tool-call-timeout");
 const authentication_summary_1 = require("./browser/authentication-summary");
 const recovery_summary_1 = require("./browser/recovery-summary");
 const action_effect_summary_1 = require("./browser/action-effect-summary");
@@ -241,6 +245,65 @@ function browserCheckExecutionCoverageLines(report) {
         lines.push(statusLine(`${item.project} / ${item.name} [${item.checkId}]`, item.status, detail));
     }
     return lines;
+}
+function browserEvidenceTemporalIntegrityLines(report) {
+    const summary = report.browserEvidenceTemporalIntegrity;
+    if (!summary)
+        return ["- none"];
+    const lines = [`- ${(0, evidence_temporal_integrity_1.formatBrowserEvidenceTemporalIntegrityLine)(summary)}; toleranceMs=${summary.toleranceMs}`];
+    for (const item of summary.items) {
+        const execution = item.checkId ? `; execution=${item.checkId} run ${item.run}` : "";
+        const detail = `startedAt=${item.startedAt}; finishedAt=${item.finishedAt}; durationMs=${item.durationMs}${execution}${item.errors.length ? `; errors=${item.errors.join(" | ")}` : ""}`;
+        lines.push(statusLine(`${item.kind} / ${item.id}`, item.status, detail));
+    }
+    return lines;
+}
+function browserResourceLifecycleLines(report) {
+    const summary = report.browserResourceLifecycleSummary;
+    if (!summary)
+        return ["- none"];
+    const lines = [`- ${(0, resource_lifecycle_1.formatBrowserResourceLifecycleLine)(summary)}`];
+    for (const event of summary.events) {
+        const detail = [
+            `planId=${event.planId}`,
+            `ownership=${event.ownership}`,
+            `acquiredAt=${event.acquiredAt}`,
+            event.releaseAttemptedAt ? `releaseAttemptedAt=${event.releaseAttemptedAt}` : "",
+            event.releasedAt ? `releasedAt=${event.releasedAt}` : "",
+            event.error ? `error=${event.error}` : "",
+        ].filter(Boolean).join("; ");
+        lines.push(statusLine(`${event.provider} ${event.resourceType} / ${event.scope} [${event.id}]`, event.status, detail));
+    }
+    return lines;
+}
+function browserToolEvidenceLineageLines(report) {
+    const summary = report.browserToolEvidenceLineage;
+    if (!summary)
+        return ["- none"];
+    const lines = [`- ${(0, tool_evidence_lineage_1.formatBrowserToolEvidenceLineageLine)(summary)}; failedCalls=${summary.failedToolCallCount}`];
+    for (const item of summary.items) {
+        const detail = [
+            `result=${item.resultStatus}`,
+            `required=${item.evidenceRequired}`,
+            `linkedCalls=${item.linkedToolCallCount}`,
+            `failedCalls=${item.failedToolCallCount}`,
+            `callIds=${item.toolCallIds.join(",") || "none"}`,
+            `missing=${item.missingToolCallIds.join(",") || "none"}`,
+            `foreign=${item.foreignToolCallIds.join(",") || "none"}`,
+            `duplicate=${item.duplicateToolCallIds.join(",") || "none"}`,
+        ].join("; ");
+        lines.push(statusLine(`${item.project} / ${item.name} [${item.checkId} run ${item.run}]`, item.status, detail));
+    }
+    return lines;
+}
+function browserToolCallTimeoutLines(report) {
+    const summary = report.browserToolCallTimeoutSummary;
+    if (!summary)
+        return ["- none"];
+    return [
+        `- ${(0, tool_call_timeout_1.formatBrowserToolCallTimeoutSummaryLine)(summary)}`,
+        ...summary.items.map(item => statusLine(`${item.toolName} [${item.id}]`, "timed_out", `timeoutMs=${item.timeoutMs}; durationMs=${item.durationMs}; abortRequested=${item.abortRequested}${item.checkId ? `; execution=${item.checkId} run ${item.run}` : ""}`)),
+    ];
 }
 function browserAuthenticationSummaryLines(report) {
     const summary = (0, authentication_summary_1.buildBrowserAuthenticationSummary)(report.browserResults);
@@ -523,11 +586,17 @@ function browserDetail(result, index) {
     ];
 }
 function browserToolCallDetail(result, index) {
+    const execution = result.browserExecution;
     return [
         detailTitle(index, result.toolName),
         "",
         `- Status: ${result.status}`,
+        `- ID: ${result.id}`,
+        ...(execution ? [`- Browser execution: ${execution.checkId} run ${execution.run}/${execution.expectedRuns}`] : []),
         `- Duration: ${result.durationMs}ms`,
+        ...(result.timeoutMs ? [`- Timeout: ${result.timeoutMs}ms`] : []),
+        ...(result.timedOut ? ["- Timed out: yes"] : []),
+        ...(result.abortRequested ? ["- Abort requested: yes"] : []),
         `- Started: ${result.startedAt}`,
         `- Finished: ${result.finishedAt}`,
         ...(result.error ? [`- Error: ${result.error}`] : []),
@@ -799,6 +868,22 @@ function buildTestAgentMarkdownReport(report) {
         "## Browser Check Execution Coverage",
         "",
         ...browserCheckExecutionCoverageLines(report),
+        "",
+        "## Browser Evidence Temporal Integrity",
+        "",
+        ...browserEvidenceTemporalIntegrityLines(report),
+        "",
+        "## Browser Resource Lifecycle",
+        "",
+        ...browserResourceLifecycleLines(report),
+        "",
+        "## Browser Tool Evidence Lineage",
+        "",
+        ...browserToolEvidenceLineageLines(report),
+        "",
+        "## Browser Tool Call Timeouts",
+        "",
+        ...browserToolCallTimeoutLines(report),
         "",
         "## Browser Acceptance Flow Summary",
         "",

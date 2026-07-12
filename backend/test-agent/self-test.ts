@@ -75,6 +75,11 @@ export { runTestAgentHttpConcurrencySelfTest } from "./http-concurrency-self-tes
 export { runTestAgentCapabilityAwareProviderRoutingSelfTest } from "./browser/provider-routing-self-test";
 export { runTestAgentHttpPageResourcesSelfTest } from "./http-page-resources-self-test";
 export { runTestAgentBrowserCheckExecutionCoverageSelfTest } from "./browser/check-execution-coverage-self-test";
+export { runTestAgentBrowserToolEvidenceLineageSelfTest } from "./browser/tool-evidence-lineage-self-test";
+export { runTestAgentBrowserToolCallTimeoutSelfTest } from "./browser/tool-call-timeout-self-test";
+export { runTestAgentBrowserEvidenceTemporalIntegritySelfTest } from "./browser/evidence-temporal-integrity-self-test";
+export { runTestAgentBrowserResourceLifecycleSelfTest } from "./browser/resource-lifecycle-self-test";
+export { runTestAgentInvocationSelfTest } from "./invocation-self-test";
 
 function getFreePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -610,6 +615,10 @@ export function runTestAgentHandoffBuilderSelfTest() {
         url: "http://127.0.0.1:5173/tasks",
         assertions: [{ type: "status", status: 200 }],
       }],
+      browserChecks: [{
+        name: "Persisted task list",
+        coversAcceptanceCriteria: ["Task list persists after save"],
+      }],
       adversarialBrowserProbeTemplates: [{
         kind: "repeated_click",
         name: "Repeated add task click",
@@ -658,6 +667,7 @@ export function runTestAgentHandoffBuilderSelfTest() {
       && required.has("browser_har")
       && required.has("adversarial")
       && project.agentSummary.includes("Task list persists after save")
+      && project.browserChecks[0].coversAcceptanceCriteria[0] === "Completed task is independently verified: Task list persists after save"
       && project.changedFiles.length === 2
       && metadata.handoffSource === "test-agent-handoff-builder"
       && metadata.completedByProjectAgents.length === 2
@@ -15133,6 +15143,9 @@ export async function runTestAgentStandaloneHandoffRealWebSelfTest() {
           { type: "consoleNoErrors" },
           { type: "networkNoErrors" },
         ],
+        coversAcceptanceCriteria: [
+          "Task creation and refresh persistence were implemented",
+        ],
         screenshot: true,
       }],
       completedTasks: [
@@ -17883,6 +17896,49 @@ export function runTestAgentContractSelfTest() {
     id: `contract-invalid-self-test-${process.pid}-${Date.now()}`,
   });
   const now = new Date().toISOString();
+  const browserEvidenceTemporalIntegrity = {
+    status: "complete" as const,
+    toleranceMs: 100,
+    reportDurationMs: 0,
+    browserResultCount: 0,
+    browserToolCallCount: 0,
+    invalidItemCount: 0,
+    invalidTimestampCount: 0,
+    durationMismatchCount: 0,
+    outsideReportWindowCount: 0,
+    outsideResultWindowCount: 0,
+    planMismatchCount: 0,
+    items: [{
+      kind: "report" as const,
+      id: "report",
+      startedAt: now,
+      finishedAt: now,
+      durationMs: 0,
+      status: "complete" as const,
+      errors: [],
+    }],
+  };
+  const browserResourceLifecycleSummary = {
+    status: "complete" as const,
+    eventCount: 0,
+    ownedResourceCount: 0,
+    externalResourceCount: 0,
+    releasedResourceCount: 0,
+    retainedExternalResourceCount: 0,
+    openResourceCount: 0,
+    cleanupFailureCount: 0,
+    planMismatchCount: 0,
+    duplicateResourceCount: 0,
+    invalidOwnershipCount: 0,
+    invalidTimestampCount: 0,
+    outsideReportWindowCount: 0,
+    resourceTypeCounts: {
+      browser: 0,
+      browser_context: 0,
+      external_browser_session: 0,
+    },
+    events: [],
+  };
   const reportValidation = validateTestAgentReportContract({
     schema: "ccm-test-agent-report-v1",
     agent: "test-agent",
@@ -17905,6 +17961,9 @@ export function runTestAgentContractSelfTest() {
     httpResults: [],
     browserResults: [],
     browserToolCalls: [],
+    browserResourceLifecycleEvents: [],
+    browserEvidenceTemporalIntegrity,
+    browserResourceLifecycleSummary,
     adversarialEvidenceSummary: {
       required: false,
       waived: true,
@@ -18024,6 +18083,8 @@ export function runTestAgentContractSelfTest() {
       browserProviderGaps: 0,
       artifacts: 4,
     },
+    browserEvidenceTemporalIntegrity,
+    browserResourceLifecycleSummary,
     adversarialEvidenceSummary: {
       required: false,
       waived: true,

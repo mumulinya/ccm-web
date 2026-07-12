@@ -9,6 +9,7 @@ const existing_session_1 = require("./existing-session");
 const provider_routing_1 = require("./provider-routing");
 const shared_1 = require("./shared");
 const check_execution_coverage_1 = require("./check-execution-coverage");
+const tool_call_timeout_1 = require("./tool-call-timeout");
 function preferredProvider(workOrder, runtime) {
     return runtime.browserProvider || workOrder.options.browserProvider || "auto";
 }
@@ -120,6 +121,8 @@ async function runProviderChain(workOrder, runtime, providers, checkFilter) {
             continue;
         }
         const results = await provider.run(context);
+        if (results.some(tool_call_timeout_1.browserResultHasToolCallTimeout))
+            return results;
         if (results.length && !results.every(item => item.status === "blocked"))
             return results;
         blocked.push(...results);

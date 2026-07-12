@@ -685,6 +685,77 @@ async function run() {
     await expectNoVisibleText(groupIntake, 'trace_id', 'group intake trace id')
     await groupIntake.screenshot({ path: path.join(outputDir, '05-group-task-intake-plan.png') })
 
+    const groupWaitingResume = page.locator('#case-group-waiting-user-resume')
+    const groupWaitingCard = groupWaitingResume.locator('.task-experience-card.context-group')
+    await expectVisible(groupWaitingCard, 'group waiting-user task card')
+    await expectVisible(groupWaitingCard.getByText('需要你确认'), 'group waiting-user task status')
+    await expectVisible(groupWaitingCard.getByText('补充确认'), 'group waiting-user supplement action')
+    await expectHidden(groupWaitingCard.locator('.task-card-technical pre'), 'group waiting-user technical details folded')
+    await groupWaitingCard.getByRole('button', { name: '补充确认', exact: true }).click()
+    const groupWaitingInput = groupWaitingResume.locator('#fixtureGroupWaitingInput')
+    await expectVisible(groupWaitingResume.getByText('正在补充'), 'group waiting-user input context')
+    await expectVisible(groupWaitingResume.getByText('提交并继续'), 'group waiting-user submit action')
+    if (!(await groupWaitingInput.evaluate(el => el === document.activeElement))) throw new Error('group waiting-user main input should receive focus')
+    const groupWaitingPlaceholder = await groupWaitingInput.getAttribute('placeholder')
+    if (!String(groupWaitingPlaceholder || '').includes('沿用原任务继续执行和验收')) throw new Error('group waiting-user input should explain same-task continuation')
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.waitForTimeout(80)
+    const groupWaitingMobileOverflow = await groupWaitingResume.evaluate(el => el.scrollWidth > el.clientWidth + 1)
+    if (groupWaitingMobileOverflow) throw new Error('group waiting-user supplement composer should not overflow on mobile')
+    await groupWaitingResume.screenshot({ path: path.join(outputDir, '05a-group-waiting-user-input-mobile.png') })
+    await page.setViewportSize({ width: 1180, height: 980 })
+    await page.waitForTimeout(80)
+    await groupWaitingInput.fill('测试地址 https://test.example.test/login，账号 qa@example.test，密码仅在本条用户消息中提供')
+    await groupWaitingResume.getByRole('button', { name: '提交并继续', exact: true }).click()
+    const groupWaitingPayload = await page.evaluate(() => window.__ccmLastGroupWaitingContinuationPayload)
+    if (groupWaitingPayload?.continuation_task_id !== 'task-group-waiting-user-resume'
+      || groupWaitingPayload?.continuation_kind !== 'supplement'
+      || groupWaitingPayload?.resolve_waiting_user !== true
+      || groupWaitingPayload?.interrupt_current_run !== false
+      || groupWaitingPayload?.source !== 'group_web_waiting_user_resolution') {
+      throw new Error('group waiting-user continuation should target the exact task as a non-interrupting supplement')
+    }
+    await expectVisible(groupWaitingResume.locator('[data-message-id="fixture-group-waiting-user-message"]'), 'group waiting-user supplement preserved as user message')
+    await expectVisible(groupWaitingCard.locator('.continuation-status').getByText('任务条件已补充'), 'group waiting-user same task resumed status')
+    await expectVisible(groupWaitingCard.getByText('用户已补充任务所需条件'), 'group waiting-user task card hides concrete condition values')
+    await expectVisible(groupWaitingCard.getByText('任务条件已收到，等待重新复核。'), 'group waiting-user old blocked worker becomes pending recheck')
+    await expectNoVisibleText(groupWaitingCard, '等待测试环境条件', 'group waiting-user old condition blocker is cleared')
+    await expectNoVisibleText(groupWaitingCard, 'https://test.example.test/login', 'group waiting-user URL stays out of resumed task card')
+    await expectNoVisibleText(groupWaitingCard, 'qa@example.test', 'group waiting-user account stays out of resumed task card')
+    await expectNoVisibleText(groupWaitingCard, '重新规划', 'group waiting-user supplement should not trigger replan')
+    await expectHidden(groupWaitingCard.locator('.task-card-technical pre'), 'group resumed task technical details folded')
+    await groupWaitingResume.screenshot({ path: path.join(outputDir, '05b-group-waiting-user-resumed.png') })
+
+    const groupClarificationResume = page.locator('#case-group-clarification-resume')
+    await expectVisible(groupClarificationResume.locator('.clarification-summary'), 'group clarification summary before answer')
+    await expectVisible(groupClarificationResume.getByText('等待你回复'), 'group clarification waits for answer')
+    await expectHidden(groupClarificationResume.locator('.task-experience-card'), 'group clarification should not show todo before answer')
+    await expectVisible(groupClarificationResume.getByText('正在回答'), 'group clarification main input context')
+    await expectVisible(groupClarificationResume.getByRole('button', { name: '提交补充', exact: true }), 'group clarification submit action')
+    const groupClarificationInput = groupClarificationResume.locator('#fixtureGroupClarificationInput')
+    const groupClarificationPlaceholder = await groupClarificationInput.getAttribute('placeholder')
+    if (!String(groupClarificationPlaceholder || '').includes('接着原请求继续判断')) throw new Error('group clarification input should explain original-request continuation')
+    await groupClarificationInput.fill('前后端都改')
+    await groupClarificationResume.getByRole('button', { name: '提交补充', exact: true }).click()
+    const groupClarificationPayload = await page.evaluate(() => window.__ccmLastGroupClarificationPayload)
+    if (groupClarificationPayload?.clarification_request_id !== 'fixture-group-clarification-request'
+      || groupClarificationPayload?.clarification_message_id !== 'fixture-group-clarification-message'
+      || groupClarificationPayload?.resolve_clarification !== true
+      || groupClarificationPayload?.source !== 'group_web_clarification_response') {
+      throw new Error('group clarification response should continue the exact pending clarification')
+    }
+    await expectVisible(groupClarificationResume.getByText('已补充'), 'group clarification summary resolved status')
+    await expectVisible(groupClarificationResume.locator('[data-message-id="fixture-group-clarification-answer"]'), 'group clarification answer preserved as user message')
+    const groupClarificationTaskCard = groupClarificationResume.locator('.task-experience-card.context-group')
+    await expectVisible(groupClarificationTaskCard, 'group clarification creates task from combined request')
+    await expectVisible(groupClarificationTaskCard.getByRole('heading', { name: '修复登录状态恢复逻辑', exact: true }), 'group clarification preserves original task title')
+    await expectVisible(groupClarificationTaskCard.getByText('补充说明：前后端都改'), 'group clarification carries short answer into original goal')
+    await expectVisible(groupClarificationTaskCard.locator('.decision-plan'), 'group clarification combined request shows todo plan')
+    await expectVisible(groupClarificationTaskCard.getByText('正在整理前后端执行计划', { exact: true }).first(), 'group clarification todo uses clarified scope')
+    await expectNoVisibleText(groupClarificationTaskCard, 'fixture-group-clarification-request', 'group clarification request id stays technical')
+    await expectHidden(groupClarificationTaskCard.locator('.task-card-technical pre'), 'group clarification resumed task technical details folded')
+    await groupClarificationResume.screenshot({ path: path.join(outputDir, '05c-group-clarification-resumed.png') })
+
     const agentQa = page.locator('#case-agent-qa-message')
     await expectVisible(agentQa.locator('.agent-qa-bubble'), 'agent qa message bubble')
     await expectVisible(agentQa.locator('.agent-qa-title').getByText('前端 向 测试 提问'), 'agent qa friendly title')
@@ -700,6 +771,85 @@ async function run() {
     const globalStream = page.locator('#case-global-stream-live')
     await expectVisible(globalStream.locator('.global-assistant-panel'), 'global stream real component')
     await expectNoVisibleText(globalStream, '下游 Agent', 'global stream downstream Agent wording')
+    const missionNotificationScreenshotStyle = await page.addStyleTag({
+      content: `
+        #case-global-stream-live .chat-header,
+        #case-global-stream-live .chat-footer,
+        #case-global-stream-live .message-navigator { display: none !important; }
+        #case-global-stream-live .global-agent-fixture-frame,
+        #case-global-stream-live .global-assistant-panel,
+        #case-global-stream-live .chat-container,
+        #case-global-stream-live .chat-body {
+          height: auto !important;
+          min-height: 0 !important;
+          overflow: visible !important;
+        }
+        #case-global-stream-live .chat-body { flex: none !important; }
+      `,
+    })
+    const globalWaitingNotification = globalStream.locator('[data-message-id="global-mission-notification:fixture-mission-waiting:waiting_user"]')
+    await expectVisible(globalWaitingNotification.locator('.task-experience-card.phase-needs_user'), 'global waiting-user conversation notification task card')
+    await expectVisible(globalWaitingNotification.locator('.task-card-phase').getByText('需要你确认', { exact: true }), 'global waiting-user notification phase')
+    await expectVisible(globalWaitingNotification.getByText('请提供测试环境的登录地址和可用测试账号').first(), 'global waiting-user actionable reason')
+    await expectVisible(globalWaitingNotification.locator('.handoff-summary-cards').getByText('当前进展', { exact: true }), 'global waiting-user current progress label')
+    await expectVisible(globalWaitingNotification.locator('.handoff-summary-cards').getByText('收到信息后继续验证', { exact: true }), 'global waiting-user deferred verification copy')
+    await expectVisible(globalWaitingNotification.locator('.handoff-primary-action').getByRole('button', { name: '补充确认', exact: true }), 'global waiting-user single primary action')
+    await expectHidden(globalWaitingNotification.locator('.handoff-secondary-actions'), 'global waiting-user duplicate handoff actions')
+    await expectHidden(globalWaitingNotification.locator('.task-card-actions'), 'global waiting-user duplicate task actions')
+    await expectNoVisibleText(globalWaitingNotification, 'fixture-supervisor-waiting-hidden', 'global waiting-user supervisor id')
+    await expectNoVisibleText(globalWaitingNotification, 'trace-global-waiting-hidden', 'global waiting-user trace id')
+    if (await globalWaitingNotification.locator('details.task-card-technical').evaluate(el => el.open)) throw new Error('global waiting-user technical details should be folded by default')
+    await globalWaitingNotification.screenshot({ path: path.join(outputDir, '07j-global-mission-waiting-user-notification.png') })
+    const globalCancelledNotification = globalStream.locator('[data-message-type="global_mission_terminal"]')
+    await expectVisible(globalCancelledNotification.locator('.task-experience-card.phase-cancelled'), 'global cancelled conversation notification task card')
+    await expectVisible(globalCancelledNotification.locator('.task-card-phase').getByText('已取消', { exact: true }), 'global cancelled notification phase')
+    await expectVisible(globalCancelledNotification.locator('.task-card-next').getByText('任务已取消；需要时可以重新发起。'), 'global cancelled notification next action')
+    await expectVisible(globalCancelledNotification.locator('.handoff-summary-cards').getByText('任务已停止，未继续验证', { exact: true }), 'global cancelled verification copy')
+    await expectNoVisibleText(globalCancelledNotification, 'fixture-supervisor-cancelled-hidden', 'global cancelled supervisor id')
+    await expectNoVisibleText(globalCancelledNotification, 'trace-global-cancelled-hidden', 'global cancelled trace id')
+    if (await globalCancelledNotification.locator('details.task-card-technical').evaluate(el => el.open)) throw new Error('global cancelled technical details should be folded by default')
+    await globalCancelledNotification.screenshot({ path: path.join(outputDir, '07k-global-mission-cancelled-notification.png') })
+    await missionNotificationScreenshotStyle.evaluate(el => el.remove())
+    await globalWaitingNotification.locator('.handoff-primary-action').getByRole('button', { name: '补充确认', exact: true }).click()
+    const waitingMissionInput = globalStream.locator('.chat-footer .input-wrapper input[type="text"]')
+    await expectVisible(waitingMissionInput, 'global waiting-user continuation input')
+    if ((await waitingMissionInput.getAttribute('placeholder')) !== '补充当前任务需要的信息，发送后会继续原任务...') throw new Error('global waiting-user input should explain same-task continuation')
+    await expectVisible(globalStream.getByRole('button', { name: '提交并继续', exact: true }), 'global waiting-user continuation submit action')
+    await waitingMissionInput.fill('测试地址是 https://test.example.test/login，测试账号已准备好')
+    await globalStream.getByRole('button', { name: '提交并继续', exact: true }).click()
+    const waitingMissionUserMessage = globalStream
+      .locator('.chat-bubble-wrapper.user .bubble-content')
+      .filter({ hasText: '测试地址是 https://test.example.test/login，测试账号已准备好' })
+      .last()
+    await waitingMissionUserMessage.waitFor({ state: 'visible', timeout: 5000 })
+    await expectVisible(waitingMissionUserMessage, 'global waiting-user supplement preserved as user message')
+    await expectVisible(globalWaitingNotification.locator('.task-experience-card.phase-executing'), 'global waiting-user notification resumes same task card')
+    await expectVisible(globalWaitingNotification.getByText('补充信息已收到，正在沿用原任务继续复核和验收。').first(), 'global waiting-user resumed status')
+    await expectVisible(globalWaitingNotification.getByText('任务条件已补充', { exact: true }), 'global waiting-user resolved continuation title')
+    await expectVisible(globalWaitingNotification.getByText('用户已补充任务所需条件', { exact: true }), 'global waiting-user safe condition summary')
+    await expectNoVisibleText(globalWaitingNotification, '请提供测试环境的登录地址和可用测试账号', 'global resolved waiting reason removed from active card')
+    await expectNoVisibleText(globalWaitingNotification, 'https://test.example.test/login', 'global resolved waiting condition value stays out of task card')
+    await expectNoVisibleText(globalWaitingNotification, '重新规划中', 'global waiting supplement should not trigger goal replan')
+    if ((await globalWaitingNotification.getAttribute('data-message-type')) !== 'global_mission') throw new Error('resolved waiting notification should return to active mission message type')
+    const resolvedMissionScreenshotStyle = await page.addStyleTag({
+      content: `
+        #toast-container,
+        #case-global-stream-live .chat-header,
+        #case-global-stream-live .chat-footer,
+        #case-global-stream-live .message-navigator { display: none !important; }
+        #case-global-stream-live .global-agent-fixture-frame,
+        #case-global-stream-live .global-assistant-panel,
+        #case-global-stream-live .chat-container,
+        #case-global-stream-live .chat-body {
+          height: auto !important;
+          min-height: 0 !important;
+          overflow: visible !important;
+        }
+        #case-global-stream-live .chat-body { flex: none !important; }
+      `,
+    })
+    await globalWaitingNotification.screenshot({ path: path.join(outputDir, '07l-global-mission-waiting-user-resumed.png') })
+    await resolvedMissionScreenshotStyle.evaluate(el => el.remove())
     const globalStreamCards = globalStream.locator('.global-stream-card')
     const globalStreamCardCount = await globalStreamCards.count()
     if (globalStreamCardCount < 7) throw new Error(`Expected at least 7 global stream cards, got ${globalStreamCardCount}`)
@@ -1022,7 +1172,7 @@ async function run() {
     await child.screenshot({ path: path.join(outputDir, '09-child-agent-summary-expanded.png') })
 
     const screenshots = (await fs.readdir(outputDir)).filter(name => name.endsWith('.png')).sort()
-    if (screenshots.length !== 30) throw new Error(`Expected 30 screenshots, got ${screenshots.length}`)
+    if (screenshots.length !== 36) throw new Error(`Expected 36 screenshots, got ${screenshots.length}`)
     console.log(JSON.stringify({ pass: true, fixtureUrl, screenshots: screenshots.map(name => path.join(outputDir, name)) }, null, 2))
   } catch (error) {
     console.error(JSON.stringify({ pass: false, error: error.message }, null, 2))

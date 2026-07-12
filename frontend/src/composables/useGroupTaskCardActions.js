@@ -8,6 +8,25 @@ const postTaskCardAction = async (path, body) => {
   return payload
 }
 
+export const buildWaitingUserTaskContinuationFields = (target = {}) => ({
+  continuation_task_id: String(target.taskId || target.task_id || '').trim(),
+  continuation_kind: 'supplement',
+  resolve_waiting_user: true,
+  interrupt_current_run: false,
+  source: 'group_web_waiting_user_resolution',
+  force_task: true,
+  message_mode: 'project_task',
+  auto_execute: true,
+})
+
+export const buildGroupClarificationResponseFields = (target = {}) => ({
+  clarification_request_id: String(target.requestId || target.request_id || '').trim(),
+  clarification_message_id: String(target.messageId || target.message_id || '').trim(),
+  resolve_clarification: true,
+  source: 'group_web_clarification_response',
+  message_mode: String(target.messageMode || target.message_mode || 'conversation'),
+})
+
 export function createGroupTaskCardActionHandler(options = {}) {
   const {
     getTaskCard,
@@ -15,6 +34,7 @@ export function createGroupTaskCardActionHandler(options = {}) {
     openCodeChangeDrawer,
     openPipelineViewer,
     openTraceReplay,
+    beginTaskInput,
     loadMessages,
   } = options
 
@@ -121,6 +141,10 @@ export function createGroupTaskCardActionHandler(options = {}) {
         if (!await confirmDialog(`确定把任务“${card?.title || id}”标记为已处理？系统仍会执行后端验收校验。`)) return
         await postTaskCardAction('/api/tasks/update', { id, status: 'done', status_detail: '用户从 Todo 步骤确认已处理', completed_at: new Date().toISOString() })
       } else if (action.kind === 'continue') {
+        if (card?.phase === 'needs_user' && beginTaskInput) {
+          beginTaskInput(msg, card, { ...action, task_id: id })
+          return
+        }
         const preset = String(action.message || action.prompt || '').trim()
         const prompt = preset || (action.id === 'replan' ? '请重新检查目标、当前事实和验收标准，只调整未完成部分。' : window.prompt(card?.status === 'done' ? '继续修改什么？' : '追加要求：', ''))
         if (!prompt) return

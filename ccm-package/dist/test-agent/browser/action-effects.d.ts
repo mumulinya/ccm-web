@@ -25,6 +25,7 @@ export declare function verifyBrowserActionEffect(input: {
     defaultTimeout: number;
     beforeObservation: BrowserActionEffectObservation;
     capture: () => Promise<BrowserActionEffectObservation>;
+    rethrowCaptureError?: (error: any) => boolean;
 }): Promise<{
     evidence: BrowserActionEffectEvidence;
     step: BrowserStepResult;

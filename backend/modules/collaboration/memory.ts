@@ -35,6 +35,7 @@ import {
   buildGroupTypedMemoryRecall,
   getOrRefreshGlobalProviderDispatchReliabilitySnapshot,
   buildPressureProvenancePreDispatchComplianceDispatchPolicy,
+  buildPostCompactCompletionMemoryPreservationClosureUsageSummary,
   deriveGroupTypedMemoryTargetPaths,
   distillGroupMessagesToTypedMemory,
   evaluateGroupTypedMemoryDistillationQuality,
@@ -5954,6 +5955,8 @@ const PROVIDER_RANKING_MEMORY_USAGE_RECEIPT_DISCIPLINE_REL_PATH = "provider-rank
 const POST_COMPACT_REINJECTION_REPAIR_RECEIPT_MEMORY_REL_PATH = "post-compact-reinjection-repair-receipt-memory.md";
 const POST_COMPACT_REINJECTION_REPAIR_RECEIPT_CAUTION_REL_PATH = "post-compact-reinjection-repair-receipt-cautions.md";
 const POST_COMPACT_RECEIPT_MEMORY_USAGE_REPAIR_COMPLETION_REL_PATH = "post-compact-receipt-memory-usage-repair-completions.md";
+const POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_REPAIR_CLOSURE_REL_PATH = "post-compact-completion-memory-preservation-repair-closures.md";
+const POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_CONFLICT_RESOLUTION_REL_PATH = "post-compact-completion-memory-preservation-closure-conflict-resolutions.md";
 
 function uniqueProviderRankingCompactRepairRecallStrings(values: any[] = [], limit = 40) {
   const seen = new Set<string>();
@@ -6142,6 +6145,26 @@ function isPostCompactReceiptMemoryUsageRepairCompletionRecallQuery(value: any, 
   }));
 }
 
+function isPostCompactCompletionMemoryPreservationRepairClosureRecallQuery(value: any, rows: any[] = []) {
+  const text = String(value || "").toLowerCase();
+  if (/completion[-_\s]?memory|compact[-_\s]?preservation|corrected[-_\s]?(retry|outcome)|exact identity|authority boundary|压缩.*保全|保全.*修复|纠正.*结果|会话权限/.test(text)) {
+    return true;
+  }
+  return rows.some((row: any) => [
+    row.work_item_id,
+    row.failed_retry_id,
+    row.failed_outcome_id,
+    row.corrected_retry_id,
+    row.corrected_outcome_id,
+    ...(Array.isArray(row.completion_doc_rel_paths) ? row.completion_doc_rel_paths : []),
+    ...(Array.isArray(row.completion_work_item_ids) ? row.completion_work_item_ids : []),
+    ...(Array.isArray(row.completion_timeline_binding_ids) ? row.completion_timeline_binding_ids : []),
+  ].some((token: any) => {
+    const normalized = String(token || "").trim().toLowerCase();
+    return normalized.length >= 4 && text.includes(normalized);
+  }));
+}
+
 function buildPostCompactReinjectionRepairReceiptWorkerContextRecall(groupId: string, task = "", memory: any = {}, options: any = {}) {
   const disabled = options.disablePostCompactReinjectionRepairReceiptRecall === true
     || options.disable_post_compact_reinjection_repair_receipt_recall === true;
@@ -6159,6 +6182,10 @@ function buildPostCompactReinjectionRepairReceiptWorkerContextRecall(groupId: st
     ignoredCount: 0,
     completionArchivedCount: 0,
     completionVerifiedCount: 0,
+    preservationClosureArchivedCount: 0,
+    preservationClosureVerifiedCount: 0,
+    preservationClosureFeedbackConflict: null,
+    preservationClosureFeedbackConflictActive: false,
     taskMatched: false,
     recalledThisTurn: false,
     docRelPaths: [],
@@ -6169,6 +6196,11 @@ function buildPostCompactReinjectionRepairReceiptWorkerContextRecall(groupId: st
     completionWorkItemIds: [],
     completionTimelineBindingIds: [],
     completionOriginalWorkerContextPacketIds: [],
+    preservationRepairWorkItemIds: [],
+    preservationFailedRetryIds: [],
+    preservationFailedOutcomeIds: [],
+    preservationCorrectedRetryIds: [],
+    preservationCorrectedOutcomeIds: [],
     taskAgentSessionIds: [],
     nativeSessionIds: [],
     originalTaskAgentSessionIds: [],
@@ -6183,24 +6215,35 @@ function buildPostCompactReinjectionRepairReceiptWorkerContextRecall(groupId: st
   if (disabled) return empty;
   let archive: any = {};
   let completionArchive: any = {};
+  let preservationClosureArchive: any = {};
+  let preservationClosureConflictResolutionArchive: any = {};
   let archiveReadError = "";
   try {
     const ledger = readGroupTypedMemoryDistillationLedger(groupId);
     archive = ledger.postCompactReinjectionRepairReceiptConsumptionArchive || {};
     completionArchive = ledger.postCompactReceiptMemoryUsageRepairCompletionArchive || {};
+    preservationClosureArchive = ledger.postCompactCompletionMemoryPreservationRepairClosureArchive || {};
+    preservationClosureConflictResolutionArchive = ledger.postCompactCompletionMemoryPreservationClosureConflictResolutionArchive || {};
   } catch (error: any) {
     archive = {};
     completionArchive = {};
+    preservationClosureArchive = {};
+    preservationClosureConflictResolutionArchive = {};
     archiveReadError = compactMemoryText(error?.message || error || "typed memory distillation ledger read failed", 500);
   }
   const rows = Array.isArray(archive.rows) ? archive.rows : [];
   const completionRows = Array.isArray(completionArchive.rows) ? completionArchive.rows : [];
+  const preservationClosureRows = Array.isArray(preservationClosureArchive.rows) ? preservationClosureArchive.rows : [];
+  const preservationClosureConflictResolutionRows = Array.isArray(preservationClosureConflictResolutionArchive.rows) ? preservationClosureConflictResolutionArchive.rows : [];
   const repairArchivedCount = Number(archive.archived_count || rows.length || 0);
   const completionArchivedCount = Number(completionArchive.archived_count || completionRows.length || 0);
-  const archivedCount = repairArchivedCount + completionArchivedCount;
+  const preservationClosureArchivedCount = Number(preservationClosureArchive.archived_count || preservationClosureRows.length || 0);
+  const preservationClosureConflictResolutionArchivedCount = Number(preservationClosureConflictResolutionArchive.archived_count || preservationClosureConflictResolutionRows.length || 0);
+  const archivedCount = repairArchivedCount + completionArchivedCount + preservationClosureArchivedCount + preservationClosureConflictResolutionArchivedCount;
   if (archivedCount <= 0) return archiveReadError ? { ...empty, reason: "archive_read_failed", archiveReadError } : empty;
   const recentRows = rows.slice(-12);
   const recentCompletionRows = completionRows.slice(-12);
+  const recentPreservationClosureRows = preservationClosureRows.slice(-12);
   const taskText = [
     task,
     memory.goal,
@@ -6209,19 +6252,73 @@ function buildPostCompactReinjectionRepairReceiptWorkerContextRecall(groupId: st
     options.targetPaths,
     options.target_paths,
   ].map((item: any) => typeof item === "string" ? item : JSON.stringify(item || "")).join("\n");
+  const preservationClosureUsageFeedback = buildPostCompactCompletionMemoryPreservationClosureUsageSummary(groupId, {
+    targetProject: options.targetProject || options.target_project || "",
+    task,
+    ignoredThreshold: options.postCompactClosureIgnoredThreshold || options.post_compact_closure_ignored_threshold || 2,
+    postCompactClosureUsageHalfLifeDays: options.postCompactClosureUsageHalfLifeDays || options.post_compact_closure_usage_half_life_days,
+    postCompactClosureUsageStaleAfterDays: options.postCompactClosureUsageStaleAfterDays || options.post_compact_closure_usage_stale_after_days,
+    taskFamilyRelevanceThreshold: options.postCompactClosureTaskFamilyRelevanceThreshold || options.post_compact_closure_task_family_relevance_threshold,
+    now: options.now || options.generatedAt || options.generated_at,
+  });
+  const preservationClosureFeedbackConflict = preservationClosureUsageFeedback.feedbackConflict || null;
+  const preservationClosureConflictResolution = preservationClosureUsageFeedback.feedbackConflictResolution || null;
+  const preservationClosureConflictResolutionEntryId = String(preservationClosureConflictResolution?.resolution_entry_id || "");
+  const recalledPreservationClosureConflictResolutionRows = preservationClosureConflictResolutionEntryId
+    ? preservationClosureConflictResolutionRows.filter((row: any) => row.resolution_entry_id === preservationClosureConflictResolutionEntryId).slice(-4)
+    : [];
+  const effectivePreservationClosureConflictResolutionArchivedCount = recalledPreservationClosureConflictResolutionRows.length;
+  const exactPreservationClosureIdentityMatched = recentPreservationClosureRows.some((row: any) => [
+    row.work_item_id,
+    row.failed_retry_id,
+    row.failed_outcome_id,
+    row.corrected_retry_id,
+    row.corrected_outcome_id,
+  ].some((token: any) => {
+    const normalized = String(token || "").trim().toLowerCase();
+    return normalized.length >= 4 && taskText.toLowerCase().includes(normalized);
+  }));
+  const preservationClosureRecallSuppressed = [
+    "deprioritize_closure_recall",
+    "require_receipt_repair_before_reuse",
+  ].includes(String(preservationClosureUsageFeedback.recommendation || "")) && !exactPreservationClosureIdentityMatched;
+  const recalledPreservationClosureRows = preservationClosureRecallSuppressed ? [] : recentPreservationClosureRows;
+  const effectivePreservationClosureArchivedCount = preservationClosureRecallSuppressed ? 0 : preservationClosureArchivedCount;
   const taskMatched = options.forcePostCompactReinjectionRepairReceiptRecall === true
     || options.force_post_compact_reinjection_repair_receipt_recall === true
     || options.forcePostCompactReceiptMemoryUsageRepairCompletionRecall === true
     || options.force_post_compact_receipt_memory_usage_repair_completion_recall === true
+    || options.forcePostCompactCompletionMemoryPreservationRepairClosureRecall === true
+    || options.force_post_compact_completion_memory_preservation_repair_closure_recall === true
     || isPostCompactReinjectionRepairReceiptRecallQuery(taskText, recentRows)
-    || isPostCompactReceiptMemoryUsageRepairCompletionRecallQuery(taskText, recentCompletionRows);
+    || isPostCompactReceiptMemoryUsageRepairCompletionRecallQuery(taskText, recentCompletionRows)
+    || isPostCompactCompletionMemoryPreservationRepairClosureRecallQuery(taskText, recalledPreservationClosureRows);
   const restoredCount = Number(archive.restored_count || rows.filter((row: any) => row.category !== "caution").length || 0);
   const cautionCount = Number(archive.caution_count || rows.filter((row: any) => row.category === "caution").length || 0);
   const docRelPaths = uniqueProviderRankingCompactRepairRecallStrings([
     restoredCount > 0 ? POST_COMPACT_REINJECTION_REPAIR_RECEIPT_MEMORY_REL_PATH : "",
     cautionCount > 0 ? POST_COMPACT_REINJECTION_REPAIR_RECEIPT_CAUTION_REL_PATH : "",
     completionArchivedCount > 0 ? POST_COMPACT_RECEIPT_MEMORY_USAGE_REPAIR_COMPLETION_REL_PATH : "",
-  ], 4);
+    effectivePreservationClosureArchivedCount > 0 ? POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_REPAIR_CLOSURE_REL_PATH : "",
+    effectivePreservationClosureConflictResolutionArchivedCount > 0 ? POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_CONFLICT_RESOLUTION_REL_PATH : "",
+  ], 5);
+  if (repairArchivedCount + completionArchivedCount + effectivePreservationClosureArchivedCount + effectivePreservationClosureConflictResolutionArchivedCount <= 0) {
+    return {
+      ...empty,
+      reason: preservationClosureRecallSuppressed ? "closure_recall_deprioritized_by_usage_feedback" : "no_recallable_verified_archive",
+      archivedCount,
+      preservationClosureArchivedCount,
+      preservationClosureVerifiedCount: Number(preservationClosureArchive.verified_count || 0),
+      preservationClosureRecallSuppressed,
+      exactPreservationClosureIdentityMatched,
+      preservationClosureUsageFeedback,
+      preservationClosureFeedbackConflict,
+      preservationClosureFeedbackConflictActive: preservationClosureFeedbackConflict?.active === true,
+      preservationClosureConflictResolution,
+      preservationClosureConflictResolutionArchivedCount,
+      immutableClosureHistoryPreserved: preservationClosureArchivedCount > 0,
+    };
+  }
   if (!taskMatched) {
     return {
       ...empty,
@@ -6234,6 +6331,16 @@ function buildPostCompactReinjectionRepairReceiptWorkerContextRecall(groupId: st
       ignoredCount: Number(archive.ignored_count || 0),
       completionArchivedCount,
       completionVerifiedCount: Number(completionArchive.verified_count || 0),
+      preservationClosureArchivedCount,
+      preservationClosureVerifiedCount: Number(preservationClosureArchive.verified_count || 0),
+      preservationClosureRecallSuppressed,
+      exactPreservationClosureIdentityMatched,
+      preservationClosureUsageFeedback,
+      preservationClosureFeedbackConflict,
+      preservationClosureFeedbackConflictActive: preservationClosureFeedbackConflict?.active === true,
+      preservationClosureConflictResolution,
+      preservationClosureConflictResolutionArchivedCount,
+      immutableClosureHistoryPreserved: preservationClosureArchivedCount > 0,
       taskMatched: false,
       docRelPaths,
     };
@@ -6247,13 +6354,34 @@ function buildPostCompactReinjectionRepairReceiptWorkerContextRecall(groupId: st
   const completionWorkItemIds = uniqueProviderRankingCompactRepairRecallStrings(recentCompletionRows.map((row: any) => row.work_item_id), 16);
   const completionTimelineBindingIds = uniqueProviderRankingCompactRepairRecallStrings(recentCompletionRows.map((row: any) => row.timeline_binding_id), 16);
   const completionOriginalWorkerContextPacketIds = uniqueProviderRankingCompactRepairRecallStrings(recentCompletionRows.map((row: any) => row.original_worker_context_packet_id), 16);
+  const preservationRepairWorkItemIds = uniqueProviderRankingCompactRepairRecallStrings(recalledPreservationClosureRows.map((row: any) => row.work_item_id), 16);
+  const preservationFailedRetryIds = uniqueProviderRankingCompactRepairRecallStrings(recalledPreservationClosureRows.map((row: any) => row.failed_retry_id), 16);
+  const preservationFailedOutcomeIds = uniqueProviderRankingCompactRepairRecallStrings(recalledPreservationClosureRows.map((row: any) => row.failed_outcome_id), 16);
+  const preservationCorrectedRetryIds = uniqueProviderRankingCompactRepairRecallStrings(recalledPreservationClosureRows.map((row: any) => row.corrected_retry_id), 16);
+  const preservationCorrectedOutcomeIds = uniqueProviderRankingCompactRepairRecallStrings(recalledPreservationClosureRows.map((row: any) => row.corrected_outcome_id), 16);
+  const preservationCompletionDocRelPaths = uniqueProviderRankingCompactRepairRecallStrings(recalledPreservationClosureRows.flatMap((row: any) => row.completion_doc_rel_paths || []), 16);
+  const preservationCompletionWorkItemIds = uniqueProviderRankingCompactRepairRecallStrings(recalledPreservationClosureRows.flatMap((row: any) => row.completion_work_item_ids || []), 24);
+  const preservationCompletionTimelineBindingIds = uniqueProviderRankingCompactRepairRecallStrings(recalledPreservationClosureRows.flatMap((row: any) => row.completion_timeline_binding_ids || []), 24);
   const originalTaskAgentSessionIds = uniqueProviderRankingCompactRepairRecallStrings(recentCompletionRows.map((row: any) => row.original_task_agent_session_id), 16);
   const originalNativeSessionIds = uniqueProviderRankingCompactRepairRecallStrings(recentCompletionRows.map((row: any) => row.original_native_session_id), 16);
   const repairTaskAgentSessionIds = uniqueProviderRankingCompactRepairRecallStrings(recentCompletionRows.map((row: any) => row.repair_task_agent_session_id), 16);
   const repairNativeSessionIds = uniqueProviderRankingCompactRepairRecallStrings(recentCompletionRows.map((row: any) => row.repair_native_session_id), 16);
+  const preservationHistoricalTaskAgentSessionIds = uniqueProviderRankingCompactRepairRecallStrings(recalledPreservationClosureRows.flatMap((row: any) => [
+    ...(Array.isArray(row.historical_task_agent_session_ids) ? row.historical_task_agent_session_ids : []),
+    row.current_task_agent_session_id,
+  ]), 24);
+  const preservationHistoricalNativeSessionIds = uniqueProviderRankingCompactRepairRecallStrings(recalledPreservationClosureRows.flatMap((row: any) => [
+    ...(Array.isArray(row.historical_native_session_ids) ? row.historical_native_session_ids : []),
+    row.current_native_session_id,
+  ]), 24);
+  const preservationConflictResolutionEntryIds = uniqueProviderRankingCompactRepairRecallStrings(recalledPreservationClosureConflictResolutionRows.map((row: any) => row.resolution_entry_id), 16);
+  const preservationConflictResolutionTaskAgentSessionIds = uniqueProviderRankingCompactRepairRecallStrings(recalledPreservationClosureConflictResolutionRows.map((row: any) => row.task_agent_session_id), 16);
+  const preservationConflictResolutionNativeSessionIds = uniqueProviderRankingCompactRepairRecallStrings(recalledPreservationClosureConflictResolutionRows.map((row: any) => row.native_session_id), 16);
   const rowIds = uniqueProviderRankingCompactRepairRecallStrings([
     recentRows.map((row: any) => row.row_id),
     recentCompletionRows.map((row: any) => row.row_id),
+    recalledPreservationClosureRows.map((row: any) => row.row_id),
+    recalledPreservationClosureConflictResolutionRows.map((row: any) => row.row_id),
   ], 24);
   const queryAppend = [
     "post-compact reinjection repair receipt typed MEMORY.md",
@@ -6262,6 +6390,7 @@ function buildPostCompactReinjectionRepairReceiptWorkerContextRecall(groupId: st
     "historical repair completion is recovery evidence, not permanent repository truth",
     "future use must reverify the current source",
     completionArchivedCount > 0 ? "corrected receipt completion memory per-session memoryUsed memoryIgnored" : "",
+    preservationClosureArchivedCount > 0 ? "post-compact completion memory preservation repair closure newer corrected retry outcome exact identity current-session authority" : "",
     ...gateIds,
     ...candidateIds,
     ...candidateValues,
@@ -6269,6 +6398,14 @@ function buildPostCompactReinjectionRepairReceiptWorkerContextRecall(groupId: st
     ...completionWorkItemIds,
     ...completionTimelineBindingIds,
     ...completionOriginalWorkerContextPacketIds,
+    ...preservationRepairWorkItemIds,
+    ...preservationFailedRetryIds,
+    ...preservationFailedOutcomeIds,
+    ...preservationCorrectedRetryIds,
+    ...preservationCorrectedOutcomeIds,
+    ...preservationCompletionWorkItemIds,
+    ...preservationCompletionTimelineBindingIds,
+    ...preservationConflictResolutionEntryIds,
     ...rowIds,
   ].filter(Boolean).join("\n");
   return {
@@ -6283,6 +6420,17 @@ function buildPostCompactReinjectionRepairReceiptWorkerContextRecall(groupId: st
     ignoredCount: Number(archive.ignored_count || 0),
     completionArchivedCount,
     completionVerifiedCount: Number(completionArchive.verified_count || 0),
+    preservationClosureArchivedCount,
+    preservationClosureVerifiedCount: Number(preservationClosureArchive.verified_count || 0),
+    preservationClosureRecallSuppressed,
+    exactPreservationClosureIdentityMatched,
+    preservationClosureUsageFeedback,
+    preservationClosureFeedbackConflict,
+    preservationClosureFeedbackConflictActive: preservationClosureFeedbackConflict?.active === true,
+    preservationClosureConflictResolution,
+    preservationClosureConflictResolutionArchivedCount,
+    preservationClosureConflictResolutionEntryIds: preservationConflictResolutionEntryIds,
+    immutableClosureHistoryPreserved: preservationClosureArchivedCount > 0,
     currentSourceVerifiedCount: Number(archive.current_source_verified_count || 0),
     taskMatched: true,
     docRelPaths,
@@ -6295,16 +6443,28 @@ function buildPostCompactReinjectionRepairReceiptWorkerContextRecall(groupId: st
     candidateIds,
     candidateValues,
     sourceMessageIds,
-    completionWorkItemIds,
-    completionTimelineBindingIds,
+    completionWorkItemIds: uniqueProviderRankingCompactRepairRecallStrings([completionWorkItemIds, preservationRepairWorkItemIds, preservationCompletionWorkItemIds], 32),
+    completionTimelineBindingIds: uniqueProviderRankingCompactRepairRecallStrings([completionTimelineBindingIds, preservationCompletionTimelineBindingIds], 32),
     completionOriginalWorkerContextPacketIds,
-    completionDocRelPaths: completionArchivedCount > 0 ? [POST_COMPACT_RECEIPT_MEMORY_USAGE_REPAIR_COMPLETION_REL_PATH] : [],
-    taskAgentSessionIds: uniqueProviderRankingCompactRepairRecallStrings([taskAgentSessionIds, originalTaskAgentSessionIds, repairTaskAgentSessionIds], 24),
-    nativeSessionIds: uniqueProviderRankingCompactRepairRecallStrings([nativeSessionIds, originalNativeSessionIds, repairNativeSessionIds], 24),
+    completionDocRelPaths: uniqueProviderRankingCompactRepairRecallStrings([
+      completionArchivedCount > 0 ? POST_COMPACT_RECEIPT_MEMORY_USAGE_REPAIR_COMPLETION_REL_PATH : "",
+      preservationClosureArchivedCount > 0 ? POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_REPAIR_CLOSURE_REL_PATH : "",
+      effectivePreservationClosureConflictResolutionArchivedCount > 0 ? POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_CONFLICT_RESOLUTION_REL_PATH : "",
+      preservationCompletionDocRelPaths,
+    ], 24),
+    preservationRepairWorkItemIds,
+    preservationFailedRetryIds,
+    preservationFailedOutcomeIds,
+    preservationCorrectedRetryIds,
+    preservationCorrectedOutcomeIds,
+    taskAgentSessionIds: uniqueProviderRankingCompactRepairRecallStrings([taskAgentSessionIds, originalTaskAgentSessionIds, repairTaskAgentSessionIds, preservationHistoricalTaskAgentSessionIds, preservationConflictResolutionTaskAgentSessionIds], 32),
+    nativeSessionIds: uniqueProviderRankingCompactRepairRecallStrings([nativeSessionIds, originalNativeSessionIds, repairNativeSessionIds, preservationHistoricalNativeSessionIds, preservationConflictResolutionNativeSessionIds], 32),
     originalTaskAgentSessionIds,
     originalNativeSessionIds,
     repairTaskAgentSessionIds,
     repairNativeSessionIds,
+    preservationHistoricalTaskAgentSessionIds,
+    preservationHistoricalNativeSessionIds,
     rowIds,
     queryAppend: compactMemoryText(queryAppend, 4200),
     rows: [
@@ -6342,7 +6502,44 @@ function buildPostCompactReinjectionRepairReceiptWorkerContextRecall(groupId: st
         completion_source: row.completion_source || "",
         resolution_reason: row.resolution_reason || "",
       })),
-    ].slice(-20),
+      ...recalledPreservationClosureRows.map((row: any) => ({
+        row_kind: "completion_memory_preservation_repair_closure",
+        row_id: row.row_id || "",
+        work_item_id: row.work_item_id || "",
+        failed_retry_id: row.failed_retry_id || "",
+        failed_outcome_id: row.failed_outcome_id || "",
+        corrected_retry_id: row.corrected_retry_id || "",
+        corrected_outcome_id: row.corrected_outcome_id || "",
+        completion_doc_rel_paths: Array.isArray(row.completion_doc_rel_paths) ? row.completion_doc_rel_paths.slice(0, 8) : [],
+        required_doc_rel_paths: Array.isArray(row.required_doc_rel_paths) ? row.required_doc_rel_paths.slice(0, 8) : [],
+        completion_work_item_ids: Array.isArray(row.completion_work_item_ids) ? row.completion_work_item_ids.slice(0, 12) : [],
+        completion_timeline_binding_ids: Array.isArray(row.completion_timeline_binding_ids) ? row.completion_timeline_binding_ids.slice(0, 12) : [],
+        historical_task_agent_session_ids: Array.isArray(row.historical_task_agent_session_ids) ? row.historical_task_agent_session_ids.slice(0, 12) : [],
+        historical_native_session_ids: Array.isArray(row.historical_native_session_ids) ? row.historical_native_session_ids.slice(0, 12) : [],
+        historical_task_agent_session_id: row.current_task_agent_session_id || "",
+        historical_native_session_id: row.current_native_session_id || "",
+        exact_identity_restored: row.exact_identity_restored === true,
+        current_session_boundary_restored: row.current_session_boundary_restored === true,
+        historical_sessions_remain_evidence_only: row.historical_sessions_remain_evidence_only === true,
+        completion_source: row.completion_source || "",
+        resolution_reason: row.resolution_reason || "",
+      })),
+      ...recalledPreservationClosureConflictResolutionRows.map((row: any) => ({
+        row_kind: "completion_memory_preservation_closure_conflict_resolution",
+        row_id: row.row_id || "",
+        resolution_entry_id: row.resolution_entry_id || "",
+        task_family_key: row.task_family_key || "",
+        resolution_usage_state: row.resolution_usage_state || "",
+        current_source_verified: row.current_source_verified === true,
+        reason: row.reason || "",
+        historical_task_agent_session_id: row.task_agent_session_id || "",
+        historical_native_session_id: row.native_session_id || "",
+        parent_conflict_fingerprint: row.parent_conflict_fingerprint || "",
+        reversible: row.reversible === true,
+        historical_branches_preserved: row.historical_branches_preserved === true,
+        historical_majority_authorization_allowed: false,
+      })),
+    ].slice(-28),
   };
 }
 
@@ -7128,11 +7325,34 @@ export function renderGroupMemoryContextBundle(bundle: any) {
       postCompactReinjectionRepairReceiptRecall.candidateIds,
       postCompactReinjectionRepairReceiptRecall.candidate_ids,
     ], 6);
+    const failedOutcomeIds = uniqueProviderRankingCompactRepairRecallStrings([
+      postCompactReinjectionRepairReceiptRecall.preservationFailedOutcomeIds,
+      postCompactReinjectionRepairReceiptRecall.preservation_failed_outcome_ids,
+    ], 6);
+    const correctedOutcomeIds = uniqueProviderRankingCompactRepairRecallStrings([
+      postCompactReinjectionRepairReceiptRecall.preservationCorrectedOutcomeIds,
+      postCompactReinjectionRepairReceiptRecall.preservation_corrected_outcome_ids,
+    ], 6);
     lines.push(`- post-compact reinjection repair receipt memory：docs=${docRelPaths.join("、") || POST_COMPACT_REINJECTION_REPAIR_RECEIPT_MEMORY_REL_PATH}；archived=${postCompactReinjectionRepairReceiptRecall.archivedCount || postCompactReinjectionRepairReceiptRecall.archived_count || 0}；recalled=${postCompactReinjectionRepairReceiptRecall.recalledThisTurn === true}；reason=${postCompactReinjectionRepairReceiptRecall.reason || "task_matched_verified_archive"}。`);
+    if (postCompactReinjectionRepairReceiptRecall.preservationClosureUsageFeedback?.schema) {
+      const feedback = postCompactReinjectionRepairReceiptRecall.preservationClosureUsageFeedback;
+      lines.push(`- closure memory usage feedback：recommendation=${feedback.recommendation || "neutral_reverify_current_source"}；used=${feedback.usedCount || 0}；verified=${feedback.verifiedCount || 0}；ignored=${feedback.ignoredCount || 0}；weightedIgnored=${feedback.weightedIgnoredCount || 0}；confidence=${feedback.evidenceConfidence || 0}/${feedback.evidenceConfidenceThreshold || 0}；independentSessions=${feedback.independentSessionCount || 0}；correlatedDuplicates=${feedback.correlatedDuplicateCount || 0}；providers=${feedback.distinctProviderCount || 0}；receiptSources=${feedback.distinctReceiptSourceCount || 0}；matchedTaskFamilyEntries=${feedback.matchedEntryCount || 0}；unrelatedEntries=${feedback.unrelatedEntryCount || 0}；halfLifeDays=${feedback.aging?.half_life_days || 0}；stale=${feedback.staleCount || 0}；immutableClosureHistoryPreserved=${feedback.immutableClosureHistoryPreserved === true}。`);
+      if (feedback.feedbackConflict?.active === true) {
+        const conflict = feedback.feedbackConflict;
+        lines.push(`- closure feedback conflict：state=${conflict.arbitration_state || "contradictory_reverify_current_session"}；positiveWeight=${conflict.positive?.weighted_evidence || 0}；ignoredWeight=${conflict.ignored?.weighted_evidence || 0}；ratio=${conflict.conflict_ratio || 0}；historicalMajorityAuthorizationAllowed=false。本次新会话必须重新读取当前源码并独立判断 memoryUsed/memoryIgnored，不能按历史多数自动升权或降权。`);
+      }
+      if (feedback.feedbackConflictResolution?.active === true) {
+        const resolution = feedback.feedbackConflictResolution;
+        lines.push(`- closure conflict resolution：state=${resolution.state || "resolved"}；usageState=${resolution.resolution_usage_state || ""}；resolutionEntry=${resolution.resolution_entry_id || ""}；historicalSession=${resolution.task_agent_session_id || ""}/${resolution.native_session_id || ""}；reversible=${resolution.reversible === true}；historicalBranchesPreserved=${resolution.historical_branches_preserved === true}。该结果仅是同任务族排序证据，本次新会话仍须重新核验当前源码。`);
+      }
+    }
     lines.push("- freshness boundary：historical repair completion is recovery evidence, not permanent repository truth；future use must reverify the current source before accepting a recovered candidate.");
     lines.push("- receipt requirement：最终 CCM_AGENT_RECEIPT.memoryUsed 或 memoryIgnored 必须引用每个 surfaced receipt MEMORY.md；used/verified 必须写 currentSourceVerified=true，ignored 必须写 reason。");
     if (gateIds.length || candidateIds.length) {
       lines.push(`  - historical repair identities：reinjection_gate_ids=${gateIds.join("、") || "none"}；candidate_ids=${candidateIds.join("、") || "none"}。`);
+    }
+    if (failedOutcomeIds.length || correctedOutcomeIds.length) {
+      lines.push(`  - completion-memory preservation closure：failed_outcomes=${failedOutcomeIds.join("、") || "none"}；corrected_outcomes=${correctedOutcomeIds.join("、") || "none"}；该历史只用于恢复与去重，不能替代当前仓库核验。`);
     }
   }
   if (pressureProvenanceDispatchFeedbackPolicy?.active === true) {

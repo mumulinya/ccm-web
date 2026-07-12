@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.runTestAgentBrowserCheckExecutionCoverageSelfTest = exports.runTestAgentHttpPageResourcesSelfTest = exports.runTestAgentCapabilityAwareProviderRoutingSelfTest = exports.runTestAgentHttpConcurrencySelfTest = exports.runTestAgentAcceptanceEvidenceGateSelfTest = exports.runTestAgentAdversarialEvidenceGateSelfTest = exports.runTestAgentMcpActionEffectSelfTest = exports.runTestAgentCrossSessionActionEffectSelfTest = exports.runTestAgentMultiSessionActionEffectSelfTest = exports.runTestAgentPlaywrightActionEffectSelfTest = exports.runTestAgentChromeDevtoolsRecoverySelfTest = exports.runTestAgentFailedBrowserRecoverySelfTest = exports.runTestAgentUnsafeBrowserRecoverySelfTest = exports.runTestAgentClaudeChromeRecoverySelfTest = exports.runTestAgentMixedBrowserProviderRoutingSelfTest = exports.runTestAgentExistingSessionContractSelfTest = exports.runTestAgentChromeDevtoolsExistingSessionSelfTest = exports.runTestAgentClaudeChromeExistingSessionSelfTest = exports.runTestAgentPlaywrightMultiSessionAuthenticationSelfTest = exports.runTestAgentPlaywrightAuthenticationSelfTest = exports.runTestAgentBrowserAuthenticationContractSelfTest = void 0;
+exports.runTestAgentInvocationSelfTest = exports.runTestAgentBrowserResourceLifecycleSelfTest = exports.runTestAgentBrowserEvidenceTemporalIntegritySelfTest = exports.runTestAgentBrowserToolCallTimeoutSelfTest = exports.runTestAgentBrowserToolEvidenceLineageSelfTest = exports.runTestAgentBrowserCheckExecutionCoverageSelfTest = exports.runTestAgentHttpPageResourcesSelfTest = exports.runTestAgentCapabilityAwareProviderRoutingSelfTest = exports.runTestAgentHttpConcurrencySelfTest = exports.runTestAgentAcceptanceEvidenceGateSelfTest = exports.runTestAgentAdversarialEvidenceGateSelfTest = exports.runTestAgentMcpActionEffectSelfTest = exports.runTestAgentCrossSessionActionEffectSelfTest = exports.runTestAgentMultiSessionActionEffectSelfTest = exports.runTestAgentPlaywrightActionEffectSelfTest = exports.runTestAgentChromeDevtoolsRecoverySelfTest = exports.runTestAgentFailedBrowserRecoverySelfTest = exports.runTestAgentUnsafeBrowserRecoverySelfTest = exports.runTestAgentClaudeChromeRecoverySelfTest = exports.runTestAgentMixedBrowserProviderRoutingSelfTest = exports.runTestAgentExistingSessionContractSelfTest = exports.runTestAgentChromeDevtoolsExistingSessionSelfTest = exports.runTestAgentClaudeChromeExistingSessionSelfTest = exports.runTestAgentPlaywrightMultiSessionAuthenticationSelfTest = exports.runTestAgentPlaywrightAuthenticationSelfTest = exports.runTestAgentBrowserAuthenticationContractSelfTest = void 0;
 exports.runTestAgentSelfTest = runTestAgentSelfTest;
 exports.runTestAgentMcpProviderSelfTest = runTestAgentMcpProviderSelfTest;
 exports.runTestAgentClaudeChromeMcpSelfTest = runTestAgentClaudeChromeMcpSelfTest;
@@ -235,6 +235,16 @@ var http_page_resources_self_test_1 = require("./http-page-resources-self-test")
 Object.defineProperty(exports, "runTestAgentHttpPageResourcesSelfTest", { enumerable: true, get: function () { return http_page_resources_self_test_1.runTestAgentHttpPageResourcesSelfTest; } });
 var check_execution_coverage_self_test_1 = require("./browser/check-execution-coverage-self-test");
 Object.defineProperty(exports, "runTestAgentBrowserCheckExecutionCoverageSelfTest", { enumerable: true, get: function () { return check_execution_coverage_self_test_1.runTestAgentBrowserCheckExecutionCoverageSelfTest; } });
+var tool_evidence_lineage_self_test_1 = require("./browser/tool-evidence-lineage-self-test");
+Object.defineProperty(exports, "runTestAgentBrowserToolEvidenceLineageSelfTest", { enumerable: true, get: function () { return tool_evidence_lineage_self_test_1.runTestAgentBrowserToolEvidenceLineageSelfTest; } });
+var tool_call_timeout_self_test_1 = require("./browser/tool-call-timeout-self-test");
+Object.defineProperty(exports, "runTestAgentBrowserToolCallTimeoutSelfTest", { enumerable: true, get: function () { return tool_call_timeout_self_test_1.runTestAgentBrowserToolCallTimeoutSelfTest; } });
+var evidence_temporal_integrity_self_test_1 = require("./browser/evidence-temporal-integrity-self-test");
+Object.defineProperty(exports, "runTestAgentBrowserEvidenceTemporalIntegritySelfTest", { enumerable: true, get: function () { return evidence_temporal_integrity_self_test_1.runTestAgentBrowserEvidenceTemporalIntegritySelfTest; } });
+var resource_lifecycle_self_test_1 = require("./browser/resource-lifecycle-self-test");
+Object.defineProperty(exports, "runTestAgentBrowserResourceLifecycleSelfTest", { enumerable: true, get: function () { return resource_lifecycle_self_test_1.runTestAgentBrowserResourceLifecycleSelfTest; } });
+var invocation_self_test_1 = require("./invocation-self-test");
+Object.defineProperty(exports, "runTestAgentInvocationSelfTest", { enumerable: true, get: function () { return invocation_self_test_1.runTestAgentInvocationSelfTest; } });
 function getFreePort() {
     return new Promise((resolve, reject) => {
         const server = net.createServer();
@@ -765,6 +775,10 @@ function runTestAgentHandoffBuilderSelfTest() {
                         url: "http://127.0.0.1:5173/tasks",
                         assertions: [{ type: "status", status: 200 }],
                     }],
+                browserChecks: [{
+                        name: "Persisted task list",
+                        coversAcceptanceCriteria: ["Task list persists after save"],
+                    }],
                 adversarialBrowserProbeTemplates: [{
                         kind: "repeated_click",
                         name: "Repeated add task click",
@@ -813,6 +827,7 @@ function runTestAgentHandoffBuilderSelfTest() {
             && required.has("browser_har")
             && required.has("adversarial")
             && project.agentSummary.includes("Task list persists after save")
+            && project.browserChecks[0].coversAcceptanceCriteria[0] === "Completed task is independently verified: Task list persists after save"
             && project.changedFiles.length === 2
             && metadata.handoffSource === "test-agent-handoff-builder"
             && metadata.completedByProjectAgents.length === 2
@@ -14976,6 +14991,9 @@ async function runTestAgentStandaloneHandoffRealWebSelfTest() {
                             { type: "consoleNoErrors" },
                             { type: "networkNoErrors" },
                         ],
+                        coversAcceptanceCriteria: [
+                            "Task creation and refresh persistence were implemented",
+                        ],
                         screenshot: true,
                     }],
                 completedTasks: [
@@ -17722,6 +17740,49 @@ function runTestAgentContractSelfTest() {
         id: `contract-invalid-self-test-${process.pid}-${Date.now()}`,
     });
     const now = new Date().toISOString();
+    const browserEvidenceTemporalIntegrity = {
+        status: "complete",
+        toleranceMs: 100,
+        reportDurationMs: 0,
+        browserResultCount: 0,
+        browserToolCallCount: 0,
+        invalidItemCount: 0,
+        invalidTimestampCount: 0,
+        durationMismatchCount: 0,
+        outsideReportWindowCount: 0,
+        outsideResultWindowCount: 0,
+        planMismatchCount: 0,
+        items: [{
+                kind: "report",
+                id: "report",
+                startedAt: now,
+                finishedAt: now,
+                durationMs: 0,
+                status: "complete",
+                errors: [],
+            }],
+    };
+    const browserResourceLifecycleSummary = {
+        status: "complete",
+        eventCount: 0,
+        ownedResourceCount: 0,
+        externalResourceCount: 0,
+        releasedResourceCount: 0,
+        retainedExternalResourceCount: 0,
+        openResourceCount: 0,
+        cleanupFailureCount: 0,
+        planMismatchCount: 0,
+        duplicateResourceCount: 0,
+        invalidOwnershipCount: 0,
+        invalidTimestampCount: 0,
+        outsideReportWindowCount: 0,
+        resourceTypeCounts: {
+            browser: 0,
+            browser_context: 0,
+            external_browser_session: 0,
+        },
+        events: [],
+    };
     const reportValidation = (0, contract_1.validateTestAgentReportContract)({
         schema: "ccm-test-agent-report-v1",
         agent: "test-agent",
@@ -17744,6 +17805,9 @@ function runTestAgentContractSelfTest() {
         httpResults: [],
         browserResults: [],
         browserToolCalls: [],
+        browserResourceLifecycleEvents: [],
+        browserEvidenceTemporalIntegrity,
+        browserResourceLifecycleSummary,
         adversarialEvidenceSummary: {
             required: false,
             waived: true,
@@ -17863,6 +17927,8 @@ function runTestAgentContractSelfTest() {
             browserProviderGaps: 0,
             artifacts: 4,
         },
+        browserEvidenceTemporalIntegrity,
+        browserResourceLifecycleSummary,
         adversarialEvidenceSummary: {
             required: false,
             waived: true,

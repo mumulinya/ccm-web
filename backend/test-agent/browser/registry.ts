@@ -9,6 +9,7 @@ import {
   buildBrowserCheckExecutionPlan,
   reconcileBrowserCheckExecution,
 } from "./check-execution-coverage";
+import { browserResultHasToolCallTimeout } from "./tool-call-timeout";
 
 export interface BrowserProviderPreflightResult {
   provider: BrowserProvider["id"];
@@ -180,6 +181,7 @@ async function runProviderChain(
       continue;
     }
     const results = await provider.run(context);
+    if (results.some(browserResultHasToolCallTimeout)) return results;
     if (results.length && !results.every(item => item.status === "blocked")) return results;
     blocked.push(...results);
   }

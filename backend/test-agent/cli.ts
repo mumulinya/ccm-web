@@ -13,6 +13,22 @@ import {
   formatBrowserCheckExecutionCoverageAttentionLines,
   formatBrowserCheckExecutionCoverageLine,
 } from "./browser/check-execution-coverage";
+import {
+  formatBrowserEvidenceTemporalIntegrityAttentionLines,
+  formatBrowserEvidenceTemporalIntegrityLine,
+} from "./browser/evidence-temporal-integrity";
+import {
+  formatBrowserResourceLifecycleAttentionLines,
+  formatBrowserResourceLifecycleLine,
+} from "./browser/resource-lifecycle";
+import {
+  formatBrowserToolEvidenceLineageAttentionLines,
+  formatBrowserToolEvidenceLineageLine,
+} from "./browser/tool-evidence-lineage";
+import {
+  formatBrowserToolCallTimeoutAttentionLines,
+  formatBrowserToolCallTimeoutSummaryLine,
+} from "./browser/tool-call-timeout";
 import { buildBrowserAuthenticationSummary, formatBrowserAuthenticationSummaryLine } from "./browser/authentication-summary";
 import { formatBrowserRecoverySummaryLine } from "./browser/recovery-summary";
 import { formatBrowserActionEffectSummaryLine } from "./browser/action-effect-summary";
@@ -113,6 +129,14 @@ export function formatTestAgentCliReportSummary(report: TestAgentReport) {
     `Browser checks: ${statusCounts(report.browserResults)}`,
     `Browser execution coverage: ${formatBrowserCheckExecutionCoverageLine(report.browserCheckExecutionCoverage)}`,
     ...formatBrowserCheckExecutionCoverageAttentionLines(report.browserCheckExecutionCoverage, 5),
+    `Browser temporal evidence: ${formatBrowserEvidenceTemporalIntegrityLine(report.browserEvidenceTemporalIntegrity)}`,
+    ...formatBrowserEvidenceTemporalIntegrityAttentionLines(report.browserEvidenceTemporalIntegrity, 5),
+    `Browser resource lifecycle: ${formatBrowserResourceLifecycleLine(report.browserResourceLifecycleSummary)}`,
+    ...formatBrowserResourceLifecycleAttentionLines(report.browserResourceLifecycleSummary, 5),
+    `Browser tool evidence lineage: ${formatBrowserToolEvidenceLineageLine(report.browserToolEvidenceLineage)}`,
+    ...formatBrowserToolEvidenceLineageAttentionLines(report.browserToolEvidenceLineage, 5),
+    `Browser tool timeouts: ${formatBrowserToolCallTimeoutSummaryLine(report.browserToolCallTimeoutSummary)}`,
+    ...formatBrowserToolCallTimeoutAttentionLines(report.browserToolCallTimeoutSummary, 5),
     `Browser multi-session: ${formatBrowserMultiSessionSummaryLine(report.browserMultiSessionSummary)}`,
     ...formatBrowserMultiSessionAttentionLines(report.browserMultiSessionSummary, 5),
     `Browser stability: ${formatBrowserStabilitySummaryLine(report.browserStabilitySummary)}`,

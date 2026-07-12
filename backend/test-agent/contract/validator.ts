@@ -4,6 +4,8 @@ import { normalizeTestAgentWorkOrder } from "../work-order";
 import { buildTestAgentWorkOrderFromHandoff, TestAgentBuiltWorkOrder, TestAgentHandoff } from "../work-order-builder";
 import {
   TestAgentHandoffContractSchema,
+  TestAgentInvocationRequestContractSchema,
+  TestAgentInvocationResultContractSchema,
   TestAgentReportContractSchema,
   TestAgentVerdictContractSchema,
   TestAgentWorkOrderContractSchema,
@@ -38,6 +40,12 @@ export interface TestAgentReportContractValidation {
 }
 
 export interface TestAgentVerdictContractValidation {
+  valid: boolean;
+  errors: TestAgentContractIssue[];
+  warnings: TestAgentContractIssue[];
+}
+
+export interface TestAgentInvocationContractValidation {
   valid: boolean;
   errors: TestAgentContractIssue[];
   warnings: TestAgentContractIssue[];
@@ -149,6 +157,24 @@ export function validateTestAgentReportContract(input: unknown): TestAgentReport
 
 export function validateTestAgentVerdictContract(input: unknown): TestAgentVerdictContractValidation {
   const parsed = TestAgentVerdictContractSchema.safeParse(input);
+  if (!parsed.success) {
+    const { errors, warnings } = splitIssues(zodIssues(parsed.error));
+    return { valid: false, errors, warnings };
+  }
+  return { valid: true, errors: [], warnings: [] };
+}
+
+export function validateTestAgentInvocationRequestContract(input: unknown): TestAgentInvocationContractValidation {
+  const parsed = TestAgentInvocationRequestContractSchema.safeParse(input);
+  if (!parsed.success) {
+    const { errors, warnings } = splitIssues(zodIssues(parsed.error));
+    return { valid: false, errors, warnings };
+  }
+  return { valid: true, errors: [], warnings: [] };
+}
+
+export function validateTestAgentInvocationResultContract(input: unknown): TestAgentInvocationContractValidation {
+  const parsed = TestAgentInvocationResultContractSchema.safeParse(input);
   if (!parsed.success) {
     const { errors, warnings } = splitIssues(zodIssues(parsed.error));
     return { valid: false, errors, warnings };

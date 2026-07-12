@@ -15,6 +15,10 @@ const recovery_summary_1 = require("./browser/recovery-summary");
 const action_effect_summary_1 = require("./browser/action-effect-summary");
 const stability_summary_1 = require("./browser/stability-summary");
 const check_execution_coverage_1 = require("./browser/check-execution-coverage");
+const tool_evidence_lineage_1 = require("./browser/tool-evidence-lineage");
+const tool_call_timeout_1 = require("./browser/tool-call-timeout");
+const evidence_temporal_integrity_1 = require("./browser/evidence-temporal-integrity");
+const resource_lifecycle_1 = require("./browser/resource-lifecycle");
 const failure_summary_1 = require("./failure-summary");
 const required_checks_1 = require("./required-checks");
 const utils_1 = require("./utils");
@@ -180,11 +184,23 @@ function applyAcceptanceEvidenceGate(status, gate) {
         return "partial";
     return status;
 }
+function applyBrowserToolEvidenceLineageGate(status, lineage) {
+    if (!lineage || lineage.status === "complete" || status === "blocked" || status === "failed")
+        return status;
+    return status === "passed" ? "partial" : status;
+}
+function applyBrowserTemporalIntegrityGate(status, temporal) {
+    if (!temporal || temporal.status === "complete" || status === "blocked" || status === "failed")
+        return status;
+    return status === "passed" ? "partial" : status;
+}
 function buildTestAgentReport(input) {
     const { workOrder, startedAt, issues, commandResults, devServerResults, browserResults } = input;
     const httpResults = input.httpResults || [];
     const browserToolCalls = input.browserToolCalls || [];
+    const browserResourceLifecycleEvents = input.browserResourceLifecycleEvents || [];
     const finishedAt = (0, utils_1.nowIso)();
+    const durationMs = Date.parse(finishedAt) - Date.parse(startedAt);
     const browserInteractionSummary = (0, interaction_summary_1.buildBrowserInteractionSummary)(browserResults);
     const browserFlowSummary = (0, flow_summary_1.buildBrowserFlowSummary)(browserResults);
     const browserMultiSessionSummary = (0, multi_session_summary_1.buildBrowserMultiSessionSummary)(browserResults);
@@ -193,6 +209,22 @@ function buildTestAgentReport(input) {
     const browserCheckExecutionCoverage = browserCheckExecutionPlan
         ? (0, check_execution_coverage_1.buildBrowserCheckExecutionCoverage)(browserCheckExecutionPlan, browserResults)
         : undefined;
+    const browserEvidenceTemporalIntegrity = (0, evidence_temporal_integrity_1.buildBrowserEvidenceTemporalIntegrity)({
+        startedAt,
+        finishedAt,
+        durationMs,
+        plan: browserCheckExecutionPlan,
+        browserResults,
+        browserToolCalls,
+    });
+    const browserResourceLifecycleSummary = (0, resource_lifecycle_1.buildBrowserResourceLifecycleSummary)({
+        events: browserResourceLifecycleEvents,
+        plan: browserCheckExecutionPlan,
+        reportStartedAt: startedAt,
+        reportFinishedAt: finishedAt,
+    });
+    const browserToolEvidenceLineage = (0, tool_evidence_lineage_1.buildBrowserToolEvidenceLineage)(browserResults, browserToolCalls);
+    const browserToolCallTimeoutSummary = (0, tool_call_timeout_1.buildBrowserToolCallTimeoutSummary)(browserToolCalls);
     const browserRecoverySummary = (0, recovery_summary_1.buildBrowserRecoverySummary)(browserResults);
     const browserActionEffectSummary = (0, action_effect_summary_1.buildBrowserActionEffectSummary)(browserResults);
     const httpConcurrencySummary = (0, http_concurrency_1.buildHttpConcurrencySummary)(httpResults);
@@ -217,7 +249,12 @@ function buildTestAgentReport(input) {
         browserResults,
         browserToolCalls,
     });
-    const operationalStatus = computeOperationalStatus(commandResults, devServerResults, httpResults, browserResults, issues, requiredCheckCoverage, adversarialEvidenceSummary);
+    const executionStatus = computeOperationalStatus(commandResults, devServerResults, httpResults, browserResults, issues, requiredCheckCoverage, adversarialEvidenceSummary);
+    const lineageStatus = applyBrowserToolEvidenceLineageGate(executionStatus, browserToolEvidenceLineage);
+    const temporalStatus = applyBrowserTemporalIntegrityGate(lineageStatus, browserEvidenceTemporalIntegrity);
+    const operationalStatus = browserResourceLifecycleSummary.status === "complete" || temporalStatus === "blocked" || temporalStatus === "failed"
+        ? temporalStatus
+        : temporalStatus === "passed" ? "partial" : temporalStatus;
     const evidence = buildEvidence(commandResults, devServerResults, httpResults, browserResults, browserToolCalls);
     const acceptanceCoverage = (0, coverage_1.buildAcceptanceCoverage)({
         workOrder,
@@ -256,6 +293,16 @@ function buildTestAgentReport(input) {
         ...(browserCheckExecutionCoverage && browserCheckExecutionCoverage.status !== "complete"
             ? [`browser check execution coverage ${browserCheckExecutionCoverage.status}: runs=${browserCheckExecutionCoverage.coveredRunCount}/${browserCheckExecutionCoverage.expectedRunCount}; missing=${browserCheckExecutionCoverage.missingRunCount}; duplicate=${browserCheckExecutionCoverage.duplicateResultCount}; invalid=${browserCheckExecutionCoverage.invalidResultCount}`]
             : []),
+        ...(browserEvidenceTemporalIntegrity.status !== "complete"
+            ? [`browser evidence temporal integrity invalid: invalidItems=${browserEvidenceTemporalIntegrity.invalidItemCount}; timestamps=${browserEvidenceTemporalIntegrity.invalidTimestampCount}; durations=${browserEvidenceTemporalIntegrity.durationMismatchCount}; reportWindow=${browserEvidenceTemporalIntegrity.outsideReportWindowCount}; resultWindow=${browserEvidenceTemporalIntegrity.outsideResultWindowCount}; planMismatch=${browserEvidenceTemporalIntegrity.planMismatchCount}`]
+            : []),
+        ...(browserResourceLifecycleSummary.status !== "complete"
+            ? [`browser resource lifecycle ${browserResourceLifecycleSummary.status}: open=${browserResourceLifecycleSummary.openResourceCount}; cleanupFailed=${browserResourceLifecycleSummary.cleanupFailureCount}; planMismatch=${browserResourceLifecycleSummary.planMismatchCount}`]
+            : []),
+        ...(browserToolEvidenceLineage.status !== "complete"
+            ? [`browser tool evidence lineage ${browserToolEvidenceLineage.status}: linkedResults=${browserToolEvidenceLineage.linkedResultCount}/${browserToolEvidenceLineage.evidenceRequiredResultCount}; orphanCalls=${browserToolEvidenceLineage.orphanScopedToolCallCount}; unscopedCalls=${browserToolEvidenceLineage.unscopedToolCallCount}`]
+            : []),
+        ...browserToolCallTimeoutSummary.items.map(item => `browser tool call timed out: ${item.toolName}; timeoutMs=${item.timeoutMs}; durationMs=${item.durationMs}${item.checkId ? `; execution=${item.checkId} run ${item.run}` : ""}`),
         ...browserRecoverySummary.items
             .filter(item => item.failed > 0 || item.notRetried > 0)
             .map(item => `${item.project}: browser recovery incomplete: ${item.name}; failed=${item.failed}; unsafeRetriesPrevented=${item.notRetried}`),
@@ -321,7 +368,7 @@ function buildTestAgentReport(input) {
         summary,
         startedAt,
         finishedAt,
-        durationMs: Date.parse(finishedAt) - Date.parse(startedAt),
+        durationMs,
         artifactDir: workOrder.options.artifactDir,
         requiredChecks: workOrder.requiredChecks,
         commandResults,
@@ -329,6 +376,7 @@ function buildTestAgentReport(input) {
         httpResults,
         browserResults,
         browserToolCalls,
+        browserResourceLifecycleEvents,
         httpConcurrencySummary,
         browserNetworkSummary,
         browserInteractionSummary,
@@ -336,6 +384,10 @@ function buildTestAgentReport(input) {
         browserMultiSessionSummary,
         browserStabilitySummary,
         browserCheckExecutionCoverage,
+        browserEvidenceTemporalIntegrity,
+        browserResourceLifecycleSummary,
+        browserToolEvidenceLineage,
+        browserToolCallTimeoutSummary,
         browserRecoverySummary,
         browserActionEffectSummary,
         adversarialEvidenceSummary,

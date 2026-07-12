@@ -8,6 +8,11 @@ export { runTestAgentHttpConcurrencySelfTest } from "./http-concurrency-self-tes
 export { runTestAgentCapabilityAwareProviderRoutingSelfTest } from "./browser/provider-routing-self-test";
 export { runTestAgentHttpPageResourcesSelfTest } from "./http-page-resources-self-test";
 export { runTestAgentBrowserCheckExecutionCoverageSelfTest } from "./browser/check-execution-coverage-self-test";
+export { runTestAgentBrowserToolEvidenceLineageSelfTest } from "./browser/tool-evidence-lineage-self-test";
+export { runTestAgentBrowserToolCallTimeoutSelfTest } from "./browser/tool-call-timeout-self-test";
+export { runTestAgentBrowserEvidenceTemporalIntegritySelfTest } from "./browser/evidence-temporal-integrity-self-test";
+export { runTestAgentBrowserResourceLifecycleSelfTest } from "./browser/resource-lifecycle-self-test";
+export { runTestAgentInvocationSelfTest } from "./invocation-self-test";
 export declare function runTestAgentSelfTest(options?: {
     includeBrowser?: boolean;
 }): Promise<{

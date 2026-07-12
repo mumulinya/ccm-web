@@ -78,10 +78,14 @@ const scrollToMessage = (originalIndex) => {
 }
 
 const chatInput = ref('')
+const chatInputElement = ref(null)
 const isSending = ref(false)
 const isSteering = ref(false)
 const activeGlobalRunId = ref('')
 const activeGlobalRunMessage = ref(null)
+const pendingGlobalMissionInput = ref(null)
+const pendingGlobalClarificationInput = ref(null)
+const pendingGlobalRequestRetry = ref(null)
 const executingAction = ref(null)
 const chatBody = ref(null)
 const chatContentInner = ref(null)
@@ -150,12 +154,31 @@ const currentSupervisedRunMessage = computed(() => {
 const isExplicitSupervisionContinuation = (value = '') => GLOBAL_SUPERVISION_CONTINUATION_PATTERN.test(String(value || '').trim())
 const isSupervisionContinuationInput = computed(() => {
   return !isSending.value
-    && !!currentSupervisedRunMessage.value
-    && isExplicitSupervisionContinuation(chatInput.value)
+    && (Boolean(pendingGlobalMissionInput.value)
+      || (!!currentSupervisedRunMessage.value && isExplicitSupervisionContinuation(chatInput.value)))
 })
+
+const syncPendingGlobalClarificationInput = () => {
+  const rows = Array.isArray(messages.value) ? messages.value : []
+  const pending = [...rows].reverse().find(message => message?.role === 'assistant') || null
+  const pendingRun = pending?.agenticRun || pending?.agentic_run || null
+  const isWaiting = !!pendingRun?.id && String(pendingRun.status || '').toLowerCase() === 'waiting_clarification'
+  pendingGlobalClarificationInput.value = pending
+    && isWaiting
+    ? {
+        runId: pendingRun.id,
+        title: pendingRun.clarification_summary?.question
+          || pendingRun.clarificationSummary?.question
+          || pendingRun.clarification_question
+          || '补充当前请求',
+      }
+    : null
+}
 
 const globalInputPlaceholder = computed(() => {
   if (!isSending.value) {
+    if (pendingGlobalMissionInput.value) return '补充当前任务需要的信息，发送后会继续原任务...'
+    if (pendingGlobalClarificationInput.value) return '回答主 Agent 刚才的问题，发送后会接着原请求继续...'
     return isSupervisionContinuationInput.value
       ? '补充要求或调整当前任务...'
       : '对全局助手说点什么... (例如: 帮我把桌宠打开)'
@@ -168,6 +191,8 @@ const globalInputPlaceholder = computed(() => {
 const globalSendButtonLabel = computed(() => {
   if (isSteering.value) return '接收中'
   if (isSending.value) return '补充要求'
+  if (pendingGlobalMissionInput.value) return '提交并继续'
+  if (pendingGlobalClarificationInput.value) return '提交补充'
   return isSupervisionContinuationInput.value ? '更新任务' : '发送'
 })
 
@@ -175,6 +200,13 @@ const canSendGlobalMessage = computed(() => {
   if (isSteering.value) return false
   if (isSending.value) return !!chatInput.value.trim() && !!activeGlobalRunId.value
   return !!chatInput.value.trim() || selectedFiles.value.length > 0
+})
+
+const globalRequestRetrySignature = ({ sessionId, message, files, clarificationRunId }) => JSON.stringify({
+  sessionId,
+  message,
+  files: (files || []).map(file => [file.name, file.size]),
+  clarificationRunId: clarificationRunId || '',
 })
 
 const SYSTEM_RESULT_MARKER = '[处理结果]'
@@ -398,7 +430,7 @@ const globalMissionNotificationContent = ({ state, mission, supervisor, run }) =
   }
   if (state === 'waiting_user') {
     const reasons = (supervisor?.incidents || [])
-      .filter(item => item?.type === 'waiting_user' && item?.reason)
+      .filter(item => item?.type === 'waiting_user' && !item?.resolved_at && !item?.resolvedAt && item?.reason)
       .slice(-3)
       .map(item => visibleGlobalText(item.reason, '需要你补充一项信息。', 220))
     const fallback = [
@@ -1576,10 +1608,14 @@ const appendGlobalStreamEvent = (agentMsg, event) => {
 }
 
 watch(messages, () => {
+  syncPendingGlobalClarificationInput()
   scrollToBottom()
 }, { deep: true, immediate: true, flush: 'post' })
 
 watch(currentSessionId, () => {
+  pendingGlobalMissionInput.value = null
+  pendingGlobalClarificationInput.value = null
+  chatInput.value = ''
   scrollToBottom()
 }, { flush: 'post' })
 
@@ -1674,9 +1710,113 @@ const sendGlobalRunSteer = async (options = {}) => {
   }
 }
 
+const beginGlobalMissionInput = async (msg, card = {}) => {
+  const missionId = msg?.globalMission?.id || card?.task_id || ''
+  const supervisorId = msg?.globalMissionSupervisor?.id || msg?.globalMission?.supervisor_id || missionId
+  if (!missionId || !supervisorId) {
+    toast.error('当前任务还没有准备好接收补充信息')
+    return
+  }
+  pendingGlobalMissionInput.value = {
+    msg,
+    missionId,
+    supervisorId,
+    title: card?.title || msg?.globalMission?.title || '当前任务',
+    businessGoal: card?.goal || msg?.globalMission?.business_goal || msg?.globalMission?.title || '',
+    acceptance: msg?.globalMissionSupervisor?.acceptance || msg?.globalMission?.acceptance_criteria || '',
+  }
+  chatInput.value = ''
+  selectedFiles.value = []
+  await nextTick()
+  chatInputElement.value?.focus?.()
+  toast.info('请在输入框补充所需信息；发送后我会接着原任务继续执行和验收')
+}
+
+const sendGlobalMissionInput = async () => {
+  const target = pendingGlobalMissionInput.value
+  const userText = chatInput.value.trim()
+  if (!target || !userText || isSteering.value || !currentSession.value) return
+  const timestamp = new Date().toISOString()
+  const requestId = `mission-input-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+  const userMessage = {
+    id: `global-mission-input:${requestId}`,
+    role: 'user',
+    type: 'global_mission_user_input',
+    content: userText,
+    timestamp,
+    mission_id: target.missionId,
+    delivery_status: 'sending',
+  }
+  currentSession.value.messages.push(userMessage)
+  chatInput.value = ''
+  pendingGlobalMissionInput.value = null
+  isSteering.value = true
+  saveHistory()
+  scrollToBottom()
+
+  try {
+    const businessGoal = String(target.businessGoal || target.title || '继续当前任务').slice(0, 50_000)
+    const data = await postJson('/api/global-agent/supervisors/control', {
+      id: target.supervisorId,
+      mission_id: target.missionId,
+      operation: 'update_goal',
+      business_goal: businessGoal,
+      acceptance: target.acceptance,
+      message: userText,
+      message_id: userMessage.id,
+      message_timestamp: timestamp,
+      request_id: requestId,
+      continuation_kind: 'supplement',
+      resolve_waiting_user: true,
+      source: 'global_web_waiting_user_resolution',
+      actor: 'global-agent-task-card',
+      continuation: {
+        kind: 'supplement',
+        source: 'global_web_waiting_user_resolution',
+        reason: userText,
+        title: '补充任务条件',
+        resolve_waiting_user: true,
+        interrupt_current_run: false,
+      },
+    })
+    userMessage.delivery_status = 'accepted'
+    const sessionMessages = currentSession.value?.messages || []
+    for (const message of sessionMessages) {
+      const sameMission = message?.globalMission?.id === target.missionId
+        || message?.globalMissionSupervisor?.mission_id === target.missionId
+        || message?.agenticRun?.mission_id === target.missionId
+      if (!sameMission) continue
+      applyGlobalMissionPayload(message, data)
+      if (data.run && message?.agenticRun?.id === data.run.id) message.agenticRun = data.run
+    }
+    applyGlobalMissionPayload(target.msg, data)
+    if (data.run && target.msg?.agenticRun?.id === data.run.id) target.msg.agenticRun = data.run
+    target.msg.type = 'global_mission'
+    target.msg.missionNotificationState = 'resolved'
+    target.msg.mission_notification_state = 'resolved'
+    target.msg.content = `已收到你补充的信息，“${visibleGlobalText(target.title, '当前任务', 100)}”会沿用原计划和验收条件继续执行。`
+    target.msg.updated_at = data.supervisor?.updated_at || new Date().toISOString()
+    saveHistory()
+    scrollToBottom()
+    toast.success('补充信息已接入原任务，我会继续执行和验收')
+  } catch (error) {
+    userMessage.delivery_status = 'failed'
+    pendingGlobalMissionInput.value = target
+    if (!chatInput.value.trim()) chatInput.value = userText
+    toast.error(error?.message || '补充信息没有接入当前任务，请重新发送')
+    saveHistory()
+  } finally {
+    isSteering.value = false
+    await nextTick()
+    if (pendingGlobalMissionInput.value) chatInputElement.value?.focus?.()
+    scrollToBottom()
+  }
+}
+
 const sendMessage = async () => {
   if (isSending.value) return sendGlobalRunSteer()
   if (!chatInput.value.trim() && selectedFiles.value.length === 0) return
+  if (pendingGlobalMissionInput.value) return sendGlobalMissionInput()
   const supervisionTarget = currentSupervisedRunMessage.value
   if (
     selectedFiles.value.length === 0
@@ -1694,7 +1834,18 @@ const sendMessage = async () => {
   }
   
   const userText = chatInput.value.trim()
+  const clarificationTarget = pendingGlobalClarificationInput.value
   const attachedFiles = [...selectedFiles.value]
+  const retrySignature = globalRequestRetrySignature({
+    sessionId: currentSessionId.value,
+    message: userText,
+    files: attachedFiles,
+    clarificationRunId: clarificationTarget?.runId,
+  })
+  const requestId = pendingGlobalRequestRetry.value?.signature === retrySignature
+    ? pendingGlobalRequestRetry.value.requestId
+    : `web-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+  pendingGlobalRequestRetry.value = { signature: retrySignature, requestId }
   
   chatInput.value = ''
   selectedFiles.value = []
@@ -1707,6 +1858,7 @@ const sendMessage = async () => {
   
   // 构建前端渲染的历史消息（带附件）
   const newMessage = {
+    id: `global-request:${requestId}`,
     role: 'user',
     content: userText,
     timestamp: new Date().toISOString(),
@@ -1717,7 +1869,8 @@ const sendMessage = async () => {
       type: f.type
     }))
   }
-  
+  const previousRequestMessageIndex = currentSession.value.messages.findIndex(message => message.id === newMessage.id)
+  if (previousRequestMessageIndex >= 0) currentSession.value.messages.splice(previousRequestMessageIndex, 1)
   currentSession.value.messages.push(newMessage)
   saveHistory()
   scrollToBottom()
@@ -1744,7 +1897,6 @@ const sendMessage = async () => {
     activeGlobalRunMessage.value = agentMsg
     activeGlobalRunId.value = ''
     const agentMsgAdded = { value: false }
-    const requestId = `web-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
     
     let res
     if (attachedFiles.length > 0) {
@@ -1753,6 +1905,7 @@ const sendMessage = async () => {
       formData.append('history', JSON.stringify(historyPayload))
       formData.append('session_id', currentSessionId.value)
       formData.append('request_id', requestId)
+      if (clarificationTarget?.runId) formData.append('clarification_run_id', clarificationTarget.runId)
       formData.append('stream', 'true')
       attachedFiles.forEach((f, idx) => {
         formData.append(`file_${idx}`, f.file)
@@ -1765,7 +1918,14 @@ const sendMessage = async () => {
       res = await fetch('/api/global-agent/run?stream=true', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
-        body: JSON.stringify({ message: userText, history: historyPayload, session_id: currentSessionId.value, request_id: requestId, stream: true })
+        body: JSON.stringify({
+          message: userText,
+          history: historyPayload,
+          session_id: currentSessionId.value,
+          request_id: requestId,
+          clarification_run_id: clarificationTarget?.runId || '',
+          stream: true
+        })
       })
     }
 
@@ -1779,6 +1939,9 @@ const sendMessage = async () => {
     let sseBuffer = ''
     let globalStreamRawBuffer = ''
     let globalStreamHiddenBuffer = false
+    const seenGlobalStreamEventIds = new Set()
+    let globalResultReceived = false
+    let globalStreamFailed = false
 
     const handleGlobalSseEvent = (rawEvent) => {
       const dataText = rawEvent
@@ -1789,6 +1952,9 @@ const sendMessage = async () => {
       if (!dataText) return
       try {
         const data = JSON.parse(dataText)
+        const eventId = String(data.event_id || data.eventId || '')
+        if (eventId && seenGlobalStreamEventIds.has(eventId)) return
+        if (eventId) seenGlobalStreamEventIds.add(eventId)
         if (data.type === 'text') {
           ensureGlobalStreamMessage(agentMsg, agentMsgAdded)
           const chunkText = String(data.text || '')
@@ -1801,6 +1967,7 @@ const sendMessage = async () => {
           }
           scrollToBottom()
         } else if (data.type === 'result') {
+          globalResultReceived = true
           ensureGlobalStreamMessage(agentMsg, agentMsgAdded)
           const run = mergeGlobalRunTestAgentExecutionPlan(data.run || {}, agentMsg.agenticRun || {})
           const pendingToolName = sanitizeGlobalVisibleStreamText(run.pending_tool?.name || '写入操作', '写入操作', 80)
@@ -1819,6 +1986,7 @@ const sendMessage = async () => {
             if (effect?.type === 'navigate' && effect.params?.tab) emit('switch-tab', effect.params.tab)
           }
         } else if (data.type === 'error') {
+          globalStreamFailed = true
           ensureGlobalStreamMessage(agentMsg, agentMsgAdded)
           agentMsg.content = `出错啦：${sanitizeGlobalVisibleStreamText(data.text, '这次处理没有完成，排障信息已放入技术详情。', 1200)}`
           agentMsg.streaming = false
@@ -1846,6 +2014,12 @@ const sendMessage = async () => {
     sseBuffer += decoder.decode()
     if (sseBuffer.trim()) handleGlobalSseEvent(sseBuffer)
 
+    if (globalResultReceived && pendingGlobalRequestRetry.value?.requestId === requestId) {
+      pendingGlobalRequestRetry.value = null
+    } else if (globalStreamFailed && !chatInput.value.trim()) {
+      chatInput.value = userText
+    }
+
     saveHistory()
 
   } catch (err) {
@@ -1855,6 +2029,7 @@ const sendMessage = async () => {
         last.streaming = false
         last.type = 'global_agent_error'
         last.content = `❌ 连接服务器失败：${err.message || '请检查网络或配置'}`
+        if (!chatInput.value.trim()) chatInput.value = userText
         saveHistory()
         scrollToBottom()
         return
@@ -1912,6 +2087,7 @@ const processBridgeRequest = async (request) => {
       success: true,
       reply: sanitizeGlobalVisibleStreamText(assistantReplies.join('\n\n') || run.final_reply || GLOBAL_RESULT_VISIBLE_FALLBACK, GLOBAL_RESULT_VISIBLE_FALLBACK, 8000)
     })
+    if (!chatInput.value.trim()) chatInput.value = userText
   } catch (err) {
     const message = sanitizeGlobalVisibleStreamText(err?.message, '全局 Agent 控制台处理飞书消息失败', 1200)
     currentSession.value.messages.push({ role: 'assistant', content: `处理失败：${message}`, timestamp: new Date().toISOString(), source: 'feishu-control-bot' })
@@ -2032,6 +2208,15 @@ const getGlobalTaskCard = (msg) => {
   if (!msg || msg.role !== 'assistant') return null
   return globalMissionTaskCard(msg) || globalAgentRunTaskCard(msg)
 }
+
+const GLOBAL_MISSION_TASK_MESSAGE_TYPES = new Set([
+  'global_mission',
+  'global_mission_complete',
+  'global_mission_waiting_user',
+  'global_mission_terminal',
+])
+
+const isGlobalMissionTaskMessage = (msg) => GLOBAL_MISSION_TASK_MESSAGE_TYPES.has(String(msg?.type || ''))
 
 const runtimeDebugRows = (msg) => {
   const debug = msg?.agenticRun?.runtime_debug || null
@@ -2160,10 +2345,26 @@ const handleGlobalTaskAction = async (msg, action) => {
       await nextTick()
       return sendMessage()
     }
+    if (
+      action.kind === 'continue'
+      && card?.phase === 'needs_user'
+      && (msg?.globalMission?.id || msg?.globalMissionSupervisor?.mission_id)
+    ) {
+      return beginGlobalMissionInput(msg, card)
+    }
     if (msg?.agenticRun?.id) {
       if (action.kind === 'provide_clarification') {
+        pendingGlobalClarificationInput.value = {
+          runId: msg.agenticRun.id,
+          title: msg.agenticRun?.clarification_summary?.question
+            || msg.agenticRun?.clarificationSummary?.question
+            || msg.agenticRun?.clarification_question
+            || card?.next_action
+            || '补充当前请求',
+        }
         chatInput.value = ''
         await nextTick()
+        chatInputElement.value?.focus?.()
         toast.info('请直接在输入框补充目标、范围或验收标准，我会接着同一个运行继续。')
         return
       }
@@ -3077,6 +3278,8 @@ const handleGitCommitCardSubmit = async (msg) => {
               :id="'msg-' + index"
               class="chat-bubble-wrapper"
               :class="msg.role"
+              :data-message-type="msg.type || undefined"
+              :data-message-id="msg.id || undefined"
             >
             <div class="avatar">{{ msg.role === 'user' ? '👤' : '🤖' }}</div>
             <div class="chat-bubble">
@@ -3220,7 +3423,7 @@ const handleGitCommitCardSubmit = async (msg) => {
 
                 <!-- 全局总控任务 -->
                 <TaskExperienceCard
-                  v-else-if="getGlobalTaskCard(msg) && (msg.type === 'global_mission' || msg.type === 'global_mission_complete')"
+                  v-else-if="getGlobalTaskCard(msg) && isGlobalMissionTaskMessage(msg)"
                   :card="getGlobalTaskCard(msg)"
                   context="global"
                   :busy="!!msg.agenticRunLoading"
@@ -3445,13 +3648,13 @@ const handleGitCommitCardSubmit = async (msg) => {
             style="display: none" 
             @change="handleFileChange"
             accept="image/*,.txt,.md,.json,.pdf,.docx,.xlsx"
-            :disabled="isSending"
+            :disabled="isSending || !!pendingGlobalMissionInput"
           />
           <button
             class="attach-btn"
             @click="triggerFileUpload"
-            :title="isSending ? '当前任务执行中，附件请在下一条消息发送' : '上传图片或文件附件'"
-            :disabled="isSending"
+            :title="pendingGlobalMissionInput ? '当前正在补充任务条件，请先提交文字信息' : isSending ? '当前任务执行中，附件请在下一条消息发送' : '上传图片或文件附件'"
+            :disabled="isSending || !!pendingGlobalMissionInput"
           >
             <svg class="icon-attach" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
@@ -3459,6 +3662,7 @@ const handleGitCommitCardSubmit = async (msg) => {
           </button>
           <input 
             type="text" 
+            ref="chatInputElement"
             v-model="chatInput" 
             :placeholder="globalInputPlaceholder"
             @keydown.enter.prevent="sendMessage"

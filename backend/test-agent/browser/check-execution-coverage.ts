@@ -10,10 +10,10 @@ import {
   NormalizedTestAgentProjectTarget,
   NormalizedTestAgentWorkOrder,
 } from "../types";
-import { nowIso, resolveUrl } from "../utils";
+import { makeRunId, nowIso, resolveUrl } from "../utils";
 import { browserProviderRouteForCheck } from "./provider-routing";
 import { checksForProject } from "./shared";
-import { browserCheckStabilityRuns } from "./stability-summary";
+import { browserCheckStabilityRuns, MAX_BROWSER_STABILITY_RUNS } from "./stability-summary";
 
 function executionCheckId(projectIndex: number, checkIndex: number) {
   return `browser-check:${projectIndex + 1}:${checkIndex + 1}`;
@@ -45,6 +45,8 @@ export function buildBrowserCheckExecutionPlan(
   }
   return {
     schema: "ccm-test-agent-browser-execution-plan-v1",
+    planId: makeRunId("browser-execution-plan"),
+    createdAt: nowIso(),
     preferredProvider,
     plannedCheckCount: items.length,
     expectedRunCount: items.reduce((sum, item) => sum + item.expectedRuns, 0),
@@ -55,6 +57,8 @@ export function buildBrowserCheckExecutionPlan(
 export function browserCheckExecutionPlanErrors(plan: BrowserCheckExecutionPlan) {
   const errors: string[] = [];
   if (plan?.schema !== "ccm-test-agent-browser-execution-plan-v1") errors.push("browser execution plan schema is invalid.");
+  if (!String(plan?.planId || "").trim()) errors.push("browser execution plan planId is missing.");
+  if (!String(plan?.createdAt || "").trim()) errors.push("browser execution plan createdAt is missing.");
   const items = Array.isArray(plan?.items) ? plan.items : [];
   if (plan?.plannedCheckCount !== items.length) errors.push("browser execution plan plannedCheckCount does not match items.length.");
   const expectedRunCount = items.reduce((sum, item) => sum + Number(item.expectedRuns || 0), 0);
@@ -66,7 +70,9 @@ export function browserCheckExecutionPlanErrors(plan: BrowserCheckExecutionPlan)
     if (item.checkId !== executionCheckId(item.projectIndex, item.checkIndex)) errors.push(`${label} checkId does not match its indexes.`);
     if (!Number.isInteger(item.projectIndex) || item.projectIndex < 0) errors.push(`${label} projectIndex is invalid.`);
     if (!Number.isInteger(item.checkIndex) || item.checkIndex < 0) errors.push(`${label} checkIndex is invalid.`);
-    if (!Number.isInteger(item.expectedRuns) || item.expectedRuns < 1) errors.push(`${label} expectedRuns is invalid.`);
+    if (!Number.isInteger(item.expectedRuns) || item.expectedRuns < 1 || item.expectedRuns > MAX_BROWSER_STABILITY_RUNS) {
+      errors.push(`${label} expectedRuns is invalid.`);
+    }
     if (!item.project || !item.name) errors.push(`${label} is missing project or name.`);
   }
   return errors;
@@ -81,7 +87,16 @@ export function browserCheckExecutionIdentity(input: {
   evidence?: BrowserCheckExecutionIdentity["evidence"];
 }): BrowserCheckExecutionIdentity {
   const projectIndex = input.workOrder.projects.indexOf(input.project);
+  let plan = input.workOrder.metadata?.browserCheckExecutionPlan as BrowserCheckExecutionPlan | undefined;
+  if (!plan?.planId) {
+    plan = buildBrowserCheckExecutionPlan(input.workOrder);
+    input.workOrder.metadata = {
+      ...input.workOrder.metadata,
+      browserCheckExecutionPlan: plan,
+    };
+  }
   return {
+    planId: plan.planId,
     checkId: executionCheckId(projectIndex, input.checkIndex),
     projectIndex,
     checkIndex: input.checkIndex,
@@ -115,8 +130,9 @@ function emptyStatusCounts(): BrowserCheckExecutionCoverageSummary["statusCounts
   return { complete: 0, incomplete: 0, invalid: 0 };
 }
 
-function identityMatchesPlan(identity: BrowserCheckExecutionIdentity, item: BrowserCheckExecutionPlanItem) {
-  return identity.checkId === item.checkId
+function identityMatchesPlan(identity: BrowserCheckExecutionIdentity, plan: BrowserCheckExecutionPlan, item: BrowserCheckExecutionPlanItem) {
+  return identity.planId === plan.planId
+    && identity.checkId === item.checkId
     && identity.projectIndex === item.projectIndex
     && identity.checkIndex === item.checkIndex
     && identity.expectedRuns === item.expectedRuns
@@ -144,7 +160,7 @@ export function buildBrowserCheckExecutionCoverage(
       continue;
     }
     const item = planById.get(identity.checkId);
-    if (!item || !identityMatchesPlan(identity, item)) {
+    if (!item || !identityMatchesPlan(identity, plan, item)) {
       invalidResultCount += 1;
       continue;
     }
@@ -241,7 +257,7 @@ export function browserCheckExecutionEvidenceErrors(input: {
     const identity = result.execution;
     if (!identity) continue;
     const item = planById.get(identity.checkId);
-    if (!item || !identityMatchesPlan(identity, item)) {
+    if (!item || !identityMatchesPlan(identity, input.plan, item)) {
       errors.push(`browserResults[${index}] has an execution identity outside the plan.`);
       continue;
     }
@@ -269,7 +285,7 @@ export function browserCheckExecutionEvidenceErrors(input: {
   return errors;
 }
 
-function missingResult(item: BrowserCheckExecutionPlanItem, run: number, diagnostic: string): BrowserCheckResult {
+function missingResult(plan: BrowserCheckExecutionPlan, item: BrowserCheckExecutionPlanItem, run: number, diagnostic: string): BrowserCheckResult {
   const at = nowIso();
   return {
     provider: item.plannedProvider,
@@ -286,6 +302,7 @@ function missingResult(item: BrowserCheckExecutionPlanItem, run: number, diagnos
     pageErrors: [],
     networkErrors: [],
     execution: {
+      planId: plan.planId,
       checkId: item.checkId,
       projectIndex: item.projectIndex,
       checkIndex: item.checkIndex,
@@ -331,7 +348,7 @@ export function reconcileBrowserCheckExecution(
     .join("; ");
   const synthesized = initial.items.flatMap(item => {
     const planItem = plan.items.find(candidate => candidate.checkId === item.checkId)!;
-    return item.missingRuns.map(run => missingResult(planItem, run, diagnostic));
+    return item.missingRuns.map(run => missingResult(plan, planItem, run, diagnostic));
   });
   const results = [...providerResults, ...synthesized];
   if (initial.invalidResultCount || initial.duplicateResultCount) {

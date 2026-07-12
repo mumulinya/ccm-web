@@ -42,7 +42,7 @@ const path = __importStar(require("path"));
 const child_process_1 = require("child_process");
 const utils_1 = require("../../core/utils");
 const PET_WEB_ASSETS_DIR = path.join(utils_1.PUBLIC_DIR, "pets");
-const PET_DESKTOP_ASSETS_DIR = path.resolve(__dirname, "..", "..", "pet", "assets");
+const PET_DESKTOP_ASSETS_DIR = path.resolve(__dirname, "..", "..", "..", "pet", "assets");
 const MAX_PET_ASSET_BYTES = 2 * 1024 * 1024;
 function isPetRunning() {
     if (!fs.existsSync(utils_1.PET_PID_FILE_GLOBAL))
@@ -61,16 +61,16 @@ function isPetRunning() {
     }
 }
 function findElectronBin() {
-    const petExe = path.resolve(__dirname, "..", "..", "pet", "node_modules", "electron", "dist", "electron.exe");
+    const petExe = path.resolve(__dirname, "..", "..", "..", "pet", "node_modules", "electron", "dist", "electron.exe");
     if (fs.existsSync(petExe))
         return petExe;
-    const mainExe = path.resolve(__dirname, "..", "..", "node_modules", "electron", "dist", "electron.exe");
+    const mainExe = path.resolve(__dirname, "..", "..", "..", "node_modules", "electron", "dist", "electron.exe");
     if (fs.existsSync(mainExe))
         return mainExe;
-    const petBin = path.resolve(__dirname, "..", "..", "pet", "node_modules", ".bin", "electron");
+    const petBin = path.resolve(__dirname, "..", "..", "..", "pet", "node_modules", ".bin", "electron");
     if (fs.existsSync(petBin))
         return petBin;
-    const mainBin = path.resolve(__dirname, "..", "..", "node_modules", ".bin", "electron");
+    const mainBin = path.resolve(__dirname, "..", "..", "..", "node_modules", ".bin", "electron");
     if (fs.existsSync(mainBin))
         return mainBin;
     return null;
@@ -79,7 +79,7 @@ function launchPet(port) {
     try {
         if (isPetRunning())
             return { success: false, error: "桌面宠物已在运行" };
-        const petDir = path.resolve(__dirname, "..", "..", "pet");
+        const petDir = path.resolve(__dirname, "..", "..", "..", "pet");
         if (!fs.existsSync(path.join(petDir, "main.js")))
             return { success: false, error: "宠物应用未安装" };
         const electronBin = findElectronBin();

@@ -69,6 +69,7 @@ function providerResult(
     pageErrors: [],
     networkErrors: [],
     execution: {
+      planId: plan.planId,
       checkId: item.checkId,
       projectIndex: item.projectIndex,
       checkIndex: item.checkIndex,
@@ -178,6 +179,10 @@ export async function runTestAgentBrowserCheckExecutionCoverageSelfTest() {
     const manifestPath = files.manifestPath;
     const reportContract = validateTestAgentReportContract(report);
     const verdictContract = validateTestAgentVerdictContract(JSON.parse(fs.readFileSync(verdictPath, "utf-8")));
+    const excessiveRunsReport = JSON.parse(JSON.stringify(report));
+    excessiveRunsReport.metadata.browserCheckExecutionPlan.items[0].expectedRuns = 11;
+    excessiveRunsReport.metadata.browserCheckExecutionPlan.expectedRunCount += 10;
+    const excessiveRunsContract = validateTestAgentReportContract(excessiveRunsReport);
     const artifactVerification = verifyTestAgentArtifactManifestFile(manifestPath);
     const cli = formatTestAgentCliReportSummary(report);
     const markdown = buildTestAgentMarkdownReport(report);
@@ -223,6 +228,8 @@ export async function runTestAgentBrowserCheckExecutionCoverageSelfTest() {
       && stability.summary.items[0]?.syntheticBlockedRuns.join(",") === "3"
       && reportContract.valid
       && verdictContract.valid
+      && !excessiveRunsContract.valid
+      && excessiveRunsContract.errors.some(issue => issue.path?.includes("browserCheckExecutionPlan"))
       && cli.includes("Browser execution coverage: status=complete")
       && markdown.includes("## Browser Check Execution Coverage")
       && markdown.includes("runs=2/2")
@@ -243,6 +250,7 @@ export async function runTestAgentBrowserCheckExecutionCoverageSelfTest() {
       stability: stability.summary,
       reportContract,
       verdictContract,
+      excessiveRunsContract,
       artifactVerification,
       tamperedMissingContract,
       tamperedMissingVerification,

@@ -37,6 +37,8 @@ export interface GlobalMissionSupervisorRuntime {
     onTerminal?: (record: GlobalMissionSupervisorRecord, outcome: "failed" | "cancelled", report: any) => Promise<void> | void;
     now?: () => number;
 }
+export declare function mergeGlobalMissionWaitingUserIncidents(existing?: any[], incoming?: any[], at?: string): any[];
+export declare function shouldScheduleGlobalMissionSupervisor(record: any, now?: number): boolean;
 export declare function buildGlobalMissionFinalReport(snapshot: any): {
     status: string;
     completed: boolean;
@@ -105,6 +107,11 @@ export declare function runGlobalMissionSupervisorAsyncSelfTest(): Promise<{
     checks: {
         asyncRecoveryActionPersisted: boolean;
         restartReloadKeepsIdentity: boolean;
+        waitingUserIsRestoredWithoutAutomaticAdvance: boolean;
+        monitoringRunRemainsSchedulable: boolean;
+        repeatedWaitingIncidentIsMerged: boolean;
+        waitingUserSupplementResumesSameMission: boolean;
+        waitingIncidentMarkedResolved: any;
         pauseWorks: boolean;
         resumeWorks: boolean;
         updateGoalUsesActualContinuationKind: boolean;

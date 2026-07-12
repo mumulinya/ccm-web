@@ -1665,8 +1665,13 @@ async function finalizePlaywrightBrowserArtifacts(input) {
     }
     try {
         await input.browserContext?.close?.();
+        if (input.lifecycleResourceId)
+            input.lifecycle?.released(input.lifecycleResourceId);
     }
-    catch { }
+    catch (error) {
+        if (input.lifecycleResourceId)
+            input.lifecycle?.cleanupFailed(input.lifecycleResourceId, error.message || String(error));
+    }
     const trace = browserEvidenceArtifact("trace", "Playwright trace", input.tracePath, "playwright:tracing", "application/zip");
     const har = browserEvidenceArtifact("har", "Playwright HAR", input.harPath, "playwright:recordHar", "application/json");
     if (trace)
@@ -2504,6 +2509,7 @@ async function runBrowserCheck(browser, context, project, check, index) {
     const url = (0, utils_1.resolveUrl)(project.targetUrl, check.url || project.targetUrl);
     let page = null;
     let browserContext = null;
+    let lifecycleResourceId = "";
     let traceStarted = false;
     const credentialEnvNames = (0, authentication_1.browserCheckAuthenticationEnvNames)(check);
     const authenticationConfigured = credentialEnvNames.length > 0 || (0, authentication_1.browserCheckHasStorageState)(check);
@@ -2552,6 +2558,12 @@ async function runBrowserCheck(browser, context, project, check, index) {
             ...(collectBrowserArtifacts ? { recordHar: { path: harPath, content: "attach" } } : {}),
             ...(collectBrowserVideo ? { recordVideo: { dir: (0, utils_1.ensureDir)(path.join(workOrder.options.artifactDir, "browser-videos")), size: { width: 1366, height: 900 } } } : {}),
         });
+        lifecycleResourceId = context.runtime.browserResourceLifecycle?.acquire({
+            planId: String(context.workOrder.metadata?.browserCheckExecutionPlan?.planId || ""),
+            provider: "playwright",
+            resourceType: "browser_context",
+            scope: `${project.name}/${name}/${index + 1}`,
+        }) || "";
         await grantClipboardPermissions(browserContext, monitoredOrigins);
         await grantBrowserContextPermissions(browserContext, monitoredOrigins, contextOptions.permissions || []);
         if (collectBrowserArtifacts && browserContext.tracing?.start) {
@@ -2741,6 +2753,8 @@ async function runBrowserCheck(browser, context, project, check, index) {
             tracePath,
             harPath,
             collectVideo: collectBrowserVideo,
+            lifecycle: context.runtime.browserResourceLifecycle,
+            lifecycleResourceId,
         }));
         const failed = steps.some(step => step.status === "failed");
         return {
@@ -2811,13 +2825,20 @@ async function runBrowserCheck(browser, context, project, check, index) {
                 tracePath,
                 harPath,
                 collectVideo: collectBrowserVideo,
+                lifecycle: context.runtime.browserResourceLifecycle,
+                lifecycleResourceId,
             }));
         }
         else {
             try {
                 await page?.context?.().close?.();
+                if (lifecycleResourceId)
+                    context.runtime.browserResourceLifecycle?.released(lifecycleResourceId);
             }
-            catch { }
+            catch (closeError) {
+                if (lifecycleResourceId)
+                    context.runtime.browserResourceLifecycle?.cleanupFailed(lifecycleResourceId, closeError.message || String(closeError));
+            }
         }
         return {
             provider: "playwright",
@@ -2867,6 +2888,7 @@ async function createPlaywrightMultiSessionRuntime(input) {
     const harPath = collectBrowserArtifacts ? path.join(evidenceDir, `${artifactBase}.har`) : "";
     const monitoredOrigins = new Set([originOf(project.targetUrl), originOf(initialUrl)].filter(Boolean));
     let browserContext = null;
+    let lifecycleResourceId = "";
     try {
         const storageStateSource = (0, authentication_1.browserStorageStatePath)(session) ? session : check;
         const loadedStorageState = (0, authentication_1.loadBrowserStorageState)(project, storageStateSource);
@@ -2895,6 +2917,12 @@ async function createPlaywrightMultiSessionRuntime(input) {
             ...(collectBrowserArtifacts ? { recordHar: { path: harPath, content: "attach" } } : {}),
             ...(collectBrowserVideo ? { recordVideo: { dir: (0, utils_1.ensureDir)(path.join(workOrder.options.artifactDir, "browser-videos")), size: { width: viewport.width, height: viewport.height } } } : {}),
         });
+        lifecycleResourceId = providerContext.runtime.browserResourceLifecycle?.acquire({
+            planId: String(workOrder.metadata?.browserCheckExecutionPlan?.planId || ""),
+            provider: "playwright",
+            resourceType: "browser_context",
+            scope: `${project.name}/${checkName}/${sessionName}`,
+        }) || "";
         await grantClipboardPermissions(browserContext, monitoredOrigins);
         await grantBrowserContextPermissions(browserContext, monitoredOrigins, contextOptions.permissions || []);
         let traceStarted = false;
@@ -2935,6 +2963,7 @@ async function createPlaywrightMultiSessionRuntime(input) {
             authentication,
             secretBindings: sessionSecretBindings,
             collectBrowserVideo,
+            lifecycleResourceId,
         };
         page.on("popup", (popup) => {
             const popupRecordIndex = runtime.popups.length;
@@ -3031,8 +3060,13 @@ async function createPlaywrightMultiSessionRuntime(input) {
     catch (error) {
         try {
             await browserContext?.close?.();
+            if (lifecycleResourceId)
+                providerContext.runtime.browserResourceLifecycle?.released(lifecycleResourceId);
         }
-        catch { }
+        catch (closeError) {
+            if (lifecycleResourceId)
+                providerContext.runtime.browserResourceLifecycle?.cleanupFailed(lifecycleResourceId, closeError.message || String(closeError));
+        }
         throw error;
     }
 }
@@ -3093,6 +3127,8 @@ async function finalizePlaywrightMultiSessionRuntime(input) {
         tracePath: runtime.tracePath,
         harPath: runtime.harPath,
         collectVideo: runtime.collectBrowserVideo,
+        lifecycle: providerContext.runtime.browserResourceLifecycle,
+        lifecycleResourceId: runtime.lifecycleResourceId,
     }));
     return {
         name: runtime.name,
@@ -3318,8 +3354,13 @@ async function runMultiSessionBrowserCheck(browser, context, project, check, ind
             infrastructureError ||= error.message || String(error);
             try {
                 await runtime.browserContext?.close?.();
+                if (runtime.lifecycleResourceId)
+                    context.runtime.browserResourceLifecycle?.released(runtime.lifecycleResourceId);
             }
-            catch { }
+            catch (closeError) {
+                if (runtime.lifecycleResourceId)
+                    context.runtime.browserResourceLifecycle?.cleanupFailed(runtime.lifecycleResourceId, closeError.message || String(closeError));
+            }
         }
     }
     const consoleMessages = runtimes.flatMap(runtime => runtime.consoleMessages.map(item => `[${runtime.name}] ${item}`));
@@ -3410,9 +3451,16 @@ exports.PlaywrightBrowserProvider = {
         }
         const results = [];
         let browser;
+        let browserLifecycleResourceId = "";
         try {
             const launched = await launchChromiumWithFallback(playwright, { headless: true });
             browser = launched.browser;
+            browserLifecycleResourceId = context.runtime.browserResourceLifecycle?.acquire({
+                planId: String(context.workOrder.metadata?.browserCheckExecutionPlan?.planId || ""),
+                provider: "playwright",
+                resourceType: "browser",
+                scope: "provider-run",
+            }) || "";
             context.workOrder.metadata = {
                 ...context.workOrder.metadata,
                 playwrightLaunch: {
@@ -3456,8 +3504,16 @@ exports.PlaywrightBrowserProvider = {
         finally {
             try {
                 await browser.close();
+                if (typeof browser.isConnected === "function" && browser.isConnected()) {
+                    throw new Error("Playwright browser remained connected after close().");
+                }
+                if (browserLifecycleResourceId)
+                    context.runtime.browserResourceLifecycle?.released(browserLifecycleResourceId);
             }
-            catch { }
+            catch (error) {
+                if (browserLifecycleResourceId)
+                    context.runtime.browserResourceLifecycle?.cleanupFailed(browserLifecycleResourceId, error.message || String(error));
+            }
         }
         return [...results, ...existingSessionBlocked];
     },

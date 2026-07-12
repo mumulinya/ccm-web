@@ -45,6 +45,22 @@ import {
   browserCheckExecutionEvidenceErrors,
   buildBrowserCheckExecutionCoverage,
 } from "./browser/check-execution-coverage";
+import {
+  browserToolEvidenceLineageErrors,
+  buildBrowserToolEvidenceLineage,
+} from "./browser/tool-evidence-lineage";
+import {
+  browserToolCallTimeoutEvidenceErrors,
+  buildBrowserToolCallTimeoutSummary,
+} from "./browser/tool-call-timeout";
+import {
+  browserEvidenceTemporalIntegrityErrors,
+  buildBrowserEvidenceTemporalIntegrity,
+} from "./browser/evidence-temporal-integrity";
+import {
+  browserResourceLifecycleErrors,
+  buildBrowserResourceLifecycleSummary,
+} from "./browser/resource-lifecycle";
 
 export interface TestAgentArtifactVerificationItem {
   type: TestAgentArtifactManifestItem["type"] | string;
@@ -1111,6 +1127,41 @@ function verifyBrowserCheckExecutionCoverageConsistency(report: TestAgentReport,
   }));
 }
 
+function verifyBrowserEvidenceTemporalIntegrityConsistency(report: TestAgentReport, errors: string[]) {
+  errors.push(...browserEvidenceTemporalIntegrityErrors(report));
+}
+
+function verifyBrowserResourceLifecycleConsistency(report: TestAgentReport, errors: string[]) {
+  errors.push(...browserResourceLifecycleErrors(report));
+}
+
+function verifyBrowserToolEvidenceLineageConsistency(report: TestAgentReport, errors: string[]) {
+  const hasSignal = report?.browserToolEvidenceLineage
+    || (report?.browserResults || []).some(result => (result.browserToolCallIds || []).length)
+    || (report?.browserToolCalls || []).some(record => record.browserExecution);
+  if (!hasSignal) return;
+  errors.push(...browserToolEvidenceLineageErrors({
+    browserResults: report?.browserResults || [],
+    browserToolCalls: report?.browserToolCalls || [],
+    summary: report?.browserToolEvidenceLineage,
+    reportStatus: report?.status,
+  }));
+}
+
+function verifyBrowserToolCallTimeoutConsistency(report: TestAgentReport, errors: string[]) {
+  const hasSignal = report?.browserToolCallTimeoutSummary
+    || (report?.browserToolCalls || []).some(record =>
+      record.timeoutMs !== undefined || record.timedOut !== undefined || record.abortRequested !== undefined
+    );
+  if (!hasSignal) return;
+  errors.push(...browserToolCallTimeoutEvidenceErrors({
+    browserResults: report?.browserResults || [],
+    browserToolCalls: report?.browserToolCalls || [],
+    summary: report?.browserToolCallTimeoutSummary,
+    reportStatus: report?.status,
+  }));
+}
+
 function verifyReportVerdictConsistency(
   manifest: TestAgentArtifactManifest,
   manifestPath: string,
@@ -1180,6 +1231,10 @@ function verifyReportVerdictConsistency(
     report?.status === "passed"
       && report?.recommendation === "accept"
       && ["verified", "waived"].includes(String(report?.adversarialEvidenceSummary?.status || ""))
+      && (!report?.browserCheckExecutionCoverage || report.browserCheckExecutionCoverage.status === "complete")
+      && report?.browserEvidenceTemporalIntegrity?.status === "complete"
+      && report?.browserResourceLifecycleSummary?.status === "complete"
+      && (!report?.browserToolEvidenceLineage || report.browserToolEvidenceLineage.status === "complete")
       && report?.acceptanceEvidenceGateSummary?.canAccept === true,
     errors,
   );
@@ -1269,6 +1324,63 @@ function verifyReportVerdictConsistency(
     expectEqual("verdict.evidenceSummary.browserDuplicateResults", verdict?.evidenceSummary?.browserDuplicateResults, expectedCoverage?.duplicateResultCount || 0, errors);
     expectEqual("verdict.evidenceSummary.browserInvalidResults", verdict?.evidenceSummary?.browserInvalidResults, expectedCoverage?.invalidResultCount || 0, errors);
   }
+  if (report?.browserEvidenceTemporalIntegrity || verdict?.browserEvidenceTemporalIntegrity) {
+    const expectedTemporal = buildBrowserEvidenceTemporalIntegrity({
+      startedAt: report?.startedAt || "",
+      finishedAt: report?.finishedAt || "",
+      durationMs: Number(report?.durationMs),
+      plan: report?.metadata?.browserCheckExecutionPlan,
+      browserResults: report?.browserResults || [],
+      browserToolCalls: report?.browserToolCalls || [],
+    });
+    expectEqual("report.browserEvidenceTemporalIntegrity", report?.browserEvidenceTemporalIntegrity || null, expectedTemporal, errors);
+    expectEqual("verdict.browserEvidenceTemporalIntegrity", verdict?.browserEvidenceTemporalIntegrity || null, report?.browserEvidenceTemporalIntegrity || null, errors);
+    expectEqual("verdict.evidenceSummary.browserTemporalInvalidItems", verdict?.evidenceSummary?.browserTemporalInvalidItems, expectedTemporal.invalidItemCount, errors);
+    expectEqual("verdict.evidenceSummary.browserTemporalPlanMismatches", verdict?.evidenceSummary?.browserTemporalPlanMismatches, expectedTemporal.planMismatchCount, errors);
+    expectEqual(
+      "verdict.evidenceSummary.browserTemporalWindowViolations",
+      verdict?.evidenceSummary?.browserTemporalWindowViolations,
+      expectedTemporal.outsideReportWindowCount + expectedTemporal.outsideResultWindowCount,
+      errors,
+    );
+  }
+  if (report?.browserResourceLifecycleSummary || verdict?.browserResourceLifecycleSummary) {
+    const expectedLifecycle = buildBrowserResourceLifecycleSummary({
+      events: report?.browserResourceLifecycleEvents || [],
+      plan: report?.metadata?.browserCheckExecutionPlan,
+      reportStartedAt: report?.startedAt || "",
+      reportFinishedAt: report?.finishedAt || "",
+    });
+    expectEqual("report.browserResourceLifecycleSummary", report?.browserResourceLifecycleSummary || null, expectedLifecycle, errors);
+    expectEqual("verdict.browserResourceLifecycleSummary", verdict?.browserResourceLifecycleSummary || null, report?.browserResourceLifecycleSummary || null, errors);
+    expectEqual("verdict.evidenceSummary.browserOwnedResources", verdict?.evidenceSummary?.browserOwnedResources, expectedLifecycle.ownedResourceCount, errors);
+    expectEqual("verdict.evidenceSummary.browserReleasedResources", verdict?.evidenceSummary?.browserReleasedResources, expectedLifecycle.releasedResourceCount, errors);
+    expectEqual("verdict.evidenceSummary.browserOpenResources", verdict?.evidenceSummary?.browserOpenResources, expectedLifecycle.openResourceCount, errors);
+    expectEqual("verdict.evidenceSummary.browserCleanupFailures", verdict?.evidenceSummary?.browserCleanupFailures, expectedLifecycle.cleanupFailureCount, errors);
+  }
+  if (report?.browserToolEvidenceLineage || verdict?.browserToolEvidenceLineage) {
+    const expectedLineage = buildBrowserToolEvidenceLineage(report?.browserResults || [], report?.browserToolCalls || []);
+    expectEqual("report.browserToolEvidenceLineage", report?.browserToolEvidenceLineage || null, expectedLineage, errors);
+    expectEqual("verdict.browserToolEvidenceLineage", verdict?.browserToolEvidenceLineage || null, report?.browserToolEvidenceLineage || null, errors);
+    expectEqual("verdict.evidenceSummary.browserToolLinkedResults", verdict?.evidenceSummary?.browserToolLinkedResults, expectedLineage.linkedResultCount, errors);
+    expectEqual("verdict.evidenceSummary.browserToolUnlinkedResults", verdict?.evidenceSummary?.browserToolUnlinkedResults, expectedLineage.unlinkedRequiredResultCount, errors);
+    expectEqual("verdict.evidenceSummary.browserToolLinkedCalls", verdict?.evidenceSummary?.browserToolLinkedCalls, expectedLineage.linkedToolCallCount, errors);
+    expectEqual("verdict.evidenceSummary.browserToolOrphanCalls", verdict?.evidenceSummary?.browserToolOrphanCalls, expectedLineage.orphanScopedToolCallCount, errors);
+    expectEqual("verdict.evidenceSummary.browserToolUnscopedCalls", verdict?.evidenceSummary?.browserToolUnscopedCalls, expectedLineage.unscopedToolCallCount, errors);
+    expectEqual(
+      "verdict.evidenceSummary.browserToolInvalidLinks",
+      verdict?.evidenceSummary?.browserToolInvalidLinks,
+      expectedLineage.missingToolCallReferenceCount + expectedLineage.foreignToolCallReferenceCount + expectedLineage.duplicateToolCallReferenceCount + expectedLineage.duplicateToolCallRecordCount,
+      errors,
+    );
+  }
+  if (report?.browserToolCallTimeoutSummary || verdict?.browserToolCallTimeoutSummary) {
+    const expectedTimeoutSummary = buildBrowserToolCallTimeoutSummary(report?.browserToolCalls || []);
+    expectEqual("report.browserToolCallTimeoutSummary", report?.browserToolCallTimeoutSummary || null, expectedTimeoutSummary, errors);
+    expectEqual("verdict.browserToolCallTimeoutSummary", verdict?.browserToolCallTimeoutSummary || null, report?.browserToolCallTimeoutSummary || null, errors);
+    expectEqual("verdict.evidenceSummary.browserToolTimedOutCalls", verdict?.evidenceSummary?.browserToolTimedOutCalls, expectedTimeoutSummary.timedOutCalls, errors);
+    expectEqual("verdict.evidenceSummary.browserToolAbortRequestedCalls", verdict?.evidenceSummary?.browserToolAbortRequestedCalls, expectedTimeoutSummary.abortRequestedCalls, errors);
+  }
   if (
     report?.browserRecoverySummary
     || verdict?.browserRecoverySummary
@@ -1324,6 +1436,10 @@ function verifyReportVerdictConsistency(
   verifyBrowserSessionEvidenceConsistency(report, errors);
   verifyBrowserStabilityEvidenceConsistency(report, errors);
   verifyBrowserCheckExecutionCoverageConsistency(report, errors);
+  verifyBrowserEvidenceTemporalIntegrityConsistency(report, errors);
+  verifyBrowserResourceLifecycleConsistency(report, errors);
+  verifyBrowserToolEvidenceLineageConsistency(report, errors);
+  verifyBrowserToolCallTimeoutConsistency(report, errors);
   verifyBrowserAuthenticationEvidenceConsistency(report, errors);
   verifyBrowserRecoveryEvidenceConsistency(report, errors);
   verifyBrowserActionEffectEvidenceConsistency(report, errors);
@@ -1369,6 +1485,126 @@ function browserExecutionCoverageEvidenceItem(
   };
 }
 
+function browserTemporalEvidenceItem(
+  reportItem: TestAgentArtifactManifestItem,
+  status: TestAgentArtifactVerificationItem["status"],
+  error?: string,
+): TestAgentArtifactVerificationItem {
+  return {
+    type: "browser_temporal_evidence",
+    title: "Browser evidence run provenance and temporal integrity",
+    path: reportItem.path,
+    status,
+    ...(error ? { error } : {}),
+  };
+}
+
+function browserResourceLifecycleEvidenceItem(
+  reportItem: TestAgentArtifactManifestItem,
+  status: TestAgentArtifactVerificationItem["status"],
+  error?: string,
+): TestAgentArtifactVerificationItem {
+  return {
+    type: "browser_resource_lifecycle_evidence",
+    title: "Browser resource lifecycle and cleanup integrity",
+    path: reportItem.path,
+    status,
+    ...(error ? { error } : {}),
+  };
+}
+
+function browserToolLineageEvidenceItem(
+  reportItem: TestAgentArtifactManifestItem,
+  status: TestAgentArtifactVerificationItem["status"],
+  error?: string,
+): TestAgentArtifactVerificationItem {
+  return {
+    type: "browser_tool_lineage_evidence",
+    title: "Browser tool-call evidence lineage integrity",
+    path: reportItem.path,
+    status,
+    ...(error ? { error } : {}),
+  };
+}
+
+function browserToolTimeoutEvidenceItem(
+  reportItem: TestAgentArtifactManifestItem,
+  status: TestAgentArtifactVerificationItem["status"],
+  error?: string,
+): TestAgentArtifactVerificationItem {
+  return {
+    type: "browser_tool_timeout_evidence",
+    title: "Browser tool-call timeout evidence integrity",
+    path: reportItem.path,
+    status,
+    ...(error ? { error } : {}),
+  };
+}
+
+function verifyReportBrowserToolTimeout(
+  manifestPath: string,
+  manifestFiles: TestAgentArtifactManifestItem[],
+  integrityItems: TestAgentArtifactVerificationItem[],
+) {
+  const reportIndex = manifestFiles.findIndex(item => item.type === "report_json");
+  if (reportIndex < 0) return [] as TestAgentArtifactVerificationItem[];
+  const reportItem = manifestFiles[reportIndex];
+  if (integrityItems[reportIndex]?.status !== "passed") {
+    return [browserToolTimeoutEvidenceItem(reportItem, "skipped", "Report artifact integrity did not pass, so browser tool timeout evidence could not be checked.")];
+  }
+  try {
+    const report = readJsonForSemantic(manifestPath, reportItem) as TestAgentReport;
+    const errors: string[] = [];
+    verifyBrowserToolCallTimeoutConsistency(report, errors);
+    return [browserToolTimeoutEvidenceItem(reportItem, errors.length ? "failed" : "passed", errors.join(" "))];
+  } catch (error: any) {
+    return [browserToolTimeoutEvidenceItem(reportItem, "failed", `Unable to verify browser tool timeout evidence: ${error.message || String(error)}`)];
+  }
+}
+
+function verifyReportBrowserToolLineage(
+  manifestPath: string,
+  manifestFiles: TestAgentArtifactManifestItem[],
+  integrityItems: TestAgentArtifactVerificationItem[],
+) {
+  const reportIndex = manifestFiles.findIndex(item => item.type === "report_json");
+  if (reportIndex < 0) return [] as TestAgentArtifactVerificationItem[];
+  const reportItem = manifestFiles[reportIndex];
+  if (integrityItems[reportIndex]?.status !== "passed") {
+    return [browserToolLineageEvidenceItem(reportItem, "skipped", "Report artifact integrity did not pass, so browser tool evidence lineage could not be checked.")];
+  }
+  try {
+    const report = readJsonForSemantic(manifestPath, reportItem) as TestAgentReport;
+    const errors: string[] = [];
+    verifyBrowserToolEvidenceLineageConsistency(report, errors);
+    const transcriptItem = manifestFiles.find(item => item.type === "browser_tool_transcript");
+    if ((report.browserToolCalls || []).length && !transcriptItem) {
+      errors.push("Browser tool calls exist without a transcript artifact.");
+    }
+    if (transcriptItem) {
+      const transcriptPath = resolveArtifactPath(manifestPath, transcriptItem.path);
+      const transcriptRecords = fs.readFileSync(transcriptPath, "utf-8")
+        .split(/\r?\n/)
+        .filter(Boolean)
+        .map((line, index) => {
+          try {
+            return JSON.parse(line);
+          } catch {
+            errors.push(`Browser tool transcript line ${index + 1} is not valid JSON.`);
+            return null;
+          }
+        })
+        .filter(Boolean);
+      if (!sameJson(transcriptRecords, report.browserToolCalls || [])) {
+        errors.push("Browser tool transcript records do not match report.browserToolCalls.");
+      }
+    }
+    return [browserToolLineageEvidenceItem(reportItem, errors.length ? "failed" : "passed", errors.join(" "))];
+  } catch (error: any) {
+    return [browserToolLineageEvidenceItem(reportItem, "failed", `Unable to verify browser tool evidence lineage: ${error.message || String(error)}`)];
+  }
+}
+
 function verifyReportBrowserExecutionCoverage(
   manifestPath: string,
   manifestFiles: TestAgentArtifactManifestItem[],
@@ -1387,6 +1623,48 @@ function verifyReportBrowserExecutionCoverage(
     return [browserExecutionCoverageEvidenceItem(reportItem, errors.length ? "failed" : "passed", errors.join(" "))];
   } catch (error: any) {
     return [browserExecutionCoverageEvidenceItem(reportItem, "failed", `Unable to read browser execution coverage: ${error.message || String(error)}`)];
+  }
+}
+
+function verifyReportBrowserTemporalEvidence(
+  manifestPath: string,
+  manifestFiles: TestAgentArtifactManifestItem[],
+  integrityItems: TestAgentArtifactVerificationItem[],
+) {
+  const reportIndex = manifestFiles.findIndex(item => item.type === "report_json");
+  if (reportIndex < 0) return [] as TestAgentArtifactVerificationItem[];
+  const reportItem = manifestFiles[reportIndex];
+  if (integrityItems[reportIndex]?.status !== "passed") {
+    return [browserTemporalEvidenceItem(reportItem, "skipped", "Report artifact integrity did not pass, so browser temporal evidence could not be checked.")];
+  }
+  try {
+    const report = readJsonForSemantic(manifestPath, reportItem) as TestAgentReport;
+    const errors: string[] = [];
+    verifyBrowserEvidenceTemporalIntegrityConsistency(report, errors);
+    return [browserTemporalEvidenceItem(reportItem, errors.length ? "failed" : "passed", errors.join(" "))];
+  } catch (error: any) {
+    return [browserTemporalEvidenceItem(reportItem, "failed", `Unable to verify browser temporal evidence: ${error.message || String(error)}`)];
+  }
+}
+
+function verifyReportBrowserResourceLifecycleEvidence(
+  manifestPath: string,
+  manifestFiles: TestAgentArtifactManifestItem[],
+  integrityItems: TestAgentArtifactVerificationItem[],
+) {
+  const reportIndex = manifestFiles.findIndex(item => item.type === "report_json");
+  if (reportIndex < 0) return [] as TestAgentArtifactVerificationItem[];
+  const reportItem = manifestFiles[reportIndex];
+  if (integrityItems[reportIndex]?.status !== "passed") {
+    return [browserResourceLifecycleEvidenceItem(reportItem, "skipped", "Report artifact integrity did not pass, so browser resource lifecycle evidence could not be checked.")];
+  }
+  try {
+    const report = readJsonForSemantic(manifestPath, reportItem) as TestAgentReport;
+    const errors: string[] = [];
+    verifyBrowserResourceLifecycleConsistency(report, errors);
+    return [browserResourceLifecycleEvidenceItem(reportItem, errors.length ? "failed" : "passed", errors.join(" "))];
+  } catch (error: any) {
+    return [browserResourceLifecycleEvidenceItem(reportItem, "failed", `Unable to verify browser resource lifecycle evidence: ${error.message || String(error)}`)];
   }
 }
 
@@ -1663,6 +1941,10 @@ export function verifyTestAgentArtifactManifest(manifest: TestAgentArtifactManif
   items.push(...verifyReportRecoveryEvidence(resolvedManifestPath, manifestFiles, items));
   items.push(...verifyReportActionEffectEvidence(resolvedManifestPath, manifestFiles, items));
   items.push(...verifyReportBrowserExecutionCoverage(resolvedManifestPath, manifestFiles, items));
+  items.push(...verifyReportBrowserTemporalEvidence(resolvedManifestPath, manifestFiles, items));
+  items.push(...verifyReportBrowserResourceLifecycleEvidence(resolvedManifestPath, manifestFiles, items));
+  items.push(...verifyReportBrowserToolLineage(resolvedManifestPath, manifestFiles, items));
+  items.push(...verifyReportBrowserToolTimeout(resolvedManifestPath, manifestFiles, items));
   items.push(...verifyReportAdversarialEvidence(resolvedManifestPath, manifestFiles, items));
   items.push(...verifyReportAcceptanceEvidence(resolvedManifestPath, manifestFiles, items));
   items.push(...verifyReportHttpPageResourceEvidence(resolvedManifestPath, manifestFiles, items));

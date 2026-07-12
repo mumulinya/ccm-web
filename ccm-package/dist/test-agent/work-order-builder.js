@@ -21,7 +21,22 @@ function projectName(project, index) {
     return text(project.name) || `project-${index + 1}`;
 }
 function completedTaskCriteria(tasks) {
-    return uniqueStrings(tasks).map(task => `Completed task is independently verified: ${task}`);
+    return uniqueStrings(tasks).map(completedTaskCriterion);
+}
+function completedTaskCriterion(task) {
+    return `Completed task is independently verified: ${task}`;
+}
+function normalizeCompletedTaskCoverage(items, completedTasks) {
+    const aliases = new Map(completedTasks.map(task => [task, completedTaskCriterion(task)]));
+    return items.map(item => {
+        const rawCoverage = uniqueStrings((0, utils_1.asArray)(item.coversAcceptanceCriteria || item.covers_acceptance_criteria));
+        if (!rawCoverage.length)
+            return item;
+        return {
+            ...item,
+            coversAcceptanceCriteria: rawCoverage.map(value => aliases.get(value) || value),
+        };
+    });
 }
 function inferRequiredChecks(projects, options) {
     const checks = [];
@@ -58,12 +73,13 @@ function inferRequiredChecks(projects, options) {
         add("adversarial");
     return uniqueStrings(checks);
 }
-function buildProject(project, index, warnings) {
+function buildProject(project, index, warnings, globalCompletedTasks) {
     const name = projectName(project, index);
     const workDir = text(project.workDir || project.work_dir);
     if (!workDir)
         warnings.push(`Project "${name}" is missing workDir; TestAgent validation will reject the work order until a workDir is supplied.`);
     const completedTasks = uniqueStrings((0, utils_1.asArray)(project.completedTasks || project.completed_tasks));
+    const coverageTaskAliases = uniqueStrings([...globalCompletedTasks, ...completedTasks]);
     const acceptanceCriteria = uniqueStrings((0, utils_1.asArray)(project.acceptanceCriteria || project.acceptance_criteria));
     const agentSummaryParts = [
         text(project.agentSummary || project.agent_summary),
@@ -81,10 +97,10 @@ function buildProject(project, index, warnings) {
         env: project.env,
         changedFiles: uniqueStrings((0, utils_1.asArray)(project.changedFiles || project.changed_files)),
         verificationCommands: uniqueStrings((0, utils_1.asArray)(project.verificationCommands || project.verification_commands)),
-        httpChecks: (0, utils_1.asArray)(project.httpChecks || project.http_checks || project.apiChecks || project.api_checks),
-        adversarialHttpChecks: (0, utils_1.asArray)(project.adversarialHttpChecks || project.adversarial_http_checks || project.adversarialApiChecks || project.adversarial_api_checks),
-        browserChecks: (0, utils_1.asArray)(project.browserChecks || project.browser_checks),
-        adversarialBrowserChecks: (0, utils_1.asArray)(project.adversarialBrowserChecks || project.adversarial_browser_checks),
+        httpChecks: normalizeCompletedTaskCoverage((0, utils_1.asArray)(project.httpChecks || project.http_checks || project.apiChecks || project.api_checks), coverageTaskAliases),
+        adversarialHttpChecks: normalizeCompletedTaskCoverage((0, utils_1.asArray)(project.adversarialHttpChecks || project.adversarial_http_checks || project.adversarialApiChecks || project.adversarial_api_checks), coverageTaskAliases),
+        browserChecks: normalizeCompletedTaskCoverage((0, utils_1.asArray)(project.browserChecks || project.browser_checks), coverageTaskAliases),
+        adversarialBrowserChecks: normalizeCompletedTaskCoverage((0, utils_1.asArray)(project.adversarialBrowserChecks || project.adversarial_browser_checks), coverageTaskAliases),
         adversarialBrowserProbeTemplates: (0, utils_1.asArray)(project.adversarialBrowserProbeTemplates || project.adversarial_browser_probe_templates),
         agentSummary: agentSummaryParts.join("\n"),
         risks: uniqueStrings((0, utils_1.asArray)(project.risks)),
@@ -92,14 +108,14 @@ function buildProject(project, index, warnings) {
 }
 function buildTestAgentWorkOrderFromHandoff(input) {
     const warnings = [];
+    const globalCompletedTasks = uniqueStrings((0, utils_1.asArray)(input.completedTasks || input.completed_tasks));
     const rawProjects = [
         ...(0, utils_1.asArray)(input.projects),
         ...(input.project ? [input.project] : []),
     ];
     if (!rawProjects.length)
         warnings.push("No project targets were supplied; TestAgent validation requires at least one project.");
-    const projects = rawProjects.map((project, index) => buildProject(project, index, warnings));
-    const globalCompletedTasks = uniqueStrings((0, utils_1.asArray)(input.completedTasks || input.completed_tasks));
+    const projects = rawProjects.map((project, index) => buildProject(project, index, warnings, globalCompletedTasks));
     const projectCompletedTasks = rawProjects.flatMap(project => (0, utils_1.asArray)(project.completedTasks || project.completed_tasks));
     const acceptanceCriteria = uniqueStrings([
         ...(0, utils_1.asArray)(input.acceptanceCriteria || input.acceptance_criteria),

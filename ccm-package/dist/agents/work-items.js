@@ -387,10 +387,22 @@ function buildMainAgentWorkItems(task = {}, options = {}) {
     const explicit = Array.isArray(task.work_items || task.workItems) ? (task.work_items || task.workItems) : [];
     const assignments = Array.isArray(summary.assignment_evidence) ? summary.assignment_evidence : [];
     const missionTargets = Array.isArray(task.mission_plan?.targets) ? task.mission_plan.targets : [];
+    const rehearsalPlan = Array.isArray(task.workflow_meta?.sandbox_rehearsal?.agent_plan)
+        ? task.workflow_meta.sandbox_rehearsal.agent_plan
+        : Array.isArray(task.sandbox_rehearsal?.agent_plan)
+            ? task.sandbox_rehearsal.agent_plan
+            : [];
     const explicitItems = explicit.map((item, index) => normalizeWorkItem(item, { taskId: task.id, scopeId: task.group_id || task.global_mission_id || task.id, index, now, source: item.source || "task_work_items" }));
     const derivedItems = [
         ...assignments.map((assignment, index) => assignmentToWorkItem(assignment, task, index)),
         ...(!assignments.length ? missionTargets.map((target, index) => missionTargetToWorkItem(target, task, index)) : []),
+        ...(!assignments.length && !missionTargets.length
+            ? rehearsalPlan.map((assignment, index) => assignmentToWorkItem({
+                ...assignment,
+                source: assignment.source || "sandbox_rehearsal_plan",
+                targetName: assignment.targetName || assignment.project,
+            }, task, index))
+            : []),
     ];
     const fallback = !derivedItems.length ? fallbackTaskWorkItem(task) : null;
     const filteredExplicit = derivedItems.length
@@ -641,6 +653,17 @@ function runMainAgentWorkItemSelfTest() {
         normalizeWorkItem({ id: "wi-2", subject: "接入页面", status: "completed" }, { taskId: "task-work-items", scopeId: "group-1", index: 2, now: "2026-07-07T00:00:00.000Z", source: "selftest" }),
         normalizeWorkItem({ id: "wi-3", subject: "运行验证", status: "completed", verification: ["npm test passed"] }, { taskId: "task-work-items", scopeId: "group-1", index: 3, now: "2026-07-07T00:00:00.000Z", source: "selftest" }),
     ]);
+    const rehearsalItems = buildMainAgentWorkItems({
+        id: "task-rehearsal-plan",
+        group_id: "group-1",
+        workflow_type: "daily_dev",
+        target_project: "coordinator",
+        workflow_meta: {
+            sandbox_rehearsal: {
+                agent_plan: [{ project: "runtime-project", task: "修改功能并运行验证", reason: "项目 Agent 负责实现" }],
+            },
+        },
+    }, { now: "2026-07-07T00:00:00.000Z" });
     const visibleSummaryText = JSON.stringify({
         unlockSummary,
         claimedSummary,
@@ -654,6 +677,10 @@ function runMainAgentWorkItemSelfTest() {
     });
     const checks = {
         derivesAssignments: items.length === 2,
+        rehearsalPlanTargetsExecutingProject: rehearsalItems.length === 1
+            && rehearsalItems[0].target === "runtime-project"
+            && rehearsalItems[0].owner === "runtime-project"
+            && rehearsalItems[0].source === "sandbox_rehearsal_plan",
         receiptCompletesDependency: items.find(item => item.target === "api")?.status === "completed",
         blocksBeforeDependencyDone: blockedBefore.find(item => item.target === "web")?.status === "blocked",
         claimAfterDependencyDone: claimWeb.ok && claimWeb.item?.status === "in_progress",

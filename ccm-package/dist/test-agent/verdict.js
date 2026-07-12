@@ -31,6 +31,12 @@ function artifactFiles(report) {
     };
 }
 function nextActionsFor(report, failedRequired, unknownRequired) {
+    if ((report.browserToolCallTimeoutSummary?.timedOutCalls || 0) > 0) {
+        return [
+            `Investigate ${report.browserToolCallTimeoutSummary.timedOutCalls} timed-out browser tool call(s) before accepting the delivery.`,
+            "Check the MCP browser server, page responsiveness, and executor AbortSignal handling, then rerun the exact linked browser check.",
+        ];
+    }
     if (report.status === "passed") {
         return [
             "Accept the delivery if it matches the user-facing goal.",
@@ -54,6 +60,24 @@ function nextActionsFor(report, failedRequired, unknownRequired) {
     }
     if (report.status === "partial") {
         const unknown = unknownRequired.map(item => item.check).join(", ");
+        if (report.browserResourceLifecycleSummary?.status !== "complete") {
+            return [
+                `Resolve browser resource cleanup before accepting: ${report.browserResourceLifecycleSummary?.openResourceCount || 0} resource(s) remain open and ${report.browserResourceLifecycleSummary?.cleanupFailureCount || 0} cleanup operation(s) failed.`,
+                "Inspect browser resource lifecycle events, fix the owning provider close path, and rerun the exact browser checks.",
+            ];
+        }
+        if (report.browserEvidenceTemporalIntegrity?.status !== "complete") {
+            return [
+                `Re-run browser verification with fresh evidence: ${report.browserEvidenceTemporalIntegrity?.invalidItemCount || 0} temporal evidence item(s) are invalid.`,
+                "Do not reuse browser results or tool calls from another execution plan; inspect the temporal evidence items for timestamp, duration, and window violations.",
+            ];
+        }
+        if (report.browserToolEvidenceLineage && report.browserToolEvidenceLineage.status !== "complete") {
+            return [
+                `Re-run MCP browser checks with attributable tool evidence: ${report.browserToolEvidenceLineage.unlinkedRequiredResultCount} result(s) are unlinked and ${report.browserToolEvidenceLineage.orphanScopedToolCallCount + report.browserToolEvidenceLineage.unscopedToolCallCount} call(s) are orphaned or unscoped.`,
+                "Use browser tool evidence lineage items to preserve the exact tool-call IDs for each check and run.",
+            ];
+        }
         if (report.browserCheckExecutionCoverage && report.browserCheckExecutionCoverage.status !== "complete") {
             return [
                 `Run every planned browser check before accepting: ${report.browserCheckExecutionCoverage.missingRunCount} run(s) are missing and ${report.browserCheckExecutionCoverage.duplicateResultCount + report.browserCheckExecutionCoverage.invalidResultCount} result(s) are invalid.`,
@@ -103,6 +127,9 @@ function buildTestAgentVerdict(report) {
         && report.recommendation === "accept"
         && ["verified", "waived"].includes(report.adversarialEvidenceSummary.status)
         && (!report.browserCheckExecutionCoverage || report.browserCheckExecutionCoverage.status === "complete")
+        && report.browserEvidenceTemporalIntegrity?.status === "complete"
+        && report.browserResourceLifecycleSummary?.status === "complete"
+        && (!report.browserToolEvidenceLineage || report.browserToolEvidenceLineage.status === "complete")
         && report.acceptanceEvidenceGateSummary.canAccept;
     const requiredCheckSummary = (0, required_check_summary_1.buildRequiredCheckSummary)(report.requiredCheckCoverage);
     const acceptanceSummary = (0, acceptance_summary_1.buildAcceptanceSummary)(report.acceptanceCoverage);
@@ -138,6 +165,17 @@ function buildTestAgentVerdict(report) {
             httpConcurrentBlocked: report.httpConcurrencySummary?.blocked || 0,
             browserChecks: countStatuses(report.browserResults),
             browserToolCalls: countStatuses(report.browserToolCalls),
+            browserToolLinkedResults: report.browserToolEvidenceLineage?.linkedResultCount || 0,
+            browserToolUnlinkedResults: report.browserToolEvidenceLineage?.unlinkedRequiredResultCount || 0,
+            browserToolLinkedCalls: report.browserToolEvidenceLineage?.linkedToolCallCount || 0,
+            browserToolOrphanCalls: report.browserToolEvidenceLineage?.orphanScopedToolCallCount || 0,
+            browserToolUnscopedCalls: report.browserToolEvidenceLineage?.unscopedToolCallCount || 0,
+            browserToolInvalidLinks: (report.browserToolEvidenceLineage?.missingToolCallReferenceCount || 0)
+                + (report.browserToolEvidenceLineage?.foreignToolCallReferenceCount || 0)
+                + (report.browserToolEvidenceLineage?.duplicateToolCallReferenceCount || 0)
+                + (report.browserToolEvidenceLineage?.duplicateToolCallRecordCount || 0),
+            browserToolTimedOutCalls: report.browserToolCallTimeoutSummary?.timedOutCalls || 0,
+            browserToolAbortRequestedCalls: report.browserToolCallTimeoutSummary?.abortRequestedCalls || 0,
             browserNetworkErrors: browserNetworkErrorCount(report),
             browserActions: browserInteractionCount(report, "actionCount"),
             browserFailedActions: browserInteractionCount(report, "failedActions"),
@@ -161,6 +199,14 @@ function buildTestAgentVerdict(report) {
             browserMissingRuns: report.browserCheckExecutionCoverage?.missingRunCount || 0,
             browserDuplicateResults: report.browserCheckExecutionCoverage?.duplicateResultCount || 0,
             browserInvalidResults: report.browserCheckExecutionCoverage?.invalidResultCount || 0,
+            browserTemporalInvalidItems: report.browserEvidenceTemporalIntegrity?.invalidItemCount || 0,
+            browserTemporalPlanMismatches: report.browserEvidenceTemporalIntegrity?.planMismatchCount || 0,
+            browserTemporalWindowViolations: (report.browserEvidenceTemporalIntegrity?.outsideReportWindowCount || 0)
+                + (report.browserEvidenceTemporalIntegrity?.outsideResultWindowCount || 0),
+            browserOwnedResources: report.browserResourceLifecycleSummary?.ownedResourceCount || 0,
+            browserReleasedResources: report.browserResourceLifecycleSummary?.releasedResourceCount || 0,
+            browserOpenResources: report.browserResourceLifecycleSummary?.openResourceCount || 0,
+            browserCleanupFailures: report.browserResourceLifecycleSummary?.cleanupFailureCount || 0,
             browserRecoveryAttempts: report.browserRecoverySummary?.attempted || 0,
             browserRecoveredOperations: report.browserRecoverySummary?.recovered || 0,
             browserFailedRecoveries: report.browserRecoverySummary?.failed || 0,
@@ -189,6 +235,10 @@ function buildTestAgentVerdict(report) {
         browserMultiSessionSummary: report.browserMultiSessionSummary,
         browserStabilitySummary: report.browserStabilitySummary,
         browserCheckExecutionCoverage: report.browserCheckExecutionCoverage,
+        browserEvidenceTemporalIntegrity: report.browserEvidenceTemporalIntegrity,
+        browserResourceLifecycleSummary: report.browserResourceLifecycleSummary,
+        browserToolEvidenceLineage: report.browserToolEvidenceLineage,
+        browserToolCallTimeoutSummary: report.browserToolCallTimeoutSummary,
         browserRecoverySummary: report.browserRecoverySummary,
         browserActionEffectSummary: report.browserActionEffectSummary,
         adversarialEvidenceSummary: report.adversarialEvidenceSummary,

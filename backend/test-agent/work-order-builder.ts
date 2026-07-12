@@ -103,7 +103,23 @@ function projectName(project: TestAgentHandoffProject, index: number) {
 }
 
 function completedTaskCriteria(tasks: any[]) {
-  return uniqueStrings(tasks).map(task => `Completed task is independently verified: ${task}`);
+  return uniqueStrings(tasks).map(completedTaskCriterion);
+}
+
+function completedTaskCriterion(task: string) {
+  return `Completed task is independently verified: ${task}`;
+}
+
+function normalizeCompletedTaskCoverage<T extends Record<string, any>>(items: T[], completedTasks: string[]) {
+  const aliases = new Map(completedTasks.map(task => [task, completedTaskCriterion(task)]));
+  return items.map(item => {
+    const rawCoverage = uniqueStrings(asArray(item.coversAcceptanceCriteria || item.covers_acceptance_criteria));
+    if (!rawCoverage.length) return item;
+    return {
+      ...item,
+      coversAcceptanceCriteria: rawCoverage.map(value => aliases.get(value) || value),
+    };
+  });
 }
 
 function inferRequiredChecks(projects: TestAgentProjectTarget[], options: TestAgentOptions | undefined) {
@@ -139,11 +155,12 @@ function inferRequiredChecks(projects: TestAgentProjectTarget[], options: TestAg
   return uniqueStrings(checks);
 }
 
-function buildProject(project: TestAgentHandoffProject, index: number, warnings: string[]): TestAgentProjectTarget {
+function buildProject(project: TestAgentHandoffProject, index: number, warnings: string[], globalCompletedTasks: string[]): TestAgentProjectTarget {
   const name = projectName(project, index);
   const workDir = text(project.workDir || project.work_dir);
   if (!workDir) warnings.push(`Project "${name}" is missing workDir; TestAgent validation will reject the work order until a workDir is supplied.`);
   const completedTasks = uniqueStrings(asArray(project.completedTasks || project.completed_tasks));
+  const coverageTaskAliases = uniqueStrings([...globalCompletedTasks, ...completedTasks]);
   const acceptanceCriteria = uniqueStrings(asArray(project.acceptanceCriteria || project.acceptance_criteria));
   const agentSummaryParts = [
     text(project.agentSummary || project.agent_summary),
@@ -161,10 +178,10 @@ function buildProject(project: TestAgentHandoffProject, index: number, warnings:
     env: project.env,
     changedFiles: uniqueStrings(asArray(project.changedFiles || project.changed_files)),
     verificationCommands: uniqueStrings(asArray(project.verificationCommands || project.verification_commands)),
-    httpChecks: asArray(project.httpChecks || project.http_checks || project.apiChecks || project.api_checks) as HttpCheckSpec[],
-    adversarialHttpChecks: asArray(project.adversarialHttpChecks || project.adversarial_http_checks || project.adversarialApiChecks || project.adversarial_api_checks) as HttpCheckSpec[],
-    browserChecks: asArray(project.browserChecks || project.browser_checks) as BrowserCheckSpec[],
-    adversarialBrowserChecks: asArray(project.adversarialBrowserChecks || project.adversarial_browser_checks) as BrowserCheckSpec[],
+    httpChecks: normalizeCompletedTaskCoverage(asArray(project.httpChecks || project.http_checks || project.apiChecks || project.api_checks) as HttpCheckSpec[], coverageTaskAliases),
+    adversarialHttpChecks: normalizeCompletedTaskCoverage(asArray(project.adversarialHttpChecks || project.adversarial_http_checks || project.adversarialApiChecks || project.adversarial_api_checks) as HttpCheckSpec[], coverageTaskAliases),
+    browserChecks: normalizeCompletedTaskCoverage(asArray(project.browserChecks || project.browser_checks) as BrowserCheckSpec[], coverageTaskAliases),
+    adversarialBrowserChecks: normalizeCompletedTaskCoverage(asArray(project.adversarialBrowserChecks || project.adversarial_browser_checks) as BrowserCheckSpec[], coverageTaskAliases),
     adversarialBrowserProbeTemplates: asArray(project.adversarialBrowserProbeTemplates || project.adversarial_browser_probe_templates) as BrowserProbeTemplateSpec[],
     agentSummary: agentSummaryParts.join("\n"),
     risks: uniqueStrings(asArray(project.risks)),
@@ -173,13 +190,13 @@ function buildProject(project: TestAgentHandoffProject, index: number, warnings:
 
 export function buildTestAgentWorkOrderFromHandoff(input: TestAgentHandoff): TestAgentBuiltWorkOrder {
   const warnings: string[] = [];
+  const globalCompletedTasks = uniqueStrings(asArray(input.completedTasks || input.completed_tasks));
   const rawProjects = [
     ...asArray(input.projects),
     ...(input.project ? [input.project] : []),
   ] as TestAgentHandoffProject[];
   if (!rawProjects.length) warnings.push("No project targets were supplied; TestAgent validation requires at least one project.");
-  const projects = rawProjects.map((project, index) => buildProject(project, index, warnings));
-  const globalCompletedTasks = uniqueStrings(asArray(input.completedTasks || input.completed_tasks));
+  const projects = rawProjects.map((project, index) => buildProject(project, index, warnings, globalCompletedTasks));
   const projectCompletedTasks = rawProjects.flatMap(project => asArray(project.completedTasks || project.completed_tasks));
   const acceptanceCriteria = uniqueStrings([
     ...asArray(input.acceptanceCriteria || input.acceptance_criteria),

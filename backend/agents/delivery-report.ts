@@ -2207,7 +2207,20 @@ export function buildMainAgentDeliveryReport(input: MainAgentDeliveryReportInput
       ...(Array.isArray(input.workchain?.technical_details) ? input.workchain.technical_details : []),
       ...(Array.isArray(input.technical?.technical_details) ? input.technical.technical_details : []),
     ],
-    raw_report: input.report?.schema === "ccm-main-agent-delivery-report-v1" ? input.report.raw_report || null : input.report || null,
+    raw_report: (() => {
+      const rep = input.report?.schema === "ccm-main-agent-delivery-report-v1" ? input.report.raw_report || null : input.report || null;
+      if (!rep || typeof rep !== "object") return rep;
+      try {
+        const clean = { ...rep } as any;
+        delete clean.delivery_report;
+        delete clean.deliveryReport;
+        delete clean.raw_report;
+        delete clean.rawReport;
+        return clean;
+      } catch (e) {
+        return null;
+      }
+    })(),
   };
 }
 

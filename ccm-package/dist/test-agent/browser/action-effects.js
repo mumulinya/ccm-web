@@ -378,7 +378,15 @@ async function verifyBrowserActionEffect(input) {
     let changed = [];
     const deadline = started + timeoutMs;
     do {
-        after = buildBrowserActionEffectSnapshot(await input.capture().catch(() => ({})), requestedSignals);
+        let observation = {};
+        try {
+            observation = await input.capture();
+        }
+        catch (error) {
+            if (input.rethrowCaptureError?.(error))
+                throw error;
+        }
+        after = buildBrowserActionEffectSnapshot(observation, requestedSignals);
         changed = changedSignals(before, after);
         if (changed.length)
             break;

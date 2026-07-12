@@ -885,6 +885,46 @@ export declare function readGroupCompactBoundaryReplayRepairLedger(groupId: stri
 export declare function getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId: string): string;
 export declare function getGroupReplayRepairDispatchPlanLedgerFile(groupId: string): string;
 export declare function readGroupCompactBoundaryReplayRepairWorkItems(groupId: string): any;
+export declare function compactGroupReplayRepairWorkItemLedgerRetention(groupId: string, options?: any): {
+    schema: string;
+    version: number;
+    groupId: string;
+    file: string;
+    latestReplay: any;
+    items: any[];
+    stats: {
+        total: number;
+        openItemCount: number;
+        pendingCount: number;
+        inProgressCount: number;
+        blockedCount: number;
+        completedCount: number;
+        cancelledCount: number;
+    };
+    retention: {
+        schema: string;
+        policy: string;
+        group_id: string;
+        input_count: number;
+        accepted_count: number;
+        deduplicated_count: number;
+        retained_count: number;
+        dropped_count: number;
+        cross_group_rejected_count: number;
+        protected_open_count: number;
+        protected_latest_verified_proof_count: number;
+        protected_conflict_resolution_count: number;
+        recent_terminal_limit: number;
+        dropped_open_count: number;
+        dropped_verified_proof_count: number;
+        dropped_conflict_resolution_count: number;
+        dropped_by_status: Record<string, number>;
+        dropped_digest: string;
+        cross_group_rejected_digest: string;
+        compacted_at: string;
+    };
+    updatedAt: any;
+};
 export declare function buildReplayRepairMainAgentDispatchCandidates(groupId: string, options?: any): {
     schema: string;
     groupId: string;
@@ -6155,6 +6195,8 @@ export declare function runMemoryCenterWorkerContextPacketCompactOutcomeLedgerSe
         taskPreservedOutcomeCount: any;
         providerRankingProvenanceRequiredCount: any;
         providerRankingProvenancePreservedCount: any;
+        completionMemoryPreservationRequiredCount: any;
+        completionMemoryPreservedCount: any;
         totalTokenDelta: any;
         totalFreeTokenDelta: any;
     };
@@ -8770,6 +8812,440 @@ export declare function runMemoryCenterPostCompactReceiptMemoryUsageRepairComple
         requiredDocs: any;
     };
 };
+export declare function runMemoryCenterPostCompactReceiptMemoryUsageRepairCompletionCompactionPreservationSelfTest(): {
+    pass: boolean;
+    checks: {
+        orchestratorFourStrategySelfTestPasses: boolean;
+        reportCoversAllPersistedStrategies: boolean;
+        persistedProofKeepsExactIdentityAndAuthority: any;
+        qualityCheckRegisteredAndPasses: boolean;
+    };
+    report: {
+        status: string;
+        coverageRate: number;
+        checkedGroupCount: any;
+        groupsCovered: any;
+        requiredOutcomeCount: any;
+        preservedOutcomeCount: any;
+        memoryFirstCount: any;
+        replayPartialCount: any;
+        metadataPartialCount: any;
+        ptlEmergencyCount: any;
+        metadataGapCount: any;
+    };
+    quality: {
+        status: any;
+        checked: any;
+        passed: any;
+    };
+    orchestrator: any;
+};
+export declare function runMemoryCenterPostCompactReceiptMemoryUsageRepairCompletionCompactionPreservationRepairSelfTest(): {
+    pass: boolean;
+    checks: {
+        idempotentWorkItem: boolean;
+        candidateExactAndNoRealTask: boolean;
+        briefSelfContainedAndNoRealTask: boolean;
+        wrongHistoricalAuthorityCannotClose: boolean;
+        crossGroupCorrectedOutcomeCannotClose: boolean;
+        correctedOutcomeStrictlyCloses: boolean;
+        readyDispatchRetiredAfterClosure: boolean;
+        closureQualityPasses: any;
+        correctedClosureAutomaticallyDistilled: boolean;
+        memoryCenterCreatedNoTask: boolean;
+    };
+    workItems: {
+        status: string;
+        groupCount: any;
+        checkedGroupCount: any;
+        groupsCovered: any;
+        requiredActionCount: any;
+        coveredItemCount: any;
+        openItemCount: any;
+        correctedRetryCompletedCount: any;
+    };
+    candidates: {
+        status: string;
+        checkedGroupCount: number;
+        expectedCandidateCount: any;
+        coveredCandidateCount: any;
+        metadataGapCount: any;
+    };
+    briefs: {
+        status: string;
+        checkedGroupCount: any;
+        expectedBriefCount: any;
+        coveredBriefCount: any;
+        metadataGapCount: any;
+    };
+    closure: {
+        status: string;
+        checkedGroupCount: any;
+        correctedRetryCompletedCount: any;
+        verifiedClosureCount: any;
+    };
+    quality: any;
+};
+export declare function runMemoryCenterPostCompactCompletionMemoryPreservationRepairClosureTypedMemoryWorkerContextSelfTest(): {
+    pass: boolean;
+    checks: {
+        indexLayerSelfTestPasses: boolean;
+        distillationIsIdempotent: boolean;
+        typedMemoryQualityCoversBothGroups: boolean;
+        repeatedFreshSessionRecallCoversBothGroups: boolean;
+        groupRecallIdentityIsIsolated: boolean;
+        packetCarriesClosureContract: boolean;
+        historicalClosureSessionsNeverBecomeCurrent: boolean;
+        renderedContextRequiresFreshUsageReceipt: boolean;
+    };
+    typedMemory: {
+        status: string;
+        checkedGroupCount: any;
+        groupsCovered: any;
+        expectedClosureCount: any;
+        coveredClosureCount: any;
+        archivedClosureCount: any;
+    };
+    workerContext: {
+        status: string;
+        checkedGroupCount: any;
+        groupsCovered: any;
+        expectedClosureCount: any;
+        firstSessionRecallCount: any;
+        secondSessionRecallCount: any;
+    };
+    contract: {
+        docRelPaths: any;
+        failedOutcomeIds: any;
+        correctedOutcomeIds: any;
+        currentTaskAgentSessionId: any;
+        currentNativeSessionId: any;
+    };
+};
+export declare function runMemoryCenterPostCompactCompletionMemoryPreservationClosureUsageFeedbackSelfTest(): {
+    pass: boolean;
+    checks: {
+        validUsedFeedbackPromotesRecall: boolean;
+        repeatedIgnoredFeedbackDeprioritizesGenericRecall: boolean;
+        exactCorrectedOutcomeStillRecalls: boolean;
+        invalidReceiptRequiresRepair: boolean;
+        duplicateScanIsIdempotent: boolean;
+        correctedReceiptClosesRepairAndRecovers: boolean;
+        feedbackSessionsStayGroupIsolated: boolean;
+        immutableClosureArchivesRemainUnchanged: boolean;
+        qualityChecksRegisteredAndPass: boolean;
+        memoryCenterCreatedNoRealTask: boolean;
+    };
+    receiptBefore: {
+        status: string;
+        coverageRate: number;
+        groupCount: any;
+        checkedGroupCount: any;
+        groupsCovered: any;
+        receiptContractCount: any;
+        coveredReceiptCount: any;
+        missingReceiptCoverageCount: number;
+        missingReceiptCount: any;
+        missingDocCoverageCount: any;
+        missingUsageOrReverifyCount: any;
+        missingBoundaryCount: any;
+        sessionMismatchCount: any;
+        repairedReceiptCount: any;
+        repairItemCount: any;
+        openRepairItemCount: any;
+        metadataGapCount: any;
+    };
+    usageFeedback: {
+        status: string;
+        checkedGroupCount: any;
+        feedbackCount: any;
+        validFeedbackCount: any;
+        distinctTaskSessionCount: any;
+        distinctNativeSessionCount: any;
+    };
+    receiptRepair: {
+        status: string;
+        checkedGroupCount: any;
+        noncompliantFeedbackCount: any;
+        repairCoveredCount: any;
+    };
+    recallPriority: {
+        status: string;
+        checkedGroupCount: any;
+        groupsCovered: any;
+        suppressedGroupCount: any;
+        immutableArchivePreservedCount: any;
+    };
+    correctedReceipt: {
+        status: string;
+        coverageRate: number;
+        groupCount: any;
+        checkedGroupCount: any;
+        groupsCovered: any;
+        receiptContractCount: any;
+        coveredReceiptCount: any;
+        missingReceiptCoverageCount: number;
+        missingReceiptCount: any;
+        missingDocCoverageCount: any;
+        missingUsageOrReverifyCount: any;
+        missingBoundaryCount: any;
+        sessionMismatchCount: any;
+        repairedReceiptCount: any;
+        repairItemCount: any;
+        openRepairItemCount: any;
+        metadataGapCount: any;
+    };
+    recommendations: {
+        used: any;
+        ignored: any;
+        invalid: any;
+        corrected: any;
+    };
+    quality: {
+        id: any;
+        status: any;
+        checked: any;
+        passed: any;
+    }[];
+};
+export declare function runMemoryCenterPostCompactCompletionMemoryPreservationClosureFeedbackAgingTaskFamilySelfTest(): {
+    pass: boolean;
+    checks: {
+        oldIgnoredFeedbackDecaysOutOfSuppression: boolean;
+        recentSameFamilyIgnoredStillSuppresses: boolean;
+        unrelatedTaskFamilyDoesNotInheritFeedback: boolean;
+        exactIdentityOverridesFamilySuppression: boolean;
+        groupsRemainIsolated: boolean;
+        agingMetadataIsExplicit: any;
+        qualityCheckPasses: boolean;
+        immutableClosureArchivesRemainUnchanged: boolean;
+        memoryCenterCreatedNoRealTask: boolean;
+    };
+    summaries: {
+        paymentA: {
+            recommendation: any;
+            weightedIgnoredCount: any;
+            matchedEntryCount: any;
+        };
+        searchA: {
+            recommendation: any;
+            weightedIgnoredCount: any;
+            matchedEntryCount: any;
+        };
+        unrelatedA: {
+            recommendation: any;
+            matchedEntryCount: any;
+        };
+        paymentB: {
+            recommendation: any;
+            weightedIgnoredCount: any;
+            matchedEntryCount: any;
+        };
+    };
+    aging: {
+        status: string;
+        checkedGroupCount: any;
+        groupsCovered: any;
+        taskFamilyCount: any;
+        staleFeedbackCount: any;
+        staleDecayedFamilyCount: any;
+        unrelatedMatchedEntryCount: any;
+    };
+    quality: {
+        id: any;
+        status: any;
+        checked: any;
+        passed: any;
+    };
+};
+export declare function runMemoryCenterPostCompactCompletionMemoryPreservationClosureFeedbackEvidenceConfidenceSelfTest(): {
+    pass: boolean;
+    checks: {
+        reusedSessionDuplicatesCollapseToOneEvidence: boolean;
+        duplicateBurstCannotSuppressRecall: boolean;
+        twoIndependentReliableSessionsCanSuppress: boolean;
+        providerAndSourceDiversityRaiseConfidence: boolean;
+        lowReliabilityStatusOnlyEvidenceCannotSuppress: boolean;
+        exactIdentityStillOverridesConfidentSuppression: boolean;
+        evidenceStaysGroupIsolated: boolean;
+        qualityCheckPassesWithoutAuthorization: boolean;
+        immutableClosureArchivesRemainUnchanged: boolean;
+        memoryCenterCreatedNoRealTask: boolean;
+    };
+    summaries: {
+        duplicateA: {
+            recommendation: any;
+            raw: any;
+            independent: any;
+            duplicates: any;
+            confidence: any;
+        };
+        sameSourceB: {
+            recommendation: any;
+            sessions: any;
+            confidence: any;
+        };
+        diverseB: {
+            recommendation: any;
+            providers: any;
+            sources: any;
+            confidence: any;
+        };
+        lowSourceC: {
+            recommendation: any;
+            sourceReliability: any;
+            confidence: any;
+        };
+    };
+    confidence: {
+        status: string;
+        checkedGroupCount: any;
+        groupsCovered: any;
+        taskFamilyCount: any;
+        rawMatchedEntryCount: any;
+        independentEvidenceCount: any;
+        correlatedDuplicateCount: any;
+        confidentSuppressionCount: any;
+    };
+    quality: {
+        id: any;
+        status: any;
+        checked: any;
+        passed: any;
+    };
+};
+export declare function runMemoryCenterPostCompactCompletionMemoryPreservationClosureFeedbackConflictArbitrationSelfTest(): {
+    pass: boolean;
+    checks: {
+        reliableOpposingBranchesTriggerConflict: boolean;
+        historicalMajorityCannotAutoSuppress: boolean;
+        bothEvidenceBranchesRemainAuditable: boolean;
+        workerContextRequiresCurrentSessionArbitration: boolean;
+        consistentIgnoredStillUsesConfidenceGate: boolean;
+        staleOppositionDoesNotCreateFalseConflict: boolean;
+        exactIdentityRemainsAvailable: boolean;
+        groupsRemainIsolated: any;
+        qualityCheckAndImmutableArchivePass: boolean;
+        memoryCenterCreatedNoRealTask: boolean;
+    };
+    summaries: {
+        conflictA: {
+            recommendation: any;
+            arbitrationState: any;
+            ratio: any;
+            positiveWeight: any;
+            ignoredWeight: any;
+        };
+        consistentB: {
+            recommendation: any;
+            conflictActive: any;
+        };
+        staleOppositionC: {
+            recommendation: any;
+            conflictActive: any;
+        };
+    };
+    conflict: {
+        status: string;
+        checkedGroupCount: any;
+        groupsCovered: any;
+        conflictFamilyCount: any;
+        coveredConflictFamilyCount: any;
+    };
+    quality: {
+        id: any;
+        status: any;
+        checked: any;
+        passed: any;
+    };
+};
+export declare function runMemoryCenterPostCompactCompletionMemoryPreservationClosureConflictResolutionSelfTest(): {
+    pass: boolean;
+    checks: {
+        wrongSessionCannotCreateResolution: boolean;
+        validUsedResolutionIsSessionBound: boolean;
+        validIgnoredResolutionStaysNeutral: boolean;
+        resolutionAutomaticallyDistillsTypedMemory: any;
+        duplicateReceiptScanIsIdempotent: boolean;
+        futureWorkerContextRecallsResolution: boolean;
+        historicalBranchesRemainPreserved: boolean;
+        laterReliableOppositionReopensConflict: boolean;
+        qualityAndGroupIsolationPass: boolean;
+        memoryCenterCreatedNoRealTask: boolean;
+    };
+    summaries: {
+        used: {
+            recommendation: any;
+            resolution: any;
+        };
+        ignored: {
+            recommendation: any;
+            resolution: any;
+        };
+        reopened: {
+            recommendation: any;
+            resolution: any;
+        };
+    };
+    resolution: {
+        status: string;
+        checkedGroupCount: any;
+        groupsCovered: any;
+        resolutionEntryCount: any;
+        archivedResolutionCount: any;
+        coveredResolutionCount: any;
+        activeResolutionCount: any;
+        reopenedResolutionCount: any;
+    };
+    resolutionGroups: any;
+    future: {
+        docRelPaths: any;
+        contract: any;
+        acceptance: any;
+        renderedHasResolution: boolean;
+    };
+    quality: {
+        id: any;
+        status: any;
+        checked: any;
+        passed: any;
+    };
+};
+export declare function runMemoryCenterPostCompactCompletionMemoryPreservationClosureConflictResolutionCompactionSelfTest(): {
+    pass: boolean;
+    checks: {
+        realFourStrategyIntegrationPasses: boolean;
+        exactResolutionIdentitySurvivesEveryStrategy: any;
+        reversibleBranchBoundarySurvives: any;
+        activeResolutionAcceptanceSurvivesMemoryAndReplay: boolean;
+        reopenedConflictAcceptanceSurvivesMetadataAndPtl: boolean;
+        recoveryBehaviorMatchesCompactStrategy: boolean;
+        tamperedResolutionIsRejected: any;
+        reportAndQualityPass: boolean;
+        memoryCenterCreatedNoRealTask: boolean;
+    };
+    report: {
+        status: string;
+        checkedGroupCount: any;
+        groupsCovered: any;
+        requiredOutcomeCount: any;
+        preservedOutcomeCount: any;
+        activeResolutionCount: any;
+        reopenedResolutionCount: any;
+        memoryFirstCount: any;
+        replayPartialCount: any;
+        metadataPartialCount: any;
+        ptlEmergencyCount: any;
+    };
+    scenarios: any;
+    tampered: any;
+    quality: {
+        id: any;
+        status: any;
+        checked: any;
+        passed: any;
+    };
+};
 export declare function runMemoryCenterCompactFileReferenceUsageDisciplineSelfTest(): {
     pass: boolean;
     checks: {
@@ -8788,6 +9264,196 @@ export declare function runMemoryCenterCompactFileReferenceUsageDisciplineSelfTe
         status: any;
         usedReference: any;
         unmentionedReference: any;
+    };
+};
+export declare function runMemoryCenterPostCompactCompletionMemoryPreservationClosureConflictResolutionCompactionRepairSelfTest(): {
+    pass: boolean;
+    checks: {
+        idempotentWorkItemsPerGroup: boolean;
+        candidatesCarryExactResolutionIdentity: boolean;
+        briefsAreSelfContainedAndNoRealTask: any;
+        staleSameAndCrossGroupOutcomesCannotClose: boolean;
+        oneGroupClosureCannotCloseAnother: boolean;
+        activeResolutionStrictlyCloses: boolean;
+        reopenedResolutionStrictlyCloses: any;
+        closureReportRequiresStrictResolutionProof: boolean;
+        immutableResolutionArchivePreserved: any;
+        memoryCenterCreatedNoRealTask: boolean;
+    };
+    workItems: {
+        status: string;
+        groupCount: any;
+        checkedGroupCount: any;
+        groupsCovered: any;
+        requiredActionCount: any;
+        coveredItemCount: any;
+        openItemCount: any;
+        correctedRetryCompletedCount: any;
+    };
+    candidates: {
+        status: string;
+        checkedGroupCount: number;
+        expectedCandidateCount: any;
+        coveredCandidateCount: any;
+        metadataGapCount: any;
+    };
+    briefs: {
+        status: string;
+        checkedGroupCount: any;
+        expectedBriefCount: any;
+        coveredBriefCount: any;
+        metadataGapCount: any;
+    };
+    closure: {
+        status: string;
+        checkedGroupCount: any;
+        correctedRetryCompletedCount: any;
+        verifiedClosureCount: any;
+    };
+};
+export declare function runMemoryCenterReplayRepairLedgerRetentionSafetySelfTest(): {
+    pass: boolean;
+    checks: {
+        oldOpenRepairSurvivesTerminalPressure: boolean;
+        latestStrictProofSurvives: boolean;
+        immutableConflictBranchIdentitySurvives: boolean;
+        supersededTerminalNoiseIsCompacted: boolean;
+        crossGroupRowsAreRejectedAndAudited: boolean;
+        compactingOneGroupDoesNotTouchAnother: boolean;
+        allResolutionBranchesRemainArchived: boolean;
+        secondGroupArchiveIsIndependent: boolean;
+        unresolvedOutcomeSurvivesPressure: boolean;
+        resolvedFailureCanBeCompactedAfterStrictCorrection: boolean;
+        outcomeCrossGroupRowsAreRejected: boolean;
+        retentionQualityChecksPass: boolean;
+        retentionNeverCreatesRealTask: boolean;
+    };
+    retentionA: {
+        schema: string;
+        policy: string;
+        group_id: string;
+        input_count: number;
+        accepted_count: number;
+        deduplicated_count: number;
+        retained_count: number;
+        dropped_count: number;
+        cross_group_rejected_count: number;
+        protected_open_count: number;
+        protected_latest_verified_proof_count: number;
+        protected_conflict_resolution_count: number;
+        recent_terminal_limit: number;
+        dropped_open_count: number;
+        dropped_verified_proof_count: number;
+        dropped_conflict_resolution_count: number;
+        dropped_by_status: Record<string, number>;
+        dropped_digest: string;
+        cross_group_rejected_digest: string;
+        compacted_at: string;
+    };
+    retentionB: {
+        schema: string;
+        policy: string;
+        group_id: string;
+        input_count: number;
+        accepted_count: number;
+        deduplicated_count: number;
+        retained_count: number;
+        dropped_count: number;
+        cross_group_rejected_count: number;
+        protected_open_count: number;
+        protected_latest_verified_proof_count: number;
+        protected_conflict_resolution_count: number;
+        recent_terminal_limit: number;
+        dropped_open_count: number;
+        dropped_verified_proof_count: number;
+        dropped_conflict_resolution_count: number;
+        dropped_by_status: Record<string, number>;
+        dropped_digest: string;
+        cross_group_rejected_digest: string;
+        compacted_at: string;
+    };
+    archiveA: {
+        archivedCount: any;
+        immutableBranchCount: any;
+        retentionPolicy: any;
+    };
+    outcomeRetention: any;
+    quality: any;
+};
+export declare function runMemoryCenterConflictResolutionColdArchiveSelfTest(): {
+    pass: boolean;
+    checks: {
+        hotIndexIsBounded: boolean;
+        manifestCoversEveryImmutableBranch: boolean;
+        lazyLookupReadsOnlyMatchingShard: boolean;
+        onDemandRestoreIsAuditOnlyAndBounded: boolean;
+        appendPreservesColdHistory: boolean;
+        shardsAreContentAddressed: boolean;
+        shardTamperIsDetectedAndBlocksRestore: boolean;
+        tamperedArchiveCannotBeRedistilled: boolean;
+        restoredShardPassesFullVerification: boolean;
+        manifestTamperIsDetected: any;
+        groupsRemainIsolated: boolean;
+        integrityQualityGatePasses: boolean;
+        coldArchiveCreatesNoRealTask: boolean;
+    };
+    archive: {
+        hotRowCount: any;
+        archivedCount: any;
+        shardCount: any;
+        manifestChecksum: any;
+    };
+    lookup: {
+        status: any;
+        shardsRead: any;
+        matchedRowCount: any;
+    };
+    tamper: {
+        shardStatus: any;
+        manifestStatus: any;
+    };
+    quality: {
+        id: any;
+        status: any;
+        checked: any;
+        passed: any;
+    };
+};
+export declare function runMemoryCenterConflictResolutionManifestGenerationGcSelfTest(): {
+    pass: boolean;
+    checks: {
+        currentAndPreviousGenerationsVerify: boolean;
+        generationChainLinksExactChecksums: boolean;
+        openRepairProtectsOrphanShard: any;
+        secondPassDeletesOnlyAfterRepairClosure: any;
+        deletionPreservesEveryCurrentRow: boolean;
+        firstDiscoveryNeverDeletesSameRun: any;
+        currentManifestCrashBlocksGc: boolean;
+        latestValidGenerationRecoversCurrentPointer: boolean;
+        previousGenerationTamperBlocksGc: boolean;
+        restoringPreviousGenerationRestoresChain: boolean;
+        quarantineTamperCannotBypassGrace: any;
+        quarantineAndGcRemainGroupIsolated: boolean;
+        generationGcQualityGatePasses: boolean;
+        manifestGcCreatesNoRealTask: boolean;
+    };
+    generation: {
+        current: any;
+        previous: any;
+        generationNumber: any;
+        recoverySimulationPassed: any;
+    };
+    quarantine: {
+        protected: any;
+        deleted: any;
+        firstDiscoveryDeleted: any;
+    };
+    recovery: any;
+    quality: {
+        id: any;
+        status: any;
+        checked: any;
+        passed: any;
     };
 };
 export declare function runMemoryCenterHistoricalCompactBoundaryReplaySelfTest(): {

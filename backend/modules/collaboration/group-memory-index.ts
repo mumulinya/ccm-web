@@ -11,6 +11,13 @@ export const GROUP_TYPED_MEMORY_MAX_INDEX_BYTES = 25_000;
 export const GROUP_TYPED_MEMORY_MAX_RECALL = 5;
 export const GROUP_TYPED_MEMORY_RECALL_LEDGER = ".recall-ledger.json";
 export const GROUP_TYPED_MEMORY_PRESSURE_RECALL_USAGE_LEDGER = ".pressure-recall-usage-ledger.json";
+export const GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_USAGE_LEDGER = ".post-compact-completion-memory-preservation-closure-usage-ledger.json";
+export const GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_USAGE_HALF_LIFE_DAYS = 14;
+export const GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_USAGE_STALE_AFTER_DAYS = 45;
+export const GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_TASK_FAMILY_RELEVANCE_THRESHOLD = 0.34;
+export const GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_EVIDENCE_CONFIDENCE_THRESHOLD = 0.45;
+export const GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_CONFLICT_MIN_BRANCH_WEIGHT = 0.6;
+export const GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_CONFLICT_RATIO_THRESHOLD = 0.25;
 export const GROUP_TYPED_MEMORY_PRESSURE_RECALL_USAGE_HALF_LIFE_DAYS = 21;
 export const GROUP_TYPED_MEMORY_PRESSURE_RECALL_USAGE_STALE_AFTER_DAYS = 60;
 export const GROUP_TYPED_MEMORY_PRESSURE_RECALL_USAGE_CROSS_GROUP_MAX_GROUPS = 24;
@@ -32,6 +39,11 @@ export const GROUP_PROVIDER_REPROOF_RECEIPT_CONSUMPTION_DISTILLATION_VERSION = 1
 export const GROUP_PROVIDER_RANKING_PROVENANCE_COMPACT_REPAIR_RECEIPT_CONSUMPTION_DISTILLATION_VERSION = 1;
 export const GROUP_POST_COMPACT_REINJECTION_REPAIR_RECEIPT_CONSUMPTION_DISTILLATION_VERSION = 1;
 export const GROUP_POST_COMPACT_RECEIPT_MEMORY_USAGE_REPAIR_COMPLETION_DISTILLATION_VERSION = 1;
+export const GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_REPAIR_CLOSURE_DISTILLATION_VERSION = 1;
+export const GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_CONFLICT_RESOLUTION_DISTILLATION_VERSION = 1;
+export const GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_CONFLICT_RESOLUTION_HOT_ROW_LIMIT = 160;
+export const GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_CONFLICT_RESOLUTION_COLD_ARCHIVE_VERSION = 1;
+export const GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_CONFLICT_RESOLUTION_COLD_ARCHIVE_DIR = ".archive/post-compact-completion-memory-preservation-closure-conflict-resolutions";
 export const GROUP_PROVIDER_RANKING_MEMORY_USAGE_RECEIPT_REPAIR_DISTILLATION_VERSION = 1;
 export const GROUP_IGNORE_MEMORY_RECEIPT_REPAIR_DISTILLATION_VERSION = 1;
 export const GROUP_PRESSURE_MEMORY_PROVENANCE_RECEIPT_REPAIR_DISTILLATION_VERSION = 1;
@@ -1033,6 +1045,700 @@ export function recordGroupTypedMemoryPressureRecallUsageLedger(groupId: string,
     duplicate_count: entries.length - newEntries.length,
     totals,
     updatedAt,
+  };
+}
+
+function getPostCompactCompletionMemoryPreservationClosureUsageLedgerFile(groupId: string) {
+  return path.join(getGroupTypedMemoryDir(groupId), GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_USAGE_LEDGER);
+}
+
+function normalizePostCompactCompletionMemoryPreservationClosureUsageState(value: any) {
+  const state = String(value || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if (["used", "applied", "consumed"].includes(state)) return "used";
+  if (["verified", "checked", "reverified"].includes(state)) return "verified";
+  if (["ignored", "not_used", "skipped"].includes(state)) return "ignored";
+  if (["mentioned", "missing", "unclassified"].includes(state)) return "mentioned";
+  return "";
+}
+
+const POST_COMPACT_CLOSURE_TASK_FAMILY_STOP_WORDS = new Set([
+  "agent", "child", "closure", "compact", "completion", "corrected", "current", "feedback", "memory",
+  "outcome", "post", "preservation", "receipt", "repair", "review", "session", "source", "task", "typed",
+  "verify", "verified", "worker", "context", "continue", "resume", "exact", "reverify", "usage",
+]);
+const POST_COMPACT_CLOSURE_TASK_FAMILY_CHINESE_STOP_BIGRAMS = new Set([
+  "记忆", "压缩", "修复", "回执", "会话", "上下", "下文", "任务", "继续", "当前", "源码", "验证", "群聊", "智能", "召回",
+]);
+
+function normalizePostCompactCompletionMemoryPreservationClosureTaskFamily(text: any, explicitKey: any = "") {
+  const explicit = String(explicitKey || "").trim().toLowerCase().replace(/[^a-z0-9._:-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 96);
+  const source = compactText(text || "", 1200).toLowerCase();
+  const asciiTokens = (source.match(/[a-z0-9_./:-]{3,}/g) || [])
+    .flatMap((token: string) => token.split(/[./:_-]+/g))
+    .map((token: string) => token.trim())
+    .filter((token: string) => token.length >= 3
+      && token.length <= 48
+      && !POST_COMPACT_CLOSURE_TASK_FAMILY_STOP_WORDS.has(token)
+      && !/^(phase)?\d+$/.test(token)
+      && !/^[a-f0-9]{16,}$/.test(token));
+  const chineseTokens: string[] = [];
+  for (const run of source.match(/[\u3400-\u9fff]{2,}/g) || []) {
+    for (let index = 0; index < run.length - 1 && chineseTokens.length < 32; index += 1) {
+      const token = run.slice(index, index + 2);
+      if (!POST_COMPACT_CLOSURE_TASK_FAMILY_CHINESE_STOP_BIGRAMS.has(token)) chineseTokens.push(token);
+    }
+  }
+  const tokens = uniqueStrings([...asciiTokens, ...chineseTokens], 40).sort();
+  return {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-task-family-v1",
+    key: explicit || (tokens.length ? `task-family-${checksum(tokens, 18)}` : ""),
+    tokens,
+    source_available: !!source,
+  };
+}
+
+function postCompactCompletionMemoryPreservationClosureTaskFamilyRelevance(entry: any = {}, queryFamily: any = {}, options: any = {}) {
+  const entryKey = String(entry.task_family_key || entry.taskFamilyKey || "").trim();
+  const entryTokens = uniqueStrings(entry.task_family_tokens || entry.taskFamilyTokens || [], 40);
+  const queryKey = String(queryFamily.key || "").trim();
+  const queryTokens = uniqueStrings(queryFamily.tokens || [], 40);
+  if (!queryKey && queryTokens.length === 0) return { score: 1, matched: true, reason: "no_task_family_filter" };
+  if (entryKey && queryKey && entryKey === queryKey) return { score: 1, matched: true, reason: "exact_task_family" };
+  if (entryTokens.length === 0) return { score: 1, matched: true, reason: "legacy_global_feedback" };
+  if (queryTokens.length === 0) return { score: 1, matched: true, reason: "query_family_unavailable" };
+  const querySet = new Set(queryTokens);
+  const overlap = entryTokens.filter((token: string) => querySet.has(token));
+  const score = roundPressureRecallUsageWeight(overlap.length / Math.max(1, Math.min(entryTokens.length, queryTokens.length)), 4);
+  const threshold = Math.max(0.1, Math.min(1, Number(
+    options.taskFamilyRelevanceThreshold
+      ?? options.task_family_relevance_threshold
+      ?? options.postCompactClosureTaskFamilyRelevanceThreshold
+      ?? options.post_compact_closure_task_family_relevance_threshold
+      ?? GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_TASK_FAMILY_RELEVANCE_THRESHOLD
+  )));
+  return {
+    score,
+    matched: score >= threshold,
+    reason: score >= threshold ? "related_task_family" : "unrelated_task_family",
+    overlap_tokens: overlap,
+    threshold,
+  };
+}
+
+function normalizePostCompactCompletionMemoryPreservationClosureUsageAging(options: any = {}) {
+  return normalizeWorkerContextPressureRecallUsageAging({
+    ...options,
+    usageHalfLifeDays: options.postCompactClosureUsageHalfLifeDays
+      ?? options.post_compact_closure_usage_half_life_days
+      ?? GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_USAGE_HALF_LIFE_DAYS,
+    usageStaleAfterDays: options.postCompactClosureUsageStaleAfterDays
+      ?? options.post_compact_closure_usage_stale_after_days
+      ?? GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_USAGE_STALE_AFTER_DAYS,
+    usageMinDecayWeight: options.postCompactClosureUsageMinDecayWeight
+      ?? options.post_compact_closure_usage_min_decay_weight
+      ?? 0,
+  });
+}
+
+function postCompactCompletionMemoryPreservationClosureReceiptSourceReliability(entry: any = {}, options: any = {}) {
+  const source = String(entry.receipt_source || entry.receiptSource || "").trim().toLowerCase();
+  const configured = options.receiptSourceReliability || options.receipt_source_reliability || {};
+  const configuredValue = configured && typeof configured === "object" ? configured[source] : undefined;
+  const defaults: Record<string, number> = {
+    corrected_repair_receipt: 1,
+    timeline_binding: 0.95,
+    assignment_binding: 0.9,
+    "task.receipt": 0.9,
+    "task.delivery_summary": 0.8,
+    worker_context_packet_receipt: 0.8,
+    "group_message.receipt": 0.75,
+    "group_message.delivery_summary": 0.65,
+    "timeline_binding.status": 0.55,
+  };
+  let reliability = Number.isFinite(Number(configuredValue)) ? Number(configuredValue) : defaults[source] ?? 0.65;
+  const status = String(entry.receipt_status || entry.receiptStatus || "").trim().toLowerCase();
+  if (status && !["done", "verified", "completed", "ok", "passed"].includes(status)) reliability *= 0.75;
+  return {
+    source: source || "unknown",
+    status,
+    reliability: roundPressureRecallUsageWeight(Math.max(0.1, Math.min(1, reliability)), 4),
+  };
+}
+
+function postCompactCompletionMemoryPreservationClosureEvidenceSessionKey(entry: any = {}) {
+  const taskSession = String(entry.task_agent_session_id || entry.taskAgentSessionId || "").trim();
+  const nativeSession = String(entry.native_session_id || entry.nativeSessionId || "").trim();
+  if (!taskSession && !nativeSession) return "";
+  return `${taskSession || "missing-task"}|${nativeSession || "missing-native"}`;
+}
+
+function clusterPostCompactCompletionMemoryPreservationClosureEvidence(entries: any[] = []) {
+  const clusters: any[] = [];
+  for (const entry of entries) {
+    const sessionKey = postCompactCompletionMemoryPreservationClosureEvidenceSessionKey(entry);
+    const packetKey = String(entry.worker_context_packet_id || entry.workerContextPacketId || "").trim();
+    const matchingIndexes: number[] = [];
+    clusters.forEach((cluster: any, index: number) => {
+      if (sessionKey && cluster.session_keys.has(sessionKey)) matchingIndexes.push(index);
+      else if (packetKey && cluster.packet_keys.has(packetKey)) matchingIndexes.push(index);
+    });
+    if (!matchingIndexes.length) {
+      clusters.push({
+        entries: [entry],
+        session_keys: new Set(sessionKey ? [sessionKey] : []),
+        packet_keys: new Set(packetKey ? [packetKey] : []),
+      });
+      continue;
+    }
+    const targetIndex = matchingIndexes[0];
+    const target = clusters[targetIndex];
+    target.entries.push(entry);
+    if (sessionKey) target.session_keys.add(sessionKey);
+    if (packetKey) target.packet_keys.add(packetKey);
+    for (const index of matchingIndexes.slice(1).sort((a, b) => b - a)) {
+      const merged = clusters[index];
+      target.entries.push(...merged.entries);
+      for (const key of merged.session_keys) target.session_keys.add(key);
+      for (const key of merged.packet_keys) target.packet_keys.add(key);
+      clusters.splice(index, 1);
+    }
+  }
+  return clusters.map((cluster: any, index: number) => {
+    const ordered = [...cluster.entries].sort((a: any, b: any) => String(a.generated_at || "").localeCompare(String(b.generated_at || "")));
+    const representative = ordered[ordered.length - 1] || {};
+    return {
+      ...representative,
+      evidence_cluster_id: `closure-evidence-${checksum([
+        ...[...cluster.session_keys].sort(),
+        ...[...cluster.packet_keys].sort(),
+        representative.entry_id || index,
+      ], 18)}`,
+      correlated_entry_count: cluster.entries.length,
+      correlated_duplicate_count: Math.max(0, cluster.entries.length - 1),
+      evidence_session_keys: [...cluster.session_keys],
+      evidence_packet_keys: [...cluster.packet_keys],
+    };
+  });
+}
+
+function scorePostCompactCompletionMemoryPreservationClosureEvidence(entries: any[] = [], options: any = {}) {
+  const independentEntries = clusterPostCompactCompletionMemoryPreservationClosureEvidence(entries).map((entry: any) => {
+    const sourceReliability = postCompactCompletionMemoryPreservationClosureReceiptSourceReliability(entry, options);
+    return {
+      ...entry,
+      receipt_source_reliability: sourceReliability,
+      independent_effective_weight: roundPressureRecallUsageWeight(Number(entry.effective_weight || 0) * sourceReliability.reliability, 4),
+    };
+  });
+  const independentSessionKeys = uniqueStrings(independentEntries.flatMap((entry: any) => entry.evidence_session_keys || []), 320);
+  const independentPacketKeys = uniqueStrings(independentEntries.flatMap((entry: any) => entry.evidence_packet_keys || []), 320);
+  const providers = uniqueStrings(independentEntries.map((entry: any) => String(entry.agent || "").trim().toLowerCase()).filter(Boolean), 64);
+  const receiptSources = uniqueStrings(independentEntries.map((entry: any) => entry.receipt_source_reliability?.source).filter(Boolean), 32);
+  const weightedEvidence = independentEntries.reduce((sum: number, entry: any) => sum + Number(entry.independent_effective_weight || 0), 0);
+  const baseConfidence = 1 - Math.exp(-weightedEvidence / 1.5);
+  const sessionFactor = independentSessionKeys.length >= 2 ? 1 : independentSessionKeys.length === 1 ? 0.55 : 0.4;
+  const providerFactor = providers.length >= 2 ? 1 : 0.9;
+  const sourceFactor = receiptSources.length >= 2 ? 1 : 0.92;
+  const confidence = roundPressureRecallUsageWeight(baseConfidence * sessionFactor * providerFactor * sourceFactor, 4);
+  return {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-independent-evidence-v1",
+    independentEntries,
+    rawEntryCount: entries.length,
+    independentEvidenceCount: independentEntries.length,
+    correlatedDuplicateCount: Math.max(0, entries.length - independentEntries.length),
+    independentSessionCount: independentSessionKeys.length,
+    independentPacketCount: independentPacketKeys.length,
+    distinctProviderCount: providers.length,
+    distinctReceiptSourceCount: receiptSources.length,
+    providers,
+    receiptSources,
+    weightedEvidence: roundPressureRecallUsageWeight(weightedEvidence, 4),
+    averageSourceReliability: independentEntries.length
+      ? roundPressureRecallUsageWeight(independentEntries.reduce((sum: number, entry: any) => sum + Number(entry.receipt_source_reliability?.reliability || 0), 0) / independentEntries.length, 4)
+      : 0,
+    confidence,
+    confidenceThreshold: Math.max(0.1, Math.min(1, Number(options.evidenceConfidenceThreshold
+      ?? options.evidence_confidence_threshold
+      ?? options.postCompactClosureEvidenceConfidenceThreshold
+      ?? options.post_compact_closure_evidence_confidence_threshold
+      ?? GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_EVIDENCE_CONFIDENCE_THRESHOLD))),
+  };
+}
+
+function arbitratePostCompactCompletionMemoryPreservationClosureEvidenceConflict(independentEntries: any[] = [], options: any = {}) {
+  const compliant = independentEntries.filter((entry: any) => entry.compliant === true);
+  const positiveEntries = compliant.filter((entry: any) => ["used", "verified"].includes(String(entry.usage_state || "")));
+  const ignoredEntries = compliant.filter((entry: any) => entry.usage_state === "ignored");
+  const summarizeBranch = (entries: any[]) => {
+    const weight = entries.reduce((sum: number, entry: any) => sum + Number(entry.independent_effective_weight || 0), 0);
+    const sessions = uniqueStrings(entries.flatMap((entry: any) => entry.evidence_session_keys || []), 320);
+    return {
+      entry_count: entries.length,
+      independent_session_count: sessions.length,
+      independent_packet_count: uniqueStrings(entries.flatMap((entry: any) => entry.evidence_packet_keys || []), 320).length,
+      weighted_evidence: roundPressureRecallUsageWeight(weight, 4),
+      confidence: roundPressureRecallUsageWeight(1 - Math.exp(-weight / 1.5), 4),
+      providers: uniqueStrings(entries.map((entry: any) => entry.agent).filter(Boolean), 32),
+      receipt_sources: uniqueStrings(entries.map((entry: any) => entry.receipt_source_reliability?.source).filter(Boolean), 24),
+      entry_ids: uniqueStrings(entries.map((entry: any) => entry.entry_id).filter(Boolean), 32),
+      task_agent_session_ids: uniqueStrings(entries.map((entry: any) => entry.task_agent_session_id).filter(Boolean), 32),
+      native_session_ids: uniqueStrings(entries.map((entry: any) => entry.native_session_id).filter(Boolean), 32),
+    };
+  };
+  const positive = summarizeBranch(positiveEntries);
+  const ignored = summarizeBranch(ignoredEntries);
+  const maxWeight = Math.max(positive.weighted_evidence, ignored.weighted_evidence);
+  const minWeight = Math.min(positive.weighted_evidence, ignored.weighted_evidence);
+  const conflictRatio = maxWeight > 0 ? roundPressureRecallUsageWeight(minWeight / maxWeight, 4) : 0;
+  const minBranchWeight = Math.max(0.1, Number(options.conflictMinBranchWeight
+    ?? options.conflict_min_branch_weight
+    ?? options.postCompactClosureConflictMinBranchWeight
+    ?? options.post_compact_closure_conflict_min_branch_weight
+    ?? GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_CONFLICT_MIN_BRANCH_WEIGHT));
+  const ratioThreshold = Math.max(0.05, Math.min(1, Number(options.conflictRatioThreshold
+    ?? options.conflict_ratio_threshold
+    ?? options.postCompactClosureConflictRatioThreshold
+    ?? options.post_compact_closure_conflict_ratio_threshold
+    ?? GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_CONFLICT_RATIO_THRESHOLD)));
+  const active = positive.independent_session_count > 0
+    && ignored.independent_session_count > 0
+    && positive.weighted_evidence >= minBranchWeight
+    && ignored.weighted_evidence >= minBranchWeight
+    && conflictRatio >= ratioThreshold;
+  return {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-feedback-conflict-v1",
+    active,
+    arbitration_state: active
+      ? "contradictory_reverify_current_session"
+      : positive.weighted_evidence > ignored.weighted_evidence
+        ? "consistent_used_or_verified"
+        : ignored.weighted_evidence > positive.weighted_evidence
+          ? "consistent_ignored"
+          : "insufficient_evidence",
+    ranking_action: active ? "neutralize_historical_promotion_and_suppression" : "use_confidence_gated_recommendation",
+    current_session_verification_required: active,
+    historical_majority_authorization_allowed: false,
+    conflict_ratio: conflictRatio,
+    conflict_confidence: active ? roundPressureRecallUsageWeight(Math.min(positive.confidence, ignored.confidence) * conflictRatio, 4) : 0,
+    min_branch_weight: minBranchWeight,
+    ratio_threshold: ratioThreshold,
+    positive,
+    ignored,
+  };
+}
+
+function postCompactCompletionMemoryPreservationClosureUsageRecommendation(stats: any = {}, options: any = {}) {
+  const ignoredThreshold = Math.max(1, Number(options.weightedIgnoredThreshold || options.weighted_ignored_threshold || 1.5));
+  const used = Number(stats.weighted_used_count ?? stats.used_count ?? 0);
+  const verified = Number(stats.weighted_verified_count ?? stats.verified_count ?? 0);
+  const ignored = Number(stats.weighted_ignored_count ?? stats.ignored_count ?? 0);
+  const stale = Number(stats.stale_count || 0);
+  if (stats.active_receipt_repair_required === true) return "require_receipt_repair_before_reuse";
+  if (stats.conflict_resolution_active === true) {
+    return ["used", "verified"].includes(String(stats.conflict_resolution_usage_state || ""))
+      ? "resolved_conflict_promote_but_reverify_future_session"
+      : "resolved_conflict_neutral_reverify_future_session";
+  }
+  if (stats.feedback_conflict_active === true) return "surface_conflict_reverify_current_session";
+  const confidenceThreshold = Number(stats.evidence_confidence_threshold
+    ?? options.evidenceConfidenceThreshold
+    ?? options.evidence_confidence_threshold
+    ?? GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_EVIDENCE_CONFIDENCE_THRESHOLD);
+  const ignoredEvidenceConfident = Number(stats.independent_session_count || 0) >= 2
+    && Number(stats.evidence_confidence || 0) >= confidenceThreshold;
+  if (ignored >= ignoredThreshold && ignored > used + verified && ignoredEvidenceConfident) return "deprioritize_closure_recall";
+  if (["used", "verified"].includes(String(stats.last_usage_state || ""))
+    && stats.last_current_source_verified === true
+    && stats.last_feedback_fresh !== false) return "promote_but_reverify_current_source";
+  if (used + verified > ignored && stale === 0) return "promote_but_reverify_current_source";
+  if (stale > 0) return "caution_stale_history_reverify_current_source";
+  return "neutral_reverify_current_source";
+}
+
+export function readPostCompactCompletionMemoryPreservationClosureUsageLedger(groupId: string) {
+  const file = getPostCompactCompletionMemoryPreservationClosureUsageLedgerFile(groupId);
+  const parsed = readJson(file, null);
+  if (parsed?.schema === "ccm-post-compact-completion-memory-preservation-closure-usage-ledger-v1") {
+    return {
+      ...parsed,
+      file,
+      entries: Array.isArray(parsed.entries) ? parsed.entries : [],
+      stats: parsed.stats && typeof parsed.stats === "object" ? parsed.stats : {},
+      totals: parsed.totals && typeof parsed.totals === "object" ? parsed.totals : {},
+    };
+  }
+  return {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-usage-ledger-v1",
+    version: 1,
+    groupId,
+    file,
+    entries: [],
+    stats: {},
+    totals: { used: 0, verified: 0, ignored: 0, mentioned: 0, stale: 0, compliant: 0, noncompliant: 0, total: 0 },
+    updatedAt: "",
+  };
+}
+
+export function recordPostCompactCompletionMemoryPreservationClosureUsage(groupId: string, input: any = {}) {
+  groupId = String(groupId || "").trim();
+  const closureRelPath = "post-compact-completion-memory-preservation-repair-closures.md";
+  if (!groupId || input.disabled === true || input.disableLedger === true || input.disable_ledger === true) return null;
+  const generatedAt = String(input.generatedAt || input.generated_at || now());
+  const rows = (Array.isArray(input.rows) ? input.rows : [])
+    .map((raw: any) => {
+      const relPath = String(raw.rel_path || raw.relPath || "").trim();
+      const usageState = normalizePostCompactCompletionMemoryPreservationClosureUsageState(raw.usage_state || raw.usageState);
+      if (relPath !== closureRelPath || !usageState) return null;
+      const currentSourceVerified = raw.current_source_verified === true || raw.currentSourceVerified === true;
+      const reason = compactText(raw.reason || "", 500);
+      const semanticCompliance = usageState === "ignored" ? !!reason : ["used", "verified"].includes(usageState) && currentSourceVerified;
+      const compliant = typeof raw.compliant === "boolean" ? raw.compliant : semanticCompliance;
+      const taskText = compactText(raw.task_text || raw.taskText || raw.task || input.taskText || input.task_text || input.task || "", 900);
+      const taskFamily = normalizePostCompactCompletionMemoryPreservationClosureTaskFamily(
+        taskText,
+        raw.task_family_key || raw.taskFamilyKey || input.taskFamilyKey || input.task_family_key
+      );
+      const conflictResolutionRequested = raw.conflict_resolution === true || raw.conflictResolution === true;
+      const conflictResolution = conflictResolutionRequested
+        && compliant
+        && !!String(raw.task_agent_session_id || raw.taskAgentSessionId || input.taskAgentSessionId || input.task_agent_session_id || "").trim()
+        && !!String(raw.native_session_id || raw.nativeSessionId || input.nativeSessionId || input.native_session_id || "").trim();
+      const entryCore = {
+        group_id: groupId,
+        target_project: String(raw.target_project || raw.targetProject || input.targetProject || input.target_project || "").trim(),
+        agent: String(raw.agent || raw.agent_type || raw.agentType || input.agent || input.agentType || input.agent_type || "").trim(),
+        task_id: String(raw.task_id || raw.taskId || input.taskId || input.task_id || "").trim(),
+        task_text: taskText,
+        task_family_key: taskFamily.key,
+        task_family_tokens: taskFamily.tokens,
+        execution_id: String(raw.execution_id || raw.executionId || input.executionId || input.execution_id || "").trim(),
+        worker_context_packet_id: String(raw.worker_context_packet_id || raw.workerContextPacketId || input.workerContextPacketId || input.worker_context_packet_id || "").trim(),
+        binding_id: String(raw.binding_id || raw.bindingId || input.bindingId || input.binding_id || "").trim(),
+        task_agent_session_id: String(raw.task_agent_session_id || raw.taskAgentSessionId || input.taskAgentSessionId || input.task_agent_session_id || "").trim(),
+        native_session_id: String(raw.native_session_id || raw.nativeSessionId || input.nativeSessionId || input.native_session_id || "").trim(),
+        receipt_source: String(raw.receipt_source || raw.receiptSource || input.receiptSource || input.receipt_source || "").trim(),
+        receipt_status: String(raw.receipt_status || raw.receiptStatus || input.receiptStatus || input.receipt_status || "").trim(),
+        rel_path: relPath,
+        usage_state: usageState,
+        current_source_verified: currentSourceVerified,
+        compliant,
+        stale: ["used", "verified"].includes(usageState) && !currentSourceVerified,
+        reason,
+        repair_work_item_id: String(raw.repair_work_item_id || raw.repairWorkItemId || "").trim(),
+        conflict_resolution: conflictResolution,
+        conflict_resolution_state: conflictResolution ? usageState : "",
+        conflict_parent_arbitration_state: String(raw.conflict_parent_arbitration_state || raw.conflictParentArbitrationState || "").trim(),
+        conflict_parent_fingerprint: String(raw.conflict_parent_fingerprint || raw.conflictParentFingerprint || "").trim(),
+        conflict_parent_ratio: Number(raw.conflict_parent_ratio || raw.conflictParentRatio || 0),
+        conflict_parent_positive_weight: Number(raw.conflict_parent_positive_weight || raw.conflictParentPositiveWeight || 0),
+        conflict_parent_ignored_weight: Number(raw.conflict_parent_ignored_weight || raw.conflictParentIgnoredWeight || 0),
+        conflict_resolution_reversible: conflictResolution,
+        generated_at: generatedAt,
+      };
+      return {
+        schema: "ccm-post-compact-completion-memory-preservation-closure-usage-entry-v1",
+        entry_id: `pccmpu_${checksum([
+          entryCore.group_id,
+          entryCore.target_project,
+          entryCore.task_id,
+          entryCore.task_family_key,
+          entryCore.execution_id,
+          entryCore.worker_context_packet_id,
+          entryCore.binding_id,
+          entryCore.task_agent_session_id,
+          entryCore.native_session_id,
+          entryCore.rel_path,
+          entryCore.usage_state,
+          entryCore.current_source_verified,
+          entryCore.compliant,
+          entryCore.reason,
+          entryCore.repair_work_item_id,
+          entryCore.conflict_resolution,
+          entryCore.conflict_parent_fingerprint,
+        ], 20)}`,
+        ...entryCore,
+      };
+    })
+    .filter(Boolean);
+  const ledger = readPostCompactCompletionMemoryPreservationClosureUsageLedger(groupId);
+  if (!rows.length) return {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-usage-record-v1",
+    groupId,
+    file: ledger.file,
+    skipped: true,
+    reason: "no_closure_usage_rows",
+    recordedCount: 0,
+    totals: ledger.totals || {},
+  };
+  const existingIds = new Set((ledger.entries || []).map((entry: any) => entry.entry_id));
+  const newEntries = rows.filter((entry: any) => !existingIds.has(entry.entry_id));
+  const stats = { ...(ledger.stats || {}) };
+  for (const entry of newEntries) {
+    const key = `${String(entry.target_project || "").toLowerCase()}|${entry.rel_path}`;
+    const current: any = stats[key] || {
+      target_project: entry.target_project,
+      rel_path: entry.rel_path,
+      used_count: 0,
+      verified_count: 0,
+      ignored_count: 0,
+      mentioned_count: 0,
+      stale_count: 0,
+      compliant_count: 0,
+      noncompliant_count: 0,
+      total_count: 0,
+      task_agent_session_ids: [],
+      native_session_ids: [],
+      packet_ids: [],
+      first_seen_at: entry.generated_at,
+    };
+    current[`${entry.usage_state}_count`] = Number(current[`${entry.usage_state}_count`] || 0) + 1;
+    current.stale_count = Number(current.stale_count || 0) + (entry.stale ? 1 : 0);
+    current[entry.compliant ? "compliant_count" : "noncompliant_count"] = Number(current[entry.compliant ? "compliant_count" : "noncompliant_count"] || 0) + 1;
+    current.total_count = Number(current.total_count || 0) + 1;
+    current.last_usage_state = entry.usage_state;
+    current.last_compliant = entry.compliant === true;
+    current.active_receipt_repair_required = entry.compliant !== true;
+    current.last_current_source_verified = entry.current_source_verified === true;
+    current.last_reason = entry.reason;
+    current.last_repair_work_item_id = entry.repair_work_item_id;
+    current.last_seen_at = entry.generated_at;
+    current.task_agent_session_ids = uniqueStrings([...(current.task_agent_session_ids || []), entry.task_agent_session_id].filter(Boolean), 24);
+    current.native_session_ids = uniqueStrings([...(current.native_session_ids || []), entry.native_session_id].filter(Boolean), 24);
+    current.packet_ids = uniqueStrings([...(current.packet_ids || []), entry.worker_context_packet_id].filter(Boolean), 24);
+    current.recommendation = postCompactCompletionMemoryPreservationClosureUsageRecommendation(current, input);
+    stats[key] = current;
+  }
+  const entries = [...(ledger.entries || []), ...newEntries].slice(-320);
+  const totals = entries.reduce((acc: any, entry: any) => {
+    acc[entry.usage_state] = Number(acc[entry.usage_state] || 0) + 1;
+    acc.stale += entry.stale ? 1 : 0;
+    acc[entry.compliant ? "compliant" : "noncompliant"] += 1;
+    acc.total += 1;
+    return acc;
+  }, { used: 0, verified: 0, ignored: 0, mentioned: 0, stale: 0, compliant: 0, noncompliant: 0, total: 0 });
+  writeJsonAtomic(ledger.file, {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-usage-ledger-v1",
+    version: 1,
+    groupId,
+    entries,
+    stats,
+    totals,
+    updatedAt: generatedAt,
+  });
+  const conflictResolutionRows = rows.filter((entry: any) => entry.conflict_resolution === true);
+  let conflictResolutionDistillation: any = null;
+  if (conflictResolutionRows.length) {
+    try {
+      conflictResolutionDistillation = distillPostCompactCompletionMemoryPreservationClosureConflictResolutionToTypedMemory(groupId, {
+        rows: conflictResolutionRows,
+      }, {
+        reason: "closure-feedback-conflict-current-session-resolution",
+        updatedAt: generatedAt,
+      });
+    } catch (error: any) {
+      conflictResolutionDistillation = {
+        schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-distillation-error-v1",
+        error: compactText(error?.message || error || "conflict resolution distillation failed", 500),
+      };
+    }
+  }
+  return {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-usage-record-v1",
+    groupId,
+    file: ledger.file,
+    recordedCount: newEntries.length,
+    duplicateCount: rows.length - newEntries.length,
+    totals,
+    conflictResolutionDistillation,
+    updatedAt: generatedAt,
+  };
+}
+
+export function buildPostCompactCompletionMemoryPreservationClosureUsageSummary(groupId: string, options: any = {}) {
+  const ledger = readPostCompactCompletionMemoryPreservationClosureUsageLedger(groupId);
+  const targetProject = String(options.targetProject || options.target_project || "").trim().toLowerCase();
+  const closureRelPath = "post-compact-completion-memory-preservation-repair-closures.md";
+  const taskText = compactText(options.task || options.taskText || options.task_text || options.taskQuery || options.task_query || "", 1200);
+  const queryFamily = normalizePostCompactCompletionMemoryPreservationClosureTaskFamily(
+    taskText,
+    options.taskFamilyKey || options.task_family_key
+  );
+  const aging = normalizePostCompactCompletionMemoryPreservationClosureUsageAging(options);
+  const sourceEntries = (Array.isArray(ledger.entries) ? ledger.entries : []).filter((entry: any) => {
+    const projectMatches = !targetProject || !entry.target_project || String(entry.target_project).toLowerCase() === targetProject;
+    return projectMatches && entry.rel_path === closureRelPath;
+  });
+  const scoredEntries = sourceEntries.map((entry: any) => {
+    const relevance = postCompactCompletionMemoryPreservationClosureTaskFamilyRelevance(entry, queryFamily, options);
+    const ageDays = workerContextPressureRecallUsageAgeDays(entry, aging);
+    const decayWeight = workerContextPressureRecallUsageDecayWeight(ageDays, aging);
+    const relevanceWeight = relevance.matched ? Math.max(0.75, Number(relevance.score || 0)) : 0;
+    return {
+      ...entry,
+      task_family_relevance: relevance,
+      age_days: roundPressureRecallUsageWeight(ageDays, 3),
+      decay_weight: decayWeight,
+      effective_weight: roundPressureRecallUsageWeight(decayWeight * relevanceWeight, 4),
+    };
+  });
+  const relevantEntries = scoredEntries.filter((entry: any) => entry.task_family_relevance?.matched === true);
+  const evidence = scorePostCompactCompletionMemoryPreservationClosureEvidence(relevantEntries, options);
+  const independentEntries = evidence.independentEntries || [];
+  const conflict = arbitratePostCompactCompletionMemoryPreservationClosureEvidenceConflict(independentEntries, options);
+  const resolutionEntries = independentEntries.filter((entry: any) => entry.conflict_resolution === true && entry.compliant === true);
+  const latestResolution = [...resolutionEntries].sort((a: any, b: any) => String(b.generated_at || "").localeCompare(String(a.generated_at || "")))[0] || null;
+  const resolutionState = String(latestResolution?.conflict_resolution_state || latestResolution?.usage_state || "");
+  const resolutionAt = String(latestResolution?.generated_at || "");
+  const laterOpposingEntries = latestResolution ? independentEntries.filter((entry: any) => {
+    if (String(entry.generated_at || "").localeCompare(resolutionAt) <= 0 || entry.compliant !== true) return false;
+    const state = String(entry.usage_state || "");
+    return ["used", "verified"].includes(resolutionState) ? state === "ignored" : ["used", "verified"].includes(state);
+  }) : [];
+  const laterOpposingWeight = laterOpposingEntries.reduce((sum: number, entry: any) => sum + Number(entry.independent_effective_weight || 0), 0);
+  const resolutionReopened = !!latestResolution && laterOpposingWeight >= Number(conflict.min_branch_weight || GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_CONFLICT_MIN_BRANCH_WEIGHT);
+  const resolutionActive = !!latestResolution && !resolutionReopened;
+  const conflictResolution = {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-feedback-conflict-resolution-v1",
+    active: resolutionActive,
+    reopened: resolutionReopened,
+    state: latestResolution
+      ? resolutionReopened
+        ? "reopened_by_later_reliable_opposition"
+        : ["used", "verified"].includes(resolutionState)
+          ? "resolved_used_or_verified_reverify_future_session"
+          : "resolved_ignored_reverify_future_session"
+      : "unresolved",
+    resolution_entry_id: latestResolution?.entry_id || "",
+    resolution_usage_state: resolutionState,
+    task_agent_session_id: latestResolution?.task_agent_session_id || "",
+    native_session_id: latestResolution?.native_session_id || "",
+    worker_context_packet_id: latestResolution?.worker_context_packet_id || "",
+    current_source_verified: latestResolution?.current_source_verified === true,
+    reason: latestResolution?.reason || "",
+    parent_conflict_fingerprint: latestResolution?.conflict_parent_fingerprint || "",
+    resolved_at: resolutionAt,
+    later_opposing_entry_ids: uniqueStrings(laterOpposingEntries.map((entry: any) => entry.entry_id), 32),
+    later_opposing_weight: roundPressureRecallUsageWeight(laterOpposingWeight, 4),
+    reversible: true,
+    historical_branches_preserved: true,
+    historical_majority_authorization_allowed: false,
+  };
+  const effectiveConflict = {
+    ...conflict,
+    active: resolutionReopened ? true : conflict.active === true && !resolutionActive,
+    historical_conflict_detected: conflict.active === true,
+    resolution: conflictResolution,
+    arbitration_state: resolutionActive ? conflictResolution.state : resolutionReopened ? "contradictory_reverify_current_session" : conflict.arbitration_state,
+    current_session_verification_required: resolutionReopened ? true : conflict.active === true && !resolutionActive,
+  };
+  const latest = [...independentEntries].sort((a: any, b: any) => String(b.generated_at || "").localeCompare(String(a.generated_at || "")))[0] || null;
+  const primary: any = independentEntries.reduce((acc: any, entry: any) => {
+    const state = normalizePostCompactCompletionMemoryPreservationClosureUsageState(entry.usage_state);
+    if (!state) return acc;
+    acc[`${state}_count`] = Number(acc[`${state}_count`] || 0) + 1;
+    acc[`weighted_${state}_count`] = Number(acc[`weighted_${state}_count`] || 0) + Number(entry.independent_effective_weight || 0);
+    acc.total_count = Number(acc.total_count || 0) + 1;
+    acc.weighted_total_count = Number(acc.weighted_total_count || 0) + Number(entry.independent_effective_weight || 0);
+    acc.stale_count = Number(acc.stale_count || 0) + (Number(entry.age_days || 0) >= Number(aging.stale_after_days || 45) ? 1 : 0);
+    acc.fresh_count = Number(acc.fresh_count || 0) + (Number(entry.age_days || 0) < Number(aging.stale_after_days || 45) ? 1 : 0);
+    acc[entry.compliant === true ? "compliant_count" : "noncompliant_count"] = Number(acc[entry.compliant === true ? "compliant_count" : "noncompliant_count"] || 0) + 1;
+    acc.task_family_keys = uniqueStrings([...(acc.task_family_keys || []), entry.task_family_key].filter(Boolean), 24);
+    return acc;
+  }, {
+    target_project: String(options.targetProject || options.target_project || ""),
+    rel_path: closureRelPath,
+    used_count: 0,
+    verified_count: 0,
+    ignored_count: 0,
+    mentioned_count: 0,
+    weighted_used_count: 0,
+    weighted_verified_count: 0,
+    weighted_ignored_count: 0,
+    weighted_mentioned_count: 0,
+    total_count: 0,
+    weighted_total_count: 0,
+    stale_count: 0,
+    fresh_count: 0,
+    compliant_count: 0,
+    noncompliant_count: 0,
+    task_family_keys: [],
+  });
+  for (const state of ["used", "verified", "ignored", "mentioned"]) {
+    primary[`weighted_${state}_count`] = roundPressureRecallUsageWeight(primary[`weighted_${state}_count`] || 0, 4);
+  }
+  primary.weighted_total_count = roundPressureRecallUsageWeight(primary.weighted_total_count || 0, 4);
+  primary.last_usage_state = latest?.usage_state || "";
+  primary.last_compliant = latest ? latest.compliant === true : null;
+  primary.last_current_source_verified = latest?.current_source_verified === true;
+  primary.last_feedback_age_days = Number(latest?.age_days || 0);
+  primary.last_feedback_fresh = !!latest && Number(latest.age_days || 0) < Number(aging.stale_after_days || 45);
+  primary.active_receipt_repair_required = !!latest && latest.compliant !== true && primary.last_feedback_fresh;
+  primary.evidence_confidence = evidence.confidence;
+  primary.evidence_confidence_threshold = evidence.confidenceThreshold;
+  primary.independent_evidence_count = evidence.independentEvidenceCount;
+  primary.independent_session_count = evidence.independentSessionCount;
+  primary.independent_packet_count = evidence.independentPacketCount;
+  primary.correlated_duplicate_count = evidence.correlatedDuplicateCount;
+  primary.distinct_provider_count = evidence.distinctProviderCount;
+  primary.distinct_receipt_source_count = evidence.distinctReceiptSourceCount;
+  primary.feedback_conflict_active = effectiveConflict.active === true;
+  primary.feedback_conflict_ratio = effectiveConflict.conflict_ratio;
+  primary.conflict_resolution_active = conflictResolution.active === true;
+  primary.conflict_resolution_usage_state = conflictResolution.resolution_usage_state;
+  primary.recommendation = postCompactCompletionMemoryPreservationClosureUsageRecommendation(primary, options);
+  const rows = primary.total_count > 0 ? [primary] : [];
+  return {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-usage-summary-v1",
+    version: 2,
+    groupId,
+    targetProject: String(options.targetProject || options.target_project || ""),
+    file: ledger.file,
+    entryCount: sourceEntries.length,
+    rawMatchedEntryCount: relevantEntries.length,
+    matchedEntryCount: independentEntries.length,
+    unrelatedEntryCount: scoredEntries.length - relevantEntries.length,
+    correlatedDuplicateCount: evidence.correlatedDuplicateCount,
+    rowCount: rows.length,
+    recommendation: primary.recommendation || "neutral_reverify_current_source",
+    activeReceiptRepairRequired: primary.active_receipt_repair_required === true,
+    usedCount: Number(primary.used_count || 0),
+    verifiedCount: Number(primary.verified_count || 0),
+    ignoredCount: Number(primary.ignored_count || 0),
+    staleCount: Number(primary.stale_count || 0),
+    compliantCount: Number(primary.compliant_count || 0),
+    noncompliantCount: Number(primary.noncompliant_count || 0),
+    weightedUsedCount: Number(primary.weighted_used_count || 0),
+    weightedVerifiedCount: Number(primary.weighted_verified_count || 0),
+    weightedIgnoredCount: Number(primary.weighted_ignored_count || 0),
+    weightedTotalCount: Number(primary.weighted_total_count || 0),
+    evidenceConfidence: Number(evidence.confidence || 0),
+    evidenceConfidenceThreshold: Number(evidence.confidenceThreshold || 0),
+    independentEvidenceCount: Number(evidence.independentEvidenceCount || 0),
+    independentSessionCount: Number(evidence.independentSessionCount || 0),
+    independentPacketCount: Number(evidence.independentPacketCount || 0),
+    distinctProviderCount: Number(evidence.distinctProviderCount || 0),
+    distinctReceiptSourceCount: Number(evidence.distinctReceiptSourceCount || 0),
+    averageSourceReliability: Number(evidence.averageSourceReliability || 0),
+    evidenceProviders: evidence.providers || [],
+    evidenceReceiptSources: evidence.receiptSources || [],
+    feedbackConflict: effectiveConflict,
+    historicalFeedbackConflict: conflict,
+    feedbackConflictResolution: conflictResolution,
+    feedbackConflictActive: effectiveConflict.active === true,
+    feedbackArbitrationState: effectiveConflict.arbitration_state,
+    currentSessionConflictVerificationRequired: effectiveConflict.current_session_verification_required === true,
+    historicalMajorityAuthorizationAllowed: false,
+    taskFamily: queryFamily,
+    taskFamilyRelevant: relevantEntries.length > 0,
+    taskFamilyRelevanceThreshold: Number(options.taskFamilyRelevanceThreshold
+      ?? options.task_family_relevance_threshold
+      ?? GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_TASK_FAMILY_RELEVANCE_THRESHOLD),
+    aging,
+    feedbackEntries: independentEntries.slice(-24),
+    rawFeedbackEntries: scoredEntries.slice(-24),
+    rows,
+    immutableClosureHistoryPreserved: true,
+    updatedAt: ledger.updatedAt || "",
   };
 }
 
@@ -2981,6 +3687,8 @@ function preservedGroupTypedMemoryDistillationArchives(...ledgers: any[]) {
     "providerRankingProvenanceCompactRepairReceiptConsumptionArchive",
     "postCompactReinjectionRepairReceiptConsumptionArchive",
     "postCompactReceiptMemoryUsageRepairCompletionArchive",
+    "postCompactCompletionMemoryPreservationRepairClosureArchive",
+    "postCompactCompletionMemoryPreservationClosureConflictResolutionArchive",
     "providerRankingMemoryUsageReceiptRepairArchive",
     "contextUsageRepairArchive",
     "compactStrategyTypedArchive",
@@ -4087,6 +4795,1496 @@ export function distillPostCompactReceiptMemoryUsageRepairCompletionToTypedMemor
     newRowCount: merged.newRowCount,
     updatedRowCount: merged.updatedRowCount,
     prunedRowCount: merged.prunedRowCount,
+    writeCount: writes.length,
+    writes,
+    index,
+    archive,
+    distilledAt: updatedAt,
+  };
+}
+
+function postCompactCompletionMemoryPreservationRepairClosureInputRows(input: any = {}) {
+  if (Array.isArray(input)) return input;
+  const direct = [
+    ...(Array.isArray(input.rows) ? input.rows : []),
+    ...(Array.isArray(input.items) ? input.items : []),
+    ...(Array.isArray(input.completions) ? input.completions : []),
+  ];
+  if (direct.length) return direct;
+  const groups = Array.isArray(input.report?.groups) ? input.report.groups : Array.isArray(input.groups) ? input.groups : [];
+  return groups.flatMap((group: any) => (Array.isArray(group.items) ? group.items : []).map((row: any) => ({
+    ...row,
+    groupId: row.groupId || row.group_id || group.groupId || group.group_id || "",
+  })));
+}
+
+function postCompactCompletionMemoryPreservationRepairClosureRowId(row: any = {}) {
+  return `post-compact-completion-memory-preservation-repair-closure:${checksum([
+    row.groupId,
+    row.work_item_id,
+    row.failed_outcome_id,
+    row.corrected_outcome_id,
+    row.completion_doc_rel_paths,
+    row.completion_work_item_ids,
+    row.completion_timeline_binding_ids,
+    row.current_session_binding_id,
+    row.current_task_agent_session_id,
+    row.current_native_session_id,
+  ], 24)}`;
+}
+
+function normalizePostCompactCompletionMemoryPreservationRepairClosureRows(input: any = {}, options: any = {}) {
+  const fallbackGroupId = String(options.groupId || options.group_id || input.groupId || input.group_id || "").trim();
+  return postCompactCompletionMemoryPreservationRepairClosureInputRows(input).map((raw: any, index: number) => {
+    const item = raw?.item || raw?.completion || raw || {};
+    const proof = item.corrected_retry_proof || item.correctedRetryProof || {};
+    const historicalTaskSessions = uniqueStrings(item.completion_preservation_historical_task_agent_session_ids || item.completionPreservationHistoricalTaskAgentSessionIds || [], 32);
+    const historicalNativeSessions = uniqueStrings(item.completion_preservation_historical_native_session_ids || item.completionPreservationHistoricalNativeSessionIds || [], 32);
+    const row: any = {
+      schema: "ccm-post-compact-completion-memory-preservation-repair-closure-distilled-row-v1",
+      version: GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_REPAIR_CLOSURE_DISTILLATION_VERSION,
+      groupId: String(item.groupId || item.group_id || item.scopeId || item.scope_id || fallbackGroupId).trim(),
+      source: String(item.source || "").trim(),
+      component: String(item.component || "").trim(),
+      project: String(item.target_project || item.project || item.target || "").trim(),
+      work_item_id: String(item.work_item_id || item.id || "").trim(),
+      assignment_id: String(item.assignment_id || item.taskId || "").trim(),
+      dispatch_key: String(item.dispatch_key || "").trim(),
+      worker_context_packet_id: String(item.worker_context_packet_id || "").trim(),
+      binding_id: String(item.binding_id || item.worker_context_packet_binding_id || "").trim(),
+      failed_retry_id: String(item.compact_retry_id || proof.failed_retry_id || "").trim(),
+      failed_outcome_id: String(item.compact_outcome_id || proof.failed_outcome_id || "").trim(),
+      failed_hook_run_id: String(item.compact_hook_run_id || "").trim(),
+      corrected_retry_id: String(item.corrected_compact_retry_id || proof.corrected_retry_id || "").trim(),
+      corrected_outcome_id: String(item.corrected_compact_outcome_id || proof.corrected_outcome_id || "").trim(),
+      corrected_hook_run_id: String(item.corrected_compact_hook_run_id || proof.corrected_hook_run_id || "").trim(),
+      completion_doc_rel_paths: uniqueStrings(item.completion_preservation_completion_doc_rel_paths || item.completionPreservationCompletionDocRelPaths || [], 24),
+      required_doc_rel_paths: uniqueStrings(item.completion_preservation_required_doc_rel_paths || item.completionPreservationRequiredDocRelPaths || [], 24),
+      completion_work_item_ids: uniqueStrings(item.completion_preservation_work_item_ids || item.completionPreservationWorkItemIds || [], 32),
+      completion_timeline_binding_ids: uniqueStrings(item.completion_preservation_timeline_binding_ids || item.completionPreservationTimelineBindingIds || [], 32),
+      historical_task_agent_session_ids: historicalTaskSessions,
+      historical_native_session_ids: historicalNativeSessions,
+      current_session_binding_id: String(item.completion_preservation_current_session_binding_id || item.completionPreservationCurrentSessionBindingId || "").trim(),
+      current_task_agent_session_id: String(item.completion_preservation_current_task_agent_session_id || item.completionPreservationCurrentTaskAgentSessionId || "").trim(),
+      current_native_session_id: String(item.completion_preservation_current_native_session_id || item.completionPreservationCurrentNativeSessionId || "").trim(),
+      original_gap_codes: uniqueStrings(item.completion_preservation_gap_codes || item.completionPreservationGapCodes || [], 32),
+      exact_identity_restored: proof.exact_identity_restored === true || proof.exactIdentityRestored === true,
+      current_session_boundary_restored: proof.current_session_boundary_restored === true || proof.currentSessionBoundaryRestored === true,
+      historical_sessions_remain_evidence_only: proof.historical_sessions_remain_evidence_only === true || proof.historicalSessionsRemainEvidenceOnly === true,
+      completion_source: String(item.completion_source || "").trim(),
+      resolution_reason: String(item.resolutionReason || item.resolution_reason || "").trim(),
+      completed_at: String(item.completedAt || item.completed_at || proof.verified_at || options.updatedAt || now()),
+      reuse_policy: "historical_compaction_repair_closure_requires_new_session_current_source_reverification",
+      source_index: Number(raw?.source_index || raw?.sourceIndex || index),
+    };
+    row.row_id = postCompactCompletionMemoryPreservationRepairClosureRowId(row);
+    return row;
+  })
+    .filter((row: any) => row.groupId === fallbackGroupId || (!fallbackGroupId && !!row.groupId))
+    .filter((row: any) => row.source === "post_compact_receipt_memory_usage_repair_completion_compaction_preservation_repair")
+    .filter((row: any) => row.component === "post_compact_receipt_memory_usage_repair_completion_compaction_preservation")
+    .filter((row: any) => row.completion_source === "post_compact_receipt_memory_usage_repair_completion_compaction_preservation_corrected_retry")
+    .filter((row: any) => row.resolution_reason === "completion_memory_compaction_preservation_corrected_retry_verified")
+    .filter((row: any) => row.exact_identity_restored && row.current_session_boundary_restored && row.historical_sessions_remain_evidence_only)
+    .filter((row: any) => row.work_item_id && row.failed_retry_id && row.failed_outcome_id && row.corrected_retry_id && row.corrected_outcome_id)
+    .filter((row: any) => row.failed_retry_id !== row.corrected_retry_id && row.failed_outcome_id !== row.corrected_outcome_id)
+    .filter((row: any) => row.completion_doc_rel_paths.length > 0 && row.required_doc_rel_paths.length > 0)
+    .filter((row: any) => row.completion_work_item_ids.length > 0 && row.completion_timeline_binding_ids.length > 0)
+    .filter((row: any) => row.current_session_binding_id && row.current_task_agent_session_id && row.current_native_session_id)
+    .filter((row: any) => !row.historical_task_agent_session_ids.includes(row.current_task_agent_session_id))
+    .filter((row: any) => !row.historical_native_session_ids.includes(row.current_native_session_id));
+}
+
+function mergePostCompactCompletionMemoryPreservationRepairClosureRows(existing: any[] = [], incoming: any[] = [], options: any = {}) {
+  const updatedAt = String(options.updatedAt || now());
+  const merged = new Map<string, any>();
+  for (const row of existing) {
+    const id = String(row.row_id || postCompactCompletionMemoryPreservationRepairClosureRowId(row));
+    merged.set(id, { ...row, row_id: id });
+  }
+  const previousIds = new Set(merged.keys());
+  const incomingIds = new Set<string>();
+  for (const row of incoming) {
+    const id = String(row.row_id || postCompactCompletionMemoryPreservationRepairClosureRowId(row));
+    incomingIds.add(id);
+    const previous = merged.get(id);
+    merged.set(id, {
+      ...(previous || {}),
+      ...row,
+      row_id: id,
+      first_seen_at: previous?.first_seen_at || row.completed_at || updatedAt,
+      last_seen_at: updatedAt,
+      seen_count: Number(previous?.seen_count || 0) + 1,
+    });
+  }
+  const limit = Math.max(1, Math.min(300, Number(options.limit || options.maxRows || options.max_rows || 160)));
+  const rows = [...merged.values()]
+    .sort((a: any, b: any) => String(a.last_seen_at || "").localeCompare(String(b.last_seen_at || "")) || Number(a.source_index || 0) - Number(b.source_index || 0))
+    .slice(-limit);
+  return {
+    rows,
+    newRowCount: rows.filter((row: any) => !previousIds.has(row.row_id)).length,
+    updatedRowCount: rows.filter((row: any) => previousIds.has(row.row_id) && incomingIds.has(row.row_id)).length,
+    prunedRowCount: Math.max(0, merged.size - rows.length),
+  };
+}
+
+function postCompactCompletionMemoryPreservationRepairClosureArchive(rows: any[] = [], options: any = {}) {
+  return {
+    schema: "ccm-post-compact-completion-memory-preservation-repair-closure-distillation-v1",
+    version: GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_REPAIR_CLOSURE_DISTILLATION_VERSION,
+    archived_count: rows.length,
+    verified_count: rows.filter((row: any) => row.exact_identity_restored && row.current_session_boundary_restored).length,
+    failed_outcome_count: uniqueStrings(rows.map((row: any) => row.failed_outcome_id), 480).length,
+    corrected_outcome_count: uniqueStrings(rows.map((row: any) => row.corrected_outcome_id), 480).length,
+    completion_doc_count: uniqueStrings(rows.flatMap((row: any) => row.completion_doc_rel_paths || []), 240).length,
+    completion_work_item_count: uniqueStrings(rows.flatMap((row: any) => row.completion_work_item_ids || []), 480).length,
+    timeline_binding_count: uniqueStrings(rows.flatMap((row: any) => row.completion_timeline_binding_ids || []), 480).length,
+    rows,
+    updatedAt: String(options.updatedAt || now()),
+  };
+}
+
+function renderPostCompactCompletionMemoryPreservationRepairClosureBody(archive: any = {}, options: any = {}) {
+  const rows = Array.isArray(archive.rows) ? archive.rows : [];
+  const lines = [
+    "# Post-Compact Completion Memory Preservation Repair Closures",
+    "",
+    `Generated by CCM compact-preservation repair closure distillation at ${options.updatedAt || now()}.`,
+    "Each row records a failed compact outcome whose corrected-receipt completion memory was restored only by a newer, different compact retry/outcome with exact identity and current-session authority proof.",
+    "Stable boundary: historical repair completion is recovery evidence, not permanent repository truth. Every future child Agent session must reverify the current source and classify this recalled MEMORY.md in memoryUsed or memoryIgnored.",
+    "All task/native sessions listed here are historical evidence in a future child session and never authorize that future session.",
+    "",
+    "## Verified Closure Rows",
+  ];
+  for (const row of rows.slice(-100).reverse()) {
+    lines.push(`- [verified] repair_work_item=${row.work_item_id}; failed_retry=${row.failed_retry_id}; failed_outcome=${row.failed_outcome_id}; corrected_retry=${row.corrected_retry_id}; corrected_outcome=${row.corrected_outcome_id}; completion_source=${row.completion_source}; resolution_reason=${row.resolution_reason}.`);
+    lines.push(`  Restored identity: completion_docs=${(row.completion_doc_rel_paths || []).join(",")}; required_docs=${(row.required_doc_rel_paths || []).join(",")}; completion_work_items=${(row.completion_work_item_ids || []).join(",")}; timelines=${(row.completion_timeline_binding_ids || []).join(",")}.`);
+    lines.push(`  Historical closure session: binding=${row.current_session_binding_id}; task_agent_session=${row.current_task_agent_session_id}; native_session=${row.current_native_session_id}; exactIdentityRestored=${row.exact_identity_restored === true}; currentSessionBoundaryRestored=${row.current_session_boundary_restored === true}; historicalSessionsRemainEvidenceOnly=${row.historical_sessions_remain_evidence_only === true}.`);
+    if (row.original_gap_codes?.length) lines.push(`  Original preservation gaps: ${row.original_gap_codes.join(", ")}.`);
+  }
+  lines.push("");
+  lines.push("## Reuse Rule");
+  lines.push("- Use this history to avoid reopening the identical failed retry/outcome after its exact corrected outcome is still applicable.");
+  lines.push("- Never use this history as current repository truth or current-session authority; re-read current sources and produce a fresh memory usage receipt.");
+  return lines.join("\n").trim() + "\n";
+}
+
+export function distillPostCompactCompletionMemoryPreservationRepairClosureToTypedMemory(groupId: string, input: any = {}, options: any = {}) {
+  if (options.disabled === true || options.disableDistillation === true || options.disable_distillation === true) {
+    return {
+      schema: "ccm-post-compact-completion-memory-preservation-repair-closure-distillation-v1",
+      version: GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_REPAIR_CLOSURE_DISTILLATION_VERSION,
+      groupId,
+      skipped: true,
+      reason: "disabled",
+    };
+  }
+  const updatedAt = String(options.updatedAt || options.updated_at || now());
+  const ledger = readGroupTypedMemoryDistillationLedger(groupId);
+  const incomingRows = normalizePostCompactCompletionMemoryPreservationRepairClosureRows(input, { ...options, groupId, updatedAt });
+  const previousArchive = ledger.postCompactCompletionMemoryPreservationRepairClosureArchive || {};
+  const merged = mergePostCompactCompletionMemoryPreservationRepairClosureRows(
+    Array.isArray(previousArchive.rows) ? previousArchive.rows : [],
+    incomingRows,
+    { ...options, updatedAt }
+  );
+  const archive = postCompactCompletionMemoryPreservationRepairClosureArchive(merged.rows, { updatedAt });
+  const writes: any[] = [];
+  if (archive.rows.length) {
+    writes.push(upsertGroupTypedMemoryDocument(groupId, {
+      type: "reference",
+      slug: "post-compact-completion-memory-preservation-repair-closures",
+      name: "Post-compact completion memory preservation repair closures",
+      description: "Verified newer compact outcomes that restored corrected-receipt completion identity and session authority, with mandatory future current-source reverification.",
+      source: "auto:post-compact-completion-memory-preservation-repair-closure-distillation",
+      updatedAt,
+      body: renderPostCompactCompletionMemoryPreservationRepairClosureBody(archive, { updatedAt }),
+      maxBodyChars: Number(options.maxBodyChars || options.max_body_chars || 24_000),
+    }));
+  }
+  const ledgerState = { ...ledger };
+  delete ledgerState.file;
+  writeJsonAtomic(ledger.file, {
+    ...ledgerState,
+    schema: "ccm-group-typed-memory-distillation-ledger-v1",
+    version: GROUP_TYPED_MEMORY_DISTILLATION_VERSION,
+    groupId,
+    facts: ledger.facts || {},
+    postCompactCompletionMemoryPreservationRepairClosureArchive: archive,
+    updatedAt,
+  });
+  const index = buildGroupTypedMemoryIndex(groupId);
+  return {
+    schema: "ccm-post-compact-completion-memory-preservation-repair-closure-distillation-v1",
+    version: GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_REPAIR_CLOSURE_DISTILLATION_VERSION,
+    groupId,
+    skipped: false,
+    reason: compactText(options.reason || "", 220),
+    ledgerFile: ledger.file,
+    incomingRowCount: incomingRows.length,
+    archivedCount: archive.archived_count,
+    verifiedCount: archive.verified_count,
+    failedOutcomeCount: archive.failed_outcome_count,
+    correctedOutcomeCount: archive.corrected_outcome_count,
+    completionDocCount: archive.completion_doc_count,
+    completionWorkItemCount: archive.completion_work_item_count,
+    timelineBindingCount: archive.timeline_binding_count,
+    newRowCount: merged.newRowCount,
+    updatedRowCount: merged.updatedRowCount,
+    prunedRowCount: merged.prunedRowCount,
+    writeCount: writes.length,
+    writes,
+    index,
+    archive,
+    distilledAt: updatedAt,
+  };
+}
+
+function normalizePostCompactCompletionMemoryPreservationClosureConflictResolutionRows(groupId: string, input: any = {}, options: any = {}) {
+  const rows = Array.isArray(input) ? input : Array.isArray(input.rows) ? input.rows : [];
+  return rows.map((entry: any) => {
+    const row: any = {
+      schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-row-v1",
+      version: GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_CONFLICT_RESOLUTION_DISTILLATION_VERSION,
+      group_id: String(entry.group_id || entry.groupId || groupId || "").trim(),
+      target_project: String(entry.target_project || entry.targetProject || "").trim(),
+      task_id: String(entry.task_id || entry.taskId || "").trim(),
+      task_text: compactText(entry.task_text || entry.taskText || "", 900),
+      task_family_key: String(entry.task_family_key || entry.taskFamilyKey || "").trim(),
+      task_family_tokens: uniqueStrings(entry.task_family_tokens || entry.taskFamilyTokens || [], 40),
+      resolution_entry_id: String(entry.entry_id || "").trim(),
+      resolution_usage_state: normalizePostCompactCompletionMemoryPreservationClosureUsageState(entry.conflict_resolution_state || entry.usage_state),
+      current_source_verified: entry.current_source_verified === true,
+      reason: compactText(entry.reason || "", 700),
+      worker_context_packet_id: String(entry.worker_context_packet_id || "").trim(),
+      binding_id: String(entry.binding_id || "").trim(),
+      task_agent_session_id: String(entry.task_agent_session_id || "").trim(),
+      native_session_id: String(entry.native_session_id || "").trim(),
+      execution_id: String(entry.execution_id || "").trim(),
+      receipt_source: String(entry.receipt_source || "").trim(),
+      receipt_status: String(entry.receipt_status || "").trim(),
+      parent_arbitration_state: String(entry.conflict_parent_arbitration_state || "").trim(),
+      parent_conflict_fingerprint: String(entry.conflict_parent_fingerprint || "").trim(),
+      parent_conflict_ratio: Number(entry.conflict_parent_ratio || 0),
+      parent_positive_weight: Number(entry.conflict_parent_positive_weight || 0),
+      parent_ignored_weight: Number(entry.conflict_parent_ignored_weight || 0),
+      reversible: entry.conflict_resolution_reversible === true,
+      historical_branches_preserved: true,
+      historical_majority_authorization_allowed: false,
+      resolved_at: String(entry.generated_at || options.updatedAt || now()),
+    };
+    row.row_id = `post-compact-closure-conflict-resolution:${checksum([
+      row.group_id,
+      row.task_family_key,
+      row.resolution_entry_id,
+      row.task_agent_session_id,
+      row.native_session_id,
+      row.parent_conflict_fingerprint,
+    ], 24)}`;
+    return row;
+  }).filter((row: any) => row.group_id === groupId)
+    .filter((row: any) => row.resolution_entry_id && row.task_family_key)
+    .filter((row: any) => row.task_agent_session_id && row.native_session_id)
+    .filter((row: any) => row.parent_arbitration_state === "contradictory_reverify_current_session" && row.parent_conflict_fingerprint)
+    .filter((row: any) => row.reversible === true)
+    .filter((row: any) => row.resolution_usage_state === "ignored" ? !!row.reason : ["used", "verified"].includes(row.resolution_usage_state) && row.current_source_verified === true);
+}
+
+function renderPostCompactCompletionMemoryPreservationClosureConflictResolutionBody(archive: any = {}, options: any = {}) {
+  const rows = Array.isArray(archive.rows) ? archive.rows : [];
+  const lines = [
+    "# Post-Compact Completion Memory Preservation Closure Conflict Resolutions",
+    "",
+    `Generated by CCM closure conflict-resolution distillation at ${options.updatedAt || now()}.`,
+    "Each row records a newer current-session decision that resolved a contradictory used/verified versus ignored closure-memory history for one task family.",
+    "Stable boundary: the resolution is session-bound recovery evidence, not permanent repository truth or authorization. Historical branches remain immutable and a later reliable contradiction may reopen arbitration.",
+    "",
+    "## Session-Bound Resolution Rows",
+  ];
+  for (const row of rows.slice(-100).reverse()) {
+    lines.push(`- [resolved:${row.resolution_usage_state}] task_family=${row.task_family_key}; resolution_entry=${row.resolution_entry_id}; parent=${row.parent_conflict_fingerprint}; resolved_at=${row.resolved_at}.`);
+    lines.push(`  Current resolution session: packet=${row.worker_context_packet_id}; binding=${row.binding_id}; task_agent_session=${row.task_agent_session_id}; native_session=${row.native_session_id}; execution=${row.execution_id || ""}.`);
+    lines.push(`  Verification: currentSourceVerified=${row.current_source_verified === true}; reason=${row.reason || ""}; parentState=${row.parent_arbitration_state}; parentRatio=${row.parent_conflict_ratio}; positiveWeight=${row.parent_positive_weight}; ignoredWeight=${row.parent_ignored_weight}.`);
+    lines.push("  Reuse boundary: reversible=true; historicalBranchesPreserved=true; historicalMajorityAuthorizationAllowed=false.");
+  }
+  lines.push("");
+  lines.push("## Future Session Rule");
+  lines.push("- Use the newest valid resolution as ranking guidance for the same task family only, then reverify current source and return a fresh memoryUsed or memoryIgnored decision.");
+  lines.push("- Never erase either historical conflict branch; reopen conflict arbitration when newer reliable opposing evidence appears.");
+  return lines.join("\n").trim() + "\n";
+}
+
+function getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveDir(groupId: string) {
+  return path.join(getGroupTypedMemoryDir(groupId), GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_CONFLICT_RESOLUTION_COLD_ARCHIVE_DIR);
+}
+
+export function getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveManifestFile(groupId: string) {
+  return path.join(getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveDir(groupId), "manifest.json");
+}
+
+function conflictResolutionColdArchiveManifestChecksum(manifest: any = {}) {
+  const value: any = {
+    group_id: manifest.group_id || "",
+    row_count: Number(manifest.row_count || 0),
+    hot_row_count: Number(manifest.hot_row_count || 0),
+    rows_checksum: manifest.rows_checksum || "",
+    shards: (manifest.shards || []).map((shard: any) => ({
+      bucket: shard.bucket || "",
+      rel_path: shard.rel_path || "",
+      content_checksum: shard.content_checksum || "",
+      row_count: Number(shard.row_count || 0),
+      row_ids_checksum: shard.row_ids_checksum || "",
+    })),
+  };
+  if (manifest.generation_number !== undefined
+    || manifest.generation_id
+    || manifest.previous_manifest_checksum
+    || manifest.previous_manifest_rel_path) {
+    value.generation_number = Number(manifest.generation_number || 0);
+    value.generation_id = manifest.generation_id || "";
+    value.previous_manifest_checksum = manifest.previous_manifest_checksum || "";
+    value.previous_manifest_rel_path = manifest.previous_manifest_rel_path || "";
+  }
+  return checksum(value, 48);
+}
+
+function getConflictResolutionColdArchiveManifestGenerationsDir(groupId: string) {
+  return path.join(getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveDir(groupId), "manifests");
+}
+
+function getConflictResolutionColdArchiveManifestGenerationFile(groupId: string, manifestChecksum: string) {
+  return path.join(getConflictResolutionColdArchiveManifestGenerationsDir(groupId), `${safeSegment(manifestChecksum, "invalid")}.json`);
+}
+
+function conflictResolutionColdArchiveShardFile(groupId: string, relPath: string) {
+  const typedDir = path.resolve(getGroupTypedMemoryDir(groupId));
+  const coldDir = path.resolve(getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveDir(groupId));
+  const file = path.resolve(typedDir, String(relPath || ""));
+  if (file !== coldDir && !file.startsWith(`${coldDir}${path.sep}`)) throw new Error("conflict-resolution cold archive shard path escapes group archive directory");
+  return file;
+}
+
+function readConflictResolutionColdArchiveManifest(groupId: string) {
+  const file = getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveManifestFile(groupId);
+  const manifest = readJson(file, null);
+  if (!manifest) return null;
+  return { ...manifest, file };
+}
+
+function readAndVerifyConflictResolutionColdArchiveShard(groupId: string, descriptor: any = {}) {
+  try {
+    const file = conflictResolutionColdArchiveShardFile(groupId, descriptor.rel_path || descriptor.relPath || "");
+    const shard = readJson(file, null);
+    const rows = Array.isArray(shard?.rows) ? shard.rows : [];
+    const calculatedChecksum = checksum(rows, 48);
+    const valid = shard?.schema === "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-cold-shard-v1"
+      && String(shard.group_id || "") === groupId
+      && String(shard.bucket || "") === String(descriptor.bucket || "")
+      && calculatedChecksum === String(descriptor.content_checksum || "")
+      && calculatedChecksum === String(shard.content_checksum || "")
+      && rows.length === Number(descriptor.row_count || 0)
+      && rows.every((row: any) => String(row.group_id || "") === groupId);
+    return {
+      valid,
+      file,
+      descriptor,
+      shard,
+      rows,
+      calculatedChecksum,
+      error: valid ? "" : "cold archive shard schema/group/checksum/count mismatch",
+    };
+  } catch (error: any) {
+    return { valid: false, file: "", descriptor, shard: null, rows: [], calculatedChecksum: "", error: String(error?.message || error) };
+  }
+}
+
+export function verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchive(groupId: string, options: any = {}) {
+  const explicitManifest = options.manifest && typeof options.manifest === "object" ? options.manifest : null;
+  const manifest = explicitManifest || readConflictResolutionColdArchiveManifest(groupId);
+  if (!manifest) {
+    return {
+      schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-cold-archive-verification-v1",
+      groupId,
+      status: "missing",
+      valid: false,
+      manifestFile: getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveManifestFile(groupId),
+      manifest: null,
+      shardCount: 0,
+      verifiedShardCount: 0,
+      rowCount: 0,
+      rows: [],
+      gaps: ["cold_archive_manifest_missing"],
+    };
+  }
+  const manifestChecksumValid = manifest.schema === "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-cold-manifest-v1"
+    && String(manifest.group_id || "") === groupId
+    && String(manifest.manifest_checksum || "") === conflictResolutionColdArchiveManifestChecksum(manifest);
+  const shardResults = (Array.isArray(manifest.shards) ? manifest.shards : []).map((descriptor: any) => readAndVerifyConflictResolutionColdArchiveShard(groupId, descriptor));
+  const rows = shardResults.flatMap((result: any) => result.valid ? result.rows : []);
+  const rowIds = rows.map((row: any) => String(row.row_id || "")).filter(Boolean);
+  const uniqueRowIds = new Set(rowIds);
+  const rowsChecksumValid = rows.length === Number(manifest.row_count || 0)
+    && uniqueRowIds.size === rows.length
+    && checksum([...rows].sort((a: any, b: any) => String(a.row_id || "").localeCompare(String(b.row_id || ""))), 48) === String(manifest.rows_checksum || "");
+  const valid = manifestChecksumValid && shardResults.every((result: any) => result.valid) && rowsChecksumValid;
+  return {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-cold-archive-verification-v1",
+    groupId,
+    status: valid ? "ok" : "fail",
+    valid,
+    manifestFile: options.manifestFile || options.manifest_file || manifest.file || getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveManifestFile(groupId),
+    manifest,
+    manifestChecksumValid,
+    shardCount: shardResults.length,
+    verifiedShardCount: shardResults.filter((result: any) => result.valid).length,
+    rowCount: rows.length,
+    rows: options.includeRows === true || options.include_rows === true ? rows : [],
+    shardResults: shardResults.map((result: any) => ({
+      valid: result.valid,
+      file: result.file,
+      bucket: result.descriptor?.bucket || "",
+      rowCount: result.rows.length,
+      contentChecksum: result.descriptor?.content_checksum || "",
+      calculatedChecksum: result.calculatedChecksum,
+      error: result.error,
+    })),
+    gaps: [
+      ...(!manifestChecksumValid ? ["cold_archive_manifest_checksum_mismatch"] : []),
+      ...shardResults.filter((result: any) => !result.valid).map((result: any) => `cold_archive_shard_invalid:${result.descriptor?.bucket || "unknown"}`),
+      ...(!rowsChecksumValid ? ["cold_archive_rows_checksum_or_count_mismatch"] : []),
+    ],
+  };
+}
+
+function readPreviousConflictResolutionColdArchiveManifest(groupId: string, currentManifest: any = {}) {
+  const checksumValue = String(currentManifest.previous_manifest_checksum || "").trim();
+  if (!checksumValue) return null;
+  const expectedFile = getConflictResolutionColdArchiveManifestGenerationFile(groupId, checksumValue);
+  const expectedRelPath = path.relative(getGroupTypedMemoryDir(groupId), expectedFile).split(path.sep).join("/");
+  if (String(currentManifest.previous_manifest_rel_path || "") !== expectedRelPath) return {
+    invalidLink: true,
+    expectedFile,
+    expectedRelPath,
+    actualRelPath: String(currentManifest.previous_manifest_rel_path || ""),
+  };
+  const manifest = readJson(expectedFile, null);
+  return manifest ? { ...manifest, file: expectedFile } : { missing: true, expectedFile, expectedRelPath };
+}
+
+export function verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionManifestGenerations(groupId: string, options: any = {}) {
+  const currentManifest = readConflictResolutionColdArchiveManifest(groupId);
+  const current = verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchive(groupId, {
+    manifest: currentManifest,
+    manifestFile: currentManifest?.file,
+    includeRows: true,
+  });
+  const generationNumber = Number(currentManifest?.generation_number || 0);
+  const currentGenerationFile = currentManifest?.manifest_checksum
+    ? getConflictResolutionColdArchiveManifestGenerationFile(groupId, currentManifest.manifest_checksum)
+    : "";
+  const currentGenerationManifest = currentGenerationFile ? readJson(currentGenerationFile, null) : null;
+  const currentGenerationCopyValid = !!currentGenerationManifest
+    && currentGenerationManifest.manifest_checksum === currentManifest?.manifest_checksum
+    && conflictResolutionColdArchiveManifestChecksum(currentGenerationManifest) === currentManifest?.manifest_checksum;
+  const previousManifest = currentManifest ? readPreviousConflictResolutionColdArchiveManifest(groupId, currentManifest) : null;
+  const previousRequired = generationNumber >= 2 || !!currentManifest?.previous_manifest_checksum;
+  const previous = previousManifest && !previousManifest.invalidLink && !previousManifest.missing
+    ? verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchive(groupId, {
+      manifest: previousManifest,
+      manifestFile: previousManifest.file,
+      includeRows: true,
+    })
+    : null;
+  const linkValid = !previousRequired || (!!previousManifest
+    && !previousManifest.invalidLink
+    && !previousManifest.missing
+    && String(previousManifest.manifest_checksum || "") === String(currentManifest?.previous_manifest_checksum || "")
+    && Number(previousManifest.generation_number || Math.max(1, generationNumber - 1)) < generationNumber);
+  const currentRowIds = new Set((current.rows || []).map((row: any) => String(row.row_id || "")));
+  const previousRowsRecoverable = !previousRequired || (previous?.valid === true
+    && (previous.rows || []).every((row: any) => currentRowIds.has(String(row.row_id || ""))));
+  const valid = current.valid === true
+    && currentGenerationCopyValid
+    && (!previousRequired || previous?.valid === true)
+    && linkValid
+    && previousRowsRecoverable;
+  return {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-manifest-generation-verification-v1",
+    groupId,
+    status: valid ? "ok" : "fail",
+    valid,
+    generationNumber,
+    currentManifestChecksum: currentManifest?.manifest_checksum || "",
+    currentGenerationFile,
+    currentGenerationCopyValid,
+    previousManifestChecksum: currentManifest?.previous_manifest_checksum || "",
+    previousRequired,
+    current,
+    previous,
+    linkValid,
+    previousRowsRecoverable,
+    recoverySimulationPassed: valid && previousRowsRecoverable,
+    gaps: [
+      ...(current.valid ? [] : ["current_manifest_generation_invalid"]),
+      ...(currentGenerationCopyValid ? [] : ["current_manifest_generation_copy_invalid"]),
+      ...(previousRequired && previous?.valid !== true ? ["previous_manifest_generation_invalid"] : []),
+      ...(!linkValid ? ["manifest_generation_link_invalid"] : []),
+      ...(!previousRowsRecoverable ? ["previous_generation_rows_not_recoverable_from_current"] : []),
+    ],
+  };
+}
+
+export function recoverPostCompactCompletionMemoryPreservationClosureConflictResolutionManifestFromGeneration(groupId: string, options: any = {}) {
+  const generationsDir = getConflictResolutionColdArchiveManifestGenerationsDir(groupId);
+  const candidates: any[] = [];
+  try {
+    for (const name of fs.readdirSync(generationsDir).filter(name => name.endsWith(".json"))) {
+      const file = path.join(generationsDir, name);
+      const manifest = readJson(file, null);
+      if (!manifest || String(manifest.group_id || "") !== groupId) continue;
+      const verification = verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchive(groupId, {
+        manifest,
+        manifestFile: file,
+      });
+      if (verification.valid) candidates.push({ manifest, file, verification });
+    }
+  } catch {}
+  candidates.sort((a, b) => Number(b.manifest.generation_number || 0) - Number(a.manifest.generation_number || 0)
+    || String(b.manifest.updated_at || "").localeCompare(String(a.manifest.updated_at || "")));
+  const selected = candidates[0] || null;
+  if (!selected) return {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-manifest-recovery-v1",
+    groupId,
+    status: "blocked",
+    recovered: false,
+    reason: "no_valid_manifest_generation",
+    candidateCount: candidates.length,
+  };
+  const current = readConflictResolutionColdArchiveManifest(groupId);
+  const currentValid = current
+    ? verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchive(groupId, { manifest: current, manifestFile: current.file }).valid === true
+    : false;
+  const alreadyCurrent = currentValid && current?.manifest_checksum === selected.manifest.manifest_checksum;
+  if (!alreadyCurrent && options.dryRun !== true && options.dry_run !== true) {
+    writeJsonAtomic(getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveManifestFile(groupId), selected.manifest);
+  }
+  return {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-manifest-recovery-v1",
+    groupId,
+    status: alreadyCurrent ? "already_current" : options.dryRun === true || options.dry_run === true ? "recoverable" : "recovered",
+    recovered: alreadyCurrent || !(options.dryRun === true || options.dry_run === true),
+    alreadyCurrent,
+    candidateCount: candidates.length,
+    selectedGenerationNumber: Number(selected.manifest.generation_number || 0),
+    selectedManifestChecksum: selected.manifest.manifest_checksum || "",
+    selectedManifestFile: selected.file,
+  };
+}
+
+export function getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveQuarantineFile(groupId: string) {
+  return path.join(getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveDir(groupId), "quarantine.json");
+}
+
+function listConflictResolutionColdArchiveShardFiles(groupId: string) {
+  const root = path.join(getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveDir(groupId), "shards");
+  const files: string[] = [];
+  const visit = (dir: string) => {
+    let entries: fs.Dirent[] = [];
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const entry of entries) {
+      const file = path.join(dir, entry.name);
+      if (entry.isDirectory()) visit(file);
+      else if (entry.isFile() && entry.name.endsWith(".json")) files.push(file);
+    }
+  };
+  visit(root);
+  return files.sort();
+}
+
+function readStandaloneConflictResolutionColdArchiveShard(groupId: string, file: string) {
+  try {
+    const coldDir = path.resolve(getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveDir(groupId));
+    const resolved = path.resolve(file);
+    if (!resolved.startsWith(`${coldDir}${path.sep}`)) throw new Error("orphan shard path escapes cold archive");
+    const shard = readJson(resolved, null);
+    const rows = Array.isArray(shard?.rows) ? shard.rows : [];
+    const calculatedChecksum = checksum(rows, 48);
+    const filenameChecksum = path.basename(resolved, ".json");
+    const valid = shard?.schema === "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-cold-shard-v1"
+      && String(shard.group_id || "") === groupId
+      && calculatedChecksum === String(shard.content_checksum || "")
+      && calculatedChecksum === filenameChecksum
+      && rows.length === Number(shard.row_count || 0)
+      && rows.every((row: any) => String(row.group_id || "") === groupId && row.row_id);
+    return { valid, file: resolved, shard, rows, calculatedChecksum, error: valid ? "" : "standalone orphan shard checksum/group/count mismatch" };
+  } catch (error: any) {
+    return { valid: false, file, shard: null, rows: [], calculatedChecksum: "", error: String(error?.message || error) };
+  }
+}
+
+function conflictResolutionOpenRepairEntryIds(groupId: string) {
+  const file = path.join(GROUP_MEMORY_REPLAY_REPAIR_WORK_ITEMS_DIR, `${safeSegment(groupId)}.json`);
+  const ledger = readJson(file, {});
+  const openStatuses = new Set(["pending", "in_progress", "running", "claimed", "dispatching", "blocked", "needs_info", "needs_user", "waiting"]);
+  return new Set((Array.isArray(ledger.items) ? ledger.items : [])
+    .filter((item: any) => openStatuses.has(String(item.status || "pending").trim().toLowerCase()))
+    .map((item: any) => String(item.completion_preservation_conflict_resolution_entry_id || "").trim())
+    .filter(Boolean));
+}
+
+function conflictResolutionQuarantineChecksum(value: any = {}) {
+  return checksum({
+    group_id: value.group_id || "",
+    current_manifest_checksum: value.current_manifest_checksum || "",
+    previous_manifest_checksum: value.previous_manifest_checksum || "",
+    entries: (value.entries || []).map((entry: any) => ({
+      rel_path: entry.rel_path || "",
+      content_checksum: entry.content_checksum || "",
+      row_ids_checksum: entry.row_ids_checksum || "",
+      first_seen_at: entry.first_seen_at || "",
+      eligible_after: entry.eligible_after || "",
+      status: entry.status || "",
+      deleted_at: entry.deleted_at || "",
+    })),
+  }, 48);
+}
+
+export function reconcilePostCompactCompletionMemoryPreservationClosureConflictResolutionOrphanShards(groupId: string, options: any = {}) {
+  const at = String(options.at || options.generatedAt || options.generated_at || now());
+  const atMs = Date.parse(at);
+  const gracePeriodMs = Math.max(0, Number(options.gracePeriodMs ?? options.grace_period_ms ?? 7 * 24 * 60 * 60 * 1000));
+  const deleteEligible = options.deleteEligible === true || options.delete_eligible === true;
+  const dryRun = options.dryRun === true || options.dry_run === true;
+  const rawAllowedRelPaths = options.allowedRelPaths || options.allowed_rel_paths;
+  const approvalRestricted = Array.isArray(rawAllowedRelPaths);
+  const allowedRelPaths = new Set(uniqueStrings(Array.isArray(rawAllowedRelPaths) ? rawAllowedRelPaths : [], 5000));
+  const generationHealth = verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionManifestGenerations(groupId);
+  const currentManifest = generationHealth.current?.manifest || {};
+  const previousManifest = generationHealth.previous?.manifest || {};
+  const typedDir = getGroupTypedMemoryDir(groupId);
+  const referenced = new Set<string>([
+    ...(currentManifest.shards || []).map((shard: any) => String(shard.rel_path || "")),
+    ...(previousManifest.shards || []).map((shard: any) => String(shard.rel_path || "")),
+  ]);
+  const currentRowIds = new Set((generationHealth.current?.rows || []).map((row: any) => String(row.row_id || "")));
+  const openRepairEntryIds = conflictResolutionOpenRepairEntryIds(groupId);
+  const quarantineFile = getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveQuarantineFile(groupId);
+  const existing = readJson(quarantineFile, {});
+  const existingPresent = fs.existsSync(quarantineFile);
+  const existingValid = !existingPresent || (existing.schema === "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-orphan-quarantine-v1"
+    && String(existing.group_id || "") === groupId
+    && String(existing.quarantine_checksum || "") === conflictResolutionQuarantineChecksum(existing));
+  const existingByPath = new Map<string, any>((existingValid && Array.isArray(existing.entries) ? existing.entries : []).map((entry: any) => [String(entry.rel_path || ""), entry]));
+  const shardFiles = listConflictResolutionColdArchiveShardFiles(groupId);
+  const orphanFiles = shardFiles.filter(file => !referenced.has(path.relative(typedDir, file).split(path.sep).join("/")));
+  const rows: any[] = [];
+  for (const file of orphanFiles) {
+    const relPath = path.relative(typedDir, file).split(path.sep).join("/");
+    const previous = existingByPath.get(relPath) || null;
+    const shard = readStandaloneConflictResolutionColdArchiveShard(groupId, file);
+    const resolutionEntryIds = uniqueStrings((shard.rows || []).map((row: any) => row.resolution_entry_id), (shard.rows || []).length || 1);
+    const referencedByOpenRepair = resolutionEntryIds.some((entryId: string) => openRepairEntryIds.has(entryId));
+    const recoveryCovered = shard.valid === true && (shard.rows || []).every((row: any) => currentRowIds.has(String(row.row_id || "")));
+    const firstSeenAt = String(previous?.first_seen_at || at);
+    const firstSeenMs = Date.parse(firstSeenAt);
+    const eligibleAfterMs = Number.isFinite(firstSeenMs) ? firstSeenMs + gracePeriodMs : Number.POSITIVE_INFINITY;
+    const eligibleAfter = Number.isFinite(eligibleAfterMs) ? new Date(eligibleAfterMs).toISOString() : "";
+    const graceElapsed = !!previous && Number.isFinite(atMs) && Number.isFinite(eligibleAfterMs) && atMs >= eligibleAfterMs;
+    const explicitlyApproved = !approvalRestricted || allowedRelPaths.has(relPath);
+    const canDelete = deleteEligible
+      && !dryRun
+      && !!previous
+      && existingValid
+      && graceElapsed
+      && generationHealth.valid === true
+      && generationHealth.previousRequired === true
+      && generationHealth.previous?.valid === true
+      && generationHealth.recoverySimulationPassed === true
+      && shard.valid === true
+      && recoveryCovered
+      && !referencedByOpenRepair
+      && explicitlyApproved;
+    let status = !existingValid ? "blocked_quarantine_integrity"
+      : referencedByOpenRepair ? "protected_open_repair"
+      : !shard.valid ? "blocked_invalid_shard"
+      : !generationHealth.valid ? "blocked_manifest_generation"
+      : !recoveryCovered ? "blocked_recovery_simulation"
+      : graceElapsed && !explicitlyApproved ? "awaiting_explicit_approval"
+      : graceElapsed ? "eligible" : "quarantined";
+    let deletedAt = String(previous?.deleted_at || "");
+    if (canDelete) {
+      fs.unlinkSync(file);
+      status = "deleted";
+      deletedAt = at;
+    }
+    rows.push({
+      schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-orphan-shard-v1",
+      group_id: groupId,
+      rel_path: relPath,
+      content_checksum: shard.shard?.content_checksum || path.basename(file, ".json"),
+      row_count: (shard.rows || []).length,
+      row_ids_checksum: checksum((shard.rows || []).map((row: any) => row.row_id), 48),
+      resolution_entry_ids: resolutionEntryIds,
+      first_seen_at: firstSeenAt,
+      last_seen_at: at,
+      eligible_after: eligibleAfter,
+      grace_elapsed: graceElapsed,
+      shard_valid: shard.valid === true,
+      recovery_covered: recoveryCovered,
+      referenced_by_open_repair: referencedByOpenRepair,
+      explicitly_approved: explicitlyApproved,
+      status,
+      deleted_at: deletedAt,
+      error: shard.error || "",
+    });
+  }
+  for (const entry of existingValid && Array.isArray(existing.entries) ? existing.entries : []) {
+    if (rows.some(row => row.rel_path === entry.rel_path)) continue;
+    if (entry.status === "deleted") rows.push(entry);
+  }
+  const quarantine: any = {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-orphan-quarantine-v1",
+    version: GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_CONFLICT_RESOLUTION_COLD_ARCHIVE_VERSION,
+    group_id: groupId,
+    current_manifest_checksum: currentManifest.manifest_checksum || "",
+    previous_manifest_checksum: previousManifest.manifest_checksum || "",
+    grace_period_ms: gracePeriodMs,
+    generation_chain_valid: generationHealth.valid === true,
+    recovery_simulation_passed: generationHealth.recoverySimulationPassed === true,
+    quarantine_input_valid: existingValid,
+    orphan_count: rows.filter(row => row.status !== "deleted").length,
+    quarantined_count: rows.filter(row => row.status === "quarantined").length,
+    protected_open_repair_count: rows.filter(row => row.status === "protected_open_repair").length,
+    eligible_count: rows.filter(row => row.status === "eligible").length,
+    deleted_count: rows.filter(row => row.status === "deleted").length,
+    blocked_count: rows.filter(row => String(row.status || "").startsWith("blocked_")).length,
+    entries: rows.sort((a, b) => String(a.rel_path || "").localeCompare(String(b.rel_path || ""))),
+    updated_at: at,
+  };
+  quarantine.quarantine_checksum = conflictResolutionQuarantineChecksum(quarantine);
+  if (!dryRun && existingValid) writeJsonAtomic(quarantineFile, quarantine);
+  return {
+    ...quarantine,
+    file: quarantineFile,
+    dry_run: dryRun,
+    delete_eligible: deleteEligible,
+    generation_health: generationHealth,
+  };
+}
+
+export function getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceLedgerFile(groupId: string) {
+  return path.join(getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveDir(groupId), "maintenance-ledger.json");
+}
+
+export function getPostCompactCompletionMemoryPreservationClosureConflictResolutionGcApprovalLedgerFile(groupId: string) {
+  return path.join(getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveDir(groupId), "gc-approval-receipts.json");
+}
+
+function conflictResolutionMaintenanceRecommendation(generation: any = {}, quarantine: any = {}) {
+  if (generation.valid !== true) return {
+    severity: "critical",
+    action: "recover_or_repair_manifest_generation",
+    destructive: false,
+    reason: `manifest generation invalid: ${(generation.gaps || []).join(",") || "unknown"}`,
+  };
+  if (Number(quarantine.protected_open_repair_count || 0) > 0) return {
+    severity: "warn",
+    action: "wait_for_open_repair_closure",
+    destructive: false,
+    reason: `orphan shards protected by open repairs=${quarantine.protected_open_repair_count}`,
+  };
+  if (Number(quarantine.eligible_count || 0) > 0) return {
+    severity: "advisory",
+    action: "request_explicit_gc_approval_receipt",
+    destructive: false,
+    reason: `eligible orphan shards=${quarantine.eligible_count}; background maintenance cannot authorize deletion`,
+  };
+  if (Number(quarantine.quarantined_count || 0) > 0) return {
+    severity: "info",
+    action: "continue_quarantine_grace_monitoring",
+    destructive: false,
+    reason: `quarantined orphan shards=${quarantine.quarantined_count}`,
+  };
+  return {
+    severity: "ok",
+    action: "continue_read_only_verification",
+    destructive: false,
+    reason: "manifest generations and cold shards verify; no destructive maintenance required",
+  };
+}
+
+export function runPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenance(groupId: string, options: any = {}) {
+  const at = String(options.at || options.generatedAt || options.generated_at || now());
+  const trigger = String(options.trigger || options.source || "manual").trim().toLowerCase();
+  const backgroundTrigger = ["background", "timer", "scheduler", "cron", "automatic", "auto"].includes(trigger);
+  const generation = verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionManifestGenerations(groupId);
+  const archive = verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchive(groupId);
+  const quarantine = reconcilePostCompactCompletionMemoryPreservationClosureConflictResolutionOrphanShards(groupId, {
+    dryRun: true,
+    at,
+    gracePeriodMs: options.gracePeriodMs ?? options.grace_period_ms,
+  });
+  const recommendation = conflictResolutionMaintenanceRecommendation(generation, quarantine);
+  const intervalMs = Math.max(60_000, Number(options.intervalMs || options.interval_ms || 6 * 60 * 60 * 1000));
+  const runCore = {
+    group_id: groupId,
+    trigger,
+    at,
+    current_manifest_checksum: generation.currentManifestChecksum || "",
+    previous_manifest_checksum: generation.previousManifestChecksum || "",
+    quarantine_checksum: quarantine.quarantine_checksum || "",
+    generation_valid: generation.valid === true,
+    archive_valid: archive.valid === true,
+    orphan_count: Number(quarantine.orphan_count || 0),
+    eligible_count: Number(quarantine.eligible_count || 0),
+    protected_open_repair_count: Number(quarantine.protected_open_repair_count || 0),
+  };
+  const runId = `conflict-resolution-maintenance:${checksum(runCore, 24)}`;
+  const run = {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-run-v1",
+    version: 1,
+    run_id: runId,
+    ...runCore,
+    mode: "verify_and_quarantine_dry_run_only",
+    destructive_action_authorized: false,
+    deletion_attempted: false,
+    background_trigger: backgroundTrigger,
+    recommendation,
+    group_main_agent_recommendation: {
+      ...recommendation,
+      owner: "group-main-agent",
+      should_create_real_task: false,
+      next_step_requires_explicit_dispatch: true,
+    },
+    global_agent_recommendation: {
+      ...recommendation,
+      owner: "global-agent",
+      advisory_only: true,
+      cross_group_authorization_allowed: false,
+    },
+    next_run_at: new Date(Date.parse(at) + intervalMs).toISOString(),
+  };
+  const file = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceLedgerFile(groupId);
+  const ledger = readJson(file, {});
+  const entries = [...(Array.isArray(ledger.entries) ? ledger.entries : []).filter((entry: any) => entry.run_id !== runId), run].slice(-240);
+  const value = {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-ledger-v1",
+    version: 1,
+    group_id: groupId,
+    controller_policy: "background_verify_and_dry_run_never_delete",
+    entries,
+    latest_run: run,
+    next_run_at: run.next_run_at,
+    updated_at: at,
+  };
+  if (options.persist !== false) writeJsonAtomic(file, value);
+  return { ...run, file, ledger: value, generation, archive, quarantine };
+}
+
+function conflictResolutionGcApprovalReceiptChecksum(receipt: any = {}) {
+  return checksum({
+    receipt_id: receipt.receipt_id || "",
+    group_id: receipt.group_id || "",
+    approved: receipt.approved === true,
+    allow_delete: receipt.allow_delete === true,
+    actor_role: receipt.actor_role || "",
+    actor_id: receipt.actor_id || "",
+    reason: receipt.reason || "",
+    current_manifest_checksum: receipt.current_manifest_checksum || "",
+    previous_manifest_checksum: receipt.previous_manifest_checksum || "",
+    quarantine_checksum: receipt.quarantine_checksum || "",
+    candidates: (receipt.candidates || []).map((candidate: any) => ({
+      rel_path: candidate.rel_path || "",
+      content_checksum: candidate.content_checksum || "",
+      row_ids_checksum: candidate.row_ids_checksum || "",
+    })),
+    issued_at: receipt.issued_at || "",
+    expires_at: receipt.expires_at || "",
+    single_use: receipt.single_use === true,
+  }, 48);
+}
+
+function readConflictResolutionGcApprovalLedger(groupId: string) {
+  const file = getPostCompactCompletionMemoryPreservationClosureConflictResolutionGcApprovalLedgerFile(groupId);
+  const ledger = readJson(file, {});
+  return {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-gc-approval-ledger-v1",
+    version: 1,
+    group_id: groupId,
+    entries: Array.isArray(ledger.entries) ? ledger.entries : [],
+    file,
+    updated_at: ledger.updated_at || "",
+  };
+}
+
+function writeConflictResolutionGcApprovalLedger(groupId: string, entries: any[], at: string) {
+  const file = getPostCompactCompletionMemoryPreservationClosureConflictResolutionGcApprovalLedgerFile(groupId);
+  const open = entries.filter((entry: any) => entry.consumed !== true && entry.revoked !== true);
+  const terminal = entries.filter((entry: any) => entry.consumed === true || entry.revoked === true).slice(-160);
+  const value = {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-gc-approval-ledger-v1",
+    version: 1,
+    group_id: groupId,
+    entries: [...open, ...terminal],
+    open_receipt_count: open.length,
+    consumed_receipt_count: terminal.filter((entry: any) => entry.consumed === true).length,
+    updated_at: at,
+  };
+  writeJsonAtomic(file, value);
+  return { ...value, file };
+}
+
+export function createPostCompactCompletionMemoryPreservationClosureConflictResolutionGcApprovalReceipt(groupId: string, input: any = {}) {
+  const at = String(input.at || input.issuedAt || input.issued_at || now());
+  const actorRole = String(input.actorRole || input.actor_role || "").trim().toLowerCase();
+  const actorId = String(input.actorId || input.actor_id || input.actor || "").trim();
+  const reason = String(input.reason || "").trim();
+  if (input.explicitApproval !== true && input.explicit_approval !== true) throw new Error("GC approval requires explicitApproval=true");
+  if (!new Set(["group-main-agent", "global-agent"]).has(actorRole)) throw new Error("GC approval actor must be group-main-agent or global-agent");
+  if (!actorId) throw new Error("GC approval requires actorId");
+  if (!reason) throw new Error("GC approval requires reason");
+  const generation = verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionManifestGenerations(groupId);
+  if (!generation.valid) throw new Error(`GC approval blocked by invalid manifest generations: ${(generation.gaps || []).join(",")}`);
+  const quarantine = reconcilePostCompactCompletionMemoryPreservationClosureConflictResolutionOrphanShards(groupId, {
+    dryRun: true,
+    at,
+    gracePeriodMs: input.gracePeriodMs ?? input.grace_period_ms,
+  });
+  if (quarantine.quarantine_input_valid === false) throw new Error("GC approval blocked by invalid quarantine manifest");
+  const requestedPathsRaw = input.candidateRelPaths || input.candidate_rel_paths;
+  const requestedPaths = Array.isArray(requestedPathsRaw) ? new Set(uniqueStrings(requestedPathsRaw, 5000)) : null;
+  const eligible = (quarantine.entries || []).filter((entry: any) => entry.status === "eligible"
+    && entry.shard_valid === true
+    && entry.recovery_covered === true
+    && entry.referenced_by_open_repair !== true
+    && (!requestedPaths || requestedPaths.has(entry.rel_path)));
+  if (!eligible.length) throw new Error("GC approval requires at least one eligible quarantined shard");
+  if (requestedPaths && eligible.length !== requestedPaths.size) throw new Error("GC approval candidate set includes non-eligible or missing shards");
+  const expiresInMs = Math.max(60_000, Math.min(24 * 60 * 60 * 1000, Number(input.expiresInMs || input.expires_in_ms || 30 * 60 * 1000)));
+  const receiptId = `conflict-resolution-gc-approval:${checksum([
+    groupId,
+    generation.currentManifestChecksum,
+    generation.previousManifestChecksum,
+    quarantine.quarantine_checksum,
+    eligible.map((entry: any) => entry.rel_path),
+    actorRole,
+    actorId,
+    at,
+  ], 24)}`;
+  const receipt: any = {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-gc-approval-receipt-v1",
+    version: 1,
+    receipt_id: receiptId,
+    group_id: groupId,
+    approved: true,
+    allow_delete: true,
+    actor_role: actorRole,
+    actor_id: actorId,
+    reason,
+    current_manifest_checksum: generation.currentManifestChecksum,
+    previous_manifest_checksum: generation.previousManifestChecksum,
+    quarantine_checksum: quarantine.quarantine_checksum,
+    candidates: eligible.map((entry: any) => ({
+      rel_path: entry.rel_path,
+      content_checksum: entry.content_checksum,
+      row_ids_checksum: entry.row_ids_checksum,
+    })).sort((a: any, b: any) => a.rel_path.localeCompare(b.rel_path)),
+    issued_at: at,
+    expires_at: new Date(Date.parse(at) + expiresInMs).toISOString(),
+    single_use: true,
+    consumed: false,
+    authorization_boundary: "exact_group_generation_quarantine_and_shard_set_only",
+  };
+  receipt.receipt_checksum = conflictResolutionGcApprovalReceiptChecksum(receipt);
+  const ledger = readConflictResolutionGcApprovalLedger(groupId);
+  const entries = [...ledger.entries.filter((entry: any) => entry.receipt_id !== receiptId), receipt];
+  writeConflictResolutionGcApprovalLedger(groupId, entries, at);
+  return receipt;
+}
+
+export function executePostCompactCompletionMemoryPreservationClosureConflictResolutionGcApprovalReceipt(groupId: string, input: any = {}) {
+  const at = String(input.at || input.executedAt || input.executed_at || now());
+  const trigger = String(input.trigger || input.source || "manual").trim().toLowerCase();
+  const receiptId = String(input.receiptId || input.receipt_id || "").trim();
+  const ledger = readConflictResolutionGcApprovalLedger(groupId);
+  const receipt = ledger.entries.find((entry: any) => entry.receipt_id === receiptId) || null;
+  const blocked = (reason: string, extra: any = {}) => ({
+    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-gc-execution-v1",
+    groupId,
+    status: "blocked",
+    executed: false,
+    reason,
+    receipt_id: receiptId,
+    ...extra,
+  });
+  if (["background", "timer", "scheduler", "cron", "automatic", "auto"].includes(trigger)) return blocked("background_trigger_cannot_authorize_destructive_gc");
+  if (input.explicitExecution !== true && input.explicit_execution !== true) return blocked("explicit_execution_required");
+  if (!receipt) return blocked("approval_receipt_not_found");
+  if (String(receipt.group_id || "") !== groupId) return blocked("approval_receipt_group_mismatch");
+  if (receipt.consumed === true) return blocked("approval_receipt_already_consumed");
+  if (receipt.revoked === true) return blocked("approval_receipt_revoked");
+  if (receipt.approved !== true || receipt.allow_delete !== true || receipt.single_use !== true) return blocked("approval_receipt_policy_invalid");
+  if (receipt.receipt_checksum !== conflictResolutionGcApprovalReceiptChecksum(receipt)) return blocked("approval_receipt_checksum_invalid");
+  const expiresAt = Date.parse(String(receipt.expires_at || ""));
+  const atMs = Date.parse(at);
+  if (!Number.isFinite(expiresAt) || !Number.isFinite(atMs) || atMs > expiresAt) return blocked("approval_receipt_expired");
+  const generation = verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionManifestGenerations(groupId);
+  if (!generation.valid) return blocked("manifest_generation_invalid", { gaps: generation.gaps || [] });
+  if (generation.currentManifestChecksum !== receipt.current_manifest_checksum
+    || generation.previousManifestChecksum !== receipt.previous_manifest_checksum) return blocked("approval_receipt_generation_stale");
+  const quarantine = reconcilePostCompactCompletionMemoryPreservationClosureConflictResolutionOrphanShards(groupId, {
+    dryRun: true,
+    at,
+    gracePeriodMs: input.gracePeriodMs ?? input.grace_period_ms,
+  });
+  if (quarantine.quarantine_input_valid === false) return blocked("quarantine_manifest_invalid");
+  if (quarantine.quarantine_checksum !== receipt.quarantine_checksum) return blocked("approval_receipt_quarantine_stale");
+  const eligibleByPath = new Map((quarantine.entries || []).filter((entry: any) => entry.status === "eligible").map((entry: any) => [entry.rel_path, entry]));
+  const candidatesValid = (receipt.candidates || []).every((candidate: any) => {
+    const entry: any = eligibleByPath.get(candidate.rel_path);
+    return !!entry
+      && entry.content_checksum === candidate.content_checksum
+      && entry.row_ids_checksum === candidate.row_ids_checksum
+      && entry.shard_valid === true
+      && entry.recovery_covered === true
+      && entry.referenced_by_open_repair !== true;
+  });
+  if (!candidatesValid || !(receipt.candidates || []).length) return blocked("approval_receipt_candidate_set_stale");
+  const allowedRelPaths = receipt.candidates.map((candidate: any) => candidate.rel_path);
+  const result = reconcilePostCompactCompletionMemoryPreservationClosureConflictResolutionOrphanShards(groupId, {
+    at,
+    gracePeriodMs: input.gracePeriodMs ?? input.grace_period_ms,
+    deleteEligible: true,
+    allowedRelPaths,
+  });
+  const deletedThisRun = (result.entries || []).filter((entry: any) => entry.status === "deleted" && entry.deleted_at === at);
+  if (deletedThisRun.some((entry: any) => !allowedRelPaths.includes(entry.rel_path))) return blocked("gc_deleted_outside_approved_candidate_set");
+  const execution = {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-gc-execution-v1",
+    groupId,
+    status: "executed",
+    executed: true,
+    receipt_id: receiptId,
+    receipt_checksum: receipt.receipt_checksum,
+    deleted_count: deletedThisRun.length,
+    deleted_rel_paths: deletedThisRun.map((entry: any) => entry.rel_path),
+    current_manifest_checksum: generation.currentManifestChecksum,
+    previous_manifest_checksum: generation.previousManifestChecksum,
+    quarantine_checksum_before: quarantine.quarantine_checksum,
+    quarantine_checksum_after: result.quarantine_checksum,
+    executed_at: at,
+    actor_role: receipt.actor_role,
+    actor_id: receipt.actor_id,
+  };
+  const updatedEntries = ledger.entries.map((entry: any) => entry.receipt_id === receiptId ? {
+    ...entry,
+    consumed: true,
+    consumed_at: at,
+    execution_status: execution.status,
+    execution_deleted_count: execution.deleted_count,
+    execution_checksum: checksum(execution, 48),
+  } : entry);
+  writeConflictResolutionGcApprovalLedger(groupId, updatedEntries, at);
+  return { ...execution, result };
+}
+
+export function inspectPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenance(groupId: string, options: any = {}) {
+  const maintenanceFile = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceLedgerFile(groupId);
+  const maintenanceLedger = readJson(maintenanceFile, {});
+  const approvalLedger = readConflictResolutionGcApprovalLedger(groupId);
+  const receipts = approvalLedger.entries || [];
+  const invalidReceipts = receipts.filter((receipt: any) => receipt.schema !== "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-gc-approval-receipt-v1"
+    || String(receipt.group_id || "") !== groupId
+    || receipt.receipt_checksum !== conflictResolutionGcApprovalReceiptChecksum(receipt));
+  const latestRun = maintenanceLedger.latest_run || null;
+  const latestRunSafe = !latestRun || (latestRun.mode === "verify_and_quarantine_dry_run_only"
+    && latestRun.destructive_action_authorized === false
+    && latestRun.deletion_attempted === false);
+  const generation = verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionManifestGenerations(groupId);
+  const quarantine = reconcilePostCompactCompletionMemoryPreservationClosureConflictResolutionOrphanShards(groupId, {
+    dryRun: true,
+    at: options.at || options.now || now(),
+    gracePeriodMs: options.gracePeriodMs ?? options.grace_period_ms,
+  });
+  return {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-status-v1",
+    groupId,
+    status: latestRunSafe && invalidReceipts.length === 0 && generation.valid === true && quarantine.quarantine_input_valid !== false ? "ok" : "fail",
+    maintenanceFile,
+    approvalFile: approvalLedger.file,
+    latestRun,
+    nextRunAt: maintenanceLedger.next_run_at || latestRun?.next_run_at || "",
+    latestRunSafe,
+    receiptCount: receipts.length,
+    openApprovalCount: receipts.filter((receipt: any) => receipt.consumed !== true && receipt.revoked !== true).length,
+    consumedApprovalCount: receipts.filter((receipt: any) => receipt.consumed === true).length,
+    invalidApprovalCount: invalidReceipts.length,
+    backgroundDeletionAuthorized: false,
+    generation,
+    quarantine,
+    recommendation: conflictResolutionMaintenanceRecommendation(generation, quarantine),
+    gaps: [
+      ...(!latestRunSafe ? ["maintenance_latest_run_violated_dry_run_boundary"] : []),
+      ...(invalidReceipts.length ? [`invalid_gc_approval_receipts:${invalidReceipts.length}`] : []),
+      ...(generation.gaps || []),
+      ...(quarantine.quarantine_input_valid === false ? ["quarantine_manifest_invalid"] : []),
+    ],
+  };
+}
+
+export function runDuePostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenance(groupIds: string[] = [], options: any = {}) {
+  const at = String(options.at || options.now || now());
+  const atMs = Date.parse(at);
+  const rows = uniqueStrings(groupIds, 500).map((groupId: string) => {
+    const file = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceLedgerFile(groupId);
+    const ledger = readJson(file, {});
+    const nextRunAt = String(ledger.next_run_at || "");
+    const nextRunMs = Date.parse(nextRunAt);
+    const due = options.force === true || !Number.isFinite(nextRunMs) || (Number.isFinite(atMs) && atMs >= nextRunMs);
+    if (!due) return { groupId, due: false, skipped: true, nextRunAt, destructiveActionAuthorized: false };
+    const run = runPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenance(groupId, {
+      at,
+      trigger: "background",
+      intervalMs: options.intervalMs || options.interval_ms,
+      gracePeriodMs: options.gracePeriodMs ?? options.grace_period_ms,
+      persist: options.persist !== false,
+    });
+    return { groupId, due: true, skipped: false, run, nextRunAt: run.next_run_at, destructiveActionAuthorized: false };
+  });
+  return {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-due-maintenance-v1",
+    at,
+    groupCount: rows.length,
+    dueCount: rows.filter(row => row.due).length,
+    skippedCount: rows.filter(row => row.skipped).length,
+    destructiveActionAuthorized: false,
+    deletedCount: 0,
+    rows,
+  };
+}
+
+function loadPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveRows(groupId: string) {
+  const manifest = readConflictResolutionColdArchiveManifest(groupId);
+  if (!manifest) return [];
+  const verification = verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchive(groupId, { includeRows: true });
+  if (!verification.valid) throw new Error(`conflict-resolution cold archive verification failed: ${(verification.gaps || []).join(",")}`);
+  return verification.rows || [];
+}
+
+function writePostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchive(groupId: string, inputRows: any[] = [], options: any = {}) {
+  const rows = [...inputRows]
+    .filter((row: any) => String(row.group_id || "") === groupId && row.row_id)
+    .sort((a: any, b: any) => String(a.row_id || "").localeCompare(String(b.row_id || "")));
+  const currentManifest = readConflictResolutionColdArchiveManifest(groupId);
+  if (currentManifest) {
+    const currentVerification = verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchive(groupId, {
+      manifest: currentManifest,
+      manifestFile: currentManifest.file,
+    });
+    if (!currentVerification.valid) throw new Error(`refusing to advance invalid conflict-resolution cold archive manifest: ${(currentVerification.gaps || []).join(",")}`);
+    const currentGenerationFile = getConflictResolutionColdArchiveManifestGenerationFile(groupId, currentManifest.manifest_checksum);
+    if (fs.existsSync(currentGenerationFile)) {
+      const existingGeneration = readJson(currentGenerationFile, null);
+      if (!existingGeneration || existingGeneration.manifest_checksum !== currentManifest.manifest_checksum
+        || conflictResolutionColdArchiveManifestChecksum(existingGeneration) !== currentManifest.manifest_checksum) {
+        throw new Error(`existing conflict-resolution manifest generation is invalid: ${currentGenerationFile}`);
+      }
+    } else {
+      const state = { ...currentManifest };
+      delete state.file;
+      writeJsonAtomic(currentGenerationFile, state);
+    }
+  }
+  const buckets = new Map<string, any[]>();
+  for (const row of rows) {
+    const bucket = checksum(String(row.row_id || ""), 1);
+    buckets.set(bucket, [...(buckets.get(bucket) || []), row]);
+  }
+  const typedDir = getGroupTypedMemoryDir(groupId);
+  const descriptors: any[] = [];
+  for (const [bucket, bucketRows] of [...buckets.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+    const sortedRows = [...bucketRows].sort((a: any, b: any) => String(a.row_id || "").localeCompare(String(b.row_id || "")));
+    const contentChecksum = checksum(sortedRows, 48);
+    const relPath = path.posix.join(
+      GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_CONFLICT_RESOLUTION_COLD_ARCHIVE_DIR,
+      "shards",
+      bucket,
+      `${contentChecksum}.json`
+    );
+    const file = conflictResolutionColdArchiveShardFile(groupId, relPath);
+    const shard = {
+      schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-cold-shard-v1",
+      version: GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_CONFLICT_RESOLUTION_COLD_ARCHIVE_VERSION,
+      group_id: groupId,
+      bucket,
+      content_checksum: contentChecksum,
+      row_count: sortedRows.length,
+      rows: sortedRows,
+      created_at: String(options.updatedAt || options.updated_at || now()),
+    };
+    if (fs.existsSync(file)) {
+      const existing = readJson(file, null);
+      if (!existing || checksum(existing.rows || [], 48) !== contentChecksum || existing.content_checksum !== contentChecksum) {
+        throw new Error(`refusing to overwrite invalid content-addressed conflict-resolution shard: ${file}`);
+      }
+    } else {
+      writeJsonAtomic(file, shard);
+    }
+    descriptors.push({
+      shard_id: `conflict-resolution-shard:${bucket}:${contentChecksum}`,
+      bucket,
+      rel_path: path.relative(typedDir, file).split(path.sep).join("/"),
+      content_checksum: contentChecksum,
+      row_count: sortedRows.length,
+      row_ids: sortedRows.map((row: any) => row.row_id),
+      resolution_entry_ids: uniqueStrings(sortedRows.map((row: any) => row.resolution_entry_id), sortedRows.length),
+      task_family_keys: uniqueStrings(sortedRows.map((row: any) => row.task_family_key), sortedRows.length),
+      row_ids_checksum: checksum(sortedRows.map((row: any) => row.row_id), 48),
+    });
+  }
+  const generationNumber = currentManifest ? Math.max(1, Number(currentManifest.generation_number || 1)) + 1 : 1;
+  const previousManifestChecksum = String(currentManifest?.manifest_checksum || "");
+  const previousManifestFile = previousManifestChecksum
+    ? getConflictResolutionColdArchiveManifestGenerationFile(groupId, previousManifestChecksum)
+    : "";
+  const manifest: any = {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-cold-manifest-v1",
+    version: GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_CONFLICT_RESOLUTION_COLD_ARCHIVE_VERSION,
+    group_id: groupId,
+    row_count: rows.length,
+    hot_row_count: Math.min(rows.length, Number(options.hotRowLimit || options.hot_row_limit || GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_CONFLICT_RESOLUTION_HOT_ROW_LIMIT)),
+    shard_count: descriptors.length,
+    rows_checksum: checksum(rows, 48),
+    shards: descriptors,
+    generation_number: generationNumber,
+    generation_id: `conflict-resolution-cold-generation:${generationNumber}:${checksum(rows, 16)}`,
+    previous_manifest_checksum: previousManifestChecksum,
+    previous_manifest_rel_path: previousManifestFile ? path.relative(typedDir, previousManifestFile).split(path.sep).join("/") : "",
+    updated_at: String(options.updatedAt || options.updated_at || now()),
+  };
+  manifest.manifest_checksum = conflictResolutionColdArchiveManifestChecksum(manifest);
+  const file = getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveManifestFile(groupId);
+  const generationFile = getConflictResolutionColdArchiveManifestGenerationFile(groupId, manifest.manifest_checksum);
+  if (fs.existsSync(generationFile)) {
+    const existing = readJson(generationFile, null);
+    if (!existing || existing.manifest_checksum !== manifest.manifest_checksum
+      || conflictResolutionColdArchiveManifestChecksum(existing) !== manifest.manifest_checksum) {
+      throw new Error(`refusing to overwrite invalid conflict-resolution manifest generation: ${generationFile}`);
+    }
+  } else {
+    writeJsonAtomic(generationFile, manifest);
+  }
+  writeJsonAtomic(file, manifest);
+  return { ...manifest, file, generation_file: generationFile };
+}
+
+export function lookupPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchive(groupId: string, query: any = {}, options: any = {}) {
+  const manifest = readConflictResolutionColdArchiveManifest(groupId);
+  if (!manifest) return {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-cold-lookup-v1",
+    groupId,
+    status: "missing",
+    found: false,
+    rows: [],
+    shardsRead: 0,
+    gaps: ["cold_archive_manifest_missing"],
+  };
+  if (manifest.manifest_checksum !== conflictResolutionColdArchiveManifestChecksum(manifest)) return {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-cold-lookup-v1",
+    groupId,
+    status: "tampered",
+    found: false,
+    rows: [],
+    shardsRead: 0,
+    gaps: ["cold_archive_manifest_checksum_mismatch"],
+  };
+  const rowId = String(query.rowId || query.row_id || "").trim();
+  const resolutionEntryId = String(query.resolutionEntryId || query.resolution_entry_id || query.entryId || query.entry_id || "").trim();
+  const taskFamilyKey = String(query.taskFamilyKey || query.task_family_key || "").trim();
+  const descriptors = (manifest.shards || []).filter((shard: any) => {
+    if (rowId) return (shard.row_ids || []).includes(rowId);
+    if (resolutionEntryId) return (shard.resolution_entry_ids || []).includes(resolutionEntryId);
+    if (taskFamilyKey) return (shard.task_family_keys || []).includes(taskFamilyKey);
+    return options.verifyAll === true || options.verify_all === true;
+  });
+  const shardResults = descriptors.map((descriptor: any) => readAndVerifyConflictResolutionColdArchiveShard(groupId, descriptor));
+  if (shardResults.some((result: any) => !result.valid)) return {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-cold-lookup-v1",
+    groupId,
+    status: "tampered",
+    found: false,
+    rows: [],
+    shardsRead: shardResults.length,
+    gaps: shardResults.filter((result: any) => !result.valid).map((result: any) => `cold_archive_shard_invalid:${result.descriptor?.bucket || "unknown"}`),
+  };
+  const rows = shardResults.flatMap((result: any) => result.rows).filter((row: any) => {
+    if (rowId && row.row_id !== rowId) return false;
+    if (resolutionEntryId && row.resolution_entry_id !== resolutionEntryId) return false;
+    if (taskFamilyKey && row.task_family_key !== taskFamilyKey) return false;
+    return true;
+  });
+  return {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-cold-lookup-v1",
+    groupId,
+    status: rows.length ? "found" : "not_found",
+    found: rows.length > 0,
+    rows: rows.slice(0, Math.max(1, Number(options.limit || 20))),
+    matchedRowCount: rows.length,
+    shardsRead: shardResults.length,
+    manifestChecksum: manifest.manifest_checksum,
+    gaps: [],
+  };
+}
+
+export function restorePostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveRows(groupId: string, query: any = {}, options: any = {}) {
+  const lookup = lookupPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchive(groupId, query, options);
+  if (lookup.status === "tampered") return {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-cold-restore-v1",
+    groupId,
+    status: "blocked",
+    restored: false,
+    reason: "cold_archive_integrity_failed",
+    lookup,
+  };
+  if (!lookup.found || !(lookup.rows || []).length) return {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-cold-restore-v1",
+    groupId,
+    status: "not_found",
+    restored: false,
+    reason: "matching_cold_rows_not_found",
+    lookup,
+  };
+  const ledger = readGroupTypedMemoryDistillationLedger(groupId);
+  const archive = ledger.postCompactCompletionMemoryPreservationClosureConflictResolutionArchive || {};
+  if (archive.schema !== "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-distillation-v1") return {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-cold-restore-v1",
+    groupId,
+    status: "blocked",
+    restored: false,
+    reason: "hot_archive_contract_missing",
+    lookup,
+  };
+  const hotRowLimit = Math.max(20, Number(archive.hot_row_limit || GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_CONFLICT_RESOLUTION_HOT_ROW_LIMIT));
+  const requested = new Map<string, any>((lookup.rows || []).slice(0, hotRowLimit).map((row: any) => [String(row.row_id || ""), row]));
+  const merged = new Map<string, any>();
+  for (const row of Array.isArray(archive.rows) ? archive.rows : []) merged.set(String(row.row_id || ""), row);
+  for (const [rowId, row] of requested) merged.set(rowId, row);
+  const sorted = [...merged.values()].sort((a: any, b: any) => String(a.resolved_at || "").localeCompare(String(b.resolved_at || "")));
+  const requestedIds = new Set(requested.keys());
+  const recentNonRequested = sorted.filter((row: any) => !requestedIds.has(String(row.row_id || ""))).slice(-Math.max(0, hotRowLimit - requestedIds.size));
+  const restoredRows = [...recentNonRequested, ...requested.values()]
+    .sort((a: any, b: any) => String(a.resolved_at || "").localeCompare(String(b.resolved_at || "")))
+    .slice(-hotRowLimit);
+  const restoredAt = String(options.restoredAt || options.restored_at || now());
+  const ledgerState = { ...ledger };
+  delete ledgerState.file;
+  writeJsonAtomic(ledger.file, {
+    ...ledgerState,
+    postCompactCompletionMemoryPreservationClosureConflictResolutionArchive: {
+      ...archive,
+      rows: restoredRows,
+      hot_row_count: restoredRows.length,
+      restored_cold_row_ids: uniqueStrings([...(archive.restored_cold_row_ids || []), ...requestedIds], 64),
+      last_cold_restore_at: restoredAt,
+      cold_restore_mode: "audit_only_not_current_authority",
+    },
+    updatedAt: restoredAt,
+  });
+  return {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-cold-restore-v1",
+    groupId,
+    status: "restored",
+    restored: true,
+    restoredRowCount: requested.size,
+    restoredRowIds: [...requestedIds],
+    hotRowCount: restoredRows.length,
+    hotRowLimit,
+    authorityBoundary: "audit_only_not_current_authority",
+    lookup,
+    restoredAt,
+  };
+}
+
+export function distillPostCompactCompletionMemoryPreservationClosureConflictResolutionToTypedMemory(groupId: string, input: any = {}, options: any = {}) {
+  const updatedAt = String(options.updatedAt || options.updated_at || now());
+  const ledger = readGroupTypedMemoryDistillationLedger(groupId);
+  const incomingRows = normalizePostCompactCompletionMemoryPreservationClosureConflictResolutionRows(groupId, input, { ...options, updatedAt });
+  const previousArchive = ledger.postCompactCompletionMemoryPreservationClosureConflictResolutionArchive || {};
+  const previousColdRows = loadPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveRows(groupId);
+  const merged = new Map<string, any>();
+  for (const row of previousColdRows) merged.set(row.row_id, row);
+  for (const row of Array.isArray(previousArchive.rows) ? previousArchive.rows : []) merged.set(row.row_id, row);
+  const previousIds = new Set(merged.keys());
+  for (const row of incomingRows) {
+    const previous = merged.get(row.row_id);
+    merged.set(row.row_id, {
+      ...(previous || {}),
+      ...row,
+      first_seen_at: previous?.first_seen_at || row.resolved_at,
+      last_seen_at: updatedAt,
+      seen_count: Number(previous?.seen_count || 0) + 1,
+    });
+  }
+  const rows = [...merged.values()].sort((a: any, b: any) => String(a.resolved_at || "").localeCompare(String(b.resolved_at || "")));
+  const hotRowLimit = Math.max(20, Number(options.hotRowLimit || options.hot_row_limit || GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_CONFLICT_RESOLUTION_HOT_ROW_LIMIT));
+  const hotRows = rows.slice(-hotRowLimit);
+  const coldManifest = writePostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchive(groupId, rows, { ...options, updatedAt, hotRowLimit });
+  const archive = {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-distillation-v1",
+    version: GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_CONFLICT_RESOLUTION_DISTILLATION_VERSION,
+    archived_count: rows.length,
+    resolved_used_or_verified_count: rows.filter((row: any) => ["used", "verified"].includes(row.resolution_usage_state)).length,
+    resolved_ignored_count: rows.filter((row: any) => row.resolution_usage_state === "ignored").length,
+    task_family_count: uniqueStrings(rows.map((row: any) => row.task_family_key), 320).length,
+    task_session_count: uniqueStrings(rows.map((row: any) => row.task_agent_session_id), 320).length,
+    native_session_count: uniqueStrings(rows.map((row: any) => row.native_session_id), 320).length,
+    immutable_branch_count: rows.length,
+    retention_policy: "checksum_addressed_cold_shards_bounded_hot_index_render_latest_100",
+    retention_pruned_count: 0,
+    hot_row_limit: hotRowLimit,
+    hot_row_count: hotRows.length,
+    cold_archive_row_count: Number(coldManifest.row_count || 0),
+    cold_archive_shard_count: Number(coldManifest.shard_count || 0),
+    cold_archive_manifest_rel_path: path.relative(getGroupTypedMemoryDir(groupId), coldManifest.file).split(path.sep).join("/"),
+    cold_archive_manifest_checksum: coldManifest.manifest_checksum,
+    cold_archive_rows_checksum: coldManifest.rows_checksum,
+    rows: hotRows,
+    updatedAt,
+  };
+  const writes: any[] = [];
+  if (archive.rows.length) {
+    writes.push(upsertGroupTypedMemoryDocument(groupId, {
+      type: "feedback",
+      slug: "post-compact-completion-memory-preservation-closure-conflict-resolutions",
+      name: "Post-compact completion memory preservation closure conflict resolutions",
+      description: "Session-bound, reversible current-source decisions resolving contradictory closure-memory feedback without erasing historical branches.",
+      source: "auto:post-compact-completion-memory-preservation-closure-conflict-resolution-distillation",
+      updatedAt,
+      body: renderPostCompactCompletionMemoryPreservationClosureConflictResolutionBody(archive, { updatedAt }),
+      maxBodyChars: Number(options.maxBodyChars || options.max_body_chars || 24_000),
+    }));
+  }
+  const ledgerState = { ...ledger };
+  delete ledgerState.file;
+  writeJsonAtomic(ledger.file, {
+    ...ledgerState,
+    schema: "ccm-group-typed-memory-distillation-ledger-v1",
+    version: GROUP_TYPED_MEMORY_DISTILLATION_VERSION,
+    groupId,
+    facts: ledger.facts || {},
+    postCompactCompletionMemoryPreservationClosureConflictResolutionArchive: archive,
+    updatedAt,
+  });
+  const index = buildGroupTypedMemoryIndex(groupId);
+  return {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-distillation-v1",
+    version: GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_CONFLICT_RESOLUTION_DISTILLATION_VERSION,
+    groupId,
+    incomingRowCount: incomingRows.length,
+    archivedCount: archive.archived_count,
+    newRowCount: rows.filter((row: any) => !previousIds.has(row.row_id)).length,
+    updatedRowCount: rows.filter((row: any) => previousIds.has(row.row_id) && incomingRows.some((incoming: any) => incoming.row_id === row.row_id)).length,
     writeCount: writes.length,
     writes,
     index,
@@ -10379,6 +12577,117 @@ export function runGroupTypedMemoryPostCompactReinjectionRepairReceiptConsumptio
     };
   } finally {
     try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+  }
+}
+
+export function runGroupTypedMemoryPostCompactCompletionMemoryPreservationRepairClosureDistillationSelfTest() {
+  const suffix = `${process.pid}-${Date.now().toString(36)}`;
+  const groupId = `typed-memory-completion-preservation-closure-${suffix}`;
+  const otherGroupId = `${groupId}-other`;
+  const dir = getGroupTypedMemoryDir(groupId);
+  const otherDir = getGroupTypedMemoryDir(otherGroupId);
+  const item = {
+    group_id: groupId,
+    source: "post_compact_receipt_memory_usage_repair_completion_compaction_preservation_repair",
+    component: "post_compact_receipt_memory_usage_repair_completion_compaction_preservation",
+    target_project: "api",
+    work_item_id: "post-compact-completion-preservation-repair:PHASE186",
+    assignment_id: "phase186-assignment",
+    dispatch_key: "phase186-dispatch",
+    worker_context_packet_id: "phase186-failed-packet",
+    binding_id: "phase186-failed-binding",
+    compact_retry_id: "phase186-failed-retry",
+    compact_outcome_id: "phase186-failed-outcome",
+    compact_hook_run_id: "phase186-failed-hook",
+    corrected_compact_retry_id: "phase186-corrected-retry",
+    corrected_compact_outcome_id: "phase186-corrected-outcome",
+    corrected_compact_hook_run_id: "phase186-corrected-hook",
+    completion_preservation_completion_doc_rel_paths: ["post-compact-receipt-memory-usage-repair-completions.md"],
+    completion_preservation_required_doc_rel_paths: ["post-compact-reinjection-repair-receipt-memory.md"],
+    completion_preservation_work_item_ids: ["post-compact-receipt-memory-usage-repair:PHASE186"],
+    completion_preservation_timeline_binding_ids: ["replay-repair-brief-timeline:PHASE186"],
+    completion_preservation_historical_task_agent_session_ids: ["phase186-original-task-session"],
+    completion_preservation_historical_native_session_ids: ["phase186-original-native-session"],
+    completion_preservation_current_session_binding_id: "phase186-closure-binding",
+    completion_preservation_current_task_agent_session_id: "phase186-closure-task-session",
+    completion_preservation_current_native_session_id: "phase186-closure-native-session",
+    completion_preservation_gap_codes: ["completion_work_item_ids_missing_after_compact"],
+    status: "completed",
+    completion_source: "post_compact_receipt_memory_usage_repair_completion_compaction_preservation_corrected_retry",
+    resolutionReason: "completion_memory_compaction_preservation_corrected_retry_verified",
+    corrected_retry_proof: {
+      schema: "ccm-post-compact-receipt-memory-usage-repair-completion-compaction-preservation-repair-closure-v1",
+      failed_retry_id: "phase186-failed-retry",
+      failed_outcome_id: "phase186-failed-outcome",
+      corrected_retry_id: "phase186-corrected-retry",
+      corrected_outcome_id: "phase186-corrected-outcome",
+      exact_identity_restored: true,
+      current_session_boundary_restored: true,
+      historical_sessions_remain_evidence_only: true,
+      verified_at: "2026-07-12T06:50:00.000Z",
+    },
+    completedAt: "2026-07-12T06:50:00.000Z",
+  };
+  try {
+    const first = distillPostCompactCompletionMemoryPreservationRepairClosureToTypedMemory(groupId, { rows: [item] }, {
+      reason: "phase186-distillation-selftest",
+      updatedAt: "2026-07-12T06:51:00.000Z",
+    });
+    const second = distillPostCompactCompletionMemoryPreservationRepairClosureToTypedMemory(groupId, { rows: [item] }, {
+      reason: "phase186-distillation-selftest-repeat",
+      updatedAt: "2026-07-12T06:52:00.000Z",
+    });
+    const crossGroup = distillPostCompactCompletionMemoryPreservationRepairClosureToTypedMemory(otherGroupId, { rows: [item] }, {
+      reason: "phase186-cross-group-isolation-selftest",
+      updatedAt: "2026-07-12T06:53:00.000Z",
+    });
+    const ledger = readGroupTypedMemoryDistillationLedger(groupId);
+    const otherLedger = readGroupTypedMemoryDistillationLedger(otherGroupId);
+    const docFile = path.join(dir, "post-compact-completion-memory-preservation-repair-closures.md");
+    const docText = fs.readFileSync(docFile, "utf-8");
+    const indexText = fs.readFileSync(getGroupTypedMemoryIndexFile(groupId), "utf-8");
+    const recall = buildGroupTypedMemoryRecall(groupId, "phase186-failed-outcome phase186-corrected-outcome completion memory preservation authority boundary", {
+      disableLedger: true,
+      forceMemory: true,
+      max: 8,
+    });
+    const recallText = JSON.stringify(recall.recalled || []);
+    const rows = ledger.postCompactCompletionMemoryPreservationRepairClosureArchive?.rows || [];
+    const otherRows = otherLedger.postCompactCompletionMemoryPreservationRepairClosureArchive?.rows || [];
+    const checks = {
+      archiveStoresVerifiedClosure: first.archivedCount === 1
+        && first.verifiedCount === 1
+        && first.failedOutcomeCount === 1
+        && first.correctedOutcomeCount === 1,
+      repeatIsIdempotent: second.archivedCount === 1 && second.newRowCount === 0 && second.updatedRowCount === 1,
+      ledgerKeepsExactIdentity: rows.length === 1
+        && rows[0].failed_outcome_id === "phase186-failed-outcome"
+        && rows[0].corrected_outcome_id === "phase186-corrected-outcome"
+        && rows[0].completion_work_item_ids.includes("post-compact-receipt-memory-usage-repair:PHASE186")
+        && rows[0].completion_timeline_binding_ids.includes("replay-repair-brief-timeline:PHASE186"),
+      typedDocAndIndexWritten: fs.existsSync(docFile)
+        && indexText.includes("post-compact-completion-memory-preservation-repair-closures.md")
+        && docText.includes("phase186-failed-outcome")
+        && docText.includes("phase186-corrected-outcome"),
+      freshnessAndAuthorityBoundaryPersisted: /historical repair completion is recovery evidence, not permanent repository truth/i.test(docText)
+        && /never authorize that future session|Never use this history as current repository truth/i.test(docText)
+        && /current-source|current source/i.test(docText),
+      recallFindsClosure: recallText.includes("post-compact-completion-memory-preservation-repair-closures.md")
+        && recallText.includes("phase186-corrected-outcome"),
+      crossGroupIsolation: crossGroup.archivedCount === 0 && otherRows.length === 0,
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      first: { archivedCount: first.archivedCount, verifiedCount: first.verifiedCount, newRowCount: first.newRowCount },
+      second: { archivedCount: second.archivedCount, newRowCount: second.newRowCount, updatedRowCount: second.updatedRowCount },
+      crossGroup: { archivedCount: crossGroup.archivedCount },
+      recalled: (recall.recalled || []).map((row: any) => row.relPath),
+    };
+  } finally {
+    for (const target of [dir, otherDir]) {
+      try { fs.rmSync(target, { recursive: true, force: true }); } catch {}
+    }
   }
 }
 

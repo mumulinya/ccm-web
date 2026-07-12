@@ -20,12 +20,18 @@ import {
 } from "../http-concurrency";
 import { httpPageResourceEvidenceErrors } from "../http-page-resources";
 import { browserCheckExecutionEvidenceErrors } from "../browser/check-execution-coverage";
+import { browserToolEvidenceLineageErrors } from "../browser/tool-evidence-lineage";
+import { browserToolCallTimeoutEvidenceErrors } from "../browser/tool-call-timeout";
+import { browserEvidenceTemporalIntegrityErrors } from "../browser/evidence-temporal-integrity";
+import { browserResourceLifecycleErrors } from "../browser/resource-lifecycle";
 
 export const TEST_AGENT_CONTRACT_IDS = {
   handoff: "ccm-test-agent-handoff-v1",
   workOrder: "ccm-test-agent-work-order-v1",
   report: "ccm-test-agent-report-v1",
   verdict: "ccm-test-agent-verdict-v1",
+  invocationRequest: "ccm-test-agent-invocation-request-v1",
+  invocationResult: "ccm-test-agent-invocation-result-v1",
 } as const;
 
 const primitiveValue = z.union([z.string(), z.number(), z.boolean(), z.undefined()]);
@@ -1301,11 +1307,12 @@ const browserStabilitySummarySchema = z.object({
 }).passthrough();
 
 const browserCheckExecutionIdentitySchema = z.object({
+  planId: z.string().min(1),
   checkId: z.string().min(1),
   projectIndex: z.number().int().nonnegative(),
   checkIndex: z.number().int().nonnegative(),
   run: z.number().int().positive(),
-  expectedRuns: z.number().int().positive(),
+  expectedRuns: z.number().int().min(1).max(10),
   evidence: z.enum(["provider", "synthetic_missing"]),
 }).strict();
 
@@ -1316,7 +1323,7 @@ const browserCheckExecutionPlanItemSchema = z.object({
   checkIndex: z.number().int().nonnegative(),
   name: z.string().min(1),
   url: z.string(),
-  expectedRuns: z.number().int().positive(),
+  expectedRuns: z.number().int().min(1).max(10),
   plannedProvider: z.enum(["playwright", "mcp", "none"]),
   providerRoutingReason: z.string().min(1),
   adversarial: z.boolean(),
@@ -1325,6 +1332,8 @@ const browserCheckExecutionPlanItemSchema = z.object({
 
 const browserCheckExecutionPlanSchema = z.object({
   schema: z.literal("ccm-test-agent-browser-execution-plan-v1"),
+  planId: z.string().min(1),
+  createdAt: z.string().min(1),
   preferredProvider: z.string().min(1),
   plannedCheckCount: z.number().int().nonnegative(),
   expectedRunCount: z.number().int().nonnegative(),
@@ -1336,7 +1345,7 @@ const browserCheckExecutionCoverageItemSchema = z.object({
   project: z.string(),
   name: z.string(),
   plannedProvider: z.enum(["playwright", "mcp", "none"]),
-  expectedRuns: z.number().int().positive(),
+  expectedRuns: z.number().int().min(1).max(10),
   observedRuns: z.array(z.number().int().positive()),
   missingRuns: z.array(z.number().int().positive()),
   duplicateRuns: z.array(z.number().int().positive()),
@@ -1361,6 +1370,129 @@ const browserCheckExecutionCoverageSchema = z.object({
     invalid: z.number().int().nonnegative(),
   }).strict(),
   items: z.array(browserCheckExecutionCoverageItemSchema),
+}).strict();
+
+const browserEvidenceTemporalIntegrityItemSchema = z.object({
+  kind: z.enum(["report", "execution_plan", "browser_result", "browser_tool_call"]),
+  id: z.string().min(1),
+  checkId: optionalString,
+  run: z.number().int().positive().optional(),
+  startedAt: z.string().min(1),
+  finishedAt: z.string().min(1),
+  durationMs: z.number().nonnegative(),
+  status: z.enum(["complete", "invalid"]),
+  errors: stringList,
+}).strict();
+
+const browserEvidenceTemporalIntegritySchema = z.object({
+  status: z.enum(["complete", "invalid"]),
+  toleranceMs: z.number().int().nonnegative(),
+  reportDurationMs: z.number().nonnegative(),
+  browserResultCount: z.number().int().nonnegative(),
+  browserToolCallCount: z.number().int().nonnegative(),
+  invalidItemCount: z.number().int().nonnegative(),
+  invalidTimestampCount: z.number().int().nonnegative(),
+  durationMismatchCount: z.number().int().nonnegative(),
+  outsideReportWindowCount: z.number().int().nonnegative(),
+  outsideResultWindowCount: z.number().int().nonnegative(),
+  planMismatchCount: z.number().int().nonnegative(),
+  items: z.array(browserEvidenceTemporalIntegrityItemSchema),
+}).strict();
+
+const browserResourceLifecycleEventSchema = z.object({
+  id: z.string().min(1),
+  planId: z.string().min(1),
+  provider: z.enum(["playwright", "mcp"]),
+  resourceType: z.enum(["browser", "browser_context", "external_browser_session"]),
+  scope: z.string().min(1),
+  ownership: z.enum(["owned", "external"]),
+  acquiredAt: z.string().min(1),
+  releaseAttemptedAt: optionalString,
+  releasedAt: optionalString,
+  status: z.enum(["open", "released", "retained", "cleanup_failed"]),
+  error: optionalString,
+}).strict();
+
+const browserResourceLifecycleSummarySchema = z.object({
+  status: z.enum(["complete", "incomplete", "invalid"]),
+  eventCount: z.number().int().nonnegative(),
+  ownedResourceCount: z.number().int().nonnegative(),
+  externalResourceCount: z.number().int().nonnegative(),
+  releasedResourceCount: z.number().int().nonnegative(),
+  retainedExternalResourceCount: z.number().int().nonnegative(),
+  openResourceCount: z.number().int().nonnegative(),
+  cleanupFailureCount: z.number().int().nonnegative(),
+  planMismatchCount: z.number().int().nonnegative(),
+  duplicateResourceCount: z.number().int().nonnegative(),
+  invalidOwnershipCount: z.number().int().nonnegative(),
+  invalidTimestampCount: z.number().int().nonnegative(),
+  outsideReportWindowCount: z.number().int().nonnegative(),
+  resourceTypeCounts: z.object({
+    browser: z.number().int().nonnegative(),
+    browser_context: z.number().int().nonnegative(),
+    external_browser_session: z.number().int().nonnegative(),
+  }).strict(),
+  events: z.array(browserResourceLifecycleEventSchema),
+}).strict();
+
+const browserToolEvidenceLineageItemSchema = z.object({
+  checkId: z.string().min(1),
+  run: z.number().int().positive(),
+  project: z.string(),
+  name: z.string(),
+  resultStatus,
+  evidenceRequired: z.boolean(),
+  toolCallIds: stringList,
+  linkedToolCallCount: z.number().int().nonnegative(),
+  failedToolCallCount: z.number().int().nonnegative(),
+  missingToolCallIds: stringList,
+  foreignToolCallIds: stringList,
+  duplicateToolCallIds: stringList,
+  status: z.enum(["complete", "incomplete", "invalid"]),
+}).strict();
+
+const browserToolEvidenceLineageSchema = z.object({
+  status: z.enum(["complete", "incomplete", "invalid"]),
+  mcpResultCount: z.number().int().nonnegative(),
+  evidenceRequiredResultCount: z.number().int().nonnegative(),
+  linkedResultCount: z.number().int().nonnegative(),
+  toolCallCount: z.number().int().nonnegative(),
+  scopedToolCallCount: z.number().int().nonnegative(),
+  linkedToolCallCount: z.number().int().nonnegative(),
+  failedToolCallCount: z.number().int().nonnegative(),
+  unlinkedRequiredResultCount: z.number().int().nonnegative(),
+  missingToolCallReferenceCount: z.number().int().nonnegative(),
+  foreignToolCallReferenceCount: z.number().int().nonnegative(),
+  duplicateToolCallReferenceCount: z.number().int().nonnegative(),
+  duplicateToolCallRecordCount: z.number().int().nonnegative(),
+  orphanScopedToolCallCount: z.number().int().nonnegative(),
+  unscopedToolCallCount: z.number().int().nonnegative(),
+  statusCounts: z.object({
+    complete: z.number().int().nonnegative(),
+    incomplete: z.number().int().nonnegative(),
+    invalid: z.number().int().nonnegative(),
+  }).strict(),
+  items: z.array(browserToolEvidenceLineageItemSchema),
+}).strict();
+
+const browserToolCallTimeoutSummaryItemSchema = z.object({
+  id: z.string().min(1),
+  toolName: z.string().min(1),
+  checkId: optionalString,
+  run: z.number().int().positive().optional(),
+  timeoutMs: z.number().int().min(1_000),
+  durationMs: z.number().nonnegative(),
+  abortRequested: z.boolean(),
+}).strict();
+
+const browserToolCallTimeoutSummarySchema = z.object({
+  totalCalls: z.number().int().nonnegative(),
+  passedCalls: z.number().int().nonnegative(),
+  failedCalls: z.number().int().nonnegative(),
+  timedOutCalls: z.number().int().nonnegative(),
+  abortRequestedCalls: z.number().int().nonnegative(),
+  timedOutByTool: z.record(z.number().int().nonnegative()),
+  items: z.array(browserToolCallTimeoutSummaryItemSchema),
 }).strict();
 
 const browserProviderGapSchema = z.object({
@@ -1789,6 +1921,7 @@ const browserActionEffectSummarySchema = z.object({
 const browserCheckResultSchema = z.object({
   status: resultStatus,
   execution: browserCheckExecutionIdentitySchema.optional(),
+  browserToolCallIds: stringList.optional(),
   browserSessions: z.array(browserSessionResultSchema).optional(),
   browserSessionComparisons: z.array(browserSessionComparisonResultSchema).optional(),
   authentication: browserAuthenticationEvidenceSchema.optional(),
@@ -1931,7 +2064,22 @@ export const TestAgentReportContractSchema: z.ZodType<Record<string, any>> = z.o
   devServerResults: z.array(z.object({ status: resultStatus }).passthrough()),
   httpResults: z.array(httpCheckResultSchema),
   browserResults: z.array(browserCheckResultSchema),
-  browserToolCalls: z.array(z.object({ status: z.enum(["passed", "failed"]) }).passthrough()),
+  browserToolCalls: z.array(z.object({
+    id: z.string().min(1),
+    toolName: z.string().min(1),
+    input: z.record(z.any()),
+    status: z.enum(["passed", "failed"]),
+    startedAt: z.string().min(1),
+    finishedAt: z.string().min(1),
+    durationMs: z.number().nonnegative(),
+    browserExecution: browserCheckExecutionIdentitySchema.optional(),
+    timeoutMs: z.number().int().min(1_000).optional(),
+    timedOut: z.boolean().optional(),
+    abortRequested: z.boolean().optional(),
+    outputPreview: optionalString,
+    error: optionalString,
+  }).passthrough()),
+  browserResourceLifecycleEvents: z.array(browserResourceLifecycleEventSchema),
   browserNetworkSummary: z.array(browserNetworkSummarySchema).optional(),
   httpConcurrencySummary: httpConcurrencySummarySchema.optional(),
   browserInteractionSummary: z.array(browserInteractionSummarySchema).optional(),
@@ -1939,6 +2087,10 @@ export const TestAgentReportContractSchema: z.ZodType<Record<string, any>> = z.o
   browserMultiSessionSummary: browserMultiSessionSummarySchema.optional(),
   browserStabilitySummary: browserStabilitySummarySchema.optional(),
   browserCheckExecutionCoverage: browserCheckExecutionCoverageSchema.optional(),
+  browserEvidenceTemporalIntegrity: browserEvidenceTemporalIntegritySchema,
+  browserResourceLifecycleSummary: browserResourceLifecycleSummarySchema,
+  browserToolEvidenceLineage: browserToolEvidenceLineageSchema.optional(),
+  browserToolCallTimeoutSummary: browserToolCallTimeoutSummarySchema.optional(),
   browserRecoverySummary: browserRecoverySummarySchema.optional(),
   browserActionEffectSummary: browserActionEffectSummarySchema.optional(),
   adversarialEvidenceSummary: adversarialEvidenceSummarySchema,
@@ -1989,6 +2141,55 @@ export const TestAgentReportContractSchema: z.ZodType<Record<string, any>> = z.o
       message: "Browser execution identities require metadata.browserCheckExecutionPlan.",
       path: ["metadata", "browserCheckExecutionPlan"],
     });
+  }
+  for (const error of browserEvidenceTemporalIntegrityErrors(value as any)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: error,
+      path: ["browserEvidenceTemporalIntegrity"],
+    });
+  }
+  for (const error of browserResourceLifecycleErrors(value as any)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: error,
+      path: ["browserResourceLifecycleSummary"],
+    });
+  }
+  const hasBrowserToolLineageSignal = value.browserToolEvidenceLineage
+    || (Array.isArray(value.browserResults) ? value.browserResults : []).some((result: any) => Array.isArray(result?.browserToolCallIds) && result.browserToolCallIds.length)
+    || (Array.isArray(value.browserToolCalls) ? value.browserToolCalls : []).some((record: any) => record?.browserExecution);
+  if (hasBrowserToolLineageSignal) {
+    for (const error of browserToolEvidenceLineageErrors({
+      browserResults: Array.isArray(value.browserResults) ? value.browserResults : [],
+      browserToolCalls: Array.isArray(value.browserToolCalls) ? value.browserToolCalls : [],
+      summary: value.browserToolEvidenceLineage,
+      reportStatus: value.status,
+    })) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: error,
+        path: ["browserToolEvidenceLineage"],
+      });
+    }
+  }
+  const hasBrowserToolTimeoutSignal = value.browserToolCallTimeoutSummary
+    || (Array.isArray(value.browserToolCalls) ? value.browserToolCalls : []).some((record: any) =>
+      record?.timeoutMs !== undefined || record?.timedOut !== undefined || record?.abortRequested !== undefined
+    );
+  if (hasBrowserToolTimeoutSignal) {
+    for (const error of browserToolCallTimeoutEvidenceErrors({
+      browserResults: Array.isArray(value.browserResults) ? value.browserResults : [],
+      browserToolCalls: Array.isArray(value.browserToolCalls) ? value.browserToolCalls : [],
+      summary: value.browserToolCallTimeoutSummary,
+      reportStatus: value.status,
+    })) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: error,
+        path: ["browserToolCallTimeoutSummary"],
+      });
+    }
   }
   const hasEffects = (Array.isArray(value.browserResults) ? value.browserResults : [])
     .some((result: any) => Array.isArray(result?.actionEffects) && result.actionEffects.length);
@@ -2143,6 +2344,14 @@ export const TestAgentVerdictContractSchema = z.object({
     httpConcurrentBlocked: z.number().optional(),
     browserChecks: z.record(z.number()),
     browserToolCalls: z.record(z.number()),
+    browserToolLinkedResults: z.number().optional(),
+    browserToolUnlinkedResults: z.number().optional(),
+    browserToolLinkedCalls: z.number().optional(),
+    browserToolOrphanCalls: z.number().optional(),
+    browserToolUnscopedCalls: z.number().optional(),
+    browserToolInvalidLinks: z.number().optional(),
+    browserToolTimedOutCalls: z.number().optional(),
+    browserToolAbortRequestedCalls: z.number().optional(),
     browserNetworkErrors: z.number().optional(),
     browserActions: z.number().optional(),
     browserFailedActions: z.number().optional(),
@@ -2166,6 +2375,13 @@ export const TestAgentVerdictContractSchema = z.object({
     browserMissingRuns: z.number().optional(),
     browserDuplicateResults: z.number().optional(),
     browserInvalidResults: z.number().optional(),
+    browserTemporalInvalidItems: z.number().optional(),
+    browserTemporalPlanMismatches: z.number().optional(),
+    browserTemporalWindowViolations: z.number().optional(),
+    browserOwnedResources: z.number().optional(),
+    browserReleasedResources: z.number().optional(),
+    browserOpenResources: z.number().optional(),
+    browserCleanupFailures: z.number().optional(),
     browserRecoveryAttempts: z.number().optional(),
     browserRecoveredOperations: z.number().optional(),
     browserFailedRecoveries: z.number().optional(),
@@ -2194,6 +2410,10 @@ export const TestAgentVerdictContractSchema = z.object({
   browserMultiSessionSummary: browserMultiSessionSummarySchema.optional(),
   browserStabilitySummary: browserStabilitySummarySchema.optional(),
   browserCheckExecutionCoverage: browserCheckExecutionCoverageSchema.optional(),
+  browserEvidenceTemporalIntegrity: browserEvidenceTemporalIntegritySchema,
+  browserResourceLifecycleSummary: browserResourceLifecycleSummarySchema,
+  browserToolEvidenceLineage: browserToolEvidenceLineageSchema.optional(),
+  browserToolCallTimeoutSummary: browserToolCallTimeoutSummarySchema.optional(),
   browserRecoverySummary: browserRecoverySummarySchema.optional(),
   browserActionEffectSummary: browserActionEffectSummarySchema.optional(),
   adversarialEvidenceSummary: adversarialEvidenceSummarySchema,
@@ -2242,9 +2462,123 @@ export const TestAgentVerdictContractSchema = z.object({
       path: ["canAccept"],
     });
   }
+  if (value.canAccept && value.browserEvidenceTemporalIntegrity?.status !== "complete") {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "canAccept requires complete browser evidence temporal integrity.",
+      path: ["canAccept"],
+    });
+  }
+  if (value.canAccept && value.browserResourceLifecycleSummary?.status !== "complete") {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "canAccept requires complete browser resource lifecycle evidence.",
+      path: ["canAccept"],
+    });
+  }
+  if (value.canAccept && value.browserToolEvidenceLineage && value.browserToolEvidenceLineage.status !== "complete") {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "canAccept requires complete browser tool evidence lineage.",
+      path: ["canAccept"],
+    });
+  }
+  if (value.canAccept && (value.browserToolCallTimeoutSummary?.timedOutCalls || 0) > 0) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "canAccept requires zero timed-out browser tool calls.",
+      path: ["canAccept"],
+    });
+  }
+});
+
+const testAgentInvocationIssueSchema = z.object({
+  severity: z.enum(["error", "warning"]),
+  code: z.string().min(1),
+  message: z.string().min(1),
+  path: optionalString,
+  project: optionalString,
+}).strict();
+
+const testAgentInvocationValidationSchema = z.object({
+  valid: z.boolean(),
+  errors: z.array(testAgentInvocationIssueSchema),
+  warnings: z.array(testAgentInvocationIssueSchema),
+}).strict();
+
+export const TestAgentInvocationRequestContractSchema = z.object({
+  schema: z.literal(TEST_AGENT_CONTRACT_IDS.invocationRequest),
+  source: z.enum(["handoff", "work_order"]),
+  payload: z.unknown(),
+}).strict();
+
+export const TestAgentInvocationResultContractSchema = z.object({
+  schema: z.literal(TEST_AGENT_CONTRACT_IDS.invocationResult),
+  invocationId: z.string().min(1),
+  source: z.enum(["handoff", "work_order", "unknown"]),
+  status: z.enum(["completed", "rejected", "runtime_error"]),
+  startedAt: z.string().min(1),
+  finishedAt: z.string().min(1),
+  durationMs: z.number().nonnegative(),
+  inputValidation: testAgentInvocationValidationSchema,
+  outputValidation: testAgentInvocationValidationSchema.optional(),
+  outcome: agentStatus.optional(),
+  recommendation: z.enum(["accept", "rework", "need_human"]).optional(),
+  canAccept: z.boolean(),
+  report: TestAgentReportContractSchema.optional(),
+  verdict: TestAgentVerdictContractSchema.optional(),
+  artifactVerification: z.object({
+    schema: z.literal("ccm-test-agent-artifact-verification-v1"),
+    manifestPath: z.string(),
+    reportId: z.string(),
+    workOrderId: z.string(),
+    checkedAt: z.string(),
+    status: z.enum(["passed", "failed"]),
+    summary: z.object({
+      total: z.number().int().nonnegative(),
+      passed: z.number().int().nonnegative(),
+      failed: z.number().int().nonnegative(),
+      skipped: z.number().int().nonnegative(),
+    }).strict(),
+    items: z.array(z.object({
+      type: z.string(),
+      title: z.string(),
+      path: z.string(),
+      status: z.enum(["passed", "failed", "skipped"]),
+    }).passthrough()),
+  }).passthrough().optional(),
+  error: optionalString,
+}).strict().superRefine((value, ctx) => {
+  if (value.status === "rejected") {
+    if (value.inputValidation.valid || !value.inputValidation.errors.length) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Rejected invocation requires invalid input validation errors.", path: ["inputValidation"] });
+    }
+    if (value.report || value.verdict || value.artifactVerification || value.canAccept) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Rejected invocation must not contain execution outputs or canAccept=true.", path: ["status"] });
+    }
+  }
+  if (value.status === "completed") {
+    if (!value.inputValidation.valid || !value.outputValidation?.valid || !value.report || !value.verdict || !value.artifactVerification) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Completed invocation requires valid input/output, report, verdict, and artifact verification.", path: ["status"] });
+    }
+    if (value.artifactVerification?.status !== "passed") {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Completed invocation requires passed artifact verification.", path: ["artifactVerification"] });
+    }
+    if (value.outcome !== value.report?.status || value.recommendation !== value.report?.recommendation) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Invocation outcome and recommendation must match the report.", path: ["outcome"] });
+    }
+    if (value.canAccept !== value.verdict?.canAccept) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Invocation canAccept must match the verdict.", path: ["canAccept"] });
+    }
+  }
+  if (value.status === "runtime_error" && value.canAccept) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Runtime-error invocation cannot be accepted.", path: ["canAccept"] });
+  }
 });
 
 export type TestAgentWorkOrderContract = z.infer<typeof TestAgentWorkOrderContractSchema>;
 export type TestAgentHandoffContract = z.infer<typeof TestAgentHandoffContractSchema>;
 export type TestAgentReportContract = z.infer<typeof TestAgentReportContractSchema>;
 export type TestAgentVerdictContract = z.infer<typeof TestAgentVerdictContractSchema>;
+export type TestAgentInvocationRequestContract = z.infer<typeof TestAgentInvocationRequestContractSchema>;
+export type TestAgentInvocationResultContract = z.infer<typeof TestAgentInvocationResultContractSchema>;

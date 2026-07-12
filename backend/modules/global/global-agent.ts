@@ -5128,6 +5128,7 @@ async function runAgenticGlobalRequest(baseUrl: string, ctx: CollabCtx, input: {
   sessionId?: string;
   source?: string;
   traceId?: string;
+  clarificationRunId?: string;
   onEvent?: (event: any) => void;
 }) {
   const projects = getConfigs().map((item: any) => item.name);
@@ -5143,7 +5144,16 @@ async function runAgenticGlobalRequest(baseUrl: string, ctx: CollabCtx, input: {
     }
   }
   const startsNewTopic = /^(?:新问题|换个问题|另外(?:一个)?问题|忽略刚才|取消刚才|重新开始)/.test(String(input.message || "").trim());
-  const waitingClarification = startsNewTopic ? null : findClarifyingGlobalAgentRun(sessionId);
+  const requestedClarificationRunId = String(input.clarificationRunId || "").trim();
+  let waitingClarification: any = null;
+  if (!startsNewTopic && requestedClarificationRunId) {
+    const requestedRun = getGlobalAgentRun(requestedClarificationRunId);
+    if (!requestedRun || requestedRun.session_id !== sessionId) throw new Error("当前会话中没有这个待补充请求");
+    if (requestedRun.status !== "waiting_clarification") throw new Error("这个请求已不再等待补充，请刷新后查看最新状态");
+    waitingClarification = requestedRun;
+  } else if (!startsNewTopic) {
+    waitingClarification = findClarifyingGlobalAgentRun(sessionId);
+  }
   const run = waitingClarification
     ? await continueGlobalAgentRunWithClarification(waitingClarification.id, input.message, runtime, {
         explicitWriteAuthorization: hasExplicitGlobalWriteAuthorization(input.message),
@@ -5706,7 +5716,37 @@ export function handleGlobalAgentApi(
         const supervisor = operation === "check_now"
           ? await checkGlobalMissionSupervisorNow(id, createMissionSupervisorRuntime(ctx))
           : await controlGlobalMissionSupervisor(id, operation, createMissionSupervisorRuntime(ctx), payload);
-        sendJson(res, { success: true, supervisor, mission: getGlobalDevelopmentMission(supervisor.mission_id) });
+        let run: any = null;
+        if (supervisor.global_run_id) {
+          run = supervisor.status === "cancelled"
+            ? completeGlobalAgentSupervision(supervisor.global_run_id, { summary: "全局任务已由用户取消。" }, "cancelled")
+            : updateGlobalAgentSupervisionState(supervisor.global_run_id, supervisor.status);
+        }
+        const userSupplement = String(payload.message || payload.followup || "").trim();
+        if (operation === "update_goal" && userSupplement && supervisor.session_id) {
+          ingestGlobalAgentConversation({
+            sessionId: supervisor.session_id,
+            source: payload.source || "global_mission_user_input",
+            messages: [{
+              role: "user",
+              content: userSupplement,
+              timestamp: payload.message_timestamp || payload.messageTimestamp || new Date().toISOString(),
+              mission_id: supervisor.mission_id,
+              run_id: supervisor.global_run_id || "",
+              metadata: {
+                continuation_kind: supervisor.last_continuation?.kind || "supplement",
+                waiting_user_resolved: supervisor.last_continuation?.resolves_waiting_user === true,
+                request_id: payload.request_id || payload.requestId || "",
+              },
+            }],
+          });
+        }
+        sendJson(res, {
+          success: true,
+          supervisor,
+          mission: getGlobalDevelopmentMission(supervisor.mission_id),
+          run: run ? publicGlobalAgentRun(run) : null,
+        });
       } catch (error: any) {
         sendJson(res, { success: false, error: error?.message || String(error) }, 400);
       }
@@ -6125,6 +6165,10 @@ export function handleGlobalAgentApi(
     const contentType = String(req.headers["content-type"] || "");
     const handleRun = async (payload: any, files: any[] = []) => {
       const isStream = parsed.query.stream === "true" || payload.stream === true || String(req.headers.accept || "").includes("text/event-stream");
+      let reliabilityOperationKey = "";
+      let reliabilityOperationAcquired = false;
+      let streamRequestId = "";
+      let streamSequence = 0;
       if (isStream) {
         res.writeHead(200, {
           "Content-Type": "text/event-stream",
@@ -6137,7 +6181,10 @@ export function handleGlobalAgentApi(
       const emit = (event: any) => {
         if (!isStream || res.writableEnded) return;
         const ui = event?.ui === undefined ? buildGlobalAgentEventUi(event) : event.ui;
-        res.write(`data: ${JSON.stringify(ui ? { ...event, ui } : event)}\n\n`);
+        const sequence = ++streamSequence;
+        const eventId = String(event?.event_id || event?.eventId || `${streamRequestId || "global-stream"}:${sequence}`);
+        const payloadWithOrder = { ...event, event_id: eventId, eventId, sequence, ...(ui ? { ui } : {}) };
+        res.write(`data: ${JSON.stringify(payloadWithOrder)}\n\n`);
       };
       try {
         let message = String(payload.message || "").trim();
@@ -6153,7 +6200,10 @@ export function handleGlobalAgentApi(
         ctx.broadcastPetSpeech(GLOBAL_PET_AGENT_NAME, { role: "user", text: message, final: true, source: "global" });
         const requestId = String(payload.request_id || payload.requestId || req.headers["x-client-message-id"] || "").trim();
         const operationKey = requestId ? `${sessionId}:${requestId}` : "";
+        streamRequestId = requestId;
+        reliabilityOperationKey = operationKey;
         const operation = operationKey ? acquireIdempotency({ scope: "global-agent-request", key: operationKey, leaseMs: 13 * 60 * 1000, metadata: { session_id: sessionId, source: "web" } }) : null;
+        reliabilityOperationAcquired = operation?.acquired === true;
         if (operation && !operation.acquired) {
           const settled = operation.inProgress ? await waitForIdempotencyResult("global-agent-request", operationKey, 13 * 60 * 1000) : operation.record;
           const replayRun = settled?.result?.run_id ? getGlobalAgentRun(settled.result.run_id) : null;
@@ -6198,6 +6248,7 @@ export function handleGlobalAgentApi(
           sessionId,
           source: "web",
           traceId: operation?.traceId,
+          clarificationRunId: payload.clarification_run_id || payload.clarificationRunId || "",
           onEvent: (event: any) => {
             emit(event);
             relayGlobalPetEvent(ctx, event);
@@ -6217,6 +6268,9 @@ export function handleGlobalAgentApi(
           res.end();
         } else sendJson(res, { success: true, run: result, files: files.map(file => ({ name: file.filename, size: file.size, savedPath: file.savedPath })) });
       } catch (error: any) {
+        if (reliabilityOperationKey && reliabilityOperationAcquired) {
+          try { failIdempotency("global-agent-request", reliabilityOperationKey, error); } catch {}
+        }
         relayGlobalPetEvent(ctx, { type: "failed", error: error?.message || String(error) }, { error: error?.message || String(error) });
         if (isStream) {
           emit({ type: "error", text: error?.message || String(error) });

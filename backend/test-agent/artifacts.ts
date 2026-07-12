@@ -22,6 +22,10 @@ import { formatBrowserFlowSummaryLine } from "./browser/flow-summary";
 import { formatBrowserMultiSessionSummaryLine } from "./browser/multi-session-summary";
 import { formatBrowserStabilitySummaryLine } from "./browser/stability-summary";
 import { formatBrowserCheckExecutionCoverageLine } from "./browser/check-execution-coverage";
+import { formatBrowserEvidenceTemporalIntegrityLine } from "./browser/evidence-temporal-integrity";
+import { formatBrowserResourceLifecycleLine } from "./browser/resource-lifecycle";
+import { formatBrowserToolEvidenceLineageLine } from "./browser/tool-evidence-lineage";
+import { formatBrowserToolCallTimeoutSummaryLine } from "./browser/tool-call-timeout";
 import {
   buildBrowserAuthenticationSummary,
   formatBrowserAuthenticationEvidence,
@@ -228,6 +232,69 @@ function browserCheckExecutionCoverageLines(report: TestAgentReport) {
     lines.push(statusLine(`${item.project} / ${item.name} [${item.checkId}]`, item.status, detail));
   }
   return lines;
+}
+
+function browserEvidenceTemporalIntegrityLines(report: TestAgentReport) {
+  const summary = report.browserEvidenceTemporalIntegrity;
+  if (!summary) return ["- none"];
+  const lines = [`- ${formatBrowserEvidenceTemporalIntegrityLine(summary)}; toleranceMs=${summary.toleranceMs}`];
+  for (const item of summary.items) {
+    const execution = item.checkId ? `; execution=${item.checkId} run ${item.run}` : "";
+    const detail = `startedAt=${item.startedAt}; finishedAt=${item.finishedAt}; durationMs=${item.durationMs}${execution}${item.errors.length ? `; errors=${item.errors.join(" | ")}` : ""}`;
+    lines.push(statusLine(`${item.kind} / ${item.id}`, item.status, detail));
+  }
+  return lines;
+}
+
+function browserResourceLifecycleLines(report: TestAgentReport) {
+  const summary = report.browserResourceLifecycleSummary;
+  if (!summary) return ["- none"];
+  const lines = [`- ${formatBrowserResourceLifecycleLine(summary)}`];
+  for (const event of summary.events) {
+    const detail = [
+      `planId=${event.planId}`,
+      `ownership=${event.ownership}`,
+      `acquiredAt=${event.acquiredAt}`,
+      event.releaseAttemptedAt ? `releaseAttemptedAt=${event.releaseAttemptedAt}` : "",
+      event.releasedAt ? `releasedAt=${event.releasedAt}` : "",
+      event.error ? `error=${event.error}` : "",
+    ].filter(Boolean).join("; ");
+    lines.push(statusLine(`${event.provider} ${event.resourceType} / ${event.scope} [${event.id}]`, event.status, detail));
+  }
+  return lines;
+}
+
+function browserToolEvidenceLineageLines(report: TestAgentReport) {
+  const summary = report.browserToolEvidenceLineage;
+  if (!summary) return ["- none"];
+  const lines = [`- ${formatBrowserToolEvidenceLineageLine(summary)}; failedCalls=${summary.failedToolCallCount}`];
+  for (const item of summary.items) {
+    const detail = [
+      `result=${item.resultStatus}`,
+      `required=${item.evidenceRequired}`,
+      `linkedCalls=${item.linkedToolCallCount}`,
+      `failedCalls=${item.failedToolCallCount}`,
+      `callIds=${item.toolCallIds.join(",") || "none"}`,
+      `missing=${item.missingToolCallIds.join(",") || "none"}`,
+      `foreign=${item.foreignToolCallIds.join(",") || "none"}`,
+      `duplicate=${item.duplicateToolCallIds.join(",") || "none"}`,
+    ].join("; ");
+    lines.push(statusLine(`${item.project} / ${item.name} [${item.checkId} run ${item.run}]`, item.status, detail));
+  }
+  return lines;
+}
+
+function browserToolCallTimeoutLines(report: TestAgentReport) {
+  const summary = report.browserToolCallTimeoutSummary;
+  if (!summary) return ["- none"];
+  return [
+    `- ${formatBrowserToolCallTimeoutSummaryLine(summary)}`,
+    ...summary.items.map(item => statusLine(
+      `${item.toolName} [${item.id}]`,
+      "timed_out",
+      `timeoutMs=${item.timeoutMs}; durationMs=${item.durationMs}; abortRequested=${item.abortRequested}${item.checkId ? `; execution=${item.checkId} run ${item.run}` : ""}`,
+    )),
+  ];
 }
 
 function browserAuthenticationSummaryLines(report: TestAgentReport) {
@@ -542,11 +609,17 @@ function browserDetail(result: BrowserCheckResult, index: number) {
 }
 
 function browserToolCallDetail(result: BrowserToolCallRecord, index: number) {
+  const execution = result.browserExecution;
   return [
     detailTitle(index, result.toolName),
     "",
     `- Status: ${result.status}`,
+    `- ID: ${result.id}`,
+    ...(execution ? [`- Browser execution: ${execution.checkId} run ${execution.run}/${execution.expectedRuns}`] : []),
     `- Duration: ${result.durationMs}ms`,
+    ...(result.timeoutMs ? [`- Timeout: ${result.timeoutMs}ms`] : []),
+    ...(result.timedOut ? ["- Timed out: yes"] : []),
+    ...(result.abortRequested ? ["- Abort requested: yes"] : []),
     `- Started: ${result.startedAt}`,
     `- Finished: ${result.finishedAt}`,
     ...(result.error ? [`- Error: ${result.error}`] : []),
@@ -822,6 +895,22 @@ export function buildTestAgentMarkdownReport(report: TestAgentReport) {
     "## Browser Check Execution Coverage",
     "",
     ...browserCheckExecutionCoverageLines(report),
+    "",
+    "## Browser Evidence Temporal Integrity",
+    "",
+    ...browserEvidenceTemporalIntegrityLines(report),
+    "",
+    "## Browser Resource Lifecycle",
+    "",
+    ...browserResourceLifecycleLines(report),
+    "",
+    "## Browser Tool Evidence Lineage",
+    "",
+    ...browserToolEvidenceLineageLines(report),
+    "",
+    "## Browser Tool Call Timeouts",
+    "",
+    ...browserToolCallTimeoutLines(report),
     "",
     "## Browser Acceptance Flow Summary",
     "",

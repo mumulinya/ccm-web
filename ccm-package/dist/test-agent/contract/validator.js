@@ -7,6 +7,8 @@ exports.validateTestAgentWorkOrderContract = validateTestAgentWorkOrderContract;
 exports.assertTestAgentWorkOrderContract = assertTestAgentWorkOrderContract;
 exports.validateTestAgentReportContract = validateTestAgentReportContract;
 exports.validateTestAgentVerdictContract = validateTestAgentVerdictContract;
+exports.validateTestAgentInvocationRequestContract = validateTestAgentInvocationRequestContract;
+exports.validateTestAgentInvocationResultContract = validateTestAgentInvocationResultContract;
 exports.assertTestAgentReportContract = assertTestAgentReportContract;
 exports.assertTestAgentVerdictContract = assertTestAgentVerdictContract;
 const work_order_1 = require("../work-order");
@@ -106,6 +108,22 @@ function validateTestAgentReportContract(input) {
 }
 function validateTestAgentVerdictContract(input) {
     const parsed = schema_1.TestAgentVerdictContractSchema.safeParse(input);
+    if (!parsed.success) {
+        const { errors, warnings } = splitIssues(zodIssues(parsed.error));
+        return { valid: false, errors, warnings };
+    }
+    return { valid: true, errors: [], warnings: [] };
+}
+function validateTestAgentInvocationRequestContract(input) {
+    const parsed = schema_1.TestAgentInvocationRequestContractSchema.safeParse(input);
+    if (!parsed.success) {
+        const { errors, warnings } = splitIssues(zodIssues(parsed.error));
+        return { valid: false, errors, warnings };
+    }
+    return { valid: true, errors: [], warnings: [] };
+}
+function validateTestAgentInvocationResultContract(input) {
+    const parsed = schema_1.TestAgentInvocationResultContractSchema.safeParse(input);
     if (!parsed.success) {
         const { errors, warnings } = splitIssues(zodIssues(parsed.error));
         return { valid: false, errors, warnings };

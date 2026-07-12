@@ -33,8 +33,13 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.resolveExplicitGroupContinuationTask = resolveExplicitGroupContinuationTask;
+exports.runGroupExplicitContinuationRoutingSelfTest = runGroupExplicitContinuationRoutingSelfTest;
 exports.buildGroupClarificationSummary = buildGroupClarificationSummary;
 exports.runGroupClarificationSummarySelfTest = runGroupClarificationSummarySelfTest;
+exports.resolvePendingGroupClarification = resolvePendingGroupClarification;
+exports.buildGroupClarificationContinuationMessage = buildGroupClarificationContinuationMessage;
+exports.runGroupClarificationContinuationSelfTest = runGroupClarificationContinuationSelfTest;
 exports.handleGroupLiveRoutes = handleGroupLiveRoutes;
 const crypto = __importStar(require("crypto"));
 const utils_1 = require("../../core/utils");
@@ -49,6 +54,45 @@ const user_facing_text_1 = require("../../agents/user-facing-text");
 function compactGroupLiveText(value, max = 180) {
     const text = String(value || "").replace(/\s+/g, " ").trim();
     return text.length > max ? `${text.slice(0, max)}...` : text;
+}
+function groupLiveFlag(value, fallback = false) {
+    if (value === undefined || value === null || value === "")
+        return fallback;
+    if (typeof value === "boolean")
+        return value;
+    return ["true", "1", "yes", "on"].includes(String(value).trim().toLowerCase());
+}
+function resolveExplicitGroupContinuationTask(tasks, groupId, taskId) {
+    const id = String(taskId || "").trim();
+    if (!id)
+        return { task: null, status: 0, error: "" };
+    const task = (Array.isArray(tasks) ? tasks : []).find((item) => item?.id === id) || null;
+    const unavailable = !task
+        || task.group_id !== groupId
+        || task.archived
+        || task.deleted_at
+        || ["cancelled", "archived"].includes(String(task.status || ""));
+    return unavailable
+        ? { task: null, status: 404, error: "当前群聊中没有可继续的这个任务" }
+        : { task, status: 200, error: "" };
+}
+function runGroupExplicitContinuationRoutingSelfTest() {
+    const tasks = [
+        { id: "task-newer", group_id: "group-a", status: "in_progress", updated_at: "2026-07-12T10:00:00.000Z" },
+        { id: "task-target", group_id: "group-a", status: "needs_user", updated_at: "2026-07-12T09:00:00.000Z" },
+        { id: "task-other-group", group_id: "group-b", status: "needs_user" },
+        { id: "task-cancelled", group_id: "group-a", status: "cancelled" },
+    ];
+    const exact = resolveExplicitGroupContinuationTask(tasks, "group-a", "task-target");
+    const crossGroup = resolveExplicitGroupContinuationTask(tasks, "group-a", "task-other-group");
+    const cancelled = resolveExplicitGroupContinuationTask(tasks, "group-a", "task-cancelled");
+    const checks = {
+        selectsRequestedTaskInsteadOfMostRecent: exact.task?.id === "task-target",
+        rejectsCrossGroupTask: crossGroup.status === 404 && !crossGroup.task,
+        rejectsCancelledTask: cancelled.status === 404 && !cancelled.task,
+        acceptsMultipartBoolean: groupLiveFlag("true") === true && groupLiveFlag("false") === false,
+    };
+    return { pass: Object.values(checks).every(Boolean), checks };
 }
 const GROUP_CLARIFICATION_INTERNAL_PATTERN = /CCM_AGENT_RECEIPT|<\s*\/?\s*task-notification|task-notification|receipt[-_\s]*status|trace_id|session_id|native_session|task_agent_session|WorkerContextPacket|raw\s+payload|raw_report|execution_id|Coordinator|Pipeline/i;
 function sanitizeGroupClarificationText(value, fallback = "", max = 220) {
@@ -127,6 +171,77 @@ function runGroupClarificationSummarySelfTest() {
     };
     return { pass: Object.values(checks).every(Boolean), checks, summary };
 }
+function groupClarificationContext(message) {
+    return message?.clarification_context || message?.clarificationContext || null;
+}
+function resolvePendingGroupClarification(messages, requestId, messageId = "") {
+    const requestedId = String(requestId || "").trim();
+    const requestedMessageId = String(messageId || "").trim();
+    if (!requestedId && !requestedMessageId)
+        return { message: null, context: null, status: 0, error: "" };
+    const candidate = [...(Array.isArray(messages) ? messages : [])].reverse().find((item) => {
+        const context = groupClarificationContext(item);
+        if (!context || String(context.status || "pending") !== "pending" || context.resolved_at || context.resolvedAt)
+            return false;
+        const contextId = String(context.id || context.request_id || context.requestId || "").trim();
+        return (requestedId && contextId === requestedId) || (requestedMessageId && String(item?.id || "") === requestedMessageId);
+    }) || null;
+    if (!candidate)
+        return { message: null, context: null, status: 404, error: "当前群聊中没有等待回答的这个问题" };
+    return { message: candidate, context: groupClarificationContext(candidate), status: 200, error: "" };
+}
+function buildGroupClarificationContinuationMessage(context, answerForAgent) {
+    const original = String(context?.original_message_for_agent || context?.originalMessageForAgent || context?.original_message || context?.originalMessage || "").trim();
+    const question = String(context?.question || "").trim();
+    const answer = String(answerForAgent || "").trim();
+    return [
+        "[原始请求]",
+        original,
+        question ? `[此前需要确认]\n${question}` : "",
+        "[用户补充]",
+        answer,
+        "[接续要求]",
+        "这是对同一请求的补充回答。请合并原始请求与补充信息继续判断、规划或执行，不要把这条简短回答当成独立新任务。",
+    ].filter(Boolean).join("\n\n");
+}
+function resolveStoredGroupClarification(groupId, pending, answerMessageId) {
+    if (!pending?.message?.id || !pending?.context)
+        return;
+    const messages = (0, storage_1.getGroupMessages)(groupId);
+    const index = messages.findIndex((item) => item.id === pending.message.id);
+    if (index < 0)
+        return;
+    const resolvedAt = new Date().toISOString();
+    const current = messages[index];
+    const summary = current.clarification_summary || current.clarificationSummary || null;
+    const context = groupClarificationContext(current) || pending.context;
+    messages[index] = {
+        ...current,
+        clarification_summary: summary ? { ...summary, status: "resolved", status_label: "已补充", resolved_at: resolvedAt, answer_message_id: answerMessageId } : summary,
+        clarificationSummary: summary ? { ...summary, status: "resolved", status_label: "已补充", resolved_at: resolvedAt, answer_message_id: answerMessageId } : summary,
+        clarification_context: { ...context, status: "resolved", resolved_at: resolvedAt, answer_message_id: answerMessageId },
+        clarificationContext: { ...context, status: "resolved", resolved_at: resolvedAt, answer_message_id: answerMessageId },
+    };
+    (0, storage_1.saveGroupMessages)(groupId, messages);
+}
+function runGroupClarificationContinuationSelfTest() {
+    const messages = [
+        { id: "clarification-newer", clarification_context: { id: "request-newer", status: "pending", original_message: "另一个请求" } },
+        { id: "clarification-target", clarification_context: { id: "request-target", status: "pending", original_message_for_agent: "修复登录恢复", question: "前端和后端都要修改吗？" } },
+        { id: "clarification-resolved", clarification_context: { id: "request-resolved", status: "resolved", resolved_at: "2026-07-12T00:00:00.000Z" } },
+    ];
+    const exact = resolvePendingGroupClarification(messages, "request-target", "");
+    const resolved = resolvePendingGroupClarification(messages, "request-resolved", "");
+    const continuation = buildGroupClarificationContinuationMessage(exact.context, "前后端都改");
+    const checks = {
+        selectsExactPendingQuestion: exact.message?.id === "clarification-target",
+        ignoresResolvedQuestion: resolved.status === 404 && !resolved.context,
+        preservesOriginalRequest: continuation.includes("修复登录恢复"),
+        carriesQuestionAndAnswer: continuation.includes("前端和后端都要修改吗") && continuation.includes("前后端都改"),
+        preventsStandaloneAnswerRouting: continuation.includes("不要把这条简短回答当成独立新任务"),
+    };
+    return { pass: Object.values(checks).every(Boolean), checks };
+}
 function buildGroupTaskIntakeSummary(input) {
     const requiresConfirmation = input.planModePreflight?.requires_confirmation === true;
     const queued = input.queueResult?.queued === true;
@@ -176,49 +291,81 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                 const userMessage = String(message || "").trim();
                 const uploadedFilesContext = ctx.buildUploadedFilesContext(uploadedFiles, "本次群聊消息附件");
                 const attachmentSummary = ctx.summarizeUploadedFiles(uploadedFiles);
-                const messageForAgent = `${userMessage}${uploadedFilesContext}`.trim();
+                const incomingMessageForAgent = `${userMessage}${uploadedFilesContext}`.trim();
                 const userMessageForHistory = attachmentSummary
                     ? `${userMessage || "请处理附件"}\n\n[附件]\n${attachmentSummary}`
                     : userMessage;
-                if (!messageForAgent)
+                if (!incomingMessageForAgent)
                     return (0, utils_1.sendJson)(res, { error: "消息或附件不能为空" }, 400);
                 const groups = (0, storage_1.loadGroups)();
                 const group = groups.find(g => g.id === group_id);
                 if (!group)
                     return (0, utils_1.sendJson)(res, { error: "群聊不存在" }, 400);
                 (0, group_orchestrator_1.normalizeGroupOrchestrator)(group);
-                const routing = (0, group_orchestrator_1.selectGroupTargets)(group, target_project);
+                const explicitContinuationTaskId = String(payload.continuation_task_id || payload.continuationTaskId || "").trim();
+                const explicitContinuationResolution = resolveExplicitGroupContinuationTask((0, db_1.loadTasks)(), group_id, explicitContinuationTaskId);
+                const explicitContinuationTask = explicitContinuationResolution.task;
+                if (explicitContinuationTaskId && !explicitContinuationTask) {
+                    return (0, utils_1.sendJson)(res, { error: explicitContinuationResolution.error }, explicitContinuationResolution.status || 404);
+                }
+                const explicitContinuationKind = String(payload.continuation_kind || payload.continuationKind || "supplement").trim().toLowerCase();
+                if (explicitContinuationTaskId && !["supplement", "revise_goal"].includes(explicitContinuationKind)) {
+                    return (0, utils_1.sendJson)(res, { error: "不支持的任务接续类型" }, 400);
+                }
+                const clarificationRequestId = String(payload.clarification_request_id || payload.clarificationRequestId || "").trim();
+                const clarificationMessageId = String(payload.clarification_message_id || payload.clarificationMessageId || "").trim();
+                if (explicitContinuationTaskId && (clarificationRequestId || clarificationMessageId)) {
+                    return (0, utils_1.sendJson)(res, { error: "一次只能继续一个任务或回答一个待确认问题" }, 400);
+                }
+                const pendingClarification = resolvePendingGroupClarification((0, storage_1.getGroupMessages)(group_id), clarificationRequestId, clarificationMessageId);
+                if ((clarificationRequestId || clarificationMessageId) && !pendingClarification.context) {
+                    return (0, utils_1.sendJson)(res, { error: pendingClarification.error }, pendingClarification.status || 404);
+                }
+                const clarificationContext = pendingClarification.context;
+                const clarificationOriginalMessage = String(clarificationContext?.original_user_message || clarificationContext?.originalUserMessage || clarificationContext?.original_message || clarificationContext?.originalMessage || "").trim();
+                const effectiveUserMessage = clarificationContext
+                    ? `${clarificationOriginalMessage || "原始请求"}\n补充说明：${userMessage || "请结合本次附件"}`.trim()
+                    : userMessage;
+                const messageForAgent = clarificationContext
+                    ? buildGroupClarificationContinuationMessage(clarificationContext, incomingMessageForAgent)
+                    : incomingMessageForAgent;
+                const routing = (0, group_orchestrator_1.selectGroupTargets)(group, clarificationContext?.target_project || clarificationContext?.targetProject || target_project);
                 const isBroadcast = routing.isBroadcast;
                 const isOrchestrated = routing.orchestrated;
                 const targetMembers = routing.members;
                 if (targetMembers.length === 0) {
                     return (0, utils_1.sendJson)(res, { error: "没有找到目标项目" }, 400);
                 }
-                const messageMode = String(payload.message_mode || payload.messageMode || "conversation").trim().toLowerCase();
-                const messageTraceId = ensureTraceId(payload.trace_id || payload.traceId, "group");
-                const forceProjectTask = payload.force_task === true || payload.forceTask === true;
+                const messageMode = String(clarificationContext?.message_mode || clarificationContext?.messageMode || payload.message_mode || payload.messageMode || "conversation").trim().toLowerCase();
+                const messageTraceId = ensureTraceId(payload.trace_id || payload.traceId || clarificationContext?.trace_id || clarificationContext?.traceId, "group");
+                const forceProjectTask = groupLiveFlag(payload.force_task ?? payload.forceTask, groupLiveFlag(clarificationContext?.force_task ?? clarificationContext?.forceTask, false));
                 const statusFollowupRequest = isOrchestrated
+                    && !clarificationContext
                     && !forceProjectTask
                     && uploadedFiles.length === 0
                     && (0, group_routes_1.isGroupProgressStatusRequest)(userMessage);
-                const taskIntent = await classifyGroupProjectTaskIntentWithAgent({
-                    group,
-                    message: userMessage,
-                    uploadedFiles,
-                    isOrchestrated,
-                    messageMode,
-                    forceProjectTask,
-                    sharedFilesContext: uploadedFilesContext,
-                });
-                const persistentTaskRequest = !statusFollowupRequest && shouldCreatePersistentGroupTask({ isOrchestrated, messageMode, taskIntent, forceProjectTask });
+                const taskIntent = explicitContinuationTask
+                    ? { executable: true, kind: "project_task", confidence: 1, reason: "用户正在补充当前任务所需条件", source: "explicit_task_continuation" }
+                    : forceProjectTask
+                        ? { executable: true, kind: "project_task", confidence: 1, reason: "用户已明确要求创建并执行项目任务", source: "explicit_force_task" }
+                        : await classifyGroupProjectTaskIntentWithAgent({
+                            group,
+                            message: effectiveUserMessage,
+                            uploadedFiles,
+                            isOrchestrated,
+                            messageMode,
+                            forceProjectTask,
+                            sharedFilesContext: uploadedFilesContext,
+                        });
+                const persistentTaskRequest = !!explicitContinuationTask || (!statusFollowupRequest && shouldCreatePersistentGroupTask({ isOrchestrated, messageMode, taskIntent, forceProjectTask }));
                 const projectAnalysisRequest = !statusFollowupRequest && shouldUseProjectAnalysisMode({ isOrchestrated, messageMode, taskIntent }) && !persistentTaskRequest;
-                const continuationKind = classifyTaskContinuation(userMessage);
-                const continuationTask = persistentTaskRequest && continuationKind !== "new_task" && looksLikeTaskContinuation(userMessage)
+                const continuationKind = explicitContinuationTask ? explicitContinuationKind : classifyTaskContinuation(effectiveUserMessage);
+                const continuationTask = explicitContinuationTask || (!clarificationContext && persistentTaskRequest && continuationKind !== "new_task" && looksLikeTaskContinuation(effectiveUserMessage)
                     ? (0, db_1.loadTasks)()
                         .filter((item) => item.group_id === group_id && !item.archived && !item.deleted_at && !["cancelled", "archived"].includes(String(item.status || "")))
                         .filter((item) => item.status !== "done" || Date.now() - Date.parse(item.completed_at || item.updated_at || "") < 30 * 60 * 1000)
                         .sort((a, b) => String(b.updated_at || b.created_at || "").localeCompare(String(a.updated_at || a.created_at || "")))[0]
-                    : null;
+                    : null);
                 const groupOperationKey = persistentTaskRequest && client_message_id ? `${group_id}:${String(client_message_id)}` : "";
                 reliabilityOperationKey = groupOperationKey;
                 const groupOperation = groupOperationKey
@@ -240,6 +387,10 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                     timestamp: new Date().toISOString(),
                     trace_id: messageTraceId,
                     ...(continuationTask ? { task_id: continuationTask.id } : {}),
+                    ...(clarificationContext ? {
+                        clarification_request_id: clarificationRequestId || clarificationContext.id || clarificationContext.request_id || "",
+                        clarification_response_to: pendingClarification.message?.id || clarificationMessageId,
+                    } : {}),
                 };
                 (0, storage_1.appendGroupMessage)(group_id, userMsg);
                 for (const member of targetMembers) {
@@ -253,8 +404,16 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                     task_intent: taskIntent,
                     task_card_allowed: persistentTaskRequest,
                     status_followup: statusFollowupRequest,
+                    clarification_resumed: !!clarificationContext,
+                    clarification_request_id: clarificationRequestId || "",
                 });
                 const configs = (0, db_1.getConfigs)();
+                if (persistentTaskRequest) {
+                    (0, logs_1.addGroupLog)(group_id, "info", "project_task_preflight", "项目任务意图已确认，开始执行前预检", {
+                        source: taskIntent?.source || "",
+                        force_task: forceProjectTask,
+                    });
+                }
                 if (statusFollowupRequest) {
                     const coordinator = (0, group_orchestrator_1.getCoordinatorMember)(group);
                     const allTasks = (0, db_1.loadTasks)();
@@ -317,9 +476,12 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                 }
                 if (continuationTask) {
                     const continuation = continueTaskWithMessage(continuationTask.id, messageForAgent, ctx, {
-                        source: "group_chat_followup",
+                        source: String(payload.source || "group_chat_followup"),
                         continuationKind,
-                        auto_execute: payload.auto_execute !== false && payload.autoExecute !== false,
+                        auto_execute: groupLiveFlag(payload.auto_execute ?? payload.autoExecute, true),
+                        interrupt_current_run: groupLiveFlag(payload.interrupt_current_run ?? payload.interruptCurrentRun, continuationKind === "revise_goal"),
+                        resolve_waiting_user: groupLiveFlag(payload.resolve_waiting_user ?? payload.resolveWaitingUser, false),
+                        append_group_message: false,
                         idempotencyKey: client_message_id ? `group-followup:${client_message_id}` : "",
                     });
                     if (!continuation.success)
@@ -373,18 +535,22 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                 }
                 // 项目任务模式会创建持久工单。后续执行由可恢复任务队列持有，不依赖本次 SSE 连接。
                 if (persistentTaskRequest) {
+                    (0, logs_1.addGroupLog)(group_id, "info", "project_task_preflight", "正在核对项目执行成员与工作目录");
                     const groupReadiness = validateDailyDevGroupReady(group);
                     const coordinator = groupReadiness.coordinator || (0, group_orchestrator_1.getCoordinatorMember)(group);
+                    (0, logs_1.addGroupLog)(group_id, "info", "project_task_preflight", "项目执行成员与工作目录已就绪", {
+                        ready_projects: groupReadiness.readyMembers.map((item) => item.project),
+                    });
                     const attachmentRecords = (uploadedFiles || []).map((file) => ({
                         name: file.filename || file.name || "",
                         path: file.savedPath || file.path || "",
                         size: Number(file.size || 0),
                     })).filter((file) => file.name || file.path);
-                    const firstDirectiveLine = userMessage.split(/\r?\n/).map((line) => line.trim()).find(Boolean) || "";
+                    const firstDirectiveLine = effectiveUserMessage.split(/\r?\n/).map((line) => line.trim()).find(Boolean) || "";
                     const attachmentTitle = attachmentRecords.map((file) => file.name).filter(Boolean).join("、");
                     const taskTitle = compactMemoryText(firstDirectiveLine || (attachmentTitle ? `处理需求文档：${attachmentTitle}` : "项目开发任务"), 80);
                     const sourceDocuments = [
-                        userMessage ? `用户原始开发指令：\n${userMessage}` : "",
+                        effectiveUserMessage ? `用户原始开发指令：\n${effectiveUserMessage}` : "",
                         uploadedFilesContext ? `用户提交的开发文档：${uploadedFilesContext}` : "",
                     ].filter(Boolean).join("\n\n");
                     const acceptanceCriteria = [
@@ -398,18 +564,23 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                             return fallback;
                         return !["false", "0", "no", "off"].includes(String(value).trim().toLowerCase());
                     };
+                    (0, logs_1.addGroupLog)(group_id, "info", "project_task_preflight", "正在生成执行前计划");
                     const planModePreflight = buildGroupPlanModePreflight({
                         group,
-                        message: userMessage || taskTitle,
+                        message: effectiveUserMessage || taskTitle,
                         ctx,
                         configs,
                         taskIntent,
                         attachmentCount: attachmentRecords.length,
                         coordinatorProject: coordinator.project,
                     });
+                    (0, logs_1.addGroupLog)(group_id, "info", "project_task_preflight", "执行前计划已生成", {
+                        requires_confirmation: planModePreflight.requires_confirmation === true,
+                        risk_level: planModePreflight.risk?.level || "",
+                    });
                     const requestedAutoExecute = flagEnabled(payload.auto_execute ?? payload.autoExecute, true);
                     const autoExecute = requestedAutoExecute && planModePreflight.requires_confirmation !== true;
-                    const inferredAgentQa = /(?:必须|需要|要求).{0,24}(?:Agent[- ]?to[- ]?Agent|Agent\s*QA|ask_agent|子\s*Agent.{0,8}(?:询问|问答)|向.{0,16}Agent.{0,8}(?:提问|询问))/i.test(userMessage);
+                    const inferredAgentQa = /(?:必须|需要|要求).{0,24}(?:Agent[- ]?to[- ]?Agent|Agent\s*QA|ask_agent|子\s*Agent.{0,8}(?:询问|问答)|向.{0,16}Agent.{0,8}(?:提问|询问))/i.test(effectiveUserMessage);
                     const requiresAgentQa = flagEnabled(payload.requires_agent_qa ?? payload.requiresAgentQa, inferredAgentQa);
                     const globalDirectDispatch = payload.global_direct_dispatch || payload.globalDirectDispatch || (payload.global_handoff || payload.globalHandoff ? {
                         schema: "ccm-global-direct-dispatch-v1",
@@ -418,15 +589,15 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                         session_id: payload.global_session_id || payload.globalSessionId || "",
                         trace_id: messageTraceId,
                         handoff: payload.global_handoff || payload.globalHandoff || null,
-                        original_text: payload.original_text || payload.originalText || userMessage,
-                        user_goal: userMessage || taskTitle,
+                        original_text: payload.original_text || payload.originalText || effectiveUserMessage,
+                        user_goal: effectiveUserMessage || taskTitle,
                         accepted_at: now,
                     } : null);
                     let task = createTask({
                         title: taskTitle,
                         description: (0, daily_dev_backlog_1.buildDailyDevTaskDescription)({
                             title: taskTitle,
-                            business_goal: userMessage || taskTitle,
+                            business_goal: effectiveUserMessage || taskTitle,
                             scope: "由项目主 Agent 根据用户指令、附件和项目上下文识别影响范围。",
                             documents: sourceDocuments,
                             acceptance: acceptanceCriteria,
@@ -441,8 +612,9 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                         workflow_type: "daily_dev",
                         requires_code_changes: flagEnabled(payload.requires_code_changes ?? payload.requiresCodeChanges, true),
                         requires_verification: flagEnabled(payload.requires_verification ?? payload.requiresVerification, true),
+                        requires_independent_review: flagEnabled(payload.requires_independent_review ?? payload.requiresIndependentReview, false),
                         requires_agent_qa: requiresAgentQa,
-                        business_goal: userMessage || taskTitle,
+                        business_goal: effectiveUserMessage || taskTitle,
                         acceptance_criteria: acceptanceCriteria,
                         source_documents: sourceDocuments,
                         source_attachments: attachmentRecords,
@@ -451,12 +623,18 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                         workflow_meta: {
                             plan_mode: planModePreflight,
                             intake: {
-                                source: "group-chat-project-task",
+                                source: clarificationContext ? "group-chat-clarification-resume" : "group-chat-project-task",
                                 message_mode: messageMode,
                                 client_message_id: client_message_id || null,
                                 accepted_at: now,
                                 attachment_count: attachmentRecords.length,
                                 task_intent: taskIntent,
+                                ...(clarificationContext ? {
+                                    clarification_request_id: clarificationRequestId || clarificationContext.id || clarificationContext.request_id || "",
+                                    clarification_message_id: pendingClarification.message?.id || clarificationMessageId,
+                                    clarification_answer_message_id: userMsg.id,
+                                    original_trace_id: clarificationContext.trace_id || clarificationContext.traceId || "",
+                                } : {}),
                                 plan_mode: planModePreflight,
                                 requires_confirmation: planModePreflight.requires_confirmation === true,
                                 auto_continue: planModePreflight.auto_continue === true,
@@ -465,13 +643,14 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                             project_mission: {
                                 owner_agent: coordinator.project,
                                 control_state: planModePreflight.requires_confirmation ? "awaiting_confirmation" : "queued",
-                                user_directive: userMessage || "请读取并完成附件中的开发需求",
+                                user_directive: effectiveUserMessage || "请读取并完成附件中的开发需求",
                             },
                             ...(globalDirectDispatch ? { global_direct_dispatch: { ...globalDirectDispatch, accepted_at: globalDirectDispatch.accepted_at || now } } : {}),
                         },
                         trace_id: messageTraceId,
                         idempotency_key: groupOperationKey ? `group-task-message:${groupOperationKey}` : null,
                     });
+                    (0, logs_1.addGroupLog)(group_id, "info", "project_task_preflight", "持久任务已创建", { task_id: task.id });
                     task = updateTask(task.id, {
                         auto_execute: autoExecute,
                         intake_state: planModePreflight.requires_confirmation ? "awaiting_confirmation" : "confirmed",
@@ -503,7 +682,12 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                         status: "active",
                         phase: "intake",
                         agent: coordinator.project,
-                        data: { attachment_count: attachmentRecords.length, source: "group-chat", plan_mode: planModePreflight },
+                        data: {
+                            attachment_count: attachmentRecords.length,
+                            source: clarificationContext ? "group-chat-clarification-resume" : "group-chat",
+                            plan_mode: planModePreflight,
+                            ...(clarificationContext ? { clarification_request_id: clarificationRequestId || clarificationContext.id || clarificationContext.request_id || "" } : {}),
+                        },
                     });
                     const intakeProgressCheckpoint = {
                         schema: "ccm-main-agent-live-checkpoint-v1",
@@ -516,7 +700,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                         task_id: task.id,
                     };
                     const receiptMessageId = "m" + Date.now().toString(36) + "mission";
-                    const understoodGoal = compactMemoryText(userMessage || task.title, 180).replace(/[。.!！]+$/g, "");
+                    const understoodGoal = compactMemoryText(effectiveUserMessage || task.title, 180).replace(/[。.!！]+$/g, "");
                     const receiptContent = planModePreflight.requires_confirmation
                         ? `我先按只读方式看了一轮：${understoodGoal}。这个需求${planModePreflight.risk?.summary ? `因为「${planModePreflight.risk.summary}」` : "需要先确认范围"}，我已经整理好执行前计划。你确认后，我再安排执行成员开始修改。`
                         : `我明白了：${understoodGoal}。执行前只读检查已通过，风险较低，会进入队列开始修改和检查，进度会持续更新在下方任务卡中。`;
@@ -529,7 +713,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                     const taskAfterQueue = (0, db_1.loadTasks)().find((item) => item.id === task.id) || task;
                     const intakeSummary = buildGroupTaskIntakeSummary({
                         task: taskAfterQueue,
-                        goal: userMessage || taskAfterQueue.title,
+                        goal: effectiveUserMessage || taskAfterQueue.title,
                         planModePreflight,
                         queueResult,
                         coordinator: coordinator.project,
@@ -566,8 +750,10 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                         task_runtime: intakeTaskRuntime,
                     };
                     (0, storage_1.appendGroupMessage)(group_id, receiptMessage);
+                    if (clarificationContext)
+                        resolveStoredGroupClarification(group_id, pendingClarification, userMsg.id);
                     updateGroupMemory(group_id, {
-                        goal: userMessageForHistory,
+                        goal: effectiveUserMessage || userMessageForHistory,
                         currentPhase: "understanding",
                         decision: `已创建持久任务 ${task.id}`,
                         reason: task.title,
@@ -677,7 +863,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                     ctx.setAgentActivity(coordinator.project, "working", projectAnalysisRequest ? "正在只读分析项目" : conversationalOnly ? "正在回复" : "正在协调群聊", { tab: "groups", groupId: group_id });
                     ctx.broadcastPetSpeech(coordinator.project, { role: "status", text: projectAnalysisRequest ? "正在查看项目上下文..." : conversationalOnly ? "正在回复..." : "正在协调群聊...", source: "group" });
                     updateGroupMemory(group_id, {
-                        ...(conversationalOnly ? {} : { goal: userMessageForHistory }),
+                        ...(conversationalOnly ? {} : { goal: effectiveUserMessage || userMessageForHistory }),
                         currentPhase: projectAnalysisRequest ? "project_analysis" : conversationalOnly ? "conversation" : "understanding",
                         decision: projectAnalysisRequest ? `只读项目分析：${taskIntent.reason}` : conversationalOnly ? `普通对话：${taskIntent.reason}` : "用户把消息交给我协调",
                         reason: routing.targetLabel,
@@ -718,6 +904,8 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                             assignments: planAssignments,
                             observations: {
                                 context_packet: true,
+                                clarification_resumed: !!clarificationContext,
+                                clarification_request_id: clarificationRequestId || "",
                                 shared_files_context: !!sharedFilesContext,
                                 project_analysis_context: !!projectAnalysisContext,
                                 runtime: coordinatorResult.runtime || "",
@@ -728,13 +916,30 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                         const clarificationSummary = dispatchPolicy?.action === "ask_user"
                             ? buildGroupClarificationSummary({
                                 group,
-                                userMessage,
+                                userMessage: effectiveUserMessage,
                                 responseText: outputText,
                                 dispatchPolicy,
                                 analysis: coordinatorResult.analysis || null,
                                 coordinator: coordinator.project,
                             })
                             : null;
+                        const clarificationContextRecord = clarificationSummary ? {
+                            schema: "ccm-group-clarification-context-v1",
+                            id: `group-clarification:${group_id}:${responseMessageId}`,
+                            status: "pending",
+                            group_id,
+                            response_message_id: responseMessageId,
+                            original_message: effectiveUserMessage,
+                            original_user_message: effectiveUserMessage,
+                            original_message_for_agent: messageForAgent,
+                            question: clarificationSummary.question,
+                            message_mode: messageMode,
+                            target_project: clarificationContext?.target_project || clarificationContext?.targetProject || target_project || "all",
+                            force_task: forceProjectTask,
+                            trace_id: clarificationContext?.trace_id || clarificationContext?.traceId || messageTraceId,
+                            parent_request_id: clarificationRequestId || "",
+                            created_at: new Date().toISOString(),
+                        } : null;
                         applyMainAgentDecisionPetState(ctx, mainAgentDecision);
                         writeSse(res, {
                             type: "agent_done",
@@ -750,6 +955,8 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                             mainAgentDecision,
                             clarificationSummary,
                             clarification_summary: clarificationSummary,
+                            clarificationContext: clarificationContextRecord,
+                            clarification_context: clarificationContextRecord,
                         });
                         writeSse(res, { type: "main_agent_decision", decision: mainAgentDecision, traceId: messageTraceId });
                         (0, storage_1.appendGroupMessage)(group_id, {
@@ -767,7 +974,11 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                             mainAgentDecision,
                             clarificationSummary,
                             clarification_summary: clarificationSummary,
+                            clarificationContext: clarificationContextRecord,
+                            clarification_context: clarificationContextRecord,
                         });
+                        if (clarificationContext)
+                            resolveStoredGroupClarification(group_id, pendingClarification, userMsg.id);
                         updateGroupMemory(group_id, {
                             currentPhase: workflowMeta.phase,
                             decision: `${dispatchPolicy?.action || "unknown"}：${dispatchPolicy?.reason || "派发判断已整理"}`,

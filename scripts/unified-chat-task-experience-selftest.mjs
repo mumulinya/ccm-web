@@ -458,6 +458,39 @@ const pausedMissionCard = globalMissionTaskCard({
 })
 checks.pausedGlobalMissionShowsResume = pausedMissionCard?.phase === 'needs_user' && pausedMissionCard?.actions?.some(action => action.kind === 'resume')
 
+const waitingMissionCard = globalMissionTaskCard({
+  role: 'assistant',
+  type: 'global_mission_waiting_user',
+  content: '请补充测试账号。',
+  globalMission: { id: 'mission_waiting_input', title: '等待补充任务', status: 'in_progress', mission_summary: { total: 1, passed: 0, blocked: 1 } },
+  globalMissionSupervisor: {
+    id: 'gms_waiting_input',
+    status: 'waiting_user',
+    incidents: [{ type: 'waiting_user', reason: '请补充测试账号。' }],
+  },
+})
+const resumedMissionCard = globalMissionTaskCard({
+  role: 'assistant',
+  type: 'global_mission',
+  content: '补充信息已收到，任务继续执行。',
+  globalMission: { id: 'mission_waiting_input', title: '等待补充任务', status: 'in_progress', status_detail: '补充信息已收到，任务继续执行。', mission_summary: { total: 1, passed: 0, blocked: 0 } },
+  globalMissionSupervisor: {
+    id: 'gms_waiting_input',
+    status: 'monitoring',
+    incidents: [{ type: 'waiting_user', reason: '请补充测试账号。', resolved_at: '2026-07-12T09:00:00.000Z' }],
+    last_continuation: { kind: 'supplement', source: 'global_web_waiting_user_resolution', resolves_waiting_user: true, replan_required: false, interrupt_current_run: false, at: '2026-07-12T09:00:00.000Z' },
+  },
+})
+checks.globalWaitingMissionUsesOneInputAction = waitingMissionCard?.phase === 'needs_user'
+  && waitingMissionCard?.user_handoff?.primary_action?.kind === 'continue'
+  && (waitingMissionCard?.user_handoff?.secondary_actions || []).length === 0
+  && !waitingMissionCard?.actions?.some(action => action.kind === 'resume')
+checks.globalResolvedWaitingMissionReturnsToExecution = resumedMissionCard?.phase === 'executing'
+  && resumedMissionCard?.next_action === '我正在协调各执行目标'
+  && !String(resumedMissionCard?.next_action || '').includes('测试账号')
+  && resumedMissionCard?.continuation_status?.kind === 'supplement'
+  && resumedMissionCard?.continuation_status?.reason === '用户已补充任务所需条件'
+
 const projectOrdinary = projectExecutionTaskCard({
   role: 'assistant',
   content: '这个项目使用 Vue 和 Node。',

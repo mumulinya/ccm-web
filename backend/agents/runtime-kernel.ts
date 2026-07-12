@@ -429,6 +429,18 @@ function extractPostCompactReinjectionRepairReceiptMemoryContract(memory: any = 
     candidate.doc_rel_path,
   ], 8);
   if (!active || !docRelPaths.length) return null;
+  if (sourceSchema === "ccm-post-compact-reinjection-repair-receipt-memory-usage-contract-v1") {
+    return {
+      ...candidate,
+      active: true,
+      doc_rel_paths: docRelPaths,
+      memory_receipt_required_doc_rel_paths: uniqueRuntimeStrings([
+        candidate.memory_receipt_required_doc_rel_paths,
+        candidate.memoryReceiptRequiredDocRelPaths,
+        docRelPaths,
+      ], 12),
+    };
+  }
   const rows = Array.isArray(candidate.rows) ? candidate.rows.slice(-12) : [];
   const sessionBinding = memory?.session_binding || memory?.sessionBinding || {};
   const gateIds = uniqueRuntimeStrings([
@@ -449,17 +461,18 @@ function extractPostCompactReinjectionRepairReceiptMemoryContract(memory: any = 
   const completionDocRelPaths = uniqueRuntimeStrings([
     candidate.completionDocRelPaths,
     candidate.completion_doc_rel_paths,
-    rows.filter((row: any) => row.row_kind === "receipt_memory_usage_repair_completion").flatMap((row: any) => row.required_doc_rel_paths || []),
   ], 12);
   const completionWorkItemIds = uniqueRuntimeStrings([
     candidate.completionWorkItemIds,
     candidate.completion_work_item_ids,
-    rows.filter((row: any) => row.row_kind === "receipt_memory_usage_repair_completion").map((row: any) => row.work_item_id),
+    candidate.preservationRepairWorkItemIds,
+    candidate.preservation_repair_work_item_ids,
+    rows.filter((row: any) => ["receipt_memory_usage_repair_completion", "completion_memory_preservation_repair_closure"].includes(row.row_kind)).flatMap((row: any) => [row.work_item_id, ...(Array.isArray(row.completion_work_item_ids) ? row.completion_work_item_ids : [])]),
   ], 16);
   const completionTimelineBindingIds = uniqueRuntimeStrings([
     candidate.completionTimelineBindingIds,
     candidate.completion_timeline_binding_ids,
-    rows.filter((row: any) => row.row_kind === "receipt_memory_usage_repair_completion").map((row: any) => row.timeline_binding_id),
+    rows.filter((row: any) => ["receipt_memory_usage_repair_completion", "completion_memory_preservation_repair_closure"].includes(row.row_kind)).flatMap((row: any) => [row.timeline_binding_id, ...(Array.isArray(row.completion_timeline_binding_ids) ? row.completion_timeline_binding_ids : [])]),
   ], 16);
   const historicalTaskAgentSessionIds = uniqueRuntimeStrings([
     candidate.taskAgentSessionIds,
@@ -468,7 +481,9 @@ function extractPostCompactReinjectionRepairReceiptMemoryContract(memory: any = 
     candidate.original_task_agent_session_ids,
     candidate.repairTaskAgentSessionIds,
     candidate.repair_task_agent_session_ids,
-    rows.map((row: any) => row.historical_task_agent_session_id || row.task_agent_session_id),
+    candidate.preservationHistoricalTaskAgentSessionIds,
+    candidate.preservation_historical_task_agent_session_ids,
+    rows.flatMap((row: any) => [row.historical_task_agent_session_id || row.task_agent_session_id, ...(Array.isArray(row.historical_task_agent_session_ids) ? row.historical_task_agent_session_ids : [])]),
   ], 16);
   const historicalNativeSessionIds = uniqueRuntimeStrings([
     candidate.nativeSessionIds,
@@ -477,8 +492,26 @@ function extractPostCompactReinjectionRepairReceiptMemoryContract(memory: any = 
     candidate.original_native_session_ids,
     candidate.repairNativeSessionIds,
     candidate.repair_native_session_ids,
-    rows.map((row: any) => row.historical_native_session_id || row.native_session_id),
+    candidate.preservationHistoricalNativeSessionIds,
+    candidate.preservation_historical_native_session_ids,
+    rows.flatMap((row: any) => [row.historical_native_session_id || row.native_session_id, ...(Array.isArray(row.historical_native_session_ids) ? row.historical_native_session_ids : [])]),
   ], 16);
+  const preservationFailedRetryIds = uniqueRuntimeStrings([candidate.preservationFailedRetryIds, candidate.preservation_failed_retry_ids, rows.map((row: any) => row.failed_retry_id)], 16);
+  const preservationFailedOutcomeIds = uniqueRuntimeStrings([candidate.preservationFailedOutcomeIds, candidate.preservation_failed_outcome_ids, rows.map((row: any) => row.failed_outcome_id)], 16);
+  const preservationCorrectedRetryIds = uniqueRuntimeStrings([candidate.preservationCorrectedRetryIds, candidate.preservation_corrected_retry_ids, rows.map((row: any) => row.corrected_retry_id)], 16);
+  const preservationCorrectedOutcomeIds = uniqueRuntimeStrings([candidate.preservationCorrectedOutcomeIds, candidate.preservation_corrected_outcome_ids, rows.map((row: any) => row.corrected_outcome_id)], 16);
+  const closureUsageFeedback = candidate.preservationClosureUsageFeedback || candidate.preservation_closure_usage_feedback || {};
+  const closureFeedbackConflict = candidate.preservationClosureFeedbackConflict
+    || candidate.preservation_closure_feedback_conflict
+    || closureUsageFeedback.feedbackConflict
+    || closureUsageFeedback.feedback_conflict
+    || null;
+  const closureConflictResolution = candidate.preservationClosureConflictResolution
+    || candidate.preservation_closure_conflict_resolution
+    || closureUsageFeedback.feedbackConflictResolution
+    || closureUsageFeedback.feedback_conflict_resolution
+    || closureFeedbackConflict?.resolution
+    || null;
   return {
     schema: "ccm-post-compact-reinjection-repair-receipt-memory-usage-contract-v1",
     version: 1,
@@ -505,6 +538,28 @@ function extractPostCompactReinjectionRepairReceiptMemoryContract(memory: any = 
     corrected_receipt_completion_timeline_binding_ids: completionTimelineBindingIds,
     historical_task_agent_session_ids: historicalTaskAgentSessionIds,
     historical_native_session_ids: historicalNativeSessionIds,
+    preservation_failed_retry_ids: preservationFailedRetryIds,
+    preservation_failed_outcome_ids: preservationFailedOutcomeIds,
+    preservation_corrected_retry_ids: preservationCorrectedRetryIds,
+    preservation_corrected_outcome_ids: preservationCorrectedOutcomeIds,
+    closure_feedback_conflict_active: closureFeedbackConflict?.active === true,
+    closure_feedback_arbitration_state: closureFeedbackConflict?.arbitration_state || closureFeedbackConflict?.arbitrationState || "",
+    closure_feedback_conflict_ratio: Number(closureFeedbackConflict?.conflict_ratio || closureFeedbackConflict?.conflictRatio || 0),
+    closure_feedback_positive_weight: Number(closureFeedbackConflict?.positive?.weighted_evidence || closureFeedbackConflict?.positive?.weightedEvidence || 0),
+    closure_feedback_ignored_weight: Number(closureFeedbackConflict?.ignored?.weighted_evidence || closureFeedbackConflict?.ignored?.weightedEvidence || 0),
+    closure_feedback_current_session_verification_required: closureFeedbackConflict?.active === true,
+    closure_feedback_historical_majority_authorization_allowed: false,
+    closure_feedback_task_family_key: closureUsageFeedback?.taskFamily?.key || closureUsageFeedback?.task_family?.key || "",
+    closure_feedback_task_family_tokens: uniqueRuntimeStrings([closureUsageFeedback?.taskFamily?.tokens, closureUsageFeedback?.task_family?.tokens], 40),
+    closure_conflict_resolution_active: closureConflictResolution?.active === true,
+    closure_conflict_resolution_reopened: closureConflictResolution?.reopened === true,
+    closure_conflict_resolution_state: closureConflictResolution?.state || "",
+    closure_conflict_resolution_entry_id: closureConflictResolution?.resolution_entry_id || closureConflictResolution?.resolutionEntryId || "",
+    closure_conflict_resolution_usage_state: closureConflictResolution?.resolution_usage_state || closureConflictResolution?.resolutionUsageState || "",
+    closure_conflict_resolution_task_agent_session_id: closureConflictResolution?.task_agent_session_id || closureConflictResolution?.taskAgentSessionId || "",
+    closure_conflict_resolution_native_session_id: closureConflictResolution?.native_session_id || closureConflictResolution?.nativeSessionId || "",
+    closure_conflict_resolution_reversible: closureConflictResolution?.reversible === true,
+    closure_conflict_resolution_historical_branches_preserved: closureConflictResolution?.historical_branches_preserved === true,
     rows: rows.map((row: any) => ({
       row_id: row.row_id || "",
       row_kind: row.row_kind || "",
@@ -516,14 +571,29 @@ function extractPostCompactReinjectionRepairReceiptMemoryContract(memory: any = 
       work_item_id: row.work_item_id || "",
       timeline_binding_id: row.timeline_binding_id || "",
       original_worker_context_packet_id: row.original_worker_context_packet_id || "",
+      failed_retry_id: row.failed_retry_id || "",
+      failed_outcome_id: row.failed_outcome_id || "",
+      corrected_retry_id: row.corrected_retry_id || "",
+      corrected_outcome_id: row.corrected_outcome_id || "",
+      completion_doc_rel_paths: Array.isArray(row.completion_doc_rel_paths) ? row.completion_doc_rel_paths.slice(0, 8) : [],
+      completion_work_item_ids: Array.isArray(row.completion_work_item_ids) ? row.completion_work_item_ids.slice(0, 12) : [],
+      completion_timeline_binding_ids: Array.isArray(row.completion_timeline_binding_ids) ? row.completion_timeline_binding_ids.slice(0, 12) : [],
       required_doc_rel_paths: Array.isArray(row.required_doc_rel_paths) ? row.required_doc_rel_paths.slice(0, 8) : [],
       coverage_rows: Array.isArray(row.coverage_rows) ? row.coverage_rows.slice(0, 8) : [],
       historical_task_agent_session_id: row.historical_task_agent_session_id || "",
       historical_native_session_id: row.historical_native_session_id || "",
       repair_task_agent_session_id: row.repair_task_agent_session_id || "",
       repair_native_session_id: row.repair_native_session_id || "",
+      exact_identity_restored: row.exact_identity_restored === true,
+      current_session_boundary_restored: row.current_session_boundary_restored === true,
+      historical_sessions_remain_evidence_only: row.historical_sessions_remain_evidence_only === true,
       completion_source: row.completion_source || "",
       resolution_reason: row.resolution_reason || "",
+      resolution_entry_id: row.resolution_entry_id || "",
+      resolution_usage_state: row.resolution_usage_state || "",
+      parent_conflict_fingerprint: row.parent_conflict_fingerprint || "",
+      reversible: row.reversible === true,
+      historical_branches_preserved: row.historical_branches_preserved === true,
     })),
     memory_used_templates: docRelPaths.map((relPath: string) =>
       `${relPath}; usageState=verified|used; currentSourceVerified=true; historical repair completion is recovery evidence, not permanent repository truth`
@@ -548,6 +618,10 @@ function renderPostCompactReinjectionRepairReceiptMemoryContract(contract: any =
   const completionTimelineBindingIds = uniqueRuntimeStrings([contract.corrected_receipt_completion_timeline_binding_ids, contract.correctedReceiptCompletionTimelineBindingIds], 8);
   const historicalTaskSessions = uniqueRuntimeStrings([contract.historical_task_agent_session_ids, contract.historicalTaskAgentSessionIds], 6);
   const historicalNativeSessions = uniqueRuntimeStrings([contract.historical_native_session_ids, contract.historicalNativeSessionIds], 6);
+  const failedRetryIds = uniqueRuntimeStrings([contract.preservation_failed_retry_ids, contract.preservationFailedRetryIds], 6);
+  const failedOutcomeIds = uniqueRuntimeStrings([contract.preservation_failed_outcome_ids, contract.preservationFailedOutcomeIds], 6);
+  const correctedRetryIds = uniqueRuntimeStrings([contract.preservation_corrected_retry_ids, contract.preservationCorrectedRetryIds], 6);
+  const correctedOutcomeIds = uniqueRuntimeStrings([contract.preservation_corrected_outcome_ids, contract.preservationCorrectedOutcomeIds], 6);
   return [
     `Post-compact reinjection repair receipt memory usage contract：docs=${docRelPaths.join(",") || "none"}；archived=${contract.archived_count || contract.archivedCount || 0}；recalled=${contract.recalled_this_turn === true || contract.recalledThisTurn === true}.`,
     "- Final CCM_AGENT_RECEIPT.memoryUsed or memoryIgnored must cite every surfaced receipt MEMORY.md.",
@@ -558,6 +632,14 @@ function renderPostCompactReinjectionRepairReceiptMemoryContract(contract: any =
     gateIds.length || candidateIds.length ? `- Historical repair identities: gates=${gateIds.join(",") || "none"}; candidates=${candidateIds.join(",") || "none"}.` : "",
     completionWorkItemIds.length || completionTimelineBindingIds.length ? `- Corrected-receipt completion identities: work_items=${completionWorkItemIds.join(",") || "none"}; timelines=${completionTimelineBindingIds.join(",") || "none"}.` : "",
     historicalTaskSessions.length || historicalNativeSessions.length ? `- Historical sessions are evidence only: task_agent_sessions=${historicalTaskSessions.join(",") || "none"}; native_sessions=${historicalNativeSessions.join(",") || "none"}.` : "",
+    failedRetryIds.length || correctedRetryIds.length ? `- Completion-memory preservation repair retries: failed=${failedRetryIds.join(",") || "none"}; corrected=${correctedRetryIds.join(",") || "none"}.` : "",
+    failedOutcomeIds.length || correctedOutcomeIds.length ? `- Completion-memory preservation repair outcomes: failed=${failedOutcomeIds.join(",") || "none"}; corrected=${correctedOutcomeIds.join(",") || "none"}; corrected history remains recovery evidence only.` : "",
+    contract.closure_feedback_conflict_active === true
+      ? `- Closure feedback conflict: state=${contract.closure_feedback_arbitration_state || "contradictory_reverify_current_session"}; positive_weight=${contract.closure_feedback_positive_weight || 0}; ignored_weight=${contract.closure_feedback_ignored_weight || 0}; ratio=${contract.closure_feedback_conflict_ratio || 0}. Historical majority cannot authorize promotion or suppression; this current child session must re-read current source and independently return memoryUsed or memoryIgnored.`
+      : "",
+    contract.closure_conflict_resolution_active === true
+      ? `- Closure conflict resolution history: state=${contract.closure_conflict_resolution_state || "resolved"}; usageState=${contract.closure_conflict_resolution_usage_state || ""}; resolution_entry=${contract.closure_conflict_resolution_entry_id || ""}; historical task/native session=${contract.closure_conflict_resolution_task_agent_session_id || ""}/${contract.closure_conflict_resolution_native_session_id || ""}. This resolution is reversible ranking evidence only; reverify current source in this new session and preserve both historical conflict branches.`
+      : "",
     contract.corrected_receipt_completion_memory_active === true ? "- Historical original/repair sessions never authorize this child Agent session; bind the new memoryUsed/memoryIgnored decision to the current task/native session." : "",
     ...(Array.isArray(contract.memory_used_templates) ? contract.memory_used_templates.slice(0, 4).map((item: any) => `- memoryUsed template: ${item}`) : []),
     ...(Array.isArray(contract.memory_ignored_templates) ? contract.memory_ignored_templates.slice(0, 4).map((item: any) => `- memoryIgnored template: ${item}`) : []),
@@ -1291,6 +1373,10 @@ export function buildWorkerContextPacket(input: {
       post_compact_receipt_memory_usage_repair_completion_memory_usage_required: postCompactReinjectionRepairReceiptMemoryContract?.corrected_receipt_completion_memory_active === true,
       post_compact_receipt_memory_usage_repair_completion_current_session_binding_required: postCompactReinjectionRepairReceiptMemoryContract?.corrected_receipt_completion_memory_active === true,
       post_compact_receipt_memory_usage_repair_completion_required_doc_rel_paths: postCompactReinjectionRepairReceiptMemoryContract?.corrected_receipt_completion_doc_rel_paths || [],
+      post_compact_completion_memory_preservation_closure_feedback_conflict_current_session_verification_required: postCompactReinjectionRepairReceiptMemoryContract?.closure_feedback_conflict_active === true,
+      post_compact_completion_memory_preservation_closure_feedback_historical_majority_authorization_allowed: false,
+      post_compact_completion_memory_preservation_closure_conflict_resolution_reverification_required: postCompactReinjectionRepairReceiptMemoryContract?.closure_conflict_resolution_active === true,
+      post_compact_completion_memory_preservation_closure_conflict_resolution_reversible: postCompactReinjectionRepairReceiptMemoryContract?.closure_conflict_resolution_active === true,
       cross_group_provider_reliability_sampling_required: pressureProvenanceProviderSelectedCandidate.cross_group_provider_reliability_actionable === true
         && pressureProvenanceProviderDispatchAdvisory?.should_hold_dispatch !== true,
       cross_group_provider_reliability_local_policy_override_allowed: false,
@@ -1405,6 +1491,9 @@ export function renderWorkerContextPacket(packet: any) {
   const compactStrategyMemory = partialCompactPolicy?.compact_strategy_memory || partialCompactPolicy?.compactStrategyMemory || retry?.compact_strategy_memory || retry?.compactStrategyMemory || null;
   const pressureRecallUsageBias = partialCompactPolicy?.pressure_recall_usage_strategy_bias || partialCompactPolicy?.pressureRecallUsageStrategyBias || null;
   const ptlEmergencyHint = retry?.ptl_emergency_hint || retry?.ptlEmergencyHint || null;
+  const completionMemoryPreservation = retry?.post_compact_receipt_memory_usage_repair_completion_preservation
+    || retry?.postCompactReceiptMemoryUsageRepairCompletionPreservation
+    || null;
   const memoryProofText = memoryProof?.schema ? [
     `Memory reinjection proof：${memoryProof.status || "unknown"}；memory_hash=${memoryProof.packet_memory_hash || ""}；rendered_hash=${memoryProof.rendered_memory_hash || ""}`,
     memoryProof.memory_first ? `- memory_first=true；compaction=${memoryProof.memory_compaction_schema || ""}；hash_match=${memoryProof.hash_matches_compaction === true}` : "",
@@ -1422,6 +1511,7 @@ export function renderWorkerContextPacket(packet: any) {
     pressureRecallUsageBias?.schema ? `- pressure_recall_usage_bias=${pressureRecallUsageBias.recommendation || "neutral"}; trust=${pressureRecallUsageBias.trust_score || 0}; adjustment_cap=${pressureRecallUsageBias.category_adjustment_cap || 0}` : "",
     ptlEmergencyHint?.schema && ptlEmergencyHint.engaged === true ? `- ptl_emergency_downgrade=${ptlEmergencyHint.emergency_level || "warning"}; reason=${ptlEmergencyHint.reason || "repeated compact failure"}` : "",
     retry.preserved_receipt_contract === true ? "- preserved receipt/proof identifiers and acceptance contract." : "",
+    completionMemoryPreservation?.schema ? `- completion_memory_preservation=${completionMemoryPreservation.preserved === true}; required=${completionMemoryPreservation.required === true}; gaps=${(completionMemoryPreservation.gaps || []).join(",") || "none"}.` : "",
   ].filter(Boolean).join("\n") : "";
   return [
     `WorkerContextPacket: ${packet?.packet_id || ""}`,

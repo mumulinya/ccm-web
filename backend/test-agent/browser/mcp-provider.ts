@@ -28,10 +28,58 @@ import {
   suppressBrowserActionEffectDetails,
   verifyBrowserActionEffect,
 } from "./action-effects";
-import { withBrowserCheckExecutionIdentity } from "./check-execution-coverage";
+import {
+  browserCheckExecutionIdentity,
+  withBrowserCheckExecutionIdentity,
+} from "./check-execution-coverage";
+import { isBrowserToolCallTimeout } from "./tool-call-timeout";
+
+function browserToolTimeoutStepError(step: BrowserStepResult) {
+  const detail = step.error || step.detail || "";
+  if (!isBrowserToolCallTimeout(detail)) return null;
+  const error = new Error(detail);
+  (error as any).code = "BROWSER_TOOL_CALL_TIMEOUT";
+  return error;
+}
+
+async function readMcpEvidence<T>(task: Promise<T>, fallback: (error: any) => T): Promise<T> {
+  try {
+    return await task;
+  } catch (error: any) {
+    if (isBrowserToolCallTimeout(error)) throw error;
+    return fallback(error);
+  }
+}
 
 async function listTools(context: BrowserProviderContext) {
-  const listed = await context.runtime.browserToolExecutor?.listTools?.();
+  const list = context.runtime.browserToolExecutor?.listTools;
+  if (!list) return [];
+  const timeoutMs = Math.max(1_000, Number(context.workOrder.options.browserTimeoutMs || 60_000));
+  const controller = new AbortController();
+  let deadlineExceeded = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const providerCall = Promise.resolve()
+    .then(() => list({ signal: controller.signal, timeoutMs }))
+    .then(
+      value => ({ kind: "passed" as const, value }),
+      error => deadlineExceeded ? ({ kind: "timed_out" as const }) : ({ kind: "failed" as const, error }),
+    );
+  const deadline = new Promise<{ kind: "timed_out" }>(resolve => {
+    timer = setTimeout(() => {
+      deadlineExceeded = true;
+      controller.abort(new Error(`Browser tool listing timed out after ${timeoutMs}ms.`));
+      resolve({ kind: "timed_out" });
+    }, timeoutMs);
+  });
+  const outcome = await Promise.race([providerCall, deadline]);
+  if (timer) clearTimeout(timer);
+  if (outcome.kind === "timed_out") {
+    const error = new Error(`Browser tool listing timed out after ${timeoutMs}ms.`);
+    (error as any).code = "BROWSER_TOOL_LIST_TIMEOUT";
+    throw error;
+  }
+  if (outcome.kind === "failed") throw outcome.error;
+  const listed = outcome.value;
   return Array.isArray(listed) ? listed.map(String) : [];
 }
 
@@ -224,10 +272,12 @@ async function runMcpCheck(context: BrowserProviderContext, tools: string[], pro
       const action = actions[actionIndex];
       const verifyEffect = browserActionEffectRequired(action);
       const beforeObservation = verifyEffect
-        ? await captureActionEffectObservation().catch(() => ({}))
+        ? await readMcpEvidence(captureActionEffectObservation(), () => ({}))
         : {};
       const step = await adapter.runAction(project, action, Number(action.timeoutMs || action.timeout_ms || context.workOrder.options.browserTimeoutMs));
       steps.push(step);
+      const actionTimeout = browserToolTimeoutStepError(step);
+      if (actionTimeout) throw actionTimeout;
       if (step.status === "failed") break;
       if (verifyEffect) {
         const verified = await verifyBrowserActionEffect({
@@ -237,6 +287,7 @@ async function runMcpCheck(context: BrowserProviderContext, tools: string[], pro
           defaultTimeout: context.workOrder.options.browserTimeoutMs,
           beforeObservation,
           capture: captureActionEffectObservation,
+          rethrowCaptureError: isBrowserToolCallTimeout,
         });
         actionEffects.push(verified.evidence);
         steps.push(verified.step);
@@ -246,14 +297,14 @@ async function runMcpCheck(context: BrowserProviderContext, tools: string[], pro
 
     const readConsoleMessages = (adapter as any).readConsoleMessages;
     if (typeof readConsoleMessages === "function") {
-      consoleMessages.push(...await readConsoleMessages.call(adapter).catch((error: any) => [`console read failed: ${error.message || String(error)}`]));
+      consoleMessages.push(...await readMcpEvidence(readConsoleMessages.call(adapter), error => [`console read failed: ${error.message || String(error)}`]));
     }
-    consoleErrors.push(...await adapter.readConsoleErrors().catch((error: any) => [`console read failed: ${error.message || String(error)}`]));
-    networkRequests.push(...await adapter.readNetworkRequests().catch((error: any) => [`network read failed: ${error.message || String(error)}`]));
-    networkErrors.push(...await adapter.readNetworkErrors().catch((error: any) => [`network read failed: ${error.message || String(error)}`]));
+    consoleErrors.push(...await readMcpEvidence(adapter.readConsoleErrors(), error => [`console read failed: ${error.message || String(error)}`]));
+    networkRequests.push(...await readMcpEvidence(adapter.readNetworkRequests(), error => [`network read failed: ${error.message || String(error)}`]));
+    networkErrors.push(...await readMcpEvidence(adapter.readNetworkErrors(), error => [`network read failed: ${error.message || String(error)}`]));
     if (!consoleMessages.length) consoleMessages.push(...consoleErrors.map(item => `error: ${item}`));
     if (!networkRequests.length) networkRequests.push(...networkErrors.map(item => `error: ${item}`));
-    const pageText = await (adapter as any).pageText?.().catch((error: any) => {
+    const pageText = await readMcpEvidence(Promise.resolve((adapter as any).pageText?.()), (error: any) => {
       pageErrors.push(`page text read failed: ${error.message || String(error)}`);
       return "";
     }) || "";
@@ -263,6 +314,8 @@ async function runMcpCheck(context: BrowserProviderContext, tools: string[], pro
       for (const assertion of check.assertions || []) {
         const step = await adapter.runAssertion(assertion, { pageText, consoleMessages, consoleErrors, networkRequests, networkErrors }, Number(assertion.timeoutMs || assertion.timeout_ms || context.workOrder.options.browserTimeoutMs));
         steps.push(step);
+        const assertionTimeout = browserToolTimeoutStepError(step);
+        if (assertionTimeout) throw assertionTimeout;
       }
     }
 
@@ -296,6 +349,7 @@ async function runMcpCheck(context: BrowserProviderContext, tools: string[], pro
           }));
         }
       } catch (error: any) {
+        if (isBrowserToolCallTimeout(error)) throw error;
         screenshots.push(`screenshot failed: ${error.message || String(error)}`);
       }
     }
@@ -364,7 +418,8 @@ async function runMcpCheck(context: BrowserProviderContext, tools: string[], pro
       context: check.context,
     };
   } catch (error: any) {
-    if (adapter && !normalScreenshotRequested && !minimalExistingSessionEvidence) {
+    const toolCallTimedOut = isBrowserToolCallTimeout(error);
+    if (adapter && !toolCallTimedOut && !normalScreenshotRequested && !minimalExistingSessionEvidence) {
       const failureCapture = await captureMcpFailureScreenshot({
         adapter,
         artifactDir: context.workOrder.options.artifactDir,
@@ -423,7 +478,12 @@ export const McpBrowserProvider: BrowserProvider = {
   label: "MCP browser tools",
   async availability(context) {
     if (!context.runtime.browserToolExecutor) return { available: false, reason: "No browserToolExecutor was supplied." };
-    const tools = await listTools(context).catch(() => []);
+    let tools: string[];
+    try {
+      tools = await listTools(context);
+    } catch (error: any) {
+      return { available: false, reason: error?.message || String(error) };
+    }
     const availableBrowserTools = browserTools(tools);
     if (!availableBrowserTools.length) return { available: false, reason: "No MCP browser tools were listed.", tools };
     const adapter = createMcpBrowserAdapter(availableBrowserTools, (toolName, input) => callTool(context, toolName, input));
@@ -463,8 +523,27 @@ export const McpBrowserProvider: BrowserProvider = {
       const checks = checksForProject(project, context.workOrder.acceptanceCriteria);
       for (let i = 0; i < checks.length; i += 1) {
         if (context.checkFilter && !context.checkFilter(project, checks[i], i)) continue;
+        const execution = browserCheckExecutionIdentity({
+          workOrder: context.workOrder,
+          project,
+          checkIndex: i,
+        });
+        context.runtime.browserResourceLifecycle?.retainExternal({
+          planId: execution.planId,
+          provider: "mcp",
+          resourceType: "external_browser_session",
+          scope: `${project.name}/${checks[i].name || `Browser check ${i + 1}`}/${i + 1}`,
+        });
+        const execute = () => runMcpCheck(context, tools, project, checks[i], i);
+        const result = context.runtime.browserToolCallScope
+          ? await context.runtime.browserToolCallScope(execution, execute)
+          : await execute();
+        const browserToolCallIds = context.runtime.browserToolCallIdsForExecution?.(execution) || [];
         results.push(withBrowserCheckExecutionIdentity({
-          result: await runMcpCheck(context, tools, project, checks[i], i),
+          result: {
+            ...result,
+            ...(browserToolCallIds.length ? { browserToolCallIds } : {}),
+          },
           workOrder: context.workOrder,
           project,
           checkIndex: i,

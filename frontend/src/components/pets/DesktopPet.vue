@@ -238,7 +238,11 @@ onUnmounted(() => {
   padding: 6px 12px;
   font-size: 12px;
   color: var(--text-primary, #e2e8f0);
-  white-space: nowrap;
+  width: fit-content;
+  max-width: min(270px, calc(100vw - 14px));
+  white-space: normal;
+  word-break: break-word;
+  text-align: center;
   box-shadow: 0 4px 12px rgba(0,0,0,0.3);
   pointer-events: none;
 }

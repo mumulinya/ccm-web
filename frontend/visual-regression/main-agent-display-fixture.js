@@ -1,4 +1,4 @@
-import { createApp, computed, ref } from 'vue/dist/vue.esm-bundler.js'
+import { createApp, computed, nextTick, ref } from 'vue/dist/vue.esm-bundler.js'
 import '../src/style.css'
 import MainAgentDecisionCard from '../src/components/agents/MainAgentDecisionCard.vue'
 import TaskExperienceCard from '../src/components/tasks/TaskExperienceCard.vue'
@@ -8,6 +8,9 @@ import TaskCollaborationCard from '../src/components/collaboration/TaskCollabora
 import AgentCodeChangeDrawer from '../src/components/agents/AgentCodeChangeDrawer.vue'
 import AgentQaMessage from '../src/components/agents/AgentQaMessage.vue'
 import GlobalAgent from '../src/components/global/GlobalAgent.vue'
+import ChatComposer from '../src/components/common/ChatComposer.vue'
+import AgentExecutionMessage from '../src/components/agents/AgentExecutionMessage.vue'
+import { buildGroupClarificationResponseFields, buildWaitingUserTaskContinuationFields, createGroupTaskCardActionHandler } from '../src/composables/useGroupTaskCardActions.js'
 import { summarizeWorkEvents, sanitizeUserFacingAgentText } from '../src/utils/agentDisplay.js'
 import { globalAgentRunTaskCard } from '../src/utils/taskExperience.js'
 
@@ -34,6 +37,9 @@ style.textContent = `
   .work-event { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 9px; align-items: start; }
   .work-event-side { display: flex; flex-direction: column; gap: 3px; color: #64748b; font-size: 10px; font-weight: 800; }
   .global-agent-fixture-frame { height: 720px; min-height: 720px; overflow: hidden; border: 1px solid rgba(148, 163, 184, .24); border-radius: 10px; }
+  .fixture-group-user-message { width: fit-content; max-width: min(720px, 90%); margin: 12px 0 12px auto; padding: 10px 13px; border: 1px solid rgba(37, 99, 235, .16); border-radius: 8px 8px 2px 8px; background: rgba(37, 99, 235, .06); color: #1e293b; font-size: 13px; line-height: 1.55; overflow-wrap: anywhere; }
+  .fixture-task-supplement-context { display: flex; min-width: 0; max-width: 250px; height: 38px; align-items: center; gap: 7px; padding: 0 10px; border: 1px solid rgba(37, 99, 235, .18); border-radius: 8px; background: rgba(37, 99, 235, .06); color: #475569; font-size: 11.5px; }
+  .fixture-task-supplement-context strong { min-width: 0; overflow: hidden; color: #0f172a; text-overflow: ellipsis; white-space: nowrap; }
 `
 document.head.appendChild(style)
 
@@ -91,6 +97,57 @@ window.fetch = async (input, init = {}) => {
   }
   if (url.includes('/api/global-agent/bridge/pending')) {
     return jsonResponse({ success: true, requests: [] })
+  }
+  if (url.includes('/api/global-agent/supervisors/control')) {
+    const payload = JSON.parse(String(init?.body || '{}'))
+    if (payload.mission_id === 'fixture-mission-waiting' || payload.id === 'fixture-supervisor-waiting-hidden') {
+      const resolvedAt = new Date().toISOString()
+      return jsonResponse({
+        success: true,
+        mission: {
+          id: 'fixture-mission-waiting',
+          trace_id: 'trace-global-waiting-hidden',
+          title: '登录恢复真实验收',
+          business_goal: payload.business_goal,
+          status: 'in_progress',
+          status_detail: '补充信息已收到，正在沿用原任务继续复核和验收。',
+          mission_summary: { total: 1, passed: 0, blocked: 0 },
+          collaboration_state: {
+            needs_user: false,
+            last_continuation: {
+              kind: payload.continuation_kind,
+              source: payload.source,
+              resolves_waiting_user: payload.resolve_waiting_user === true,
+              replan_required: false,
+              interrupt_current_run: false,
+              reason: payload.message,
+              at: resolvedAt,
+            },
+          },
+        },
+        children: [],
+        supervisor: {
+          id: 'fixture-supervisor-waiting-hidden',
+          mission_id: 'fixture-mission-waiting',
+          status: 'monitoring',
+          phase: 'supervising',
+          updated_at: resolvedAt,
+          last_continuation: {
+            kind: payload.continuation_kind,
+            source: payload.source,
+            resolves_waiting_user: payload.resolve_waiting_user === true,
+            replan_required: false,
+            interrupt_current_run: false,
+          },
+          incidents: [{
+            type: 'waiting_user',
+            reason: '请提供测试环境的登录地址和可用测试账号；收到后我会继续复核和总结。',
+            resolved_at: resolvedAt,
+          }],
+        },
+        run: null,
+      })
+    }
   }
   if (url.includes('/api/global-agent/missions')) {
     const mission = globalSupervisingFixtureMission || {
@@ -1593,6 +1650,75 @@ const explicitUserRequestSummaryCard = {
     display_policy: { user_text_first: true, technical_default_collapsed: true, hide_internal_protocols: true },
   },
   next_action: '等待你确认验收方式。',
+}
+
+const groupWaitingUserTaskCard = {
+  version: 1,
+  visible: true,
+  task_id: 'task-group-waiting-user-resume',
+  title: '登录恢复真实验收',
+  goal: '完成登录恢复的真实验收，并在复核通过后给出最终总结。',
+  phase: 'needs_user',
+  phase_label: '需要你确认',
+  progress: 72,
+  active_agents: [],
+  agents: [{ name: 'TestAgent', status: 'blocked', summary: '等待测试环境条件后继续独立复核。', blockers: [] }],
+  blockers: ['还缺少可用的测试环境条件。'],
+  user_request_summary: {
+    schema: 'ccm-main-agent-user-request-summary-v1',
+    title: '需要你补充信息',
+    status: 'waiting_user',
+    status_label: '等待你回复',
+    headline: '我已保留当前任务进度，收到测试条件后会继续复核。',
+    question: '请补充测试环境地址和可用测试账号。',
+    next_action: '收到后会沿用原任务、执行成员上下文和验收标准继续。',
+    display_policy: { user_text_first: true, technical_default_collapsed: true, hide_internal_protocols: true },
+  },
+  next_action: '请补充任务所需条件。',
+  actions: [
+    { id: 'supplement', label: '补充确认', kind: 'continue', tone: 'primary' },
+    { id: 'cancel', label: '停止', kind: 'cancel', tone: 'danger' },
+  ],
+  technical: {
+    trace_id: 'trace-group-waiting-user-resume',
+    session_ids: ['session-web-resumable', 'session-test-agent-resumable'],
+  },
+}
+
+const groupClarificationMessageFixture = {
+  id: 'fixture-group-clarification-message',
+  role: 'assistant',
+  agent: 'coordinator',
+  content: '我需要先确认一下：这次是只改前端入口，还是也要补后端接口？',
+  timestamp: now,
+  clarification_summary: {
+    schema: 'ccm-group-main-agent-clarification-summary-v1',
+    title: '需要你补充信息',
+    status: 'waiting_user',
+    status_label: '等待你回复',
+    headline: '我已暂停派发，先确认一个关键问题。',
+    question: '这次是只改前端入口，还是也要补后端接口？',
+    reason: '需要确认影响范围。',
+    answer_suggestions: ['只改前端入口', '前后端都改'],
+    next_action: '你回复后，我会接着原请求继续判断和生成计划。',
+    display_policy: { user_visible: true, show_todo: false, technical_details_default_collapsed: true, hide_internal_protocols: true },
+  },
+  clarification_context: {
+    schema: 'ccm-group-clarification-context-v1',
+    id: 'fixture-group-clarification-request',
+    status: 'pending',
+    group_id: 'fixture-group-clarification',
+    response_message_id: 'fixture-group-clarification-message',
+    original_message: '修复登录状态恢复逻辑，完成修改、测试和最终总结。',
+    original_user_message: '修复登录状态恢复逻辑，完成修改、测试和最终总结。',
+    original_message_for_agent: '修复登录状态恢复逻辑，完成修改、测试和最终总结。',
+    question: '这次是只改前端入口，还是也要补后端接口？',
+    message_mode: 'project_task',
+    target_project: 'all',
+    force_task: true,
+    trace_id: 'trace-group-clarification-root',
+    created_at: now,
+  },
 }
 
 const taskStatusFallbackCard = {
@@ -3343,6 +3469,51 @@ const setupGlobalAgentFixtureState = () => {
           },
           agenticRun: globalSupervisingFixtureRun,
         },
+        {
+          id: 'global-mission-notification:fixture-mission-waiting:waiting_user',
+          role: 'assistant',
+          type: 'global_mission_waiting_user',
+          missionNotificationState: 'waiting_user',
+          content: '「登录恢复真实验收」暂时停在需要你处理的位置。\n需要补充：请提供测试环境的登录地址和可用测试账号；收到后我会继续复核和总结。',
+          timestamp: now,
+          globalMission: {
+            id: 'fixture-mission-waiting',
+            trace_id: 'trace-global-waiting-hidden',
+            title: '登录恢复真实验收',
+            business_goal: '完成登录恢复的真实浏览器验收并给出最终总结',
+            status: 'in_progress',
+            status_detail: '任务正在等待测试条件，收到后会继续执行。',
+            mission_summary: { total: 1, passed: 0, blocked: 1 },
+          },
+          globalMissionChildren: [],
+          globalMissionSupervisor: {
+            id: 'fixture-supervisor-waiting-hidden',
+            status: 'waiting_user',
+            incidents: [{ type: 'waiting_user', reason: '请提供测试环境的登录地址和可用测试账号；收到后我会继续复核和总结。' }],
+          },
+        },
+        {
+          id: 'global-mission-notification:fixture-mission-cancelled:cancelled',
+          role: 'assistant',
+          type: 'global_mission_terminal',
+          missionNotificationState: 'cancelled',
+          content: '「旧版登录兼容清理」已取消，我已保留停止前的进度；需要时可以重新发起。',
+          timestamp: now,
+          globalMission: {
+            id: 'fixture-mission-cancelled',
+            trace_id: 'trace-global-cancelled-hidden',
+            title: '旧版登录兼容清理',
+            business_goal: '移除旧版登录兼容逻辑',
+            status: 'cancelled',
+            status_detail: '任务已按你的要求取消，停止前的进度已保留。',
+            mission_summary: { total: 1, passed: 0, blocked: 0 },
+          },
+          globalMissionChildren: [],
+          globalMissionSupervisor: {
+            id: 'fixture-supervisor-cancelled-hidden',
+            status: 'cancelled',
+          },
+        },
       ],
     },
   ]
@@ -3531,7 +3702,7 @@ const childEvents = [
 ]
 
 const FixtureApp = {
-  components: { MainAgentDecisionCard, TaskExperienceCard, GroupMainAgentStatusCard, ProjectTaskIntakeMessage, TaskCollaborationCard, AgentCodeChangeDrawer, AgentQaMessage, GlobalAgent },
+  components: { MainAgentDecisionCard, TaskExperienceCard, GroupMainAgentStatusCard, ProjectTaskIntakeMessage, TaskCollaborationCard, AgentCodeChangeDrawer, AgentQaMessage, GlobalAgent, ChatComposer, AgentExecutionMessage },
   setup() {
     setupGlobalAgentFixtureState()
     window.__ccmLastTaskAction = null
@@ -3564,7 +3735,137 @@ const FixtureApp = {
     const closeCodeDrawer = () => {
       codeDrawer.value = { ...codeDrawer.value, visible: false }
     }
-    return { conversationDecision, taskDecision, taskCompletedDecision, taskMissingVerificationDecision, taskCard, internalUserRequestSummaryCard, explicitUserRequestSummaryCard, taskStatusFallbackCard, startupAutoRecoveryCard, planGapDeliveryCard, groupIntakeMessage, workQueueCard, workchainTodoCard, workchainCompletedArchivedCard, workchainQualityFollowupCard, ordinaryWorkchainTodoCard, testAgentBlockedPlanCard, testAgentFailedReviewCard, groupLiveTestAgentReviewMergedCard, workItemVerificationReminderCard, receiptResolvedCard, goalRevisionContinuationCard, planRevisionCard, confirmedPlanFollowupCard, mainAgentStatus, mainAgentActiveStatus, mainAgentArchivedTodoStatus, globalHistoryCard, globalTestAgentUnknownCoverageCard, globalTestAgentNotVerifiedCoverageCard, globalTestAgentLatestEvidenceRecheckCard, globalPostReviewSpotCheckRecheckCard, globalDirectDispatchCard, globalSingleProjectDispatchCard, globalFailedHistoryCard, internalProtocolFailureCard, globalCancelledHistoryCard, agentQaVisibleMessage, agentDisplayName, childEvents, childSummary, compactWorkText, codeDrawer, handleTaskAction, closeCodeDrawer }
+    const groupWaitingCard = ref({ ...groupWaitingUserTaskCard })
+    const groupWaitingInput = ref('')
+    const groupWaitingTarget = ref(null)
+    const groupWaitingMessages = ref([])
+    const beginGroupWaitingInput = (_msg, card, action = {}) => {
+      groupWaitingTarget.value = {
+        taskId: action.task_id || card.task_id,
+        groupId: 'fixture-group-waiting-user',
+        title: card.title,
+      }
+      groupWaitingInput.value = ''
+      nextTick(() => document.getElementById('fixtureGroupWaitingInput')?.focus())
+    }
+    const groupWaitingTaskAction = createGroupTaskCardActionHandler({
+      getTaskCard: () => groupWaitingCard.value,
+      getCurrentGroup: () => ({ id: 'fixture-group-waiting-user', name: '登录协作群' }),
+      beginTaskInput: beginGroupWaitingInput,
+    })
+    const handleGroupWaitingTaskAction = (action) => groupWaitingTaskAction({
+      task_id: groupWaitingCard.value.task_id,
+      taskCard: groupWaitingCard.value,
+    }, action)
+    const submitGroupWaitingSupplement = () => {
+      const message = groupWaitingInput.value.trim()
+      if (!message || !groupWaitingTarget.value) return
+      const fields = buildWaitingUserTaskContinuationFields(groupWaitingTarget.value)
+      window.__ccmLastGroupWaitingContinuationPayload = {
+        group_id: groupWaitingTarget.value.groupId,
+        message,
+        client_message_id: 'fixture-group-waiting-user-message',
+        ...fields,
+      }
+      groupWaitingMessages.value.push({ id: 'fixture-group-waiting-user-message', content: message })
+      groupWaitingCard.value = {
+        ...groupWaitingCard.value,
+        phase: 'reworking',
+        phase_label: '正在继续',
+        progress: 76,
+        active_agents: ['正在沿用原任务继续复核和验收'],
+        agents: [{ name: 'TestAgent', status: 'pending', summary: '任务条件已收到，等待重新复核。', blockers: [] }],
+        blockers: [],
+        user_request_summary: null,
+        next_action: '继续使用原任务证据完成复核、验收和最终总结。',
+        continuation_status: {
+          schema: 'ccm-main-agent-continuation-status-v1',
+          title: '任务条件已补充',
+          status: 'queued',
+          status_label: '已入队',
+          headline: '我已收到任务所需条件，会在同一任务里继续处理。',
+          kind: 'supplement',
+          kind_label: '任务条件',
+          route_label: '并入同一任务',
+          reason: '用户已补充任务所需条件',
+          next_action: '我会复用原任务证据继续执行，完成后重新验收并总结。',
+        },
+        actions: [
+          { id: 'supplement', label: '追加要求', kind: 'continue', tone: 'primary' },
+          { id: 'cancel', label: '停止', kind: 'cancel', tone: 'danger' },
+        ],
+      }
+      groupWaitingInput.value = ''
+      groupWaitingTarget.value = null
+    }
+    const groupClarificationMessage = ref({
+      ...groupClarificationMessageFixture,
+      clarification_summary: { ...groupClarificationMessageFixture.clarification_summary },
+      clarification_context: { ...groupClarificationMessageFixture.clarification_context },
+    })
+    const groupClarificationInput = ref('')
+    const groupClarificationTarget = ref({
+      requestId: groupClarificationMessageFixture.clarification_context.id,
+      messageId: groupClarificationMessageFixture.id,
+      groupId: groupClarificationMessageFixture.clarification_context.group_id,
+      title: groupClarificationMessageFixture.clarification_summary.question,
+      messageMode: groupClarificationMessageFixture.clarification_context.message_mode,
+    })
+    const groupClarificationUserMessages = ref([])
+    const groupClarificationResumedCard = ref(null)
+    const submitGroupClarificationResponse = () => {
+      const answer = groupClarificationInput.value.trim()
+      if (!answer || !groupClarificationTarget.value) return
+      const fields = buildGroupClarificationResponseFields(groupClarificationTarget.value)
+      window.__ccmLastGroupClarificationPayload = {
+        group_id: groupClarificationTarget.value.groupId,
+        message: answer,
+        client_message_id: 'fixture-group-clarification-answer',
+        ...fields,
+      }
+      groupClarificationUserMessages.value.push({ id: 'fixture-group-clarification-answer', content: answer })
+      groupClarificationMessage.value = {
+        ...groupClarificationMessage.value,
+        clarification_summary: {
+          ...groupClarificationMessage.value.clarification_summary,
+          status: 'resolved',
+          status_label: '已补充',
+        },
+        clarification_context: {
+          ...groupClarificationMessage.value.clarification_context,
+          status: 'resolved',
+          resolved_at: new Date().toISOString(),
+          answer_message_id: 'fixture-group-clarification-answer',
+        },
+      }
+      groupClarificationResumedCard.value = {
+        version: 1,
+        visible: true,
+        task_id: 'fixture-group-clarification-task',
+        title: '修复登录状态恢复逻辑',
+        goal: `修复登录状态恢复逻辑，完成修改、测试和最终总结。补充说明：${answer}`,
+        phase: 'planning',
+        phase_label: '正在分析',
+        progress: 18,
+        active_agents: ['正在根据补充范围整理执行计划'],
+        agents: [],
+        blockers: [],
+        next_action: '计划确认后安排前端和后端执行成员，并在完成后运行 TestAgent 复核。',
+        todo_plan: {
+          title: '当前计划',
+          steps: [
+            { id: 'understand', label: '合并原始需求与补充范围', active_form: '已确认前后端都需要修改', status: 'completed' },
+            { id: 'plan', label: '整理前后端执行计划', active_form: '正在整理前后端执行计划', status: 'in_progress' },
+            { id: 'verify', label: '执行测试、独立复核和最终总结', active_form: '等待执行与验收', status: 'pending' },
+          ],
+        },
+        actions: [{ id: 'cancel', label: '停止', kind: 'cancel', tone: 'danger' }],
+        technical: { trace_id: 'trace-group-clarification-root', clarification_request_id: fields.clarification_request_id },
+      }
+      groupClarificationInput.value = ''
+      groupClarificationTarget.value = null
+    }
+    return { conversationDecision, taskDecision, taskCompletedDecision, taskMissingVerificationDecision, taskCard, internalUserRequestSummaryCard, explicitUserRequestSummaryCard, taskStatusFallbackCard, startupAutoRecoveryCard, planGapDeliveryCard, groupIntakeMessage, workQueueCard, workchainTodoCard, workchainCompletedArchivedCard, workchainQualityFollowupCard, ordinaryWorkchainTodoCard, testAgentBlockedPlanCard, testAgentFailedReviewCard, groupLiveTestAgentReviewMergedCard, workItemVerificationReminderCard, receiptResolvedCard, goalRevisionContinuationCard, planRevisionCard, confirmedPlanFollowupCard, mainAgentStatus, mainAgentActiveStatus, mainAgentArchivedTodoStatus, globalHistoryCard, globalTestAgentUnknownCoverageCard, globalTestAgentNotVerifiedCoverageCard, globalTestAgentLatestEvidenceRecheckCard, globalPostReviewSpotCheckRecheckCard, globalDirectDispatchCard, globalSingleProjectDispatchCard, globalFailedHistoryCard, internalProtocolFailureCard, globalCancelledHistoryCard, agentQaVisibleMessage, agentDisplayName, childEvents, childSummary, compactWorkText, codeDrawer, handleTaskAction, closeCodeDrawer, groupWaitingCard, groupWaitingInput, groupWaitingTarget, groupWaitingMessages, handleGroupWaitingTaskAction, submitGroupWaitingSupplement, groupClarificationMessage, groupClarificationInput, groupClarificationTarget, groupClarificationUserMessages, groupClarificationResumedCard, submitGroupClarificationResponse }
   },
   template: `
     <main class="visual-fixture">
@@ -3707,6 +4008,55 @@ const FixtureApp = {
         <ProjectTaskIntakeMessage :msg="groupIntakeMessage" :display-content="groupIntakeMessage.content" :accent-style="{ '--agent-accent': '#2563eb' }">
           <TaskCollaborationCard :card="groupIntakeMessage.taskCard" :runtime="groupIntakeMessage.taskRuntime" @action="handleTaskAction" />
         </ProjectTaskIntakeMessage>
+      </section>
+
+      <section id="case-group-waiting-user-resume" class="fixture-case">
+        <h2>群聊等待补充后继续原任务</h2>
+        <div v-for="item in groupWaitingMessages" :key="item.id" class="fixture-group-user-message" :data-message-id="item.id">{{ item.content }}</div>
+        <TaskCollaborationCard :card="groupWaitingCard" @action="handleGroupWaitingTaskAction" />
+        <ChatComposer
+          v-model="groupWaitingInput"
+          input-id="fixtureGroupWaitingInput"
+          :files="[]"
+          :placeholder="groupWaitingTarget ? '补充当前任务需要的信息，发送后会沿用原任务继续执行和验收...' : '输入消息...'"
+          :send-label="groupWaitingTarget ? '提交并继续' : '发送 ➤'"
+          @send="submitGroupWaitingSupplement"
+        >
+          <template v-if="groupWaitingTarget" #prefix>
+            <div class="fixture-task-supplement-context">
+              <span>正在补充</span>
+              <strong>{{ groupWaitingTarget.title }}</strong>
+            </div>
+          </template>
+        </ChatComposer>
+      </section>
+
+      <section id="case-group-clarification-resume" class="fixture-case">
+        <h2>群聊澄清后接回原始需求</h2>
+        <AgentExecutionMessage
+          :msg="groupClarificationMessage"
+          :display-content="groupClarificationMessage.content"
+          :status="{ tone: 'idle', label: '等待补充' }"
+          agent-initials="AI"
+          agent-display-name="协调者"
+        />
+        <div v-for="item in groupClarificationUserMessages" :key="item.id" class="fixture-group-user-message" :data-message-id="item.id">{{ item.content }}</div>
+        <TaskExperienceCard v-if="groupClarificationResumedCard" :card="groupClarificationResumedCard" context="group" />
+        <ChatComposer
+          v-model="groupClarificationInput"
+          input-id="fixtureGroupClarificationInput"
+          :files="[]"
+          :placeholder="groupClarificationTarget ? '补充主 Agent 刚才询问的信息，发送后会接着原请求继续判断...' : '输入消息...'"
+          :send-label="groupClarificationTarget ? '提交补充' : '发送 ➤'"
+          @send="submitGroupClarificationResponse"
+        >
+          <template v-if="groupClarificationTarget" #prefix>
+            <div class="fixture-task-supplement-context">
+              <span>正在回答</span>
+              <strong>{{ groupClarificationTarget.title }}</strong>
+            </div>
+          </template>
+        </ChatComposer>
       </section>
 
       <section id="case-agent-qa-message" class="fixture-case">

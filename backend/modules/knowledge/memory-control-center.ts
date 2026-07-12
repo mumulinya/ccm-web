@@ -4643,6 +4643,9 @@ function normalizeWorkerContextCompactOutcomeEntryForCenter(raw: any = {}) {
   const policy = raw.partial_compact_policy || raw.partialCompactPolicy || null;
   const ptlHint = raw.ptl_emergency_hint || raw.ptlEmergencyHint || null;
   const rawProviderRankingProvenance = raw.provider_ranking_provenance_preservation || raw.providerRankingProvenancePreservation || null;
+  const rawCompletionMemoryPreservation = raw.post_compact_receipt_memory_usage_repair_completion_preservation
+    || raw.postCompactReceiptMemoryUsageRepairCompletionPreservation
+    || null;
   const providerRankingSummary = (value: any = {}) => ({
     present: value.present === true,
     compact_safe: value.compact_safe === true || value.compactSafe === true,
@@ -4664,6 +4667,55 @@ function normalizeWorkerContextCompactOutcomeEntryForCenter(raw: any = {}) {
       missing_typed_memory_rel_paths: uniqueStrings(Array.isArray(rawProviderRankingProvenance.missing_typed_memory_rel_paths || rawProviderRankingProvenance.missingTypedMemoryRelPaths) ? (rawProviderRankingProvenance.missing_typed_memory_rel_paths || rawProviderRankingProvenance.missingTypedMemoryRelPaths) : [], 16),
       missing_typed_memory_row_ids: uniqueStrings(Array.isArray(rawProviderRankingProvenance.missing_typed_memory_row_ids || rawProviderRankingProvenance.missingTypedMemoryRowIds) ? (rawProviderRankingProvenance.missing_typed_memory_row_ids || rawProviderRankingProvenance.missingTypedMemoryRowIds) : [], 32),
       gaps: uniqueStrings(Array.isArray(rawProviderRankingProvenance.gaps) ? rawProviderRankingProvenance.gaps : [], 16),
+    }
+    : null;
+  const completionMemorySummary = (value: any = {}) => ({
+    schema: "ccm-post-compact-receipt-memory-usage-repair-completion-packet-summary-v1",
+    present: value.present === true,
+    completion_doc_rel_paths: uniqueStrings(value.completion_doc_rel_paths || value.completionDocRelPaths || [], 16),
+    required_doc_rel_paths: uniqueStrings(value.required_doc_rel_paths || value.requiredDocRelPaths || [], 16),
+    work_item_ids: uniqueStrings(value.work_item_ids || value.workItemIds || [], 24),
+    timeline_binding_ids: uniqueStrings(value.timeline_binding_ids || value.timelineBindingIds || [], 24),
+    historical_task_agent_session_ids: uniqueStrings(value.historical_task_agent_session_ids || value.historicalTaskAgentSessionIds || [], 24),
+    historical_native_session_ids: uniqueStrings(value.historical_native_session_ids || value.historicalNativeSessionIds || [], 24),
+    current_session_binding_id: String(value.current_session_binding_id || value.currentSessionBindingId || ""),
+    current_task_agent_session_id: String(value.current_task_agent_session_id || value.currentTaskAgentSessionId || ""),
+    current_native_session_id: String(value.current_native_session_id || value.currentNativeSessionId || ""),
+    conflict_resolution_present: value.conflict_resolution_present === true || value.conflictResolutionPresent === true,
+    conflict_resolution_doc_rel_paths: uniqueStrings(value.conflict_resolution_doc_rel_paths || value.conflictResolutionDocRelPaths || [], 8),
+    conflict_resolution_active: value.conflict_resolution_active === true || value.conflictResolutionActive === true,
+    conflict_resolution_reopened: value.conflict_resolution_reopened === true || value.conflictResolutionReopened === true,
+    conflict_resolution_state: String(value.conflict_resolution_state || value.conflictResolutionState || ""),
+    conflict_resolution_entry_id: String(value.conflict_resolution_entry_id || value.conflictResolutionEntryId || ""),
+    conflict_resolution_usage_state: String(value.conflict_resolution_usage_state || value.conflictResolutionUsageState || ""),
+    conflict_resolution_task_agent_session_id: String(value.conflict_resolution_task_agent_session_id || value.conflictResolutionTaskAgentSessionId || ""),
+    conflict_resolution_native_session_id: String(value.conflict_resolution_native_session_id || value.conflictResolutionNativeSessionId || ""),
+    conflict_resolution_reversible: value.conflict_resolution_reversible === true || value.conflictResolutionReversible === true,
+    conflict_resolution_historical_branches_preserved: value.conflict_resolution_historical_branches_preserved === true || value.conflictResolutionHistoricalBranchesPreserved === true,
+    conflict_resolution_reverification_acceptance_required: value.conflict_resolution_reverification_acceptance_required === true || value.conflictResolutionReverificationAcceptanceRequired === true,
+    conflict_resolution_reversible_acceptance_required: value.conflict_resolution_reversible_acceptance_required === true || value.conflictResolutionReversibleAcceptanceRequired === true,
+    conflict_verification_acceptance_required: value.conflict_verification_acceptance_required === true || value.conflictVerificationAcceptanceRequired === true,
+    usage_acceptance_required: value.usage_acceptance_required === true || value.usageAcceptanceRequired === true,
+    current_session_acceptance_required: value.current_session_acceptance_required === true || value.currentSessionAcceptanceRequired === true,
+    authority_boundary_valid: value.authority_boundary_valid === true || value.authorityBoundaryValid === true,
+  });
+  const completionMemoryPreservation = rawCompletionMemoryPreservation?.schema === "ccm-post-compact-receipt-memory-usage-repair-completion-preservation-v1"
+    ? {
+      schema: "ccm-post-compact-receipt-memory-usage-repair-completion-preservation-v1",
+      required: rawCompletionMemoryPreservation.required === true,
+      preserved: rawCompletionMemoryPreservation.preserved === true,
+      source: String(rawCompletionMemoryPreservation.source || "worker_context_packet_compaction_retry"),
+      retry_id: String(rawCompletionMemoryPreservation.retry_id || rawCompletionMemoryPreservation.retryId || ""),
+      before: completionMemorySummary(rawCompletionMemoryPreservation.before || {}),
+      after: completionMemorySummary(rawCompletionMemoryPreservation.after || {}),
+      missing_completion_doc_rel_paths: uniqueStrings(rawCompletionMemoryPreservation.missing_completion_doc_rel_paths || rawCompletionMemoryPreservation.missingCompletionDocRelPaths || [], 16),
+      missing_required_doc_rel_paths: uniqueStrings(rawCompletionMemoryPreservation.missing_required_doc_rel_paths || rawCompletionMemoryPreservation.missingRequiredDocRelPaths || [], 16),
+      missing_work_item_ids: uniqueStrings(rawCompletionMemoryPreservation.missing_work_item_ids || rawCompletionMemoryPreservation.missingWorkItemIds || [], 24),
+      missing_timeline_binding_ids: uniqueStrings(rawCompletionMemoryPreservation.missing_timeline_binding_ids || rawCompletionMemoryPreservation.missingTimelineBindingIds || [], 24),
+      missing_historical_task_agent_session_ids: uniqueStrings(rawCompletionMemoryPreservation.missing_historical_task_agent_session_ids || rawCompletionMemoryPreservation.missingHistoricalTaskAgentSessionIds || [], 24),
+      missing_historical_native_session_ids: uniqueStrings(rawCompletionMemoryPreservation.missing_historical_native_session_ids || rawCompletionMemoryPreservation.missingHistoricalNativeSessionIds || [], 24),
+      missing_conflict_resolution_doc_rel_paths: uniqueStrings(rawCompletionMemoryPreservation.missing_conflict_resolution_doc_rel_paths || rawCompletionMemoryPreservation.missingConflictResolutionDocRelPaths || [], 8),
+      gaps: uniqueStrings(rawCompletionMemoryPreservation.gaps || [], 24),
     }
     : null;
   return {
@@ -4728,6 +4780,11 @@ function normalizeWorkerContextCompactOutcomeEntryForCenter(raw: any = {}) {
     provider_ranking_provenance_preserved: providerRankingProvenancePreservation
       ? providerRankingProvenancePreservation.preserved === true
       : raw.provider_ranking_provenance_preserved === true || raw.providerRankingProvenancePreserved === true,
+    post_compact_receipt_memory_usage_repair_completion_preservation: completionMemoryPreservation,
+    post_compact_receipt_memory_usage_repair_completion_preserved: completionMemoryPreservation
+      ? completionMemoryPreservation.preserved === true
+        && (raw.post_compact_receipt_memory_usage_repair_completion_preserved === true || raw.postCompactReceiptMemoryUsageRepairCompletionPreserved === true)
+      : raw.post_compact_receipt_memory_usage_repair_completion_preserved === true || raw.postCompactReceiptMemoryUsageRepairCompletionPreserved === true,
     distillation_candidate: raw.distillation_candidate === false || raw.distillationCandidate === false ? false : true,
     at: String(raw.at || ""),
   };
@@ -4776,6 +4833,78 @@ function readGroupWorkerContextCompactOutcomeLedger(groupId: string) {
     stats: buildWorkerContextCompactOutcomeStatsForCenter([]),
     updatedAt: "",
   };
+}
+
+function workerContextCompactOutcomeRetentionGroupIds(options: any = {}) {
+  const rawExplicit = options.groupIds || options.group_ids || options.groupId || options.group_id || [];
+  const explicit = uniqueStrings(Array.isArray(rawExplicit) ? rawExplicit : [rawExplicit], 500);
+  if (explicit.length) return explicit;
+  try {
+    return uniqueStrings(fs.readdirSync(GROUP_MEMORY_WORKER_CONTEXT_COMPACT_OUTCOMES_DIR)
+      .filter(name => name.endsWith(".json"))
+      .map(name => String(readJson(path.join(GROUP_MEMORY_WORKER_CONTEXT_COMPACT_OUTCOMES_DIR, name), {})?.groupId || path.basename(name, ".json"))), 500);
+  } catch {
+    return [];
+  }
+}
+
+function buildWorkerContextCompactOutcomeRetentionSafetyReport(options: any = {}) {
+  const rows = workerContextCompactOutcomeRetentionGroupIds(options).map((groupId: string) => {
+    const ledger = readGroupWorkerContextCompactOutcomeLedger(groupId);
+    const entries = Array.isArray(ledger.entries) ? ledger.entries : [];
+    const retention = ledger.retention || {};
+    const retentionPresent = retention.schema === "ccm-worker-context-compact-outcome-retention-v1";
+    const crossGroupEntries = entries.filter((entry: any) => String(entry.group_id || "") && String(entry.group_id || "") !== groupId);
+    const status = !entries.length ? "empty" : !retentionPresent ? "legacy" : (
+      Number(retention.dropped_unresolved_failure_count || 0) === 0
+      && crossGroupEntries.length === 0 ? "ok" : "fail"
+    );
+    return {
+      schema: "ccm-worker-context-compact-outcome-retention-safety-group-v1",
+      groupId,
+      status,
+      file: ledger.file,
+      entryCount: entries.length,
+      retention,
+      gaps: [
+        ...(Number(retention.dropped_unresolved_failure_count || 0) > 0 ? [{ reason: "compact outcome retention dropped unresolved preservation failures" }] : []),
+        ...(crossGroupEntries.length ? [{ reason: `compact outcome ledger contains cross-group entries=${crossGroupEntries.length}` }] : []),
+      ],
+    };
+  });
+  const checked = rows.filter((row: any) => row.status !== "empty" && row.status !== "legacy");
+  return {
+    schema: "ccm-worker-context-compact-outcome-retention-safety-report-v1",
+    generatedAt: now(),
+    overall: {
+      status: checked.length === 0 ? "empty" : checked.every((row: any) => row.status === "ok") ? "ok" : "fail",
+      checkedGroupCount: checked.length,
+      groupsCovered: checked.filter((row: any) => row.status === "ok").length,
+      retainedOutcomeCount: checked.reduce((sum: number, row: any) => sum + Number(row.entryCount || 0), 0),
+      droppedDiagnosticCount: checked.reduce((sum: number, row: any) => sum + Number(row.retention?.dropped_count || 0), 0),
+      protectedUnresolvedFailureCount: checked.reduce((sum: number, row: any) => sum + Number(row.retention?.protected_unresolved_failure_count || 0), 0),
+      protectedLatestResolutionCount: checked.reduce((sum: number, row: any) => sum + Number(row.retention?.protected_latest_resolution_count || 0), 0),
+      crossGroupRejectedCount: checked.reduce((sum: number, row: any) => sum + Number(row.retention?.cross_group_rejected_count || 0), 0),
+      legacyGroupCount: rows.filter((row: any) => row.status === "legacy").length,
+    },
+    groups: rows,
+    weakGroups: rows.filter((row: any) => row.status === "fail"),
+  };
+}
+
+function evaluateWorkerContextCompactOutcomeRetentionSafety(options: any = {}) {
+  const report = buildWorkerContextCompactOutcomeRetentionSafetyReport(options);
+  const check: any = makeQualityCheck(
+    "worker_context_packet_compact_outcome_retention_safety",
+    "WorkerContext Compact Outcome Retention Safety",
+    Number(report.overall.checkedGroupCount || 0),
+    Number(report.overall.groupsCovered || 0),
+    (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12),
+    (report.weakGroups || []).flatMap((row: any) => row.gaps || []).slice(0, 12),
+    "Compact outcome retention must preserve unresolved completion-memory failures, latest assignment/resolution evidence and strict group isolation while compacting superseded diagnostics."
+  );
+  check.report = report;
+  return check;
 }
 
 const WORKER_CONTEXT_METADATA_COMPACT_CATEGORIES_FOR_CENTER = [
@@ -5578,9 +5707,106 @@ function replayRepairWorkItemStats(items: any[] = []) {
   };
 }
 
+const REPLAY_REPAIR_RETENTION_RECENT_TERMINAL_LIMIT = 160;
+
+function replayRepairRetentionItemKey(item: any = {}, index = 0) {
+  return String(item.id || item.work_item_id || "").trim()
+    || `anonymous:${hash([item.source || "", item.repair_target || "", item.createdAt || "", index], 20)}`;
+}
+
+function replayRepairRetentionProofKey(item: any = {}) {
+  if (item.corrected_retry_proof?.exact_identity_restored !== true
+    && item.corrected_retry_proof?.exact_conflict_resolution_restored !== true
+    && !String(item.completion_source || "").includes("corrected")) return "";
+  return [
+    item.source || "unknown-source",
+    item.completion_preservation_conflict_resolution_entry_id
+      || item.compact_outcome_id
+      || item.original_work_item_id
+      || item.repair_target
+      || item.target_project
+      || "unknown-target",
+  ].join(":");
+}
+
+function replayRepairRetentionConflictResolutionKey(item: any = {}) {
+  const entryId = String(item.completion_preservation_conflict_resolution_entry_id || "").trim();
+  return item.completion_preservation_conflict_resolution_present === true && entryId
+    ? `${item.source || "completion-preservation"}:${entryId}`
+    : "";
+}
+
+function retainReplayRepairWorkItemsForLedger(groupId: string, input: any[] = [], options: any = {}) {
+  const recentTerminalLimit = Math.max(16, Number(options.recentTerminalLimit || options.recent_terminal_limit || REPLAY_REPAIR_RETENTION_RECENT_TERMINAL_LIMIT));
+  const accepted: Array<{ item: any; key: string; index: number }> = [];
+  const rejected: any[] = [];
+  for (const [index, item] of (Array.isArray(input) ? input : []).entries()) {
+    const itemGroupId = String(item?.group_id || item?.scopeId || item?.groupId || "").trim();
+    if (itemGroupId && itemGroupId !== groupId) {
+      rejected.push(item);
+      continue;
+    }
+    accepted.push({ item: { ...item, group_id: item.group_id || groupId, scopeId: item.scopeId || groupId }, key: replayRepairRetentionItemKey(item, index), index });
+  }
+  const latestByKey = new Map<string, { item: any; key: string; index: number }>();
+  for (const row of accepted) latestByKey.set(row.key, row);
+  const rows = [...latestByKey.values()].sort((a, b) => a.index - b.index);
+  const openRows = rows.filter(row => replayRepairWorkItemOpen(row.item.status));
+  const terminalRows = rows.filter(row => !replayRepairWorkItemOpen(row.item.status));
+  const latestProofByKey = new Map<string, string>();
+  const latestConflictByKey = new Map<string, string>();
+  for (const row of terminalRows) {
+    const proofKey = replayRepairRetentionProofKey(row.item);
+    if (proofKey) latestProofByKey.set(proofKey, row.key);
+    const conflictKey = replayRepairRetentionConflictResolutionKey(row.item);
+    if (conflictKey) latestConflictByKey.set(conflictKey, row.key);
+  }
+  const keep = new Set<string>([
+    ...openRows.map(row => row.key),
+    ...terminalRows.slice(-recentTerminalLimit).map(row => row.key),
+    ...latestProofByKey.values(),
+    ...latestConflictByKey.values(),
+  ]);
+  const retainedRows = rows.filter(row => keep.has(row.key));
+  const droppedRows = rows.filter(row => !keep.has(row.key));
+  const droppedByStatus = droppedRows.reduce((acc: Record<string, number>, row) => {
+    const status = replayRepairWorkItemStatus(row.item.status);
+    acc[status] = Number(acc[status] || 0) + 1;
+    return acc;
+  }, {});
+  return {
+    items: retainedRows.map(row => row.item),
+    retention: {
+      schema: "ccm-replay-repair-work-item-retention-v1",
+      policy: "protect_all_open_latest_verified_proofs_resolution_branches_and_recent_terminal",
+      group_id: groupId,
+      input_count: Array.isArray(input) ? input.length : 0,
+      accepted_count: accepted.length,
+      deduplicated_count: rows.length,
+      retained_count: retainedRows.length,
+      dropped_count: droppedRows.length,
+      cross_group_rejected_count: rejected.length,
+      protected_open_count: openRows.length,
+      protected_latest_verified_proof_count: new Set(latestProofByKey.values()).size,
+      protected_conflict_resolution_count: new Set(latestConflictByKey.values()).size,
+      recent_terminal_limit: recentTerminalLimit,
+      dropped_open_count: droppedRows.filter(row => replayRepairWorkItemOpen(row.item.status)).length,
+      dropped_verified_proof_count: droppedRows.filter(row => !!replayRepairRetentionProofKey(row.item)).length,
+      dropped_conflict_resolution_count: droppedRows.filter(row => !!replayRepairRetentionConflictResolutionKey(row.item)).length,
+      dropped_by_status: droppedByStatus,
+      dropped_digest: hash(droppedRows.map(row => [row.key, replayRepairWorkItemStatus(row.item.status), row.item.source || ""]), 32),
+      cross_group_rejected_digest: hash(rejected.map((item: any, index: number) => replayRepairRetentionItemKey(item, index)), 32),
+      compacted_at: String(options.at || now()),
+    },
+  };
+}
+
 function writeGroupCompactBoundaryReplayRepairWorkItems(groupId: string, ledger: any) {
   const file = getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId);
-  const items = Array.isArray(ledger.items) ? ledger.items.slice(-160) : [];
+  const retained = retainReplayRepairWorkItemsForLedger(groupId, Array.isArray(ledger.items) ? ledger.items : [], {
+    at: ledger.updatedAt || now(),
+  });
+  const items = retained.items;
   const value = {
     schema: "ccm-compact-boundary-replay-repair-work-items-v1",
     version: 1,
@@ -5588,11 +5814,403 @@ function writeGroupCompactBoundaryReplayRepairWorkItems(groupId: string, ledger:
     file,
     latestReplay: ledger.latestReplay || null,
     items,
-    stats: ledger.stats || replayRepairWorkItemStats(items),
+    stats: replayRepairWorkItemStats(items),
+    retention: retained.retention,
     updatedAt: ledger.updatedAt || now(),
   };
   writeJsonAtomic(file, value);
   return value;
+}
+
+export function compactGroupReplayRepairWorkItemLedgerRetention(groupId: string, options: any = {}) {
+  const ledger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+  return writeGroupCompactBoundaryReplayRepairWorkItems(groupId, {
+    ...ledger,
+    updatedAt: options.at || options.generatedAt || options.generated_at || now(),
+  });
+}
+
+function replayRepairRetentionGroupIds(options: any = {}) {
+  const rawExplicit = options.groupIds || options.group_ids || options.groupId || options.group_id || [];
+  const explicit = uniqueStrings(Array.isArray(rawExplicit) ? rawExplicit : [rawExplicit], 500);
+  if (explicit.length) return explicit;
+  try {
+    return uniqueStrings(fs.readdirSync(GROUP_MEMORY_REPLAY_REPAIR_WORK_ITEMS_DIR)
+      .filter(name => name.endsWith(".json"))
+      .map(name => String(readJson(path.join(GROUP_MEMORY_REPLAY_REPAIR_WORK_ITEMS_DIR, name), {})?.groupId || path.basename(name, ".json"))), 500);
+  } catch {
+    return [];
+  }
+}
+
+function buildReplayRepairLedgerRetentionSafetyReport(options: any = {}) {
+  const {
+    lookupPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchive,
+    readGroupTypedMemoryDistillationLedger,
+    verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchive,
+  } = require("../collaboration/group-memory-index");
+  const rows = replayRepairRetentionGroupIds(options).map((groupId: string) => {
+    const ledger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+    const items = Array.isArray(ledger.items) ? ledger.items : [];
+    const retention = ledger.retention || {};
+    const crossGroupRows = items.filter((item: any) => {
+      const itemGroupId = String(item.group_id || item.scopeId || item.groupId || "").trim();
+      return !!itemGroupId && itemGroupId !== groupId;
+    });
+    const openCount = items.filter((item: any) => replayRepairWorkItemOpen(item.status)).length;
+    const strictProofCount = items.filter((item: any) => !!replayRepairRetentionProofKey(item)).length;
+    const conflictResolutionCount = items.filter((item: any) => !!replayRepairRetentionConflictResolutionKey(item)).length;
+    const conflictResolutionEntryIds = uniqueStrings(items
+      .map((item: any) => item.completion_preservation_conflict_resolution_entry_id)
+      .filter(Boolean), 1000);
+    const typedLedger = readGroupTypedMemoryDistillationLedger(groupId);
+    const conflictArchive = typedLedger.postCompactCompletionMemoryPreservationClosureConflictResolutionArchive || {};
+    const conflictArchiveRows = Array.isArray(conflictArchive.rows) ? conflictArchive.rows : [];
+    const coldVerification = conflictResolutionEntryIds.length
+      ? verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchive(groupId)
+      : null;
+    const missingHotConflictArchiveEntryIds = conflictResolutionEntryIds.filter((entryId: string) => !conflictArchiveRows.some((row: any) => String(row.resolution_entry_id || row.entry_id || "") === entryId));
+    const coldLookups = missingHotConflictArchiveEntryIds.map((entryId: string) => ({
+      entryId,
+      result: lookupPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchive(groupId, { resolutionEntryId: entryId }, { limit: 1 }),
+    }));
+    const missingConflictArchiveEntryIds = coldLookups.filter((row: any) => row.result?.found !== true).map((row: any) => row.entryId);
+    const conflictArchiveSafe = conflictResolutionEntryIds.length === 0 || (
+      conflictArchive.schema === "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-distillation-v1"
+      && conflictArchive.retention_policy === "checksum_addressed_cold_shards_bounded_hot_index_render_latest_100"
+      && Number(conflictArchive.retention_pruned_count || 0) === 0
+      && coldVerification?.valid === true
+      && missingConflictArchiveEntryIds.length === 0
+    );
+    const retentionPresent = retention.schema === "ccm-replay-repair-work-item-retention-v1";
+    const status = !items.length ? "empty" : retentionPresent
+      && Number(retention.dropped_open_count || 0) === 0
+      && Number(retention.dropped_verified_proof_count || 0) === 0
+      && Number(retention.dropped_conflict_resolution_count || 0) === 0
+      && crossGroupRows.length === 0
+      && conflictArchiveSafe ? "ok" : "fail";
+    return {
+      schema: "ccm-replay-repair-ledger-retention-safety-group-v1",
+      groupId,
+      status,
+      file: ledger.file,
+      itemCount: items.length,
+      openCount,
+      strictProofCount,
+      conflictResolutionCount,
+      conflictArchiveRowCount: conflictArchiveRows.length,
+      conflictArchiveSafe,
+      conflictArchiveRetentionPolicy: conflictArchive.retention_policy || "",
+      conflictArchiveManifestChecksum: conflictArchive.cold_archive_manifest_checksum || "",
+      conflictArchiveVerificationStatus: coldVerification?.status || "not_required",
+      conflictArchiveVerifiedShardCount: Number(coldVerification?.verifiedShardCount || 0),
+      conflictArchiveShardCount: Number(coldVerification?.shardCount || 0),
+      coldLookupCount: coldLookups.length,
+      missingConflictArchiveEntryIds,
+      retention,
+      gaps: [
+        ...(!retentionPresent && items.length ? [{ reason: "repair ledger missing retention proof" }] : []),
+        ...(Number(retention.dropped_open_count || 0) > 0 ? [{ reason: "retention dropped open repair work items" }] : []),
+        ...(Number(retention.dropped_verified_proof_count || 0) > 0 ? [{ reason: "retention dropped latest verified closure proofs" }] : []),
+        ...(Number(retention.dropped_conflict_resolution_count || 0) > 0 ? [{ reason: "retention dropped conflict-resolution identities" }] : []),
+        ...(crossGroupRows.length ? [{ reason: `repair ledger contains cross-group rows=${crossGroupRows.length}` }] : []),
+        ...(!conflictArchiveSafe ? [{ reason: `immutable conflict-resolution archive missing or unsafe; missing entries=${missingConflictArchiveEntryIds.join(",") || "none"}` }] : []),
+      ],
+    };
+  });
+  const checked = rows.filter((row: any) => row.status !== "empty");
+  return {
+    schema: "ccm-replay-repair-ledger-retention-safety-report-v1",
+    generatedAt: now(),
+    overall: {
+      status: checked.length === 0 ? "empty" : checked.every((row: any) => row.status === "ok") ? "ok" : "fail",
+      checkedGroupCount: checked.length,
+      groupsCovered: checked.filter((row: any) => row.status === "ok").length,
+      retainedItemCount: checked.reduce((sum: number, row: any) => sum + Number(row.itemCount || 0), 0),
+      droppedDiagnosticCount: checked.reduce((sum: number, row: any) => sum + Number(row.retention?.dropped_count || 0), 0),
+      protectedOpenCount: checked.reduce((sum: number, row: any) => sum + Number(row.openCount || 0), 0),
+      protectedStrictProofCount: checked.reduce((sum: number, row: any) => sum + Number(row.strictProofCount || 0), 0),
+      protectedConflictResolutionCount: checked.reduce((sum: number, row: any) => sum + Number(row.conflictResolutionCount || 0), 0),
+      immutableConflictArchiveRowCount: checked.reduce((sum: number, row: any) => sum + Number(row.conflictArchiveRowCount || 0), 0),
+      conflictArchivesSafe: checked.filter((row: any) => row.conflictArchiveSafe === true).length,
+      crossGroupRejectedCount: checked.reduce((sum: number, row: any) => sum + Number(row.retention?.cross_group_rejected_count || 0), 0),
+    },
+    groups: rows,
+    weakGroups: rows.filter((row: any) => row.status === "fail"),
+  };
+}
+
+function evaluateReplayRepairLedgerRetentionSafety(options: any = {}) {
+  const report = buildReplayRepairLedgerRetentionSafetyReport(options);
+  const check: any = makeQualityCheck(
+    "replay_repair_ledger_retention_safety",
+    "Replay Repair Ledger Retention Safety",
+    Number(report.overall.checkedGroupCount || 0),
+    Number(report.overall.groupsCovered || 0),
+    (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12),
+    (report.weakGroups || []).flatMap((row: any) => row.gaps || []).slice(0, 12),
+    "Retention may compact superseded terminal diagnostics, but must preserve every open repair, latest strict closure proof, conflict-resolution identity and group boundary."
+  );
+  check.report = report;
+  return check;
+}
+
+function conflictResolutionColdArchiveGroupIds(options: any = {}) {
+  const rawExplicit = options.groupIds || options.group_ids || options.groupId || options.group_id || [];
+  const explicit = uniqueStrings(Array.isArray(rawExplicit) ? rawExplicit : [rawExplicit], 500);
+  if (explicit.length) return explicit;
+  try {
+    return uniqueStrings(fs.readdirSync(GROUP_TYPED_MEMORY_MD_DIR, { withFileTypes: true })
+      .filter(entry => entry.isDirectory())
+      .map(entry => String(readJson(path.join(GROUP_TYPED_MEMORY_MD_DIR, entry.name, ".distillation-ledger.json"), {})?.groupId || ""))
+      .filter(Boolean), 500);
+  } catch {
+    return [];
+  }
+}
+
+function buildConflictResolutionColdArchiveIntegrityReport(options: any = {}) {
+  const {
+    readGroupTypedMemoryDistillationLedger,
+    verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchive,
+  } = require("../collaboration/group-memory-index");
+  const rows = conflictResolutionColdArchiveGroupIds(options).map((groupId: string) => {
+    const ledger = readGroupTypedMemoryDistillationLedger(groupId);
+    const archive = ledger.postCompactCompletionMemoryPreservationClosureConflictResolutionArchive || {};
+    if (archive.schema !== "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-distillation-v1") {
+      return { groupId, status: "empty", expectedRowCount: 0, verifiedRowCount: 0, gaps: [] };
+    }
+    const verification = verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchive(groupId);
+    const hotRows = Array.isArray(archive.rows) ? archive.rows : [];
+    const hotBounded = hotRows.length <= Number(archive.hot_row_limit || 160)
+      && hotRows.length === Number(archive.hot_row_count || hotRows.length);
+    const countsMatch = Number(archive.archived_count || 0) === Number(verification.rowCount || 0)
+      && Number(archive.immutable_branch_count || 0) === Number(verification.rowCount || 0)
+      && Number(archive.cold_archive_row_count || 0) === Number(verification.rowCount || 0)
+      && Number(archive.cold_archive_shard_count || 0) === Number(verification.shardCount || 0);
+    const manifestMatches = String(archive.cold_archive_manifest_checksum || "") === String(verification.manifest?.manifest_checksum || "")
+      && String(archive.cold_archive_rows_checksum || "") === String(verification.manifest?.rows_checksum || "");
+    const valid = verification.valid === true && hotBounded && countsMatch && manifestMatches;
+    return {
+      schema: "ccm-conflict-resolution-cold-archive-integrity-group-v1",
+      groupId,
+      status: valid ? "ok" : "fail",
+      ledgerFile: ledger.file,
+      manifestFile: verification.manifestFile || "",
+      expectedRowCount: Number(archive.archived_count || 0),
+      verifiedRowCount: Number(verification.rowCount || 0),
+      hotRowCount: hotRows.length,
+      hotRowLimit: Number(archive.hot_row_limit || 0),
+      shardCount: Number(verification.shardCount || 0),
+      verifiedShardCount: Number(verification.verifiedShardCount || 0),
+      manifestChecksumValid: verification.manifestChecksumValid === true,
+      hotBounded,
+      countsMatch,
+      manifestMatches,
+      verification,
+      gaps: [
+        ...(verification.gaps || []).map((reason: string) => ({ reason })),
+        ...(!hotBounded ? [{ reason: "conflict-resolution hot index exceeds configured bound" }] : []),
+        ...(!countsMatch ? [{ reason: "hot ledger and cold manifest row/shard counts differ" }] : []),
+        ...(!manifestMatches ? [{ reason: "hot ledger manifest/rows checksum differs from cold manifest" }] : []),
+      ],
+    };
+  });
+  const checked = rows.filter((row: any) => row.status !== "empty");
+  return {
+    schema: "ccm-conflict-resolution-cold-archive-integrity-report-v1",
+    generatedAt: now(),
+    overall: {
+      status: checked.length === 0 ? "empty" : checked.every((row: any) => row.status === "ok") ? "ok" : "fail",
+      checkedGroupCount: checked.length,
+      groupsCovered: checked.filter((row: any) => row.status === "ok").length,
+      expectedRowCount: checked.reduce((sum: number, row: any) => sum + Number(row.expectedRowCount || 0), 0),
+      verifiedRowCount: checked.reduce((sum: number, row: any) => sum + Number(row.verifiedRowCount || 0), 0),
+      shardCount: checked.reduce((sum: number, row: any) => sum + Number(row.shardCount || 0), 0),
+      verifiedShardCount: checked.reduce((sum: number, row: any) => sum + Number(row.verifiedShardCount || 0), 0),
+    },
+    groups: rows,
+    weakGroups: rows.filter((row: any) => row.status === "fail"),
+  };
+}
+
+function evaluateConflictResolutionColdArchiveIntegrity(options: any = {}) {
+  const report = buildConflictResolutionColdArchiveIntegrityReport(options);
+  const check: any = makeQualityCheck(
+    "post_compact_completion_memory_preservation_closure_conflict_resolution_cold_archive_integrity",
+    "Conflict Resolution Cold Archive Integrity",
+    Number(report.overall.checkedGroupCount || 0),
+    Number(report.overall.groupsCovered || 0),
+    (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12),
+    (report.weakGroups || []).flatMap((row: any) => row.gaps || []).slice(0, 12),
+    "Every immutable conflict-resolution branch must live in a checksum-addressed group-local shard, remain discoverable from the manifest and keep the hot typed-memory index bounded."
+  );
+  check.report = report;
+  return check;
+}
+
+function buildConflictResolutionManifestGenerationGcSafetyReport(options: any = {}) {
+  const {
+    reconcilePostCompactCompletionMemoryPreservationClosureConflictResolutionOrphanShards,
+    readGroupTypedMemoryDistillationLedger,
+    verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionManifestGenerations,
+  } = require("../collaboration/group-memory-index");
+  const rows = conflictResolutionColdArchiveGroupIds(options).map((groupId: string) => {
+    const ledger = readGroupTypedMemoryDistillationLedger(groupId);
+    const archive = ledger.postCompactCompletionMemoryPreservationClosureConflictResolutionArchive || {};
+    if (archive.schema !== "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-distillation-v1") {
+      return { groupId, status: "empty", gaps: [] };
+    }
+    const generation = verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionManifestGenerations(groupId);
+    const quarantine = reconcilePostCompactCompletionMemoryPreservationClosureConflictResolutionOrphanShards(groupId, {
+      dryRun: true,
+      at: options.now || options.generatedAt || options.generated_at || now(),
+      gracePeriodMs: options.gracePeriodMs ?? options.grace_period_ms,
+    });
+    const deletedUnsafe = (quarantine.entries || []).filter((entry: any) => entry.status === "deleted"
+      && (entry.shard_valid !== true || entry.recovery_covered !== true || entry.referenced_by_open_repair === true));
+    const blockedInvalid = (quarantine.entries || []).filter((entry: any) => entry.status === "blocked_invalid_shard");
+    const valid = generation.valid === true
+      && generation.currentGenerationCopyValid === true
+      && generation.recoverySimulationPassed === true
+      && quarantine.quarantine_input_valid !== false
+      && deletedUnsafe.length === 0
+      && blockedInvalid.length === 0;
+    return {
+      schema: "ccm-conflict-resolution-manifest-generation-gc-safety-group-v1",
+      groupId,
+      status: valid ? "ok" : "fail",
+      ledgerFile: ledger.file,
+      generationNumber: Number(generation.generationNumber || 0),
+      currentManifestChecksum: generation.currentManifestChecksum || "",
+      previousManifestChecksum: generation.previousManifestChecksum || "",
+      currentGenerationCopyValid: generation.currentGenerationCopyValid === true,
+      previousRequired: generation.previousRequired === true,
+      previousValid: generation.previousRequired !== true || generation.previous?.valid === true,
+      recoverySimulationPassed: generation.recoverySimulationPassed === true,
+      orphanCount: Number(quarantine.orphan_count || 0),
+      quarantinedCount: Number(quarantine.quarantined_count || 0),
+      protectedOpenRepairCount: Number(quarantine.protected_open_repair_count || 0),
+      eligibleCount: Number(quarantine.eligible_count || 0),
+      deletedCount: Number(quarantine.deleted_count || 0),
+      blockedCount: Number(quarantine.blocked_count || 0),
+      quarantineInputValid: quarantine.quarantine_input_valid !== false,
+      generation,
+      quarantine,
+      gaps: [
+        ...(generation.gaps || []).map((reason: string) => ({ reason })),
+        ...(quarantine.quarantine_input_valid === false ? [{ reason: "orphan quarantine manifest checksum/group/schema invalid" }] : []),
+        ...deletedUnsafe.map((entry: any) => ({ reason: `unsafe orphan deletion audit row: ${entry.rel_path || ""}` })),
+        ...blockedInvalid.map((entry: any) => ({ reason: `invalid orphan shard blocks GC: ${entry.rel_path || ""}` })),
+      ],
+    };
+  });
+  const checked = rows.filter((row: any) => row.status !== "empty");
+  return {
+    schema: "ccm-conflict-resolution-manifest-generation-gc-safety-report-v1",
+    generatedAt: now(),
+    overall: {
+      status: checked.length === 0 ? "empty" : checked.every((row: any) => row.status === "ok") ? "ok" : "fail",
+      checkedGroupCount: checked.length,
+      groupsCovered: checked.filter((row: any) => row.status === "ok").length,
+      orphanCount: checked.reduce((sum: number, row: any) => sum + Number(row.orphanCount || 0), 0),
+      protectedOpenRepairCount: checked.reduce((sum: number, row: any) => sum + Number(row.protectedOpenRepairCount || 0), 0),
+      deletedCount: checked.reduce((sum: number, row: any) => sum + Number(row.deletedCount || 0), 0),
+      blockedCount: checked.reduce((sum: number, row: any) => sum + Number(row.blockedCount || 0), 0),
+    },
+    groups: rows,
+    weakGroups: rows.filter((row: any) => row.status === "fail"),
+  };
+}
+
+function evaluateConflictResolutionManifestGenerationGcSafety(options: any = {}) {
+  const report = buildConflictResolutionManifestGenerationGcSafetyReport(options);
+  const check: any = makeQualityCheck(
+    "post_compact_completion_memory_preservation_closure_conflict_resolution_manifest_generation_gc_safety",
+    "Conflict Resolution Manifest Generation And GC Safety",
+    Number(report.overall.checkedGroupCount || 0),
+    Number(report.overall.groupsCovered || 0),
+    (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12),
+    (report.weakGroups || []).flatMap((row: any) => row.gaps || []).slice(0, 12),
+    "Cold-archive GC requires valid current/previous manifest generations, immutable current-generation copy, recovery simulation, quarantine grace and no open repair references."
+  );
+  check.report = report;
+  return check;
+}
+
+function buildConflictResolutionMaintenanceControllerReport(options: any = {}) {
+  const {
+    inspectPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenance,
+    readGroupTypedMemoryDistillationLedger,
+  } = require("../collaboration/group-memory-index");
+  const rows = conflictResolutionColdArchiveGroupIds(options).map((groupId: string) => {
+    const ledger = readGroupTypedMemoryDistillationLedger(groupId);
+    const archive = ledger.postCompactCompletionMemoryPreservationClosureConflictResolutionArchive || {};
+    if (archive.schema !== "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-distillation-v1") return { groupId, status: "empty", gaps: [] };
+    const status = inspectPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenance(groupId, {
+      at: options.now || options.generatedAt || options.generated_at || now(),
+      gracePeriodMs: options.gracePeriodMs ?? options.grace_period_ms,
+    });
+    const latestRun = status.latestRun || null;
+    const legacy = !latestRun;
+    const safe = !legacy
+      && status.status === "ok"
+      && status.latestRunSafe === true
+      && status.backgroundDeletionAuthorized === false
+      && latestRun.mode === "verify_and_quarantine_dry_run_only"
+      && latestRun.destructive_action_authorized === false
+      && latestRun.deletion_attempted === false
+      && latestRun.group_main_agent_recommendation?.should_create_real_task === false
+      && latestRun.global_agent_recommendation?.cross_group_authorization_allowed === false;
+    return {
+      schema: "ccm-conflict-resolution-maintenance-controller-group-v1",
+      groupId,
+      status: legacy ? "legacy" : safe ? "ok" : "fail",
+      legacy,
+      latestRun,
+      nextRunAt: status.nextRunAt || "",
+      openApprovalCount: Number(status.openApprovalCount || 0),
+      consumedApprovalCount: Number(status.consumedApprovalCount || 0),
+      invalidApprovalCount: Number(status.invalidApprovalCount || 0),
+      recommendation: status.recommendation,
+      groupMainAgentRecommendation: latestRun?.group_main_agent_recommendation || null,
+      globalAgentRecommendation: latestRun?.global_agent_recommendation || null,
+      maintenanceStatus: status,
+      gaps: safe || legacy ? [] : (status.gaps || []).map((reason: string) => ({ reason })),
+    };
+  });
+  const checked = rows.filter((row: any) => row.status !== "empty" && row.status !== "legacy");
+  return {
+    schema: "ccm-conflict-resolution-maintenance-controller-report-v1",
+    generatedAt: now(),
+    overall: {
+      status: checked.length === 0 ? "empty" : checked.every((row: any) => row.status === "ok") ? "ok" : "fail",
+      checkedGroupCount: checked.length,
+      groupsCovered: checked.filter((row: any) => row.status === "ok").length,
+      legacyGroupCount: rows.filter((row: any) => row.status === "legacy").length,
+      openApprovalCount: checked.reduce((sum: number, row: any) => sum + Number(row.openApprovalCount || 0), 0),
+      consumedApprovalCount: checked.reduce((sum: number, row: any) => sum + Number(row.consumedApprovalCount || 0), 0),
+      invalidApprovalCount: checked.reduce((sum: number, row: any) => sum + Number(row.invalidApprovalCount || 0), 0),
+      backgroundDeletionAuthorizedCount: 0,
+    },
+    groups: rows,
+    weakGroups: rows.filter((row: any) => row.status === "fail"),
+  };
+}
+
+function evaluateConflictResolutionMaintenanceController(options: any = {}) {
+  const report = buildConflictResolutionMaintenanceControllerReport(options);
+  const check: any = makeQualityCheck(
+    "post_compact_completion_memory_preservation_closure_conflict_resolution_maintenance_controller",
+    "Conflict Resolution Cold Archive Maintenance Controller",
+    Number(report.overall.checkedGroupCount || 0),
+    Number(report.overall.groupsCovered || 0),
+    (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12),
+    (report.weakGroups || []).flatMap((row: any) => row.gaps || []).slice(0, 12),
+    "Background maintenance may verify and dry-run quarantine only; destructive GC requires a valid single-use generation-bound approval receipt and explicit non-background execution."
+  );
+  check.report = report;
+  return check;
 }
 
 function summarizeReplayRepairPendingWorkItems(groupId: string, ledgerInput: any = null) {
@@ -5795,6 +6413,33 @@ function buildReplayRepairDispatchCandidate(groupId: string, item: any = {}, ind
     post_compact_receipt_memory_missing_doc_rel_paths: item.post_compact_receipt_memory_missing_doc_rel_paths || [],
     post_compact_receipt_memory_missing_current_source_verified_doc_rel_paths: item.post_compact_receipt_memory_missing_current_source_verified_doc_rel_paths || [],
     post_compact_receipt_memory_missing_ignored_reason_doc_rel_paths: item.post_compact_receipt_memory_missing_ignored_reason_doc_rel_paths || [],
+    completion_preservation_gap_codes: item.completion_preservation_gap_codes || [],
+    completion_preservation_completion_doc_rel_paths: item.completion_preservation_completion_doc_rel_paths || [],
+    completion_preservation_required_doc_rel_paths: item.completion_preservation_required_doc_rel_paths || [],
+    completion_preservation_work_item_ids: item.completion_preservation_work_item_ids || [],
+    completion_preservation_timeline_binding_ids: item.completion_preservation_timeline_binding_ids || [],
+    completion_preservation_historical_task_agent_session_ids: item.completion_preservation_historical_task_agent_session_ids || [],
+    completion_preservation_historical_native_session_ids: item.completion_preservation_historical_native_session_ids || [],
+    completion_preservation_current_session_binding_id: item.completion_preservation_current_session_binding_id || "",
+    completion_preservation_current_task_agent_session_id: item.completion_preservation_current_task_agent_session_id || "",
+    completion_preservation_current_native_session_id: item.completion_preservation_current_native_session_id || "",
+    completion_preservation_conflict_resolution_present: item.completion_preservation_conflict_resolution_present === true,
+    completion_preservation_conflict_resolution_doc_rel_paths: item.completion_preservation_conflict_resolution_doc_rel_paths || [],
+    completion_preservation_conflict_resolution_entry_id: item.completion_preservation_conflict_resolution_entry_id || "",
+    completion_preservation_conflict_resolution_state: item.completion_preservation_conflict_resolution_state || "",
+    completion_preservation_conflict_resolution_usage_state: item.completion_preservation_conflict_resolution_usage_state || "",
+    completion_preservation_conflict_resolution_task_agent_session_id: item.completion_preservation_conflict_resolution_task_agent_session_id || "",
+    completion_preservation_conflict_resolution_native_session_id: item.completion_preservation_conflict_resolution_native_session_id || "",
+    completion_preservation_conflict_resolution_active: item.completion_preservation_conflict_resolution_active === true,
+    completion_preservation_conflict_resolution_reopened: item.completion_preservation_conflict_resolution_reopened === true,
+    completion_preservation_conflict_resolution_reversible: item.completion_preservation_conflict_resolution_reversible === true,
+    completion_preservation_conflict_resolution_historical_branches_preserved: item.completion_preservation_conflict_resolution_historical_branches_preserved === true,
+    completion_preservation_conflict_resolution_reverification_acceptance_required: item.completion_preservation_conflict_resolution_reverification_acceptance_required === true,
+    completion_preservation_conflict_resolution_reversible_acceptance_required: item.completion_preservation_conflict_resolution_reversible_acceptance_required === true,
+    completion_preservation_conflict_verification_acceptance_required: item.completion_preservation_conflict_verification_acceptance_required === true,
+    corrected_compact_outcome_id: item.corrected_compact_outcome_id || "",
+    corrected_compact_retry_id: item.corrected_compact_retry_id || "",
+    corrected_compact_hook_run_id: item.corrected_compact_hook_run_id || "",
     original_worker_context_packet_id: item.original_worker_context_packet_id || "",
     original_binding_id: item.original_binding_id || "",
     original_assignment_id: item.original_assignment_id || "",
@@ -15379,6 +16024,15 @@ function workerContextPacketCompactionRetryGaps(entry: any = {}) {
   }
   if (retry.status === "recovered" && usage.status === "over_budget") gaps.push("final_usage_still_over_budget");
   if (retry.preserved_receipt_contract !== true) gaps.push("preserved_receipt_contract");
+  const completionPreservation = retry.post_compact_receipt_memory_usage_repair_completion_preservation
+    || retry.postCompactReceiptMemoryUsageRepairCompletionPreservation
+    || null;
+  if (completionPreservation?.required === true) {
+    if (completionPreservation.schema !== "ccm-post-compact-receipt-memory-usage-repair-completion-preservation-v1") gaps.push("completion_memory_preservation_schema");
+    if (completionPreservation.preserved !== true) gaps.push("completion_memory_preservation_lost");
+    if ((completionPreservation.gaps || []).length) gaps.push("completion_memory_preservation_gaps");
+    if (completionPreservation.after?.authority_boundary_valid !== true) gaps.push("completion_memory_authority_boundary");
+  }
   return [...new Set(gaps)];
 }
 
@@ -15534,6 +16188,9 @@ function workerContextPacketCompactOutcomeGaps(entry: any = {}, outcomeLedger: a
   const retryProviderRankingProvenancePreservation = retry.provider_ranking_provenance_preservation
     || retry.providerRankingProvenancePreservation
     || null;
+  const retryCompletionMemoryPreservation = retry.post_compact_receipt_memory_usage_repair_completion_preservation
+    || retry.postCompactReceiptMemoryUsageRepairCompletionPreservation
+    || null;
   if (!entry.binding_id) gaps.push("binding_id");
   if (!entry.assignment_id) gaps.push("assignment_id");
   if (!entry.worker_context_packet_id) gaps.push("worker_context_packet_id");
@@ -15592,6 +16249,22 @@ function workerContextPacketCompactOutcomeGaps(entry: any = {}, outcomeLedger: a
       }
     }
   }
+  if (retryCompletionMemoryPreservation?.schema === "ccm-post-compact-receipt-memory-usage-repair-completion-preservation-v1"
+    && retryCompletionMemoryPreservation.required === true) {
+    const outcomeCompletionMemoryPreservation = outcome.post_compact_receipt_memory_usage_repair_completion_preservation
+      || outcome.postCompactReceiptMemoryUsageRepairCompletionPreservation
+      || null;
+    if (outcomeCompletionMemoryPreservation?.schema !== "ccm-post-compact-receipt-memory-usage-repair-completion-preservation-v1") {
+      gaps.push("outcome_completion_memory_preservation");
+    } else {
+      if (outcomeCompletionMemoryPreservation.required !== true) gaps.push("outcome_completion_memory_preservation_required");
+      if (outcomeCompletionMemoryPreservation.preserved !== true || outcome.post_compact_receipt_memory_usage_repair_completion_preserved !== true) gaps.push("outcome_completion_memory_preservation_lost");
+      if (outcomeCompletionMemoryPreservation.after?.authority_boundary_valid !== true) gaps.push("outcome_completion_memory_authority_boundary");
+      for (const completionGap of outcomeCompletionMemoryPreservation.gaps || []) {
+        gaps.push(`outcome_completion_${String(completionGap || "")}`.slice(0, 180));
+      }
+    }
+  }
   return [...new Set(gaps)];
 }
 
@@ -15638,6 +16311,14 @@ function buildWorkerContextPacketCompactOutcomeLedgerReport(options: any = {}) {
         row.outcome?.provider_ranking_provenance_preservation?.required === true
         && row.outcome?.provider_ranking_provenance_preservation?.preserved === true
       ).length,
+      completionMemoryPreservationRequiredCount: checked.filter((row: any) =>
+        (row.retry?.post_compact_receipt_memory_usage_repair_completion_preservation || row.retry?.postCompactReceiptMemoryUsageRepairCompletionPreservation)?.required === true
+      ).length,
+      completionMemoryPreservedCount: outcomeRows.filter((row: any) =>
+        row.outcome?.post_compact_receipt_memory_usage_repair_completion_preservation?.required === true
+        && row.outcome?.post_compact_receipt_memory_usage_repair_completion_preservation?.preserved === true
+        && row.outcome?.post_compact_receipt_memory_usage_repair_completion_preserved === true
+      ).length,
       totalTokenDelta: outcomeRows.reduce((sum, row) => sum + Number(row.outcome?.token_delta || 0), 0),
       totalFreeTokenDelta: outcomeRows.reduce((sum, row) => sum + Number(row.outcome?.free_token_delta || 0), 0),
       selectedCategoryCounts: outcomeLedger.stats?.selectedCategoryCounts || {},
@@ -15648,6 +16329,11 @@ function buildWorkerContextPacketCompactOutcomeLedgerReport(options: any = {}) {
           || null;
         const before = providerRankingProvenancePreservation?.before || {};
         const after = providerRankingProvenancePreservation?.after || {};
+        const completionMemoryPreservation = row.outcome?.post_compact_receipt_memory_usage_repair_completion_preservation
+          || row.retry?.post_compact_receipt_memory_usage_repair_completion_preservation
+          || row.retry?.postCompactReceiptMemoryUsageRepairCompletionPreservation
+          || null;
+        const completionAfter = completionMemoryPreservation?.after || {};
         return {
           binding_id: row.entry.binding_id || "",
           assignment_id: row.entry.assignment_id || "",
@@ -15674,6 +16360,31 @@ function buildWorkerContextPacketCompactOutcomeLedgerReport(options: any = {}) {
             ...(Array.isArray(after.typed_memory_row_ids) ? after.typed_memory_row_ids : []),
             ...(Array.isArray(before.typed_memory_row_ids) ? before.typed_memory_row_ids : []),
           ], 32),
+          completion_memory_preservation_required: completionMemoryPreservation?.required === true,
+          completion_memory_preserved: completionMemoryPreservation?.required === true
+            ? completionMemoryPreservation?.preserved === true
+            : row.outcome?.post_compact_receipt_memory_usage_repair_completion_preserved === true,
+          completion_doc_rel_paths: completionAfter.completion_doc_rel_paths || [],
+          completion_work_item_ids: completionAfter.work_item_ids || [],
+          completion_timeline_binding_ids: completionAfter.timeline_binding_ids || [],
+          completion_current_task_agent_session_id: completionAfter.current_task_agent_session_id || "",
+          completion_current_native_session_id: completionAfter.current_native_session_id || "",
+          completion_authority_boundary_valid: completionAfter.authority_boundary_valid === true,
+          conflict_resolution_preservation_required: completionMemoryPreservation?.required === true && completionAfter.conflict_resolution_present === true,
+          conflict_resolution_present: completionAfter.conflict_resolution_present === true,
+          conflict_resolution_doc_rel_paths: completionAfter.conflict_resolution_doc_rel_paths || [],
+          conflict_resolution_active: completionAfter.conflict_resolution_active === true,
+          conflict_resolution_reopened: completionAfter.conflict_resolution_reopened === true,
+          conflict_resolution_state: completionAfter.conflict_resolution_state || "",
+          conflict_resolution_entry_id: completionAfter.conflict_resolution_entry_id || "",
+          conflict_resolution_usage_state: completionAfter.conflict_resolution_usage_state || "",
+          conflict_resolution_task_agent_session_id: completionAfter.conflict_resolution_task_agent_session_id || "",
+          conflict_resolution_native_session_id: completionAfter.conflict_resolution_native_session_id || "",
+          conflict_resolution_reversible: completionAfter.conflict_resolution_reversible === true,
+          conflict_resolution_historical_branches_preserved: completionAfter.conflict_resolution_historical_branches_preserved === true,
+          conflict_resolution_reverification_acceptance_required: completionAfter.conflict_resolution_reverification_acceptance_required === true,
+          conflict_resolution_reversible_acceptance_required: completionAfter.conflict_resolution_reversible_acceptance_required === true,
+          conflict_verification_acceptance_required: completionAfter.conflict_verification_acceptance_required === true,
         };
       }),
       gaps: gapRows.slice(0, 8).map((row: any) => ({
@@ -15709,6 +16420,8 @@ function buildWorkerContextPacketCompactOutcomeLedgerReport(options: any = {}) {
       taskPreservedOutcomeCount: checkedRows.reduce((sum, row) => sum + Number(row.taskPreservedOutcomeCount || 0), 0),
       providerRankingProvenanceRequiredCount: checkedRows.reduce((sum, row) => sum + Number(row.providerRankingProvenanceRequiredCount || 0), 0),
       providerRankingProvenancePreservedCount: checkedRows.reduce((sum, row) => sum + Number(row.providerRankingProvenancePreservedCount || 0), 0),
+      completionMemoryPreservationRequiredCount: checkedRows.reduce((sum, row) => sum + Number(row.completionMemoryPreservationRequiredCount || 0), 0),
+      completionMemoryPreservedCount: checkedRows.reduce((sum, row) => sum + Number(row.completionMemoryPreservedCount || 0), 0),
       totalTokenDelta: checkedRows.reduce((sum, row) => sum + Number(row.totalTokenDelta || 0), 0),
       totalFreeTokenDelta: checkedRows.reduce((sum, row) => sum + Number(row.totalFreeTokenDelta || 0), 0),
     },
@@ -15749,6 +16462,1859 @@ function evaluateWorkerContextPacketCompactOutcomeLedger(options: any = {}) {
     evidence,
     gaps,
     "每次 WorkerContextPacket 自动 compact retry 完成后，都应写入 outcome ledger，保存 token 恢复、policy 选择、任务正文是否保留，以及 provider ranking provenance 是否保全等长期策略样本，供后续日志蒸馏使用。"
+  );
+  check.report = report;
+  return check;
+}
+
+function buildPostCompactReceiptMemoryUsageRepairCompletionCompactionPreservationReport(options: any = {}) {
+  const outcomeReport = buildWorkerContextPacketCompactOutcomeLedgerReport(options);
+  const rows = (outcomeReport.groups || []).map((group: any) => {
+    const requiredOutcomes = (group.outcomes || []).filter((outcome: any) => outcome.completion_memory_preservation_required === true);
+    const preservedOutcomes = requiredOutcomes.filter((outcome: any) => outcome.completion_memory_preserved === true
+      && outcome.completion_authority_boundary_valid === true
+      && (outcome.completion_doc_rel_paths || []).length > 0
+      && (outcome.completion_work_item_ids || []).length > 0
+      && (outcome.completion_timeline_binding_ids || []).length > 0
+      && !!outcome.completion_current_task_agent_session_id
+      && !!outcome.completion_current_native_session_id);
+    const gaps = requiredOutcomes.filter((outcome: any) => !preservedOutcomes.includes(outcome)).map((outcome: any) => ({
+      assignment_id: outcome.assignment_id || "",
+      outcome_id: outcome.outcome_id || "",
+      retry_method: outcome.retry_method || "",
+      reason: "completion memory compact preservation missing exact doc/work-item/timeline/current-session/authority proof",
+    }));
+    return {
+      schema: "ccm-post-compact-receipt-memory-usage-repair-completion-compaction-preservation-group-v1",
+      groupId: group.groupId,
+      status: requiredOutcomes.length === 0 ? "empty" : gaps.length ? "fail" : "ok",
+      file: group.file || "",
+      requiredOutcomeCount: requiredOutcomes.length,
+      preservedOutcomeCount: preservedOutcomes.length,
+      memoryFirstCount: requiredOutcomes.filter((outcome: any) => String(outcome.retry_method || "").startsWith("memory_first")).length,
+      replayPartialCount: requiredOutcomes.filter((outcome: any) => /replay_brief_partial_compact/.test(String(outcome.retry_method || ""))).length,
+      metadataPartialCount: requiredOutcomes.filter((outcome: any) => /metadata_partial_compact/.test(String(outcome.retry_method || ""))).length,
+      ptlEmergencyCount: requiredOutcomes.filter((outcome: any) => outcome.ptl_emergency_engaged === true || /deterministic_head_tail/.test(String(outcome.retry_method || ""))).length,
+      outcomes: requiredOutcomes,
+      gaps,
+    };
+  });
+  const checked = rows.filter((row: any) => Number(row.requiredOutcomeCount || 0) > 0);
+  const requiredCount = checked.reduce((sum: number, row: any) => sum + Number(row.requiredOutcomeCount || 0), 0);
+  const preservedCount = checked.reduce((sum: number, row: any) => sum + Number(row.preservedOutcomeCount || 0), 0);
+  const coverageRate = requiredCount ? Math.round((preservedCount / requiredCount) * 1000) / 10 : null;
+  return {
+    schema: "ccm-post-compact-receipt-memory-usage-repair-completion-compaction-preservation-report-v1",
+    generatedAt: now(),
+    overall: {
+      status: coverageRate === null ? "empty" : coverageRate === 100 && checked.every((row: any) => row.status === "ok") ? "ok" : coverageRate >= 75 ? "warn" : "fail",
+      coverageRate,
+      checkedGroupCount: checked.length,
+      groupsCovered: checked.filter((row: any) => row.status === "ok").length,
+      requiredOutcomeCount: requiredCount,
+      preservedOutcomeCount: preservedCount,
+      memoryFirstCount: checked.reduce((sum: number, row: any) => sum + Number(row.memoryFirstCount || 0), 0),
+      replayPartialCount: checked.reduce((sum: number, row: any) => sum + Number(row.replayPartialCount || 0), 0),
+      metadataPartialCount: checked.reduce((sum: number, row: any) => sum + Number(row.metadataPartialCount || 0), 0),
+      ptlEmergencyCount: checked.reduce((sum: number, row: any) => sum + Number(row.ptlEmergencyCount || 0), 0),
+      metadataGapCount: checked.reduce((sum: number, row: any) => sum + Number((row.gaps || []).length), 0),
+    },
+    groups: rows,
+    weakGroups: rows.filter((row: any) => row.status === "fail" || row.status === "warn"),
+  };
+}
+
+function evaluatePostCompactReceiptMemoryUsageRepairCompletionCompactionPreservation(options: any = {}) {
+  const report = buildPostCompactReceiptMemoryUsageRepairCompletionCompactionPreservationReport(options);
+  const checked = Number(report.overall.requiredOutcomeCount || 0);
+  const passed = Number(report.overall.preservedOutcomeCount || 0);
+  const evidence = (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12).map((row: any) => ({
+    groupId: row.groupId,
+    requiredOutcomeCount: row.requiredOutcomeCount,
+    preservedOutcomeCount: row.preservedOutcomeCount,
+    methods: (row.outcomes || []).map((outcome: any) => outcome.retry_method || ""),
+    file: row.file,
+  }));
+  const gaps = (report.weakGroups || []).flatMap((row: any) => (row.gaps || []).map((gap: any) => ({ groupId: row.groupId, ...gap }))).slice(0, 12);
+  const check: any = makeQualityCheck(
+    "post_compact_reinjection_repair_receipt_memory_usage_repair_completion_compaction_preservation",
+    "Post-Compact Receipt Memory Usage Repair Completion Compaction Preservation",
+    checked,
+    passed,
+    evidence,
+    gaps,
+    "Every WorkerContextPacket retry carrying corrected-receipt completion memory must preserve exact required docs, work-item/timeline identity, current task/native session binding, historical-session evidence boundary and receipt acceptance across memory-first, partial compact and PTL downgrade paths."
+  );
+  check.report = report;
+  return check;
+}
+
+function buildPostCompactCompletionMemoryPreservationClosureConflictResolutionCompactionReport(options: any = {}) {
+  const outcomeReport = options.outcomeReport || options.outcome_report || buildWorkerContextPacketCompactOutcomeLedgerReport(options);
+  const rows = (outcomeReport.groups || []).map((group: any) => {
+    const required = (group.outcomes || []).filter((outcome: any) => outcome.conflict_resolution_preservation_required === true);
+    const preserved = required.filter((outcome: any) => outcome.completion_memory_preserved === true
+      && outcome.conflict_resolution_present === true
+      && (outcome.conflict_resolution_doc_rel_paths || []).includes("post-compact-completion-memory-preservation-closure-conflict-resolutions.md")
+      && !!outcome.conflict_resolution_entry_id
+      && !!outcome.conflict_resolution_state
+      && !!outcome.conflict_resolution_usage_state
+      && !!outcome.conflict_resolution_task_agent_session_id
+      && !!outcome.conflict_resolution_native_session_id
+      && outcome.conflict_resolution_reversible === true
+      && outcome.conflict_resolution_historical_branches_preserved === true
+      && (outcome.conflict_resolution_active === true
+        ? outcome.conflict_resolution_reverification_acceptance_required === true
+          && outcome.conflict_resolution_reversible_acceptance_required === true
+        : outcome.conflict_resolution_reopened === true && outcome.conflict_verification_acceptance_required === true));
+    const gaps = required.filter((outcome: any) => !preserved.includes(outcome)).map((outcome: any) => ({
+      assignment_id: outcome.assignment_id || "",
+      outcome_id: outcome.outcome_id || "",
+      retry_method: outcome.retry_method || "",
+      reason: "conflict resolution compact preservation missing doc/entry/state/session/reversible/branch/acceptance proof",
+    }));
+    return {
+      schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-compaction-group-v1",
+      groupId: group.groupId,
+      status: required.length === 0 ? "empty" : gaps.length ? "fail" : "ok",
+      requiredOutcomeCount: required.length,
+      preservedOutcomeCount: preserved.length,
+      activeResolutionCount: required.filter((outcome: any) => outcome.conflict_resolution_active === true).length,
+      reopenedResolutionCount: required.filter((outcome: any) => outcome.conflict_resolution_reopened === true).length,
+      memoryFirstCount: required.filter((outcome: any) => String(outcome.retry_method || "").startsWith("memory_first")).length,
+      replayPartialCount: required.filter((outcome: any) => /replay_brief_partial_compact/.test(String(outcome.retry_method || ""))).length,
+      metadataPartialCount: required.filter((outcome: any) => /metadata_partial_compact/.test(String(outcome.retry_method || ""))).length,
+      ptlEmergencyCount: required.filter((outcome: any) => outcome.ptl_emergency_engaged === true || /deterministic_head_tail/.test(String(outcome.retry_method || ""))).length,
+      outcomes: required,
+      gaps,
+    };
+  });
+  const checked = rows.filter((row: any) => row.requiredOutcomeCount > 0);
+  const requiredCount = checked.reduce((sum: number, row: any) => sum + row.requiredOutcomeCount, 0);
+  const preservedCount = checked.reduce((sum: number, row: any) => sum + row.preservedOutcomeCount, 0);
+  return {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-compaction-report-v1",
+    generatedAt: now(),
+    overall: {
+      status: requiredCount === 0 ? "empty" : requiredCount === preservedCount && checked.every((row: any) => row.status === "ok") ? "ok" : "fail",
+      checkedGroupCount: checked.length,
+      groupsCovered: checked.filter((row: any) => row.status === "ok").length,
+      requiredOutcomeCount: requiredCount,
+      preservedOutcomeCount: preservedCount,
+      activeResolutionCount: checked.reduce((sum: number, row: any) => sum + row.activeResolutionCount, 0),
+      reopenedResolutionCount: checked.reduce((sum: number, row: any) => sum + row.reopenedResolutionCount, 0),
+      memoryFirstCount: checked.reduce((sum: number, row: any) => sum + row.memoryFirstCount, 0),
+      replayPartialCount: checked.reduce((sum: number, row: any) => sum + row.replayPartialCount, 0),
+      metadataPartialCount: checked.reduce((sum: number, row: any) => sum + row.metadataPartialCount, 0),
+      ptlEmergencyCount: checked.reduce((sum: number, row: any) => sum + row.ptlEmergencyCount, 0),
+    },
+    groups: rows,
+    weakGroups: rows.filter((row: any) => row.status === "fail"),
+  };
+}
+
+function evaluatePostCompactCompletionMemoryPreservationClosureConflictResolutionCompaction(options: any = {}) {
+  const report = buildPostCompactCompletionMemoryPreservationClosureConflictResolutionCompactionReport(options);
+  const check: any = makeQualityCheck(
+    "post_compact_completion_memory_preservation_closure_conflict_resolution_compaction",
+    "Post-Compact Completion Memory Preservation Closure Conflict Resolution Compaction",
+    Number(report.overall.requiredOutcomeCount || 0),
+    Number(report.overall.preservedOutcomeCount || 0),
+    (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12),
+    (report.weakGroups || []).flatMap((row: any) => row.gaps || []).slice(0, 12),
+    "Conflict-resolution typed memory must preserve exact doc, entry, state, resolving session, reversible branch history and active/reopened acceptance requirements across memory-first, replay partial, metadata partial and PTL compact paths."
+  );
+  check.report = report;
+  return check;
+}
+
+const POST_COMPACT_COMPLETION_PRESERVATION_REPAIR_SOURCE = "post_compact_receipt_memory_usage_repair_completion_compaction_preservation_repair";
+
+function postCompactCompletionPreservationFromValue(value: any = {}) {
+  return value.post_compact_receipt_memory_usage_repair_completion_preservation
+    || value.postCompactReceiptMemoryUsageRepairCompletionPreservation
+    || null;
+}
+
+function postCompactCompletionPreservationSummaryCovered(expected: any = {}, actual: any = {}) {
+  const listFields = [
+    "completion_doc_rel_paths",
+    "required_doc_rel_paths",
+    "work_item_ids",
+    "timeline_binding_ids",
+    "historical_task_agent_session_ids",
+    "historical_native_session_ids",
+    "conflict_resolution_doc_rel_paths",
+  ];
+  for (const field of listFields) {
+    const expectedValues = uniqueStrings(expected[field] || [], 48);
+    const actualValues = uniqueStrings(actual[field] || [], 48);
+    if (expectedValues.some((item: string) => !actualValues.includes(item))) return false;
+  }
+  const completionCovered = actual.present === true
+    && String(actual.current_session_binding_id || "") === String(expected.current_session_binding_id || "")
+    && String(actual.current_task_agent_session_id || "") === String(expected.current_task_agent_session_id || "")
+    && String(actual.current_native_session_id || "") === String(expected.current_native_session_id || "")
+    && actual.usage_acceptance_required === true
+    && actual.current_session_acceptance_required === true
+    && actual.authority_boundary_valid === true
+    && !!actual.current_session_binding_id
+    && !!actual.current_task_agent_session_id
+    && !!actual.current_native_session_id
+    && !uniqueStrings(actual.historical_task_agent_session_ids || [], 48).includes(String(actual.current_task_agent_session_id || ""))
+    && !uniqueStrings(actual.historical_native_session_ids || [], 48).includes(String(actual.current_native_session_id || ""));
+  if (!completionCovered || expected.conflict_resolution_present !== true) return completionCovered;
+  return actual.conflict_resolution_present === true
+    && String(actual.conflict_resolution_entry_id || "") === String(expected.conflict_resolution_entry_id || "")
+    && String(actual.conflict_resolution_state || "") === String(expected.conflict_resolution_state || "")
+    && String(actual.conflict_resolution_usage_state || "") === String(expected.conflict_resolution_usage_state || "")
+    && String(actual.conflict_resolution_task_agent_session_id || "") === String(expected.conflict_resolution_task_agent_session_id || "")
+    && String(actual.conflict_resolution_native_session_id || "") === String(expected.conflict_resolution_native_session_id || "")
+    && actual.conflict_resolution_active === (expected.conflict_resolution_active === true)
+    && actual.conflict_resolution_reopened === (expected.conflict_resolution_reopened === true)
+    && actual.conflict_resolution_reversible === true
+    && actual.conflict_resolution_historical_branches_preserved === true
+    && actual.conflict_resolution_reverification_acceptance_required === (expected.conflict_resolution_reverification_acceptance_required === true)
+    && actual.conflict_resolution_reversible_acceptance_required === (expected.conflict_resolution_reversible_acceptance_required === true)
+    && actual.conflict_verification_acceptance_required === (expected.conflict_verification_acceptance_required === true)
+    && !!actual.conflict_resolution_entry_id
+    && !!actual.conflict_resolution_task_agent_session_id
+    && !!actual.conflict_resolution_native_session_id;
+}
+
+function postCompactCompletionPreservationFailureGaps(preservation: any = {}) {
+  const before = preservation.before || {};
+  const after = preservation.after || {};
+  const resolutionRequired = before.conflict_resolution_present === true;
+  return uniqueStrings([
+    ...(Array.isArray(preservation.gaps) ? preservation.gaps : []),
+    preservation.preserved !== true ? "completion_memory_preservation_lost" : "",
+    after.authority_boundary_valid !== true ? "completion_memory_authority_boundary" : "",
+    !(before.completion_doc_rel_paths || []).length ? "completion_doc_rel_paths_missing_before_compact" : "",
+    !(before.required_doc_rel_paths || []).length ? "required_doc_rel_paths_missing_before_compact" : "",
+    !(before.work_item_ids || []).length ? "completion_work_item_ids_missing_before_compact" : "",
+    !(before.timeline_binding_ids || []).length ? "completion_timeline_binding_ids_missing_before_compact" : "",
+    !before.current_session_binding_id ? "current_session_binding_missing_before_compact" : "",
+    !before.current_task_agent_session_id ? "current_task_agent_session_missing_before_compact" : "",
+    !before.current_native_session_id ? "current_native_session_missing_before_compact" : "",
+    resolutionRequired && !(before.conflict_resolution_doc_rel_paths || []).length ? "conflict_resolution_doc_rel_paths_missing_before_compact" : "",
+    resolutionRequired && !before.conflict_resolution_entry_id ? "conflict_resolution_entry_id_missing_before_compact" : "",
+    resolutionRequired && !before.conflict_resolution_state ? "conflict_resolution_state_missing_before_compact" : "",
+    resolutionRequired && !before.conflict_resolution_usage_state ? "conflict_resolution_usage_state_missing_before_compact" : "",
+    resolutionRequired && !before.conflict_resolution_task_agent_session_id ? "conflict_resolution_task_session_missing_before_compact" : "",
+    resolutionRequired && !before.conflict_resolution_native_session_id ? "conflict_resolution_native_session_missing_before_compact" : "",
+    resolutionRequired && before.conflict_resolution_reversible !== true ? "conflict_resolution_reversible_missing_before_compact" : "",
+    resolutionRequired && before.conflict_resolution_historical_branches_preserved !== true ? "conflict_resolution_historical_branches_missing_before_compact" : "",
+    resolutionRequired && before.conflict_resolution_active === true && before.conflict_resolution_reverification_acceptance_required !== true ? "conflict_resolution_reverification_acceptance_missing_before_compact" : "",
+    resolutionRequired && before.conflict_resolution_active === true && before.conflict_resolution_reversible_acceptance_required !== true ? "conflict_resolution_reversible_acceptance_missing_before_compact" : "",
+    resolutionRequired && before.conflict_resolution_reopened === true && before.conflict_verification_acceptance_required !== true ? "reopened_conflict_current_session_verification_missing_before_compact" : "",
+    resolutionRequired && after.conflict_resolution_present !== true ? "conflict_resolution_contract_missing_after_compact" : "",
+  ], 32);
+}
+
+function postCompactCompletionPreservationCorrectedOutcome(row: any = {}, outcomeEntries: any[] = []) {
+  const expected = row.preservation?.before || {};
+  const failedOutcomeIndex = Number(row.failedOutcomeIndex ?? -1);
+  const failedAt = Date.parse(String(row.outcome?.at || row.outcome?.createdAt || row.entry?.updatedAt || ""));
+  const failedOutcomeId = String(row.outcome?.outcome_id || "");
+  const failedRetryId = String(row.retry?.retry_id || row.retry?.retryId || row.outcome?.retry_id || "");
+  return outcomeEntries
+    .map((outcome: any, index: number) => ({ outcome, index }))
+    .filter(({ outcome, index }) => {
+      if (String(outcome.assignment_id || "") !== String(row.entry?.assignment_id || row.entry?.assignmentId || "")) return false;
+      if (row.entry?.project && outcome.project && String(outcome.project) !== String(row.entry.project)) return false;
+      if (failedOutcomeId && String(outcome.outcome_id || "") === failedOutcomeId) return false;
+      if (failedRetryId && String(outcome.retry_id || "") === failedRetryId) return false;
+      if (failedOutcomeIndex >= 0 && index <= failedOutcomeIndex) return false;
+      const correctedAt = Date.parse(String(outcome.at || outcome.createdAt || ""));
+      if (Number.isFinite(failedAt) && Number.isFinite(correctedAt) && correctedAt <= failedAt) return false;
+      const proof = postCompactCompletionPreservationFromValue(outcome);
+      return proof?.schema === "ccm-post-compact-receipt-memory-usage-repair-completion-preservation-v1"
+        && proof.required === true
+        && proof.preserved === true
+        && outcome.post_compact_receipt_memory_usage_repair_completion_preserved === true
+        && !(proof.gaps || []).length
+        && postCompactCompletionPreservationSummaryCovered(expected, proof.before || {})
+        && postCompactCompletionPreservationSummaryCovered(expected, proof.after || {});
+    })
+    .sort((a: any, b: any) => a.index - b.index)[0]?.outcome || null;
+}
+
+function postCompactCompletionPreservationRepairRows(groupId: string) {
+  const bindingLedger = readGroupReplayRepairDispatchBindingLedger(groupId);
+  const outcomeLedger = readGroupWorkerContextCompactOutcomeLedger(groupId);
+  const outcomeEntries = Array.isArray(outcomeLedger.entries) ? outcomeLedger.entries : [];
+  return (Array.isArray(bindingLedger.entries) ? bindingLedger.entries : [])
+    .filter((entry: any) => workerContextPacketCompactionRetry(entry))
+    .map((entry: any) => {
+      const retry = workerContextPacketCompactionRetry(entry) || {};
+      const hookRunId = workerContextPacketCompactHookRunId(entry);
+      const failedOutcomeIndex = outcomeEntries.findIndex((outcome: any) =>
+        (hookRunId && outcome.hook_run_id === hookRunId)
+        || (retry.retry_id && outcome.retry_id === retry.retry_id)
+      );
+      const outcome = failedOutcomeIndex >= 0 ? outcomeEntries[failedOutcomeIndex] : null;
+      const preservation = postCompactCompletionPreservationFromValue(outcome || {})
+        || postCompactCompletionPreservationFromValue(retry)
+        || null;
+      const row: any = {
+        entry,
+        retry,
+        hookRunId,
+        outcome,
+        failedOutcomeIndex,
+        preservation,
+        failureGaps: postCompactCompletionPreservationFailureGaps(preservation || {}),
+      };
+      row.correctedOutcome = postCompactCompletionPreservationCorrectedOutcome(row, outcomeEntries);
+      return row;
+    })
+    .filter((row: any) => row.preservation?.schema === "ccm-post-compact-receipt-memory-usage-repair-completion-preservation-v1"
+      && row.preservation.required === true
+      && (row.preservation.preserved !== true
+        || row.outcome?.post_compact_receipt_memory_usage_repair_completion_preserved !== true
+        || (row.preservation.gaps || []).length > 0
+        || row.preservation.after?.authority_boundary_valid !== true
+        || !postCompactCompletionPreservationSummaryCovered(row.preservation.before || {}, row.preservation.after || {})));
+}
+
+function buildPostCompactCompletionPreservationRepairWorkItem(groupId: string, row: any = {}, index = 0, existing: any = {}, at = now()) {
+  const entry = row.entry || {};
+  const retry = row.retry || {};
+  const outcome = row.outcome || {};
+  const preservation = row.preservation || {};
+  const before = preservation.before || {};
+  const correctedOutcome = row.correctedOutcome || null;
+  const correctedProof = postCompactCompletionPreservationFromValue(correctedOutcome || {}) || null;
+  const retryId = String(retry.retry_id || retry.retryId || outcome.retry_id || "");
+  const outcomeId = String(outcome.outcome_id || "");
+  const hookRunId = String(row.hookRunId || retry.compact_hook_run_id || outcome.hook_run_id || "");
+  const targetProject = String(entry.project || outcome.project || "").trim();
+  const gaps = uniqueStrings(row.failureGaps || preservation.gaps || [], 32);
+  const completionDocs = uniqueStrings(before.completion_doc_rel_paths || [], 24);
+  const requiredDocs = uniqueStrings(before.required_doc_rel_paths || [], 24);
+  const workItemIds = uniqueStrings(before.work_item_ids || [], 32);
+  const timelineIds = uniqueStrings(before.timeline_binding_ids || [], 32);
+  const historicalTaskSessions = uniqueStrings(before.historical_task_agent_session_ids || [], 32);
+  const historicalNativeSessions = uniqueStrings(before.historical_native_session_ids || [], 32);
+  const conflictResolutionDocs = uniqueStrings(before.conflict_resolution_doc_rel_paths || [], 8);
+  const currentBindingId = String(before.current_session_binding_id || "");
+  const currentTaskSession = String(before.current_task_agent_session_id || "");
+  const currentNativeSession = String(before.current_native_session_id || "");
+  const conflictResolutionPresent = before.conflict_resolution_present === true;
+  const conflictResolutionEntryId = String(before.conflict_resolution_entry_id || "");
+  const conflictResolutionState = String(before.conflict_resolution_state || "");
+  const conflictResolutionUsageState = String(before.conflict_resolution_usage_state || "");
+  const conflictResolutionTaskSession = String(before.conflict_resolution_task_agent_session_id || "");
+  const conflictResolutionNativeSession = String(before.conflict_resolution_native_session_id || "");
+  const id = `post-compact-completion-preservation-repair:${hash([
+    groupId,
+    entry.assignment_id || entry.assignmentId || "",
+    retryId || hookRunId || outcomeId,
+    completionDocs.join("|"),
+    workItemIds.join("|"),
+    timelineIds.join("|"),
+    currentBindingId,
+    currentTaskSession,
+    currentNativeSession,
+    conflictResolutionDocs.join("|"),
+    conflictResolutionEntryId,
+    conflictResolutionState,
+    conflictResolutionUsageState,
+    conflictResolutionTaskSession,
+    conflictResolutionNativeSession,
+    before.conflict_resolution_active === true ? "active" : before.conflict_resolution_reopened === true ? "reopened" : "",
+    gaps.join("|"),
+  ], 16)}`;
+  const corrected = !!correctedOutcome;
+  const previousStatus = replayRepairWorkItemStatus(existing.status);
+  const status = corrected ? "completed" : ["in_progress", "blocked"].includes(previousStatus) ? previousStatus : "pending";
+  const reason = compactMemoryCenterText([
+    "WorkerContextPacket compact retry lost corrected-receipt completion memory or its current-session authority boundary.",
+    retryId ? `retry=${retryId}` : "",
+    outcomeId ? `outcome=${outcomeId}` : "",
+    gaps.length ? `gaps=${gaps.join(",")}` : "",
+  ].filter(Boolean).join(" "), 520);
+  const identityLines = [
+    completionDocs.length ? `completion_doc_rel_paths=${completionDocs.join(";")}` : "",
+    requiredDocs.length ? `required_doc_rel_paths=${requiredDocs.join(";")}` : "",
+    workItemIds.length ? `completion_work_item_ids=${workItemIds.join(";")}` : "",
+    timelineIds.length ? `completion_timeline_binding_ids=${timelineIds.join(";")}` : "",
+    currentBindingId ? `current_session_binding_id=${currentBindingId}` : "",
+    currentTaskSession ? `current_task_agent_session_id=${currentTaskSession}` : "",
+    currentNativeSession ? `current_native_session_id=${currentNativeSession}` : "",
+    conflictResolutionPresent ? "conflict_resolution_present=true" : "",
+    conflictResolutionDocs.length ? `conflict_resolution_doc_rel_paths=${conflictResolutionDocs.join(";")}` : "",
+    conflictResolutionEntryId ? `conflict_resolution_entry_id=${conflictResolutionEntryId}` : "",
+    conflictResolutionState ? `conflict_resolution_state=${conflictResolutionState}` : "",
+    conflictResolutionUsageState ? `conflict_resolution_usage_state=${conflictResolutionUsageState}` : "",
+    conflictResolutionTaskSession ? `conflict_resolution_task_agent_session_id=${conflictResolutionTaskSession}` : "",
+    conflictResolutionNativeSession ? `conflict_resolution_native_session_id=${conflictResolutionNativeSession}` : "",
+    conflictResolutionPresent ? `conflict_resolution_active=${before.conflict_resolution_active === true}` : "",
+    conflictResolutionPresent ? `conflict_resolution_reopened=${before.conflict_resolution_reopened === true}` : "",
+    conflictResolutionPresent ? "conflict_resolution_reversible=true" : "",
+    conflictResolutionPresent ? "conflict_resolution_historical_branches_preserved=true" : "",
+    conflictResolutionPresent ? `conflict_resolution_reverification_acceptance_required=${before.conflict_resolution_reverification_acceptance_required === true}` : "",
+    conflictResolutionPresent ? `conflict_resolution_reversible_acceptance_required=${before.conflict_resolution_reversible_acceptance_required === true}` : "",
+    conflictResolutionPresent ? `conflict_verification_acceptance_required=${before.conflict_verification_acceptance_required === true}` : "",
+  ].filter(Boolean);
+  return {
+    id,
+    work_item_id: id,
+    taskId: String(entry.assignment_id || entry.assignmentId || ""),
+    scopeId: groupId,
+    group_id: groupId,
+    subject: "修复 completion memory compact preservation",
+    description: reason,
+    activeForm: compactMemoryCenterText(`恢复 corrected-receipt completion memory：${targetProject || "memory-context"}`, 180),
+    owner: existing.owner && !corrected ? existing.owner : "group-main-agent",
+    target: compactMemoryCenterText(targetProject || "memory-context", 120),
+    agentType: "group-main-agent",
+    status,
+    priority: gaps.some((gap: string) => /authority|current_.*session/.test(gap)) ? "critical" : "high",
+    component: "post_compact_receipt_memory_usage_repair_completion_compaction_preservation",
+    source: POST_COMPACT_COMPLETION_PRESERVATION_REPAIR_SOURCE,
+    source_action_id: `post-compact-completion-preservation:${retryId || hookRunId || outcomeId || index}`,
+    repair_target: String(retry.retry_packet_id || entry.worker_context_packet_id || retryId || outcomeId || "worker_context_packet"),
+    target_project: targetProject,
+    dispatch_target: targetProject,
+    instruction: compactMemoryCenterText([
+      `从当前群聊 typed MEMORY.md 重新渲染 ${targetProject || "目标项目"} 的 WorkerContextPacket compact retry。`,
+      "Persist a newer, different compact retry/outcome.",
+      "historical task/native sessions remain evidence only; every new child session requires current-source reverify.",
+      ...identityLines,
+      "必须保留 corrected-receipt completion docs、required docs、work-item/timeline identity、historical-session evidence 和当前 task/native session 绑定。",
+      conflictResolutionPresent ? "必须精确保留 conflict-resolution doc/entry/state/usage state、resolving task/native session、active/reopened 状态、可逆历史分支和对应 acceptance requirements。" : "",
+      "修复必须产生不同且更新的 retry/outcome；preservation.required=true、preserved=true、gaps=[]、authority_boundary_valid=true。",
+      "历史 repair completion 只作为恢复证据，不代表仓库事实永久新鲜；每个新子 Agent 会话仍需 current-source reverify。",
+    ].join(" "), 1600),
+    expected: compactMemoryCenterText([
+      "post_compact_receipt_memory_usage_repair_completion_preservation.required=true",
+      "preserved=true",
+      "gaps=[]",
+      "authority_boundary_valid=true",
+      ...identityLines,
+    ].join("; "), 1000),
+    source_reason: reason,
+    prompt_patch: compactMemoryCenterText([
+      "Post-compact corrected-receipt completion-memory preservation repair:",
+      "- historical task/native sessions remain evidence only; every new child session requires current-source reverify",
+      `- group=${groupId}`,
+      entry.binding_id ? `- failed_binding_id=${entry.binding_id}` : "",
+      entry.assignment_id ? `- assignment_id=${entry.assignment_id}` : "",
+      retryId ? `- failed_retry_id=${retryId}` : "",
+      outcomeId ? `- failed_outcome_id=${outcomeId}` : "",
+      hookRunId ? `- failed_hook_run_id=${hookRunId}` : "",
+      ...identityLines.map(line => `- ${line}`),
+      historicalTaskSessions.length ? `- historical_task_agent_session_ids=${historicalTaskSessions.join(";")}` : "",
+      historicalNativeSessions.length ? `- historical_native_session_ids=${historicalNativeSessions.join(";")}` : "",
+      gaps.length ? `- preservation_gaps=${gaps.join(";")}` : "",
+      "- Rerender from the current memory bundle and persist a newer compact outcome with exact identity coverage.",
+      "- Never promote a historical task/native session to current authority.",
+      "- Memory Center must not create a real child task; the main Agent explicitly dispatches this brief.",
+    ].filter(Boolean).join("\n"), 2400),
+    dispatch_hint: {
+      claim_policy: "group_main_agent_before_child_dispatch",
+      next_step: "rerender_worker_context_packet_and_persist_corrected_compact_outcome",
+      should_create_real_task: false,
+      reason: "Memory Center diagnostic sidecar; main Agent explicitly owns dispatch.",
+    },
+    raw_recovery: {
+      rule: "post_compact_receipt_memory_usage_repair_completion_compaction_preservation",
+      failed_retry_id: retryId,
+      failed_outcome_id: outcomeId,
+      failed_hook_run_id: hookRunId,
+      preservation,
+      corrected_outcome: correctedOutcome,
+    },
+    worker_context_packet_id: String(retry.retry_packet_id || entry.worker_context_packet_id || ""),
+    worker_context_packet_binding_id: String(entry.binding_id || ""),
+    binding_id: String(entry.binding_id || ""),
+    assignment_id: String(entry.assignment_id || ""),
+    dispatch_key: String(entry.dispatch_key || ""),
+    compact_outcome_id: outcomeId,
+    compact_retry_id: retryId,
+    compact_hook_run_id: hookRunId,
+    completion_preservation_gap_codes: gaps,
+    completion_preservation_completion_doc_rel_paths: completionDocs,
+    completion_preservation_required_doc_rel_paths: requiredDocs,
+    completion_preservation_work_item_ids: workItemIds,
+    completion_preservation_timeline_binding_ids: timelineIds,
+    completion_preservation_historical_task_agent_session_ids: historicalTaskSessions,
+    completion_preservation_historical_native_session_ids: historicalNativeSessions,
+    completion_preservation_current_session_binding_id: currentBindingId,
+    completion_preservation_current_task_agent_session_id: currentTaskSession,
+    completion_preservation_current_native_session_id: currentNativeSession,
+    completion_preservation_conflict_resolution_present: conflictResolutionPresent,
+    completion_preservation_conflict_resolution_doc_rel_paths: conflictResolutionDocs,
+    completion_preservation_conflict_resolution_entry_id: conflictResolutionEntryId,
+    completion_preservation_conflict_resolution_state: conflictResolutionState,
+    completion_preservation_conflict_resolution_usage_state: conflictResolutionUsageState,
+    completion_preservation_conflict_resolution_task_agent_session_id: conflictResolutionTaskSession,
+    completion_preservation_conflict_resolution_native_session_id: conflictResolutionNativeSession,
+    completion_preservation_conflict_resolution_active: before.conflict_resolution_active === true,
+    completion_preservation_conflict_resolution_reopened: before.conflict_resolution_reopened === true,
+    completion_preservation_conflict_resolution_reversible: before.conflict_resolution_reversible === true,
+    completion_preservation_conflict_resolution_historical_branches_preserved: before.conflict_resolution_historical_branches_preserved === true,
+    completion_preservation_conflict_resolution_reverification_acceptance_required: before.conflict_resolution_reverification_acceptance_required === true,
+    completion_preservation_conflict_resolution_reversible_acceptance_required: before.conflict_resolution_reversible_acceptance_required === true,
+    completion_preservation_conflict_verification_acceptance_required: before.conflict_verification_acceptance_required === true,
+    corrected_compact_outcome_id: correctedOutcome?.outcome_id || "",
+    corrected_compact_retry_id: correctedOutcome?.retry_id || correctedProof?.retry_id || "",
+    corrected_compact_hook_run_id: correctedOutcome?.hook_run_id || "",
+    completion_source: corrected ? "post_compact_receipt_memory_usage_repair_completion_compaction_preservation_corrected_retry" : "",
+    resolutionReason: corrected ? "completion_memory_compaction_preservation_corrected_retry_verified" : existing.resolutionReason || "",
+    corrected_retry_proof: corrected ? {
+      schema: "ccm-post-compact-receipt-memory-usage-repair-completion-compaction-preservation-repair-closure-v1",
+      failed_retry_id: retryId,
+      failed_outcome_id: outcomeId,
+      corrected_retry_id: correctedOutcome.retry_id || correctedProof?.retry_id || "",
+      corrected_outcome_id: correctedOutcome.outcome_id || "",
+      corrected_hook_run_id: correctedOutcome.hook_run_id || "",
+      exact_identity_restored: true,
+      current_session_boundary_restored: true,
+      exact_conflict_resolution_restored: !conflictResolutionPresent || postCompactCompletionPreservationSummaryCovered(before, correctedProof?.after || {}),
+      conflict_resolution_reversible_boundary_restored: !conflictResolutionPresent || (correctedProof?.after?.conflict_resolution_reversible === true
+        && correctedProof?.after?.conflict_resolution_historical_branches_preserved === true),
+      historical_sessions_remain_evidence_only: true,
+      verified_at: correctedOutcome.at || at,
+    } : null,
+    evidence: [
+      retryId ? `failed_retry_id=${retryId}` : "",
+      outcomeId ? `failed_outcome_id=${outcomeId}` : "",
+      correctedOutcome?.outcome_id ? `corrected_outcome_id=${correctedOutcome.outcome_id}` : "",
+      ...identityLines,
+      gaps.length ? `gaps=${gaps.join(";")}` : "",
+    ].filter(Boolean),
+    filesChanged: [],
+    verification: [
+      "重新运行 completion-memory compaction preservation repair quality checks",
+      "确认 corrected retry/outcome 与失败 retry/outcome 不同且更新",
+      "确认 exact completion identity、current session 和 historical-evidence boundary 均恢复",
+    ],
+    blockers: [],
+    needs: ["current typed MEMORY.md", "current WorkerContextPacket memory bundle", "new compact retry/outcome"],
+    attempt: Math.max(1, Number(existing.attempt || 1) || 1),
+    createdAt: existing.createdAt || existing.created_at || at,
+    updatedAt: corrected ? (correctedOutcome.at || at) : existing.updatedAt || at,
+    lastSeenAt: at,
+    completedAt: corrected ? (existing.completedAt || correctedOutcome.at || at) : "",
+    seenCount: Math.max(1, Number(existing.seenCount || existing.seen_count || 1) || 1),
+  };
+}
+
+function syncPostCompactCompletionPreservationRepairWorkItems(groupId: string, repairRows: any[] = [], options: any = {}) {
+  if (!groupId) return summarizeReplayRepairPendingWorkItems(groupId);
+  const at = String(options.at || options.generatedAt || options.generated_at || now());
+  const ledger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+  const previousItems = Array.isArray(ledger.items) ? ledger.items : [];
+  const previousById = new Map<string, any>(previousItems.map((item: any) => [String(item.id || item.work_item_id || ""), item]));
+  const currentIds = new Set<string>();
+  const repairItems: any[] = [];
+  let changed = false;
+  for (const [index, row] of repairRows.entries()) {
+    const draft = buildPostCompactCompletionPreservationRepairWorkItem(groupId, row, index, {}, at);
+    const existing = previousById.get(draft.id) || {};
+    let item = buildPostCompactCompletionPreservationRepairWorkItem(groupId, row, index, existing, at);
+    if (existing.id && replayRepairWorkItemSignature(existing) === replayRepairWorkItemSignature(item)
+      && String(existing.corrected_compact_outcome_id || "") === String(item.corrected_compact_outcome_id || "")) {
+      item = { ...existing, ...item, createdAt: existing.createdAt || item.createdAt, updatedAt: existing.updatedAt || item.updatedAt, seenCount: Number(existing.seenCount || 1) };
+    } else {
+      item = { ...item, updatedAt: item.updatedAt || at, seenCount: existing.id ? Number(existing.seenCount || 1) + 1 : 1 };
+      changed = true;
+    }
+    currentIds.add(item.id);
+    repairItems.push(item);
+  }
+  const untouched = previousItems.filter((item: any) => {
+    if (String(item.source || "") !== POST_COMPACT_COMPLETION_PRESERVATION_REPAIR_SOURCE) return true;
+    const id = String(item.id || item.work_item_id || "");
+    return !currentIds.has(id);
+  });
+  const nextItems = [...untouched, ...repairItems]
+    .sort((a: any, b: any) => {
+      const openRank = replayRepairWorkItemOpen(a.status) === replayRepairWorkItemOpen(b.status) ? 0 : replayRepairWorkItemOpen(a.status) ? -1 : 1;
+      if (openRank) return openRank;
+      const priority = replayRepairPriorityRank(a.priority) - replayRepairPriorityRank(b.priority);
+      return priority || String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""));
+    })
+    .slice(0, 160);
+  const nextLedger = { ...ledger, items: nextItems, stats: replayRepairWorkItemStats(nextItems), updatedAt: changed || !ledger.updatedAt ? at : ledger.updatedAt };
+  const before = JSON.stringify(previousItems.filter((item: any) => String(item.source || "") === POST_COMPACT_COMPLETION_PRESERVATION_REPAIR_SOURCE));
+  const after = JSON.stringify(nextItems.filter((item: any) => String(item.source || "") === POST_COMPACT_COMPLETION_PRESERVATION_REPAIR_SOURCE));
+  let summary: any;
+  if (changed || before !== after || !fs.existsSync(ledger.file || getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId))) {
+    summary = summarizeReplayRepairPendingWorkItems(groupId, writeGroupCompactBoundaryReplayRepairWorkItems(groupId, nextLedger));
+  } else {
+    summary = summarizeReplayRepairPendingWorkItems(groupId, ledger);
+  }
+  const verifiedClosures = repairItems.filter((item: any) => replayRepairWorkItemStatus(item.status) === "completed"
+    && item.completion_source === "post_compact_receipt_memory_usage_repair_completion_compaction_preservation_corrected_retry"
+    && item.resolutionReason === "completion_memory_compaction_preservation_corrected_retry_verified"
+    && item.corrected_retry_proof?.exact_identity_restored === true
+    && item.corrected_retry_proof?.current_session_boundary_restored === true
+    && item.corrected_retry_proof?.historical_sessions_remain_evidence_only === true);
+  if (verifiedClosures.length) {
+    try {
+      const api = require("../collaboration/group-memory-index");
+      if (typeof api.distillPostCompactCompletionMemoryPreservationRepairClosureToTypedMemory === "function") {
+        api.distillPostCompactCompletionMemoryPreservationRepairClosureToTypedMemory(groupId, { rows: verifiedClosures }, {
+          reason: "post-compact-completion-memory-preservation-repair-corrected-retry-closure",
+          updatedAt: at,
+        });
+      }
+    } catch {}
+  }
+  return summary;
+}
+
+function buildPostCompactCompletionPreservationRepairWorkItemReport(options: any = {}) {
+  const groupIds = replayRepairDispatchBindingGroupIds(options);
+  const rows = groupIds.map((groupId: string) => {
+    const failures = postCompactCompletionPreservationRepairRows(groupId);
+    const summary = syncPostCompactCompletionPreservationRepairWorkItems(groupId, failures, { at: options.generatedAt || options.generated_at || now() });
+    const ledger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+    const items = (Array.isArray(ledger.items) ? ledger.items : []).filter((item: any) => String(item.source || "") === POST_COMPACT_COMPLETION_PRESERVATION_REPAIR_SOURCE);
+    const expectedIds = new Set(failures.map((row: any, index: number) => buildPostCompactCompletionPreservationRepairWorkItem(groupId, row, index, {}, now()).id));
+    const current = items.filter((item: any) => expectedIds.has(String(item.id || item.work_item_id || "")));
+    const covered = current.filter((item: any) => replayRepairWorkItemOpen(item.status)
+      || (replayRepairWorkItemStatus(item.status) === "completed"
+        && item.resolutionReason === "completion_memory_compaction_preservation_corrected_retry_verified"
+        && item.corrected_retry_proof?.exact_identity_restored === true
+        && item.corrected_retry_proof?.current_session_boundary_restored === true));
+    const open = current.filter((item: any) => replayRepairWorkItemOpen(item.status));
+    const completed = current.filter((item: any) => replayRepairWorkItemStatus(item.status) === "completed");
+    const status = failures.length === 0 ? "empty" : covered.length === failures.length ? "ok" : "fail";
+    return {
+      schema: "ccm-post-compact-receipt-memory-usage-repair-completion-compaction-preservation-repair-work-item-group-v1",
+      groupId,
+      status,
+      file: summary.file || getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId),
+      requiredActionCount: failures.length,
+      coveredItemCount: covered.length,
+      openItemCount: open.length,
+      correctedRetryCompletedCount: completed.length,
+      shouldCreateRealTask: false,
+      failures: failures.slice(0, 12).map((row: any) => ({
+        binding_id: row.entry?.binding_id || "",
+        assignment_id: row.entry?.assignment_id || "",
+        failed_retry_id: row.retry?.retry_id || "",
+        failed_outcome_id: row.outcome?.outcome_id || "",
+        corrected_outcome_id: row.correctedOutcome?.outcome_id || "",
+        gaps: row.failureGaps || [],
+      })),
+      items: current.slice(0, 12),
+      gaps: status === "fail" ? [{ reason: `completion-memory preservation failures=${failures.length}, covered repair items=${covered.length}` }] : [],
+    };
+  });
+  const checked = rows.filter((row: any) => row.requiredActionCount > 0);
+  return {
+    schema: "ccm-post-compact-receipt-memory-usage-repair-completion-compaction-preservation-repair-work-item-report-v1",
+    generatedAt: now(),
+    overall: {
+      status: checked.length === 0 ? "empty" : checked.every((row: any) => row.status === "ok") ? "ok" : "fail",
+      groupCount: rows.length,
+      checkedGroupCount: checked.length,
+      groupsCovered: checked.filter((row: any) => row.status === "ok").length,
+      requiredActionCount: checked.reduce((sum: number, row: any) => sum + row.requiredActionCount, 0),
+      coveredItemCount: checked.reduce((sum: number, row: any) => sum + row.coveredItemCount, 0),
+      openItemCount: checked.reduce((sum: number, row: any) => sum + row.openItemCount, 0),
+      correctedRetryCompletedCount: checked.reduce((sum: number, row: any) => sum + row.correctedRetryCompletedCount, 0),
+    },
+    groups: rows,
+    weakGroups: rows.filter((row: any) => row.status === "fail"),
+  };
+}
+
+function evaluatePostCompactCompletionPreservationRepairWorkItems(options: any = {}) {
+  const report = buildPostCompactCompletionPreservationRepairWorkItemReport(options);
+  const check: any = makeQualityCheck(
+    "post_compact_receipt_memory_usage_repair_completion_compaction_preservation_repair_work_items",
+    "Post-Compact Completion Memory Preservation Repair Work Items",
+    Number(report.overall.requiredActionCount || 0),
+    Number(report.overall.coveredItemCount || 0),
+    (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12),
+    (report.weakGroups || []).flatMap((row: any) => row.gaps || []).slice(0, 12),
+    "Every failed completion-memory preservation proof must become an idempotent group-main-Agent repair work item; it remains open until a newer exact corrected compact outcome restores identity and current-session authority."
+  );
+  check.report = report;
+  return check;
+}
+
+function isPostCompactCompletionPreservationRepairSource(source: any) {
+  return String(source || "").trim() === POST_COMPACT_COMPLETION_PRESERVATION_REPAIR_SOURCE;
+}
+
+function postCompactCompletionPreservationRepairCandidateGaps(item: any = {}, candidate: any = {}) {
+  const gaps: string[] = [];
+  if (!candidate?.candidate_id) return ["candidate_missing"];
+  if (!isPostCompactCompletionPreservationRepairSource(candidate.source)) gaps.push("source");
+  if (candidate.component !== "post_compact_receipt_memory_usage_repair_completion_compaction_preservation") gaps.push("component");
+  if (candidate.shouldCreateRealTask !== false && candidate.should_create_real_task !== false) gaps.push("should_create_real_task_false");
+  const scalarFields = [
+    "worker_context_packet_id", "worker_context_packet_binding_id", "binding_id", "assignment_id", "dispatch_key",
+    "compact_outcome_id", "compact_retry_id", "compact_hook_run_id",
+    "completion_preservation_current_session_binding_id", "completion_preservation_current_task_agent_session_id", "completion_preservation_current_native_session_id",
+    "completion_preservation_conflict_resolution_entry_id", "completion_preservation_conflict_resolution_state", "completion_preservation_conflict_resolution_usage_state",
+    "completion_preservation_conflict_resolution_task_agent_session_id", "completion_preservation_conflict_resolution_native_session_id",
+  ];
+  for (const field of scalarFields) {
+    const expected = String(item[field] || "");
+    if (expected && String(candidate[field] || "") !== expected) gaps.push(field);
+  }
+  const listFields = [
+    "completion_preservation_gap_codes", "completion_preservation_completion_doc_rel_paths", "completion_preservation_required_doc_rel_paths",
+    "completion_preservation_work_item_ids", "completion_preservation_timeline_binding_ids",
+    "completion_preservation_historical_task_agent_session_ids", "completion_preservation_historical_native_session_ids",
+    "completion_preservation_conflict_resolution_doc_rel_paths",
+  ];
+  for (const field of listFields) {
+    const expected = uniqueStrings(item[field] || [], 48);
+    const actual = uniqueStrings(candidate[field] || [], 48);
+    if (expected.some((value: string) => !actual.includes(value))) gaps.push(field);
+  }
+  const booleanFields = [
+    "completion_preservation_conflict_resolution_present",
+    "completion_preservation_conflict_resolution_active",
+    "completion_preservation_conflict_resolution_reopened",
+    "completion_preservation_conflict_resolution_reversible",
+    "completion_preservation_conflict_resolution_historical_branches_preserved",
+    "completion_preservation_conflict_resolution_reverification_acceptance_required",
+    "completion_preservation_conflict_resolution_reversible_acceptance_required",
+    "completion_preservation_conflict_verification_acceptance_required",
+  ];
+  for (const field of booleanFields) {
+    if ((candidate[field] === true) !== (item[field] === true)) gaps.push(field);
+  }
+  const text = [candidate.instruction, candidate.expected, candidate.prompt_patch].join("\n");
+  if (!/newer|更新|different/i.test(text) || !/retry|outcome/i.test(text)) gaps.push("new_retry_outcome_prompt");
+  if (!/authority_boundary_valid=true/i.test(text)) gaps.push("authority_boundary_prompt");
+  if (!/historical.*evidence|历史.*证据/i.test(text)) gaps.push("historical_session_boundary_prompt");
+  if (!/current-source reverify/i.test(text)) gaps.push("current_source_reverify_prompt");
+  if (item.completion_preservation_conflict_resolution_present === true
+    && !/conflict.?resolution/i.test(text)) gaps.push("conflict_resolution_restoration_prompt");
+  return [...new Set(gaps)];
+}
+
+function buildPostCompactCompletionPreservationRepairDispatchCandidateReport(options: any = {}) {
+  const workItemReport = options.workItemReport || options.work_item_report || buildPostCompactCompletionPreservationRepairWorkItemReport(options);
+  const explicit = Array.isArray(options.groupIds || options.group_ids) ? (options.groupIds || options.group_ids) : [];
+  const groupIds = uniqueStrings([...explicit, ...(workItemReport.groups || []).map((row: any) => row.groupId)], 200);
+  const rows = groupIds.map((groupId: string) => {
+    const ledger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+    const items = (Array.isArray(ledger.items) ? ledger.items : []).filter((item: any) => isPostCompactCompletionPreservationRepairSource(item.source));
+    const openItems = items.filter((item: any) => replayRepairWorkItemOpen(item.status));
+    const summary = buildReplayRepairMainAgentDispatchCandidates(groupId, { ledger, limit: Math.max(Number(options.limit || 24), openItems.length + 8) });
+    const candidates = (summary.candidates || []).filter((candidate: any) => isPostCompactCompletionPreservationRepairSource(candidate.source));
+    const byWorkId = new Map(candidates.map((candidate: any) => [String(candidate.work_item_id || ""), candidate]));
+    const missing = openItems.filter((item: any) => !byWorkId.has(String(item.work_item_id || item.id || "")));
+    const metadataGaps = openItems.map((item: any) => {
+      const candidate: any = byWorkId.get(String(item.work_item_id || item.id || "")) || null;
+      return { work_item_id: item.work_item_id || item.id || "", candidate_id: candidate?.candidate_id || "", gaps: postCompactCompletionPreservationRepairCandidateGaps(item, candidate) };
+    }).filter((row: any) => row.gaps.length > 0);
+    const status = openItems.length === 0 ? "empty" : missing.length ? "fail" : metadataGaps.length ? "warn" : "ok";
+    return {
+      schema: "ccm-post-compact-receipt-memory-usage-repair-completion-compaction-preservation-repair-dispatch-candidate-group-v1",
+      groupId,
+      status,
+      file: summary.file || ledger.file,
+      expectedCandidateCount: openItems.length,
+      coveredCandidateCount: openItems.length - missing.length,
+      candidateCount: candidates.length,
+      metadataGapCount: metadataGaps.length,
+      shouldCreateRealTask: false,
+      candidates,
+      gaps: [
+        ...missing.map((item: any) => ({ work_item_id: item.work_item_id || item.id || "", reason: "open preservation repair work item missing main-Agent dispatch candidate" })),
+        ...metadataGaps.map((row: any) => ({ work_item_id: row.work_item_id, candidate_id: row.candidate_id, reason: `candidate metadata gaps: ${row.gaps.join(",")}` })),
+      ].slice(0, 12),
+    };
+  });
+  const checked = rows.filter((row: any) => row.expectedCandidateCount > 0);
+  return {
+    schema: "ccm-post-compact-receipt-memory-usage-repair-completion-compaction-preservation-repair-dispatch-candidate-report-v1",
+    generatedAt: now(),
+    overall: {
+      status: checked.length === 0 ? "empty" : checked.every((row: any) => row.status === "ok") ? "ok" : checked.some((row: any) => row.status === "ok") ? "warn" : "fail",
+      checkedGroupCount: checked.length,
+      expectedCandidateCount: checked.reduce((sum: number, row: any) => sum + row.expectedCandidateCount, 0),
+      coveredCandidateCount: checked.reduce((sum: number, row: any) => sum + row.coveredCandidateCount, 0),
+      metadataGapCount: checked.reduce((sum: number, row: any) => sum + row.metadataGapCount, 0),
+    },
+    groups: rows,
+    weakGroups: rows.filter((row: any) => row.status === "fail" || row.status === "warn"),
+  };
+}
+
+function evaluatePostCompactCompletionPreservationRepairDispatchCandidates(options: any = {}) {
+  const report = buildPostCompactCompletionPreservationRepairDispatchCandidateReport(options);
+  const check: any = makeQualityCheck(
+    "post_compact_receipt_memory_usage_repair_completion_compaction_preservation_repair_dispatch_candidates",
+    "Post-Compact Completion Memory Preservation Repair Dispatch Candidates",
+    Number(report.overall.expectedCandidateCount || 0),
+    Number(report.overall.coveredCandidateCount || 0) - Number(report.overall.metadataGapCount || 0),
+    (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12),
+    (report.weakGroups || []).flatMap((row: any) => row.gaps || []).slice(0, 12),
+    "Open completion-memory preservation repair items must surface as exact main-Agent dispatch candidates and must never create a real child task from Memory Center."
+  );
+  check.report = report;
+  return check;
+}
+
+function postCompactCompletionPreservationRepairBriefGaps(candidate: any = {}, brief: any = {}) {
+  const gaps = replayRepairDispatchBriefMetadataGaps(candidate, brief);
+  if (!brief?.brief_id) return gaps;
+  if (!isPostCompactCompletionPreservationRepairSource(brief.source)) gaps.push("source");
+  const scalarFields = [
+    "worker_context_packet_id", "worker_context_packet_binding_id", "binding_id", "assignment_id", "dispatch_key",
+    "compact_outcome_id", "compact_retry_id", "compact_hook_run_id",
+    "completion_preservation_current_session_binding_id", "completion_preservation_current_task_agent_session_id", "completion_preservation_current_native_session_id",
+    "completion_preservation_conflict_resolution_entry_id", "completion_preservation_conflict_resolution_state", "completion_preservation_conflict_resolution_usage_state",
+    "completion_preservation_conflict_resolution_task_agent_session_id", "completion_preservation_conflict_resolution_native_session_id",
+  ];
+  for (const field of scalarFields) {
+    const expected = String(candidate[field] || "");
+    if (expected && String(brief[field] || "") !== expected) gaps.push(field);
+  }
+  const listFields = [
+    "completion_preservation_gap_codes", "completion_preservation_completion_doc_rel_paths", "completion_preservation_required_doc_rel_paths",
+    "completion_preservation_work_item_ids", "completion_preservation_timeline_binding_ids",
+    "completion_preservation_historical_task_agent_session_ids", "completion_preservation_historical_native_session_ids",
+    "completion_preservation_conflict_resolution_doc_rel_paths",
+  ];
+  for (const field of listFields) {
+    const expected = uniqueStrings(candidate[field] || [], 48);
+    const actual = uniqueStrings(brief[field] || [], 48);
+    if (expected.some((value: string) => !actual.includes(value))) gaps.push(field);
+  }
+  const booleanFields = [
+    "completion_preservation_conflict_resolution_present",
+    "completion_preservation_conflict_resolution_active",
+    "completion_preservation_conflict_resolution_reopened",
+    "completion_preservation_conflict_resolution_reversible",
+    "completion_preservation_conflict_resolution_historical_branches_preserved",
+    "completion_preservation_conflict_resolution_reverification_acceptance_required",
+    "completion_preservation_conflict_resolution_reversible_acceptance_required",
+    "completion_preservation_conflict_verification_acceptance_required",
+  ];
+  for (const field of booleanFields) {
+    if ((brief[field] === true) !== (candidate[field] === true)) gaps.push(field);
+  }
+  const text = String(brief.worker_task || "");
+  if (!/newer|更新|different/i.test(text) || !/retry|outcome/i.test(text)) gaps.push("worker_task_new_retry_outcome");
+  if (!/authority_boundary_valid=true/i.test(text)) gaps.push("worker_task_authority_boundary");
+  if (!/historical.*evidence|历史.*证据/i.test(text)) gaps.push("worker_task_historical_session_boundary");
+  if (!/current-source reverify/i.test(text)) gaps.push("worker_task_current_source_reverify");
+  if (!/Memory Center.*not create|Memory Center.*不得创建|不自动创建真实任务/i.test(text)) gaps.push("worker_task_no_real_task_boundary");
+  if (candidate.completion_preservation_conflict_resolution_present === true
+    && !/conflict.?resolution/i.test(text)) gaps.push("worker_task_conflict_resolution_restoration");
+  return [...new Set(gaps)];
+}
+
+function buildPostCompactCompletionPreservationRepairDispatchBriefReport(options: any = {}) {
+  const candidateReport = options.candidateReport || options.candidate_report || buildPostCompactCompletionPreservationRepairDispatchCandidateReport(options);
+  const rows = (candidateReport.groups || []).map((candidateGroup: any) => {
+    const groupId = String(candidateGroup.groupId || "");
+    const candidates = (candidateGroup.candidates || []).filter((candidate: any) => isPostCompactCompletionPreservationRepairSource(candidate.source));
+    const ledger = syncReplayRepairDispatchPlanLedgerForCenter(groupId, {
+      schema: "ccm-replay-repair-main-agent-dispatch-candidates-v1",
+      groupId,
+      file: candidateGroup.file,
+      candidateCount: candidates.length,
+      openItemCount: candidates.length,
+      shouldCreateRealTask: false,
+      candidates,
+    }, options);
+    const briefs = (Array.isArray(ledger.briefs) ? ledger.briefs : []).filter((brief: any) => String(brief.status || "") === "ready" && isPostCompactCompletionPreservationRepairSource(brief.source));
+    const byWorkId = new Map(briefs.map((brief: any) => [String(brief.work_item_id || ""), brief]));
+    const missing = candidates.filter((candidate: any) => !byWorkId.has(String(candidate.work_item_id || "")));
+    const metadataGaps = candidates.map((candidate: any) => {
+      const brief: any = byWorkId.get(String(candidate.work_item_id || "")) || null;
+      return { work_item_id: candidate.work_item_id || "", candidate_id: candidate.candidate_id || "", brief_id: brief?.brief_id || "", gaps: postCompactCompletionPreservationRepairBriefGaps(candidate, brief) };
+    }).filter((row: any) => row.gaps.length > 0);
+    const status = candidates.length === 0 ? "empty" : missing.length ? "fail" : metadataGaps.length ? "warn" : "ok";
+    return {
+      schema: "ccm-post-compact-receipt-memory-usage-repair-completion-compaction-preservation-repair-dispatch-brief-group-v1",
+      groupId,
+      status,
+      file: ledger.file || getGroupReplayRepairDispatchPlanLedgerFile(groupId),
+      expectedBriefCount: candidates.length,
+      coveredBriefCount: candidates.length - missing.length,
+      readyBriefCount: briefs.length,
+      metadataGapCount: metadataGaps.length,
+      shouldCreateRealTask: ledger.shouldCreateRealTask === false || ledger.should_create_real_task === false,
+      briefs,
+      gaps: [
+        ...missing.map((candidate: any) => ({ work_item_id: candidate.work_item_id || "", candidate_id: candidate.candidate_id || "", reason: "preservation repair candidate missing self-contained brief" })),
+        ...metadataGaps.map((row: any) => ({ work_item_id: row.work_item_id, candidate_id: row.candidate_id, brief_id: row.brief_id, reason: `brief metadata gaps: ${row.gaps.join(",")}` })),
+      ].slice(0, 12),
+    };
+  });
+  const checked = rows.filter((row: any) => row.expectedBriefCount > 0);
+  return {
+    schema: "ccm-post-compact-receipt-memory-usage-repair-completion-compaction-preservation-repair-dispatch-brief-report-v1",
+    generatedAt: now(),
+    overall: {
+      status: checked.length === 0 ? "empty" : checked.every((row: any) => row.status === "ok") ? "ok" : checked.some((row: any) => row.status === "ok") ? "warn" : "fail",
+      checkedGroupCount: checked.length,
+      expectedBriefCount: checked.reduce((sum: number, row: any) => sum + row.expectedBriefCount, 0),
+      coveredBriefCount: checked.reduce((sum: number, row: any) => sum + row.coveredBriefCount, 0),
+      metadataGapCount: checked.reduce((sum: number, row: any) => sum + row.metadataGapCount, 0),
+    },
+    groups: rows,
+    weakGroups: rows.filter((row: any) => row.status === "fail" || row.status === "warn"),
+  };
+}
+
+function evaluatePostCompactCompletionPreservationRepairDispatchBriefs(options: any = {}) {
+  const report = buildPostCompactCompletionPreservationRepairDispatchBriefReport(options);
+  const check: any = makeQualityCheck(
+    "post_compact_receipt_memory_usage_repair_completion_compaction_preservation_repair_dispatch_briefs",
+    "Post-Compact Completion Memory Preservation Repair Dispatch Briefs",
+    Number(report.overall.expectedBriefCount || 0),
+    Number(report.overall.coveredBriefCount || 0) - Number(report.overall.metadataGapCount || 0),
+    (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12),
+    (report.weakGroups || []).flatMap((row: any) => row.gaps || []).slice(0, 12),
+    "Every main-Agent candidate must become a self-contained no-real-task repair brief carrying exact completion identity, failed retry/outcome evidence and current-session authority boundaries."
+  );
+  check.report = report;
+  return check;
+}
+
+function buildPostCompactCompletionPreservationRepairClosureReport(options: any = {}) {
+  const workItemReport = options.workItemReport || options.work_item_report || buildPostCompactCompletionPreservationRepairWorkItemReport(options);
+  const rows = (workItemReport.groups || []).map((group: any) => {
+    const items = (group.items || []).filter((item: any) => isPostCompactCompletionPreservationRepairSource(item.source));
+    const corrected = items.filter((item: any) => replayRepairWorkItemStatus(item.status) === "completed");
+    const invalid = corrected.filter((item: any) => item.resolutionReason !== "completion_memory_compaction_preservation_corrected_retry_verified"
+      || item.completion_source !== "post_compact_receipt_memory_usage_repair_completion_compaction_preservation_corrected_retry"
+      || !item.corrected_compact_outcome_id
+      || !item.corrected_compact_retry_id
+      || item.corrected_retry_proof?.exact_identity_restored !== true
+      || item.corrected_retry_proof?.current_session_boundary_restored !== true
+      || (item.completion_preservation_conflict_resolution_present === true
+        && (item.corrected_retry_proof?.exact_conflict_resolution_restored !== true
+          || item.corrected_retry_proof?.conflict_resolution_reversible_boundary_restored !== true))
+      || item.corrected_retry_proof?.historical_sessions_remain_evidence_only !== true);
+    return {
+      schema: "ccm-post-compact-receipt-memory-usage-repair-completion-compaction-preservation-repair-closure-group-v1",
+      groupId: group.groupId,
+      status: corrected.length === 0 ? "empty" : invalid.length === 0 ? "ok" : "fail",
+      correctedRetryCompletedCount: corrected.length,
+      verifiedClosureCount: corrected.length - invalid.length,
+      items: corrected,
+      gaps: invalid.map((item: any) => ({ work_item_id: item.work_item_id || item.id || "", reason: "completed preservation repair lacks strict newer corrected-outcome closure proof" })).slice(0, 12),
+    };
+  });
+  const checked = rows.filter((row: any) => row.correctedRetryCompletedCount > 0);
+  return {
+    schema: "ccm-post-compact-receipt-memory-usage-repair-completion-compaction-preservation-repair-closure-report-v1",
+    generatedAt: now(),
+    overall: {
+      status: checked.length === 0 ? "empty" : checked.every((row: any) => row.status === "ok") ? "ok" : "fail",
+      checkedGroupCount: checked.length,
+      correctedRetryCompletedCount: checked.reduce((sum: number, row: any) => sum + row.correctedRetryCompletedCount, 0),
+      verifiedClosureCount: checked.reduce((sum: number, row: any) => sum + row.verifiedClosureCount, 0),
+    },
+    groups: rows,
+    weakGroups: rows.filter((row: any) => row.status === "fail"),
+  };
+}
+
+function evaluatePostCompactCompletionPreservationRepairClosure(options: any = {}) {
+  const report = buildPostCompactCompletionPreservationRepairClosureReport(options);
+  const check: any = makeQualityCheck(
+    "post_compact_receipt_memory_usage_repair_completion_compaction_preservation_repair_closure",
+    "Post-Compact Completion Memory Preservation Corrected-Retry Closure",
+    Number(report.overall.correctedRetryCompletedCount || 0),
+    Number(report.overall.verifiedClosureCount || 0),
+    (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12),
+    (report.weakGroups || []).flatMap((row: any) => row.gaps || []).slice(0, 12),
+    "A preservation repair may close only from a newer different compact retry/outcome that restores every completion identity and the exact current task/native session authority boundary."
+  );
+  check.report = report;
+  return check;
+}
+
+function buildPostCompactCompletionPreservationRepairClosureTypedMemoryReport(options: any = {}) {
+  const workItemReport = options.workItemReport || options.work_item_report || buildPostCompactCompletionPreservationRepairWorkItemReport(options);
+  const { readGroupTypedMemoryDistillationLedger, scanGroupTypedMemoryDocuments } = require("../collaboration/group-memory-index");
+  const docRelPath = "post-compact-completion-memory-preservation-repair-closures.md";
+  const rows = (workItemReport.groups || []).map((group: any) => {
+    const groupId = String(group.groupId || "");
+    const completedItems = (group.items || []).filter((item: any) => replayRepairWorkItemStatus(item.status) === "completed"
+      && item.resolutionReason === "completion_memory_compaction_preservation_corrected_retry_verified");
+    const ledger = readGroupTypedMemoryDistillationLedger(groupId);
+    const archive = ledger.postCompactCompletionMemoryPreservationRepairClosureArchive || {};
+    const archiveRows = Array.isArray(archive.rows) ? archive.rows : [];
+    const docs = scanGroupTypedMemoryDocuments(groupId);
+    const doc = docs.find((item: any) => item.relPath === docRelPath) || null;
+    let text = "";
+    try { if (doc?.file) text = fs.readFileSync(doc.file, "utf-8"); } catch {}
+    const missingItems = completedItems.filter((item: any) => !archiveRows.some((row: any) => row.work_item_id === (item.work_item_id || item.id)
+      && row.failed_outcome_id === item.compact_outcome_id
+      && row.corrected_outcome_id === item.corrected_compact_outcome_id));
+    const boundaryCovered = completedItems.length === 0 || (/historical repair completion is recovery evidence, not permanent repository truth/i.test(text)
+      && /current-source|current source/i.test(text)
+      && /never authorize that future session|Never use this history as current repository truth/i.test(text));
+    const status = completedItems.length === 0 ? "empty" : !doc || missingItems.length || !boundaryCovered ? "fail" : "ok";
+    return {
+      schema: "ccm-post-compact-completion-memory-preservation-repair-closure-typed-memory-group-v1",
+      groupId,
+      status,
+      workItemFile: group.file || "",
+      ledgerFile: ledger.file || "",
+      typedMemoryDocFile: doc?.file || "",
+      expectedClosureCount: completedItems.length,
+      archivedClosureCount: archiveRows.length,
+      coveredClosureCount: completedItems.length - missingItems.length,
+      verifiedClosureCount: Number(archive.verified_count || 0),
+      boundaryCovered,
+      docRelPath,
+      archiveRows: archiveRows.slice(-12),
+      gaps: [
+        ...missingItems.map((item: any) => ({ work_item_id: item.work_item_id || item.id || "", reason: "verified preservation repair closure missing typed-memory archive row" })),
+        ...(!doc && completedItems.length ? [{ reason: `typed MEMORY.md missing: ${docRelPath}` }] : []),
+        ...(!boundaryCovered ? [{ reason: "typed closure memory missing stale-evidence/current-source/session-authority boundary" }] : []),
+      ].slice(0, 12),
+    };
+  });
+  const checked = rows.filter((row: any) => row.expectedClosureCount > 0);
+  return {
+    schema: "ccm-post-compact-completion-memory-preservation-repair-closure-typed-memory-report-v1",
+    generatedAt: now(),
+    overall: {
+      status: checked.length === 0 ? "empty" : checked.every((row: any) => row.status === "ok") ? "ok" : "fail",
+      checkedGroupCount: checked.length,
+      groupsCovered: checked.filter((row: any) => row.status === "ok").length,
+      expectedClosureCount: checked.reduce((sum: number, row: any) => sum + row.expectedClosureCount, 0),
+      coveredClosureCount: checked.reduce((sum: number, row: any) => sum + row.coveredClosureCount, 0),
+      archivedClosureCount: checked.reduce((sum: number, row: any) => sum + row.archivedClosureCount, 0),
+    },
+    groups: rows,
+    weakGroups: rows.filter((row: any) => row.status === "fail"),
+  };
+}
+
+function evaluatePostCompactCompletionPreservationRepairClosureTypedMemory(options: any = {}) {
+  const report = buildPostCompactCompletionPreservationRepairClosureTypedMemoryReport(options);
+  const check: any = makeQualityCheck(
+    "post_compact_receipt_memory_usage_repair_completion_compaction_preservation_repair_closure_typed_memory",
+    "Post-Compact Completion Memory Preservation Repair Closure Typed Memory",
+    Number(report.overall.expectedClosureCount || 0),
+    Number(report.overall.coveredClosureCount || 0),
+    (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12),
+    (report.weakGroups || []).flatMap((row: any) => row.gaps || []).slice(0, 12),
+    "Every verified Phase 185 corrected-retry closure must distill into group-isolated typed MEMORY.md with exact failed/corrected outcome identity and mandatory future current-source/session revalidation."
+  );
+  check.report = report;
+  return check;
+}
+
+function buildPostCompactCompletionPreservationRepairClosureWorkerContextReport(options: any = {}) {
+  const typedReport = options.typedReport || options.typed_report || buildPostCompactCompletionPreservationRepairClosureTypedMemoryReport(options);
+  const { buildAgentMemoryContextBundle, renderGroupMemoryContextBundle } = require("../collaboration/memory");
+  const targetProject = String(options.targetProject || options.target_project || "api");
+  const rows = (typedReport.groups || []).map((typedGroup: any) => {
+    const groupId = String(typedGroup.groupId || "");
+    const archiveRows = Array.isArray(typedGroup.archiveRows) ? typedGroup.archiveRows : [];
+    if (!archiveRows.length) return { schema: "ccm-post-compact-completion-memory-preservation-repair-closure-worker-context-group-v1", groupId, status: "empty", expectedClosureCount: 0, gaps: [] };
+    const marker = hash([groupId, "phase186-worker-context"], 10);
+    const task = String(options.task || `resume completion memory preservation repair corrected outcome ${archiveRows.map((row: any) => row.corrected_outcome_id).join(" ")} and reverify current source`);
+    const build = (session: string, native: string) => buildAgentMemoryContextBundle(groupId, targetProject, task, {
+      includeGlobalClaudeMemory: false,
+      includeProjectMemory: false,
+      maxTypedMemory: 8,
+      maxRenderedChars: 18000,
+      taskId: `phase186-quality-${marker}`,
+      taskAgentSessionId: session,
+      nativeSessionId: native,
+      executionId: `phase186-quality-execution-${marker}`,
+      forcePostCompactCompletionMemoryPreservationRepairClosureRecall: true,
+    });
+    const firstTaskSession = `phase186-quality-task-session-a-${marker}`;
+    const firstNativeSession = `phase186-quality-native-session-a-${marker}`;
+    const secondTaskSession = `phase186-quality-task-session-b-${marker}`;
+    const secondNativeSession = `phase186-quality-native-session-b-${marker}`;
+    const first = build(firstTaskSession, firstNativeSession);
+    const second = build(secondTaskSession, secondNativeSession);
+    const firstRecall = first.post_compact_reinjection_repair_receipt_recall || first.group_state?.typedMemory?.postCompactReinjectionRepairReceiptRecall || {};
+    const secondRecall = second.post_compact_reinjection_repair_receipt_recall || second.group_state?.typedMemory?.postCompactReinjectionRepairReceiptRecall || {};
+    const firstText = renderGroupMemoryContextBundle(first);
+    const historicalTaskSessions = normalizeQualityStringList(firstRecall.taskAgentSessionIds || firstRecall.task_agent_session_ids || []);
+    const historicalNativeSessions = normalizeQualityStringList(firstRecall.nativeSessionIds || firstRecall.native_session_ids || []);
+    const expectedCorrectedOutcomeIds = uniqueStrings(archiveRows.map((row: any) => row.corrected_outcome_id), 16);
+    const firstCorrectedOutcomeIds = normalizeQualityStringList(firstRecall.preservationCorrectedOutcomeIds || firstRecall.preservation_corrected_outcome_ids || []);
+    const gaps: any[] = [];
+    if (firstRecall.active !== true || firstRecall.recalledThisTurn !== true) gaps.push({ reason: "first fresh child session did not recall preservation closure typed memory" });
+    if (secondRecall.active !== true || secondRecall.recalledThisTurn !== true) gaps.push({ reason: "second fresh child session did not recall preservation closure typed memory" });
+    if (!expectedCorrectedOutcomeIds.every((id: string) => firstCorrectedOutcomeIds.includes(id))) gaps.push({ reason: "fresh WorkerContext recall missing corrected outcome identity" });
+    if (first.session_binding?.task_agent_session_id !== firstTaskSession || first.session_binding?.native_session_id !== firstNativeSession) gaps.push({ reason: "first recall not bound to requested fresh session" });
+    if (second.session_binding?.task_agent_session_id !== secondTaskSession || second.session_binding?.native_session_id !== secondNativeSession) gaps.push({ reason: "second recall not bound to requested fresh session" });
+    if (first.session_binding?.binding_id === second.session_binding?.binding_id) gaps.push({ reason: "repeated child execution reused the same memory session binding" });
+    if (historicalTaskSessions.includes(firstTaskSession) || historicalNativeSessions.includes(firstNativeSession)) gaps.push({ reason: "fresh child session was promoted into historical closure evidence" });
+    if (!firstText.includes("post-compact-completion-memory-preservation-repair-closures.md")
+      || !firstText.includes("memoryUsed")
+      || !firstText.includes("memoryIgnored")
+      || !/current source|current-source/i.test(firstText)) gaps.push({ reason: "rendered fresh child context missing closure doc or memory usage/current-source contract" });
+    return {
+      schema: "ccm-post-compact-completion-memory-preservation-repair-closure-worker-context-group-v1",
+      groupId,
+      status: gaps.length ? "fail" : "ok",
+      expectedClosureCount: archiveRows.length,
+      firstSessionBindingId: first.session_binding?.binding_id || "",
+      secondSessionBindingId: second.session_binding?.binding_id || "",
+      firstTaskAgentSessionId: firstTaskSession,
+      secondTaskAgentSessionId: secondTaskSession,
+      correctedOutcomeIds: firstCorrectedOutcomeIds,
+      historicalTaskAgentSessionIds: historicalTaskSessions,
+      historicalNativeSessionIds: historicalNativeSessions,
+      docRelPaths: firstRecall.docRelPaths || [],
+      gaps,
+    };
+  });
+  const checked = rows.filter((row: any) => row.expectedClosureCount > 0);
+  return {
+    schema: "ccm-post-compact-completion-memory-preservation-repair-closure-worker-context-report-v1",
+    generatedAt: now(),
+    overall: {
+      status: checked.length === 0 ? "empty" : checked.every((row: any) => row.status === "ok") ? "ok" : "fail",
+      checkedGroupCount: checked.length,
+      groupsCovered: checked.filter((row: any) => row.status === "ok").length,
+      expectedClosureCount: checked.reduce((sum: number, row: any) => sum + row.expectedClosureCount, 0),
+      firstSessionRecallCount: checked.filter((row: any) => !!row.firstSessionBindingId).length,
+      secondSessionRecallCount: checked.filter((row: any) => !!row.secondSessionBindingId).length,
+    },
+    groups: rows,
+    weakGroups: rows.filter((row: any) => row.status === "fail"),
+  };
+}
+
+function evaluatePostCompactCompletionPreservationRepairClosureWorkerContext(options: any = {}) {
+  const report = buildPostCompactCompletionPreservationRepairClosureWorkerContextReport(options);
+  const check: any = makeQualityCheck(
+    "post_compact_receipt_memory_usage_repair_completion_compaction_preservation_repair_closure_worker_context_recall",
+    "Post-Compact Completion Memory Preservation Repair Closure WorkerContext Recall",
+    Number(report.overall.checkedGroupCount || 0),
+    Number(report.overall.groupsCovered || 0),
+    (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12),
+    (report.weakGroups || []).flatMap((row: any) => row.gaps || []).slice(0, 12),
+    "Verified preservation closure typed memory must be recallable in every fresh child Agent session with distinct current bindings, exact corrected outcome identity, historical-session evidence only, and memoryUsed/memoryIgnored current-source receipt requirements."
+  );
+  check.report = report;
+  return check;
+}
+
+function buildPostCompactCompletionPreservationClosureUsageFeedbackReport(options: any = {}) {
+  const groupIds = replayRepairDispatchBindingGroupIds(options);
+  const {
+    readGroupTypedMemoryDistillationLedger,
+    readPostCompactCompletionMemoryPreservationClosureUsageLedger,
+  } = require("../collaboration/group-memory-index");
+  const closureRelPath = "post-compact-completion-memory-preservation-repair-closures.md";
+  const rows = groupIds.map((groupId: string) => {
+    const typedLedger = readGroupTypedMemoryDistillationLedger(groupId);
+    const archive = typedLedger.postCompactCompletionMemoryPreservationRepairClosureArchive || {};
+    const archiveRows = Array.isArray(archive.rows) ? archive.rows : [];
+    const usageLedger = readPostCompactCompletionMemoryPreservationClosureUsageLedger(groupId);
+    const entries = (Array.isArray(usageLedger.entries) ? usageLedger.entries : [])
+      .filter((entry: any) => entry.rel_path === closureRelPath);
+    const validEntries = entries.filter((entry: any) => {
+      if (!entry.task_agent_session_id || !entry.native_session_id) return false;
+      if (!["used", "verified", "ignored"].includes(String(entry.usage_state || ""))) return false;
+      if (entry.usage_state === "ignored") return !!entry.reason;
+      return true;
+    });
+    const invalidEntries = entries.filter((entry: any) => !validEntries.some((valid: any) => valid.entry_id === entry.entry_id));
+    return {
+      schema: "ccm-post-compact-completion-memory-preservation-closure-usage-feedback-group-v1",
+      groupId,
+      status: entries.length === 0 ? "empty" : invalidEntries.length === 0 ? "ok" : "fail",
+      archiveCount: archiveRows.length,
+      feedbackCount: entries.length,
+      validFeedbackCount: validEntries.length,
+      distinctTaskSessionCount: new Set(entries.map((entry: any) => entry.task_agent_session_id).filter(Boolean)).size,
+      distinctNativeSessionCount: new Set(entries.map((entry: any) => entry.native_session_id).filter(Boolean)).size,
+      immutableClosureHistoryPreserved: archiveRows.length === Number(archive.archived_count || archiveRows.length),
+      file: usageLedger.file || "",
+      entries: entries.slice(-12),
+      gaps: invalidEntries.slice(0, 12).map((entry: any) => ({
+        entry_id: entry.entry_id || "",
+        packet_id: entry.worker_context_packet_id || "",
+        reason: "closure usage feedback lacks a compliant per-session used/verified/ignored decision",
+      })),
+    };
+  });
+  const checked = rows.filter((row: any) => row.feedbackCount > 0);
+  return {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-usage-feedback-report-v1",
+    generatedAt: now(),
+    overall: {
+      status: checked.length === 0 ? "empty" : checked.every((row: any) => row.status === "ok") ? "ok" : "fail",
+      checkedGroupCount: checked.length,
+      feedbackCount: checked.reduce((sum: number, row: any) => sum + row.feedbackCount, 0),
+      validFeedbackCount: checked.reduce((sum: number, row: any) => sum + row.validFeedbackCount, 0),
+      distinctTaskSessionCount: checked.reduce((sum: number, row: any) => sum + row.distinctTaskSessionCount, 0),
+      distinctNativeSessionCount: checked.reduce((sum: number, row: any) => sum + row.distinctNativeSessionCount, 0),
+    },
+    groups: rows,
+    weakGroups: rows.filter((row: any) => row.status === "fail"),
+  };
+}
+
+function evaluatePostCompactCompletionPreservationClosureUsageFeedback(options: any = {}) {
+  const report = buildPostCompactCompletionPreservationClosureUsageFeedbackReport(options);
+  const check: any = makeQualityCheck(
+    "post_compact_completion_memory_preservation_closure_usage_feedback",
+    "Post-Compact Completion Memory Preservation Closure Usage Feedback",
+    Number(report.overall.feedbackCount || 0),
+    Number(report.overall.validFeedbackCount || 0),
+    (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12),
+    (report.weakGroups || []).flatMap((row: any) => row.gaps || []).slice(0, 12),
+    "Every fresh child Agent session that receives closure MEMORY.md must persist a group-isolated memoryUsed/memoryIgnored decision; used or verified requires currentSourceVerified=true, while ignored requires a reason."
+  );
+  check.report = report;
+  return check;
+}
+
+function buildPostCompactCompletionPreservationClosureReceiptRepairReport(options: any = {}) {
+  const usageReport = options.usageReport || options.usage_report
+    || buildPostCompactCompletionPreservationClosureUsageFeedbackReport(options);
+  const rows = (usageReport.groups || []).map((group: any) => {
+    const groupId = String(group.groupId || "");
+    const workLedger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+    const repairItems = (Array.isArray(workLedger.items) ? workLedger.items : [])
+      .filter(isPostCompactReinjectionRepairReceiptMemoryUsageReceiptRepairWorkItem);
+    const noncompliant = (group.entries || []).filter((entry: any) => entry.compliant !== true);
+    const covered = noncompliant.filter((entry: any) => repairItems.some((item: any) => {
+      const packetMatches = !entry.worker_context_packet_id
+        || String(item.original_worker_context_packet_id || item.worker_context_packet_id || "") === String(entry.worker_context_packet_id);
+      const bindingMatches = !entry.binding_id
+        || String(item.original_binding_id || item.binding_id || "") === String(entry.binding_id);
+      return packetMatches && bindingMatches;
+    }));
+    return {
+      schema: "ccm-post-compact-completion-memory-preservation-closure-receipt-repair-group-v1",
+      groupId,
+      status: noncompliant.length === 0 ? "empty" : covered.length === noncompliant.length ? "ok" : "fail",
+      noncompliantFeedbackCount: noncompliant.length,
+      repairCoveredCount: covered.length,
+      repairItemCount: repairItems.length,
+      openRepairItemCount: repairItems.filter((item: any) => replayRepairWorkItemOpen(item.status)).length,
+      completedRepairItemCount: repairItems.filter((item: any) => replayRepairWorkItemStatus(item.status) === "completed").length,
+      gaps: noncompliant.filter((entry: any) => !covered.includes(entry)).slice(0, 12).map((entry: any) => ({
+        entry_id: entry.entry_id || "",
+        packet_id: entry.worker_context_packet_id || "",
+        binding_id: entry.binding_id || "",
+        reason: "noncompliant closure usage feedback did not enter the existing main-Agent repair sidecar",
+      })),
+    };
+  });
+  const checked = rows.filter((row: any) => row.noncompliantFeedbackCount > 0);
+  return {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-receipt-repair-report-v1",
+    generatedAt: now(),
+    overall: {
+      status: checked.length === 0 ? "empty" : checked.every((row: any) => row.status === "ok") ? "ok" : "fail",
+      checkedGroupCount: checked.length,
+      noncompliantFeedbackCount: checked.reduce((sum: number, row: any) => sum + row.noncompliantFeedbackCount, 0),
+      repairCoveredCount: checked.reduce((sum: number, row: any) => sum + row.repairCoveredCount, 0),
+    },
+    groups: rows,
+    weakGroups: rows.filter((row: any) => row.status === "fail"),
+  };
+}
+
+function evaluatePostCompactCompletionPreservationClosureReceiptRepair(options: any = {}) {
+  const report = buildPostCompactCompletionPreservationClosureReceiptRepairReport(options);
+  const check: any = makeQualityCheck(
+    "post_compact_completion_memory_preservation_closure_receipt_repair",
+    "Post-Compact Completion Memory Preservation Closure Receipt Repair",
+    Number(report.overall.noncompliantFeedbackCount || 0),
+    Number(report.overall.repairCoveredCount || 0),
+    (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12),
+    (report.weakGroups || []).flatMap((row: any) => row.gaps || []).slice(0, 12),
+    "Noncompliant closure-memory receipts must enter the existing main-Agent corrected-receipt repair sidecar without Memory Center creating a real child task."
+  );
+  check.report = report;
+  return check;
+}
+
+function buildPostCompactCompletionPreservationClosureRecallPriorityReport(options: any = {}) {
+  const groupIds = replayRepairDispatchBindingGroupIds(options);
+  const {
+    buildPostCompactCompletionMemoryPreservationClosureUsageSummary,
+    readGroupTypedMemoryDistillationLedger,
+  } = require("../collaboration/group-memory-index");
+  const { buildAgentMemoryContextBundle } = require("../collaboration/memory");
+  const closureRelPath = "post-compact-completion-memory-preservation-repair-closures.md";
+  const targetProject = String(options.targetProject || options.target_project || "api");
+  const rows = groupIds.map((groupId: string) => {
+    const ledgerBefore = readGroupTypedMemoryDistillationLedger(groupId);
+    const archiveBefore = ledgerBefore.postCompactCompletionMemoryPreservationRepairClosureArchive || {};
+    const archiveRows = Array.isArray(archiveBefore.rows) ? archiveBefore.rows : [];
+    const usage = buildPostCompactCompletionMemoryPreservationClosureUsageSummary(groupId, { targetProject });
+    if (!archiveRows.length || Number(usage.entryCount || 0) === 0) {
+      return { schema: "ccm-post-compact-completion-memory-preservation-closure-recall-priority-group-v1", groupId, status: "empty", feedbackCount: 0, gaps: [] };
+    }
+    const marker = hash([groupId, "phase187-recall-priority"], 10);
+    const build = (task: string, suffix: string) => buildAgentMemoryContextBundle(groupId, targetProject, task, {
+      includeGlobalClaudeMemory: false,
+      includeProjectMemory: false,
+      maxTypedMemory: 8,
+      maxRenderedChars: 18000,
+      taskId: `phase187-priority-${marker}-${suffix}`,
+      taskAgentSessionId: `phase187-priority-task-session-${marker}-${suffix}`,
+      nativeSessionId: `phase187-priority-native-session-${marker}-${suffix}`,
+      executionId: `phase187-priority-execution-${marker}-${suffix}`,
+    });
+    const generic = build("review post-compact completion memory preservation repair closure and reverify current source", "generic");
+    const correctedOutcomeId = String(archiveRows[archiveRows.length - 1]?.corrected_outcome_id || "");
+    const exact = build(`review exact corrected outcome ${correctedOutcomeId} and reverify current source`, "exact");
+    const genericRecall = generic.post_compact_reinjection_repair_receipt_recall || generic.group_state?.typedMemory?.postCompactReinjectionRepairReceiptRecall || {};
+    const exactRecall = exact.post_compact_reinjection_repair_receipt_recall || exact.group_state?.typedMemory?.postCompactReinjectionRepairReceiptRecall || {};
+    const suppressExpected = ["deprioritize_closure_recall", "require_receipt_repair_before_reuse"].includes(String(usage.recommendation || ""));
+    const genericSuppressed = genericRecall.preservationClosureRecallSuppressed === true
+      && !(genericRecall.docRelPaths || []).includes(closureRelPath);
+    const exactCorrectedIds = normalizeQualityStringList(exactRecall.preservationCorrectedOutcomeIds || exactRecall.preservation_corrected_outcome_ids || []);
+    const exactIdentityPreserved = !correctedOutcomeId || exactCorrectedIds.includes(correctedOutcomeId);
+    const ledgerAfter = readGroupTypedMemoryDistillationLedger(groupId);
+    const archiveRowsAfter = ledgerAfter.postCompactCompletionMemoryPreservationRepairClosureArchive?.rows || [];
+    const immutablePreserved = archiveRowsAfter.length === archiveRows.length
+      && archiveRowsAfter.every((row: any, index: number) => row.row_id === archiveRows[index]?.row_id);
+    const gaps: any[] = [];
+    if (suppressExpected && !genericSuppressed) gaps.push({ reason: "ignored or noncompliant feedback did not lower generic closure recall priority" });
+    if (suppressExpected && !exactIdentityPreserved) gaps.push({ reason: "exact corrected-outcome query could not override generic recall suppression" });
+    if (!suppressExpected && genericRecall.preservationClosureRecallSuppressed === true) gaps.push({ reason: "compliant closure usage feedback incorrectly suppressed generic recall" });
+    if (!immutablePreserved) gaps.push({ reason: "recall-priority feedback mutated or deleted immutable closure archive rows" });
+    return {
+      schema: "ccm-post-compact-completion-memory-preservation-closure-recall-priority-group-v1",
+      groupId,
+      status: gaps.length ? "fail" : "ok",
+      feedbackCount: Number(usage.entryCount || 0),
+      recommendation: usage.recommendation || "",
+      genericRecallSuppressed: genericSuppressed,
+      exactIdentityPreserved,
+      immutableClosureHistoryPreserved: immutablePreserved,
+      correctedOutcomeId,
+      gaps,
+    };
+  });
+  const checked = rows.filter((row: any) => row.feedbackCount > 0);
+  return {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-recall-priority-report-v1",
+    generatedAt: now(),
+    overall: {
+      status: checked.length === 0 ? "empty" : checked.every((row: any) => row.status === "ok") ? "ok" : "fail",
+      checkedGroupCount: checked.length,
+      groupsCovered: checked.filter((row: any) => row.status === "ok").length,
+      suppressedGroupCount: checked.filter((row: any) => row.genericRecallSuppressed === true).length,
+      immutableArchivePreservedCount: checked.filter((row: any) => row.immutableClosureHistoryPreserved === true).length,
+    },
+    groups: rows,
+    weakGroups: rows.filter((row: any) => row.status === "fail"),
+  };
+}
+
+function evaluatePostCompactCompletionPreservationClosureRecallPriority(options: any = {}) {
+  const report = buildPostCompactCompletionPreservationClosureRecallPriorityReport(options);
+  const check: any = makeQualityCheck(
+    "post_compact_completion_memory_preservation_closure_recall_priority",
+    "Post-Compact Completion Memory Preservation Closure Recall Priority",
+    Number(report.overall.checkedGroupCount || 0),
+    Number(report.overall.groupsCovered || 0),
+    (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12),
+    (report.weakGroups || []).flatMap((row: any) => row.gaps || []).slice(0, 12),
+    "Repeated ignored or noncompliant feedback may lower generic closure recall priority, but exact corrected-outcome recall and immutable closure history must remain available and group-isolated."
+  );
+  check.report = report;
+  return check;
+}
+
+function buildPostCompactCompletionPreservationClosureFeedbackAgingTaskFamilyReport(options: any = {}) {
+  const groupIds = replayRepairDispatchBindingGroupIds(options);
+  const {
+    buildPostCompactCompletionMemoryPreservationClosureUsageSummary,
+    readGroupTypedMemoryDistillationLedger,
+    readPostCompactCompletionMemoryPreservationClosureUsageLedger,
+  } = require("../collaboration/group-memory-index");
+  const targetProject = String(options.targetProject || options.target_project || "api");
+  const rows = groupIds.map((groupId: string) => {
+    const usageLedger = readPostCompactCompletionMemoryPreservationClosureUsageLedger(groupId);
+    const entries = Array.isArray(usageLedger.entries) ? usageLedger.entries : [];
+    const familyEntries = entries.filter((entry: any) => !!entry.task_family_key && Array.isArray(entry.task_family_tokens) && entry.task_family_tokens.length > 0);
+    const familyKeys = uniqueStrings(familyEntries.map((entry: any) => entry.task_family_key), 32);
+    const probes = familyKeys.map((familyKey: string) => {
+      const representative = [...familyEntries].reverse().find((entry: any) => entry.task_family_key === familyKey) || {};
+      const summary = buildPostCompactCompletionMemoryPreservationClosureUsageSummary(groupId, {
+        ...options,
+        targetProject,
+        task: representative.task_text || "",
+        taskFamilyKey: familyKey,
+      });
+      const matchedEntries = (summary.feedbackEntries || []).filter((entry: any) => entry.task_family_relevance?.matched === true);
+      return {
+        taskFamilyKey: familyKey,
+        taskText: representative.task_text || "",
+        recommendation: summary.recommendation || "",
+        matchedEntryCount: Number(summary.matchedEntryCount || 0),
+        unrelatedEntryCount: Number(summary.unrelatedEntryCount || 0),
+        weightedIgnoredCount: Number(summary.weightedIgnoredCount || 0),
+        staleCount: Number(summary.staleCount || 0),
+        halfLifeDays: Number(summary.aging?.half_life_days || 0),
+        allMatchedEntriesBelongToFamily: matchedEntries.every((entry: any) => entry.task_family_key === familyKey),
+      };
+    });
+    const unrelated = buildPostCompactCompletionMemoryPreservationClosureUsageSummary(groupId, {
+      ...options,
+      targetProject,
+      task: "quantum astronomy unrelated phase188 task family sentinel",
+    });
+    const typedLedger = readGroupTypedMemoryDistillationLedger(groupId);
+    const archive = typedLedger.postCompactCompletionMemoryPreservationRepairClosureArchive || {};
+    const archiveRows = Array.isArray(archive.rows) ? archive.rows : [];
+    const staleEntries = familyEntries.filter((entry: any) => {
+      const at = Date.parse(String(entry.generated_at || ""));
+      const nowAt = Date.parse(String(options.now || options.generatedAt || options.generated_at || new Date().toISOString()));
+      const staleAfterDays = Number(options.postCompactClosureUsageStaleAfterDays || options.post_compact_closure_usage_stale_after_days || 45);
+      return Number.isFinite(at) && Number.isFinite(nowAt) && (nowAt - at) / 86_400_000 >= staleAfterDays;
+    });
+    const staleDecayedCount = probes.filter((probe: any) => probe.staleCount > 0 && probe.weightedIgnoredCount < 1.5).length;
+    const gaps: any[] = [];
+    if (familyEntries.length && probes.some((probe: any) => probe.halfLifeDays <= 0)) gaps.push({ reason: "closure feedback task family probe lacks half-life scoring" });
+    if (familyKeys.length > 1 && probes.some((probe: any) => !probe.allMatchedEntriesBelongToFamily)) gaps.push({ reason: "closure feedback leaked across unrelated task families" });
+    if (staleEntries.length && staleDecayedCount === 0) gaps.push({ reason: "stale closure feedback did not decay below active suppression weight" });
+    if (familyEntries.length && Number(unrelated.matchedEntryCount || 0) !== 0) gaps.push({ reason: "unrelated task family inherited closure feedback" });
+    if (archiveRows.length !== Number(archive.archived_count || archiveRows.length)) gaps.push({ reason: "task-family scoring changed immutable closure archive count" });
+    return {
+      schema: "ccm-post-compact-completion-memory-preservation-closure-feedback-aging-task-family-group-v1",
+      groupId,
+      status: familyEntries.length === 0 ? "empty" : gaps.length ? "fail" : "ok",
+      feedbackCount: entries.length,
+      taskFamilyFeedbackCount: familyEntries.length,
+      taskFamilyCount: familyKeys.length,
+      staleFeedbackCount: staleEntries.length,
+      staleDecayedFamilyCount: staleDecayedCount,
+      unrelatedMatchedEntryCount: Number(unrelated.matchedEntryCount || 0),
+      immutableClosureHistoryPreserved: archiveRows.length === Number(archive.archived_count || archiveRows.length),
+      probes,
+      gaps,
+    };
+  });
+  const checked = rows.filter((row: any) => row.taskFamilyFeedbackCount > 0);
+  return {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-feedback-aging-task-family-report-v1",
+    generatedAt: now(),
+    overall: {
+      status: checked.length === 0 ? "empty" : checked.every((row: any) => row.status === "ok") ? "ok" : "fail",
+      checkedGroupCount: checked.length,
+      groupsCovered: checked.filter((row: any) => row.status === "ok").length,
+      taskFamilyCount: checked.reduce((sum: number, row: any) => sum + row.taskFamilyCount, 0),
+      staleFeedbackCount: checked.reduce((sum: number, row: any) => sum + row.staleFeedbackCount, 0),
+      staleDecayedFamilyCount: checked.reduce((sum: number, row: any) => sum + row.staleDecayedFamilyCount, 0),
+      unrelatedMatchedEntryCount: checked.reduce((sum: number, row: any) => sum + row.unrelatedMatchedEntryCount, 0),
+    },
+    groups: rows,
+    weakGroups: rows.filter((row: any) => row.status === "fail"),
+  };
+}
+
+function evaluatePostCompactCompletionPreservationClosureFeedbackAgingTaskFamily(options: any = {}) {
+  const report = buildPostCompactCompletionPreservationClosureFeedbackAgingTaskFamilyReport(options);
+  const check: any = makeQualityCheck(
+    "post_compact_completion_memory_preservation_closure_feedback_aging_task_family",
+    "Post-Compact Completion Memory Preservation Closure Feedback Aging And Task Family",
+    Number(report.overall.checkedGroupCount || 0),
+    Number(report.overall.groupsCovered || 0),
+    (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12),
+    (report.weakGroups || []).flatMap((row: any) => row.gaps || []).slice(0, 12),
+    "Closure-memory feedback must decay by age and affect only a related task family; unrelated work, exact identity recall, immutable history and authorization boundaries remain unchanged."
+  );
+  check.report = report;
+  return check;
+}
+
+function buildPostCompactCompletionPreservationClosureFeedbackEvidenceConfidenceReport(options: any = {}) {
+  const groupIds = replayRepairDispatchBindingGroupIds(options);
+  const {
+    buildPostCompactCompletionMemoryPreservationClosureUsageSummary,
+    readGroupTypedMemoryDistillationLedger,
+    readPostCompactCompletionMemoryPreservationClosureUsageLedger,
+  } = require("../collaboration/group-memory-index");
+  const targetProject = String(options.targetProject || options.target_project || "api");
+  const rows = groupIds.map((groupId: string) => {
+    const usageLedger = readPostCompactCompletionMemoryPreservationClosureUsageLedger(groupId);
+    const entries = Array.isArray(usageLedger.entries) ? usageLedger.entries : [];
+    const familyEntries = entries.filter((entry: any) => !!entry.task_family_key && !!entry.task_text);
+    const familyKeys = uniqueStrings(familyEntries.map((entry: any) => entry.task_family_key), 32);
+    const probes = familyKeys.map((familyKey: string) => {
+      const representative = [...familyEntries].reverse().find((entry: any) => entry.task_family_key === familyKey) || {};
+      const summary = buildPostCompactCompletionMemoryPreservationClosureUsageSummary(groupId, {
+        ...options,
+        targetProject,
+        task: representative.task_text || "",
+        taskFamilyKey: familyKey,
+      });
+      const suppressionRecommendation = summary.recommendation === "deprioritize_closure_recall";
+      const confidenceCovered = Number(summary.evidenceConfidence || 0) >= Number(summary.evidenceConfidenceThreshold || 0);
+      const independentSessionsCovered = Number(summary.independentSessionCount || 0) >= 2;
+      return {
+        taskFamilyKey: familyKey,
+        recommendation: summary.recommendation || "",
+        rawMatchedEntryCount: Number(summary.rawMatchedEntryCount || 0),
+        independentEvidenceCount: Number(summary.independentEvidenceCount || 0),
+        independentSessionCount: Number(summary.independentSessionCount || 0),
+        independentPacketCount: Number(summary.independentPacketCount || 0),
+        correlatedDuplicateCount: Number(summary.correlatedDuplicateCount || 0),
+        distinctProviderCount: Number(summary.distinctProviderCount || 0),
+        distinctReceiptSourceCount: Number(summary.distinctReceiptSourceCount || 0),
+        averageSourceReliability: Number(summary.averageSourceReliability || 0),
+        evidenceConfidence: Number(summary.evidenceConfidence || 0),
+        evidenceConfidenceThreshold: Number(summary.evidenceConfidenceThreshold || 0),
+        suppressionConfidenceCovered: !suppressionRecommendation || confidenceCovered && independentSessionsCovered,
+      };
+    });
+    const typedLedger = readGroupTypedMemoryDistillationLedger(groupId);
+    const archive = typedLedger.postCompactCompletionMemoryPreservationRepairClosureArchive || {};
+    const archiveRows = Array.isArray(archive.rows) ? archive.rows : [];
+    const gaps: any[] = [];
+    for (const probe of probes) {
+      if (probe.independentEvidenceCount > probe.rawMatchedEntryCount) gaps.push({ taskFamilyKey: probe.taskFamilyKey, reason: "independent evidence exceeds raw matching feedback" });
+      if (probe.correlatedDuplicateCount !== Math.max(0, probe.rawMatchedEntryCount - probe.independentEvidenceCount)) gaps.push({ taskFamilyKey: probe.taskFamilyKey, reason: "correlated duplicate accounting is inconsistent" });
+      if (probe.evidenceConfidence < 0 || probe.evidenceConfidence > 1 || probe.evidenceConfidenceThreshold <= 0 || probe.evidenceConfidenceThreshold > 1) gaps.push({ taskFamilyKey: probe.taskFamilyKey, reason: "closure evidence confidence is outside bounded range" });
+      if (probe.averageSourceReliability < 0.1 || probe.averageSourceReliability > 1) gaps.push({ taskFamilyKey: probe.taskFamilyKey, reason: "receipt source reliability is outside bounded range" });
+      if (!probe.suppressionConfidenceCovered) gaps.push({ taskFamilyKey: probe.taskFamilyKey, reason: "closure recall was deprioritized without two independent sessions and sufficient evidence confidence" });
+    }
+    if (archiveRows.length !== Number(archive.archived_count || archiveRows.length)) gaps.push({ reason: "evidence confidence scoring changed immutable closure archive count" });
+    return {
+      schema: "ccm-post-compact-completion-memory-preservation-closure-feedback-evidence-confidence-group-v1",
+      groupId,
+      status: probes.length === 0 ? "empty" : gaps.length ? "fail" : "ok",
+      feedbackCount: entries.length,
+      taskFamilyCount: probes.length,
+      rawMatchedEntryCount: probes.reduce((sum: number, probe: any) => sum + probe.rawMatchedEntryCount, 0),
+      independentEvidenceCount: probes.reduce((sum: number, probe: any) => sum + probe.independentEvidenceCount, 0),
+      correlatedDuplicateCount: probes.reduce((sum: number, probe: any) => sum + probe.correlatedDuplicateCount, 0),
+      confidentSuppressionCount: probes.filter((probe: any) => probe.recommendation === "deprioritize_closure_recall" && probe.suppressionConfidenceCovered).length,
+      immutableClosureHistoryPreserved: archiveRows.length === Number(archive.archived_count || archiveRows.length),
+      rankingEvidenceOnly: true,
+      authorizationGranted: false,
+      probes,
+      gaps,
+    };
+  });
+  const checked = rows.filter((row: any) => row.taskFamilyCount > 0);
+  return {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-feedback-evidence-confidence-report-v1",
+    generatedAt: now(),
+    overall: {
+      status: checked.length === 0 ? "empty" : checked.every((row: any) => row.status === "ok") ? "ok" : "fail",
+      checkedGroupCount: checked.length,
+      groupsCovered: checked.filter((row: any) => row.status === "ok").length,
+      taskFamilyCount: checked.reduce((sum: number, row: any) => sum + row.taskFamilyCount, 0),
+      rawMatchedEntryCount: checked.reduce((sum: number, row: any) => sum + row.rawMatchedEntryCount, 0),
+      independentEvidenceCount: checked.reduce((sum: number, row: any) => sum + row.independentEvidenceCount, 0),
+      correlatedDuplicateCount: checked.reduce((sum: number, row: any) => sum + row.correlatedDuplicateCount, 0),
+      confidentSuppressionCount: checked.reduce((sum: number, row: any) => sum + row.confidentSuppressionCount, 0),
+    },
+    groups: rows,
+    weakGroups: rows.filter((row: any) => row.status === "fail"),
+  };
+}
+
+function evaluatePostCompactCompletionPreservationClosureFeedbackEvidenceConfidence(options: any = {}) {
+  const report = buildPostCompactCompletionPreservationClosureFeedbackEvidenceConfidenceReport(options);
+  const check: any = makeQualityCheck(
+    "post_compact_completion_memory_preservation_closure_feedback_evidence_confidence",
+    "Post-Compact Completion Memory Preservation Closure Feedback Evidence Confidence",
+    Number(report.overall.checkedGroupCount || 0),
+    Number(report.overall.groupsCovered || 0),
+    (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12),
+    (report.weakGroups || []).flatMap((row: any) => row.gaps || []).slice(0, 12),
+    "Closure-memory ranking feedback must deduplicate reused sessions and packets, weight receipt-source reliability, require independent-session confidence before generic suppression, and never grant authorization."
+  );
+  check.report = report;
+  return check;
+}
+
+function buildPostCompactCompletionPreservationClosureFeedbackConflictReport(options: any = {}) {
+  const groupIds = replayRepairDispatchBindingGroupIds(options);
+  const {
+    buildPostCompactCompletionMemoryPreservationClosureUsageSummary,
+    readGroupTypedMemoryDistillationLedger,
+    readPostCompactCompletionMemoryPreservationClosureUsageLedger,
+  } = require("../collaboration/group-memory-index");
+  const { buildAgentMemoryContextBundle } = require("../collaboration/memory");
+  const { buildWorkerContextPacket, renderWorkerContextPacket } = require("../../agents/runtime-kernel");
+  const targetProject = String(options.targetProject || options.target_project || "api");
+  const rows = groupIds.map((groupId: string) => {
+    const usageLedger = readPostCompactCompletionMemoryPreservationClosureUsageLedger(groupId);
+    const entries = Array.isArray(usageLedger.entries) ? usageLedger.entries : [];
+    const familyEntries = entries.filter((entry: any) => !!entry.task_family_key && !!entry.task_text);
+    const familyKeys = uniqueStrings(familyEntries.map((entry: any) => entry.task_family_key), 32);
+    const probes = familyKeys.map((familyKey: string) => {
+      const representative = [...familyEntries].reverse().find((entry: any) => entry.task_family_key === familyKey) || {};
+      const taskText = representative.task_text || "";
+      const summary = buildPostCompactCompletionMemoryPreservationClosureUsageSummary(groupId, {
+        ...options,
+        targetProject,
+        task: taskText,
+        taskFamilyKey: familyKey,
+      });
+      const conflict = summary.feedbackConflict || {};
+      if (conflict.active !== true) {
+        return {
+          taskFamilyKey: familyKey,
+          conflictActive: false,
+          recommendation: summary.recommendation || "",
+          arbitrationState: conflict.arbitration_state || "",
+          covered: true,
+          gaps: [],
+        };
+      }
+      const marker = hash([groupId, familyKey, "phase190-conflict-quality"], 10);
+      const task = `review post-compact completion memory preservation repair closure for ${taskText}`;
+      const bundle = buildAgentMemoryContextBundle(groupId, targetProject, task, {
+        includeGlobalClaudeMemory: false,
+        includeProjectMemory: false,
+        maxTypedMemory: 8,
+        maxRenderedChars: 18000,
+        taskId: `phase190-conflict-quality-${marker}`,
+        taskAgentSessionId: `phase190-conflict-quality-task-session-${marker}`,
+        nativeSessionId: `phase190-conflict-quality-native-session-${marker}`,
+        executionId: `phase190-conflict-quality-execution-${marker}`,
+        generatedAt: options.now || options.generatedAt || options.generated_at,
+      });
+      const recall = bundle.post_compact_reinjection_repair_receipt_recall || bundle.group_state?.typedMemory?.postCompactReinjectionRepairReceiptRecall || {};
+      const packet = buildWorkerContextPacket({
+        group: { id: groupId, name: "Closure feedback conflict quality", members: [{ project: targetProject }] },
+        project: targetProject,
+        task,
+        taskId: `phase190-conflict-quality-${marker}`,
+        traceId: `phase190-conflict-quality-trace-${marker}`,
+        agentType: "codex",
+        memory: bundle,
+        contextUsageOptions: { maxTokens: 90000 },
+      });
+      const contract = packet.post_compact_reinjection_repair_receipt_memory_contract || {};
+      const rendered = renderWorkerContextPacket(packet);
+      const gaps: any[] = [];
+      if (summary.recommendation !== "surface_conflict_reverify_current_session") gaps.push({ reason: "contradictory closure feedback did not neutralize historical promotion/suppression" });
+      if (recall.preservationClosureRecallSuppressed === true || recall.active !== true) gaps.push({ reason: "contradictory closure feedback incorrectly suppressed the closure memory" });
+      if (conflict.positive?.independent_session_count < 1 || conflict.ignored?.independent_session_count < 1) gaps.push({ reason: "conflict does not preserve both independent evidence branches" });
+      if (conflict.historical_majority_authorization_allowed !== false) gaps.push({ reason: "historical majority was allowed to authorize conflict arbitration" });
+      if (contract.closure_feedback_conflict_active !== true
+        || contract.closure_feedback_current_session_verification_required !== true
+        || contract.closure_feedback_historical_majority_authorization_allowed !== false) gaps.push({ reason: "WorkerContext contract lacks conflict/current-session/no-majority-authority fields" });
+      if (packet.acceptance?.post_compact_completion_memory_preservation_closure_feedback_conflict_current_session_verification_required !== true
+        || packet.acceptance?.post_compact_completion_memory_preservation_closure_feedback_historical_majority_authorization_allowed !== false) gaps.push({ reason: "WorkerContext acceptance lacks closure conflict verification boundary" });
+      if (!/Closure feedback conflict|closure feedback conflict/i.test(rendered)
+        || !/current child session|current source|当前源码/i.test(rendered)) gaps.push({ reason: "rendered WorkerContext does not surface conflict and current-session verification" });
+      return {
+        taskFamilyKey: familyKey,
+        conflictActive: true,
+        recommendation: summary.recommendation || "",
+        arbitrationState: conflict.arbitration_state || "",
+        conflictRatio: Number(conflict.conflict_ratio || 0),
+        conflictConfidence: Number(conflict.conflict_confidence || 0),
+        positiveWeight: Number(conflict.positive?.weighted_evidence || 0),
+        ignoredWeight: Number(conflict.ignored?.weighted_evidence || 0),
+        positiveSessionCount: Number(conflict.positive?.independent_session_count || 0),
+        ignoredSessionCount: Number(conflict.ignored?.independent_session_count || 0),
+        workerContextConflictActive: contract.closure_feedback_conflict_active === true,
+        covered: gaps.length === 0,
+        gaps,
+      };
+    });
+    const typedLedger = readGroupTypedMemoryDistillationLedger(groupId);
+    const archive = typedLedger.postCompactCompletionMemoryPreservationRepairClosureArchive || {};
+    const archiveRows = Array.isArray(archive.rows) ? archive.rows : [];
+    const gaps = probes.flatMap((probe: any) => (probe.gaps || []).map((gap: any) => ({ taskFamilyKey: probe.taskFamilyKey, ...gap })));
+    if (archiveRows.length !== Number(archive.archived_count || archiveRows.length)) gaps.push({ reason: "conflict arbitration changed immutable closure archive count" });
+    return {
+      schema: "ccm-post-compact-completion-memory-preservation-closure-feedback-conflict-group-v1",
+      groupId,
+      status: probes.length === 0 ? "empty" : gaps.length ? "fail" : "ok",
+      taskFamilyCount: probes.length,
+      conflictFamilyCount: probes.filter((probe: any) => probe.conflictActive).length,
+      coveredConflictFamilyCount: probes.filter((probe: any) => probe.conflictActive && probe.covered).length,
+      historicalMajorityAuthorizationAllowed: false,
+      immutableClosureHistoryPreserved: archiveRows.length === Number(archive.archived_count || archiveRows.length),
+      probes,
+      gaps,
+    };
+  });
+  const checked = rows.filter((row: any) => row.conflictFamilyCount > 0);
+  return {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-feedback-conflict-report-v1",
+    generatedAt: now(),
+    overall: {
+      status: checked.length === 0 ? "empty" : checked.every((row: any) => row.status === "ok") ? "ok" : "fail",
+      checkedGroupCount: checked.length,
+      groupsCovered: checked.filter((row: any) => row.status === "ok").length,
+      conflictFamilyCount: checked.reduce((sum: number, row: any) => sum + row.conflictFamilyCount, 0),
+      coveredConflictFamilyCount: checked.reduce((sum: number, row: any) => sum + row.coveredConflictFamilyCount, 0),
+    },
+    groups: rows,
+    weakGroups: rows.filter((row: any) => row.status === "fail"),
+  };
+}
+
+function evaluatePostCompactCompletionPreservationClosureFeedbackConflict(options: any = {}) {
+  const report = buildPostCompactCompletionPreservationClosureFeedbackConflictReport(options);
+  const check: any = makeQualityCheck(
+    "post_compact_completion_memory_preservation_closure_feedback_conflict_arbitration",
+    "Post-Compact Completion Memory Preservation Closure Feedback Conflict Arbitration",
+    Number(report.overall.conflictFamilyCount || 0),
+    Number(report.overall.coveredConflictFamilyCount || 0),
+    (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12),
+    (report.weakGroups || []).flatMap((row: any) => row.gaps || []).slice(0, 12),
+    "Contradictory reliable used/verified and ignored closure feedback must preserve both branches, neutralize historical ranking, and require current-session verification in WorkerContext without granting historical-majority authority."
+  );
+  check.report = report;
+  return check;
+}
+
+function buildPostCompactCompletionPreservationClosureConflictResolutionReport(options: any = {}) {
+  const groupIds = replayRepairDispatchBindingGroupIds(options);
+  const {
+    buildPostCompactCompletionMemoryPreservationClosureUsageSummary,
+    lookupPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchive,
+    readGroupTypedMemoryDistillationLedger,
+    readPostCompactCompletionMemoryPreservationClosureUsageLedger,
+    scanGroupTypedMemoryDocuments,
+    verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchive,
+  } = require("../collaboration/group-memory-index");
+  const { buildAgentMemoryContextBundle } = require("../collaboration/memory");
+  const { buildWorkerContextPacket, renderWorkerContextPacket } = require("../../agents/runtime-kernel");
+  const targetProject = String(options.targetProject || options.target_project || "api");
+  const resolutionDoc = "post-compact-completion-memory-preservation-closure-conflict-resolutions.md";
+  const rows = groupIds.map((groupId: string) => {
+    const usageLedger = readPostCompactCompletionMemoryPreservationClosureUsageLedger(groupId);
+    const resolutionEntries = (Array.isArray(usageLedger.entries) ? usageLedger.entries : []).filter((entry: any) => entry.conflict_resolution === true);
+    const typedLedger = readGroupTypedMemoryDistillationLedger(groupId);
+    const archive = typedLedger.postCompactCompletionMemoryPreservationClosureConflictResolutionArchive || {};
+    const archiveRows = Array.isArray(archive.rows) ? archive.rows : [];
+    const coldVerification = archive.schema ? verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchive(groupId) : null;
+    const doc = scanGroupTypedMemoryDocuments(groupId).find((item: any) => item.relPath === resolutionDoc) || null;
+    const familyKeys = uniqueStrings(resolutionEntries.map((entry: any) => entry.task_family_key), 32);
+    const probes = familyKeys.map((familyKey: string) => {
+      const entry = [...resolutionEntries].reverse().find((item: any) => item.task_family_key === familyKey) || {};
+      const summary = buildPostCompactCompletionMemoryPreservationClosureUsageSummary(groupId, {
+        ...options,
+        targetProject,
+        task: entry.task_text || "",
+        taskFamilyKey: familyKey,
+      });
+      const resolution = summary.feedbackConflictResolution || {};
+      const hotArchiveRow = archiveRows.find((row: any) => row.resolution_entry_id === entry.entry_id) || null;
+      const coldLookup = hotArchiveRow ? null : lookupPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchive(groupId, { resolutionEntryId: entry.entry_id }, { limit: 1 });
+      const archiveRow = hotArchiveRow || coldLookup?.rows?.[0] || null;
+      const gaps: any[] = [];
+      if (!archiveRow) gaps.push({ reason: "session-bound conflict resolution missing typed archive row" });
+      if (!entry.task_agent_session_id || !entry.native_session_id || archiveRow?.task_agent_session_id !== entry.task_agent_session_id || archiveRow?.native_session_id !== entry.native_session_id) gaps.push({ reason: "typed conflict resolution is not bound to the exact resolving task/native session" });
+      if (entry.usage_state === "ignored" ? !entry.reason : entry.current_source_verified !== true) gaps.push({ reason: "conflict resolution lacks current-source verification or ignored reason" });
+      if (resolution.historical_branches_preserved !== true || resolution.reversible !== true || resolution.historical_majority_authorization_allowed !== false) gaps.push({ reason: "conflict resolution lost reversible/historical-branch/no-majority-authority boundary" });
+      if (resolution.active === true) {
+        const marker = hash([groupId, familyKey, "phase191-resolution-quality"], 10);
+        const task = `review post-compact completion memory preservation repair closure for ${entry.task_text || "current task"}`;
+        const bundle = buildAgentMemoryContextBundle(groupId, targetProject, task, {
+          includeGlobalClaudeMemory: false,
+          includeProjectMemory: false,
+          maxTypedMemory: 8,
+          maxRenderedChars: 18000,
+          taskId: `phase191-resolution-quality-${marker}`,
+          taskAgentSessionId: `phase191-resolution-quality-task-session-${marker}`,
+          nativeSessionId: `phase191-resolution-quality-native-session-${marker}`,
+          executionId: `phase191-resolution-quality-execution-${marker}`,
+          generatedAt: options.now || options.generatedAt || options.generated_at,
+        });
+        const recall = bundle.post_compact_reinjection_repair_receipt_recall || bundle.group_state?.typedMemory?.postCompactReinjectionRepairReceiptRecall || {};
+        const packet = buildWorkerContextPacket({
+          group: { id: groupId, name: "Closure conflict resolution quality", members: [{ project: targetProject }] },
+          project: targetProject,
+          task,
+          taskId: `phase191-resolution-quality-${marker}`,
+          traceId: `phase191-resolution-quality-trace-${marker}`,
+          agentType: "codex",
+          memory: bundle,
+          contextUsageOptions: { maxTokens: 90000 },
+        });
+        const contract = packet.post_compact_reinjection_repair_receipt_memory_contract || {};
+        const rendered = renderWorkerContextPacket(packet);
+        if (!(recall.docRelPaths || []).includes(resolutionDoc)) gaps.push({ reason: "resolved conflict typed MEMORY.md is not recalled for the same task family" });
+        if (contract.closure_conflict_resolution_active !== true
+          || contract.closure_conflict_resolution_entry_id !== entry.entry_id
+          || contract.closure_conflict_resolution_reversible !== true
+          || contract.closure_conflict_resolution_historical_branches_preserved !== true) gaps.push({ reason: "WorkerContext contract lacks active reversible conflict resolution identity" });
+        if (packet.acceptance?.post_compact_completion_memory_preservation_closure_conflict_resolution_reverification_required !== true) gaps.push({ reason: "WorkerContext acceptance lacks future-session resolution reverification" });
+        if (!/Closure conflict resolution history/i.test(rendered) || !/reverify current source/i.test(rendered)) gaps.push({ reason: "rendered WorkerContext does not surface resolution/reverification boundary" });
+      } else if (resolution.reopened !== true || summary.feedbackConflictActive !== true) {
+        gaps.push({ reason: "inactive conflict resolution was not explicitly reopened by later reliable opposition" });
+      }
+      return {
+        taskFamilyKey: familyKey,
+        resolutionEntryId: entry.entry_id || "",
+        resolutionUsageState: entry.usage_state || "",
+        active: resolution.active === true,
+        reopened: resolution.reopened === true,
+        state: resolution.state || "",
+        archiveCovered: !!archiveRow,
+        archiveSource: hotArchiveRow ? "hot" : archiveRow ? "cold" : "missing",
+        coldShardsRead: Number(coldLookup?.shardsRead || 0),
+        covered: gaps.length === 0,
+        gaps,
+      };
+    });
+    const gaps = probes.flatMap((probe: any) => (probe.gaps || []).map((gap: any) => ({ taskFamilyKey: probe.taskFamilyKey, ...gap })));
+    if (resolutionEntries.length && !doc) gaps.push({ reason: `typed MEMORY.md missing: ${resolutionDoc}` });
+    return {
+      schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-group-v1",
+      groupId,
+      status: resolutionEntries.length === 0 ? "empty" : gaps.length ? "fail" : "ok",
+      resolutionEntryCount: resolutionEntries.length,
+      archivedResolutionCount: Number(archive.archived_count || archiveRows.length),
+      hotResolutionCount: archiveRows.length,
+      coldArchiveValid: coldVerification?.valid === true,
+      coveredResolutionCount: probes.filter((probe: any) => probe.covered).length,
+      activeResolutionCount: probes.filter((probe: any) => probe.active).length,
+      reopenedResolutionCount: probes.filter((probe: any) => probe.reopened).length,
+      typedMemoryDocFile: doc?.file || "",
+      historicalBranchesPreserved: coldVerification?.valid === true && archiveRows.every((row: any) => row.historical_branches_preserved === true),
+      reversible: coldVerification?.valid === true && archiveRows.every((row: any) => row.reversible === true),
+      probes,
+      gaps,
+    };
+  });
+  const checked = rows.filter((row: any) => row.resolutionEntryCount > 0);
+  return {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-report-v1",
+    generatedAt: now(),
+    overall: {
+      status: checked.length === 0 ? "empty" : checked.every((row: any) => row.status === "ok") ? "ok" : "fail",
+      checkedGroupCount: checked.length,
+      groupsCovered: checked.filter((row: any) => row.status === "ok").length,
+      resolutionEntryCount: checked.reduce((sum: number, row: any) => sum + row.resolutionEntryCount, 0),
+      archivedResolutionCount: checked.reduce((sum: number, row: any) => sum + row.archivedResolutionCount, 0),
+      coveredResolutionCount: checked.reduce((sum: number, row: any) => sum + row.coveredResolutionCount, 0),
+      activeResolutionCount: checked.reduce((sum: number, row: any) => sum + row.activeResolutionCount, 0),
+      reopenedResolutionCount: checked.reduce((sum: number, row: any) => sum + row.reopenedResolutionCount, 0),
+    },
+    groups: rows,
+    weakGroups: rows.filter((row: any) => row.status === "fail"),
+  };
+}
+
+function evaluatePostCompactCompletionPreservationClosureConflictResolution(options: any = {}) {
+  const report = buildPostCompactCompletionPreservationClosureConflictResolutionReport(options);
+  const check: any = makeQualityCheck(
+    "post_compact_completion_memory_preservation_closure_conflict_resolution",
+    "Post-Compact Completion Memory Preservation Closure Conflict Resolution",
+    Number(report.overall.resolutionEntryCount || 0),
+    Number(report.overall.coveredResolutionCount || 0),
+    (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12),
+    (report.weakGroups || []).flatMap((row: any) => row.gaps || []).slice(0, 12),
+    "A newer compliant current-session conflict decision must become reversible typed MEMORY.md, preserve both historical branches, rebind future WorkerContext verification, and reopen when later reliable opposition appears."
   );
   check.report = report;
   return check;
@@ -24162,6 +26728,10 @@ function postCompactReinjectionRepairReceiptMemoryUsageCoverage(contract: any = 
     const usedCurrentSourceVerified = usedRows.some((item: string) => /currentSourceVerified\s*=\s*true/i.test(item));
     const ignoredCovered = ignoredRows.some((item: string) => /usageState\s*=\s*(ignored|not_used|not used)|\bignored\b/i.test(item));
     const ignoredReasonCovered = ignoredRows.some((item: string) => /reason\s*=\s*[^;\s][^;]*/i.test(item));
+    const usageState = usedCovered
+      ? usedRows.some((item: string) => /usageState\s*=\s*verified|\bverified\b/i.test(item)) ? "verified" : "used"
+      : ignoredCovered ? "ignored" : "mentioned";
+    const ignoredReason = ignoredRows.map((item: string) => item.match(/reason\s*=\s*([^;]+)/i)?.[1]?.trim() || "").find(Boolean) || "";
     const covered = usedCovered || ignoredCovered;
     const compliant = usedCovered
       ? usedCurrentSourceVerified
@@ -24176,6 +26746,9 @@ function postCompactReinjectionRepairReceiptMemoryUsageCoverage(contract: any = 
       usedCurrentSourceVerified,
       ignoredCovered,
       ignoredReasonCovered,
+      usageState,
+      currentSourceVerified: usedCurrentSourceVerified,
+      reason: ignoredReason,
     };
   });
   const missingDocRelPaths = docRows.filter((row: any) => row.covered !== true).map((row: any) => row.relPath);
@@ -24568,6 +27141,80 @@ function buildPostCompactReinjectionRepairReceiptMemoryUsageReceiptReport(option
     const repairItems = (Array.isArray(workLedger.items) ? workLedger.items : [])
       .filter(isPostCompactReinjectionRepairReceiptMemoryUsageReceiptRepairWorkItem);
     const openRepairItems = repairItems.filter((item: any) => replayRepairWorkItemOpen(item.status));
+    let closureUsageFeedback: any = null;
+    try {
+      const api = require("../collaboration/group-memory-index");
+      const closureRelPath = "post-compact-completion-memory-preservation-repair-closures.md";
+      const feedbackRows = receiptRows.flatMap((row: any) => {
+        const completedProof = row.completedRepairReceipt?.verified === true ? row.completedRepairReceipt : null;
+        const receiptContract = workerContextPacketPostCompactReinjectionRepairReceiptMemoryContract(row.entry || {}) || {};
+        const conflictResolutionRequested = receiptContract.closure_feedback_conflict_active === true
+          && receiptContract.closure_feedback_current_session_verification_required === true
+          && receiptContract.closure_feedback_historical_majority_authorization_allowed === false;
+        const conflictParentFingerprint = conflictResolutionRequested ? hash([
+          groupId,
+          receiptContract.closure_feedback_arbitration_state || "",
+          receiptContract.closure_feedback_conflict_ratio || 0,
+          receiptContract.closure_feedback_positive_weight || 0,
+          receiptContract.closure_feedback_ignored_weight || 0,
+          receiptContract.preservation_corrected_outcome_ids || [],
+        ], 18) : "";
+        const proofRows = Array.isArray(completedProof?.coverage_rows) ? completedProof.coverage_rows : [];
+        const docRows = proofRows.length ? proofRows : row.coverage?.docRows || [];
+        const relatedRepairItem = repairItems.find((item: any) => {
+          const packetMatches = !row.packet_id || String(item.original_worker_context_packet_id || item.worker_context_packet_id || "") === String(row.packet_id);
+          const bindingMatches = !row.binding_id || String(item.original_binding_id || item.binding_id || "") === String(row.binding_id);
+          return packetMatches && bindingMatches;
+        }) || null;
+        const proofCompliant = completedProof
+          ? completedProof.all_docs_compliant === true
+            && completedProof.task_session_matched === true
+            && completedProof.native_session_matched === true
+          : null;
+        return docRows
+        .filter((doc: any) => doc.relPath === closureRelPath)
+        .map((doc: any) => ({
+          target_project: row.project || "",
+          agent: row.receipt?.agent || row.entry?.agent_type || row.entry?.agentType || row.entry?.provider || row.receipt?.project || row.project || "",
+          task_id: row.entry?.task_id || "",
+          task_text: row.entry?.task || row.entry?.worker_task || row.entry?.task_text || row.entry?.taskText || "",
+          task_family_key: row.entry?.task_family_key || row.entry?.taskFamilyKey || receiptContract.closure_feedback_task_family_key || "",
+          execution_id: row.entry?.execution_id || "",
+          worker_context_packet_id: row.packet_id || "",
+          binding_id: row.binding_id || "",
+          task_agent_session_id: completedProof?.task_agent_session_id || row.coverage?.receiptTaskAgentSessionId || row.receipt?.task_agent_session_id || "",
+          native_session_id: completedProof?.native_session_id || row.coverage?.receiptNativeSessionId || row.receipt?.native_session_id || "",
+          receipt_source: completedProof ? "corrected_repair_receipt" : row.receipt?.source || "",
+          receipt_status: completedProof ? "verified" : row.receipt?.status || "",
+          rel_path: doc.relPath,
+          usage_state: doc.usageState || "mentioned",
+          current_source_verified: doc.currentSourceVerified === true,
+          compliant: doc.compliant === true && (completedProof
+            ? proofCompliant === true
+            : row.coverage?.historicalBoundaryCovered === true
+              && row.coverage?.taskSessionMatched === true && row.coverage?.nativeSessionMatched === true),
+          reason: doc.reason || (doc.usageState === "mentioned" ? "required closure memory usage was not classified" : ""),
+          repair_work_item_id: row.repairedByWorkItemId || relatedRepairItem?.work_item_id || relatedRepairItem?.id || "",
+          conflict_resolution: conflictResolutionRequested,
+          conflict_parent_arbitration_state: receiptContract.closure_feedback_arbitration_state || "",
+          conflict_parent_fingerprint: conflictParentFingerprint,
+          conflict_parent_ratio: Number(receiptContract.closure_feedback_conflict_ratio || 0),
+          conflict_parent_positive_weight: Number(receiptContract.closure_feedback_positive_weight || 0),
+          conflict_parent_ignored_weight: Number(receiptContract.closure_feedback_ignored_weight || 0),
+        }));
+      });
+      if (typeof api.recordPostCompactCompletionMemoryPreservationClosureUsage === "function") {
+        api.recordPostCompactCompletionMemoryPreservationClosureUsage(groupId, {
+          rows: feedbackRows,
+          generatedAt: options.generatedAt || options.generated_at || now(),
+        });
+      }
+      if (typeof api.buildPostCompactCompletionMemoryPreservationClosureUsageSummary === "function") {
+        closureUsageFeedback = api.buildPostCompactCompletionMemoryPreservationClosureUsageSummary(groupId, {
+          targetProject: options.targetProject || options.target_project || "",
+        });
+      }
+    } catch {}
     const status = receiptRows.length === 0 ? "empty" : gapRows.length === 0 ? "ok" : gapRows.length < receiptRows.length ? "warn" : "fail";
     return {
       schema: "ccm-post-compact-reinjection-repair-receipt-memory-usage-receipt-group-v1",
@@ -24587,6 +27234,7 @@ function buildPostCompactReinjectionRepairReceiptMemoryUsageReceiptReport(option
       repairedReceiptCount: receiptRows.filter((row: any) => !!row.repairedByWorkItemId).length,
       repairItemCount: repairItems.length,
       openRepairItemCount: openRepairItems.length,
+      closureUsageFeedback,
       receipts: receiptRows.slice(-12).reverse().map((row: any) => ({
         binding_id: row.binding_id || "",
         assignment_id: row.assignment_id || "",
@@ -27967,6 +30615,25 @@ function memoryQualityCheckDescriptors(lightweight: boolean, options: any = {}) 
     { id: "worker_context_packet_compaction_retry", run: () => evaluateWorkerContextPacketCompactionRetry(options) },
     { id: "worker_context_packet_compact_hook_ledger", run: () => evaluateWorkerContextPacketCompactHookLedger(options) },
     { id: "worker_context_packet_compact_outcome_ledger", run: () => evaluateWorkerContextPacketCompactOutcomeLedger(options) },
+    { id: "worker_context_packet_compact_outcome_retention_safety", run: () => evaluateWorkerContextCompactOutcomeRetentionSafety(options) },
+    { id: "post_compact_reinjection_repair_receipt_memory_usage_repair_completion_compaction_preservation", run: () => evaluatePostCompactReceiptMemoryUsageRepairCompletionCompactionPreservation(options) },
+    { id: "post_compact_completion_memory_preservation_closure_conflict_resolution_compaction", run: () => evaluatePostCompactCompletionMemoryPreservationClosureConflictResolutionCompaction(options) },
+    { id: "post_compact_receipt_memory_usage_repair_completion_compaction_preservation_repair_work_items", run: () => evaluatePostCompactCompletionPreservationRepairWorkItems(options) },
+    { id: "post_compact_receipt_memory_usage_repair_completion_compaction_preservation_repair_dispatch_candidates", run: () => evaluatePostCompactCompletionPreservationRepairDispatchCandidates(options) },
+    { id: "post_compact_receipt_memory_usage_repair_completion_compaction_preservation_repair_dispatch_briefs", run: () => evaluatePostCompactCompletionPreservationRepairDispatchBriefs(options) },
+    { id: "post_compact_receipt_memory_usage_repair_completion_compaction_preservation_repair_closure", run: () => evaluatePostCompactCompletionPreservationRepairClosure(options) },
+    { id: "post_compact_receipt_memory_usage_repair_completion_compaction_preservation_repair_closure_typed_memory", run: () => evaluatePostCompactCompletionPreservationRepairClosureTypedMemory(options) },
+    { id: "post_compact_receipt_memory_usage_repair_completion_compaction_preservation_repair_closure_worker_context_recall", run: () => evaluatePostCompactCompletionPreservationRepairClosureWorkerContext(options) },
+    { id: "post_compact_completion_memory_preservation_closure_usage_feedback", run: () => evaluatePostCompactCompletionPreservationClosureUsageFeedback(options) },
+    { id: "post_compact_completion_memory_preservation_closure_receipt_repair", run: () => evaluatePostCompactCompletionPreservationClosureReceiptRepair(options) },
+    { id: "post_compact_completion_memory_preservation_closure_recall_priority", run: () => evaluatePostCompactCompletionPreservationClosureRecallPriority(options) },
+    { id: "post_compact_completion_memory_preservation_closure_feedback_aging_task_family", run: () => evaluatePostCompactCompletionPreservationClosureFeedbackAgingTaskFamily(options) },
+    { id: "post_compact_completion_memory_preservation_closure_feedback_evidence_confidence", run: () => evaluatePostCompactCompletionPreservationClosureFeedbackEvidenceConfidence(options) },
+    { id: "post_compact_completion_memory_preservation_closure_feedback_conflict_arbitration", run: () => evaluatePostCompactCompletionPreservationClosureFeedbackConflict(options) },
+    { id: "post_compact_completion_memory_preservation_closure_conflict_resolution", run: () => evaluatePostCompactCompletionPreservationClosureConflictResolution(options) },
+    { id: "post_compact_completion_memory_preservation_closure_conflict_resolution_cold_archive_integrity", run: () => evaluateConflictResolutionColdArchiveIntegrity(options) },
+    { id: "post_compact_completion_memory_preservation_closure_conflict_resolution_manifest_generation_gc_safety", run: () => evaluateConflictResolutionManifestGenerationGcSafety(options) },
+    { id: "post_compact_completion_memory_preservation_closure_conflict_resolution_maintenance_controller", run: () => evaluateConflictResolutionMaintenanceController(options) },
     { id: "worker_context_provider_ranking_provenance_compact_repair_work_items", run: () => evaluateWorkerContextProviderRankingProvenanceCompactRepairWorkItems(options) },
     { id: "worker_context_provider_ranking_provenance_compact_repair_dispatch_briefs", run: () => evaluateWorkerContextProviderRankingProvenanceCompactRepairDispatchBriefs(options) },
     { id: "worker_context_provider_ranking_provenance_compact_repair_receipt_consumption", run: () => evaluateWorkerContextProviderRankingProvenanceCompactRepairReceiptConsumption(options) },
@@ -28002,6 +30669,7 @@ function memoryQualityCheckDescriptors(lightweight: boolean, options: any = {}) 
     { id: "compaction_hook_ledger", run: () => evaluateCompactionHookLedger({}) },
     { id: "compact_boundary_replay_gate", run: () => evaluateCompactBoundaryReplayGate({}) },
     { id: "replay_repair_pending_work_items", run: () => evaluateReplayRepairPendingWorkItems({}) },
+    { id: "replay_repair_ledger_retention_safety", run: () => evaluateReplayRepairLedgerRetentionSafety(options) },
     { id: "replay_repair_dispatch_candidates", run: () => evaluateReplayRepairDispatchCandidates({}) },
     { id: "post_compact_reinjection_repair_dispatch_candidates", run: () => evaluatePostCompactReinjectionRepairDispatchCandidates(options) },
     { id: "post_compact_reinjection_repair_dispatch_briefs", run: () => evaluatePostCompactReinjectionRepairDispatchBriefs(options) },
@@ -33023,6 +35691,7 @@ export function runMemoryCenterApiMicrocompactNativeApplyProofRepairDispatchBrie
   const telemetryFile = getGroupApiMicrocompactNativeApplyRequestTelemetryLedgerFile(groupId);
   const workItemsFile = getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId);
   const dispatchPlanFile = getGroupReplayRepairDispatchPlanLedgerFile(groupId);
+  const typedDir = path.join(GROUP_TYPED_MEMORY_MD_DIR, sidecarFileId(groupId));
   const taskId = `task-${groupId}`;
   const nativePlan = {
     schema: "ccm-api-microcompact-native-apply-plan-v1",
@@ -33243,6 +35912,7 @@ export function runMemoryCenterApiMicrocompactNativeApplyProofRepairDispatchBrie
     ]) {
       try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
     }
+    try { if (fs.existsSync(typedDir)) fs.rmSync(typedDir, { recursive: true, force: true }); } catch {}
   }
 }
 
@@ -49365,6 +52035,1944 @@ export function runMemoryCenterPostCompactReceiptMemoryUsageRepairCompletionWork
   }
 }
 
+export function runMemoryCenterPostCompactReceiptMemoryUsageRepairCompletionCompactionPreservationSelfTest() {
+  const groupId = `memory-center-completion-memory-compaction-preservation-${process.pid}-${Date.now()}`;
+  const bindingFile = getGroupReplayRepairDispatchBindingLedgerFile(groupId);
+  const outcomeFile = getGroupWorkerContextCompactOutcomeLedgerFile(groupId);
+  const completionDoc = "post-compact-receipt-memory-usage-repair-completions.md";
+  const workItemId = "post-compact-receipt-memory-usage-repair:PHASE184_MEMORY_CENTER";
+  const timelineId = "replay-repair-brief-timeline:PHASE184_MEMORY_CENTER";
+  const currentTaskSession = "task-agent-session-phase184-memory-center-current";
+  const currentNativeSession = "native-session-phase184-memory-center-current";
+  const historicalTaskSessions = ["task-agent-session-phase184-memory-center-original", "task-agent-session-phase184-memory-center-repair"];
+  const historicalNativeSessions = ["native-session-phase184-memory-center-original", "native-session-phase184-memory-center-repair"];
+  const methods = [
+    "memory_first_deterministic_context_compaction",
+    "replay_brief_partial_compact",
+    "metadata_partial_compact",
+    "deterministic_head_tail_critical_lines",
+  ];
+  const summary = {
+    schema: "ccm-post-compact-receipt-memory-usage-repair-completion-packet-summary-v1",
+    present: true,
+    completion_doc_rel_paths: [completionDoc],
+    required_doc_rel_paths: [completionDoc],
+    work_item_ids: [workItemId],
+    timeline_binding_ids: [timelineId],
+    historical_task_agent_session_ids: historicalTaskSessions,
+    historical_native_session_ids: historicalNativeSessions,
+    current_session_binding_id: "binding-phase184-memory-center-current",
+    current_task_agent_session_id: currentTaskSession,
+    current_native_session_id: currentNativeSession,
+    usage_acceptance_required: true,
+    current_session_acceptance_required: true,
+    authority_boundary_valid: true,
+  };
+  const preservation = {
+    schema: "ccm-post-compact-receipt-memory-usage-repair-completion-preservation-v1",
+    required: true,
+    preserved: true,
+    source: "worker_context_packet_compaction_retry",
+    before: summary,
+    after: summary,
+    missing_completion_doc_rel_paths: [],
+    missing_required_doc_rel_paths: [],
+    missing_work_item_ids: [],
+    missing_timeline_binding_ids: [],
+    missing_historical_task_agent_session_ids: [],
+    missing_historical_native_session_ids: [],
+    gaps: [],
+  };
+  try {
+    const orchestratorSelfTest = require("../collaboration/group-orchestrator").runWorkerContextCompletionMemoryCompactionPreservationSelfTest();
+    const bindingEntries = methods.map((method, index) => {
+      const retryId = `phase184-memory-center-retry-${index}`;
+      const hookRunId = `phase184-memory-center-hook-${index}`;
+      const recovered = index > 0;
+      return {
+        schema: "ccm-replay-repair-main-agent-dispatch-brief-assignment-v1",
+        binding_id: `phase184-memory-center-binding-${index}`,
+        assignment_id: `phase184-memory-center-assignment-${index}`,
+        dispatch_key: `phase184-memory-center-dispatch-${index}`,
+        groupId,
+        project: "api",
+        worker_context_packet_id: `phase184-memory-center-packet-${index}`,
+        dispatch_ready: recovered,
+        worker_context_packet_compact_hook_run_id: hookRunId,
+        worker_context_packet_context_usage: { status: recovered ? "ok" : "over_budget" },
+        worker_context_pre_dispatch_gate: { dispatch_ready: recovered, context_compaction_retry: null },
+        worker_context_packet_compaction_retry: {
+          schema: "ccm-worker-context-compaction-retry-v1",
+          retry_id: retryId,
+          method,
+          status: recovered ? "recovered" : "blocked",
+          from_packet_id: `phase184-memory-center-from-packet-${index}`,
+          retry_packet_id: `phase184-memory-center-packet-${index}`,
+          from_usage_status: "over_budget",
+          retry_usage_status: recovered ? "ok" : "over_budget",
+          from_total_tokens: 9000,
+          retry_total_tokens: recovered ? 4200 : 5200,
+          from_free_tokens: -3000,
+          retry_free_tokens: recovered ? 800 : -200,
+          compact_hook_run_id: hookRunId,
+          memory_first: index === 0,
+          memory_compaction: index === 0 ? {
+            schema: "ccm-worker-context-memory-first-compaction-v1",
+            status: "compacted",
+            original_memory_chars: 12000,
+            compacted_memory_chars: 3000,
+            omitted_chars: 9000,
+            original_memory_hash: "phase184-original-memory-hash",
+            compacted_memory_hash: "phase184-compacted-memory-hash",
+          } : null,
+          partial_compact: index === 1 || index === 2,
+          partial_compaction: index === 1 ? {
+            schema: "ccm-worker-context-replay-brief-partial-compaction-v1",
+            category: "replay_repair_dispatch_briefs",
+            omitted_chars: 4000,
+            preserved_fields: ["brief_id", "work_item_id"],
+          } : index === 2 ? {
+            schema: "ccm-worker-context-metadata-partial-compaction-v1",
+            category: "worker_context_metadata",
+            categories: ["constraints_and_documents"],
+            omitted_chars: 5000,
+            preserved_fields: ["contract_injections.injection_id"],
+          } : null,
+          ptl_emergency_hint: index === 3 ? { schema: "ccm-worker-context-ptl-emergency-hint-v1", engaged: true, emergency_level: "critical" } : null,
+          original_task_hash: `phase184-task-hash-${index}`,
+          compacted_task_hash: index === 3 ? `phase184-compacted-task-hash-${index}` : `phase184-task-hash-${index}`,
+          original_task_chars: 8000,
+          compacted_task_chars: index === 3 ? 2200 : 8000,
+          omitted_chars: index === 3 ? 5800 : 4000,
+          preserved_receipt_contract: true,
+          post_compact_receipt_memory_usage_repair_completion_preservation: { ...preservation, retry_id: retryId },
+          post_compact_receipt_memory_usage_repair_completion_preserved: true,
+        },
+      };
+    });
+    writeJsonAtomic(bindingFile, {
+      schema: "ccm-replay-repair-main-agent-dispatch-brief-assignment-ledger-v1",
+      version: 1,
+      groupId,
+      file: bindingFile,
+      entries: bindingEntries,
+      bindingCount: bindingEntries.length,
+      updatedAt: "2026-07-11T01:20:00.000Z",
+    });
+    const outcomeEntries = bindingEntries.map((entry: any, index: number) => {
+      const retry = entry.worker_context_packet_compaction_retry;
+      return {
+        schema: "ccm-worker-context-compact-outcome-entry-v1",
+        outcome_id: `phase184-memory-center-outcome-${index}`,
+        group_id: groupId,
+        assignment_id: entry.assignment_id,
+        dispatch_key: entry.dispatch_key,
+        project: "api",
+        hook_run_id: entry.worker_context_packet_compact_hook_run_id,
+        retry_id: retry.retry_id,
+        method: retry.method,
+        status: retry.status,
+        dispatch_ready: entry.dispatch_ready,
+        from_packet_id: retry.from_packet_id,
+        retry_packet_id: retry.retry_packet_id,
+        from_total_tokens: retry.from_total_tokens,
+        retry_total_tokens: retry.retry_total_tokens,
+        from_free_tokens: retry.from_free_tokens,
+        retry_free_tokens: retry.retry_free_tokens,
+        token_delta: retry.from_total_tokens - retry.retry_total_tokens,
+        free_token_delta: retry.retry_free_tokens - retry.from_free_tokens,
+        memory_first: retry.memory_first,
+        partial_compact: retry.partial_compact,
+        task_compacted: index === 3,
+        task_hash_unchanged: index !== 3,
+        partial_compaction_categories: index === 1 ? ["replay_repair_dispatch_briefs"] : index === 2 ? ["constraints_and_documents"] : [],
+        ptl_emergency_hint: retry.ptl_emergency_hint,
+        post_compact_receipt_memory_usage_repair_completion_preservation: { ...preservation, retry_id: retry.retry_id },
+        post_compact_receipt_memory_usage_repair_completion_preserved: true,
+        at: `2026-07-11T01:20:0${index}.000Z`,
+      };
+    });
+    writeJsonAtomic(outcomeFile, {
+      schema: "ccm-worker-context-compact-outcome-ledger-v1",
+      version: 1,
+      groupId,
+      file: outcomeFile,
+      entries: outcomeEntries,
+      updatedAt: "2026-07-11T01:20:04.000Z",
+    });
+    const report = buildPostCompactReceiptMemoryUsageRepairCompletionCompactionPreservationReport({ groupIds: [groupId] });
+    const quality = evaluatePostCompactReceiptMemoryUsageRepairCompletionCompactionPreservation({ groupIds: [groupId] });
+    const qualityReport = buildMemoryQualityReport({
+      checkIds: ["post_compact_reinjection_repair_receipt_memory_usage_repair_completion_compaction_preservation"],
+      groupIds: [groupId],
+      tasks: [],
+      refresh: true,
+    });
+    const qualityCheck = (qualityReport.checks || []).find((item: any) => item.id === "post_compact_reinjection_repair_receipt_memory_usage_repair_completion_compaction_preservation") || {};
+    const group = report.groups?.[0] || {};
+    const checks = {
+      orchestratorFourStrategySelfTestPasses: orchestratorSelfTest.pass === true,
+      reportCoversAllPersistedStrategies: report.overall?.status === "ok"
+        && Number(report.overall?.requiredOutcomeCount || 0) === 4
+        && Number(report.overall?.preservedOutcomeCount || 0) === 4
+        && Number(report.overall?.memoryFirstCount || 0) === 1
+        && Number(report.overall?.replayPartialCount || 0) === 1
+        && Number(report.overall?.metadataPartialCount || 0) === 1
+        && Number(report.overall?.ptlEmergencyCount || 0) === 1,
+      persistedProofKeepsExactIdentityAndAuthority: (group.outcomes || []).every((outcome: any) => (outcome.completion_doc_rel_paths || []).includes(completionDoc)
+        && (outcome.completion_work_item_ids || []).includes(workItemId)
+        && (outcome.completion_timeline_binding_ids || []).includes(timelineId)
+        && outcome.completion_current_task_agent_session_id === currentTaskSession
+        && outcome.completion_current_native_session_id === currentNativeSession
+        && outcome.completion_authority_boundary_valid === true),
+      qualityCheckRegisteredAndPasses: quality.status === "ok"
+        && Number(quality.checked || 0) === 4
+        && Number(quality.passed || 0) === 4
+        && qualityCheck.status === "ok"
+        && Number(qualityCheck.checked || 0) === 4
+        && Number(qualityCheck.passed || 0) === 4,
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      report: report.overall,
+      quality: { status: qualityCheck.status || "", checked: qualityCheck.checked || 0, passed: qualityCheck.passed || 0 },
+      orchestrator: orchestratorSelfTest.scenarios || [],
+    };
+  } finally {
+    for (const file of [bindingFile, `${bindingFile}.bak`, outcomeFile, `${outcomeFile}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+  }
+}
+
+export function runMemoryCenterPostCompactReceiptMemoryUsageRepairCompletionCompactionPreservationRepairSelfTest() {
+  const groupId = `memory-center-completion-preservation-repair-${process.pid}-${Date.now()}`;
+  const decoyGroupId = `${groupId}-other-group`;
+  const bindingFile = getGroupReplayRepairDispatchBindingLedgerFile(groupId);
+  const outcomeFile = getGroupWorkerContextCompactOutcomeLedgerFile(groupId);
+  const decoyOutcomeFile = getGroupWorkerContextCompactOutcomeLedgerFile(decoyGroupId);
+  const workItemsFile = getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId);
+  const dispatchPlanFile = getGroupReplayRepairDispatchPlanLedgerFile(groupId);
+  const typedDir = path.join(GROUP_TYPED_MEMORY_MD_DIR, sidecarFileId(groupId));
+  const completionDoc = "post-compact-receipt-memory-usage-repair-completions.md";
+  const completionWorkItemId = "post-compact-receipt-memory-usage-repair:PHASE185";
+  const completionTimelineId = "replay-repair-brief-timeline:PHASE185";
+  const currentBindingId = "phase185-current-session-binding";
+  const currentTaskSession = "phase185-current-task-session";
+  const currentNativeSession = "phase185-current-native-session";
+  const historicalTaskSession = "phase185-historical-task-session";
+  const historicalNativeSession = "phase185-historical-native-session";
+  const failedRetryId = "phase185-failed-retry";
+  const failedOutcomeId = "phase185-failed-outcome";
+  const assignmentId = "phase185-assignment";
+  const summary = {
+    schema: "ccm-post-compact-receipt-memory-usage-repair-completion-packet-summary-v1",
+    present: true,
+    completion_doc_rel_paths: [completionDoc],
+    required_doc_rel_paths: [completionDoc],
+    work_item_ids: [completionWorkItemId],
+    timeline_binding_ids: [completionTimelineId],
+    historical_task_agent_session_ids: [historicalTaskSession],
+    historical_native_session_ids: [historicalNativeSession],
+    current_session_binding_id: currentBindingId,
+    current_task_agent_session_id: currentTaskSession,
+    current_native_session_id: currentNativeSession,
+    usage_acceptance_required: true,
+    current_session_acceptance_required: true,
+    authority_boundary_valid: true,
+  };
+  const failedAfter = {
+    ...summary,
+    completion_doc_rel_paths: [],
+    work_item_ids: [],
+    timeline_binding_ids: [],
+    current_task_agent_session_id: historicalTaskSession,
+    authority_boundary_valid: false,
+  };
+  const failedPreservation = {
+    schema: "ccm-post-compact-receipt-memory-usage-repair-completion-preservation-v1",
+    required: true,
+    preserved: false,
+    source: "worker_context_packet_compaction_retry",
+    retry_id: failedRetryId,
+    before: summary,
+    after: failedAfter,
+    missing_completion_doc_rel_paths: [completionDoc],
+    missing_required_doc_rel_paths: [],
+    missing_work_item_ids: [completionWorkItemId],
+    missing_timeline_binding_ids: [completionTimelineId],
+    missing_historical_task_agent_session_ids: [],
+    missing_historical_native_session_ids: [],
+    gaps: [
+      "completion_doc_rel_paths_missing_after_compact",
+      "completion_work_item_ids_missing_after_compact",
+      "completion_timeline_binding_ids_missing_after_compact",
+      "current_task_agent_session_changed_after_compact",
+      "historical_session_promoted_to_current_authority",
+    ],
+  };
+  const bindingEntry = {
+    schema: "ccm-replay-repair-main-agent-dispatch-brief-assignment-v1",
+    binding_id: "phase185-failed-binding",
+    assignment_id: assignmentId,
+    dispatch_key: "phase185-dispatch",
+    groupId,
+    project: "api",
+    worker_context_packet_id: "phase185-failed-packet",
+    dispatch_ready: false,
+    worker_context_packet_compact_hook_run_id: "phase185-failed-hook",
+    worker_context_packet_compaction_retry: {
+      schema: "ccm-worker-context-compaction-retry-v1",
+      retry_id: failedRetryId,
+      method: "memory_first_deterministic_context_compaction",
+      status: "blocked",
+      from_packet_id: "phase185-from-packet",
+      retry_packet_id: "phase185-failed-packet",
+      post_compact_receipt_memory_usage_repair_completion_preservation: failedPreservation,
+      post_compact_receipt_memory_usage_repair_completion_preserved: false,
+    },
+    updatedAt: "2026-07-12T01:00:00.000Z",
+  };
+  const failedOutcome = {
+    schema: "ccm-worker-context-compact-outcome-entry-v1",
+    outcome_id: failedOutcomeId,
+    group_id: groupId,
+    assignment_id: assignmentId,
+    dispatch_key: "phase185-dispatch",
+    project: "api",
+    hook_run_id: "phase185-failed-hook",
+    retry_id: failedRetryId,
+    method: "memory_first_deterministic_context_compaction",
+    status: "blocked",
+    dispatch_ready: false,
+    post_compact_receipt_memory_usage_repair_completion_preservation: failedPreservation,
+    post_compact_receipt_memory_usage_repair_completion_preserved: false,
+    at: "2026-07-12T01:00:01.000Z",
+  };
+  const tasksBefore = loadTasks().length;
+  try {
+    writeJsonAtomic(bindingFile, {
+      schema: "ccm-replay-repair-main-agent-dispatch-brief-assignment-ledger-v1",
+      version: 1,
+      groupId,
+      file: bindingFile,
+      entries: [bindingEntry],
+      updatedAt: "2026-07-12T01:00:01.000Z",
+    });
+    writeJsonAtomic(outcomeFile, {
+      schema: "ccm-worker-context-compact-outcome-ledger-v1",
+      version: 1,
+      groupId,
+      file: outcomeFile,
+      entries: [failedOutcome],
+      updatedAt: "2026-07-12T01:00:01.000Z",
+    });
+
+    const firstWorkReport = buildPostCompactCompletionPreservationRepairWorkItemReport({ groupIds: [groupId], generatedAt: "2026-07-12T01:00:02.000Z" });
+    const firstLedger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+    const firstItems = (firstLedger.items || []).filter((item: any) => isPostCompactCompletionPreservationRepairSource(item.source));
+    const secondWorkReport = buildPostCompactCompletionPreservationRepairWorkItemReport({ groupIds: [groupId], generatedAt: "2026-07-12T01:00:03.000Z" });
+    const secondLedger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+    const secondItems = (secondLedger.items || []).filter((item: any) => isPostCompactCompletionPreservationRepairSource(item.source));
+    const candidateReport = buildPostCompactCompletionPreservationRepairDispatchCandidateReport({ groupIds: [groupId], workItemReport: secondWorkReport });
+    const briefReport = buildPostCompactCompletionPreservationRepairDispatchBriefReport({ groupIds: [groupId], candidateReport, generatedAt: "2026-07-12T01:00:04.000Z" });
+    const candidate = candidateReport.groups?.[0]?.candidates?.[0] || {};
+    const brief = briefReport.groups?.[0]?.briefs?.[0] || {};
+
+    const wrongSummary = {
+      ...summary,
+      current_task_agent_session_id: historicalTaskSession,
+      authority_boundary_valid: false,
+    };
+    const wrongPreservation = {
+      schema: "ccm-post-compact-receipt-memory-usage-repair-completion-preservation-v1",
+      required: true,
+      preserved: true,
+      source: "worker_context_packet_compaction_retry",
+      retry_id: "phase185-wrong-retry",
+      before: summary,
+      after: wrongSummary,
+      gaps: [],
+    };
+    const wrongOutcome = {
+      ...failedOutcome,
+      outcome_id: "phase185-wrong-outcome",
+      retry_id: "phase185-wrong-retry",
+      hook_run_id: "phase185-wrong-hook",
+      status: "recovered",
+      dispatch_ready: true,
+      post_compact_receipt_memory_usage_repair_completion_preservation: wrongPreservation,
+      post_compact_receipt_memory_usage_repair_completion_preserved: true,
+      at: "2026-07-12T01:00:05.000Z",
+    };
+    writeJsonAtomic(outcomeFile, {
+      schema: "ccm-worker-context-compact-outcome-ledger-v1",
+      version: 1,
+      groupId,
+      file: outcomeFile,
+      entries: [failedOutcome, wrongOutcome],
+      updatedAt: "2026-07-12T01:00:05.000Z",
+    });
+    const wrongReport = buildPostCompactCompletionPreservationRepairWorkItemReport({ groupIds: [groupId], generatedAt: "2026-07-12T01:00:06.000Z" });
+    const wrongItem = wrongReport.groups?.[0]?.items?.[0] || {};
+
+    const correctedPreservation = {
+      schema: "ccm-post-compact-receipt-memory-usage-repair-completion-preservation-v1",
+      required: true,
+      preserved: true,
+      source: "worker_context_packet_compaction_retry",
+      retry_id: "phase185-corrected-retry",
+      before: summary,
+      after: summary,
+      missing_completion_doc_rel_paths: [],
+      missing_required_doc_rel_paths: [],
+      missing_work_item_ids: [],
+      missing_timeline_binding_ids: [],
+      missing_historical_task_agent_session_ids: [],
+      missing_historical_native_session_ids: [],
+      gaps: [],
+    };
+    const correctedOutcome = {
+      ...failedOutcome,
+      outcome_id: "phase185-corrected-outcome",
+      retry_id: "phase185-corrected-retry",
+      hook_run_id: "phase185-corrected-hook",
+      status: "recovered",
+      dispatch_ready: true,
+      post_compact_receipt_memory_usage_repair_completion_preservation: correctedPreservation,
+      post_compact_receipt_memory_usage_repair_completion_preserved: true,
+      at: "2026-07-12T01:00:07.000Z",
+    };
+    writeJsonAtomic(decoyOutcomeFile, {
+      schema: "ccm-worker-context-compact-outcome-ledger-v1",
+      version: 1,
+      groupId: decoyGroupId,
+      file: decoyOutcomeFile,
+      entries: [{ ...correctedOutcome, group_id: decoyGroupId }],
+      updatedAt: "2026-07-12T01:00:07.000Z",
+    });
+    const crossGroupReport = buildPostCompactCompletionPreservationRepairWorkItemReport({ groupIds: [groupId], generatedAt: "2026-07-12T01:00:07.500Z" });
+    const crossGroupItem = crossGroupReport.groups?.[0]?.items?.[0] || {};
+    writeJsonAtomic(outcomeFile, {
+      schema: "ccm-worker-context-compact-outcome-ledger-v1",
+      version: 1,
+      groupId,
+      file: outcomeFile,
+      entries: [failedOutcome, wrongOutcome, correctedOutcome],
+      updatedAt: "2026-07-12T01:00:07.000Z",
+    });
+    const correctedWorkReport = buildPostCompactCompletionPreservationRepairWorkItemReport({ groupIds: [groupId], generatedAt: "2026-07-12T01:00:08.000Z" });
+    const correctedItem = correctedWorkReport.groups?.[0]?.items?.[0] || {};
+    const closedCandidateReport = buildPostCompactCompletionPreservationRepairDispatchCandidateReport({ groupIds: [groupId], workItemReport: correctedWorkReport });
+    const closedBriefReport = buildPostCompactCompletionPreservationRepairDispatchBriefReport({ groupIds: [groupId], candidateReport: closedCandidateReport, generatedAt: "2026-07-12T01:00:09.000Z" });
+    const closureReport = buildPostCompactCompletionPreservationRepairClosureReport({ groupIds: [groupId], workItemReport: correctedWorkReport });
+    const closureTypedLedger = readJson(path.join(typedDir, ".distillation-ledger.json"), {});
+    const closureTypedRows = closureTypedLedger.postCompactCompletionMemoryPreservationRepairClosureArchive?.rows || [];
+    const qualityReport = buildMemoryQualityReport({
+      checkIds: [
+        "post_compact_receipt_memory_usage_repair_completion_compaction_preservation_repair_work_items",
+        "post_compact_receipt_memory_usage_repair_completion_compaction_preservation_repair_closure",
+      ],
+      groupIds: [groupId],
+      tasks: [],
+      refresh: true,
+    });
+    const qualityChecks = qualityReport.checks || [];
+    const checks = {
+      idempotentWorkItem: firstWorkReport.overall?.status === "ok"
+        && firstItems.length === 1
+        && secondItems.length === 1
+        && firstItems[0]?.id === secondItems[0]?.id
+        && Number(secondItems[0]?.seenCount || 0) === Number(firstItems[0]?.seenCount || 0),
+      candidateExactAndNoRealTask: candidateReport.overall?.status === "ok"
+        && candidate.shouldCreateRealTask === false
+        && candidate.completion_preservation_completion_doc_rel_paths?.includes(completionDoc)
+        && candidate.completion_preservation_work_item_ids?.includes(completionWorkItemId)
+        && candidate.completion_preservation_timeline_binding_ids?.includes(completionTimelineId)
+        && candidate.completion_preservation_current_task_agent_session_id === currentTaskSession,
+      briefSelfContainedAndNoRealTask: briefReport.overall?.status === "ok"
+        && brief.should_create_real_task === false
+        && String(brief.worker_task || "").includes(failedRetryId)
+        && String(brief.worker_task || "").includes(completionWorkItemId)
+        && String(brief.worker_task || "").includes(currentNativeSession),
+      wrongHistoricalAuthorityCannotClose: replayRepairWorkItemOpen(wrongItem.status)
+        && !wrongItem.corrected_compact_outcome_id,
+      crossGroupCorrectedOutcomeCannotClose: replayRepairWorkItemOpen(crossGroupItem.status)
+        && !crossGroupItem.corrected_compact_outcome_id,
+      correctedOutcomeStrictlyCloses: correctedItem.status === "completed"
+        && correctedItem.resolutionReason === "completion_memory_compaction_preservation_corrected_retry_verified"
+        && correctedItem.completion_source === "post_compact_receipt_memory_usage_repair_completion_compaction_preservation_corrected_retry"
+        && correctedItem.corrected_compact_outcome_id === correctedOutcome.outcome_id
+        && correctedItem.corrected_retry_proof?.exact_identity_restored === true
+        && correctedItem.corrected_retry_proof?.current_session_boundary_restored === true,
+      readyDispatchRetiredAfterClosure: Number(closedCandidateReport.overall?.expectedCandidateCount || 0) === 0
+        && Number(closedBriefReport.overall?.expectedBriefCount || 0) === 0
+        && !(closedBriefReport.groups?.[0]?.briefs || []).some((item: any) => item.status === "ready"),
+      closureQualityPasses: closureReport.overall?.status === "ok"
+        && Number(closureReport.overall?.verifiedClosureCount || 0) === 1
+        && qualityChecks.every((item: any) => ["ok", "empty"].includes(String(item.status || ""))),
+      correctedClosureAutomaticallyDistilled: closureTypedRows.length === 1
+        && closureTypedRows[0]?.failed_outcome_id === failedOutcomeId
+        && closureTypedRows[0]?.corrected_outcome_id === correctedOutcome.outcome_id
+        && fs.existsSync(path.join(typedDir, "post-compact-completion-memory-preservation-repair-closures.md")),
+      memoryCenterCreatedNoTask: loadTasks().length === tasksBefore,
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      workItems: correctedWorkReport.overall,
+      candidates: candidateReport.overall,
+      briefs: briefReport.overall,
+      closure: closureReport.overall,
+      quality: qualityChecks.map((item: any) => ({ id: item.id, status: item.status, checked: item.checked, passed: item.passed })),
+    };
+  } finally {
+    for (const file of [bindingFile, `${bindingFile}.bak`, outcomeFile, `${outcomeFile}.bak`, decoyOutcomeFile, `${decoyOutcomeFile}.bak`, workItemsFile, `${workItemsFile}.bak`, dispatchPlanFile, `${dispatchPlanFile}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+    try { if (fs.existsSync(typedDir)) fs.rmSync(typedDir, { recursive: true, force: true }); } catch {}
+  }
+}
+
+export function runMemoryCenterPostCompactCompletionMemoryPreservationRepairClosureTypedMemoryWorkerContextSelfTest() {
+  const suffix = `${process.pid}-${Date.now()}`;
+  const groupA = `memory-center-completion-preservation-closure-a-${suffix}`;
+  const groupB = `memory-center-completion-preservation-closure-b-${suffix}`;
+  const typedDirA = path.join(GROUP_TYPED_MEMORY_MD_DIR, sidecarFileId(groupA));
+  const typedDirB = path.join(GROUP_TYPED_MEMORY_MD_DIR, sidecarFileId(groupB));
+  const closureDoc = "post-compact-completion-memory-preservation-repair-closures.md";
+  const completionDoc = "post-compact-receipt-memory-usage-repair-completions.md";
+  const sourceDoc = "post-compact-reinjection-repair-receipt-memory.md";
+  const {
+    distillPostCompactCompletionMemoryPreservationRepairClosureToTypedMemory,
+    runGroupTypedMemoryPostCompactCompletionMemoryPreservationRepairClosureDistillationSelfTest,
+  } = require("../collaboration/group-memory-index");
+  const { buildAgentMemoryContextBundle } = require("../collaboration/memory");
+  const { buildWorkerContextPacket, renderWorkerContextPacket } = require("../../agents/runtime-kernel");
+  const makeItem = (groupId: string, marker: string) => ({
+    group_id: groupId,
+    source: POST_COMPACT_COMPLETION_PRESERVATION_REPAIR_SOURCE,
+    component: "post_compact_receipt_memory_usage_repair_completion_compaction_preservation",
+    target_project: "api",
+    work_item_id: `post-compact-completion-preservation-repair:${marker}`,
+    assignment_id: `assignment-${marker}`,
+    dispatch_key: `dispatch-${marker}`,
+    worker_context_packet_id: `failed-packet-${marker}`,
+    binding_id: `failed-binding-${marker}`,
+    compact_retry_id: `failed-retry-${marker}`,
+    compact_outcome_id: `failed-outcome-${marker}`,
+    compact_hook_run_id: `failed-hook-${marker}`,
+    corrected_compact_retry_id: `corrected-retry-${marker}`,
+    corrected_compact_outcome_id: `corrected-outcome-${marker}`,
+    corrected_compact_hook_run_id: `corrected-hook-${marker}`,
+    completion_preservation_completion_doc_rel_paths: [completionDoc],
+    completion_preservation_required_doc_rel_paths: [sourceDoc],
+    completion_preservation_work_item_ids: [`receipt-memory-usage-repair:${marker}`],
+    completion_preservation_timeline_binding_ids: [`receipt-memory-usage-timeline:${marker}`],
+    completion_preservation_historical_task_agent_session_ids: [`original-task-session-${marker}`],
+    completion_preservation_historical_native_session_ids: [`original-native-session-${marker}`],
+    completion_preservation_current_session_binding_id: `closure-binding-${marker}`,
+    completion_preservation_current_task_agent_session_id: `closure-task-session-${marker}`,
+    completion_preservation_current_native_session_id: `closure-native-session-${marker}`,
+    completion_preservation_gap_codes: ["completion_work_item_ids_missing_after_compact"],
+    status: "completed",
+    completion_source: "post_compact_receipt_memory_usage_repair_completion_compaction_preservation_corrected_retry",
+    resolutionReason: "completion_memory_compaction_preservation_corrected_retry_verified",
+    corrected_retry_proof: {
+      schema: "ccm-post-compact-receipt-memory-usage-repair-completion-compaction-preservation-repair-closure-v1",
+      failed_retry_id: `failed-retry-${marker}`,
+      failed_outcome_id: `failed-outcome-${marker}`,
+      corrected_retry_id: `corrected-retry-${marker}`,
+      corrected_outcome_id: `corrected-outcome-${marker}`,
+      exact_identity_restored: true,
+      current_session_boundary_restored: true,
+      historical_sessions_remain_evidence_only: true,
+      verified_at: "2026-07-12T07:10:00.000Z",
+    },
+    completedAt: "2026-07-12T07:10:00.000Z",
+  });
+  try {
+    const indexSelfTest = runGroupTypedMemoryPostCompactCompletionMemoryPreservationRepairClosureDistillationSelfTest();
+    const itemA = makeItem(groupA, "PHASE186_GROUP_A_SENTINEL");
+    const itemB = makeItem(groupB, "PHASE186_GROUP_B_SENTINEL");
+    const firstA = distillPostCompactCompletionMemoryPreservationRepairClosureToTypedMemory(groupA, { rows: [itemA] }, { reason: "phase186-memory-center-a", updatedAt: "2026-07-12T07:11:00.000Z" });
+    const secondA = distillPostCompactCompletionMemoryPreservationRepairClosureToTypedMemory(groupA, { rows: [itemA] }, { reason: "phase186-memory-center-a-repeat", updatedAt: "2026-07-12T07:12:00.000Z" });
+    distillPostCompactCompletionMemoryPreservationRepairClosureToTypedMemory(groupB, { rows: [itemB] }, { reason: "phase186-memory-center-b", updatedAt: "2026-07-12T07:11:00.000Z" });
+    const workItemReport = {
+      schema: "ccm-post-compact-receipt-memory-usage-repair-completion-compaction-preservation-repair-work-item-report-v1",
+      overall: { requiredActionCount: 2, coveredItemCount: 2 },
+      groups: [
+        { groupId: groupA, status: "ok", file: "", items: [itemA] },
+        { groupId: groupB, status: "ok", file: "", items: [itemB] },
+      ],
+    };
+    const typedReport = buildPostCompactCompletionPreservationRepairClosureTypedMemoryReport({ groupIds: [groupA, groupB], workItemReport });
+    const typedQuality = evaluatePostCompactCompletionPreservationRepairClosureTypedMemory({ groupIds: [groupA, groupB], workItemReport });
+    const workerReport = buildPostCompactCompletionPreservationRepairClosureWorkerContextReport({ groupIds: [groupA, groupB], typedReport, targetProject: "api" });
+    const workerQuality = evaluatePostCompactCompletionPreservationRepairClosureWorkerContext({ groupIds: [groupA, groupB], typedReport, targetProject: "api" });
+    const currentTaskSession = "phase186-fresh-task-session";
+    const currentNativeSession = "phase186-fresh-native-session";
+    const task = "resume PHASE186_GROUP_A_SENTINEL completion memory preservation corrected outcome and reverify current source";
+    const bundle = buildAgentMemoryContextBundle(groupA, "api", task, {
+      includeGlobalClaudeMemory: false,
+      includeProjectMemory: false,
+      maxTypedMemory: 8,
+      maxRenderedChars: 18000,
+      taskId: "phase186-fresh-task",
+      taskAgentSessionId: currentTaskSession,
+      nativeSessionId: currentNativeSession,
+      executionId: "phase186-fresh-execution",
+      forcePostCompactCompletionMemoryPreservationRepairClosureRecall: true,
+    });
+    const packet = buildWorkerContextPacket({
+      group: { id: groupA, name: "Phase 186 Closure Memory", members: [{ project: "api" }] },
+      project: "api",
+      task,
+      taskId: "phase186-fresh-task",
+      traceId: "phase186-fresh-trace",
+      agentType: "codex",
+      memory: bundle,
+      contextUsageOptions: { maxTokens: 90000 },
+    });
+    const contract = workerContextPacketPostCompactReinjectionRepairReceiptMemoryContract(packet) || {};
+    const rendered = renderWorkerContextPacket(packet);
+    const groupAReport = (workerReport.groups || []).find((row: any) => row.groupId === groupA) || {};
+    const groupBReport = (workerReport.groups || []).find((row: any) => row.groupId === groupB) || {};
+    const historicalTaskSessions = normalizeQualityStringList(contract.historical_task_agent_session_ids || []);
+    const historicalNativeSessions = normalizeQualityStringList(contract.historical_native_session_ids || []);
+    const checks = {
+      indexLayerSelfTestPasses: indexSelfTest.pass === true,
+      distillationIsIdempotent: firstA.archivedCount === 1 && secondA.archivedCount === 1 && secondA.newRowCount === 0,
+      typedMemoryQualityCoversBothGroups: typedReport.overall?.status === "ok"
+        && Number(typedReport.overall?.expectedClosureCount || 0) === 2
+        && Number(typedReport.overall?.coveredClosureCount || 0) === 2
+        && typedQuality.status === "ok",
+      repeatedFreshSessionRecallCoversBothGroups: workerReport.overall?.status === "ok"
+        && Number(workerReport.overall?.checkedGroupCount || 0) === 2
+        && Number(workerReport.overall?.firstSessionRecallCount || 0) === 2
+        && Number(workerReport.overall?.secondSessionRecallCount || 0) === 2
+        && workerQuality.status === "ok",
+      groupRecallIdentityIsIsolated: (groupAReport.correctedOutcomeIds || []).includes(itemA.corrected_compact_outcome_id)
+        && !(groupAReport.correctedOutcomeIds || []).includes(itemB.corrected_compact_outcome_id)
+        && (groupBReport.correctedOutcomeIds || []).includes(itemB.corrected_compact_outcome_id)
+        && !(groupBReport.correctedOutcomeIds || []).includes(itemA.corrected_compact_outcome_id),
+      packetCarriesClosureContract: (contract.doc_rel_paths || []).includes(closureDoc)
+        && (contract.preservation_failed_outcome_ids || []).includes(itemA.compact_outcome_id)
+        && (contract.preservation_corrected_outcome_ids || []).includes(itemA.corrected_compact_outcome_id)
+        && contract.current_task_agent_session_id === currentTaskSession
+        && contract.current_native_session_id === currentNativeSession
+        && packet.acceptance?.post_compact_receipt_memory_usage_repair_completion_memory_usage_required === true,
+      historicalClosureSessionsNeverBecomeCurrent: historicalTaskSessions.includes(itemA.completion_preservation_current_task_agent_session_id)
+        && historicalNativeSessions.includes(itemA.completion_preservation_current_native_session_id)
+        && !historicalTaskSessions.includes(currentTaskSession)
+        && !historicalNativeSessions.includes(currentNativeSession),
+      renderedContextRequiresFreshUsageReceipt: rendered.includes(closureDoc)
+        && rendered.includes(itemA.compact_outcome_id)
+        && rendered.includes(itemA.corrected_compact_outcome_id)
+        && rendered.includes("memoryUsed")
+        && rendered.includes("memoryIgnored")
+        && /current source|current-source/i.test(rendered),
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      typedMemory: typedReport.overall,
+      workerContext: workerReport.overall,
+      contract: {
+        docRelPaths: contract.doc_rel_paths || [],
+        failedOutcomeIds: contract.preservation_failed_outcome_ids || [],
+        correctedOutcomeIds: contract.preservation_corrected_outcome_ids || [],
+        currentTaskAgentSessionId: contract.current_task_agent_session_id || "",
+        currentNativeSessionId: contract.current_native_session_id || "",
+      },
+    };
+  } finally {
+    for (const dir of [typedDirA, typedDirB]) {
+      try { if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+    }
+  }
+}
+
+export function runMemoryCenterPostCompactCompletionMemoryPreservationClosureUsageFeedbackSelfTest() {
+  const suffix = `${process.pid}-${Date.now()}`;
+  const groupA = `memory-center-closure-feedback-used-${suffix}`;
+  const groupB = `memory-center-closure-feedback-ignored-${suffix}`;
+  const groupC = `memory-center-closure-feedback-repair-${suffix}`;
+  const groupIds = [groupA, groupB, groupC];
+  const closureDoc = "post-compact-completion-memory-preservation-repair-closures.md";
+  const bindingFiles = groupIds.map(groupId => getGroupReplayRepairDispatchBindingLedgerFile(groupId));
+  const workItemFiles = groupIds.map(groupId => getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId));
+  const typedDirs = groupIds.map(groupId => path.join(GROUP_TYPED_MEMORY_MD_DIR, sidecarFileId(groupId)));
+  const {
+    buildPostCompactCompletionMemoryPreservationClosureUsageSummary,
+    distillPostCompactCompletionMemoryPreservationRepairClosureToTypedMemory,
+    readGroupTypedMemoryDistillationLedger,
+    readPostCompactCompletionMemoryPreservationClosureUsageLedger,
+  } = require("../collaboration/group-memory-index");
+  const makeClosure = (groupId: string, marker: string) => ({
+    group_id: groupId,
+    source: POST_COMPACT_COMPLETION_PRESERVATION_REPAIR_SOURCE,
+    component: "post_compact_receipt_memory_usage_repair_completion_compaction_preservation",
+    target_project: "api",
+    work_item_id: `post-compact-completion-preservation-repair:${marker}`,
+    assignment_id: `assignment-${marker}`,
+    dispatch_key: `dispatch-${marker}`,
+    worker_context_packet_id: `failed-packet-${marker}`,
+    binding_id: `failed-binding-${marker}`,
+    compact_retry_id: `failed-retry-${marker}`,
+    compact_outcome_id: `failed-outcome-${marker}`,
+    compact_hook_run_id: `failed-hook-${marker}`,
+    corrected_compact_retry_id: `corrected-retry-${marker}`,
+    corrected_compact_outcome_id: `corrected-outcome-${marker}`,
+    corrected_compact_hook_run_id: `corrected-hook-${marker}`,
+    completion_preservation_completion_doc_rel_paths: ["post-compact-receipt-memory-usage-repair-completions.md"],
+    completion_preservation_required_doc_rel_paths: ["post-compact-reinjection-repair-receipt-memory.md"],
+    completion_preservation_work_item_ids: [`receipt-memory-usage-repair:${marker}`],
+    completion_preservation_timeline_binding_ids: [`receipt-memory-usage-timeline:${marker}`],
+    completion_preservation_historical_task_agent_session_ids: [`historical-task-session-${marker}`],
+    completion_preservation_historical_native_session_ids: [`historical-native-session-${marker}`],
+    completion_preservation_current_session_binding_id: `closure-binding-${marker}`,
+    completion_preservation_current_task_agent_session_id: `closure-task-session-${marker}`,
+    completion_preservation_current_native_session_id: `closure-native-session-${marker}`,
+    completion_preservation_gap_codes: ["completion_work_item_ids_missing_after_compact"],
+    status: "completed",
+    completion_source: "post_compact_receipt_memory_usage_repair_completion_compaction_preservation_corrected_retry",
+    resolutionReason: "completion_memory_compaction_preservation_corrected_retry_verified",
+    corrected_retry_proof: {
+      schema: "ccm-post-compact-receipt-memory-usage-repair-completion-compaction-preservation-repair-closure-v1",
+      failed_retry_id: `failed-retry-${marker}`,
+      failed_outcome_id: `failed-outcome-${marker}`,
+      corrected_retry_id: `corrected-retry-${marker}`,
+      corrected_outcome_id: `corrected-outcome-${marker}`,
+      exact_identity_restored: true,
+      current_session_boundary_restored: true,
+      historical_sessions_remain_evidence_only: true,
+      verified_at: "2026-07-12T08:00:00.000Z",
+    },
+    completedAt: "2026-07-12T08:00:00.000Z",
+  });
+  const makeEntry = (groupId: string, marker: string, sessionSuffix: string, receipt: any) => {
+    const packetId = `phase187-packet-${marker}-${sessionSuffix}`;
+    const taskSessionId = `phase187-task-session-${marker}-${sessionSuffix}`;
+    const nativeSessionId = `phase187-native-session-${marker}-${sessionSuffix}`;
+    const contract = {
+      schema: "ccm-post-compact-reinjection-repair-receipt-memory-usage-contract-v1",
+      active: true,
+      memory_receipt_required_doc_rel_paths: [closureDoc],
+      doc_rel_paths: [closureDoc],
+      current_task_agent_session_id: taskSessionId,
+      current_native_session_id: nativeSessionId,
+      required_receipt_fields: ["memoryUsed", "memoryIgnored"],
+      freshness_boundary: "historical repair completion is recovery evidence, not permanent repository truth",
+    };
+    return {
+      schema: "ccm-replay-repair-main-agent-dispatch-brief-assignment-v1",
+      groupId,
+      project: "api",
+      task_id: `phase187-task-${marker}-${sessionSuffix}`,
+      execution_id: `phase187-execution-${marker}-${sessionSuffix}`,
+      binding_id: `phase187-binding-${marker}-${sessionSuffix}`,
+      assignment_id: `phase187-assignment-${marker}-${sessionSuffix}`,
+      dispatch_key: `phase187-dispatch-${marker}-${sessionSuffix}`,
+      worker_context_packet_id: packetId,
+      post_compact_reinjection_repair_receipt_memory_contract: contract,
+      worker_context_packet_post_compact_reinjection_repair_receipt_memory_contract: contract,
+      worker_context_packet_context_usage: {
+        schema: "ccm-worker-context-usage-v1",
+        packet_id: packetId,
+        categories: [{ id: "post_compact_reinjection_repair_receipt_memory_contract", required: true, tokens: 80 }],
+      },
+      worker_context_packet_receipt: {
+        status: "done",
+        worker_context_packet_id: packetId,
+        task_agent_session_id: taskSessionId,
+        native_session_id: nativeSessionId,
+        memoryUsed: [],
+        memoryIgnored: [],
+        ...receipt,
+      },
+    };
+  };
+  const writeBindings = (groupId: string, entries: any[], at: string) => {
+    const file = getGroupReplayRepairDispatchBindingLedgerFile(groupId);
+    writeJsonAtomic(file, {
+      schema: "ccm-replay-repair-main-agent-dispatch-brief-assignment-ledger-v1",
+      version: 1,
+      groupId,
+      file,
+      updatedAt: at,
+      bindingCount: entries.length,
+      entries,
+    });
+  };
+  const historicalBoundary = "historical repair completion is recovery evidence, not permanent repository truth";
+  try {
+    const tasksBefore = loadTasks().length;
+    const closureA = makeClosure(groupA, "PHASE187_A");
+    const closureB = makeClosure(groupB, "PHASE187_B");
+    const closureC = makeClosure(groupC, "PHASE187_C");
+    for (const [groupId, closure] of [[groupA, closureA], [groupB, closureB], [groupC, closureC]] as any[]) {
+      distillPostCompactCompletionMemoryPreservationRepairClosureToTypedMemory(groupId, { rows: [closure] }, {
+        reason: "phase187-usage-feedback-selftest",
+        updatedAt: "2026-07-12T08:01:00.000Z",
+      });
+    }
+    const entryA = makeEntry(groupA, "A", "used", {
+      memoryUsed: [`${closureDoc}; usageState=verified; currentSourceVerified=true; ${historicalBoundary}`],
+    });
+    const entriesB = ["ignored-1", "ignored-2"].map(suffixId => makeEntry(groupB, "B", suffixId, {
+      memoryIgnored: [`${closureDoc}; usageState=ignored; reason=not relevant to this child task; ${historicalBoundary}`],
+    }));
+    const invalidEntryC = makeEntry(groupC, "C", "invalid", {
+      memoryUsed: [`${closureDoc}; usageState=verified; ${historicalBoundary}`],
+    });
+    writeBindings(groupA, [entryA], "2026-07-12T08:02:00.000Z");
+    writeBindings(groupB, entriesB, "2026-07-12T08:02:00.000Z");
+    writeBindings(groupC, [invalidEntryC], "2026-07-12T08:02:00.000Z");
+
+    const firstReceiptReport = buildPostCompactReinjectionRepairReceiptMemoryUsageReceiptReport({
+      groupIds,
+      targetProject: "api",
+      tasks: [],
+      generatedAt: "2026-07-12T08:03:00.000Z",
+    });
+    buildPostCompactReinjectionRepairReceiptMemoryUsageReceiptReport({
+      groupIds,
+      targetProject: "api",
+      tasks: [],
+      generatedAt: "2026-07-12T08:04:00.000Z",
+    });
+    const firstSummaries = new Map(groupIds.map(groupId => [groupId, buildPostCompactCompletionMemoryPreservationClosureUsageSummary(groupId, { targetProject: "api" })]));
+    const firstUsageLedgers = new Map(groupIds.map(groupId => [groupId, readPostCompactCompletionMemoryPreservationClosureUsageLedger(groupId)]));
+    const repairLedgerBefore = readGroupCompactBoundaryReplayRepairWorkItems(groupC);
+    const repairItemBefore = (repairLedgerBefore.items || []).find(isPostCompactReinjectionRepairReceiptMemoryUsageReceiptRepairWorkItem) || {};
+    const archiveCountsBefore = new Map(groupIds.map(groupId => {
+      const ledger = readGroupTypedMemoryDistillationLedger(groupId);
+      return [groupId, (ledger.postCompactCompletionMemoryPreservationRepairClosureArchive?.rows || []).length];
+    }));
+    const firstUsageReport = buildPostCompactCompletionPreservationClosureUsageFeedbackReport({ groupIds, targetProject: "api" });
+    const firstRepairReport = buildPostCompactCompletionPreservationClosureReceiptRepairReport({ groupIds, targetProject: "api", usageReport: firstUsageReport });
+    const firstPriorityReport = buildPostCompactCompletionPreservationClosureRecallPriorityReport({ groupIds, targetProject: "api" });
+
+    const correctedEntryC = makeEntry(groupC, "C", "invalid", {
+      memoryUsed: [`${closureDoc}; usageState=verified; currentSourceVerified=true; ${historicalBoundary}`],
+    });
+    writeBindings(groupC, [correctedEntryC], "2026-07-12T08:05:00.000Z");
+    const correctedReceiptReport = buildPostCompactReinjectionRepairReceiptMemoryUsageReceiptReport({
+      groupIds,
+      targetProject: "api",
+      tasks: [],
+      generatedAt: "2026-07-12T08:06:00.000Z",
+    });
+    const correctedSummaryC = buildPostCompactCompletionMemoryPreservationClosureUsageSummary(groupC, { targetProject: "api" });
+    const repairLedgerAfter = readGroupCompactBoundaryReplayRepairWorkItems(groupC);
+    const repairItemAfter = (repairLedgerAfter.items || []).find(isPostCompactReinjectionRepairReceiptMemoryUsageReceiptRepairWorkItem) || {};
+    const qualityReport = buildMemoryQualityReport({
+      checkIds: [
+        "post_compact_completion_memory_preservation_closure_usage_feedback",
+        "post_compact_completion_memory_preservation_closure_receipt_repair",
+        "post_compact_completion_memory_preservation_closure_recall_priority",
+      ],
+      groupIds,
+      targetProject: "api",
+      tasks: [],
+      refresh: true,
+    });
+    const qualityChecks = new Map<string, any>((qualityReport.checks || []).map((check: any) => [check.id, check]));
+    const archiveCountsAfter = new Map(groupIds.map(groupId => {
+      const ledger = readGroupTypedMemoryDistillationLedger(groupId);
+      return [groupId, (ledger.postCompactCompletionMemoryPreservationRepairClosureArchive?.rows || []).length];
+    }));
+    const checks = {
+      validUsedFeedbackPromotesRecall: firstSummaries.get(groupA)?.recommendation === "promote_but_reverify_current_source"
+        && firstSummaries.get(groupA)?.verifiedCount === 1,
+      repeatedIgnoredFeedbackDeprioritizesGenericRecall: firstSummaries.get(groupB)?.recommendation === "deprioritize_closure_recall"
+        && firstSummaries.get(groupB)?.ignoredCount === 2
+        && firstPriorityReport.groups?.find((row: any) => row.groupId === groupB)?.genericRecallSuppressed === true,
+      exactCorrectedOutcomeStillRecalls: firstPriorityReport.groups?.find((row: any) => row.groupId === groupB)?.exactIdentityPreserved === true,
+      invalidReceiptRequiresRepair: firstSummaries.get(groupC)?.recommendation === "require_receipt_repair_before_reuse"
+        && replayRepairWorkItemOpen(repairItemBefore.status)
+        && firstRepairReport.overall?.status === "ok",
+      duplicateScanIsIdempotent: Number(firstUsageLedgers.get(groupA)?.entries?.length || 0) === 1
+        && Number(firstUsageLedgers.get(groupB)?.entries?.length || 0) === 2
+        && Number(firstUsageLedgers.get(groupC)?.entries?.length || 0) === 1,
+      correctedReceiptClosesRepairAndRecovers: correctedReceiptReport.overall?.status === "ok"
+        && replayRepairWorkItemStatus(repairItemAfter.status) === "completed"
+        && correctedSummaryC.recommendation === "promote_but_reverify_current_source"
+        && correctedSummaryC.activeReceiptRepairRequired === false,
+      feedbackSessionsStayGroupIsolated: firstUsageReport.overall?.status === "ok"
+        && firstUsageReport.groups?.every((row: any) => (row.entries || []).every((entry: any) => entry.group_id === row.groupId))
+        && firstReceiptReport.groups?.find((row: any) => row.groupId === groupC)?.status === "fail",
+      immutableClosureArchivesRemainUnchanged: groupIds.every(groupId => archiveCountsBefore.get(groupId) === 1 && archiveCountsAfter.get(groupId) === 1),
+      qualityChecksRegisteredAndPass: [
+        "post_compact_completion_memory_preservation_closure_usage_feedback",
+        "post_compact_completion_memory_preservation_closure_receipt_repair",
+        "post_compact_completion_memory_preservation_closure_recall_priority",
+      ].every(id => qualityChecks.get(id)?.status === "ok"),
+      memoryCenterCreatedNoRealTask: loadTasks().length === tasksBefore,
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      receiptBefore: firstReceiptReport.overall,
+      usageFeedback: firstUsageReport.overall,
+      receiptRepair: firstRepairReport.overall,
+      recallPriority: firstPriorityReport.overall,
+      correctedReceipt: correctedReceiptReport.overall,
+      recommendations: {
+        used: firstSummaries.get(groupA)?.recommendation || "",
+        ignored: firstSummaries.get(groupB)?.recommendation || "",
+        invalid: firstSummaries.get(groupC)?.recommendation || "",
+        corrected: correctedSummaryC.recommendation || "",
+      },
+      quality: [...qualityChecks.values()].map((check: any) => ({ id: check.id, status: check.status, checked: check.checked, passed: check.passed })),
+    };
+  } finally {
+    for (const file of [...bindingFiles, ...workItemFiles]) {
+      for (const target of [file, `${file}.bak`]) {
+        try { if (target && fs.existsSync(target)) fs.unlinkSync(target); } catch {}
+      }
+    }
+    for (const dir of typedDirs) {
+      try { if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+    }
+  }
+}
+
+export function runMemoryCenterPostCompactCompletionMemoryPreservationClosureFeedbackAgingTaskFamilySelfTest() {
+  const suffix = `${process.pid}-${Date.now()}`;
+  const groupA = `memory-center-closure-feedback-aging-a-${suffix}`;
+  const groupB = `memory-center-closure-feedback-aging-b-${suffix}`;
+  const groupIds = [groupA, groupB];
+  const typedDirs = groupIds.map(groupId => path.join(GROUP_TYPED_MEMORY_MD_DIR, sidecarFileId(groupId)));
+  const closureDoc = "post-compact-completion-memory-preservation-repair-closures.md";
+  const fixedNow = "2026-07-12T12:00:00.000Z";
+  const oldAt = "2026-03-01T12:00:00.000Z";
+  const recentAt = "2026-07-12T11:30:00.000Z";
+  const {
+    buildPostCompactCompletionMemoryPreservationClosureUsageSummary,
+    distillPostCompactCompletionMemoryPreservationRepairClosureToTypedMemory,
+    readGroupTypedMemoryDistillationLedger,
+    recordPostCompactCompletionMemoryPreservationClosureUsage,
+  } = require("../collaboration/group-memory-index");
+  const { buildAgentMemoryContextBundle } = require("../collaboration/memory");
+  const makeClosure = (groupId: string, marker: string) => ({
+    group_id: groupId,
+    source: POST_COMPACT_COMPLETION_PRESERVATION_REPAIR_SOURCE,
+    component: "post_compact_receipt_memory_usage_repair_completion_compaction_preservation",
+    target_project: "api",
+    work_item_id: `post-compact-completion-preservation-repair:${marker}`,
+    assignment_id: `assignment-${marker}`,
+    dispatch_key: `dispatch-${marker}`,
+    worker_context_packet_id: `failed-packet-${marker}`,
+    binding_id: `failed-binding-${marker}`,
+    compact_retry_id: `failed-retry-${marker}`,
+    compact_outcome_id: `failed-outcome-${marker}`,
+    compact_hook_run_id: `failed-hook-${marker}`,
+    corrected_compact_retry_id: `corrected-retry-${marker}`,
+    corrected_compact_outcome_id: `corrected-outcome-${marker}`,
+    corrected_compact_hook_run_id: `corrected-hook-${marker}`,
+    completion_preservation_completion_doc_rel_paths: ["post-compact-receipt-memory-usage-repair-completions.md"],
+    completion_preservation_required_doc_rel_paths: ["post-compact-reinjection-repair-receipt-memory.md"],
+    completion_preservation_work_item_ids: [`receipt-memory-usage-repair:${marker}`],
+    completion_preservation_timeline_binding_ids: [`receipt-memory-usage-timeline:${marker}`],
+    completion_preservation_historical_task_agent_session_ids: [`historical-task-session-${marker}`],
+    completion_preservation_historical_native_session_ids: [`historical-native-session-${marker}`],
+    completion_preservation_current_session_binding_id: `closure-binding-${marker}`,
+    completion_preservation_current_task_agent_session_id: `closure-task-session-${marker}`,
+    completion_preservation_current_native_session_id: `closure-native-session-${marker}`,
+    completion_preservation_gap_codes: ["completion_work_item_ids_missing_after_compact"],
+    status: "completed",
+    completion_source: "post_compact_receipt_memory_usage_repair_completion_compaction_preservation_corrected_retry",
+    resolutionReason: "completion_memory_compaction_preservation_corrected_retry_verified",
+    corrected_retry_proof: {
+      schema: "ccm-post-compact-receipt-memory-usage-repair-completion-compaction-preservation-repair-closure-v1",
+      failed_retry_id: `failed-retry-${marker}`,
+      failed_outcome_id: `failed-outcome-${marker}`,
+      corrected_retry_id: `corrected-retry-${marker}`,
+      corrected_outcome_id: `corrected-outcome-${marker}`,
+      exact_identity_restored: true,
+      current_session_boundary_restored: true,
+      historical_sessions_remain_evidence_only: true,
+      verified_at: fixedNow,
+    },
+    completedAt: fixedNow,
+  });
+  const feedbackRow = (groupId: string, family: string, index: number) => ({
+    target_project: "api",
+    agent: "codex",
+    task_id: `phase188-${family}-task-${index}`,
+    task_text: family === "payment" ? "fix payment callback timeout" : "optimize search indexing pipeline",
+    execution_id: `phase188-${family}-execution-${index}`,
+    worker_context_packet_id: `phase188-${groupId}-${family}-packet-${index}`,
+    binding_id: `phase188-${groupId}-${family}-binding-${index}`,
+    task_agent_session_id: `phase188-${groupId}-${family}-task-session-${index}`,
+    native_session_id: `phase188-${groupId}-${family}-native-session-${index}`,
+    receipt_source: "worker_context_packet_receipt",
+    receipt_status: "done",
+    rel_path: closureDoc,
+    usage_state: "ignored",
+    current_source_verified: false,
+    compliant: true,
+    reason: `closure history is not relevant to the ${family} task family`,
+  });
+  const recall = (groupId: string, task: string, suffixId: string) => {
+    const bundle = buildAgentMemoryContextBundle(groupId, "api", task, {
+      includeGlobalClaudeMemory: false,
+      includeProjectMemory: false,
+      maxTypedMemory: 8,
+      maxRenderedChars: 18000,
+      taskId: `phase188-recall-${suffixId}`,
+      taskAgentSessionId: `phase188-recall-task-session-${suffixId}`,
+      nativeSessionId: `phase188-recall-native-session-${suffixId}`,
+      executionId: `phase188-recall-execution-${suffixId}`,
+      generatedAt: fixedNow,
+      postCompactClosureUsageHalfLifeDays: 14,
+      postCompactClosureUsageStaleAfterDays: 45,
+    });
+    return bundle.post_compact_reinjection_repair_receipt_recall || bundle.group_state?.typedMemory?.postCompactReinjectionRepairReceiptRecall || {};
+  };
+  try {
+    const tasksBefore = loadTasks().length;
+    const closureA = makeClosure(groupA, "PHASE188_A");
+    const closureB = makeClosure(groupB, "PHASE188_B");
+    distillPostCompactCompletionMemoryPreservationRepairClosureToTypedMemory(groupA, { rows: [closureA] }, { reason: "phase188-aging-a", updatedAt: fixedNow });
+    distillPostCompactCompletionMemoryPreservationRepairClosureToTypedMemory(groupB, { rows: [closureB] }, { reason: "phase188-aging-b", updatedAt: fixedNow });
+    recordPostCompactCompletionMemoryPreservationClosureUsage(groupA, {
+      rows: [feedbackRow(groupA, "payment", 1), feedbackRow(groupA, "payment", 2)],
+      generatedAt: oldAt,
+    });
+    recordPostCompactCompletionMemoryPreservationClosureUsage(groupA, {
+      rows: [feedbackRow(groupA, "search", 1), feedbackRow(groupA, "search", 2)],
+      generatedAt: recentAt,
+    });
+    recordPostCompactCompletionMemoryPreservationClosureUsage(groupB, {
+      rows: [feedbackRow(groupB, "payment", 1), feedbackRow(groupB, "payment", 2)],
+      generatedAt: recentAt,
+    });
+    const summary = (groupId: string, task: string) => buildPostCompactCompletionMemoryPreservationClosureUsageSummary(groupId, {
+      targetProject: "api",
+      task,
+      now: fixedNow,
+      postCompactClosureUsageHalfLifeDays: 14,
+      postCompactClosureUsageStaleAfterDays: 45,
+    });
+    const paymentA = summary(groupA, "fix payment callback timeout");
+    const searchA = summary(groupA, "optimize search indexing pipeline");
+    const unrelatedA = summary(groupA, "deploy kubernetes ingress certificate rotation");
+    const paymentB = summary(groupB, "fix payment callback timeout");
+    const paymentRecallA = recall(groupA, "review post-compact completion memory preservation repair closure for fix payment callback timeout", "payment-a");
+    const searchRecallA = recall(groupA, "review post-compact completion memory preservation repair closure for optimize search indexing pipeline", "search-a");
+    const unrelatedRecallA = recall(groupA, "review post-compact completion memory preservation repair closure for deploy kubernetes ingress certificate rotation", "unrelated-a");
+    const exactRecallA = recall(groupA, `review exact corrected outcome ${closureA.corrected_compact_outcome_id} for optimize search indexing pipeline`, "exact-a");
+    const paymentRecallB = recall(groupB, "review post-compact completion memory preservation repair closure for fix payment callback timeout", "payment-b");
+    const archiveCountsBefore = new Map(groupIds.map(groupId => {
+      const ledger = readGroupTypedMemoryDistillationLedger(groupId);
+      return [groupId, (ledger.postCompactCompletionMemoryPreservationRepairClosureArchive?.rows || []).length];
+    }));
+    const agingReport = buildPostCompactCompletionPreservationClosureFeedbackAgingTaskFamilyReport({
+      groupIds,
+      targetProject: "api",
+      now: fixedNow,
+      postCompactClosureUsageHalfLifeDays: 14,
+      postCompactClosureUsageStaleAfterDays: 45,
+    });
+    const qualityReport = buildMemoryQualityReport({
+      checkIds: ["post_compact_completion_memory_preservation_closure_feedback_aging_task_family"],
+      groupIds,
+      targetProject: "api",
+      now: fixedNow,
+      postCompactClosureUsageHalfLifeDays: 14,
+      postCompactClosureUsageStaleAfterDays: 45,
+      tasks: [],
+      refresh: true,
+    });
+    const quality = qualityReport.checks?.[0] || {};
+    const archiveCountsAfter = new Map(groupIds.map(groupId => {
+      const ledger = readGroupTypedMemoryDistillationLedger(groupId);
+      return [groupId, (ledger.postCompactCompletionMemoryPreservationRepairClosureArchive?.rows || []).length];
+    }));
+    const exactCorrectedIds = normalizeQualityStringList(exactRecallA.preservationCorrectedOutcomeIds || exactRecallA.preservation_corrected_outcome_ids || []);
+    const checks = {
+      oldIgnoredFeedbackDecaysOutOfSuppression: paymentA.recommendation === "caution_stale_history_reverify_current_source"
+        && paymentA.weightedIgnoredCount < 1.5
+        && paymentRecallA.preservationClosureRecallSuppressed !== true,
+      recentSameFamilyIgnoredStillSuppresses: searchA.recommendation === "deprioritize_closure_recall"
+        && searchA.weightedIgnoredCount >= 1.5
+        && searchRecallA.preservationClosureRecallSuppressed === true,
+      unrelatedTaskFamilyDoesNotInheritFeedback: unrelatedA.recommendation === "neutral_reverify_current_source"
+        && unrelatedA.matchedEntryCount === 0
+        && unrelatedRecallA.preservationClosureRecallSuppressed !== true,
+      exactIdentityOverridesFamilySuppression: exactRecallA.exactPreservationClosureIdentityMatched === true
+        && exactRecallA.preservationClosureRecallSuppressed === false
+        && exactCorrectedIds.includes(closureA.corrected_compact_outcome_id),
+      groupsRemainIsolated: paymentB.recommendation === "deprioritize_closure_recall"
+        && paymentRecallB.preservationClosureRecallSuppressed === true
+        && paymentA.recommendation !== paymentB.recommendation,
+      agingMetadataIsExplicit: paymentA.aging?.half_life_days === 14
+        && paymentA.aging?.stale_after_days === 45
+        && paymentA.taskFamily?.tokens?.includes("payment"),
+      qualityCheckPasses: agingReport.overall?.status === "ok"
+        && agingReport.overall?.checkedGroupCount === 2
+        && agingReport.overall?.unrelatedMatchedEntryCount === 0
+        && quality.id === "post_compact_completion_memory_preservation_closure_feedback_aging_task_family"
+        && quality.status === "ok",
+      immutableClosureArchivesRemainUnchanged: groupIds.every(groupId => archiveCountsBefore.get(groupId) === 1 && archiveCountsAfter.get(groupId) === 1),
+      memoryCenterCreatedNoRealTask: loadTasks().length === tasksBefore,
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      summaries: {
+        paymentA: { recommendation: paymentA.recommendation, weightedIgnoredCount: paymentA.weightedIgnoredCount, matchedEntryCount: paymentA.matchedEntryCount },
+        searchA: { recommendation: searchA.recommendation, weightedIgnoredCount: searchA.weightedIgnoredCount, matchedEntryCount: searchA.matchedEntryCount },
+        unrelatedA: { recommendation: unrelatedA.recommendation, matchedEntryCount: unrelatedA.matchedEntryCount },
+        paymentB: { recommendation: paymentB.recommendation, weightedIgnoredCount: paymentB.weightedIgnoredCount, matchedEntryCount: paymentB.matchedEntryCount },
+      },
+      aging: agingReport.overall,
+      quality: { id: quality.id || "", status: quality.status || "", checked: quality.checked || 0, passed: quality.passed || 0 },
+    };
+  } finally {
+    for (const dir of typedDirs) {
+      try { if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+    }
+  }
+}
+
+export function runMemoryCenterPostCompactCompletionMemoryPreservationClosureFeedbackEvidenceConfidenceSelfTest() {
+  const suffix = `${process.pid}-${Date.now()}`;
+  const groupA = `memory-center-closure-confidence-duplicate-${suffix}`;
+  const groupB = `memory-center-closure-confidence-diverse-${suffix}`;
+  const groupC = `memory-center-closure-confidence-low-source-${suffix}`;
+  const groupIds = [groupA, groupB, groupC];
+  const typedDirs = groupIds.map(groupId => path.join(GROUP_TYPED_MEMORY_MD_DIR, sidecarFileId(groupId)));
+  const closureDoc = "post-compact-completion-memory-preservation-repair-closures.md";
+  const fixedNow = "2026-07-12T14:00:00.000Z";
+  const {
+    buildPostCompactCompletionMemoryPreservationClosureUsageSummary,
+    distillPostCompactCompletionMemoryPreservationRepairClosureToTypedMemory,
+    readGroupTypedMemoryDistillationLedger,
+    recordPostCompactCompletionMemoryPreservationClosureUsage,
+  } = require("../collaboration/group-memory-index");
+  const { buildAgentMemoryContextBundle } = require("../collaboration/memory");
+  const makeClosure = (groupId: string, marker: string) => ({
+    group_id: groupId,
+    source: POST_COMPACT_COMPLETION_PRESERVATION_REPAIR_SOURCE,
+    component: "post_compact_receipt_memory_usage_repair_completion_compaction_preservation",
+    target_project: "api",
+    work_item_id: `post-compact-completion-preservation-repair:${marker}`,
+    assignment_id: `assignment-${marker}`,
+    dispatch_key: `dispatch-${marker}`,
+    worker_context_packet_id: `failed-packet-${marker}`,
+    binding_id: `failed-binding-${marker}`,
+    compact_retry_id: `failed-retry-${marker}`,
+    compact_outcome_id: `failed-outcome-${marker}`,
+    compact_hook_run_id: `failed-hook-${marker}`,
+    corrected_compact_retry_id: `corrected-retry-${marker}`,
+    corrected_compact_outcome_id: `corrected-outcome-${marker}`,
+    corrected_compact_hook_run_id: `corrected-hook-${marker}`,
+    completion_preservation_completion_doc_rel_paths: ["post-compact-receipt-memory-usage-repair-completions.md"],
+    completion_preservation_required_doc_rel_paths: ["post-compact-reinjection-repair-receipt-memory.md"],
+    completion_preservation_work_item_ids: [`receipt-memory-usage-repair:${marker}`],
+    completion_preservation_timeline_binding_ids: [`receipt-memory-usage-timeline:${marker}`],
+    completion_preservation_historical_task_agent_session_ids: [`historical-task-session-${marker}`],
+    completion_preservation_historical_native_session_ids: [`historical-native-session-${marker}`],
+    completion_preservation_current_session_binding_id: `closure-binding-${marker}`,
+    completion_preservation_current_task_agent_session_id: `closure-task-session-${marker}`,
+    completion_preservation_current_native_session_id: `closure-native-session-${marker}`,
+    completion_preservation_gap_codes: ["completion_work_item_ids_missing_after_compact"],
+    status: "completed",
+    completion_source: "post_compact_receipt_memory_usage_repair_completion_compaction_preservation_corrected_retry",
+    resolutionReason: "completion_memory_compaction_preservation_corrected_retry_verified",
+    corrected_retry_proof: {
+      schema: "ccm-post-compact-receipt-memory-usage-repair-completion-compaction-preservation-repair-closure-v1",
+      failed_retry_id: `failed-retry-${marker}`,
+      failed_outcome_id: `failed-outcome-${marker}`,
+      corrected_retry_id: `corrected-retry-${marker}`,
+      corrected_outcome_id: `corrected-outcome-${marker}`,
+      exact_identity_restored: true,
+      current_session_boundary_restored: true,
+      historical_sessions_remain_evidence_only: true,
+      verified_at: fixedNow,
+    },
+    completedAt: fixedNow,
+  });
+  const feedback = (groupId: string, index: number, input: any = {}) => ({
+    target_project: "api",
+    agent: input.agent || "codex",
+    task_id: `phase189-search-task-${groupId}-${index}`,
+    task_text: "optimize search indexing pipeline",
+    execution_id: `phase189-search-execution-${groupId}-${index}`,
+    worker_context_packet_id: input.packetId || `phase189-${groupId}-packet-${index}`,
+    binding_id: `phase189-${groupId}-binding-${index}`,
+    task_agent_session_id: input.taskSessionId || `phase189-${groupId}-task-session-${index}`,
+    native_session_id: input.nativeSessionId || `phase189-${groupId}-native-session-${index}`,
+    receipt_source: input.receiptSource || "assignment_binding",
+    receipt_status: "done",
+    rel_path: closureDoc,
+    usage_state: "ignored",
+    current_source_verified: false,
+    compliant: true,
+    reason: "closure history is not relevant to this search-indexing child task",
+  });
+  const summary = (groupId: string) => buildPostCompactCompletionMemoryPreservationClosureUsageSummary(groupId, {
+    targetProject: "api",
+    task: "optimize search indexing pipeline",
+    now: fixedNow,
+    postCompactClosureUsageHalfLifeDays: 14,
+    postCompactClosureUsageStaleAfterDays: 45,
+  });
+  const recall = (groupId: string, task: string, suffixId: string) => {
+    const bundle = buildAgentMemoryContextBundle(groupId, "api", task, {
+      includeGlobalClaudeMemory: false,
+      includeProjectMemory: false,
+      maxTypedMemory: 8,
+      maxRenderedChars: 18000,
+      taskId: `phase189-recall-${suffixId}`,
+      taskAgentSessionId: `phase189-recall-task-session-${suffixId}`,
+      nativeSessionId: `phase189-recall-native-session-${suffixId}`,
+      executionId: `phase189-recall-execution-${suffixId}`,
+      generatedAt: fixedNow,
+    });
+    return bundle.post_compact_reinjection_repair_receipt_recall || bundle.group_state?.typedMemory?.postCompactReinjectionRepairReceiptRecall || {};
+  };
+  try {
+    const tasksBefore = loadTasks().length;
+    const closureA = makeClosure(groupA, "PHASE189_A");
+    const closureB = makeClosure(groupB, "PHASE189_B");
+    const closureC = makeClosure(groupC, "PHASE189_C");
+    for (const [groupId, closure] of [[groupA, closureA], [groupB, closureB], [groupC, closureC]] as any[]) {
+      distillPostCompactCompletionMemoryPreservationRepairClosureToTypedMemory(groupId, { rows: [closure] }, { reason: "phase189-evidence-confidence", updatedAt: fixedNow });
+    }
+    const duplicateTaskSession = `phase189-${groupA}-reused-task-session`;
+    const duplicateNativeSession = `phase189-${groupA}-reused-native-session`;
+    recordPostCompactCompletionMemoryPreservationClosureUsage(groupA, {
+      rows: Array.from({ length: 5 }, (_, index) => feedback(groupA, index + 1, {
+        taskSessionId: duplicateTaskSession,
+        nativeSessionId: duplicateNativeSession,
+        packetId: `phase189-${groupA}-duplicate-packet-${index + 1}`,
+        receiptSource: "timeline_binding.status",
+      })),
+      generatedAt: fixedNow,
+    });
+    recordPostCompactCompletionMemoryPreservationClosureUsage(groupB, {
+      rows: [feedback(groupB, 1), feedback(groupB, 2)],
+      generatedAt: fixedNow,
+    });
+    const sameSourceB = summary(groupB);
+    recordPostCompactCompletionMemoryPreservationClosureUsage(groupB, {
+      rows: [feedback(groupB, 3, { agent: "cursor", receiptSource: "corrected_repair_receipt" })],
+      generatedAt: fixedNow,
+    });
+    recordPostCompactCompletionMemoryPreservationClosureUsage(groupC, {
+      rows: [
+        feedback(groupC, 1, { receiptSource: "timeline_binding.status" }),
+        feedback(groupC, 2, { receiptSource: "timeline_binding.status" }),
+      ],
+      generatedAt: fixedNow,
+    });
+    const duplicateA = summary(groupA);
+    const diverseB = summary(groupB);
+    const lowSourceC = summary(groupC);
+    const genericRecallA = recall(groupA, "review post-compact completion memory preservation repair closure for optimize search indexing pipeline", "duplicate-a");
+    const genericRecallB = recall(groupB, "review post-compact completion memory preservation repair closure for optimize search indexing pipeline", "diverse-b");
+    const genericRecallC = recall(groupC, "review post-compact completion memory preservation repair closure for optimize search indexing pipeline", "low-source-c");
+    const exactRecallB = recall(groupB, `review exact corrected outcome ${closureB.corrected_compact_outcome_id} for optimize search indexing pipeline`, "exact-b");
+    const archiveCountsBefore = new Map(groupIds.map(groupId => {
+      const ledger = readGroupTypedMemoryDistillationLedger(groupId);
+      return [groupId, (ledger.postCompactCompletionMemoryPreservationRepairClosureArchive?.rows || []).length];
+    }));
+    const confidenceReport = buildPostCompactCompletionPreservationClosureFeedbackEvidenceConfidenceReport({
+      groupIds,
+      targetProject: "api",
+      now: fixedNow,
+    });
+    const qualityReport = buildMemoryQualityReport({
+      checkIds: ["post_compact_completion_memory_preservation_closure_feedback_evidence_confidence"],
+      groupIds,
+      targetProject: "api",
+      now: fixedNow,
+      tasks: [],
+      refresh: true,
+    });
+    const quality = qualityReport.checks?.[0] || {};
+    const archiveCountsAfter = new Map(groupIds.map(groupId => {
+      const ledger = readGroupTypedMemoryDistillationLedger(groupId);
+      return [groupId, (ledger.postCompactCompletionMemoryPreservationRepairClosureArchive?.rows || []).length];
+    }));
+    const exactCorrectedIds = normalizeQualityStringList(exactRecallB.preservationCorrectedOutcomeIds || exactRecallB.preservation_corrected_outcome_ids || []);
+    const checks = {
+      reusedSessionDuplicatesCollapseToOneEvidence: duplicateA.rawMatchedEntryCount === 5
+        && duplicateA.independentEvidenceCount === 1
+        && duplicateA.correlatedDuplicateCount === 4
+        && duplicateA.independentSessionCount === 1,
+      duplicateBurstCannotSuppressRecall: duplicateA.recommendation !== "deprioritize_closure_recall"
+        && duplicateA.evidenceConfidence < duplicateA.evidenceConfidenceThreshold
+        && genericRecallA.preservationClosureRecallSuppressed !== true,
+      twoIndependentReliableSessionsCanSuppress: sameSourceB.independentSessionCount === 2
+        && sameSourceB.recommendation === "deprioritize_closure_recall"
+        && sameSourceB.evidenceConfidence >= sameSourceB.evidenceConfidenceThreshold,
+      providerAndSourceDiversityRaiseConfidence: diverseB.distinctProviderCount === 2
+        && diverseB.distinctReceiptSourceCount === 2
+        && diverseB.evidenceConfidence > sameSourceB.evidenceConfidence
+        && diverseB.recommendation === "deprioritize_closure_recall"
+        && genericRecallB.preservationClosureRecallSuppressed === true,
+      lowReliabilityStatusOnlyEvidenceCannotSuppress: lowSourceC.independentSessionCount === 2
+        && lowSourceC.averageSourceReliability === 0.55
+        && lowSourceC.recommendation !== "deprioritize_closure_recall"
+        && genericRecallC.preservationClosureRecallSuppressed !== true,
+      exactIdentityStillOverridesConfidentSuppression: exactRecallB.exactPreservationClosureIdentityMatched === true
+        && exactRecallB.preservationClosureRecallSuppressed === false
+        && exactCorrectedIds.includes(closureB.corrected_compact_outcome_id),
+      evidenceStaysGroupIsolated: duplicateA.rawMatchedEntryCount === 5
+        && diverseB.rawMatchedEntryCount === 3
+        && lowSourceC.rawMatchedEntryCount === 2,
+      qualityCheckPassesWithoutAuthorization: confidenceReport.overall?.status === "ok"
+        && confidenceReport.groups?.every((row: any) => row.rankingEvidenceOnly === true && row.authorizationGranted === false)
+        && quality.id === "post_compact_completion_memory_preservation_closure_feedback_evidence_confidence"
+        && quality.status === "ok",
+      immutableClosureArchivesRemainUnchanged: groupIds.every(groupId => archiveCountsBefore.get(groupId) === 1 && archiveCountsAfter.get(groupId) === 1),
+      memoryCenterCreatedNoRealTask: loadTasks().length === tasksBefore,
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      summaries: {
+        duplicateA: { recommendation: duplicateA.recommendation, raw: duplicateA.rawMatchedEntryCount, independent: duplicateA.independentEvidenceCount, duplicates: duplicateA.correlatedDuplicateCount, confidence: duplicateA.evidenceConfidence },
+        sameSourceB: { recommendation: sameSourceB.recommendation, sessions: sameSourceB.independentSessionCount, confidence: sameSourceB.evidenceConfidence },
+        diverseB: { recommendation: diverseB.recommendation, providers: diverseB.distinctProviderCount, sources: diverseB.distinctReceiptSourceCount, confidence: diverseB.evidenceConfidence },
+        lowSourceC: { recommendation: lowSourceC.recommendation, sourceReliability: lowSourceC.averageSourceReliability, confidence: lowSourceC.evidenceConfidence },
+      },
+      confidence: confidenceReport.overall,
+      quality: { id: quality.id || "", status: quality.status || "", checked: quality.checked || 0, passed: quality.passed || 0 },
+    };
+  } finally {
+    for (const dir of typedDirs) {
+      try { if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+    }
+  }
+}
+
+export function runMemoryCenterPostCompactCompletionMemoryPreservationClosureFeedbackConflictArbitrationSelfTest() {
+  const suffix = `${process.pid}-${Date.now()}`;
+  const groupA = `memory-center-closure-conflict-${suffix}`;
+  const groupB = `memory-center-closure-consistent-ignored-${suffix}`;
+  const groupC = `memory-center-closure-stale-opposition-${suffix}`;
+  const groupIds = [groupA, groupB, groupC];
+  const typedDirs = groupIds.map(groupId => path.join(GROUP_TYPED_MEMORY_MD_DIR, sidecarFileId(groupId)));
+  const closureDoc = "post-compact-completion-memory-preservation-repair-closures.md";
+  const fixedNow = "2026-07-12T16:00:00.000Z";
+  const oldAt = "2026-03-01T16:00:00.000Z";
+  const {
+    buildPostCompactCompletionMemoryPreservationClosureUsageSummary,
+    distillPostCompactCompletionMemoryPreservationRepairClosureToTypedMemory,
+    readGroupTypedMemoryDistillationLedger,
+    recordPostCompactCompletionMemoryPreservationClosureUsage,
+  } = require("../collaboration/group-memory-index");
+  const { buildAgentMemoryContextBundle } = require("../collaboration/memory");
+  const { buildWorkerContextPacket, renderWorkerContextPacket } = require("../../agents/runtime-kernel");
+  const makeClosure = (groupId: string, marker: string) => ({
+    group_id: groupId,
+    source: POST_COMPACT_COMPLETION_PRESERVATION_REPAIR_SOURCE,
+    component: "post_compact_receipt_memory_usage_repair_completion_compaction_preservation",
+    target_project: "api",
+    work_item_id: `post-compact-completion-preservation-repair:${marker}`,
+    assignment_id: `assignment-${marker}`,
+    dispatch_key: `dispatch-${marker}`,
+    worker_context_packet_id: `failed-packet-${marker}`,
+    binding_id: `failed-binding-${marker}`,
+    compact_retry_id: `failed-retry-${marker}`,
+    compact_outcome_id: `failed-outcome-${marker}`,
+    compact_hook_run_id: `failed-hook-${marker}`,
+    corrected_compact_retry_id: `corrected-retry-${marker}`,
+    corrected_compact_outcome_id: `corrected-outcome-${marker}`,
+    corrected_compact_hook_run_id: `corrected-hook-${marker}`,
+    completion_preservation_completion_doc_rel_paths: ["post-compact-receipt-memory-usage-repair-completions.md"],
+    completion_preservation_required_doc_rel_paths: ["post-compact-reinjection-repair-receipt-memory.md"],
+    completion_preservation_work_item_ids: [`receipt-memory-usage-repair:${marker}`],
+    completion_preservation_timeline_binding_ids: [`receipt-memory-usage-timeline:${marker}`],
+    completion_preservation_historical_task_agent_session_ids: [`historical-task-session-${marker}`],
+    completion_preservation_historical_native_session_ids: [`historical-native-session-${marker}`],
+    completion_preservation_current_session_binding_id: `closure-binding-${marker}`,
+    completion_preservation_current_task_agent_session_id: `closure-task-session-${marker}`,
+    completion_preservation_current_native_session_id: `closure-native-session-${marker}`,
+    completion_preservation_gap_codes: ["completion_work_item_ids_missing_after_compact"],
+    status: "completed",
+    completion_source: "post_compact_receipt_memory_usage_repair_completion_compaction_preservation_corrected_retry",
+    resolutionReason: "completion_memory_compaction_preservation_corrected_retry_verified",
+    corrected_retry_proof: {
+      schema: "ccm-post-compact-receipt-memory-usage-repair-completion-compaction-preservation-repair-closure-v1",
+      failed_retry_id: `failed-retry-${marker}`,
+      failed_outcome_id: `failed-outcome-${marker}`,
+      corrected_retry_id: `corrected-retry-${marker}`,
+      corrected_outcome_id: `corrected-outcome-${marker}`,
+      exact_identity_restored: true,
+      current_session_boundary_restored: true,
+      historical_sessions_remain_evidence_only: true,
+      verified_at: fixedNow,
+    },
+    completedAt: fixedNow,
+  });
+  const feedback = (groupId: string, index: number, usageState: string) => ({
+    target_project: "api",
+    agent: index % 2 ? "codex" : "cursor",
+    task_id: `phase190-migration-task-${groupId}-${index}`,
+    task_text: "migrate account database schema",
+    execution_id: `phase190-migration-execution-${groupId}-${index}`,
+    worker_context_packet_id: `phase190-${groupId}-packet-${index}`,
+    binding_id: `phase190-${groupId}-binding-${index}`,
+    task_agent_session_id: `phase190-${groupId}-task-session-${index}`,
+    native_session_id: `phase190-${groupId}-native-session-${index}`,
+    receipt_source: "assignment_binding",
+    receipt_status: "done",
+    rel_path: closureDoc,
+    usage_state: usageState,
+    current_source_verified: ["used", "verified"].includes(usageState),
+    compliant: true,
+    reason: usageState === "ignored" ? "closure history was not relevant after current migration source inspection" : "",
+  });
+  const summary = (groupId: string) => buildPostCompactCompletionMemoryPreservationClosureUsageSummary(groupId, {
+    targetProject: "api",
+    task: "migrate account database schema",
+    now: fixedNow,
+    postCompactClosureUsageHalfLifeDays: 14,
+    postCompactClosureUsageStaleAfterDays: 45,
+  });
+  const bundleFor = (groupId: string, task: string, suffixId: string) => buildAgentMemoryContextBundle(groupId, "api", task, {
+    includeGlobalClaudeMemory: false,
+    includeProjectMemory: false,
+    maxTypedMemory: 8,
+    maxRenderedChars: 18000,
+    taskId: `phase190-recall-${suffixId}`,
+    taskAgentSessionId: `phase190-recall-task-session-${suffixId}`,
+    nativeSessionId: `phase190-recall-native-session-${suffixId}`,
+    executionId: `phase190-recall-execution-${suffixId}`,
+    generatedAt: fixedNow,
+  });
+  try {
+    const tasksBefore = loadTasks().length;
+    const closureA = makeClosure(groupA, "PHASE190_A");
+    const closureB = makeClosure(groupB, "PHASE190_B");
+    const closureC = makeClosure(groupC, "PHASE190_C");
+    for (const [groupId, closure] of [[groupA, closureA], [groupB, closureB], [groupC, closureC]] as any[]) {
+      distillPostCompactCompletionMemoryPreservationRepairClosureToTypedMemory(groupId, { rows: [closure] }, { reason: "phase190-conflict-arbitration", updatedAt: fixedNow });
+    }
+    recordPostCompactCompletionMemoryPreservationClosureUsage(groupA, {
+      rows: [feedback(groupA, 1, "verified"), feedback(groupA, 2, "ignored"), feedback(groupA, 3, "ignored"), feedback(groupA, 4, "ignored")],
+      generatedAt: fixedNow,
+    });
+    recordPostCompactCompletionMemoryPreservationClosureUsage(groupB, {
+      rows: [feedback(groupB, 1, "ignored"), feedback(groupB, 2, "ignored")],
+      generatedAt: fixedNow,
+    });
+    recordPostCompactCompletionMemoryPreservationClosureUsage(groupC, {
+      rows: [feedback(groupC, 1, "verified"), feedback(groupC, 2, "verified")],
+      generatedAt: oldAt,
+    });
+    recordPostCompactCompletionMemoryPreservationClosureUsage(groupC, {
+      rows: [feedback(groupC, 3, "ignored"), feedback(groupC, 4, "ignored")],
+      generatedAt: fixedNow,
+    });
+    const conflictA = summary(groupA);
+    const consistentB = summary(groupB);
+    const staleOppositionC = summary(groupC);
+    const genericTask = "review post-compact completion memory preservation repair closure for migrate account database schema";
+    const bundleA = bundleFor(groupA, genericTask, "conflict-a");
+    const recallA = bundleA.post_compact_reinjection_repair_receipt_recall || bundleA.group_state?.typedMemory?.postCompactReinjectionRepairReceiptRecall || {};
+    const packetA = buildWorkerContextPacket({
+      group: { id: groupA, name: "Phase 190 conflict", members: [{ project: "api" }] },
+      project: "api",
+      task: genericTask,
+      taskId: "phase190-conflict-packet",
+      traceId: "phase190-conflict-trace",
+      agentType: "codex",
+      memory: bundleA,
+      contextUsageOptions: { maxTokens: 90000 },
+    });
+    const contractA = packetA.post_compact_reinjection_repair_receipt_memory_contract || {};
+    const renderedA = renderWorkerContextPacket(packetA);
+    const bundleB = bundleFor(groupB, genericTask, "consistent-b");
+    const recallB = bundleB.post_compact_reinjection_repair_receipt_recall || bundleB.group_state?.typedMemory?.postCompactReinjectionRepairReceiptRecall || {};
+    const bundleC = bundleFor(groupC, genericTask, "stale-c");
+    const recallC = bundleC.post_compact_reinjection_repair_receipt_recall || bundleC.group_state?.typedMemory?.postCompactReinjectionRepairReceiptRecall || {};
+    const exactBundleA = bundleFor(groupA, `review exact corrected outcome ${closureA.corrected_compact_outcome_id} for migrate account database schema`, "exact-a");
+    const exactRecallA = exactBundleA.post_compact_reinjection_repair_receipt_recall || exactBundleA.group_state?.typedMemory?.postCompactReinjectionRepairReceiptRecall || {};
+    const archiveCountsBefore = new Map(groupIds.map(groupId => {
+      const ledger = readGroupTypedMemoryDistillationLedger(groupId);
+      return [groupId, (ledger.postCompactCompletionMemoryPreservationRepairClosureArchive?.rows || []).length];
+    }));
+    const conflictReport = buildPostCompactCompletionPreservationClosureFeedbackConflictReport({
+      groupIds,
+      targetProject: "api",
+      now: fixedNow,
+    });
+    const qualityReport = buildMemoryQualityReport({
+      checkIds: ["post_compact_completion_memory_preservation_closure_feedback_conflict_arbitration"],
+      groupIds,
+      targetProject: "api",
+      now: fixedNow,
+      tasks: [],
+      refresh: true,
+    });
+    const quality = qualityReport.checks?.[0] || {};
+    const archiveCountsAfter = new Map(groupIds.map(groupId => {
+      const ledger = readGroupTypedMemoryDistillationLedger(groupId);
+      return [groupId, (ledger.postCompactCompletionMemoryPreservationRepairClosureArchive?.rows || []).length];
+    }));
+    const conflict = conflictA.feedbackConflict || {};
+    const exactCorrectedIds = normalizeQualityStringList(exactRecallA.preservationCorrectedOutcomeIds || exactRecallA.preservation_corrected_outcome_ids || []);
+    const checks = {
+      reliableOpposingBranchesTriggerConflict: conflict.active === true
+        && conflictA.recommendation === "surface_conflict_reverify_current_session"
+        && conflict.positive?.independent_session_count === 1
+        && conflict.ignored?.independent_session_count === 3,
+      historicalMajorityCannotAutoSuppress: conflict.historical_majority_authorization_allowed === false
+        && recallA.preservationClosureRecallSuppressed === false
+        && recallA.active === true,
+      bothEvidenceBranchesRemainAuditable: conflict.positive?.entry_ids?.length === 1
+        && conflict.ignored?.entry_ids?.length === 3
+        && conflict.positive?.weighted_evidence > 0
+        && conflict.ignored?.weighted_evidence > conflict.positive?.weighted_evidence,
+      workerContextRequiresCurrentSessionArbitration: contractA.closure_feedback_conflict_active === true
+        && contractA.closure_feedback_current_session_verification_required === true
+        && contractA.closure_feedback_historical_majority_authorization_allowed === false
+        && packetA.acceptance?.post_compact_completion_memory_preservation_closure_feedback_conflict_current_session_verification_required === true
+        && /Closure feedback conflict/i.test(renderedA)
+        && /current child session|current source/i.test(renderedA),
+      consistentIgnoredStillUsesConfidenceGate: consistentB.feedbackConflictActive === false
+        && consistentB.recommendation === "deprioritize_closure_recall"
+        && recallB.preservationClosureRecallSuppressed === true,
+      staleOppositionDoesNotCreateFalseConflict: staleOppositionC.feedbackConflictActive === false
+        && staleOppositionC.recommendation === "deprioritize_closure_recall"
+        && recallC.preservationClosureRecallSuppressed === true,
+      exactIdentityRemainsAvailable: exactRecallA.exactPreservationClosureIdentityMatched === true
+        && exactCorrectedIds.includes(closureA.corrected_compact_outcome_id),
+      groupsRemainIsolated: conflictReport.overall?.checkedGroupCount === 1
+        && conflictReport.groups?.find((row: any) => row.groupId === groupA)?.conflictFamilyCount === 1
+        && conflictReport.groups?.filter((row: any) => row.groupId !== groupA).every((row: any) => row.conflictFamilyCount === 0),
+      qualityCheckAndImmutableArchivePass: conflictReport.overall?.status === "ok"
+        && quality.id === "post_compact_completion_memory_preservation_closure_feedback_conflict_arbitration"
+        && quality.status === "ok"
+        && groupIds.every(groupId => archiveCountsBefore.get(groupId) === 1 && archiveCountsAfter.get(groupId) === 1),
+      memoryCenterCreatedNoRealTask: loadTasks().length === tasksBefore,
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      summaries: {
+        conflictA: { recommendation: conflictA.recommendation, arbitrationState: conflict.arbitration_state, ratio: conflict.conflict_ratio, positiveWeight: conflict.positive?.weighted_evidence, ignoredWeight: conflict.ignored?.weighted_evidence },
+        consistentB: { recommendation: consistentB.recommendation, conflictActive: consistentB.feedbackConflictActive },
+        staleOppositionC: { recommendation: staleOppositionC.recommendation, conflictActive: staleOppositionC.feedbackConflictActive },
+      },
+      conflict: conflictReport.overall,
+      quality: { id: quality.id || "", status: quality.status || "", checked: quality.checked || 0, passed: quality.passed || 0 },
+    };
+  } finally {
+    for (const dir of typedDirs) {
+      try { if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+    }
+  }
+}
+
+export function runMemoryCenterPostCompactCompletionMemoryPreservationClosureConflictResolutionSelfTest() {
+  const suffix = `${process.pid}-${Date.now()}`;
+  const groupA = `memory-center-closure-resolution-used-${suffix}`;
+  const groupB = `memory-center-closure-resolution-ignored-${suffix}`;
+  const groupC = `memory-center-closure-resolution-reopened-${suffix}`;
+  const groupIds = [groupA, groupB, groupC];
+  const typedDirs = groupIds.map(groupId => path.join(GROUP_TYPED_MEMORY_MD_DIR, sidecarFileId(groupId)));
+  const bindingFiles = groupIds.map(groupId => getGroupReplayRepairDispatchBindingLedgerFile(groupId));
+  const workItemFiles = groupIds.map(groupId => getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId));
+  const closureDoc = "post-compact-completion-memory-preservation-repair-closures.md";
+  const resolutionDoc = "post-compact-completion-memory-preservation-closure-conflict-resolutions.md";
+  const conflictAt = "2026-07-12T17:00:00.000Z";
+  const resolvedAt = "2026-07-12T17:10:00.000Z";
+  const reopenedAt = "2026-07-12T17:20:00.000Z";
+  const {
+    buildPostCompactCompletionMemoryPreservationClosureUsageSummary,
+    distillPostCompactCompletionMemoryPreservationRepairClosureToTypedMemory,
+    readGroupTypedMemoryDistillationLedger,
+    readPostCompactCompletionMemoryPreservationClosureUsageLedger,
+    recordPostCompactCompletionMemoryPreservationClosureUsage,
+    scanGroupTypedMemoryDocuments,
+  } = require("../collaboration/group-memory-index");
+  const { buildAgentMemoryContextBundle } = require("../collaboration/memory");
+  const { buildWorkerContextPacket, renderWorkerContextPacket } = require("../../agents/runtime-kernel");
+  const makeClosure = (groupId: string, marker: string) => ({
+    group_id: groupId,
+    source: POST_COMPACT_COMPLETION_PRESERVATION_REPAIR_SOURCE,
+    component: "post_compact_receipt_memory_usage_repair_completion_compaction_preservation",
+    target_project: "api",
+    work_item_id: `post-compact-completion-preservation-repair:${marker}`,
+    assignment_id: `assignment-${marker}`,
+    dispatch_key: `dispatch-${marker}`,
+    worker_context_packet_id: `failed-packet-${marker}`,
+    binding_id: `failed-binding-${marker}`,
+    compact_retry_id: `failed-retry-${marker}`,
+    compact_outcome_id: `failed-outcome-${marker}`,
+    compact_hook_run_id: `failed-hook-${marker}`,
+    corrected_compact_retry_id: `corrected-retry-${marker}`,
+    corrected_compact_outcome_id: `corrected-outcome-${marker}`,
+    corrected_compact_hook_run_id: `corrected-hook-${marker}`,
+    completion_preservation_completion_doc_rel_paths: ["post-compact-receipt-memory-usage-repair-completions.md"],
+    completion_preservation_required_doc_rel_paths: ["post-compact-reinjection-repair-receipt-memory.md"],
+    completion_preservation_work_item_ids: [`receipt-memory-usage-repair:${marker}`],
+    completion_preservation_timeline_binding_ids: [`receipt-memory-usage-timeline:${marker}`],
+    completion_preservation_historical_task_agent_session_ids: [`historical-task-session-${marker}`],
+    completion_preservation_historical_native_session_ids: [`historical-native-session-${marker}`],
+    completion_preservation_current_session_binding_id: `closure-binding-${marker}`,
+    completion_preservation_current_task_agent_session_id: `closure-task-session-${marker}`,
+    completion_preservation_current_native_session_id: `closure-native-session-${marker}`,
+    completion_preservation_gap_codes: ["completion_work_item_ids_missing_after_compact"],
+    status: "completed",
+    completion_source: "post_compact_receipt_memory_usage_repair_completion_compaction_preservation_corrected_retry",
+    resolutionReason: "completion_memory_compaction_preservation_corrected_retry_verified",
+    corrected_retry_proof: {
+      schema: "ccm-post-compact-receipt-memory-usage-repair-completion-compaction-preservation-repair-closure-v1",
+      failed_retry_id: `failed-retry-${marker}`,
+      failed_outcome_id: `failed-outcome-${marker}`,
+      corrected_retry_id: `corrected-retry-${marker}`,
+      corrected_outcome_id: `corrected-outcome-${marker}`,
+      exact_identity_restored: true,
+      current_session_boundary_restored: true,
+      historical_sessions_remain_evidence_only: true,
+      verified_at: conflictAt,
+    },
+    completedAt: conflictAt,
+  });
+  const historicalFeedback = (groupId: string, index: number, usageState: string) => ({
+    target_project: "api",
+    agent: index % 2 ? "codex" : "cursor",
+    task_id: `phase191-cache-task-${groupId}-${index}`,
+    task_text: "repair distributed cache invalidation",
+    execution_id: `phase191-cache-execution-${groupId}-${index}`,
+    worker_context_packet_id: `phase191-${groupId}-historical-packet-${index}`,
+    binding_id: `phase191-${groupId}-historical-binding-${index}`,
+    task_agent_session_id: `phase191-${groupId}-historical-task-session-${index}`,
+    native_session_id: `phase191-${groupId}-historical-native-session-${index}`,
+    receipt_source: "assignment_binding",
+    receipt_status: "done",
+    rel_path: closureDoc,
+    usage_state: usageState,
+    current_source_verified: ["used", "verified"].includes(usageState),
+    compliant: true,
+    reason: usageState === "ignored" ? "closure history was not relevant after current cache inspection" : "",
+  });
+  const buildConflictPacket = (groupId: string, suffixId: string) => {
+    const task = "review post-compact completion memory preservation repair closure for repair distributed cache invalidation";
+    const bundle = buildAgentMemoryContextBundle(groupId, "api", task, {
+      includeGlobalClaudeMemory: false,
+      includeProjectMemory: false,
+      maxTypedMemory: 8,
+      maxRenderedChars: 18000,
+      taskId: `phase191-conflict-${suffixId}`,
+      taskAgentSessionId: `phase191-conflict-task-session-${suffixId}`,
+      nativeSessionId: `phase191-conflict-native-session-${suffixId}`,
+      executionId: `phase191-conflict-execution-${suffixId}`,
+      generatedAt: conflictAt,
+    });
+    const packet = buildWorkerContextPacket({
+      group: { id: groupId, name: "Phase 191 conflict resolution", members: [{ project: "api" }] },
+      project: "api",
+      task,
+      taskId: `phase191-conflict-${suffixId}`,
+      traceId: `phase191-conflict-trace-${suffixId}`,
+      agentType: "codex",
+      memory: bundle,
+      contextUsageOptions: { maxTokens: 90000 },
+    });
+    return { task, bundle, packet, contract: packet.post_compact_reinjection_repair_receipt_memory_contract || {} };
+  };
+  const writeResolutionBinding = (groupId: string, packetBuild: any, usageState: string, validSession: boolean, at: string) => {
+    const contract = packetBuild.contract || {};
+    const packetId = packetBuild.packet.packet_id;
+    const taskSession = validSession ? contract.current_task_agent_session_id : `wrong-${contract.current_task_agent_session_id}`;
+    const nativeSession = validSession ? contract.current_native_session_id : `wrong-${contract.current_native_session_id}`;
+    const memoryUsed = ["used", "verified"].includes(usageState)
+      ? [`${closureDoc}; usageState=${usageState}; currentSourceVerified=true; historical repair completion is recovery evidence, not permanent repository truth`]
+      : [];
+    const memoryIgnored = usageState === "ignored"
+      ? [`${closureDoc}; usageState=ignored; reason=current cache source shows this historical closure is not applicable; historical repair completion is recovery evidence, not permanent repository truth`]
+      : [];
+    const entry = {
+      schema: "ccm-replay-repair-main-agent-dispatch-brief-assignment-v1",
+      groupId,
+      project: "api",
+      agent_type: "codex",
+      task: packetBuild.task,
+      task_family_key: contract.closure_feedback_task_family_key,
+      task_id: `phase191-resolution-${groupId}`,
+      execution_id: `phase191-resolution-execution-${groupId}`,
+      binding_id: `phase191-resolution-binding-${groupId}`,
+      assignment_id: `phase191-resolution-assignment-${groupId}`,
+      dispatch_key: `phase191-resolution-dispatch-${groupId}`,
+      worker_context_packet_id: packetId,
+      post_compact_reinjection_repair_receipt_memory_contract: contract,
+      worker_context_packet_post_compact_reinjection_repair_receipt_memory_contract: contract,
+      worker_context_packet_context_usage: {
+        schema: "ccm-worker-context-usage-v1",
+        packet_id: packetId,
+        categories: [{ id: "post_compact_reinjection_repair_receipt_memory_contract", required: true, tokens: 100 }],
+      },
+      worker_context_packet_receipt: {
+        status: "done",
+        worker_context_packet_id: packetId,
+        task_agent_session_id: taskSession,
+        native_session_id: nativeSession,
+        memoryUsed,
+        memoryIgnored,
+      },
+    };
+    const file = getGroupReplayRepairDispatchBindingLedgerFile(groupId);
+    writeJsonAtomic(file, {
+      schema: "ccm-replay-repair-main-agent-dispatch-brief-assignment-ledger-v1",
+      version: 1,
+      groupId,
+      file,
+      updatedAt: at,
+      bindingCount: 1,
+      entries: [entry],
+    });
+  };
+  const summary = (groupId: string, at: string) => buildPostCompactCompletionMemoryPreservationClosureUsageSummary(groupId, {
+    targetProject: "api",
+    task: "repair distributed cache invalidation",
+    now: at,
+  });
+  try {
+    const tasksBefore = loadTasks().length;
+    const closures = new Map<string, any>();
+    for (const [groupId, marker] of [[groupA, "PHASE191_A"], [groupB, "PHASE191_B"], [groupC, "PHASE191_C"]]) {
+      const closure = makeClosure(groupId, marker);
+      closures.set(groupId, closure);
+      distillPostCompactCompletionMemoryPreservationRepairClosureToTypedMemory(groupId, { rows: [closure] }, { reason: "phase191-conflict-resolution", updatedAt: conflictAt });
+      recordPostCompactCompletionMemoryPreservationClosureUsage(groupId, {
+        rows: [historicalFeedback(groupId, 1, "verified"), historicalFeedback(groupId, 2, "ignored")],
+        generatedAt: conflictAt,
+      });
+    }
+    const packetA = buildConflictPacket(groupA, "used-a");
+    const packetB = buildConflictPacket(groupB, "ignored-b");
+    const packetC = buildConflictPacket(groupC, "reopened-c");
+    writeResolutionBinding(groupA, packetA, "verified", true, resolvedAt);
+    writeResolutionBinding(groupB, packetB, "ignored", false, resolvedAt);
+    writeResolutionBinding(groupC, packetC, "verified", true, resolvedAt);
+    const firstReport = buildPostCompactReinjectionRepairReceiptMemoryUsageReceiptReport({ groupIds, targetProject: "api", tasks: [], generatedAt: resolvedAt });
+    const invalidLedgerB = readPostCompactCompletionMemoryPreservationClosureUsageLedger(groupB);
+    const invalidResolutionCountB = (invalidLedgerB.entries || []).filter((entry: any) => entry.conflict_resolution === true).length;
+    writeResolutionBinding(groupB, packetB, "ignored", true, "2026-07-12T17:11:00.000Z");
+    const correctedReport = buildPostCompactReinjectionRepairReceiptMemoryUsageReceiptReport({ groupIds, targetProject: "api", tasks: [], generatedAt: "2026-07-12T17:11:00.000Z" });
+    buildPostCompactReinjectionRepairReceiptMemoryUsageReceiptReport({ groupIds, targetProject: "api", tasks: [], generatedAt: "2026-07-12T17:12:00.000Z" });
+    recordPostCompactCompletionMemoryPreservationClosureUsage(groupC, {
+      rows: [{
+        ...historicalFeedback(groupC, 3, "ignored"),
+        task_agent_session_id: "phase191-group-c-later-opposition-task-session",
+        native_session_id: "phase191-group-c-later-opposition-native-session",
+        worker_context_packet_id: "phase191-group-c-later-opposition-packet",
+      }],
+      generatedAt: reopenedAt,
+    });
+    const summaryA = summary(groupA, reopenedAt);
+    const summaryB = summary(groupB, reopenedAt);
+    const summaryC = summary(groupC, reopenedAt);
+    const futureBundleA = buildAgentMemoryContextBundle(groupA, "api", "review post-compact completion memory preservation repair closure for repair distributed cache invalidation", {
+      includeGlobalClaudeMemory: false,
+      includeProjectMemory: false,
+      maxTypedMemory: 8,
+      maxRenderedChars: 18000,
+      taskId: "phase191-future-a",
+      taskAgentSessionId: "phase191-future-task-session-a",
+      nativeSessionId: "phase191-future-native-session-a",
+      executionId: "phase191-future-execution-a",
+      generatedAt: reopenedAt,
+    });
+    const futureRecallA = futureBundleA.post_compact_reinjection_repair_receipt_recall || futureBundleA.group_state?.typedMemory?.postCompactReinjectionRepairReceiptRecall || {};
+    const futurePacketA = buildWorkerContextPacket({
+      group: { id: groupA, name: "Phase 191 future", members: [{ project: "api" }] },
+      project: "api",
+      task: "review post-compact completion memory preservation repair closure for repair distributed cache invalidation",
+      taskId: "phase191-future-a",
+      traceId: "phase191-future-trace-a",
+      agentType: "codex",
+      memory: futureBundleA,
+      contextUsageOptions: { maxTokens: 90000 },
+    });
+    const futureContractA = futurePacketA.post_compact_reinjection_repair_receipt_memory_contract || {};
+    const futureRenderedA = renderWorkerContextPacket(futurePacketA);
+    const resolutionReport = buildPostCompactCompletionPreservationClosureConflictResolutionReport({ groupIds, targetProject: "api", now: reopenedAt });
+    const qualityReport = buildMemoryQualityReport({
+      checkIds: ["post_compact_completion_memory_preservation_closure_conflict_resolution"],
+      groupIds,
+      targetProject: "api",
+      now: reopenedAt,
+      tasks: [],
+      refresh: true,
+    });
+    const quality = qualityReport.checks?.[0] || {};
+    const archives = new Map(groupIds.map(groupId => {
+      const ledger = readGroupTypedMemoryDistillationLedger(groupId);
+      return [groupId, ledger.postCompactCompletionMemoryPreservationClosureConflictResolutionArchive || {}];
+    }));
+    const resolutionEntriesA = readPostCompactCompletionMemoryPreservationClosureUsageLedger(groupA).entries.filter((entry: any) => entry.conflict_resolution === true);
+    const docsA = scanGroupTypedMemoryDocuments(groupA);
+    const checks = {
+      wrongSessionCannotCreateResolution: firstReport.groups?.find((row: any) => row.groupId === groupB)?.status === "fail"
+        && invalidResolutionCountB === 0,
+      validUsedResolutionIsSessionBound: summaryA.feedbackConflictResolution?.active === true
+        && summaryA.feedbackConflictResolution?.resolution_usage_state === "verified"
+        && summaryA.feedbackConflictResolution?.task_agent_session_id === packetA.contract.current_task_agent_session_id
+        && summaryA.recommendation === "resolved_conflict_promote_but_reverify_future_session",
+      validIgnoredResolutionStaysNeutral: summaryB.feedbackConflictResolution?.active === true
+        && summaryB.feedbackConflictResolution?.resolution_usage_state === "ignored"
+        && summaryB.recommendation === "resolved_conflict_neutral_reverify_future_session",
+      resolutionAutomaticallyDistillsTypedMemory: groupIds.every(groupId => Number(archives.get(groupId)?.archived_count || 0) === 1)
+        && docsA.some((doc: any) => doc.relPath === resolutionDoc),
+      duplicateReceiptScanIsIdempotent: resolutionEntriesA.length === 1
+        && Number(archives.get(groupA)?.rows?.length || 0) === 1,
+      futureWorkerContextRecallsResolution: (futureRecallA.docRelPaths || []).includes(resolutionDoc)
+        && futureContractA.closure_conflict_resolution_active === true
+        && futureContractA.closure_conflict_resolution_entry_id === summaryA.feedbackConflictResolution?.resolution_entry_id
+        && futurePacketA.acceptance?.post_compact_completion_memory_preservation_closure_conflict_resolution_reverification_required === true
+        && /Closure conflict resolution history/i.test(futureRenderedA),
+      historicalBranchesRemainPreserved: summaryA.historicalFeedbackConflict?.positive?.entry_ids?.length >= 1
+        && summaryA.historicalFeedbackConflict?.ignored?.entry_ids?.length >= 1
+        && archives.get(groupA)?.rows?.[0]?.historical_branches_preserved === true,
+      laterReliableOppositionReopensConflict: summaryC.feedbackConflictResolution?.reopened === true
+        && summaryC.feedbackConflictResolution?.active === false
+        && summaryC.feedbackConflictActive === true
+        && summaryC.recommendation === "surface_conflict_reverify_current_session",
+      qualityAndGroupIsolationPass: correctedReport.overall?.status === "ok"
+        && resolutionReport.overall?.status === "ok"
+        && resolutionReport.overall?.checkedGroupCount === 3
+        && quality.id === "post_compact_completion_memory_preservation_closure_conflict_resolution"
+        && quality.status === "ok"
+        && groupIds.every(groupId => archives.get(groupId)?.rows?.every((row: any) => row.group_id === groupId)),
+      memoryCenterCreatedNoRealTask: loadTasks().length === tasksBefore,
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      summaries: {
+        used: { recommendation: summaryA.recommendation, resolution: summaryA.feedbackConflictResolution },
+        ignored: { recommendation: summaryB.recommendation, resolution: summaryB.feedbackConflictResolution },
+        reopened: { recommendation: summaryC.recommendation, resolution: summaryC.feedbackConflictResolution },
+      },
+      resolution: resolutionReport.overall,
+      resolutionGroups: resolutionReport.groups,
+      future: {
+        docRelPaths: futureRecallA.docRelPaths || [],
+        contract: futureContractA,
+        acceptance: futurePacketA.acceptance || {},
+        renderedHasResolution: /Closure conflict resolution history/i.test(futureRenderedA),
+      },
+      quality: { id: quality.id || "", status: quality.status || "", checked: quality.checked || 0, passed: quality.passed || 0 },
+    };
+  } finally {
+    for (const file of [...bindingFiles, ...workItemFiles]) {
+      for (const target of [file, `${file}.bak`]) {
+        try { if (target && fs.existsSync(target)) fs.unlinkSync(target); } catch {}
+      }
+    }
+    for (const dir of typedDirs) {
+      try { if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+    }
+  }
+}
+
+export function runMemoryCenterPostCompactCompletionMemoryPreservationClosureConflictResolutionCompactionSelfTest() {
+  const tasksBefore = loadTasks().length;
+  const integration = require("../collaboration/group-orchestrator").runWorkerContextCompletionMemoryCompactionPreservationSelfTest();
+  const scenarios = Array.isArray(integration.scenarios) ? integration.scenarios : [];
+  const outcomeReport = {
+    schema: "ccm-worker-context-compact-outcome-ledger-report-v1",
+    overall: { status: "ok", outcomeCount: scenarios.length },
+    groups: scenarios.map((scenario: any, index: number) => ({
+      groupId: `phase192-${scenario.kind}-${index}`,
+      status: "ok",
+      outcomes: [{
+        assignment_id: `phase192-assignment-${scenario.kind}`,
+        outcome_id: `phase192-outcome-${scenario.kind}`,
+        retry_method: scenario.retry_method,
+        completion_memory_preserved: scenario.preservation_preserved === true,
+        conflict_resolution_preservation_required: scenario.conflict_resolution_present === true,
+        conflict_resolution_present: scenario.conflict_resolution_present === true,
+        conflict_resolution_doc_rel_paths: scenario.conflict_resolution_doc_rel_paths || [],
+        conflict_resolution_active: scenario.conflict_resolution_active === true,
+        conflict_resolution_reopened: scenario.conflict_resolution_reopened === true,
+        conflict_resolution_state: scenario.conflict_resolution_state || "",
+        conflict_resolution_entry_id: scenario.conflict_resolution_entry_id || "",
+        conflict_resolution_usage_state: scenario.conflict_resolution_usage_state || "",
+        conflict_resolution_task_agent_session_id: scenario.conflict_resolution_task_agent_session_id || "",
+        conflict_resolution_native_session_id: scenario.conflict_resolution_native_session_id || "",
+        conflict_resolution_reversible: scenario.conflict_resolution_reversible === true,
+        conflict_resolution_historical_branches_preserved: scenario.conflict_resolution_historical_branches_preserved === true,
+        conflict_resolution_reverification_acceptance_required: scenario.conflict_resolution_reverification_acceptance_required === true,
+        conflict_resolution_reversible_acceptance_required: scenario.conflict_resolution_reversible_acceptance_required === true,
+        conflict_verification_acceptance_required: scenario.conflict_verification_acceptance_required === true,
+        ptl_emergency_engaged: scenario.ptl_emergency_engaged === true,
+      }],
+      gaps: [],
+    })),
+    weakGroups: [],
+  };
+  const report = buildPostCompactCompletionMemoryPreservationClosureConflictResolutionCompactionReport({ outcomeReport });
+  const directQuality = evaluatePostCompactCompletionMemoryPreservationClosureConflictResolutionCompaction({ outcomeReport });
+  const qualityReport = buildMemoryQualityReport({
+    checkIds: ["post_compact_completion_memory_preservation_closure_conflict_resolution_compaction"],
+    outcomeReport,
+    tasks: [],
+    refresh: true,
+  });
+  const quality = qualityReport.checks?.[0] || {};
+  const memory = scenarios.find((scenario: any) => scenario.kind === "memory") || {};
+  const replay = scenarios.find((scenario: any) => scenario.kind === "replay") || {};
+  const metadata = scenarios.find((scenario: any) => scenario.kind === "metadata") || {};
+  const ptl = scenarios.find((scenario: any) => scenario.kind === "ptl") || {};
+  const checks = {
+    realFourStrategyIntegrationPasses: integration.pass === true
+      && scenarios.length === 4
+      && integration.checks?.exactConflictResolutionIdentitySurvivesAllStrategies === true,
+    exactResolutionIdentitySurvivesEveryStrategy: scenarios.every((scenario: any) => scenario.conflict_resolution_entry_id === "pccmpu_PHASE192_RESOLUTION_SENTINEL"
+      && (scenario.conflict_resolution_doc_rel_paths || []).includes("post-compact-completion-memory-preservation-closure-conflict-resolutions.md")
+      && scenario.conflict_resolution_task_agent_session_id === "task-agent-session-phase192-resolution"
+      && scenario.conflict_resolution_native_session_id === "native-session-phase192-resolution"),
+    reversibleBranchBoundarySurvives: scenarios.every((scenario: any) => scenario.conflict_resolution_reversible === true
+      && scenario.conflict_resolution_historical_branches_preserved === true),
+    activeResolutionAcceptanceSurvivesMemoryAndReplay: [memory, replay].every((scenario: any) => scenario.conflict_resolution_active === true
+      && scenario.conflict_resolution_reopened === false
+      && scenario.conflict_resolution_reverification_acceptance_required === true
+      && scenario.conflict_resolution_reversible_acceptance_required === true),
+    reopenedConflictAcceptanceSurvivesMetadataAndPtl: [metadata, ptl].every((scenario: any) => scenario.conflict_resolution_active === false
+      && scenario.conflict_resolution_reopened === true
+      && scenario.conflict_verification_acceptance_required === true),
+    recoveryBehaviorMatchesCompactStrategy: memory.dispatch_ready === false
+      && replay.dispatch_ready === true
+      && metadata.dispatch_ready === true
+      && ptl.ptl_emergency_engaged === true,
+    tamperedResolutionIsRejected: integration.checks?.tamperedCompactPacketIsRejected === true
+      && (integration.tampered?.gaps || []).includes("conflict_resolution_contract_missing_after_compact")
+      && (integration.tampered?.gaps || []).includes("conflict_resolution_entry_id_changed_after_compact"),
+    reportAndQualityPass: report.overall?.status === "ok"
+      && report.overall?.requiredOutcomeCount === 4
+      && report.overall?.preservedOutcomeCount === 4
+      && report.overall?.activeResolutionCount === 2
+      && report.overall?.reopenedResolutionCount === 2
+      && directQuality.status === "ok"
+      && quality.id === "post_compact_completion_memory_preservation_closure_conflict_resolution_compaction"
+      && quality.status === "ok",
+    memoryCenterCreatedNoRealTask: loadTasks().length === tasksBefore,
+  };
+  return {
+    pass: Object.values(checks).every(Boolean),
+    checks,
+    report: report.overall,
+    scenarios,
+    tampered: integration.tampered,
+    quality: { id: quality.id || "", status: quality.status || "", checked: quality.checked || 0, passed: quality.passed || 0 },
+  };
+}
+
 export function runMemoryCenterCompactFileReferenceUsageDisciplineSelfTest() {
   const groupId = `memory-center-compact-file-reference-discipline-selftest-${process.pid}-${Date.now()}`;
   const groupFile = path.join(GROUP_MEMORY_DIR, `${groupId}.json`);
@@ -49469,6 +54077,1301 @@ export function runMemoryCenterCompactFileReferenceUsageDisciplineSelfTest() {
       try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
     }
     for (const dir of [typedDir, sessionDir, toolDir]) {
+      try { if (dir && fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+    }
+  }
+}
+
+export function runMemoryCenterPostCompactCompletionMemoryPreservationClosureConflictResolutionCompactionRepairSelfTest() {
+  const suffix = `${process.pid}-${Date.now()}`;
+  const activeGroupId = `memory-center-resolution-compact-repair-active-${suffix}`;
+  const reopenedGroupId = `memory-center-resolution-compact-repair-reopened-${suffix}`;
+  const decoyGroupId = `memory-center-resolution-compact-repair-decoy-${suffix}`;
+  const groupIds = [activeGroupId, reopenedGroupId];
+  const tasksBefore = loadTasks().length;
+  const resolutionDoc = "post-compact-completion-memory-preservation-closure-conflict-resolutions.md";
+  const completionDoc = "post-compact-receipt-memory-usage-repair-completions.md";
+  const filesFor = (groupId: string) => ({
+    binding: getGroupReplayRepairDispatchBindingLedgerFile(groupId),
+    outcome: getGroupWorkerContextCompactOutcomeLedgerFile(groupId),
+    workItems: getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId),
+    dispatch: getGroupReplayRepairDispatchPlanLedgerFile(groupId),
+    typedDir: path.join(GROUP_TYPED_MEMORY_MD_DIR, sidecarFileId(groupId)),
+  });
+  const summaryFor = (marker: string, reopened: boolean) => ({
+    schema: "ccm-post-compact-receipt-memory-usage-repair-completion-packet-summary-v1",
+    present: true,
+    completion_doc_rel_paths: [completionDoc],
+    required_doc_rel_paths: [completionDoc, resolutionDoc],
+    work_item_ids: [`completion-work-${marker}`],
+    timeline_binding_ids: [`completion-timeline-${marker}`],
+    historical_task_agent_session_ids: [`historical-task-${marker}`],
+    historical_native_session_ids: [`historical-native-${marker}`],
+    current_session_binding_id: `current-binding-${marker}`,
+    current_task_agent_session_id: `current-task-${marker}`,
+    current_native_session_id: `current-native-${marker}`,
+    usage_acceptance_required: true,
+    current_session_acceptance_required: true,
+    authority_boundary_valid: true,
+    conflict_resolution_present: true,
+    conflict_resolution_doc_rel_paths: [resolutionDoc],
+    conflict_resolution_active: !reopened,
+    conflict_resolution_reopened: reopened,
+    conflict_resolution_state: reopened ? "reopened" : "resolved",
+    conflict_resolution_entry_id: `resolution-entry-${marker}`,
+    conflict_resolution_usage_state: "verified",
+    conflict_resolution_task_agent_session_id: `resolving-task-${marker}`,
+    conflict_resolution_native_session_id: `resolving-native-${marker}`,
+    conflict_resolution_reversible: true,
+    conflict_resolution_historical_branches_preserved: true,
+    conflict_resolution_reverification_acceptance_required: !reopened,
+    conflict_resolution_reversible_acceptance_required: !reopened,
+    conflict_verification_acceptance_required: reopened,
+  });
+  const scenarioFor = (groupId: string, marker: string, reopened: boolean) => {
+    const summary = summaryFor(marker, reopened);
+    const failedRetryId = `failed-retry-${marker}`;
+    const failedOutcomeId = `failed-outcome-${marker}`;
+    const failedAfter = {
+      ...summary,
+      conflict_resolution_present: false,
+      conflict_resolution_doc_rel_paths: [],
+      conflict_resolution_entry_id: "",
+      conflict_resolution_state: "",
+      conflict_resolution_usage_state: "",
+      conflict_resolution_task_agent_session_id: "",
+      conflict_resolution_native_session_id: "",
+      conflict_resolution_reversible: false,
+      conflict_resolution_historical_branches_preserved: false,
+      conflict_resolution_reverification_acceptance_required: false,
+      conflict_resolution_reversible_acceptance_required: false,
+      conflict_verification_acceptance_required: false,
+    };
+    const preservation = {
+      schema: "ccm-post-compact-receipt-memory-usage-repair-completion-preservation-v1",
+      required: true,
+      preserved: false,
+      source: "worker_context_packet_compaction_retry",
+      retry_id: failedRetryId,
+      before: summary,
+      after: failedAfter,
+      gaps: [
+        "conflict_resolution_contract_missing_after_compact",
+        "conflict_resolution_doc_rel_paths_missing_after_compact",
+        "conflict_resolution_entry_id_changed_after_compact",
+      ],
+    };
+    const assignmentId = `assignment-${marker}`;
+    const failedAt = reopened ? "2026-07-12T03:10:01.000Z" : "2026-07-12T03:00:01.000Z";
+    const entry = {
+      schema: "ccm-replay-repair-main-agent-dispatch-brief-assignment-v1",
+      binding_id: `binding-${marker}`,
+      assignment_id: assignmentId,
+      dispatch_key: `dispatch-${marker}`,
+      groupId,
+      project: "api",
+      worker_context_packet_id: `failed-packet-${marker}`,
+      dispatch_ready: false,
+      worker_context_packet_compact_hook_run_id: `failed-hook-${marker}`,
+      worker_context_packet_compaction_retry: {
+        schema: "ccm-worker-context-compaction-retry-v1",
+        retry_id: failedRetryId,
+        retry_packet_id: `failed-packet-${marker}`,
+        status: "blocked",
+        post_compact_receipt_memory_usage_repair_completion_preservation: preservation,
+        post_compact_receipt_memory_usage_repair_completion_preserved: false,
+      },
+      updatedAt: failedAt,
+    };
+    const outcome = {
+      schema: "ccm-worker-context-compact-outcome-entry-v1",
+      outcome_id: failedOutcomeId,
+      group_id: groupId,
+      assignment_id: assignmentId,
+      dispatch_key: `dispatch-${marker}`,
+      project: "api",
+      hook_run_id: `failed-hook-${marker}`,
+      retry_id: failedRetryId,
+      status: "blocked",
+      dispatch_ready: false,
+      post_compact_receipt_memory_usage_repair_completion_preservation: preservation,
+      post_compact_receipt_memory_usage_repair_completion_preserved: false,
+      at: failedAt,
+    };
+    return { groupId, marker, reopened, summary, failedRetryId, failedOutcomeId, assignmentId, entry, outcome, failedAt };
+  };
+  const correctedFor = (scenario: any, retryId: string, outcomeId: string, at: string) => ({
+    ...scenario.outcome,
+    outcome_id: outcomeId,
+    retry_id: retryId,
+    hook_run_id: `corrected-hook-${scenario.marker}`,
+    status: "recovered",
+    dispatch_ready: true,
+    post_compact_receipt_memory_usage_repair_completion_preservation: {
+      schema: "ccm-post-compact-receipt-memory-usage-repair-completion-preservation-v1",
+      required: true,
+      preserved: true,
+      source: "worker_context_packet_compaction_retry",
+      retry_id: retryId,
+      before: scenario.summary,
+      after: scenario.summary,
+      gaps: [],
+    },
+    post_compact_receipt_memory_usage_repair_completion_preserved: true,
+    at,
+  });
+  const active = scenarioFor(activeGroupId, "phase193-active", false);
+  const reopened = scenarioFor(reopenedGroupId, "phase193-reopened", true);
+  const allScenarios = [active, reopened];
+  const writeBinding = (scenario: any) => writeJsonAtomic(filesFor(scenario.groupId).binding, {
+    schema: "ccm-replay-repair-main-agent-dispatch-brief-assignment-ledger-v1",
+    version: 1,
+    groupId: scenario.groupId,
+    entries: [scenario.entry],
+    updatedAt: scenario.failedAt,
+  });
+  const writeOutcomes = (scenario: any, entries: any[]) => writeJsonAtomic(filesFor(scenario.groupId).outcome, {
+    schema: "ccm-worker-context-compact-outcome-ledger-v1",
+    version: 1,
+    groupId: scenario.groupId,
+    entries,
+    updatedAt: entries[entries.length - 1]?.at || scenario.failedAt,
+  });
+  try {
+    for (const scenario of allScenarios) {
+      writeBinding(scenario);
+      writeOutcomes(scenario, [scenario.outcome]);
+    }
+    const activeFiles = filesFor(activeGroupId);
+    fs.mkdirSync(activeFiles.typedDir, { recursive: true });
+    writeJsonAtomic(path.join(activeFiles.typedDir, ".distillation-ledger.json"), {
+      schema: "ccm-group-typed-memory-distillation-ledger-v1",
+      groupId: activeGroupId,
+      postCompactCompletionMemoryPreservationClosureConflictResolutionArchive: {
+        schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-archive-v1",
+        rows: [{ entry_id: active.summary.conflict_resolution_entry_id, immutable_marker: "PHASE193_ARCHIVE_SENTINEL" }],
+        entry_count: 1,
+      },
+    });
+
+    const firstReport = buildPostCompactCompletionPreservationRepairWorkItemReport({ groupIds, generatedAt: "2026-07-12T03:20:00.000Z" });
+    const firstIds = Object.fromEntries((firstReport.groups || []).map((group: any) => [group.groupId, group.items?.[0]?.id || ""]));
+    const secondReport = buildPostCompactCompletionPreservationRepairWorkItemReport({ groupIds, generatedAt: "2026-07-12T03:20:01.000Z" });
+    const secondIds = Object.fromEntries((secondReport.groups || []).map((group: any) => [group.groupId, group.items?.[0]?.id || ""]));
+    const candidateReport = buildPostCompactCompletionPreservationRepairDispatchCandidateReport({ groupIds, workItemReport: secondReport });
+    const briefReport = buildPostCompactCompletionPreservationRepairDispatchBriefReport({ groupIds, candidateReport, generatedAt: "2026-07-12T03:20:02.000Z" });
+    const candidates = (candidateReport.groups || []).flatMap((group: any) => group.candidates || []);
+    const briefs = (briefReport.groups || []).flatMap((group: any) => group.briefs || []);
+
+    const sameRetry = correctedFor(active, active.failedRetryId, "same-retry-new-outcome-phase193", "2026-07-12T03:21:00.000Z");
+    const sameOutcome = correctedFor(active, "different-retry-same-outcome-phase193", active.failedOutcomeId, "2026-07-12T03:21:01.000Z");
+    const stale = correctedFor(active, "stale-retry-phase193", "stale-outcome-phase193", "2026-07-12T02:59:59.000Z");
+    writeOutcomes(active, [active.outcome, sameRetry, sameOutcome, stale]);
+    const decoyCorrected = correctedFor(active, "decoy-retry-phase193", "decoy-outcome-phase193", "2026-07-12T03:22:00.000Z");
+    writeJsonAtomic(filesFor(decoyGroupId).outcome, {
+      schema: "ccm-worker-context-compact-outcome-ledger-v1",
+      version: 1,
+      groupId: decoyGroupId,
+      entries: [{ ...decoyCorrected, group_id: decoyGroupId }],
+      updatedAt: decoyCorrected.at,
+    });
+    const rejectedReport = buildPostCompactCompletionPreservationRepairWorkItemReport({ groupIds, generatedAt: "2026-07-12T03:22:01.000Z" });
+    const rejectedActiveItem = rejectedReport.groups?.find((group: any) => group.groupId === activeGroupId)?.items?.[0] || {};
+
+    const activeCorrected = correctedFor(active, "corrected-retry-phase193-active", "corrected-outcome-phase193-active", "2026-07-12T03:23:00.000Z");
+    writeOutcomes(active, [active.outcome, sameRetry, sameOutcome, stale, activeCorrected]);
+    const activeOnlyReport = buildPostCompactCompletionPreservationRepairWorkItemReport({ groupIds, generatedAt: "2026-07-12T03:23:01.000Z" });
+    const activeClosed = activeOnlyReport.groups?.find((group: any) => group.groupId === activeGroupId)?.items?.[0] || {};
+    const reopenedStillOpen = activeOnlyReport.groups?.find((group: any) => group.groupId === reopenedGroupId)?.items?.[0] || {};
+
+    const reopenedCorrected = correctedFor(reopened, "corrected-retry-phase193-reopened", "corrected-outcome-phase193-reopened", "2026-07-12T03:24:00.000Z");
+    writeOutcomes(reopened, [reopened.outcome, reopenedCorrected]);
+    const finalReport = buildPostCompactCompletionPreservationRepairWorkItemReport({ groupIds, generatedAt: "2026-07-12T03:24:01.000Z" });
+    const finalItems = (finalReport.groups || []).flatMap((group: any) => group.items || []);
+    const finalClosure = buildPostCompactCompletionPreservationRepairClosureReport({ groupIds, workItemReport: finalReport });
+    const preservedArchive = readJson(path.join(activeFiles.typedDir, ".distillation-ledger.json"), {})
+      .postCompactCompletionMemoryPreservationClosureConflictResolutionArchive?.rows || [];
+    const checks = {
+      idempotentWorkItemsPerGroup: firstReport.overall?.requiredActionCount === 2
+        && groupIds.every(groupId => firstIds[groupId] && firstIds[groupId] === secondIds[groupId]),
+      candidatesCarryExactResolutionIdentity: candidateReport.overall?.status === "ok"
+        && candidates.length === 2
+        && candidates.every((candidate: any) => candidate.shouldCreateRealTask === false
+          && candidate.completion_preservation_conflict_resolution_present === true
+          && candidate.completion_preservation_conflict_resolution_doc_rel_paths?.includes(resolutionDoc)
+          && candidate.completion_preservation_conflict_resolution_entry_id
+          && candidate.completion_preservation_conflict_resolution_reversible === true
+          && candidate.completion_preservation_conflict_resolution_historical_branches_preserved === true),
+      briefsAreSelfContainedAndNoRealTask: briefReport.overall?.status === "ok"
+        && briefs.length === 2
+        && briefs.every((brief: any) => brief.should_create_real_task === false
+          && brief.completion_preservation_conflict_resolution_entry_id
+          && /conflict.?resolution/i.test(String(brief.worker_task || ""))
+          && /Memory Center must not create/i.test(String(brief.worker_task || ""))),
+      staleSameAndCrossGroupOutcomesCannotClose: replayRepairWorkItemOpen(rejectedActiveItem.status)
+        && !rejectedActiveItem.corrected_compact_outcome_id,
+      oneGroupClosureCannotCloseAnother: activeClosed.status === "completed"
+        && replayRepairWorkItemOpen(reopenedStillOpen.status)
+        && !reopenedStillOpen.corrected_compact_outcome_id,
+      activeResolutionStrictlyCloses: activeClosed.corrected_retry_proof?.exact_conflict_resolution_restored === true
+        && activeClosed.completion_preservation_conflict_resolution_active === true
+        && activeClosed.completion_preservation_conflict_resolution_reopened === false,
+      reopenedResolutionStrictlyCloses: finalItems.some((item: any) => item.group_id === reopenedGroupId
+        && item.status === "completed"
+        && item.corrected_retry_proof?.exact_conflict_resolution_restored === true
+        && item.completion_preservation_conflict_resolution_reopened === true
+        && item.completion_preservation_conflict_verification_acceptance_required === true),
+      closureReportRequiresStrictResolutionProof: finalClosure.overall?.status === "ok"
+        && Number(finalClosure.overall?.verifiedClosureCount || 0) === 2,
+      immutableResolutionArchivePreserved: preservedArchive.some((row: any) => row.immutable_marker === "PHASE193_ARCHIVE_SENTINEL"
+        && row.entry_id === active.summary.conflict_resolution_entry_id),
+      memoryCenterCreatedNoRealTask: loadTasks().length === tasksBefore,
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      workItems: finalReport.overall,
+      candidates: candidateReport.overall,
+      briefs: briefReport.overall,
+      closure: finalClosure.overall,
+    };
+  } finally {
+    for (const groupId of [...groupIds, decoyGroupId]) {
+      const files = filesFor(groupId);
+      for (const file of [files.binding, `${files.binding}.bak`, files.outcome, `${files.outcome}.bak`, files.workItems, `${files.workItems}.bak`, files.dispatch, `${files.dispatch}.bak`]) {
+        try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+      }
+      try { if (fs.existsSync(files.typedDir)) fs.rmSync(files.typedDir, { recursive: true, force: true }); } catch {}
+    }
+  }
+}
+
+export function runMemoryCenterReplayRepairLedgerRetentionSafetySelfTest() {
+  const suffix = `${process.pid}-${Date.now()}`;
+  const groupA = `memory-center-retention-a-${suffix}`;
+  const groupB = `memory-center-retention-b-${suffix}`;
+  const workFileA = getGroupCompactBoundaryReplayRepairWorkItemsFile(groupA);
+  const workFileB = getGroupCompactBoundaryReplayRepairWorkItemsFile(groupB);
+  const outcomeFileA = getGroupWorkerContextCompactOutcomeLedgerFile(groupA);
+  const typedDirA = path.join(GROUP_TYPED_MEMORY_MD_DIR, sidecarFileId(groupA));
+  const typedDirB = path.join(GROUP_TYPED_MEMORY_MD_DIR, sidecarFileId(groupB));
+  const tasksBefore = loadTasks().length;
+  const {
+    distillPostCompactCompletionMemoryPreservationClosureConflictResolutionToTypedMemory,
+    lookupPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchive,
+    verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchive,
+  } = require("../collaboration/group-memory-index");
+  const resolutionRows = (groupId: string, count: number, marker: string) => Array.from({ length: count }, (_, index) => ({
+    group_id: groupId,
+    target_project: "api",
+    task_id: `task-${marker}-${index}`,
+    task_text: `Retention task ${marker} ${index}`,
+    task_family_key: `family-${marker}-${index}`,
+    task_family_tokens: [marker, String(index)],
+    entry_id: `resolution-${marker}-${index}`,
+    conflict_resolution_state: "verified",
+    current_source_verified: true,
+    reason: `verified current source ${index}`,
+    worker_context_packet_id: `packet-${marker}-${index}`,
+    binding_id: `binding-${marker}-${index}`,
+    task_agent_session_id: `task-session-${marker}-${index}`,
+    native_session_id: `native-session-${marker}-${index}`,
+    execution_id: `execution-${marker}-${index}`,
+    receipt_source: "child-agent-receipt",
+    receipt_status: "completed",
+    conflict_parent_arbitration_state: "contradictory_reverify_current_session",
+    conflict_parent_fingerprint: `fingerprint-${marker}-${index}`,
+    conflict_parent_ratio: 0.5,
+    conflict_parent_positive_weight: 1,
+    conflict_parent_ignored_weight: 1,
+    conflict_resolution_reversible: true,
+    generated_at: new Date(Date.UTC(2026, 6, 12, 4, 0, index)).toISOString(),
+  }));
+  const terminalNoise = (groupId: string, marker: string, index: number) => ({
+    id: `terminal-noise-${marker}-${index}`,
+    work_item_id: `terminal-noise-${marker}-${index}`,
+    group_id: groupId,
+    scopeId: groupId,
+    source: "superseded_diagnostic_noise",
+    repair_target: `noise-${index}`,
+    status: "completed",
+    resolutionReason: "superseded_by_newer_diagnostic",
+    createdAt: new Date(Date.UTC(2026, 6, 12, 5, 0, index)).toISOString(),
+    updatedAt: new Date(Date.UTC(2026, 6, 12, 5, 0, index)).toISOString(),
+  });
+  try {
+    const distilledA = distillPostCompactCompletionMemoryPreservationClosureConflictResolutionToTypedMemory(groupA, resolutionRows(groupA, 180, "a"), { updatedAt: "2026-07-12T04:10:00.000Z" });
+    const distilledB = distillPostCompactCompletionMemoryPreservationClosureConflictResolutionToTypedMemory(groupB, resolutionRows(groupB, 3, "b"), { updatedAt: "2026-07-12T04:11:00.000Z" });
+    const oldOpen = {
+      id: "old-open-repair-a",
+      work_item_id: "old-open-repair-a",
+      group_id: groupA,
+      scopeId: groupA,
+      source: "compact_boundary_replay_repair",
+      repair_target: "old-open-boundary",
+      status: "blocked",
+      priority: "critical",
+      createdAt: "2026-07-01T00:00:00.000Z",
+      updatedAt: "2026-07-01T00:00:00.000Z",
+    };
+    const oldStrictProof = {
+      id: "old-strict-proof-a",
+      work_item_id: "old-strict-proof-a",
+      group_id: groupA,
+      scopeId: groupA,
+      source: POST_COMPACT_COMPLETION_PRESERVATION_REPAIR_SOURCE,
+      repair_target: "failed-outcome-retention-a",
+      compact_outcome_id: "failed-outcome-retention-a",
+      completion_preservation_conflict_resolution_present: true,
+      completion_preservation_conflict_resolution_entry_id: "resolution-a-0",
+      status: "completed",
+      completion_source: "post_compact_receipt_memory_usage_repair_completion_compaction_preservation_corrected_retry",
+      corrected_retry_proof: {
+        exact_identity_restored: true,
+        exact_conflict_resolution_restored: true,
+        conflict_resolution_reversible_boundary_restored: true,
+      },
+      createdAt: "2026-07-01T00:01:00.000Z",
+      updatedAt: "2026-07-01T00:01:00.000Z",
+    };
+    const oldConflictBranch = {
+      id: "old-conflict-branch-a",
+      work_item_id: "old-conflict-branch-a",
+      group_id: groupA,
+      scopeId: groupA,
+      source: POST_COMPACT_COMPLETION_PRESERVATION_REPAIR_SOURCE,
+      repair_target: "failed-outcome-retention-a-branch",
+      completion_preservation_conflict_resolution_present: true,
+      completion_preservation_conflict_resolution_entry_id: "resolution-a-1",
+      status: "completed",
+      createdAt: "2026-07-01T00:02:00.000Z",
+      updatedAt: "2026-07-01T00:02:00.000Z",
+    };
+    const crossGroupRow = {
+      ...terminalNoise(groupB, "cross", 0),
+      id: "cross-group-row-in-a",
+      work_item_id: "cross-group-row-in-a",
+    };
+    const inputA = [oldOpen, oldStrictProof, oldConflictBranch, crossGroupRow, ...Array.from({ length: 220 }, (_, index) => terminalNoise(groupA, "a", index))];
+    writeJsonAtomic(workFileA, {
+      schema: "ccm-compact-boundary-replay-repair-work-items-v1",
+      version: 1,
+      groupId: groupA,
+      items: inputA,
+      updatedAt: "2026-07-12T05:10:00.000Z",
+    });
+    const inputB = Array.from({ length: 20 }, (_, index) => terminalNoise(groupB, "b", index));
+    writeJsonAtomic(workFileB, {
+      schema: "ccm-compact-boundary-replay-repair-work-items-v1",
+      version: 1,
+      groupId: groupB,
+      items: inputB,
+      updatedAt: "2026-07-12T05:11:00.000Z",
+    });
+    const beforeB = JSON.stringify(readJson(workFileB, {}));
+    const compactedA = compactGroupReplayRepairWorkItemLedgerRetention(groupA, { at: "2026-07-12T05:12:00.000Z" });
+    const afterAOnlyB = JSON.stringify(readJson(workFileB, {}));
+    const compactedB = compactGroupReplayRepairWorkItemLedgerRetention(groupB, { at: "2026-07-12T05:13:00.000Z" });
+    const completionSummary = (entryId: string) => ({
+      schema: "ccm-post-compact-receipt-memory-usage-repair-completion-packet-summary-v1",
+      present: true,
+      completion_doc_rel_paths: ["post-compact-receipt-memory-usage-repair-completions.md"],
+      required_doc_rel_paths: ["post-compact-completion-memory-preservation-closure-conflict-resolutions.md"],
+      work_item_ids: [`completion-${entryId}`],
+      timeline_binding_ids: [`timeline-${entryId}`],
+      historical_task_agent_session_ids: [`historical-task-${entryId}`],
+      historical_native_session_ids: [`historical-native-${entryId}`],
+      current_session_binding_id: `current-binding-${entryId}`,
+      current_task_agent_session_id: `current-task-${entryId}`,
+      current_native_session_id: `current-native-${entryId}`,
+      conflict_resolution_present: true,
+      conflict_resolution_doc_rel_paths: ["post-compact-completion-memory-preservation-closure-conflict-resolutions.md"],
+      conflict_resolution_active: true,
+      conflict_resolution_reopened: false,
+      conflict_resolution_state: "resolved",
+      conflict_resolution_entry_id: entryId,
+      conflict_resolution_usage_state: "verified",
+      conflict_resolution_task_agent_session_id: `resolving-task-${entryId}`,
+      conflict_resolution_native_session_id: `resolving-native-${entryId}`,
+      conflict_resolution_reversible: true,
+      conflict_resolution_historical_branches_preserved: true,
+      conflict_resolution_reverification_acceptance_required: true,
+      conflict_resolution_reversible_acceptance_required: true,
+      conflict_verification_acceptance_required: false,
+      usage_acceptance_required: true,
+      current_session_acceptance_required: true,
+      authority_boundary_valid: true,
+    });
+    const failedOutcome = (id: string, assignmentId: string, entryId: string) => {
+      const before = completionSummary(entryId);
+      return {
+        schema: "ccm-worker-context-compact-outcome-entry-v1",
+        outcome_id: id,
+        group_id: groupA,
+        assignment_id: assignmentId,
+        dispatch_key: assignmentId,
+        project: "api",
+        hook_run_id: `hook-${id}`,
+        retry_id: `retry-${id}`,
+        status: "blocked",
+        dispatch_ready: false,
+        post_compact_receipt_memory_usage_repair_completion_preservation: {
+          schema: "ccm-post-compact-receipt-memory-usage-repair-completion-preservation-v1",
+          required: true,
+          preserved: false,
+          before,
+          after: { ...before, conflict_resolution_present: false, conflict_resolution_doc_rel_paths: [], conflict_resolution_entry_id: "" },
+          gaps: ["conflict_resolution_contract_missing_after_compact"],
+        },
+        post_compact_receipt_memory_usage_repair_completion_preserved: false,
+        at: "2026-07-12T05:20:00.000Z",
+      };
+    };
+    const unresolvedOutcome = failedOutcome("unresolved-failure-a", "unresolved-assignment-a", "resolution-a-0");
+    const resolvedFailure = failedOutcome("resolved-failure-a", "resolved-assignment-a", "resolution-a-2");
+    const resolvedSummary = completionSummary("resolution-a-2");
+    const correctedOutcome = {
+      ...resolvedFailure,
+      outcome_id: "corrected-outcome-a",
+      retry_id: "corrected-retry-a",
+      hook_run_id: "corrected-hook-a",
+      status: "recovered",
+      dispatch_ready: true,
+      post_compact_receipt_memory_usage_repair_completion_preservation: {
+        schema: "ccm-post-compact-receipt-memory-usage-repair-completion-preservation-v1",
+        required: true,
+        preserved: true,
+        before: resolvedSummary,
+        after: resolvedSummary,
+        gaps: [],
+      },
+      post_compact_receipt_memory_usage_repair_completion_preserved: true,
+      at: "2026-07-12T05:21:00.000Z",
+    };
+    const outcomeNoise = Array.from({ length: 150 }, (_, index) => ({
+      schema: "ccm-worker-context-compact-outcome-entry-v1",
+      outcome_id: `outcome-noise-a-${index}`,
+      group_id: groupA,
+      assignment_id: "noise-assignment-a",
+      dispatch_key: "noise-assignment-a",
+      project: "api",
+      hook_run_id: `noise-hook-${index}`,
+      retry_id: `noise-retry-${index}`,
+      status: "recovered",
+      dispatch_ready: true,
+      at: new Date(Date.UTC(2026, 6, 12, 6, 0, index)).toISOString(),
+    }));
+    writeJsonAtomic(outcomeFileA, {
+      schema: "ccm-worker-context-compact-outcome-ledger-v1",
+      version: 1,
+      groupId: groupA,
+      entries: [
+        unresolvedOutcome,
+        resolvedFailure,
+        correctedOutcome,
+        { ...outcomeNoise[0], outcome_id: "cross-group-outcome-a", group_id: groupB },
+        ...outcomeNoise,
+      ],
+      updatedAt: "2026-07-12T06:10:00.000Z",
+    });
+    const { compactWorkerContextCompactOutcomeLedgerRetentionForCoordinator } = require("../collaboration/group-orchestrator");
+    const compactedOutcomes = compactWorkerContextCompactOutcomeLedgerRetentionForCoordinator(groupA, {
+      at: "2026-07-12T06:11:00.000Z",
+      recentLimit: 100,
+    });
+    const outcomeIds = new Set((compactedOutcomes.entries || []).map((entry: any) => entry.outcome_id));
+    const idsA = new Set((compactedA.items || []).map((item: any) => item.id || item.work_item_id));
+    const archiveA = readJson(path.join(typedDirA, ".distillation-ledger.json"), {})
+      .postCompactCompletionMemoryPreservationClosureConflictResolutionArchive || {};
+    const coldVerificationA = verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchive(groupA);
+    const oldestColdLookupA = lookupPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchive(groupA, { resolutionEntryId: "resolution-a-0" }, { limit: 1 });
+    const newestColdLookupA = lookupPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchive(groupA, { resolutionEntryId: "resolution-a-179" }, { limit: 1 });
+    const qualityReport = buildMemoryQualityReport({
+      checkIds: ["replay_repair_ledger_retention_safety", "worker_context_packet_compact_outcome_retention_safety"],
+      groupIds: [groupA, groupB],
+      refresh: true,
+      writeTargeted: false,
+    });
+    const repairQuality = (qualityReport.checks || []).find((check: any) => check.id === "replay_repair_ledger_retention_safety") || {};
+    const outcomeQuality = (qualityReport.checks || []).find((check: any) => check.id === "worker_context_packet_compact_outcome_retention_safety") || {};
+    const checks = {
+      oldOpenRepairSurvivesTerminalPressure: idsA.has(oldOpen.id)
+        && Number(compactedA.retention?.dropped_open_count || 0) === 0,
+      latestStrictProofSurvives: idsA.has(oldStrictProof.id)
+        && Number(compactedA.retention?.dropped_verified_proof_count || 0) === 0,
+      immutableConflictBranchIdentitySurvives: idsA.has(oldConflictBranch.id)
+        && Number(compactedA.retention?.dropped_conflict_resolution_count || 0) === 0,
+      supersededTerminalNoiseIsCompacted: !idsA.has("terminal-noise-a-0")
+        && Number(compactedA.retention?.dropped_count || 0) >= 50
+        && !!compactedA.retention?.dropped_digest,
+      crossGroupRowsAreRejectedAndAudited: !idsA.has(crossGroupRow.id)
+        && Number(compactedA.retention?.cross_group_rejected_count || 0) === 1
+        && !!compactedA.retention?.cross_group_rejected_digest,
+      compactingOneGroupDoesNotTouchAnother: beforeB === afterAOnlyB
+        && compactedB.groupId === groupB,
+      allResolutionBranchesRemainArchived: distilledA.archive?.archived_count === 180
+        && archiveA.rows?.length === 160
+        && !archiveA.rows?.some((row: any) => row.resolution_entry_id === "resolution-a-0")
+        && archiveA.rows?.some((row: any) => row.resolution_entry_id === "resolution-a-179")
+        && oldestColdLookupA.found === true
+        && newestColdLookupA.found === true
+        && coldVerificationA.valid === true
+        && Number(coldVerificationA.rowCount || 0) === 180
+        && archiveA.retention_policy === "checksum_addressed_cold_shards_bounded_hot_index_render_latest_100"
+        && Number(archiveA.retention_pruned_count || 0) === 0,
+      secondGroupArchiveIsIndependent: distilledB.archive?.archived_count === 3,
+      unresolvedOutcomeSurvivesPressure: outcomeIds.has(unresolvedOutcome.outcome_id)
+        && Number(compactedOutcomes.retention?.protected_unresolved_failure_count || 0) === 1
+        && Number(compactedOutcomes.retention?.dropped_unresolved_failure_count || 0) === 0,
+      resolvedFailureCanBeCompactedAfterStrictCorrection: !outcomeIds.has(resolvedFailure.outcome_id)
+        && outcomeIds.has(correctedOutcome.outcome_id),
+      outcomeCrossGroupRowsAreRejected: !outcomeIds.has("cross-group-outcome-a")
+        && Number(compactedOutcomes.retention?.cross_group_rejected_count || 0) === 1,
+      retentionQualityChecksPass: repairQuality.status === "ok"
+        && Number(repairQuality.checked || 0) === 2
+        && Number(repairQuality.passed || 0) === 2
+        && outcomeQuality.status === "ok"
+        && Number(outcomeQuality.checked || 0) === 1
+        && Number(outcomeQuality.passed || 0) === 1,
+      retentionNeverCreatesRealTask: loadTasks().length === tasksBefore,
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      retentionA: compactedA.retention,
+      retentionB: compactedB.retention,
+      archiveA: {
+        archivedCount: archiveA.archived_count,
+        immutableBranchCount: archiveA.immutable_branch_count,
+        retentionPolicy: archiveA.retention_policy,
+      },
+      outcomeRetention: compactedOutcomes.retention,
+      quality: (qualityReport.checks || []).map((check: any) => ({ id: check.id, status: check.status, checked: check.checked, passed: check.passed })),
+    };
+  } finally {
+    for (const file of [workFileA, `${workFileA}.bak`, workFileB, `${workFileB}.bak`, outcomeFileA, `${outcomeFileA}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+    for (const dir of [typedDirA, typedDirB]) {
+      try { if (dir && fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+    }
+  }
+}
+
+export function runMemoryCenterConflictResolutionColdArchiveSelfTest() {
+  const suffix = `${process.pid}-${Date.now()}`;
+  const groupA = `memory-center-cold-resolution-a-${suffix}`;
+  const groupB = `memory-center-cold-resolution-b-${suffix}`;
+  const typedDirA = path.join(GROUP_TYPED_MEMORY_MD_DIR, sidecarFileId(groupA));
+  const typedDirB = path.join(GROUP_TYPED_MEMORY_MD_DIR, sidecarFileId(groupB));
+  const tasksBefore = loadTasks().length;
+  const {
+    distillPostCompactCompletionMemoryPreservationClosureConflictResolutionToTypedMemory,
+    getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveManifestFile,
+    getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveQuarantineFile,
+    lookupPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchive,
+    readGroupTypedMemoryDistillationLedger,
+    restorePostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveRows,
+    verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchive,
+  } = require("../collaboration/group-memory-index");
+  const rowsFor = (groupId: string, marker: string, count: number, offset = 0) => Array.from({ length: count }, (_, rawIndex) => {
+    const index = rawIndex + offset;
+    return {
+      group_id: groupId,
+      target_project: "api",
+      task_id: `cold-task-${marker}-${index}`,
+      task_text: `Cold archive task ${marker} ${index}`,
+      task_family_key: `cold-family-${marker}-${index}`,
+      task_family_tokens: ["cold", marker, String(index)],
+      entry_id: `cold-resolution-${marker}-${index}`,
+      conflict_resolution_state: index % 2 === 0 ? "verified" : "ignored",
+      current_source_verified: index % 2 === 0,
+      reason: `cold archive current-session decision ${marker}-${index}`,
+      worker_context_packet_id: `cold-packet-${marker}-${index}`,
+      binding_id: `cold-binding-${marker}-${index}`,
+      task_agent_session_id: `cold-task-session-${marker}-${index}`,
+      native_session_id: `cold-native-session-${marker}-${index}`,
+      execution_id: `cold-execution-${marker}-${index}`,
+      receipt_source: "child-agent-receipt",
+      receipt_status: "completed",
+      conflict_parent_arbitration_state: "contradictory_reverify_current_session",
+      conflict_parent_fingerprint: `cold-fingerprint-${marker}-${index}`,
+      conflict_parent_ratio: 0.5,
+      conflict_parent_positive_weight: 1,
+      conflict_parent_ignored_weight: 1,
+      conflict_resolution_reversible: true,
+      generated_at: new Date(Date.UTC(2026, 6, 12, 7, 0, index)).toISOString(),
+    };
+  });
+  try {
+    const firstA = distillPostCompactCompletionMemoryPreservationClosureConflictResolutionToTypedMemory(groupA, rowsFor(groupA, "a", 400), {
+      updatedAt: "2026-07-12T08:00:00.000Z",
+      hotRowLimit: 40,
+    });
+    const firstB = distillPostCompactCompletionMemoryPreservationClosureConflictResolutionToTypedMemory(groupB, rowsFor(groupB, "b", 5), {
+      updatedAt: "2026-07-12T08:01:00.000Z",
+      hotRowLimit: 40,
+    });
+    const ledgerAfterFirstA = readGroupTypedMemoryDistillationLedger(groupA);
+    const archiveAfterFirstA = ledgerAfterFirstA.postCompactCompletionMemoryPreservationClosureConflictResolutionArchive || {};
+    const verificationAfterFirstA = verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchive(groupA);
+    const oldestLookup = lookupPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchive(groupA, {
+      resolutionEntryId: "cold-resolution-a-0",
+    }, { limit: 1 });
+    const familyLookup = lookupPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchive(groupA, {
+      taskFamilyKey: "cold-family-a-0",
+    }, { limit: 1 });
+    const crossGroupLookup = lookupPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchive(groupB, {
+      resolutionEntryId: "cold-resolution-a-0",
+    }, { limit: 1 });
+    const restore = restorePostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveRows(groupA, {
+      resolutionEntryId: "cold-resolution-a-0",
+    }, { limit: 1, restoredAt: "2026-07-12T08:02:00.000Z" });
+    const archiveAfterRestore = readGroupTypedMemoryDistillationLedger(groupA).postCompactCompletionMemoryPreservationClosureConflictResolutionArchive || {};
+    const secondA = distillPostCompactCompletionMemoryPreservationClosureConflictResolutionToTypedMemory(groupA, rowsFor(groupA, "a", 1, 400), {
+      updatedAt: "2026-07-12T08:03:00.000Z",
+      hotRowLimit: 40,
+    });
+    const verificationAfterAppend = verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchive(groupA);
+    const oldestAfterAppend = lookupPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchive(groupA, {
+      resolutionEntryId: "cold-resolution-a-0",
+    }, { limit: 1 });
+    const manifestFile = getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveManifestFile(groupA);
+    const originalManifest = readJson(manifestFile, {});
+    const oldestDescriptor = (originalManifest.shards || []).find((shard: any) => (shard.resolution_entry_ids || []).includes("cold-resolution-a-0")) || {};
+    const oldestShardFile = path.resolve(typedDirA, String(oldestDescriptor.rel_path || ""));
+    const originalShard = readJson(oldestShardFile, {});
+    const shardRows = Array.isArray(originalShard.rows) ? originalShard.rows : [];
+    writeJsonAtomic(oldestShardFile, {
+      ...originalShard,
+      rows: shardRows.map((row: any, index: number) => index === 0 ? { ...row, reason: `${row.reason || ""} TAMPERED_PHASE195` } : row),
+    });
+    const verificationAfterShardTamper = verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchive(groupA);
+    const lookupAfterShardTamper = lookupPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchive(groupA, {
+      resolutionEntryId: "cold-resolution-a-0",
+    }, { limit: 1 });
+    const restoreAfterShardTamper = restorePostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveRows(groupA, {
+      resolutionEntryId: "cold-resolution-a-0",
+    }, { limit: 1 });
+    const ledgerBeforeRejectedDistill = JSON.stringify(readJson(path.join(typedDirA, ".distillation-ledger.json"), {}));
+    let rejectedTamperedDistill = false;
+    try {
+      distillPostCompactCompletionMemoryPreservationClosureConflictResolutionToTypedMemory(groupA, rowsFor(groupA, "a", 1, 401), {
+        updatedAt: "2026-07-12T08:04:00.000Z",
+        hotRowLimit: 40,
+      });
+    } catch {
+      rejectedTamperedDistill = true;
+    }
+    const ledgerAfterRejectedDistill = JSON.stringify(readJson(path.join(typedDirA, ".distillation-ledger.json"), {}));
+    writeJsonAtomic(oldestShardFile, originalShard);
+    const verificationAfterShardRestore = verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchive(groupA);
+    writeJsonAtomic(manifestFile, { ...originalManifest, row_count: Number(originalManifest.row_count || 0) + 1 });
+    const lookupAfterManifestTamper = lookupPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchive(groupA, {
+      resolutionEntryId: "cold-resolution-a-0",
+    }, { limit: 1 });
+    writeJsonAtomic(manifestFile, originalManifest);
+    const finalVerification = verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchive(groupA);
+    const qualityReport = buildMemoryQualityReport({
+      checkIds: ["post_compact_completion_memory_preservation_closure_conflict_resolution_cold_archive_integrity"],
+      groupIds: [groupA, groupB],
+      refresh: true,
+      writeTargeted: false,
+    });
+    const quality = qualityReport.checks?.[0] || {};
+    const checks = {
+      hotIndexIsBounded: firstA.archive?.archived_count === 400
+        && firstA.archive?.rows?.length === 40
+        && archiveAfterFirstA.hot_row_limit === 40
+        && !archiveAfterFirstA.rows?.some((row: any) => row.resolution_entry_id === "cold-resolution-a-0"),
+      manifestCoversEveryImmutableBranch: verificationAfterFirstA.valid === true
+        && Number(verificationAfterFirstA.rowCount || 0) === 400
+        && Number(verificationAfterFirstA.shardCount || 0) > 1
+        && verificationAfterFirstA.verifiedShardCount === verificationAfterFirstA.shardCount,
+      lazyLookupReadsOnlyMatchingShard: oldestLookup.found === true
+        && oldestLookup.rows?.[0]?.resolution_entry_id === "cold-resolution-a-0"
+        && oldestLookup.shardsRead === 1
+        && familyLookup.found === true
+        && familyLookup.shardsRead === 1,
+      onDemandRestoreIsAuditOnlyAndBounded: restore.restored === true
+        && restore.authorityBoundary === "audit_only_not_current_authority"
+        && archiveAfterRestore.rows?.some((row: any) => row.resolution_entry_id === "cold-resolution-a-0")
+        && archiveAfterRestore.rows?.length === 40
+        && archiveAfterRestore.cold_restore_mode === "audit_only_not_current_authority",
+      appendPreservesColdHistory: secondA.archive?.archived_count === 401
+        && secondA.archive?.rows?.length === 40
+        && verificationAfterAppend.valid === true
+        && Number(verificationAfterAppend.rowCount || 0) === 401
+        && oldestAfterAppend.found === true
+        && oldestAfterAppend.rows?.[0]?.resolution_entry_id === "cold-resolution-a-0",
+      shardsAreContentAddressed: !!oldestDescriptor.content_checksum
+        && String(oldestDescriptor.rel_path || "").includes(String(oldestDescriptor.content_checksum || ""))
+        && fs.existsSync(oldestShardFile),
+      shardTamperIsDetectedAndBlocksRestore: verificationAfterShardTamper.valid === false
+        && lookupAfterShardTamper.status === "tampered"
+        && restoreAfterShardTamper.status === "blocked",
+      tamperedArchiveCannotBeRedistilled: rejectedTamperedDistill === true
+        && ledgerBeforeRejectedDistill === ledgerAfterRejectedDistill,
+      restoredShardPassesFullVerification: verificationAfterShardRestore.valid === true,
+      manifestTamperIsDetected: lookupAfterManifestTamper.status === "tampered"
+        && lookupAfterManifestTamper.gaps?.includes("cold_archive_manifest_checksum_mismatch"),
+      groupsRemainIsolated: firstB.archive?.archived_count === 5
+        && crossGroupLookup.found === false
+        && crossGroupLookup.status === "not_found",
+      integrityQualityGatePasses: finalVerification.valid === true
+        && quality.id === "post_compact_completion_memory_preservation_closure_conflict_resolution_cold_archive_integrity"
+        && quality.status === "ok"
+        && Number(quality.checked || 0) === 2
+        && Number(quality.passed || 0) === 2,
+      coldArchiveCreatesNoRealTask: loadTasks().length === tasksBefore,
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      archive: {
+        hotRowCount: secondA.archive?.rows?.length || 0,
+        archivedCount: secondA.archive?.archived_count || 0,
+        shardCount: verificationAfterAppend.shardCount || 0,
+        manifestChecksum: verificationAfterAppend.manifest?.manifest_checksum || "",
+      },
+      lookup: { status: oldestLookup.status, shardsRead: oldestLookup.shardsRead, matchedRowCount: oldestLookup.matchedRowCount },
+      tamper: { shardStatus: verificationAfterShardTamper.status, manifestStatus: lookupAfterManifestTamper.status },
+      quality: { id: quality.id, status: quality.status, checked: quality.checked, passed: quality.passed },
+    };
+  } finally {
+    for (const dir of [typedDirA, typedDirB]) {
+      try { if (dir && fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+    }
+  }
+}
+
+export function runMemoryCenterConflictResolutionManifestGenerationGcSelfTest() {
+  const suffix = `${process.pid}-${Date.now()}`;
+  const groupA = `memory-center-cold-gc-a-${suffix}`;
+  const groupB = `memory-center-cold-gc-b-${suffix}`;
+  const typedDirA = path.join(GROUP_TYPED_MEMORY_MD_DIR, sidecarFileId(groupA));
+  const typedDirB = path.join(GROUP_TYPED_MEMORY_MD_DIR, sidecarFileId(groupB));
+  const workFileA = getGroupCompactBoundaryReplayRepairWorkItemsFile(groupA);
+  const tasksBefore = loadTasks().length;
+  const {
+    distillPostCompactCompletionMemoryPreservationClosureConflictResolutionToTypedMemory,
+    getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveManifestFile,
+    getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveQuarantineFile,
+    lookupPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchive,
+    reconcilePostCompactCompletionMemoryPreservationClosureConflictResolutionOrphanShards,
+    recoverPostCompactCompletionMemoryPreservationClosureConflictResolutionManifestFromGeneration,
+    verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionManifestGenerations,
+  } = require("../collaboration/group-memory-index");
+  const rowFor = (groupId: string, marker: string, index: number) => ({
+    group_id: groupId,
+    target_project: "api",
+    task_id: `gc-task-${marker}-${index}`,
+    task_text: `GC manifest task ${marker} ${index}`,
+    task_family_key: `gc-family-${marker}-${index}`,
+    task_family_tokens: ["gc", marker, String(index)],
+    entry_id: `gc-resolution-${marker}-${index}`,
+    conflict_resolution_state: "verified",
+    current_source_verified: true,
+    reason: `gc current source verified ${marker}-${index}`,
+    worker_context_packet_id: `gc-packet-${marker}-${index}`,
+    binding_id: `gc-binding-${marker}-${index}`,
+    task_agent_session_id: `gc-task-session-${marker}-${index}`,
+    native_session_id: `gc-native-session-${marker}-${index}`,
+    execution_id: `gc-execution-${marker}-${index}`,
+    receipt_source: "child-agent-receipt",
+    receipt_status: "completed",
+    conflict_parent_arbitration_state: "contradictory_reverify_current_session",
+    conflict_parent_fingerprint: `gc-fingerprint-${marker}-${index}`,
+    conflict_parent_ratio: 0.5,
+    conflict_parent_positive_weight: 1,
+    conflict_parent_ignored_weight: 1,
+    conflict_resolution_reversible: true,
+    generated_at: new Date(Date.UTC(2026, 6, 12, 9, 0, index)).toISOString(),
+  });
+  const buildThreeGenerations = (groupId: string, marker: string) => {
+    const initialRows = Array.from({ length: 40 }, (_, index) => rowFor(groupId, marker, index));
+    const first = distillPostCompactCompletionMemoryPreservationClosureConflictResolutionToTypedMemory(groupId, initialRows, {
+      updatedAt: "2026-07-12T09:10:00.000Z",
+      hotRowLimit: 30,
+    });
+    const second = distillPostCompactCompletionMemoryPreservationClosureConflictResolutionToTypedMemory(groupId, [rowFor(groupId, marker, 0)], {
+      updatedAt: "2026-07-12T09:11:00.000Z",
+      hotRowLimit: 30,
+    });
+    const third = distillPostCompactCompletionMemoryPreservationClosureConflictResolutionToTypedMemory(groupId, [rowFor(groupId, marker, 0)], {
+      updatedAt: "2026-07-12T09:12:00.000Z",
+      hotRowLimit: 30,
+    });
+    return { first, second, third };
+  };
+  try {
+    const generationsA = buildThreeGenerations(groupA, "a");
+    const generationsB = buildThreeGenerations(groupB, "b");
+    const healthA = verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionManifestGenerations(groupA);
+    const healthB = verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionManifestGenerations(groupB);
+    writeJsonAtomic(workFileA, {
+      schema: "ccm-compact-boundary-replay-repair-work-items-v1",
+      version: 1,
+      groupId: groupA,
+      items: [{
+        id: "gc-open-repair-a",
+        work_item_id: "gc-open-repair-a",
+        group_id: groupA,
+        scopeId: groupA,
+        source: POST_COMPACT_COMPLETION_PRESERVATION_REPAIR_SOURCE,
+        status: "blocked",
+        completion_preservation_conflict_resolution_present: true,
+        completion_preservation_conflict_resolution_entry_id: "gc-resolution-a-0",
+      }],
+      updatedAt: "2026-07-12T09:13:00.000Z",
+    });
+    const protectedPass = reconcilePostCompactCompletionMemoryPreservationClosureConflictResolutionOrphanShards(groupA, {
+      at: "2026-07-12T09:14:00.000Z",
+      gracePeriodMs: 0,
+      deleteEligible: true,
+    });
+    const protectedFiles = (protectedPass.entries || []).filter((entry: any) => entry.status === "protected_open_repair")
+      .map((entry: any) => path.resolve(typedDirA, entry.rel_path));
+    const protectedFilesExistedBeforeRepairClosure = protectedFiles.length >= 1
+      && protectedFiles.every((file: string) => fs.existsSync(file));
+    writeJsonAtomic(workFileA, {
+      schema: "ccm-compact-boundary-replay-repair-work-items-v1",
+      version: 1,
+      groupId: groupA,
+      items: [{
+        id: "gc-open-repair-a",
+        work_item_id: "gc-open-repair-a",
+        group_id: groupA,
+        scopeId: groupA,
+        source: POST_COMPACT_COMPLETION_PRESERVATION_REPAIR_SOURCE,
+        status: "completed",
+        completion_preservation_conflict_resolution_present: true,
+        completion_preservation_conflict_resolution_entry_id: "gc-resolution-a-0",
+      }],
+      updatedAt: "2026-07-12T09:15:00.000Z",
+    });
+    const deletionPass = reconcilePostCompactCompletionMemoryPreservationClosureConflictResolutionOrphanShards(groupA, {
+      at: "2026-07-12T09:16:00.000Z",
+      gracePeriodMs: 0,
+      deleteEligible: true,
+    });
+    const firstDiscoveryB = reconcilePostCompactCompletionMemoryPreservationClosureConflictResolutionOrphanShards(groupB, {
+      at: "2026-07-12T09:17:00.000Z",
+      gracePeriodMs: 0,
+      deleteEligible: true,
+    });
+    const firstDiscoveryBFiles = (firstDiscoveryB.entries || []).filter((entry: any) => entry.status !== "deleted")
+      .map((entry: any) => path.resolve(typedDirB, entry.rel_path));
+    const lookupAfterDeletion = lookupPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchive(groupA, {
+      resolutionEntryId: "gc-resolution-a-0",
+    }, { limit: 1 });
+    const manifestFileA = getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveManifestFile(groupA);
+    const originalCurrentManifestA = readJson(manifestFileA, {});
+    writeJsonAtomic(manifestFileA, { ...originalCurrentManifestA, row_count: Number(originalCurrentManifestA.row_count || 0) + 10 });
+    const blockedDuringCurrentCrash = reconcilePostCompactCompletionMemoryPreservationClosureConflictResolutionOrphanShards(groupA, {
+      at: "2026-07-12T09:18:00.000Z",
+      gracePeriodMs: 0,
+      deleteEligible: true,
+    });
+    const recovery = recoverPostCompactCompletionMemoryPreservationClosureConflictResolutionManifestFromGeneration(groupA, {
+      at: "2026-07-12T09:19:00.000Z",
+    });
+    const healthAfterRecovery = verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionManifestGenerations(groupA);
+    const previousGenerationFileA = healthAfterRecovery.previous?.manifestFile || healthAfterRecovery.previous?.manifest?.file || "";
+    const originalPreviousManifestA = readJson(previousGenerationFileA, {});
+    writeJsonAtomic(previousGenerationFileA, { ...originalPreviousManifestA, row_count: Number(originalPreviousManifestA.row_count || 0) + 1 });
+    const healthAfterPreviousTamper = verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionManifestGenerations(groupA);
+    const blockedDuringPreviousTamper = reconcilePostCompactCompletionMemoryPreservationClosureConflictResolutionOrphanShards(groupA, {
+      at: "2026-07-12T09:20:00.000Z",
+      gracePeriodMs: 0,
+      deleteEligible: true,
+    });
+    writeJsonAtomic(previousGenerationFileA, originalPreviousManifestA);
+    const finalHealthA = verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionManifestGenerations(groupA);
+    const quarantineFileB = getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveQuarantineFile(groupB);
+    const originalQuarantineB = readJson(quarantineFileB, {});
+    writeJsonAtomic(quarantineFileB, {
+      ...originalQuarantineB,
+      entries: (originalQuarantineB.entries || []).map((entry: any) => ({ ...entry, first_seen_at: "2000-01-01T00:00:00.000Z" })),
+    });
+    const blockedDuringQuarantineTamper = reconcilePostCompactCompletionMemoryPreservationClosureConflictResolutionOrphanShards(groupB, {
+      at: "2026-07-12T09:21:00.000Z",
+      gracePeriodMs: 0,
+      deleteEligible: true,
+    });
+    const groupBFilesAfterQuarantineTamper = firstDiscoveryBFiles.map((file: string) => fs.existsSync(file));
+    writeJsonAtomic(quarantineFileB, originalQuarantineB);
+    const qualityReport = buildMemoryQualityReport({
+      checkIds: ["post_compact_completion_memory_preservation_closure_conflict_resolution_manifest_generation_gc_safety"],
+      groupIds: [groupA, groupB],
+      refresh: true,
+      writeTargeted: false,
+      now: "2026-07-12T09:22:00.000Z",
+      gracePeriodMs: 0,
+    });
+    const quality = qualityReport.checks?.[0] || {};
+    const checks = {
+      currentAndPreviousGenerationsVerify: healthA.valid === true
+        && healthA.generationNumber === 3
+        && healthA.currentGenerationCopyValid === true
+        && healthA.previous?.valid === true
+        && healthA.recoverySimulationPassed === true
+        && healthB.valid === true,
+      generationChainLinksExactChecksums: healthA.currentManifestChecksum === generationsA.third.archive?.cold_archive_manifest_checksum
+        && healthA.previousManifestChecksum === generationsA.second.archive?.cold_archive_manifest_checksum
+        && generationsA.first.archive?.cold_archive_manifest_checksum !== generationsA.second.archive?.cold_archive_manifest_checksum,
+      openRepairProtectsOrphanShard: Number(protectedPass.protected_open_repair_count || 0) >= 1
+        && Number(protectedPass.deleted_count || 0) === 0
+        && protectedFiles.length >= 1
+        && protectedFilesExistedBeforeRepairClosure,
+      secondPassDeletesOnlyAfterRepairClosure: Number(deletionPass.deleted_count || 0) >= 1
+        && (deletionPass.entries || []).filter((entry: any) => entry.status === "deleted").every((entry: any) => entry.shard_valid === true
+          && entry.recovery_covered === true
+          && entry.referenced_by_open_repair === false),
+      deletionPreservesEveryCurrentRow: lookupAfterDeletion.found === true
+        && lookupAfterDeletion.rows?.[0]?.resolution_entry_id === "gc-resolution-a-0"
+        && verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionManifestGenerations(groupA).valid === true,
+      firstDiscoveryNeverDeletesSameRun: Number(firstDiscoveryB.deleted_count || 0) === 0
+        && Number(firstDiscoveryB.quarantined_count || 0) >= 1
+        && firstDiscoveryBFiles.every((file: string) => fs.existsSync(file)),
+      currentManifestCrashBlocksGc: blockedDuringCurrentCrash.generation_chain_valid === false
+        && Number(blockedDuringCurrentCrash.deleted_count || 0) === Number(deletionPass.deleted_count || 0),
+      latestValidGenerationRecoversCurrentPointer: recovery.recovered === true
+        && recovery.selectedGenerationNumber === 3
+        && healthAfterRecovery.valid === true
+        && healthAfterRecovery.currentManifestChecksum === originalCurrentManifestA.manifest_checksum,
+      previousGenerationTamperBlocksGc: healthAfterPreviousTamper.valid === false
+        && healthAfterPreviousTamper.gaps?.includes("previous_manifest_generation_invalid")
+        && blockedDuringPreviousTamper.generation_chain_valid === false,
+      restoringPreviousGenerationRestoresChain: finalHealthA.valid === true
+        && finalHealthA.previous?.valid === true
+        && finalHealthA.recoverySimulationPassed === true,
+      quarantineTamperCannotBypassGrace: blockedDuringQuarantineTamper.quarantine_input_valid === false
+        && Number(blockedDuringQuarantineTamper.deleted_count || 0) === 0
+        && (blockedDuringQuarantineTamper.entries || []).some((entry: any) => entry.status === "blocked_quarantine_integrity")
+        && groupBFilesAfterQuarantineTamper.every(Boolean),
+      quarantineAndGcRemainGroupIsolated: generationsB.third.archive?.archived_count === 40
+        && firstDiscoveryB.group_id === groupB
+        && deletionPass.group_id === groupA,
+      generationGcQualityGatePasses: quality.id === "post_compact_completion_memory_preservation_closure_conflict_resolution_manifest_generation_gc_safety"
+        && quality.status === "ok"
+        && Number(quality.checked || 0) === 2
+        && Number(quality.passed || 0) === 2,
+      manifestGcCreatesNoRealTask: loadTasks().length === tasksBefore,
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      generation: {
+        current: finalHealthA.currentManifestChecksum,
+        previous: finalHealthA.previousManifestChecksum,
+        generationNumber: finalHealthA.generationNumber,
+        recoverySimulationPassed: finalHealthA.recoverySimulationPassed,
+      },
+      quarantine: {
+        protected: protectedPass.protected_open_repair_count,
+        deleted: deletionPass.deleted_count,
+        firstDiscoveryDeleted: firstDiscoveryB.deleted_count,
+      },
+      recovery,
+      quality: { id: quality.id, status: quality.status, checked: quality.checked, passed: quality.passed },
+    };
+  } finally {
+    for (const file of [workFileA, `${workFileA}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+    for (const dir of [typedDirA, typedDirB]) {
+      try { if (dir && fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+    }
+  }
+}
+
+export function runMemoryCenterConflictResolutionMaintenanceControllerSelfTest() {
+  const suffix = `${process.pid}-${Date.now()}`;
+  const groupA = `memory-center-maintenance-a-${suffix}`;
+  const groupB = `memory-center-maintenance-b-${suffix}`;
+  const typedDirA = path.join(GROUP_TYPED_MEMORY_MD_DIR, sidecarFileId(groupA));
+  const typedDirB = path.join(GROUP_TYPED_MEMORY_MD_DIR, sidecarFileId(groupB));
+  const tasksBefore = loadTasks().length;
+  const {
+    createPostCompactCompletionMemoryPreservationClosureConflictResolutionGcApprovalReceipt,
+    distillPostCompactCompletionMemoryPreservationClosureConflictResolutionToTypedMemory,
+    executePostCompactCompletionMemoryPreservationClosureConflictResolutionGcApprovalReceipt,
+    getPostCompactCompletionMemoryPreservationClosureConflictResolutionGcApprovalLedgerFile,
+    inspectPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenance,
+    reconcilePostCompactCompletionMemoryPreservationClosureConflictResolutionOrphanShards,
+    runDuePostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenance,
+    runPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenance,
+  } = require("../collaboration/group-memory-index");
+  const rowFor = (groupId: string, marker: string, index: number) => ({
+    group_id: groupId,
+    target_project: "api",
+    task_id: `maintenance-task-${marker}-${index}`,
+    task_text: `Maintenance controller task ${marker} ${index}`,
+    task_family_key: `maintenance-family-${marker}-${index}`,
+    task_family_tokens: ["maintenance", marker, String(index)],
+    entry_id: `maintenance-resolution-${marker}-${index}`,
+    conflict_resolution_state: "verified",
+    current_source_verified: true,
+    reason: `maintenance current source verified ${marker}-${index}`,
+    worker_context_packet_id: `maintenance-packet-${marker}-${index}`,
+    binding_id: `maintenance-binding-${marker}-${index}`,
+    task_agent_session_id: `maintenance-task-session-${marker}-${index}`,
+    native_session_id: `maintenance-native-session-${marker}-${index}`,
+    execution_id: `maintenance-execution-${marker}-${index}`,
+    receipt_source: "child-agent-receipt",
+    receipt_status: "completed",
+    conflict_parent_arbitration_state: "contradictory_reverify_current_session",
+    conflict_parent_fingerprint: `maintenance-fingerprint-${marker}-${index}`,
+    conflict_parent_ratio: 0.5,
+    conflict_parent_positive_weight: 1,
+    conflict_parent_ignored_weight: 1,
+    conflict_resolution_reversible: true,
+    generated_at: new Date(Date.UTC(2026, 6, 12, 10, 0, index)).toISOString(),
+  });
+  const seed = (groupId: string, marker: string) => {
+    const initial = Array.from({ length: 48 }, (_, index) => rowFor(groupId, marker, index));
+    distillPostCompactCompletionMemoryPreservationClosureConflictResolutionToTypedMemory(groupId, initial, {
+      updatedAt: "2026-07-12T10:00:00.000Z",
+      hotRowLimit: 30,
+    });
+    const updates = [0, 1, 2, 3].map(index => rowFor(groupId, marker, index));
+    distillPostCompactCompletionMemoryPreservationClosureConflictResolutionToTypedMemory(groupId, updates, {
+      updatedAt: "2026-07-12T10:01:00.000Z",
+      hotRowLimit: 30,
+    });
+    distillPostCompactCompletionMemoryPreservationClosureConflictResolutionToTypedMemory(groupId, updates, {
+      updatedAt: "2026-07-12T10:02:00.000Z",
+      hotRowLimit: 30,
+    });
+    return reconcilePostCompactCompletionMemoryPreservationClosureConflictResolutionOrphanShards(groupId, {
+      at: "2026-07-12T10:03:00.000Z",
+      gracePeriodMs: 0,
+      deleteEligible: false,
+    });
+  };
+  try {
+    const quarantineA = seed(groupA, "a");
+    const quarantineB = seed(groupB, "b");
+    const dueRun = runDuePostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenance([groupA, groupB], {
+      at: "2026-07-12T10:04:00.000Z",
+      force: true,
+      gracePeriodMs: 0,
+      intervalMs: 60_000,
+    });
+    const directBackgroundRun = runPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenance(groupA, {
+      at: "2026-07-12T10:04:30.000Z",
+      trigger: "timer",
+      gracePeriodMs: 0,
+    });
+    const statusAfterBackground = inspectPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenance(groupA, {
+      at: "2026-07-12T10:04:40.000Z",
+      gracePeriodMs: 0,
+    });
+    let missingExplicitApprovalRejected = false;
+    let invalidActorRejected = false;
+    try {
+      createPostCompactCompletionMemoryPreservationClosureConflictResolutionGcApprovalReceipt(groupA, {
+        at: "2026-07-12T10:05:00.000Z",
+        actorRole: "group-main-agent",
+        actorId: "main-a",
+        reason: "missing explicit approval",
+        gracePeriodMs: 0,
+      });
+    } catch { missingExplicitApprovalRejected = true; }
+    try {
+      createPostCompactCompletionMemoryPreservationClosureConflictResolutionGcApprovalReceipt(groupA, {
+        at: "2026-07-12T10:05:00.000Z",
+        explicitApproval: true,
+        actorRole: "background-timer",
+        actorId: "timer-a",
+        reason: "invalid actor",
+        gracePeriodMs: 0,
+      });
+    } catch { invalidActorRejected = true; }
+    const staleReceipt = createPostCompactCompletionMemoryPreservationClosureConflictResolutionGcApprovalReceipt(groupA, {
+      at: "2026-07-12T10:05:00.000Z",
+      explicitApproval: true,
+      actorRole: "group-main-agent",
+      actorId: "main-a",
+      reason: "approve exact eligible shards before generation changes",
+      gracePeriodMs: 0,
+    });
+    const backgroundExecution = executePostCompactCompletionMemoryPreservationClosureConflictResolutionGcApprovalReceipt(groupA, {
+      at: "2026-07-12T10:05:10.000Z",
+      receiptId: staleReceipt.receipt_id,
+      explicitExecution: true,
+      trigger: "cron",
+      gracePeriodMs: 0,
+    });
+    const crossGroupExecution = executePostCompactCompletionMemoryPreservationClosureConflictResolutionGcApprovalReceipt(groupB, {
+      at: "2026-07-12T10:05:20.000Z",
+      receiptId: staleReceipt.receipt_id,
+      explicitExecution: true,
+      trigger: "manual",
+      gracePeriodMs: 0,
+    });
+    const expiredReceipt = createPostCompactCompletionMemoryPreservationClosureConflictResolutionGcApprovalReceipt(groupA, {
+      at: "2026-07-12T10:05:30.000Z",
+      explicitApproval: true,
+      actorRole: "global-agent",
+      actorId: "global-a",
+      reason: "short lived approval for expiry test",
+      gracePeriodMs: 0,
+      expiresInMs: 60_000,
+    });
+    const expiredExecution = executePostCompactCompletionMemoryPreservationClosureConflictResolutionGcApprovalReceipt(groupA, {
+      at: "2026-07-12T10:07:00.000Z",
+      receiptId: expiredReceipt.receipt_id,
+      explicitExecution: true,
+      trigger: "manual",
+      gracePeriodMs: 0,
+    });
+    distillPostCompactCompletionMemoryPreservationClosureConflictResolutionToTypedMemory(groupA, [rowFor(groupA, "a", 48)], {
+      updatedAt: "2026-07-12T10:06:00.000Z",
+      hotRowLimit: 30,
+    });
+    const staleExecution = executePostCompactCompletionMemoryPreservationClosureConflictResolutionGcApprovalReceipt(groupA, {
+      at: "2026-07-12T10:07:10.000Z",
+      receiptId: staleReceipt.receipt_id,
+      explicitExecution: true,
+      trigger: "manual",
+      gracePeriodMs: 0,
+    });
+    reconcilePostCompactCompletionMemoryPreservationClosureConflictResolutionOrphanShards(groupA, {
+      at: "2026-07-12T10:08:00.000Z",
+      gracePeriodMs: 0,
+      deleteEligible: false,
+    });
+    const eligiblePreview = reconcilePostCompactCompletionMemoryPreservationClosureConflictResolutionOrphanShards(groupA, {
+      at: "2026-07-12T10:09:00.000Z",
+      gracePeriodMs: 0,
+      dryRun: true,
+    });
+    const selectedCandidate = (eligiblePreview.entries || []).find((entry: any) => entry.status === "eligible") || {};
+    const finalReceipt = createPostCompactCompletionMemoryPreservationClosureConflictResolutionGcApprovalReceipt(groupA, {
+      at: "2026-07-12T10:09:10.000Z",
+      explicitApproval: true,
+      actorRole: "group-main-agent",
+      actorId: "main-a",
+      reason: "approve one exact shard after current generation revalidation",
+      gracePeriodMs: 0,
+      candidateRelPaths: [selectedCandidate.rel_path],
+      expiresInMs: 10 * 60 * 1000,
+    });
+    const approvalFile = getPostCompactCompletionMemoryPreservationClosureConflictResolutionGcApprovalLedgerFile(groupA);
+    const originalApprovalLedger = readJson(approvalFile, {});
+    writeJsonAtomic(approvalFile, {
+      ...originalApprovalLedger,
+      entries: (originalApprovalLedger.entries || []).map((entry: any) => entry.receipt_id === finalReceipt.receipt_id ? { ...entry, reason: `${entry.reason} TAMPERED_PHASE197` } : entry),
+    });
+    const tamperedReceiptExecution = executePostCompactCompletionMemoryPreservationClosureConflictResolutionGcApprovalReceipt(groupA, {
+      at: "2026-07-12T10:09:20.000Z",
+      receiptId: finalReceipt.receipt_id,
+      explicitExecution: true,
+      trigger: "manual",
+      gracePeriodMs: 0,
+    });
+    writeJsonAtomic(approvalFile, originalApprovalLedger);
+    const approvedFile = path.resolve(typedDirA, selectedCandidate.rel_path || "");
+    const approvedFileBeforeExecution = !!selectedCandidate.rel_path && fs.existsSync(approvedFile);
+    const finalExecution = executePostCompactCompletionMemoryPreservationClosureConflictResolutionGcApprovalReceipt(groupA, {
+      at: "2026-07-12T10:10:00.000Z",
+      receiptId: finalReceipt.receipt_id,
+      explicitExecution: true,
+      trigger: "manual",
+      gracePeriodMs: 0,
+    });
+    const replayExecution = executePostCompactCompletionMemoryPreservationClosureConflictResolutionGcApprovalReceipt(groupA, {
+      at: "2026-07-12T10:10:10.000Z",
+      receiptId: finalReceipt.receipt_id,
+      explicitExecution: true,
+      trigger: "manual",
+      gracePeriodMs: 0,
+    });
+    const finalStatus = inspectPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenance(groupA, {
+      at: "2026-07-12T10:10:20.000Z",
+      gracePeriodMs: 0,
+    });
+    const qualityReport = buildMemoryQualityReport({
+      checkIds: ["post_compact_completion_memory_preservation_closure_conflict_resolution_maintenance_controller"],
+      groupIds: [groupA, groupB],
+      refresh: true,
+      writeTargeted: false,
+      now: "2026-07-12T10:10:30.000Z",
+      gracePeriodMs: 0,
+    });
+    const quality = qualityReport.checks?.[0] || {};
+    const checks = {
+      backgroundDueRunIsReadOnly: dueRun.dueCount === 2
+        && dueRun.deletedCount === 0
+        && dueRun.destructiveActionAuthorized === false
+        && dueRun.rows?.every((row: any) => row.run?.mode === "verify_and_quarantine_dry_run_only"
+          && row.run?.deletion_attempted === false),
+      directTimerRunCannotAuthorizeDeletion: directBackgroundRun.background_trigger === true
+        && directBackgroundRun.destructive_action_authorized === false
+        && directBackgroundRun.deletion_attempted === false,
+      recommendationsReachBothAgentsWithoutTasks: statusAfterBackground.latestRun?.group_main_agent_recommendation?.owner === "group-main-agent"
+        && statusAfterBackground.latestRun?.group_main_agent_recommendation?.should_create_real_task === false
+        && statusAfterBackground.latestRun?.global_agent_recommendation?.owner === "global-agent"
+        && statusAfterBackground.latestRun?.global_agent_recommendation?.cross_group_authorization_allowed === false,
+      approvalRequiresExplicitTrustedActor: missingExplicitApprovalRejected === true && invalidActorRejected === true,
+      approvalBindsExactCurrentState: staleReceipt.group_id === groupA
+        && staleReceipt.current_manifest_checksum
+        && staleReceipt.previous_manifest_checksum
+        && staleReceipt.quarantine_checksum
+        && staleReceipt.receipt_checksum
+        && staleReceipt.single_use === true
+        && staleReceipt.candidates?.length >= 1,
+      backgroundExecutionIsBlocked: backgroundExecution.status === "blocked"
+        && backgroundExecution.reason === "background_trigger_cannot_authorize_destructive_gc",
+      crossGroupReceiptCannotExecute: crossGroupExecution.status === "blocked"
+        && crossGroupExecution.reason === "approval_receipt_not_found",
+      expiredReceiptCannotExecute: expiredExecution.status === "blocked"
+        && expiredExecution.reason === "approval_receipt_expired",
+      generationChangeInvalidatesReceipt: staleExecution.status === "blocked"
+        && staleExecution.reason === "approval_receipt_generation_stale",
+      tamperedReceiptCannotExecute: tamperedReceiptExecution.status === "blocked"
+        && tamperedReceiptExecution.reason === "approval_receipt_checksum_invalid",
+      validReceiptDeletesOnlyApprovedShard: approvedFileBeforeExecution
+        && finalExecution.status === "executed"
+        && finalExecution.deleted_count === 1
+        && finalExecution.deleted_rel_paths?.length === 1
+        && finalExecution.deleted_rel_paths?.[0] === selectedCandidate.rel_path
+        && !fs.existsSync(approvedFile),
+      consumedReceiptCannotReplay: replayExecution.status === "blocked"
+        && replayExecution.reason === "approval_receipt_already_consumed",
+      maintenanceStatusAuditsReceiptLifecycle: finalStatus.status === "ok"
+        && finalStatus.consumedApprovalCount >= 1
+        && finalStatus.invalidApprovalCount === 0
+        && finalStatus.backgroundDeletionAuthorized === false,
+      maintenanceControllerQualityGatePasses: quality.id === "post_compact_completion_memory_preservation_closure_conflict_resolution_maintenance_controller"
+        && quality.status === "ok"
+        && Number(quality.checked || 0) === 2
+        && Number(quality.passed || 0) === 2,
+      controllerMaintainsGroupIsolation: quarantineA.group_id === groupA
+        && quarantineB.group_id === groupB
+        && finalExecution.groupId === groupA,
+      maintenanceCreatesNoRealTask: loadTasks().length === tasksBefore,
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      dueRun: { dueCount: dueRun.dueCount, deletedCount: dueRun.deletedCount },
+      receipt: {
+        receiptId: finalReceipt.receipt_id,
+        candidateCount: finalReceipt.candidates?.length || 0,
+        deletedCount: finalExecution.deleted_count || 0,
+        replayReason: replayExecution.reason || "",
+      },
+      recommendations: {
+        groupMainAgent: statusAfterBackground.latestRun?.group_main_agent_recommendation,
+        globalAgent: statusAfterBackground.latestRun?.global_agent_recommendation,
+      },
+      quality: { id: quality.id, status: quality.status, checked: quality.checked, passed: quality.passed },
+    };
+  } finally {
+    for (const dir of [typedDirA, typedDirB]) {
       try { if (dir && fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true }); } catch {}
     }
   }
@@ -49770,6 +55673,58 @@ export function handleMemoryCenterApi(pathname: string, req: any, res: any, pars
             candidateCount: result.candidateCount || 0,
             prunedCount: result.prunedCount || 0,
             skippedCount: result.skippedCount || 0,
+          });
+        }
+        else if (scope === "group" && operation === "run_conflict_resolution_archive_maintenance") {
+          const { runPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenance } = require("../collaboration/group-memory-index");
+          result = runPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenance(scopeId, {
+            ...data,
+            trigger: data.trigger || "manual",
+          });
+          appendAudit({
+            action: "run_conflict_resolution_archive_maintenance",
+            scope,
+            scopeId,
+            actor: data.actor || "local-user",
+            reason: data.reason,
+            mode: result.mode,
+            destructiveActionAuthorized: result.destructive_action_authorized === true,
+          });
+        }
+        else if (scope === "group" && operation === "approve_conflict_resolution_archive_gc") {
+          const { createPostCompactCompletionMemoryPreservationClosureConflictResolutionGcApprovalReceipt } = require("../collaboration/group-memory-index");
+          result = createPostCompactCompletionMemoryPreservationClosureConflictResolutionGcApprovalReceipt(scopeId, {
+            ...data,
+            explicitApproval: data.explicitApproval === true || data.explicit_approval === true,
+            actorRole: data.actorRole || data.actor_role,
+            actorId: data.actorId || data.actor_id || data.actor,
+          });
+          appendAudit({
+            action: "approve_conflict_resolution_archive_gc",
+            scope,
+            scopeId,
+            actor: data.actor || data.actor_id || "group-main-agent",
+            reason: data.reason,
+            receiptId: result.receipt_id,
+            receiptChecksum: result.receipt_checksum,
+            candidateCount: result.candidates?.length || 0,
+          });
+        }
+        else if (scope === "group" && operation === "execute_conflict_resolution_archive_gc") {
+          const { executePostCompactCompletionMemoryPreservationClosureConflictResolutionGcApprovalReceipt } = require("../collaboration/group-memory-index");
+          result = executePostCompactCompletionMemoryPreservationClosureConflictResolutionGcApprovalReceipt(scopeId, {
+            ...data,
+            explicitExecution: data.explicitExecution === true || data.explicit_execution === true,
+          });
+          appendAudit({
+            action: "execute_conflict_resolution_archive_gc",
+            scope,
+            scopeId,
+            actor: data.actor || "group-main-agent",
+            reason: data.reason,
+            receiptId: result.receipt_id || data.receiptId || data.receipt_id || "",
+            status: result.status,
+            deletedCount: result.deleted_count || 0,
           });
         }
         else if (scope === "global" && operation === "compact") {

@@ -360,6 +360,7 @@ export async function verifyBrowserActionEffect(input: {
   defaultTimeout: number;
   beforeObservation: BrowserActionEffectObservation;
   capture: () => Promise<BrowserActionEffectObservation>;
+  rethrowCaptureError?: (error: any) => boolean;
 }) {
   const started = Date.now();
   const startedAt = new Date(started).toISOString();
@@ -370,7 +371,13 @@ export async function verifyBrowserActionEffect(input: {
   let changed: BrowserActionEffectSignal[] = [];
   const deadline = started + timeoutMs;
   do {
-    after = buildBrowserActionEffectSnapshot(await input.capture().catch(() => ({})), requestedSignals);
+    let observation: BrowserActionEffectObservation = {};
+    try {
+      observation = await input.capture();
+    } catch (error: any) {
+      if (input.rethrowCaptureError?.(error)) throw error;
+    }
+    after = buildBrowserActionEffectSnapshot(observation, requestedSignals);
     changed = changedSignals(before, after);
     if (changed.length) break;
     if (Date.now() >= deadline) break;

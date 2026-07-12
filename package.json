@@ -12,6 +12,8 @@
     "build:mcp-feishu": "tsc -p integrations/mcp-feishu/tsconfig.json",
     "build": "npm run build:frontend && npm run build:mcp-feishu && npm run build:backend",
     "test:render-regression": "node scripts/main-agent-render-regression.mjs",
+    "test:main-agent-runtime-e2e": "node scripts/main-agent-runtime-e2e.mjs",
+    "test:main-agent-real-chain-e2e": "node scripts/main-agent-real-chain-e2e.mjs",
     "test:replay-regression": "node scripts/main-agent-replay-regression.mjs",
     "test:post-review-spot-check": "npx tsc -p backend/tsconfig.json --declaration false && node scripts/main-agent-post-review-spot-check-selftest.mjs",
     "test:coordinator": "npm run build:backend && node ccm-package/scripts/coordinator-smoke.js",

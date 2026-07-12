@@ -2,6 +2,7 @@ import {
   BrowserCheckResult,
   BrowserCheckExecutionPlan,
   BrowserToolCallRecord,
+  BrowserResourceLifecycleEvent,
   CommandRunResult,
   DevServerResult,
   EvidenceItem,
@@ -26,6 +27,10 @@ import { buildBrowserRecoverySummary } from "./browser/recovery-summary";
 import { buildBrowserActionEffectSummary } from "./browser/action-effect-summary";
 import { buildBrowserStabilitySummary } from "./browser/stability-summary";
 import { buildBrowserCheckExecutionCoverage } from "./browser/check-execution-coverage";
+import { buildBrowserToolEvidenceLineage } from "./browser/tool-evidence-lineage";
+import { buildBrowserToolCallTimeoutSummary } from "./browser/tool-call-timeout";
+import { buildBrowserEvidenceTemporalIntegrity } from "./browser/evidence-temporal-integrity";
+import { buildBrowserResourceLifecycleSummary } from "./browser/resource-lifecycle";
 import { buildTestAgentFailureSummary } from "./failure-summary";
 import { buildRequiredCheckCoverage } from "./required-checks";
 import { makeRunId, nowIso } from "./utils";
@@ -195,6 +200,22 @@ function applyAcceptanceEvidenceGate(
   return status;
 }
 
+function applyBrowserToolEvidenceLineageGate(
+  status: TestAgentStatus,
+  lineage: TestAgentReport["browserToolEvidenceLineage"],
+): TestAgentStatus {
+  if (!lineage || lineage.status === "complete" || status === "blocked" || status === "failed") return status;
+  return status === "passed" ? "partial" : status;
+}
+
+function applyBrowserTemporalIntegrityGate(
+  status: TestAgentStatus,
+  temporal: TestAgentReport["browserEvidenceTemporalIntegrity"],
+): TestAgentStatus {
+  if (!temporal || temporal.status === "complete" || status === "blocked" || status === "failed") return status;
+  return status === "passed" ? "partial" : status;
+}
+
 export function buildTestAgentReport(input: {
   workOrder: NormalizedTestAgentWorkOrder;
   startedAt: string;
@@ -204,11 +225,14 @@ export function buildTestAgentReport(input: {
   httpResults?: HttpCheckResult[];
   browserResults: BrowserCheckResult[];
   browserToolCalls?: BrowserToolCallRecord[];
+  browserResourceLifecycleEvents?: BrowserResourceLifecycleEvent[];
 }): TestAgentReport {
   const { workOrder, startedAt, issues, commandResults, devServerResults, browserResults } = input;
   const httpResults = input.httpResults || [];
   const browserToolCalls = input.browserToolCalls || [];
+  const browserResourceLifecycleEvents = input.browserResourceLifecycleEvents || [];
   const finishedAt = nowIso();
+  const durationMs = Date.parse(finishedAt) - Date.parse(startedAt);
   const browserInteractionSummary = buildBrowserInteractionSummary(browserResults);
   const browserFlowSummary = buildBrowserFlowSummary(browserResults);
   const browserMultiSessionSummary = buildBrowserMultiSessionSummary(browserResults);
@@ -217,6 +241,22 @@ export function buildTestAgentReport(input: {
   const browserCheckExecutionCoverage = browserCheckExecutionPlan
     ? buildBrowserCheckExecutionCoverage(browserCheckExecutionPlan, browserResults)
     : undefined;
+  const browserEvidenceTemporalIntegrity = buildBrowserEvidenceTemporalIntegrity({
+    startedAt,
+    finishedAt,
+    durationMs,
+    plan: browserCheckExecutionPlan,
+    browserResults,
+    browserToolCalls,
+  });
+  const browserResourceLifecycleSummary = buildBrowserResourceLifecycleSummary({
+    events: browserResourceLifecycleEvents,
+    plan: browserCheckExecutionPlan,
+    reportStartedAt: startedAt,
+    reportFinishedAt: finishedAt,
+  });
+  const browserToolEvidenceLineage = buildBrowserToolEvidenceLineage(browserResults, browserToolCalls);
+  const browserToolCallTimeoutSummary = buildBrowserToolCallTimeoutSummary(browserToolCalls);
   const browserRecoverySummary = buildBrowserRecoverySummary(browserResults);
   const browserActionEffectSummary = buildBrowserActionEffectSummary(browserResults);
   const httpConcurrencySummary = buildHttpConcurrencySummary(httpResults);
@@ -241,7 +281,7 @@ export function buildTestAgentReport(input: {
     browserResults,
     browserToolCalls,
   });
-  const operationalStatus = computeOperationalStatus(
+  const executionStatus = computeOperationalStatus(
     commandResults,
     devServerResults,
     httpResults,
@@ -250,6 +290,11 @@ export function buildTestAgentReport(input: {
     requiredCheckCoverage,
     adversarialEvidenceSummary,
   );
+  const lineageStatus = applyBrowserToolEvidenceLineageGate(executionStatus, browserToolEvidenceLineage);
+  const temporalStatus = applyBrowserTemporalIntegrityGate(lineageStatus, browserEvidenceTemporalIntegrity);
+  const operationalStatus = browserResourceLifecycleSummary.status === "complete" || temporalStatus === "blocked" || temporalStatus === "failed"
+    ? temporalStatus
+    : temporalStatus === "passed" ? "partial" : temporalStatus;
   const evidence = buildEvidence(commandResults, devServerResults, httpResults, browserResults, browserToolCalls);
   const acceptanceCoverage = buildAcceptanceCoverage({
     workOrder,
@@ -288,6 +333,18 @@ export function buildTestAgentReport(input: {
     ...(browserCheckExecutionCoverage && browserCheckExecutionCoverage.status !== "complete"
       ? [`browser check execution coverage ${browserCheckExecutionCoverage.status}: runs=${browserCheckExecutionCoverage.coveredRunCount}/${browserCheckExecutionCoverage.expectedRunCount}; missing=${browserCheckExecutionCoverage.missingRunCount}; duplicate=${browserCheckExecutionCoverage.duplicateResultCount}; invalid=${browserCheckExecutionCoverage.invalidResultCount}`]
       : []),
+    ...(browserEvidenceTemporalIntegrity.status !== "complete"
+      ? [`browser evidence temporal integrity invalid: invalidItems=${browserEvidenceTemporalIntegrity.invalidItemCount}; timestamps=${browserEvidenceTemporalIntegrity.invalidTimestampCount}; durations=${browserEvidenceTemporalIntegrity.durationMismatchCount}; reportWindow=${browserEvidenceTemporalIntegrity.outsideReportWindowCount}; resultWindow=${browserEvidenceTemporalIntegrity.outsideResultWindowCount}; planMismatch=${browserEvidenceTemporalIntegrity.planMismatchCount}`]
+      : []),
+    ...(browserResourceLifecycleSummary.status !== "complete"
+      ? [`browser resource lifecycle ${browserResourceLifecycleSummary.status}: open=${browserResourceLifecycleSummary.openResourceCount}; cleanupFailed=${browserResourceLifecycleSummary.cleanupFailureCount}; planMismatch=${browserResourceLifecycleSummary.planMismatchCount}`]
+      : []),
+    ...(browserToolEvidenceLineage.status !== "complete"
+      ? [`browser tool evidence lineage ${browserToolEvidenceLineage.status}: linkedResults=${browserToolEvidenceLineage.linkedResultCount}/${browserToolEvidenceLineage.evidenceRequiredResultCount}; orphanCalls=${browserToolEvidenceLineage.orphanScopedToolCallCount}; unscopedCalls=${browserToolEvidenceLineage.unscopedToolCallCount}`]
+      : []),
+    ...browserToolCallTimeoutSummary.items.map(item =>
+      `browser tool call timed out: ${item.toolName}; timeoutMs=${item.timeoutMs}; durationMs=${item.durationMs}${item.checkId ? `; execution=${item.checkId} run ${item.run}` : ""}`
+    ),
     ...browserRecoverySummary.items
       .filter(item => item.failed > 0 || item.notRetried > 0)
       .map(item => `${item.project}: browser recovery incomplete: ${item.name}; failed=${item.failed}; unsafeRetriesPrevented=${item.notRetried}`),
@@ -355,7 +412,7 @@ export function buildTestAgentReport(input: {
     summary,
     startedAt,
     finishedAt,
-    durationMs: Date.parse(finishedAt) - Date.parse(startedAt),
+    durationMs,
     artifactDir: workOrder.options.artifactDir,
     requiredChecks: workOrder.requiredChecks,
     commandResults,
@@ -363,6 +420,7 @@ export function buildTestAgentReport(input: {
     httpResults,
     browserResults,
     browserToolCalls,
+    browserResourceLifecycleEvents,
     httpConcurrencySummary,
     browserNetworkSummary,
     browserInteractionSummary,
@@ -370,6 +428,10 @@ export function buildTestAgentReport(input: {
     browserMultiSessionSummary,
     browserStabilitySummary,
     browserCheckExecutionCoverage,
+    browserEvidenceTemporalIntegrity,
+    browserResourceLifecycleSummary,
+    browserToolEvidenceLineage,
+    browserToolCallTimeoutSummary,
     browserRecoverySummary,
     browserActionEffectSummary,
     adversarialEvidenceSummary,

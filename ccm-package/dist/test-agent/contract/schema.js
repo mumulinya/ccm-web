@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.TestAgentVerdictContractSchema = exports.TestAgentReportContractSchema = exports.TestAgentWorkOrderContractSchema = exports.TestAgentHandoffContractSchema = exports.TestAgentHandoffProjectContractSchema = exports.TestAgentProjectTargetContractSchema = exports.TestAgentBrowserProbeTemplateContractSchema = exports.TestAgentBrowserCheckContractSchema = exports.TestAgentBrowserAssertionContractSchema = exports.TestAgentBrowserActionContractSchema = exports.TestAgentHttpCheckContractSchema = exports.TestAgentHttpConcurrencyContractSchema = exports.TestAgentHttpConcurrencyAssertionContractSchema = exports.TestAgentHttpAssertionContractSchema = exports.TestAgentOptionsContractSchema = exports.TEST_AGENT_CONTRACT_IDS = void 0;
+exports.TestAgentInvocationResultContractSchema = exports.TestAgentInvocationRequestContractSchema = exports.TestAgentVerdictContractSchema = exports.TestAgentReportContractSchema = exports.TestAgentWorkOrderContractSchema = exports.TestAgentHandoffContractSchema = exports.TestAgentHandoffProjectContractSchema = exports.TestAgentProjectTargetContractSchema = exports.TestAgentBrowserProbeTemplateContractSchema = exports.TestAgentBrowserCheckContractSchema = exports.TestAgentBrowserAssertionContractSchema = exports.TestAgentBrowserActionContractSchema = exports.TestAgentHttpCheckContractSchema = exports.TestAgentHttpConcurrencyContractSchema = exports.TestAgentHttpConcurrencyAssertionContractSchema = exports.TestAgentHttpAssertionContractSchema = exports.TestAgentOptionsContractSchema = exports.TEST_AGENT_CONTRACT_IDS = void 0;
 const zod_1 = require("zod");
 const recovery_validation_1 = require("../browser/recovery-validation");
 const action_effects_1 = require("../browser/action-effects");
@@ -10,11 +10,17 @@ const acceptance_gate_1 = require("../acceptance-gate");
 const http_concurrency_1 = require("../http-concurrency");
 const http_page_resources_1 = require("../http-page-resources");
 const check_execution_coverage_1 = require("../browser/check-execution-coverage");
+const tool_evidence_lineage_1 = require("../browser/tool-evidence-lineage");
+const tool_call_timeout_1 = require("../browser/tool-call-timeout");
+const evidence_temporal_integrity_1 = require("../browser/evidence-temporal-integrity");
+const resource_lifecycle_1 = require("../browser/resource-lifecycle");
 exports.TEST_AGENT_CONTRACT_IDS = {
     handoff: "ccm-test-agent-handoff-v1",
     workOrder: "ccm-test-agent-work-order-v1",
     report: "ccm-test-agent-report-v1",
     verdict: "ccm-test-agent-verdict-v1",
+    invocationRequest: "ccm-test-agent-invocation-request-v1",
+    invocationResult: "ccm-test-agent-invocation-result-v1",
 };
 const primitiveValue = zod_1.z.union([zod_1.z.string(), zod_1.z.number(), zod_1.z.boolean(), zod_1.z.undefined()]);
 const optionalString = zod_1.z.string().optional();
@@ -1228,11 +1234,12 @@ const browserStabilitySummarySchema = zod_1.z.object({
     items: zod_1.z.array(browserStabilitySummaryItemSchema),
 }).passthrough();
 const browserCheckExecutionIdentitySchema = zod_1.z.object({
+    planId: zod_1.z.string().min(1),
     checkId: zod_1.z.string().min(1),
     projectIndex: zod_1.z.number().int().nonnegative(),
     checkIndex: zod_1.z.number().int().nonnegative(),
     run: zod_1.z.number().int().positive(),
-    expectedRuns: zod_1.z.number().int().positive(),
+    expectedRuns: zod_1.z.number().int().min(1).max(10),
     evidence: zod_1.z.enum(["provider", "synthetic_missing"]),
 }).strict();
 const browserCheckExecutionPlanItemSchema = zod_1.z.object({
@@ -1242,7 +1249,7 @@ const browserCheckExecutionPlanItemSchema = zod_1.z.object({
     checkIndex: zod_1.z.number().int().nonnegative(),
     name: zod_1.z.string().min(1),
     url: zod_1.z.string(),
-    expectedRuns: zod_1.z.number().int().positive(),
+    expectedRuns: zod_1.z.number().int().min(1).max(10),
     plannedProvider: zod_1.z.enum(["playwright", "mcp", "none"]),
     providerRoutingReason: zod_1.z.string().min(1),
     adversarial: zod_1.z.boolean(),
@@ -1250,6 +1257,8 @@ const browserCheckExecutionPlanItemSchema = zod_1.z.object({
 }).strict();
 const browserCheckExecutionPlanSchema = zod_1.z.object({
     schema: zod_1.z.literal("ccm-test-agent-browser-execution-plan-v1"),
+    planId: zod_1.z.string().min(1),
+    createdAt: zod_1.z.string().min(1),
     preferredProvider: zod_1.z.string().min(1),
     plannedCheckCount: zod_1.z.number().int().nonnegative(),
     expectedRunCount: zod_1.z.number().int().nonnegative(),
@@ -1260,7 +1269,7 @@ const browserCheckExecutionCoverageItemSchema = zod_1.z.object({
     project: zod_1.z.string(),
     name: zod_1.z.string(),
     plannedProvider: zod_1.z.enum(["playwright", "mcp", "none"]),
-    expectedRuns: zod_1.z.number().int().positive(),
+    expectedRuns: zod_1.z.number().int().min(1).max(10),
     observedRuns: zod_1.z.array(zod_1.z.number().int().positive()),
     missingRuns: zod_1.z.array(zod_1.z.number().int().positive()),
     duplicateRuns: zod_1.z.array(zod_1.z.number().int().positive()),
@@ -1284,6 +1293,121 @@ const browserCheckExecutionCoverageSchema = zod_1.z.object({
         invalid: zod_1.z.number().int().nonnegative(),
     }).strict(),
     items: zod_1.z.array(browserCheckExecutionCoverageItemSchema),
+}).strict();
+const browserEvidenceTemporalIntegrityItemSchema = zod_1.z.object({
+    kind: zod_1.z.enum(["report", "execution_plan", "browser_result", "browser_tool_call"]),
+    id: zod_1.z.string().min(1),
+    checkId: optionalString,
+    run: zod_1.z.number().int().positive().optional(),
+    startedAt: zod_1.z.string().min(1),
+    finishedAt: zod_1.z.string().min(1),
+    durationMs: zod_1.z.number().nonnegative(),
+    status: zod_1.z.enum(["complete", "invalid"]),
+    errors: stringList,
+}).strict();
+const browserEvidenceTemporalIntegritySchema = zod_1.z.object({
+    status: zod_1.z.enum(["complete", "invalid"]),
+    toleranceMs: zod_1.z.number().int().nonnegative(),
+    reportDurationMs: zod_1.z.number().nonnegative(),
+    browserResultCount: zod_1.z.number().int().nonnegative(),
+    browserToolCallCount: zod_1.z.number().int().nonnegative(),
+    invalidItemCount: zod_1.z.number().int().nonnegative(),
+    invalidTimestampCount: zod_1.z.number().int().nonnegative(),
+    durationMismatchCount: zod_1.z.number().int().nonnegative(),
+    outsideReportWindowCount: zod_1.z.number().int().nonnegative(),
+    outsideResultWindowCount: zod_1.z.number().int().nonnegative(),
+    planMismatchCount: zod_1.z.number().int().nonnegative(),
+    items: zod_1.z.array(browserEvidenceTemporalIntegrityItemSchema),
+}).strict();
+const browserResourceLifecycleEventSchema = zod_1.z.object({
+    id: zod_1.z.string().min(1),
+    planId: zod_1.z.string().min(1),
+    provider: zod_1.z.enum(["playwright", "mcp"]),
+    resourceType: zod_1.z.enum(["browser", "browser_context", "external_browser_session"]),
+    scope: zod_1.z.string().min(1),
+    ownership: zod_1.z.enum(["owned", "external"]),
+    acquiredAt: zod_1.z.string().min(1),
+    releaseAttemptedAt: optionalString,
+    releasedAt: optionalString,
+    status: zod_1.z.enum(["open", "released", "retained", "cleanup_failed"]),
+    error: optionalString,
+}).strict();
+const browserResourceLifecycleSummarySchema = zod_1.z.object({
+    status: zod_1.z.enum(["complete", "incomplete", "invalid"]),
+    eventCount: zod_1.z.number().int().nonnegative(),
+    ownedResourceCount: zod_1.z.number().int().nonnegative(),
+    externalResourceCount: zod_1.z.number().int().nonnegative(),
+    releasedResourceCount: zod_1.z.number().int().nonnegative(),
+    retainedExternalResourceCount: zod_1.z.number().int().nonnegative(),
+    openResourceCount: zod_1.z.number().int().nonnegative(),
+    cleanupFailureCount: zod_1.z.number().int().nonnegative(),
+    planMismatchCount: zod_1.z.number().int().nonnegative(),
+    duplicateResourceCount: zod_1.z.number().int().nonnegative(),
+    invalidOwnershipCount: zod_1.z.number().int().nonnegative(),
+    invalidTimestampCount: zod_1.z.number().int().nonnegative(),
+    outsideReportWindowCount: zod_1.z.number().int().nonnegative(),
+    resourceTypeCounts: zod_1.z.object({
+        browser: zod_1.z.number().int().nonnegative(),
+        browser_context: zod_1.z.number().int().nonnegative(),
+        external_browser_session: zod_1.z.number().int().nonnegative(),
+    }).strict(),
+    events: zod_1.z.array(browserResourceLifecycleEventSchema),
+}).strict();
+const browserToolEvidenceLineageItemSchema = zod_1.z.object({
+    checkId: zod_1.z.string().min(1),
+    run: zod_1.z.number().int().positive(),
+    project: zod_1.z.string(),
+    name: zod_1.z.string(),
+    resultStatus,
+    evidenceRequired: zod_1.z.boolean(),
+    toolCallIds: stringList,
+    linkedToolCallCount: zod_1.z.number().int().nonnegative(),
+    failedToolCallCount: zod_1.z.number().int().nonnegative(),
+    missingToolCallIds: stringList,
+    foreignToolCallIds: stringList,
+    duplicateToolCallIds: stringList,
+    status: zod_1.z.enum(["complete", "incomplete", "invalid"]),
+}).strict();
+const browserToolEvidenceLineageSchema = zod_1.z.object({
+    status: zod_1.z.enum(["complete", "incomplete", "invalid"]),
+    mcpResultCount: zod_1.z.number().int().nonnegative(),
+    evidenceRequiredResultCount: zod_1.z.number().int().nonnegative(),
+    linkedResultCount: zod_1.z.number().int().nonnegative(),
+    toolCallCount: zod_1.z.number().int().nonnegative(),
+    scopedToolCallCount: zod_1.z.number().int().nonnegative(),
+    linkedToolCallCount: zod_1.z.number().int().nonnegative(),
+    failedToolCallCount: zod_1.z.number().int().nonnegative(),
+    unlinkedRequiredResultCount: zod_1.z.number().int().nonnegative(),
+    missingToolCallReferenceCount: zod_1.z.number().int().nonnegative(),
+    foreignToolCallReferenceCount: zod_1.z.number().int().nonnegative(),
+    duplicateToolCallReferenceCount: zod_1.z.number().int().nonnegative(),
+    duplicateToolCallRecordCount: zod_1.z.number().int().nonnegative(),
+    orphanScopedToolCallCount: zod_1.z.number().int().nonnegative(),
+    unscopedToolCallCount: zod_1.z.number().int().nonnegative(),
+    statusCounts: zod_1.z.object({
+        complete: zod_1.z.number().int().nonnegative(),
+        incomplete: zod_1.z.number().int().nonnegative(),
+        invalid: zod_1.z.number().int().nonnegative(),
+    }).strict(),
+    items: zod_1.z.array(browserToolEvidenceLineageItemSchema),
+}).strict();
+const browserToolCallTimeoutSummaryItemSchema = zod_1.z.object({
+    id: zod_1.z.string().min(1),
+    toolName: zod_1.z.string().min(1),
+    checkId: optionalString,
+    run: zod_1.z.number().int().positive().optional(),
+    timeoutMs: zod_1.z.number().int().min(1_000),
+    durationMs: zod_1.z.number().nonnegative(),
+    abortRequested: zod_1.z.boolean(),
+}).strict();
+const browserToolCallTimeoutSummarySchema = zod_1.z.object({
+    totalCalls: zod_1.z.number().int().nonnegative(),
+    passedCalls: zod_1.z.number().int().nonnegative(),
+    failedCalls: zod_1.z.number().int().nonnegative(),
+    timedOutCalls: zod_1.z.number().int().nonnegative(),
+    abortRequestedCalls: zod_1.z.number().int().nonnegative(),
+    timedOutByTool: zod_1.z.record(zod_1.z.number().int().nonnegative()),
+    items: zod_1.z.array(browserToolCallTimeoutSummaryItemSchema),
 }).strict();
 const browserProviderGapSchema = zod_1.z.object({
     provider: zod_1.z.string(),
@@ -1696,6 +1820,7 @@ const browserActionEffectSummarySchema = zod_1.z.object({
 const browserCheckResultSchema = zod_1.z.object({
     status: resultStatus,
     execution: browserCheckExecutionIdentitySchema.optional(),
+    browserToolCallIds: stringList.optional(),
     browserSessions: zod_1.z.array(browserSessionResultSchema).optional(),
     browserSessionComparisons: zod_1.z.array(browserSessionComparisonResultSchema).optional(),
     authentication: browserAuthenticationEvidenceSchema.optional(),
@@ -1836,7 +1961,22 @@ exports.TestAgentReportContractSchema = zod_1.z.object({
     devServerResults: zod_1.z.array(zod_1.z.object({ status: resultStatus }).passthrough()),
     httpResults: zod_1.z.array(httpCheckResultSchema),
     browserResults: zod_1.z.array(browserCheckResultSchema),
-    browserToolCalls: zod_1.z.array(zod_1.z.object({ status: zod_1.z.enum(["passed", "failed"]) }).passthrough()),
+    browserToolCalls: zod_1.z.array(zod_1.z.object({
+        id: zod_1.z.string().min(1),
+        toolName: zod_1.z.string().min(1),
+        input: zod_1.z.record(zod_1.z.any()),
+        status: zod_1.z.enum(["passed", "failed"]),
+        startedAt: zod_1.z.string().min(1),
+        finishedAt: zod_1.z.string().min(1),
+        durationMs: zod_1.z.number().nonnegative(),
+        browserExecution: browserCheckExecutionIdentitySchema.optional(),
+        timeoutMs: zod_1.z.number().int().min(1_000).optional(),
+        timedOut: zod_1.z.boolean().optional(),
+        abortRequested: zod_1.z.boolean().optional(),
+        outputPreview: optionalString,
+        error: optionalString,
+    }).passthrough()),
+    browserResourceLifecycleEvents: zod_1.z.array(browserResourceLifecycleEventSchema),
     browserNetworkSummary: zod_1.z.array(browserNetworkSummarySchema).optional(),
     httpConcurrencySummary: httpConcurrencySummarySchema.optional(),
     browserInteractionSummary: zod_1.z.array(browserInteractionSummarySchema).optional(),
@@ -1844,6 +1984,10 @@ exports.TestAgentReportContractSchema = zod_1.z.object({
     browserMultiSessionSummary: browserMultiSessionSummarySchema.optional(),
     browserStabilitySummary: browserStabilitySummarySchema.optional(),
     browserCheckExecutionCoverage: browserCheckExecutionCoverageSchema.optional(),
+    browserEvidenceTemporalIntegrity: browserEvidenceTemporalIntegritySchema,
+    browserResourceLifecycleSummary: browserResourceLifecycleSummarySchema,
+    browserToolEvidenceLineage: browserToolEvidenceLineageSchema.optional(),
+    browserToolCallTimeoutSummary: browserToolCallTimeoutSummarySchema.optional(),
     browserRecoverySummary: browserRecoverySummarySchema.optional(),
     browserActionEffectSummary: browserActionEffectSummarySchema.optional(),
     adversarialEvidenceSummary: adversarialEvidenceSummarySchema,
@@ -1896,6 +2040,53 @@ exports.TestAgentReportContractSchema = zod_1.z.object({
             message: "Browser execution identities require metadata.browserCheckExecutionPlan.",
             path: ["metadata", "browserCheckExecutionPlan"],
         });
+    }
+    for (const error of (0, evidence_temporal_integrity_1.browserEvidenceTemporalIntegrityErrors)(value)) {
+        ctx.addIssue({
+            code: zod_1.z.ZodIssueCode.custom,
+            message: error,
+            path: ["browserEvidenceTemporalIntegrity"],
+        });
+    }
+    for (const error of (0, resource_lifecycle_1.browserResourceLifecycleErrors)(value)) {
+        ctx.addIssue({
+            code: zod_1.z.ZodIssueCode.custom,
+            message: error,
+            path: ["browserResourceLifecycleSummary"],
+        });
+    }
+    const hasBrowserToolLineageSignal = value.browserToolEvidenceLineage
+        || (Array.isArray(value.browserResults) ? value.browserResults : []).some((result) => Array.isArray(result?.browserToolCallIds) && result.browserToolCallIds.length)
+        || (Array.isArray(value.browserToolCalls) ? value.browserToolCalls : []).some((record) => record?.browserExecution);
+    if (hasBrowserToolLineageSignal) {
+        for (const error of (0, tool_evidence_lineage_1.browserToolEvidenceLineageErrors)({
+            browserResults: Array.isArray(value.browserResults) ? value.browserResults : [],
+            browserToolCalls: Array.isArray(value.browserToolCalls) ? value.browserToolCalls : [],
+            summary: value.browserToolEvidenceLineage,
+            reportStatus: value.status,
+        })) {
+            ctx.addIssue({
+                code: zod_1.z.ZodIssueCode.custom,
+                message: error,
+                path: ["browserToolEvidenceLineage"],
+            });
+        }
+    }
+    const hasBrowserToolTimeoutSignal = value.browserToolCallTimeoutSummary
+        || (Array.isArray(value.browserToolCalls) ? value.browserToolCalls : []).some((record) => record?.timeoutMs !== undefined || record?.timedOut !== undefined || record?.abortRequested !== undefined);
+    if (hasBrowserToolTimeoutSignal) {
+        for (const error of (0, tool_call_timeout_1.browserToolCallTimeoutEvidenceErrors)({
+            browserResults: Array.isArray(value.browserResults) ? value.browserResults : [],
+            browserToolCalls: Array.isArray(value.browserToolCalls) ? value.browserToolCalls : [],
+            summary: value.browserToolCallTimeoutSummary,
+            reportStatus: value.status,
+        })) {
+            ctx.addIssue({
+                code: zod_1.z.ZodIssueCode.custom,
+                message: error,
+                path: ["browserToolCallTimeoutSummary"],
+            });
+        }
     }
     const hasEffects = (Array.isArray(value.browserResults) ? value.browserResults : [])
         .some((result) => Array.isArray(result?.actionEffects) && result.actionEffects.length);
@@ -2032,6 +2223,14 @@ exports.TestAgentVerdictContractSchema = zod_1.z.object({
         httpConcurrentBlocked: zod_1.z.number().optional(),
         browserChecks: zod_1.z.record(zod_1.z.number()),
         browserToolCalls: zod_1.z.record(zod_1.z.number()),
+        browserToolLinkedResults: zod_1.z.number().optional(),
+        browserToolUnlinkedResults: zod_1.z.number().optional(),
+        browserToolLinkedCalls: zod_1.z.number().optional(),
+        browserToolOrphanCalls: zod_1.z.number().optional(),
+        browserToolUnscopedCalls: zod_1.z.number().optional(),
+        browserToolInvalidLinks: zod_1.z.number().optional(),
+        browserToolTimedOutCalls: zod_1.z.number().optional(),
+        browserToolAbortRequestedCalls: zod_1.z.number().optional(),
         browserNetworkErrors: zod_1.z.number().optional(),
         browserActions: zod_1.z.number().optional(),
         browserFailedActions: zod_1.z.number().optional(),
@@ -2055,6 +2254,13 @@ exports.TestAgentVerdictContractSchema = zod_1.z.object({
         browserMissingRuns: zod_1.z.number().optional(),
         browserDuplicateResults: zod_1.z.number().optional(),
         browserInvalidResults: zod_1.z.number().optional(),
+        browserTemporalInvalidItems: zod_1.z.number().optional(),
+        browserTemporalPlanMismatches: zod_1.z.number().optional(),
+        browserTemporalWindowViolations: zod_1.z.number().optional(),
+        browserOwnedResources: zod_1.z.number().optional(),
+        browserReleasedResources: zod_1.z.number().optional(),
+        browserOpenResources: zod_1.z.number().optional(),
+        browserCleanupFailures: zod_1.z.number().optional(),
         browserRecoveryAttempts: zod_1.z.number().optional(),
         browserRecoveredOperations: zod_1.z.number().optional(),
         browserFailedRecoveries: zod_1.z.number().optional(),
@@ -2083,6 +2289,10 @@ exports.TestAgentVerdictContractSchema = zod_1.z.object({
     browserMultiSessionSummary: browserMultiSessionSummarySchema.optional(),
     browserStabilitySummary: browserStabilitySummarySchema.optional(),
     browserCheckExecutionCoverage: browserCheckExecutionCoverageSchema.optional(),
+    browserEvidenceTemporalIntegrity: browserEvidenceTemporalIntegritySchema,
+    browserResourceLifecycleSummary: browserResourceLifecycleSummarySchema,
+    browserToolEvidenceLineage: browserToolEvidenceLineageSchema.optional(),
+    browserToolCallTimeoutSummary: browserToolCallTimeoutSummarySchema.optional(),
     browserRecoverySummary: browserRecoverySummarySchema.optional(),
     browserActionEffectSummary: browserActionEffectSummarySchema.optional(),
     adversarialEvidenceSummary: adversarialEvidenceSummarySchema,
@@ -2128,6 +2338,114 @@ exports.TestAgentVerdictContractSchema = zod_1.z.object({
             message: "canAccept requires complete browser check execution coverage.",
             path: ["canAccept"],
         });
+    }
+    if (value.canAccept && value.browserEvidenceTemporalIntegrity?.status !== "complete") {
+        ctx.addIssue({
+            code: zod_1.z.ZodIssueCode.custom,
+            message: "canAccept requires complete browser evidence temporal integrity.",
+            path: ["canAccept"],
+        });
+    }
+    if (value.canAccept && value.browserResourceLifecycleSummary?.status !== "complete") {
+        ctx.addIssue({
+            code: zod_1.z.ZodIssueCode.custom,
+            message: "canAccept requires complete browser resource lifecycle evidence.",
+            path: ["canAccept"],
+        });
+    }
+    if (value.canAccept && value.browserToolEvidenceLineage && value.browserToolEvidenceLineage.status !== "complete") {
+        ctx.addIssue({
+            code: zod_1.z.ZodIssueCode.custom,
+            message: "canAccept requires complete browser tool evidence lineage.",
+            path: ["canAccept"],
+        });
+    }
+    if (value.canAccept && (value.browserToolCallTimeoutSummary?.timedOutCalls || 0) > 0) {
+        ctx.addIssue({
+            code: zod_1.z.ZodIssueCode.custom,
+            message: "canAccept requires zero timed-out browser tool calls.",
+            path: ["canAccept"],
+        });
+    }
+});
+const testAgentInvocationIssueSchema = zod_1.z.object({
+    severity: zod_1.z.enum(["error", "warning"]),
+    code: zod_1.z.string().min(1),
+    message: zod_1.z.string().min(1),
+    path: optionalString,
+    project: optionalString,
+}).strict();
+const testAgentInvocationValidationSchema = zod_1.z.object({
+    valid: zod_1.z.boolean(),
+    errors: zod_1.z.array(testAgentInvocationIssueSchema),
+    warnings: zod_1.z.array(testAgentInvocationIssueSchema),
+}).strict();
+exports.TestAgentInvocationRequestContractSchema = zod_1.z.object({
+    schema: zod_1.z.literal(exports.TEST_AGENT_CONTRACT_IDS.invocationRequest),
+    source: zod_1.z.enum(["handoff", "work_order"]),
+    payload: zod_1.z.unknown(),
+}).strict();
+exports.TestAgentInvocationResultContractSchema = zod_1.z.object({
+    schema: zod_1.z.literal(exports.TEST_AGENT_CONTRACT_IDS.invocationResult),
+    invocationId: zod_1.z.string().min(1),
+    source: zod_1.z.enum(["handoff", "work_order", "unknown"]),
+    status: zod_1.z.enum(["completed", "rejected", "runtime_error"]),
+    startedAt: zod_1.z.string().min(1),
+    finishedAt: zod_1.z.string().min(1),
+    durationMs: zod_1.z.number().nonnegative(),
+    inputValidation: testAgentInvocationValidationSchema,
+    outputValidation: testAgentInvocationValidationSchema.optional(),
+    outcome: agentStatus.optional(),
+    recommendation: zod_1.z.enum(["accept", "rework", "need_human"]).optional(),
+    canAccept: zod_1.z.boolean(),
+    report: exports.TestAgentReportContractSchema.optional(),
+    verdict: exports.TestAgentVerdictContractSchema.optional(),
+    artifactVerification: zod_1.z.object({
+        schema: zod_1.z.literal("ccm-test-agent-artifact-verification-v1"),
+        manifestPath: zod_1.z.string(),
+        reportId: zod_1.z.string(),
+        workOrderId: zod_1.z.string(),
+        checkedAt: zod_1.z.string(),
+        status: zod_1.z.enum(["passed", "failed"]),
+        summary: zod_1.z.object({
+            total: zod_1.z.number().int().nonnegative(),
+            passed: zod_1.z.number().int().nonnegative(),
+            failed: zod_1.z.number().int().nonnegative(),
+            skipped: zod_1.z.number().int().nonnegative(),
+        }).strict(),
+        items: zod_1.z.array(zod_1.z.object({
+            type: zod_1.z.string(),
+            title: zod_1.z.string(),
+            path: zod_1.z.string(),
+            status: zod_1.z.enum(["passed", "failed", "skipped"]),
+        }).passthrough()),
+    }).passthrough().optional(),
+    error: optionalString,
+}).strict().superRefine((value, ctx) => {
+    if (value.status === "rejected") {
+        if (value.inputValidation.valid || !value.inputValidation.errors.length) {
+            ctx.addIssue({ code: zod_1.z.ZodIssueCode.custom, message: "Rejected invocation requires invalid input validation errors.", path: ["inputValidation"] });
+        }
+        if (value.report || value.verdict || value.artifactVerification || value.canAccept) {
+            ctx.addIssue({ code: zod_1.z.ZodIssueCode.custom, message: "Rejected invocation must not contain execution outputs or canAccept=true.", path: ["status"] });
+        }
+    }
+    if (value.status === "completed") {
+        if (!value.inputValidation.valid || !value.outputValidation?.valid || !value.report || !value.verdict || !value.artifactVerification) {
+            ctx.addIssue({ code: zod_1.z.ZodIssueCode.custom, message: "Completed invocation requires valid input/output, report, verdict, and artifact verification.", path: ["status"] });
+        }
+        if (value.artifactVerification?.status !== "passed") {
+            ctx.addIssue({ code: zod_1.z.ZodIssueCode.custom, message: "Completed invocation requires passed artifact verification.", path: ["artifactVerification"] });
+        }
+        if (value.outcome !== value.report?.status || value.recommendation !== value.report?.recommendation) {
+            ctx.addIssue({ code: zod_1.z.ZodIssueCode.custom, message: "Invocation outcome and recommendation must match the report.", path: ["outcome"] });
+        }
+        if (value.canAccept !== value.verdict?.canAccept) {
+            ctx.addIssue({ code: zod_1.z.ZodIssueCode.custom, message: "Invocation canAccept must match the verdict.", path: ["canAccept"] });
+        }
+    }
+    if (value.status === "runtime_error" && value.canAccept) {
+        ctx.addIssue({ code: zod_1.z.ZodIssueCode.custom, message: "Runtime-error invocation cannot be accepted.", path: ["canAccept"] });
     }
 });
 //# sourceMappingURL=schema.js.map

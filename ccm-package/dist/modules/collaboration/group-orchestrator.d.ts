@@ -683,6 +683,53 @@ export declare function runWorkerContextPtlEmergencyDowngradeSelfTest(): {
         ptl_emergency_level: any;
     };
 };
+export declare function runWorkerContextCompletionMemoryCompactionPreservationSelfTest(): {
+    pass: boolean;
+    checks: {
+        allStrategiesCarryVerifiedPreservation: boolean;
+        exactCompletionIdentitySurvivesAllStrategies: boolean;
+        exactConflictResolutionIdentitySurvivesAllStrategies: boolean;
+        resolvedAndReopenedStatesSurviveCorrectStrategies: boolean;
+        currentAndHistoricalSessionBoundarySurvives: boolean;
+        memoryFirstReinjectsCompactedMemoryWithContract: any;
+        replayAndMetadataPartialCompactPreserveContract: boolean;
+        ptlEmergencyPreservesContract: any;
+        compactOutcomeLedgerCarriesProof: boolean;
+        tamperedCompactPacketIsRejected: boolean;
+    };
+    scenarios: {
+        kind: string;
+        retry_status: any;
+        retry_method: any;
+        dispatch_ready: boolean;
+        initial_total_tokens: any;
+        retry_total_tokens: any;
+        max_tokens: any;
+        retry_free_tokens: any;
+        preservation_required: boolean;
+        preservation_preserved: boolean;
+        conflict_resolution_present: boolean;
+        conflict_resolution_active: boolean;
+        conflict_resolution_reopened: boolean;
+        conflict_resolution_entry_id: any;
+        conflict_resolution_state: any;
+        conflict_resolution_usage_state: any;
+        conflict_resolution_doc_rel_paths: any;
+        conflict_resolution_task_agent_session_id: any;
+        conflict_resolution_native_session_id: any;
+        conflict_resolution_reversible: boolean;
+        conflict_resolution_historical_branches_preserved: boolean;
+        conflict_resolution_reverification_acceptance_required: boolean;
+        conflict_resolution_reversible_acceptance_required: boolean;
+        conflict_verification_acceptance_required: boolean;
+        ptl_emergency_engaged: boolean;
+        outcome_preserved: boolean;
+    }[];
+    tampered: {
+        gaps: string[];
+        dispatch_ready: boolean;
+    };
+};
 export declare function runWorkerContextIgnoreMemoryPolicySelfTest(): {
     pass: boolean;
     checks: {
@@ -1239,6 +1286,7 @@ export declare function readWorkerContextPtlEmergencyHintForCoordinator(groupId:
     updatedAt: string;
 };
 export declare function readWorkerContextCompactOutcomeLedgerForCoordinator(groupId: string): any;
+export declare function compactWorkerContextCompactOutcomeLedgerRetentionForCoordinator(groupId: string, options?: any): any;
 export declare function validateProviderSwitchDecisionReceiptForCoordinator(receipt?: any, options?: any): {
     schema: string;
     valid: boolean;
@@ -1513,6 +1561,33 @@ export declare function buildReplayRepairDispatchBriefForCoordinator(groupId: st
     post_compact_receipt_memory_missing_doc_rel_paths: string[];
     post_compact_receipt_memory_missing_current_source_verified_doc_rel_paths: string[];
     post_compact_receipt_memory_missing_ignored_reason_doc_rel_paths: string[];
+    completion_preservation_gap_codes: string[];
+    completion_preservation_completion_doc_rel_paths: string[];
+    completion_preservation_required_doc_rel_paths: string[];
+    completion_preservation_work_item_ids: string[];
+    completion_preservation_timeline_binding_ids: string[];
+    completion_preservation_historical_task_agent_session_ids: string[];
+    completion_preservation_historical_native_session_ids: string[];
+    completion_preservation_current_session_binding_id: any;
+    completion_preservation_current_task_agent_session_id: any;
+    completion_preservation_current_native_session_id: any;
+    completion_preservation_conflict_resolution_present: boolean;
+    completion_preservation_conflict_resolution_doc_rel_paths: string[];
+    completion_preservation_conflict_resolution_entry_id: any;
+    completion_preservation_conflict_resolution_state: any;
+    completion_preservation_conflict_resolution_usage_state: any;
+    completion_preservation_conflict_resolution_task_agent_session_id: any;
+    completion_preservation_conflict_resolution_native_session_id: any;
+    completion_preservation_conflict_resolution_active: boolean;
+    completion_preservation_conflict_resolution_reopened: boolean;
+    completion_preservation_conflict_resolution_reversible: boolean;
+    completion_preservation_conflict_resolution_historical_branches_preserved: boolean;
+    completion_preservation_conflict_resolution_reverification_acceptance_required: boolean;
+    completion_preservation_conflict_resolution_reversible_acceptance_required: boolean;
+    completion_preservation_conflict_verification_acceptance_required: boolean;
+    corrected_compact_outcome_id: any;
+    corrected_compact_retry_id: any;
+    corrected_compact_hook_run_id: any;
     original_worker_context_packet_id: any;
     original_binding_id: any;
     original_assignment_id: any;

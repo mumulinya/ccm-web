@@ -1,5 +1,7 @@
 export { TEST_AGENT_DEFINITION, TEST_AGENT_SYSTEM_PROMPT } from "./agent-profile";
 export { runTestAgent } from "./agent";
+export { invokeTestAgent, invokeTestAgentHandoff, invokeTestAgentWorkOrder } from "./invocation";
+export type { TestAgentInvocationRequest, TestAgentInvocationResult, TestAgentInvocationValidation } from "./invocation";
 export { runTestAgentSelfTest, runTestAgentMcpProviderSelfTest, runTestAgentClaudeChromeMcpSelfTest, runTestAgentComputerUseMcpSelfTest, runTestAgentWorkOrderNormalizationSelfTest, runTestAgentHandoffBuilderSelfTest, runTestAgentHandoffContractSelfTest, runTestAgentArtifactSelfTest, runTestAgentVerdictSelfTest, runTestAgentArtifactManifestSelfTest, runTestAgentArtifactVerifierSelfTest, runTestAgentMcpScreenshotArtifactSelfTest, runTestAgentBrowserEvidenceArtifactSelfTest, runTestAgentCoverageSelfTest, runTestAgentCommandPlannerSelfTest, runTestAgentExecutionPlanSelfTest, runTestAgentHttpApiSelfTest, runTestAgentAdversarialHttpSelfTest, runTestAgentAdversarialBrowserSelfTest, runTestAgentBrowserProbeTemplateSelfTest, runTestAgentAutoBrowserSmokeSelfTest, runTestAgentBlankPageSmokeSelfTest, runTestAgentAcceptancePathSmokeSelfTest, runTestAgentAcceptancePathGroupingSelfTest, runTestAgentAcceptanceDownloadFlowSelfTest, runTestAgentAcceptanceUploadFlowSelfTest, runTestAgentAcceptanceClickFlowSelfTest, runTestAgentAcceptanceClickNavigationFlowSelfTest, runTestAgentAcceptanceMultiClickFlowSelfTest, runTestAgentAcceptanceFormFlowSelfTest, runTestAgentAcceptanceMultiFieldFormFlowSelfTest, runTestAgentAcceptanceSelectCheckboxFormFlowSelfTest, runTestAgentAcceptanceUncheckRadioFormFlowSelfTest, runTestAgentAcceptanceRedirectFormFlowSelfTest, runTestAgentAcceptanceRefreshPersistenceFormFlowSelfTest, runTestAgentBrowserInteractionSummarySelfTest, runTestAgentBrowserNetworkAssertionSelfTest, runTestAgentStructuredBrowserNetworkAssertionSelfTest, runTestAgentNegativeBrowserNetworkAssertionSelfTest, runTestAgentBrowserRequestMetadataAssertionSelfTest, runTestAgentAcceptanceDerivedChecksSelfTest, runTestAgentAcceptanceDerivedAccessibilitySelfTest, runTestAgentSemanticLocatorSelfTest, runTestAgentBrowserStateSelfTest, runTestAgentBrowserSelectStateSelfTest, runTestAgentBrowserInputValueAssertionSelfTest, runTestAgentBrowserEnabledStateSelfTest, runTestAgentBrowserFocusStateSelfTest, runTestAgentBrowserElementCountSelfTest, runTestAgentBrowserDialogAssertionSelfTest, runTestAgentBrowserPopupAssertionSelfTest, runTestAgentBrowserTableAssertionSelfTest, runTestAgentBrowserDragToActionSelfTest, runTestAgentBrowserScrollActionSelfTest, runTestAgentBrowserAdvancedMouseActionSelfTest, runTestAgentBrowserKeyboardActionSelfTest, runTestAgentBrowserStorageActionSelfTest, runTestAgentBrowserCookieActionSelfTest, runTestAgentBrowserClipboardAssertionSelfTest, runTestAgentBrowserElementScreenshotAssertionSelfTest, runTestAgentBrowserTextOrderAssertionSelfTest, runTestAgentBrowserUrlTitleAssertionSelfTest, runTestAgentBrowserConsoleAssertionSelfTest, runTestAgentBrowserNetworkStateActionSelfTest, runTestAgentBrowserAccessibilityAssertionSelfTest, runTestAgentBrowserAriaStateAssertionSelfTest, runTestAgentBrowserAttributeAssertionSelfTest, runTestAgentBrowserComputedStyleAssertionSelfTest, runTestAgentBrowserCookieAssertionSelfTest, runTestAgentPlaywrightDownloadArtifactSelfTest, runTestAgentPlaywrightFileUploadSelfTest, runTestAgentPlaywrightMultiFileUploadSelfTest, runTestAgentPlaywrightViewportSelfTest, runTestAgentPlaywrightContextOptionsSelfTest, runTestAgentPlaywrightInViewportSelfTest, runTestAgentPlaywrightNoHorizontalOverflowSelfTest, runTestAgentBrowserPreflightSelfTest, runTestAgentPlaywrightRealBrowserSelfTest, runTestAgentPlaywrightResourceErrorSelfTest, runTestAgentPlaywrightUrlIncludesWaitSelfTest, runTestAgentStandaloneCliRealWebSelfTest, runTestAgentStandaloneHandoffRealWebSelfTest, runTestAgentPlaywrightAvailabilitySelfTest, runTestAgentRequiredCheckCoverageSelfTest, runTestAgentContractSelfTest, runTestAgentCliSelfTest } from "./self-test";
 export { runTestAgentSelfTestMatrixSelfTest } from "./self-test";
 export { runTestAgentAdversarialEvidenceGateSelfTest } from "./adversarial-self-test";
@@ -8,12 +10,39 @@ export { runTestAgentHttpConcurrencySelfTest } from "./http-concurrency-self-tes
 export { runTestAgentCapabilityAwareProviderRoutingSelfTest } from "./browser/provider-routing-self-test";
 export { runTestAgentHttpPageResourcesSelfTest } from "./http-page-resources-self-test";
 export { runTestAgentBrowserCheckExecutionCoverageSelfTest } from "./browser/check-execution-coverage-self-test";
+export { runTestAgentBrowserToolEvidenceLineageSelfTest } from "./browser/tool-evidence-lineage-self-test";
+export { runTestAgentBrowserToolCallTimeoutSelfTest } from "./browser/tool-call-timeout-self-test";
+export { runTestAgentBrowserEvidenceTemporalIntegritySelfTest } from "./browser/evidence-temporal-integrity-self-test";
+export { runTestAgentBrowserResourceLifecycleSelfTest } from "./browser/resource-lifecycle-self-test";
+export { runTestAgentInvocationSelfTest } from "./invocation-self-test";
 export {
   browserCheckExecutionEvidenceErrors,
   buildBrowserCheckExecutionCoverage,
   buildBrowserCheckExecutionPlan,
   reconcileBrowserCheckExecution,
 } from "./browser/check-execution-coverage";
+export {
+  browserToolEvidenceLineageErrors,
+  buildBrowserToolEvidenceLineage,
+} from "./browser/tool-evidence-lineage";
+export {
+  browserToolCallTimeoutEvidenceErrors,
+  buildBrowserToolCallTimeoutSummary,
+} from "./browser/tool-call-timeout";
+export {
+  BROWSER_TEMPORAL_TOLERANCE_MS,
+  browserEvidenceTemporalIntegrityErrors,
+  buildBrowserEvidenceTemporalIntegrity,
+  formatBrowserEvidenceTemporalIntegrityAttentionLines,
+  formatBrowserEvidenceTemporalIntegrityLine,
+} from "./browser/evidence-temporal-integrity";
+export {
+  browserResourceLifecycleErrors,
+  buildBrowserResourceLifecycleSummary,
+  createBrowserResourceLifecycleRecorder,
+  formatBrowserResourceLifecycleAttentionLines,
+  formatBrowserResourceLifecycleLine,
+} from "./browser/resource-lifecycle";
 export { runTestAgentFailureSummarySelfTest } from "./self-test";
 export { runTestAgentBrowserProviderGapSummarySelfTest } from "./self-test";
 export { runTestAgentBrowserSessionComparisonSelfTest } from "./self-test";

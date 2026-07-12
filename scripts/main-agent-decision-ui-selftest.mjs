@@ -141,7 +141,7 @@ const checks = {
     && renderFixture.includes('case-task-plan-missing-verification')
     && renderFixture.includes('还缺验收步骤')
     && renderRegression.includes('missing verification plan reminder')
-    && renderRegression.includes('Expected 30 screenshots'),
+    && renderRegression.includes('Expected 36 screenshots'),
   liveTodoStatusesVisible: ['reviewing', 'reworking', 'failed', 'cancelled'].every(text => component.includes(text)) && component.includes('验收中') && component.includes('返工中'),
   liveVerifyBadgeNotAlwaysNeedsConfirm: component.includes('verifyBadge') && component.includes('进行中') && component.includes('需处理') && component.includes('decision-verify.work'),
   todoEvidenceAndStepActionsVisible: component.includes('plan-step-evidence') && component.includes('evidence-list') && component.includes('step-action-button') && component.includes("defineEmits(['step-action'])"),
@@ -183,8 +183,81 @@ const checks = {
     && renderFixture.includes('groupIntakePlanMode')
     && renderRegression.includes('group intake plan mode title')
     && renderRegression.includes('group intake confirm boundary step'),
+  groupTaskCanRequireRealIndependentReview: backendGroupLiveRoutes.includes('requires_independent_review: flagEnabled(payload.requires_independent_review ?? payload.requiresIndependentReview, false)')
+    && backendGroupLiveRoutes.includes('source: "explicit_force_task"')
+    && backendGroupLiveRoutes.includes('用户已明确要求创建并执行项目任务'),
+  groupWaitingUserContinuesExactTaskFromMainInput: groupTaskActions.includes('buildWaitingUserTaskContinuationFields')
+    && groupTaskActions.includes("continuation_kind: 'supplement'")
+    && groupTaskActions.includes('resolve_waiting_user: true')
+    && groupTaskActions.includes('interrupt_current_run: false')
+    && groupTaskActions.includes("source: 'group_web_waiting_user_resolution'")
+    && groupTaskActions.includes("card?.phase === 'needs_user' && beginTaskInput")
+    && groupChat.includes('pendingGroupTaskInput')
+    && groupChat.includes('beginTaskInput: beginTaskSupplementInput')
+    && groupChat.includes("? '提交并继续'")
+    && groupChat.includes("? '提交补充' : '发送 ➤'")
+    && groupChat.includes('buildWaitingUserTaskContinuationFields(taskSupplementTarget)')
+    && groupChat.includes("...(taskSupplementTarget ? { task_id: taskSupplementTarget.taskId } : {})")
+    && groupChat.includes("data.type === 'task_updated'")
+    && backendGroupLiveRoutes.includes('const explicitContinuationTaskId = String(payload.continuation_task_id')
+    && backendGroupLiveRoutes.includes('task.group_id !== groupId')
+    && backendGroupLiveRoutes.includes('runGroupExplicitContinuationRoutingSelfTest')
+    && backendGroupLiveRoutes.includes('const continuationTask = explicitContinuationTask ||')
+    && backendGroupLiveRoutes.includes('append_group_message: false')
+    && backendGroupLiveRoutes.includes('resolve_waiting_user: groupLiveFlag')
+    && backend.includes('resolves_waiting_user: resolvesWaitingUser')
+    && backend.includes('waiting_user_resolution: resolvesWaitingUser')
+    && backend.includes('worker.summary = "任务条件已收到，等待重新复核。"')
+    && backend.includes('options.append_group_message !== false')
+    && backend.includes('recovery_pending: false')
+    && renderFixture.includes('case-group-waiting-user-resume')
+    && renderRegression.includes('group waiting-user continuation should target the exact task as a non-interrupting supplement')
+    && renderRegression.includes('05b-group-waiting-user-resumed.png')
+    && renderRegression.includes('Expected 36 screenshots'),
   groupClarificationSummaryVisible: agentExecution.includes('clarificationSummary') && agentExecution.includes('clarification-summary') && agentExecution.includes('需要你补充信息') && groupChat.includes('clarificationSummary: data.clarificationSummary || data.clarification_summary') && backendGroupLiveRoutes.includes('ccm-group-main-agent-clarification-summary-v1') && backendGroupLiveRoutes.includes('buildGroupClarificationSummary') && backendGroupLiveRoutes.includes('show_todo: false') && backendGroupLiveRoutes.includes('runGroupClarificationSummarySelfTest'),
+  groupClarificationResponseResumesOriginalRequest: groupTaskActions.includes('buildGroupClarificationResponseFields')
+    && groupTaskActions.includes("source: 'group_web_clarification_response'")
+    && groupChat.includes('pendingGroupClarificationInput')
+    && groupChat.includes('beginGroupClarificationInput')
+    && groupChat.includes("? '提交补充' : '发送 ➤'")
+    && groupChat.includes('buildGroupClarificationResponseFields(clarificationResponseTarget)')
+    && groupChat.includes('syncPendingGroupClarificationInput()')
+    && backendGroupLiveRoutes.includes('ccm-group-clarification-context-v1')
+    && backendGroupLiveRoutes.includes('resolvePendingGroupClarification')
+    && backendGroupLiveRoutes.includes('buildGroupClarificationContinuationMessage')
+    && backendGroupLiveRoutes.includes('resolveStoredGroupClarification')
+    && backendGroupLiveRoutes.includes('runGroupClarificationContinuationSelfTest')
+    && backendGroupLiveRoutes.includes('不要把这条简短回答当成独立新任务')
+    && backendGroupLiveRoutes.includes('clarification_response_to: pendingClarification.message?.id')
+    && backendGroupLiveRoutes.includes('clarification_resumed: !!clarificationContext')
+    && renderFixture.includes('case-group-clarification-resume')
+    && renderRegression.includes('group clarification creates task from combined request')
+    && renderRegression.includes('05c-group-clarification-resumed.png')
+    && renderRegression.includes('Expected 36 screenshots'),
   globalClarificationConfirmationSummaryVisible: taskCard.includes('userRequestSummary') && taskCard.includes('user-request-summary') && taskCard.includes('answer_suggestions') && taskExperience.includes('buildGlobalUserRequestSummary') && taskExperience.includes('user_request_summary') && taskExperience.includes('confirmationSummary') && globalAgent.includes('clarificationSummary = event.clarification_summary') && globalAgent.includes("action.kind === 'provide_clarification'") && backendGlobalLoop.includes('ccm-global-main-agent-clarification-summary-v1') && backendGlobalLoop.includes('ccm-global-main-agent-confirmation-summary-v1') && backendGlobalLoop.includes('buildGlobalClarificationSummary') && backendGlobalLoop.includes('buildGlobalConfirmationSummary') && backendGlobalLoop.includes('show_todo: false') && backendGlobalLoop.includes('globalClarificationSummaryVisible') && backendGlobalLoop.includes('globalConfirmationSummaryVisible') && backendGlobalAgent.includes('clarification_summary: (run as any).clarification_summary') && backendGlobalAgent.includes('confirmation_summary: (run as any).confirmation_summary'),
+  globalClarificationResumesExactRunAfterRefresh: globalAgent.includes('pendingGlobalClarificationInput')
+    && globalAgent.includes("formData.append('clarification_run_id', clarificationTarget.runId)")
+    && globalAgent.includes("clarification_run_id: clarificationTarget?.runId || ''")
+    && globalAgent.includes("String(pendingRun.status || '').toLowerCase() === 'waiting_clarification'")
+    && backendGlobalAgent.includes('clarificationRunId?: string')
+    && backendGlobalAgent.includes('requestedRun.session_id !== sessionId')
+    && backendGlobalAgent.includes('requestedRun.status !== "waiting_clarification"')
+    && backendGlobalAgent.includes('clarificationRunId: payload.clarification_run_id'),
+  globalWaitingSupervisorRestartIsStable: backendMissionSupervisor.includes('shouldScheduleGlobalMissionSupervisor')
+    && backendMissionSupervisor.includes('record.status !== "monitoring"')
+    && backendMissionSupervisor.includes('mergeGlobalMissionWaitingUserIncidents')
+    && backendMissionSupervisor.includes('waitingUserIsRestoredWithoutAutomaticAdvance')
+    && backendMissionSupervisor.includes('repeatedWaitingIncidentIsMerged'),
+  mainAgentStreamsAreOrderedAndRetryIdempotently: backendGlobalAgent.includes('reliabilityOperationKey && reliabilityOperationAcquired')
+    && backendGlobalAgent.includes('failIdempotency("global-agent-request", reliabilityOperationKey, error)')
+    && backendGlobalAgent.includes('event_id: eventId, eventId, sequence')
+    && globalAgent.includes('pendingGlobalRequestRetry')
+    && globalAgent.includes('seenGlobalStreamEventIds')
+    && globalAgent.includes('global-request:${requestId}')
+    && backend.includes('res.__ccmSseSequence = sequence')
+    && groupChat.includes('pendingGroupSendRetry')
+    && groupChat.includes('seenStreamEventIds')
+    && groupChat.includes('重新发送会继续同一次请求'),
   taskCardUserRequestSummaryGuard: taskCard.includes('userRequestSummarySource')
     && taskCard.includes('taskUserRequestNeedsAction')
     && taskCard.includes('requires_user_action')
@@ -273,7 +346,7 @@ const checks = {
     && renderRegression.includes('global supervising false confirmation state')
     && renderRegression.includes('global supervising revision verification reminder')
     && renderRegression.includes('07h-global-supervising-goal-revision.png')
-    && renderRegression.includes('Expected 30 screenshots'),
+    && renderRegression.includes('Expected 36 screenshots'),
   globalStreamCurrentTodoVisible: globalAgent.includes('buildGlobalStreamCurrentTodoSummary')
     && globalAgent.includes('ccm-global-main-agent-current-todo-v1')
     && globalAgent.includes('globalTodoStatusLabel')
@@ -582,7 +655,7 @@ const checks = {
     && renderFixture.includes('计划已确认，正在按计划执行')
     && renderRegression.includes('plan execution followup')
     && renderRegression.includes('auto global plan execution followup')
-    && renderRegression.includes('Expected 30 screenshots'),
+    && renderRegression.includes('Expected 36 screenshots'),
   taskCardRendersPlanAlignment: taskCard.includes('planAlignment') && taskCard.includes('计划执行核对') && taskCard.includes('plan-alignment') && taskCard.includes('planAlignmentStatusLabel') && taskExperience.includes('buildPlanAlignment') && taskExperience.includes('ccm-main-agent-plan-alignment-v1'),
   taskCardRendersUserHandoff: taskCard.includes('userHandoff') && taskCard.includes('接下来建议') && taskCard.includes('user-handoff') && taskCard.includes('handoffActionPayload') && taskCard.includes('userHandoffSummaryCards') && taskCard.includes('handoff-summary-cards') && taskExperience.includes('buildUserHandoff') && taskExperience.includes('summary_cards') && taskExperience.includes('ccm-main-agent-user-handoff-v1') && taskExperience.includes('项待补齐') && taskExperienceSelftest.includes('projectDoneWithoutVerificationHandoffUsesNeutralGapCopy') && renderFixture.includes('summary_cards') && renderRegression.includes('task card user handoff completed summary label'),
   taskCardRendersWorkOrderExecutionAndAcceptance: taskCard.includes('workOrderPreview') && taskCard.includes('执行成员任务') && taskCard.includes('executionStory') && taskCard.includes('执行过程') && taskCard.includes('acceptanceReview') && taskCard.includes('最终验收'),
@@ -649,7 +722,7 @@ const checks = {
     && taskExperience.includes('ccm-main-agent-work-item-verification-reminder-v1')
     && renderFixture.includes('case-work-item-verification-reminder')
     && renderRegression.includes('work item verification reminder')
-    && renderRegression.includes('Expected 30 screenshots'),
+    && renderRegression.includes('Expected 36 screenshots'),
   taskManagerStartupRecoverySummaryVisible: taskManager.includes("fetch('/api/tasks/queue/resume'")
     && taskManager.includes('data.auto_resumed ?? data.resumed')
     && taskManager.includes('data.manual_pending')
@@ -899,7 +972,7 @@ const checks = {
     && renderRegression.includes('global TestAgent latest evidence adversarial work order')
     && renderRegression.includes('global TestAgent latest evidence raw browser details')
     && renderRegression.includes('global TestAgent latest evidence technical details should be folded by default')
-    && renderRegression.includes('Expected 30 screenshots'),
+    && renderRegression.includes('Expected 36 screenshots'),
   testAgentConnectorSummarizesFailureDiagnostics: backend.includes('collectTestAgentFailureSummaryLines')
     && backend.includes('collectTestAgentFailureDiagnosticLines')
     && backend.includes('failureSummary')
@@ -964,7 +1037,7 @@ const checks = {
     && renderRegression.includes('global post-review spot check recheck state')
     && renderRegression.includes('global stream post-review spot check passed state')
     && renderRegression.includes('post-review spot check technical details should be folded by default')
-    && renderRegression.includes('Expected 30 screenshots'),
+    && renderRegression.includes('Expected 36 screenshots'),
   taskCardRendersCompletionOverview: taskCard.includes('completionOverview') && taskCard.includes('最终交付总览') && taskCard.includes('completion-overview') && taskCard.includes('completion-metrics'),
   taskCardRendersPickupSummary: taskCard.includes('pickupSummary') && taskCard.includes('pickup-summary') && taskCard.includes('回来继续看这里') && taskCard.includes('review_items'),
   taskManagerSanitizesVisibleReportData: taskManager.includes('sanitizeUserFacingAgentText') && taskManager.includes('sanitizeUserFacingStructure') && taskManager.includes('visibleReportText') && taskManager.includes('currentDeliverySummary') && taskManager.includes('currentWorkerNotifications') && taskManager.includes('visibleUserDeliveryReport') && taskExecutionDashboard.includes('sanitizeUserFacingAgentText') && taskExecutionDashboard.includes('compactDashboardText'),
@@ -1029,7 +1102,7 @@ const checks = {
     && renderRegression.includes('auto global tool summary raw tool completed wording')
     && renderRegression.includes('legacy global stream event raw tool completed wording'),
   globalAgentLiveStreamsSanitizeInternalProtocol: globalAgent.includes('GLOBAL_VISIBLE_INTERNAL_TEXT_PATTERN') && globalAgent.includes('sanitizeGlobalVisibleStreamText') && globalAgent.includes('sanitizeUserFacingLegacyTerminology') && globalAgent.includes('globalStreamRawBuffer') && globalAgent.includes('globalStreamHiddenBuffer') && globalAgent.includes('我已收到技术执行信息，正在整理用户可读结论。') && globalAgent.includes('artifact-manifest\\.json') && agentDisplay.includes('test-agent-artifacts') && taskExperience.includes('artifact-manifest\\.json') && !globalAgent.includes('agentMsg.content += data.text'),
-  globalAgentCompletionPathsUseVisibleSummary: globalAgent.includes('formatGlobalRunVisibleReply') && globalAgent.includes('getDeliveryReport(run)') && globalAgent.includes('GLOBAL_RESULT_VISIBLE_FALLBACK') && globalAgent.includes('GLOBAL_STREAM_COMPLETED_FALLBACK') && globalAgent.includes("type: 'global_mission_complete'") && globalAgent.includes('content: formatGlobalRunVisibleReply(run, GLOBAL_RESULT_VISIBLE_FALLBACK)') && globalAgent.includes('msg.content = formatGlobalRunVisibleReply(run') && globalAgent.includes("title: '处理结果'") && backendGlobalAgent.includes('GLOBAL_AGENT_VISIBLE_RESULT_FALLBACK') && backendGlobalAgent.includes('GLOBAL_AGENT_VISIBLE_COMPLETED_EVENT_FALLBACK') && backendGlobalAgent.includes('globalRunVisibleReply(run, GLOBAL_AGENT_VISIBLE_RESULT_FALLBACK)') && backendGlobalAgent.includes('payload.reply || payload.error || GLOBAL_AGENT_VISIBLE_RESULT_FALLBACK') && !globalAgent.includes("content: formatGlobalRunVisibleReply(run, '已处理。')") && !globalAgent.includes("'本轮处理完成。'") && !backendGlobalAgent.includes('"本轮处理完成。"') && !backendGlobalAgent.includes('"全局 Agent 已完成本轮处理"') && !globalAgent.includes('message.content = runData.run.final_reply') && !globalAgent.includes('content: run.final_reply') && !globalAgent.includes('msg.content = run.final_reply') && !globalAgent.includes("compactStreamText(event.reply || '本轮处理完成。')"),
+  globalAgentCompletionPathsUseVisibleSummary: globalAgent.includes('formatGlobalRunVisibleReply') && globalAgent.includes('getDeliveryReport(run)') && globalAgent.includes('GLOBAL_RESULT_VISIBLE_FALLBACK') && globalAgent.includes('GLOBAL_STREAM_COMPLETED_FALLBACK') && globalAgent.includes("'global_mission_terminal'") && globalAgent.includes('upsertGlobalMissionConversationNotification') && globalAgent.includes('content: formatGlobalRunVisibleReply(run, GLOBAL_RESULT_VISIBLE_FALLBACK)') && globalAgent.includes('msg.content = formatGlobalRunVisibleReply(run') && globalAgent.includes("title: '处理结果'") && backendGlobalAgent.includes('GLOBAL_AGENT_VISIBLE_RESULT_FALLBACK') && backendGlobalAgent.includes('GLOBAL_AGENT_VISIBLE_COMPLETED_EVENT_FALLBACK') && backendGlobalAgent.includes('globalRunVisibleReply(run, GLOBAL_AGENT_VISIBLE_RESULT_FALLBACK)') && backendGlobalAgent.includes('payload.reply || payload.error || GLOBAL_AGENT_VISIBLE_RESULT_FALLBACK') && !globalAgent.includes("content: formatGlobalRunVisibleReply(run, '已处理。')") && !globalAgent.includes("'本轮处理完成。'") && !backendGlobalAgent.includes('"本轮处理完成。"') && !backendGlobalAgent.includes('"全局 Agent 已完成本轮处理"') && !globalAgent.includes('message.content = runData.run.final_reply') && !globalAgent.includes('content: run.final_reply') && !globalAgent.includes('msg.content = run.final_reply') && !globalAgent.includes("compactStreamText(event.reply || '本轮处理完成。')"),
   globalAgentHistoryMessagesSanitizeVisibleContent: globalAgent.includes('getVisibleGlobalMessageContent') && globalAgent.includes("getAssistantContent: (message) => getVisibleGlobalMessageContent") && globalAgent.includes("renderMarkdown(getVisibleGlobalMessageContent(msg, '代码审查报告已整理，技术细节已放入技术详情。'))") && globalAgent.includes('{{ getVisibleGlobalMessageContent(msg) }}') && messageNavigation.includes('getAssistantContent') && messageNavigation.includes('getUserContent'),
   globalAgentActionResultsUseFriendlyMarker: globalAgent.includes("const SYSTEM_RESULT_MARKER = '[处理结果]'") && globalAgent.includes("const LEGACY_SYSTEM_RECEIPT_MARKER = '[系统回执]'") && globalAgent.includes('SYSTEM_RESULT_MARKERS') && globalAgent.includes('systemResultMessage(') && globalAgent.includes("title: '处理结果'") && !globalAgentWithoutLegacyReceiptMarker.includes('[系统回执]') && !globalAgentWithoutLegacyReceiptMarker.includes('系统回执') && !globalAgent.includes('主 Agent 回执：'),
   globalAgentStoresLiveProgressCheckpoints: globalAgent.includes('progressCheckpoints') && globalAgent.includes('ccm-main-agent-live-checkpoints-v1') && backendGlobalAgent.includes('ccm-main-agent-live-checkpoint-v1') && backendGlobalAgent.includes('checkpoint:'),
@@ -1265,8 +1338,34 @@ const checks = {
     && globalAgent.includes('globalMissionNotificationContent')
     && globalAgent.includes("['completed', 'failed', 'cancelled'].includes(state)")
     && globalAgent.includes('stopMissionTracking(missionId)')
+    && globalAgent.includes("'global_mission_waiting_user'")
+    && globalAgent.includes("'global_mission_terminal'")
+    && globalAgent.includes('isGlobalMissionTaskMessage(msg)')
     && taskExperienceSelftest.includes('globalMissionNotificationsAreIdempotentPerState')
-    && taskExperienceSelftest.includes('globalMissionNotificationsSurviveHistoryMergeWithoutDuplicates'),
+    && taskExperienceSelftest.includes('globalMissionNotificationsSurviveHistoryMergeWithoutDuplicates')
+    && renderFixture.includes('global-mission-notification:fixture-mission-waiting:waiting_user')
+    && renderFixture.includes('global-mission-notification:fixture-mission-cancelled:cancelled')
+    && renderRegression.includes('07j-global-mission-waiting-user-notification.png')
+    && renderRegression.includes('07k-global-mission-cancelled-notification.png')
+    && renderRegression.includes('07l-global-mission-waiting-user-resumed.png'),
+  globalWaitingUserInputResumesSameMission: globalAgent.includes('pendingGlobalMissionInput')
+    && globalAgent.includes('beginGlobalMissionInput')
+    && globalAgent.includes('sendGlobalMissionInput')
+    && globalAgent.includes("continuation_kind: 'supplement'")
+    && globalAgent.includes('resolve_waiting_user: true')
+    && globalAgent.includes("source: 'global_web_waiting_user_resolution'")
+    && globalAgent.includes("type: 'global_mission_user_input'")
+    && globalAgent.includes("target.msg.missionNotificationState = 'resolved'")
+    && backendMissionSupervisor.includes('waitingUserResolutionRequested')
+    && backendMissionSupervisor.includes('waitingUserResolved')
+    && backendMissionSupervisor.includes('waitingUserSupplementResumesSameMission')
+    && backendMissionSupervisor.includes('waitingIncidentMarkedResolved')
+    && backendGlobalAgent.includes('global_mission_user_input')
+    && backendGlobalAgent.includes('waiting_user_resolved')
+    && taskExperienceSelftest.includes('globalWaitingMissionUsesOneInputAction')
+    && taskExperienceSelftest.includes('globalResolvedWaitingMissionReturnsToExecution')
+    && renderRegression.includes('global waiting-user supplement preserved as user message')
+    && renderRegression.includes('global waiting supplement should not trigger goal replan'),
   backendGlobalBuildsDispatchLaunchSummary: backendGlobalLoop.includes('buildGlobalDispatchLaunchSummary') && backendGlobalLoop.includes('emitGlobalDispatchLaunchProgress') && backendGlobalLoop.includes('ccm-main-agent-dispatch-launch-summary-v1') && backendGlobalLoop.includes('dispatch_launch_summary: dispatchLaunchSummary') && backendGlobalLoop.includes('main_agent_decision: mainAgentDecision') && backendGlobalLoop.includes('globalDispatchLaunchSummaryVisible') && backendGlobalLoop.includes('globalDispatchLaunchSummaryStreamsLive') && backendGlobalLoop.includes('globalOrdinaryAnswerHasNoDispatchLaunchSummary') && backendGlobalLoop.includes('globalOrdinaryAnswerHasNoDispatchLaunchEvent'),
   backendGlobalDispatchLaunchDoesNotClaimCompletion: backendGlobalLoop.includes('normalizeGlobalDispatchLaunchRowStatus')
     && backendGlobalLoop.includes('已回传结果，待验收')
@@ -1349,9 +1448,9 @@ const checks = {
     && backend.includes('正在等待和读取结果说明')
     && backend.includes('底层执行记录和排障信息仍保留在群聊任务卡的技术详情里')
     && backendDailyDevBacklog.includes('等待子 Agent 执行并提交结果说明'),
-  mainAgentVisibleAcceptanceTerminologyPolished: globalAgent.includes('全局任务已通过全部交付验收')
+  mainAgentVisibleAcceptanceTerminologyPolished: globalAgent.includes('已通过全部交付验收')
     && globalAgent.includes("return '验收通过'")
-    && globalAgent.includes('所有子任务通过交付验收')
+    && globalAgent.includes('最终是否交付以总结和验收结果为准')
     && !globalAgent.includes('全局任务已通过全部交付门禁')
     && !globalAgent.includes("return '门禁通过'")
     && !globalAgent.includes('所有子任务通过交付门禁')

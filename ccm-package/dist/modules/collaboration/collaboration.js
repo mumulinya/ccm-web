@@ -55,6 +55,7 @@ exports.startAgentRecoveryMonitor = startAgentRecoveryMonitor;
 exports.stopAgentRecoveryMonitor = stopAgentRecoveryMonitor;
 exports.startTaskWatchdog = startTaskWatchdog;
 exports.stopTaskWatchdog = stopTaskWatchdog;
+exports.buildDailyDevAgentDiagnostics = buildDailyDevAgentDiagnostics;
 exports.runCollaborationProtocolSelfTest = runCollaborationProtocolSelfTest;
 exports.refreshGlobalDevelopmentMissions = refreshGlobalDevelopmentMissions;
 exports.getGlobalDevelopmentMission = getGlobalDevelopmentMission;
@@ -1276,6 +1277,10 @@ function buildTaskCardView(task, executions, sessions) {
     const summary = task?.delivery_summary || {};
     const planMode = task?.workflow_meta?.plan_mode || task?.workflow_meta?.intake?.plan_mode || task?.intake_draft || null;
     const phase = taskCardPhase(task, executions);
+    const latestContinuation = task?.collaboration_state?.last_continuation || {};
+    const waitingUserResolved = latestContinuation.resolves_waiting_user === true
+        || latestContinuation.resolvesWaitingUser === true
+        || /waiting[_-]?user[_-]?resolution/i.test(String(latestContinuation.source || task?.last_continue_source || ""));
     const deliveryAccepted = hasStrongTaskAcceptanceEvidence(task, executions, summary);
     const visible = shouldShowUserTaskCard(task, summary, executions);
     const phaseLabels = {
@@ -1327,6 +1332,15 @@ function buildTaskCardView(task, executions, sessions) {
             work_item_id: item.id,
         });
     }
+    if (waitingUserResolved && phase === "reworking") {
+        for (const worker of workers) {
+            if (!["blocked", "needs_user", "needs_info", "waiting_user"].includes(String(worker.status || "").toLowerCase()))
+                continue;
+            worker.status = "pending";
+            worker.summary = "任务条件已收到，等待重新复核。";
+            worker.blockers = [];
+        }
+    }
     const activeAgents = terminalPhase ? [] : uniqueStrings([
         ...executions.filter(item => ["spawning", "ready", "prompt_accepted", "running", "reviewing"].includes(item.state)).map(item => item.project),
         ...workers.filter((item) => ["running", "in_progress", "pending", "partial", "blocked"].includes(String(item.status || ""))).map((item) => item.agent),
@@ -1373,7 +1387,7 @@ function buildTaskCardView(task, executions, sessions) {
     else if (phase === "executing")
         nextAction = "完成修改后会自动运行检查";
     else if (phase === "reworking")
-        nextAction = "修复后会重新运行检查";
+        nextAction = waitingUserResolved ? "正在沿用原任务继续复核和验收" : "修复后会重新运行检查";
     else if (phase === "reviewing")
         nextAction = "检查通过后自动交付";
     else if (phase === "needs_user")
@@ -1414,7 +1428,7 @@ function buildTaskCardView(task, executions, sessions) {
         title: task?.title || "开发任务",
         goal: task?.business_goal || task?.goal || task?.title || "",
         phase,
-        phase_label: phaseLabels[phase] || phase,
+        phase_label: waitingUserResolved && phase === "reworking" ? "正在继续" : phaseLabels[phase] || phase,
         status: task?.status || "pending",
         progress: progressByPhase[phase] ?? 0,
         active_agents: activeAgents.map((name) => `${userAgentRole(name)} · ${name} 正在处理`),
@@ -1526,6 +1540,11 @@ function buildContinuationUserDecision(input = {}) {
     const reworkKind = String(meta.rework_kind || meta.reworkKind || "").trim();
     const target = (0, memory_1.compactMemoryText)(meta.target || meta.agent || meta.project || input.target || "", 80);
     const reason = (0, memory_1.compactMemoryText)(meta.reason || meta.detail || meta.title || meta.label || input.reason || "", 180);
+    const resolvesWaitingUser = meta.resolves_waiting_user === true
+        || meta.resolvesWaitingUser === true
+        || input.resolve_waiting_user === true
+        || input.resolveWaitingUser === true
+        || /waiting[_-]?user[_-]?resolution/i.test(source);
     const isNextWorkItem = reworkKind === "next_claimable_work_item" || /next_work_item|user_next_work_item/i.test(`${source} ${reworkKind}`);
     const isQualityFollowup = /quality[_-]?followup/i.test(`${source} ${reworkKind}`);
     const isTargeted = isNextWorkItem || /targeted|gap_rework|rework|ack_rewrite|missing_|contract_|weak_receipt/i.test(`${source} ${reworkKind}`);
@@ -1542,7 +1561,7 @@ function buildContinuationUserDecision(input = {}) {
                     ? "replan_same_task"
                     : "continue_same_task";
     const kindLabel = {
-        supplement: "补充要求",
+        supplement: resolvesWaitingUser ? "任务条件" : "补充要求",
         revise_goal: "目标调整",
         new_task: "独立新任务",
     };
@@ -1559,27 +1578,31 @@ function buildContinuationUserDecision(input = {}) {
                     : isTargeted
                         ? "定向返工"
                         : "并入同一任务";
-    const title = isNextWorkItem
-        ? "下一步派发已接上"
-        : isQualityFollowup
-            ? "交付总结补齐已接上"
-            : isTargeted
-                ? "精准返工已接上"
-                : replanRequired
-                    ? "目标调整已接收"
-                    : "补充要求已接收";
-    const targetText = target ? `${target} 的` : "";
-    const headline = isNextWorkItem
-        ? `我已接收${targetText}已解锁工作项，只推进这一小步。`
-        : isQualityFollowup
-            ? "我已接上交付总结补齐，会补齐交付证据、验证结果和验收结论。"
-            : isTargeted
-                ? `我已接收${targetText}返工缺口，会复用当前任务上下文继续处理。`
-                : replanRequired && interruptCurrentRun
-                    ? "我已收到新的目标边界，会先停止可能跑偏的当前执行轮，再重新核对计划。"
+    const title = resolvesWaitingUser
+        ? "任务条件已补充"
+        : isNextWorkItem
+            ? "下一步派发已接上"
+            : isQualityFollowup
+                ? "交付总结补齐已接上"
+                : isTargeted
+                    ? "精准返工已接上"
                     : replanRequired
-                        ? "我已收到新的目标边界，会先重新核对计划，再在同一任务里继续推进。"
-                        : "我已收到你的补充要求，会在同一任务里继续处理。";
+                        ? "目标调整已接收"
+                        : "补充要求已接收";
+    const targetText = target ? `${target} 的` : "";
+    const headline = resolvesWaitingUser
+        ? "我已收到任务所需条件，会在同一任务里继续处理。"
+        : isNextWorkItem
+            ? `我已接收${targetText}已解锁工作项，只推进这一小步。`
+            : isQualityFollowup
+                ? "我已接上交付总结补齐，会补齐交付证据、验证结果和验收结论。"
+                : isTargeted
+                    ? `我已接收${targetText}返工缺口，会复用当前任务上下文继续处理。`
+                    : replanRequired && interruptCurrentRun
+                        ? "我已收到新的目标边界，会先停止可能跑偏的当前执行轮，再重新核对计划。"
+                        : replanRequired
+                            ? "我已收到新的目标边界，会先重新核对计划，再在同一任务里继续推进。"
+                            : "我已收到你的补充要求，会在同一任务里继续处理。";
     const nextAction = deferred
         ? replanRequired && interruptCurrentRun
             ? "我正在停止当前执行轮；停止后会重新核对目标、影响范围和验收条件，再按新目标继续。"
@@ -1591,22 +1614,26 @@ function buildContinuationUserDecision(input = {}) {
             : isQualityFollowup
                 ? "我会复用已有执行结果和复核证据，补齐最终总结缺口，完成后重新给你一份可验收总结。"
                 : "我会复用原任务证据继续执行，完成后重新验收并总结。";
-    const statusDetail = deferred
-        ? replanRequired && interruptCurrentRun
-            ? "已收到目标调整，正在停止当前执行轮并准备重核计划"
+    const statusDetail = resolvesWaitingUser
+        ? deferred
+            ? "补充信息已收到，本轮结束后会沿用原任务继续复核和验收"
+            : "补充信息已收到，正在沿用原任务继续复核和验收"
+        : deferred
+            ? replanRequired && interruptCurrentRun
+                ? "已收到目标调整，正在停止当前执行轮并准备重核计划"
+                : replanRequired
+                    ? "已收到目标调整，本轮结束后会先重新核对计划再继续"
+                    : "已收到追加要求，本轮结束后将在同一任务中继续"
             : replanRequired
-                ? "已收到目标调整，本轮结束后会先重新核对计划再继续"
-                : "已收到追加要求，本轮结束后将在同一任务中继续"
-        : replanRequired
-            ? "已收到目标调整，等待我重新核对计划并继续执行"
-            : isQualityFollowup
-                ? "已接上交付总结补齐，等待我补齐证据、验证和验收结论"
-                : "已收到补充说明，等待我继续执行";
+                ? "已收到目标调整，等待我重新核对计划并继续执行"
+                : isQualityFollowup
+                    ? "已接上交付总结补齐，等待我补齐证据、验证和验收结论"
+                    : "已收到补充说明，等待我继续执行";
     const steps = [
         {
             id: "capture",
-            label: replanRequired ? "已记录新的目标边界" : isQualityFollowup ? "已记录总结补齐要求" : "已记录补充要求",
-            detail: reason || "补充内容已写入当前任务上下文。",
+            label: resolvesWaitingUser ? "已收到任务所需条件" : replanRequired ? "已记录新的目标边界" : isQualityFollowup ? "已记录总结补齐要求" : "已记录补充要求",
+            detail: resolvesWaitingUser ? "用户补充已写入当前任务上下文，具体内容只保留在用户消息和执行上下文中。" : reason || "补充内容已写入当前任务上下文。",
         },
         {
             id: "preserve_context",
@@ -1633,8 +1660,8 @@ function buildContinuationUserDecision(input = {}) {
         next_action: nextAction,
         status_detail: statusDetail,
         steps,
-        timeline_type: replanRequired ? "task_goal_revision" : isNextWorkItem ? "next_work_item_dispatch" : isQualityFollowup ? "quality_followup_continuation" : isTargeted ? "targeted_rework" : "task_continuation",
-        timeline_detail: reason || (replanRequired ? "用户调整了目标边界，我将重新核对计划。" : "我已复用同一任务上下文继续处理。"),
+        timeline_type: resolvesWaitingUser ? "waiting_user_resolution" : replanRequired ? "task_goal_revision" : isNextWorkItem ? "next_work_item_dispatch" : isQualityFollowup ? "quality_followup_continuation" : isTargeted ? "targeted_rework" : "task_continuation",
+        timeline_detail: resolvesWaitingUser ? "用户已补充任务所需条件，我将复用同一任务上下文继续处理。" : reason || (replanRequired ? "用户调整了目标边界，我将重新核对计划。" : "我已复用同一任务上下文继续处理。"),
     };
 }
 function buildUserContinuationStatus(task, phase = "") {
@@ -1790,6 +1817,8 @@ function timelineLabelForUser(item) {
         return "我已接上精准返工";
     if (type === "auto_gap_rework")
         return "我已按缺口继续";
+    if (type === "waiting_user_resolution")
+        return "任务条件已补充";
     if (type === "task_continuation")
         return "我已收到补充要求";
     if (type === "coordinator_review")
@@ -13153,7 +13182,11 @@ function writeSse(res, data) {
     if (!res || res.writableEnded || res.destroyed)
         return;
     try {
-        res.write(`data: ${JSON.stringify(data)}\n\n`);
+        const sequence = Number(res.__ccmSseSequence || 0) + 1;
+        res.__ccmSseSequence = sequence;
+        const streamId = String(data?.traceId || data?.trace_id || data?.taskId || data?.task_id || "group-stream");
+        const eventId = String(data?.event_id || data?.eventId || `${streamId}:${sequence}`);
+        res.write(`data: ${JSON.stringify({ ...data, event_id: eventId, eventId, sequence })}\n\n`);
     }
     catch { }
 }
@@ -13405,6 +13438,7 @@ async function processCrossAgents(groupId, group, sourceProject, output, atMenti
             }
             atMessage = relevantLines.join("\n").trim() || output.substring(0, 500);
         }
+        const implementationMessage = atMessage;
         const requiresAckPreflight = !!sourceTask
             && sourceTask.workflow_type === "daily_dev"
             && (taskRequiresCodeChanges(sourceTask) || taskRequiresVerification(sourceTask))
@@ -14508,6 +14542,103 @@ ${childTaskText}
                 if (laneChangeSnapshot)
                     targetFileChanges = ctx.getFileChanges(targetName, laneChangeSnapshot);
                 targetReceipt = (0, agent_receipts_1.extractAgentReceipt)(tOutput, targetName);
+                if (requiresAckPreflight && targetReceipt) {
+                    const ackReceipt = targetReceipt;
+                    const ackReview = (0, protocol_gates_1.buildAckPreflightReview)(sourceTask, [ackReceipt], [{ project: targetName, objective: implementationMessage }]);
+                    if (ackReview.status === "approved" && ackReview.rejected.length === 0) {
+                        const currentTask = taskId ? (getTaskById(taskId) || sourceTask) : sourceTask;
+                        const nextDeliverySummary = {
+                            ...(currentTask?.delivery_summary || {}),
+                            ack_gate_passed: true,
+                            ack_review: ackReview,
+                        };
+                        if (taskId) {
+                            updateTask(taskId, {
+                                delivery_summary: nextDeliverySummary,
+                                workflow_meta: {
+                                    ...(currentTask?.workflow_meta || {}),
+                                    ack_preflight: {
+                                        status: "approved",
+                                        approved_at: new Date().toISOString(),
+                                        agent: targetName,
+                                        review: ackReview,
+                                    },
+                                },
+                            });
+                            (0, logs_1.addTaskLog)(taskId, "success", `${targetName} ACK 前置审核通过，立即复用同一原生会话进入实现阶段`);
+                            (0, logs_1.appendTaskTimelineEvent)(taskId, {
+                                type: "ack_preflight_approved",
+                                title: `${targetName} 接单确认通过`,
+                                detail: "目标、范围和验证计划已确认，正在进入实现阶段",
+                                status: "ok",
+                                phase: "dispatching",
+                                agent: targetName,
+                                data: { ack_review: ackReview, task_agent_session_id: activeTaskSession?.id || "" },
+                            });
+                        }
+                        sourceTask.delivery_summary = nextDeliverySummary;
+                        writeSse(streamRes, {
+                            type: "status",
+                            text: `${targetName} 已确认目标和范围，正在进入实现阶段...`,
+                            agent: targetName,
+                            taskId,
+                        });
+                        const implementationPrompt = [
+                            "ACK 前置审核已通过。现在进入同一工作单的实现阶段，不要再次只回复 ACK。",
+                            "请从当前工作区继续，实际完成下面的原始工作单：",
+                            implementationMessage,
+                            "完成后必须返回新的 CCM_AGENT_RECEIPT，包含真实修改文件、实际执行的验证命令及结果、阻塞和待确认事项。",
+                        ].join("\n\n");
+                        targetNativeSessionId = "";
+                        targetSessionSucceeded = true;
+                        targetSessionError = "";
+                        const implementationOutput = await ctx.callAgentForGroupStream(targetName, implementationPrompt, tWorkDir, activeRuntime, {
+                            res: streamRes,
+                            groupId,
+                            timeoutMs: runtimeAttemptTimeoutMs,
+                            messageId: `${responseMessageId}-implementation`,
+                            allowedTools: toolContext.allowedTools,
+                            mcpConfigPath: runtimeToolContext.audit.mcpConfigPath,
+                            taskId,
+                            executionId: laneExecutionId,
+                            agentSession: activeTaskSession ? (0, agent_sessions_1.getTaskAgentSessionOptions)(activeTaskSession) : null,
+                            initialWorkEvents: [runtimeToolContext.workEvent],
+                            onDone: (opts) => {
+                                targetFileChanges = opts.fileChanges;
+                                targetWorkEvents = [...targetWorkEvents, ...(Array.isArray(opts.workEvents) ? opts.workEvents : [])].slice(-80);
+                                targetNativeSessionId = String(opts.nativeSessionId || "");
+                                targetSessionSucceeded = opts.isError !== true;
+                                targetSessionError = String(opts.error || opts.message || "");
+                            },
+                        });
+                        if (activeTaskSession) {
+                            activeTaskSession = (0, agent_sessions_1.recordTaskAgentSessionTurn)(activeTaskSession.id, {
+                                nativeSessionId: targetNativeSessionId,
+                                success: targetSessionSucceeded,
+                                error: targetSessionError || (!targetSessionSucceeded ? implementationOutput : ""),
+                                runtimeToolSnapshot: runtimeToolSnapshotFromAudit(runtimeToolContext.audit, toolContext.allowedTools),
+                            }) || activeTaskSession;
+                        }
+                        tOutput = implementationOutput;
+                        const implementationReceipt = (0, agent_receipts_1.extractAgentReceipt)(implementationOutput, targetName);
+                        targetReceipt = implementationReceipt
+                            ? {
+                                ...implementationReceipt,
+                                ack: implementationReceipt.ack || ackReceipt.ack,
+                                ack_preflight: { status: "approved", review: ackReview },
+                            }
+                            : {
+                                ...ackReceipt,
+                                status: "partial",
+                                summary: "ACK 已通过，但实现阶段缺少结构化结果说明",
+                                blockers: uniqueStrings([...(ackReceipt.blockers || []), "实现阶段缺少 CCM_AGENT_RECEIPT"]),
+                                needs: uniqueStrings([...(ackReceipt.needs || []), "补充实现结果、文件变更和验证证据"]),
+                                ack_preflight: { status: "approved", review: ackReview },
+                            };
+                        if (laneChangeSnapshot)
+                            targetFileChanges = ctx.getFileChanges(targetName, laneChangeSnapshot);
+                    }
+                }
                 const detectedSkillUse = attachInvokedSkillsToReceipt(targetReceipt, tOutput, toolContext.allowedTools, runtimeToolContext.audit);
                 targetReceipt = detectedSkillUse.receipt;
                 targetInvokedSkills = detectedSkillUse.invoked;
@@ -26739,12 +26870,16 @@ function continueTaskWithMessage(taskId, message, ctx, options = {}) {
     if (operation && !operation.acquired) {
         return { success: true, duplicate: true, task: (0, db_1.loadTasks)().find((item) => item.id === taskId) || current, ...(operation.record?.result || {}), trace_id: operation.traceId };
     }
+    const resolvesWaitingUser = options.resolve_waiting_user === true
+        || options.resolveWaitingUser === true
+        || /waiting[_-]?user[_-]?resolution/i.test(source);
     const continuationMeta = {
         rework_kind: compactFormText(options.rework_kind || options.reworkKind || options.continuation_rework_kind || "", ""),
         target: compactFormText(options.target || options.agent || options.project || "", ""),
         reason: compactFormText(options.reason || options.detail || "", ""),
         title: compactFormText(options.title || options.label || "", ""),
         work_item_id: compactFormText(options.work_item_id || options.workItemId || "", ""),
+        resolves_waiting_user: resolvesWaitingUser,
     };
     const shouldInterruptCurrentRun = currentlyRunning
         && continuationKind === "revise_goal"
@@ -26797,7 +26932,16 @@ function continueTaskWithMessage(taskId, message, ctx, options = {}) {
             items: gapItems,
             auto_attempts: autoAttempts,
             last_auto_continue_at: followup.time,
+        } : resolvesWaitingUser && Object.keys(previousGap).length ? {
+            ...previousGap,
+            resolved_at: followup.time,
+            resolved_by: source,
         } : previousGap,
+        waiting_user_resolution: resolvesWaitingUser ? {
+            resolved_at: followup.time,
+            source,
+            summary: "用户已补充任务所需条件",
+        } : current.collaboration_state?.waiting_user_resolution || null,
         last_continuation: {
             source,
             at: followup.time,
@@ -26851,6 +26995,11 @@ function continueTaskWithMessage(taskId, message, ctx, options = {}) {
         collaboration_state: nextCollaborationState,
         last_continue_at: followup.time,
         last_continue_source: followup.source,
+        ...(resolvesWaitingUser ? {
+            recovery_pending: false,
+            waiting_user_resolved_at: followup.time,
+            waiting_user_resolution_source: source,
+        } : {}),
         ...(internalContinuation ? { last_internal_continue_at: followup.time } : {}),
     };
     if (continuationKind === "revise_goal") {
@@ -26901,7 +27050,7 @@ function continueTaskWithMessage(taskId, message, ctx, options = {}) {
         agent: continuationMeta.target || "",
         data: { source, kind: continuationKind, rework_kind: continuationMeta.rework_kind, work_item_id: continuationMeta.work_item_id },
     });
-    if (task?.assign_type === "group" && task.group_id && !automaticGapContinuation && !internalContinuation) {
+    if (task?.assign_type === "group" && task.group_id && !automaticGapContinuation && !internalContinuation && options.append_group_message !== false && options.appendGroupMessage !== false) {
         const group = (0, storage_1.loadGroups)().find(g => g.id === task.group_id);
         const target = group ? (0, group_orchestrator_1.getCoordinatorMember)(group).project : "coordinator";
         (0, storage_1.appendGroupMessage)(task.group_id, {

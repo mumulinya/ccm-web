@@ -4,6 +4,7 @@ exports.runTestAgent = runTestAgent;
 const browser_verifier_1 = require("./browser-verifier");
 const registry_1 = require("./browser/registry");
 const tool_executor_1 = require("./browser/tool-executor");
+const resource_lifecycle_1 = require("./browser/resource-lifecycle");
 const authentication_summary_1 = require("./browser/authentication-summary");
 const existing_session_1 = require("./browser/existing-session");
 const shared_1 = require("./browser/shared");
@@ -29,11 +30,23 @@ async function runTestAgent(input, options = {}) {
     }
     const suppressBrowserToolDetails = workOrder.projects.some(project => (0, shared_1.checksForProject)(project, workOrder.acceptanceCriteria).some(existing_session_1.browserExistingSessionUsesMinimalEvidence));
     const browserToolRecorder = options.browserToolExecutor
-        ? (0, tool_executor_1.createRecordingBrowserToolExecutor)(options.browserToolExecutor, workOrder.options.artifactDir, { suppressDetails: suppressBrowserToolDetails })
+        ? (0, tool_executor_1.createRecordingBrowserToolExecutor)(options.browserToolExecutor, workOrder.options.artifactDir, {
+            suppressDetails: suppressBrowserToolDetails,
+            toolCallTimeoutMs: workOrder.options.browserTimeoutMs,
+        })
         : null;
-    const runtimeOptions = browserToolRecorder
-        ? { ...options, browserToolExecutor: browserToolRecorder.executor }
-        : options;
+    const browserResourceLifecycle = (0, shared_1.wantsBrowser)(workOrder)
+        ? (0, resource_lifecycle_1.createBrowserResourceLifecycleRecorder)()
+        : null;
+    const runtimeOptions = {
+        ...options,
+        ...(browserToolRecorder ? {
+            browserToolExecutor: browserToolRecorder.executor,
+            browserToolCallScope: browserToolRecorder.runWithExecutionScope,
+            browserToolCallIdsForExecution: browserToolRecorder.getRecordIdsForExecution,
+        } : {}),
+        ...(browserResourceLifecycle ? { browserResourceLifecycle } : {}),
+    };
     let commandResults = [];
     let devServers = [];
     let httpResults = [];
@@ -90,6 +103,7 @@ async function runTestAgent(input, options = {}) {
         httpResults,
         browserResults,
         browserToolCalls,
+        browserResourceLifecycleEvents: browserResourceLifecycle?.getEvents() || [],
     });
     return (0, artifacts_1.writeTestAgentArtifacts)(report);
 }

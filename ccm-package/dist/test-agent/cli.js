@@ -50,6 +50,10 @@ const flow_summary_1 = require("./browser/flow-summary");
 const multi_session_summary_1 = require("./browser/multi-session-summary");
 const stability_summary_1 = require("./browser/stability-summary");
 const check_execution_coverage_1 = require("./browser/check-execution-coverage");
+const evidence_temporal_integrity_1 = require("./browser/evidence-temporal-integrity");
+const resource_lifecycle_1 = require("./browser/resource-lifecycle");
+const tool_evidence_lineage_1 = require("./browser/tool-evidence-lineage");
+const tool_call_timeout_1 = require("./browser/tool-call-timeout");
 const authentication_summary_1 = require("./browser/authentication-summary");
 const recovery_summary_1 = require("./browser/recovery-summary");
 const action_effect_summary_1 = require("./browser/action-effect-summary");
@@ -124,6 +128,14 @@ function formatTestAgentCliReportSummary(report) {
         `Browser checks: ${statusCounts(report.browserResults)}`,
         `Browser execution coverage: ${(0, check_execution_coverage_1.formatBrowserCheckExecutionCoverageLine)(report.browserCheckExecutionCoverage)}`,
         ...(0, check_execution_coverage_1.formatBrowserCheckExecutionCoverageAttentionLines)(report.browserCheckExecutionCoverage, 5),
+        `Browser temporal evidence: ${(0, evidence_temporal_integrity_1.formatBrowserEvidenceTemporalIntegrityLine)(report.browserEvidenceTemporalIntegrity)}`,
+        ...(0, evidence_temporal_integrity_1.formatBrowserEvidenceTemporalIntegrityAttentionLines)(report.browserEvidenceTemporalIntegrity, 5),
+        `Browser resource lifecycle: ${(0, resource_lifecycle_1.formatBrowserResourceLifecycleLine)(report.browserResourceLifecycleSummary)}`,
+        ...(0, resource_lifecycle_1.formatBrowserResourceLifecycleAttentionLines)(report.browserResourceLifecycleSummary, 5),
+        `Browser tool evidence lineage: ${(0, tool_evidence_lineage_1.formatBrowserToolEvidenceLineageLine)(report.browserToolEvidenceLineage)}`,
+        ...(0, tool_evidence_lineage_1.formatBrowserToolEvidenceLineageAttentionLines)(report.browserToolEvidenceLineage, 5),
+        `Browser tool timeouts: ${(0, tool_call_timeout_1.formatBrowserToolCallTimeoutSummaryLine)(report.browserToolCallTimeoutSummary)}`,
+        ...(0, tool_call_timeout_1.formatBrowserToolCallTimeoutAttentionLines)(report.browserToolCallTimeoutSummary, 5),
         `Browser multi-session: ${(0, multi_session_summary_1.formatBrowserMultiSessionSummaryLine)(report.browserMultiSessionSummary)}`,
         ...(0, multi_session_summary_1.formatBrowserMultiSessionAttentionLines)(report.browserMultiSessionSummary, 5),
         `Browser stability: ${(0, stability_summary_1.formatBrowserStabilitySummaryLine)(report.browserStabilitySummary)}`,

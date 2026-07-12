@@ -152,7 +152,12 @@ const buildContinuationStatus = (source = {}) => {
   const kind = String(last.rework_kind || last.reworkKind || last.kind || '').trim()
   const sourceName = String(last.source || source.last_continue_source || source.lastContinueSource || '').trim()
   const target = compact(last.target || last.agent || last.project || '', 80)
-  const reason = compact(last.reason || last.detail || last.title || last.label || '', 180)
+  const resolvesWaitingUser = last.resolves_waiting_user === true
+    || last.resolvesWaitingUser === true
+    || /waiting[_-]?user[_-]?resolution/i.test(sourceName)
+  const reason = resolvesWaitingUser
+    ? '用户已补充任务所需条件'
+    : compact(last.reason || last.detail || last.title || last.label || '', 180)
   const isNextWorkItem = kind === 'next_claimable_work_item' || /next_work_item|user_next_work_item/i.test(`${sourceName} ${kind}`)
   const isQualityFollowup = /quality[_-]?followup/i.test(`${sourceName} ${kind}`)
   const isTargeted = isNextWorkItem || /targeted|gap_rework|rework|ack_rewrite|missing_|contract_|weak_receipt/i.test(`${sourceName} ${kind}`)
@@ -190,7 +195,7 @@ const buildContinuationStatus = (source = {}) => {
       : '我会复用原任务证据继续执行，完成后重新验收并总结。'
   return {
     schema: 'ccm-main-agent-continuation-status-v1',
-    title: isNextWorkItem ? '下一步派发已接上' : isQualityFollowup ? '交付总结补齐已接上' : isTargeted ? '定向补充已接上' : replanRequired ? '目标调整已接收' : '补充要求已接收',
+    title: resolvesWaitingUser ? '任务条件已补充' : isNextWorkItem ? '下一步派发已接上' : isQualityFollowup ? '交付总结补齐已接上' : isTargeted ? '定向补充已接上' : replanRequired ? '目标调整已接收' : '补充要求已接收',
     status,
     status_label: ({ queued: '已入队', accepted: '已接收', active: '处理中', deferred: '本轮后继续', interrupting: '正在停止当前轮' })[status] || '已接收',
     headline: isNextWorkItem
@@ -203,9 +208,11 @@ const buildContinuationStatus = (source = {}) => {
           ? '我已收到新的目标边界，会先停止可能跑偏的当前执行轮，再重新核对计划。'
           : replanRequired
           ? '我已收到新的目标边界，会先重新核对计划，再在同一任务里继续推进。'
-          : '我已收到你的补充要求，会在同一任务里继续处理。',
+          : resolvesWaitingUser
+            ? '我已收到任务所需条件，会在同一任务里继续处理。'
+            : '我已收到你的补充要求，会在同一任务里继续处理。',
     kind: continuationKind,
-    kind_label: ({ supplement: '补充要求', revise_goal: '目标调整', new_task: '独立新任务' })[continuationKind] || '补充要求',
+    kind_label: resolvesWaitingUser ? '任务条件' : ({ supplement: '补充要求', revise_goal: '目标调整', new_task: '独立新任务' })[continuationKind] || '补充要求',
     strategy: last.strategy || (replanRequired ? 'replan_same_task' : isNextWorkItem ? 'continue_next_work_item' : isQualityFollowup ? 'complete_quality_followup' : isTargeted ? 'targeted_rework' : 'continue_same_task'),
     route_label: routeLabel,
     replan_required: replanRequired,
@@ -213,7 +220,7 @@ const buildContinuationStatus = (source = {}) => {
     target,
     reason,
     handoff_steps: [
-      { id: 'capture', label: replanRequired ? '已记录新的目标边界' : isQualityFollowup ? '已记录总结补齐要求' : '已记录补充要求', detail: reason || '补充内容已写入当前任务上下文。' },
+      { id: 'capture', label: replanRequired ? '已记录新的目标边界' : isQualityFollowup ? '已记录总结补齐要求' : resolvesWaitingUser ? '已记录任务条件' : '已记录补充要求', detail: reason || '补充内容已写入当前任务上下文。' },
       { id: 'preserve_context', label: '保留已有上下文', detail: '已完成的文件、验证和执行成员结果说明会继续作为判断依据。' },
       { id: replanRequired ? (interruptCurrentRun ? 'interrupt_and_replan' : 'replan') : status === 'deferred' ? 'defer' : 'continue', label: replanRequired ? (interruptCurrentRun ? '停止当前轮并重核计划' : '重新核对计划') : status === 'deferred' ? '等待当前轮结束' : isQualityFollowup ? '补齐交付总结' : '继续同一任务', detail: nextAction },
     ],
@@ -807,7 +814,7 @@ const buildUserHandoff = ({ provided = null, phase = '', status = '', nextAction
   }
   if (needsUser) addAction('provide_input', '补充确认', unresolved[0] || nextAction || '我正在等待你的确认。', 'continue', 'primary')
   if (cancelled) addAction('restart_request', '重新发起需求', nextAction || '任务已经停止；需要继续时可以重新发起。', 'continue', 'primary')
-  if (!cancelled && (blocked || normalizedPhase === 'failed' || unresolved.length)) addAction('continue_rework', normalizedPhase === 'failed' ? '重新执行或继续修复' : '继续补齐缺口', unresolved[0] || nextAction || '我会复用已有证据继续处理。', normalizedPhase === 'failed' ? 'retry' : 'gap_continue', normalizedPhase === 'failed' ? 'primary' : 'warning')
+  if (!cancelled && !needsUser && (blocked || normalizedPhase === 'failed' || unresolved.length)) addAction('continue_rework', normalizedPhase === 'failed' ? '重新执行或继续修复' : '继续补齐缺口', unresolved[0] || nextAction || '我会复用已有证据继续处理。', normalizedPhase === 'failed' ? 'retry' : 'gap_continue', normalizedPhase === 'failed' ? 'primary' : 'warning')
   if (fileCount > 0) addAction('view_changes', '查看改动', changeSummary?.headline || `已捕获 ${fileCount} 个文件改动。`, 'view_changes', terminal && !unresolved.length ? 'primary' : 'outline')
   if (deliveryReport) addAction('review_delivery', '核对交付总结', '查看完成内容、验证结果和风险提示。', 'review_delivery', fileCount ? 'outline' : 'primary')
   if (cancelled && unresolved.length) addAction('review_stop_reason', '查看停止原因', unresolved[0], 'review_risks', 'outline')
@@ -817,14 +824,14 @@ const buildUserHandoff = ({ provided = null, phase = '', status = '', nextAction
   const summaryCards = [
     {
       id: 'completed',
-      label: normalizedPhase === 'failed' ? '处理结果' : cancelled ? '停止说明' : '完成内容',
-      value: compact(deliveryReport?.headline || (fileCount ? `已整理 ${fileCount} 个文件改动` : handoffStatus === 'ready' ? '任务结果已整理，等待你核对。' : '当前状态已整理。'), 180),
+      label: normalizedPhase === 'failed' ? '处理结果' : cancelled ? '停止说明' : needsUser ? '当前进展' : '完成内容',
+      value: compact(deliveryReport?.headline || (fileCount ? `已整理 ${fileCount} 个文件改动` : cancelled ? '任务已停止，停止前进度已保留。' : needsUser ? '现有进度已保留，收到信息后继续。' : handoffStatus === 'ready' ? '任务结果已整理，等待你核对。' : '当前状态已整理。'), 180),
       tone: normalizedPhase === 'failed' ? 'warning' : handoffStatus === 'ready' ? 'ok' : 'neutral',
     },
     {
       id: 'verification',
       label: '验证状态',
-      value: verificationRows.length ? `已执行 ${verificationRows.length} 项验证` : planAlignment?.status === 'aligned' ? '计划核对已通过' : '等待补齐验证证据',
+      value: verificationRows.length ? `已执行 ${verificationRows.length} 项验证` : planAlignment?.status === 'aligned' ? '计划核对已通过' : cancelled ? '任务已停止，未继续验证' : needsUser ? '收到信息后继续验证' : '等待补齐验证证据',
       tone: verificationRows.length || planAlignment?.status === 'aligned' ? 'ok' : 'warning',
     },
     {
@@ -1042,7 +1049,7 @@ export const globalMissionTaskCard = (message = {}) => {
     viewChanges: files.length > 0,
     continue: true,
     cancel: true,
-    resume: ['paused', 'waiting_user', 'manual_takeover'].includes(supervisor.status),
+    resume: ['paused', 'manual_takeover'].includes(supervisor.status),
     retry: true,
     rollback: !!mission.rollback_available,
     saveKnowledge: true,
@@ -1102,18 +1109,26 @@ export const globalMissionTaskCard = (message = {}) => {
   const changeSummary = mission.change_summary || mission.changeSummary || missionDelivery.change_summary || missionDelivery.changeSummary || buildChangeSummary({ files, workItems, agents })
   const missionPlanMode = mission.plan_mode || mission.planMode || mission.workflow_meta?.plan_mode || mission.workflowMeta?.planMode || missionDelivery.plan_mode || missionDelivery.planMode || finalReport.plan_mode || finalReport.planMode || null
   const planAlignment = buildPlanAlignment({ provided: mission.plan_alignment || mission.planAlignment || missionDelivery.plan_alignment || missionDelivery.planAlignment || finalReport.plan_alignment || finalReport.planAlignment, planMode: missionPlanMode, deliveryReport, files, verification, workItems, phase: presentation.phase, report: finalReport })
+  const waitingReason = asArray(supervisor.incidents)
+    .filter(item => !item?.resolved_at && !item?.resolvedAt && ['waiting_user', 'needs_user', 'waiting_clarification'].includes(String(item?.type || item?.status || '').toLowerCase()))
+    .map(handoffText)
+    .filter(Boolean)
+    .slice(-1)[0] || ''
+  const notificationText = compact(message.content, 260)
   const nextAction = presentation.phase === 'completed'
     ? '可以查看交付总结、验证结果和风险提示'
     : presentation.phase === 'needs_user'
-      ? '请确认后继续'
+      ? waitingReason || notificationText || '请补充任务卡中的待确认信息；收到后我会继续执行和验收。'
       : presentation.phase === 'failed'
         ? '可以重新执行，系统会复用已有证据'
+        : presentation.phase === 'cancelled'
+          ? '任务已取消；需要时可以重新发起。'
         : lastContinuationKind === 'revise_goal'
           ? '正在按新目标重新规划；完成后会重新执行验收和复核。'
           : lastContinuationKind === 'supplement'
             ? '补充要求已同步，正在继续执行和验收。'
             : '我正在协调各执行目标'
-  const userHandoff = buildUserHandoff({ provided: mission.user_handoff || mission.userHandoff || missionDelivery.user_handoff || missionDelivery.userHandoff || finalReport.user_handoff || finalReport.userHandoff || deliveryReport?.user_handoff || deliveryReport?.userHandoff, phase: presentation.phase, status: presentationStatus, nextAction, blockers: blocked ? [`${blocked} 个执行目标待补齐`] : [], deliveryReport, changeSummary, planAlignment, files, verification, risks })
+  const userHandoff = buildUserHandoff({ provided: mission.user_handoff || mission.userHandoff || missionDelivery.user_handoff || missionDelivery.userHandoff || finalReport.user_handoff || finalReport.userHandoff || deliveryReport?.user_handoff || deliveryReport?.userHandoff, phase: presentation.phase, status: presentationStatus, nextAction, blockers: presentation.phase === 'needs_user' ? [waitingReason || notificationText].filter(Boolean) : blocked ? [`${blocked} 个执行目标待补齐`] : [], deliveryReport, changeSummary, planAlignment, files, verification, risks })
   const deliveryAccepted = hasStrongDeliveryAcceptance({ deliveryReport, report: { ...missionDelivery, ...finalReport }, verificationRows: verification })
   return {
     version: 1,
@@ -1169,7 +1184,7 @@ export const globalMissionTaskCard = (message = {}) => {
     display_stream: missionDisplayStream,
     progress_checkpoints: missionProgressCheckpoints,
     delivery_report: deliveryReport,
-    delivery: { headline: deliveryReport?.headline || finalReport.summary || missionDelivery.headline || mission.status_detail || '', files, changes: files, verification, risks, acceptance_passed: deliveryAccepted },
+    delivery: { headline: deliveryReport?.headline || finalReport.summary || missionDelivery.headline || mission.status_detail || notificationText || '', files, changes: files, verification, risks, acceptance_passed: deliveryAccepted },
     actions,
     technical: { trace_id: mission.trace_id || '', execution_ids: children.map(row => row.task?.id).filter(Boolean), session_ids: [], supervisor_id: supervisor.id || mission.supervisor_id || '', agent_progress_summary: agentProgressSummary, change_summary: changeSummary, plan_alignment: planAlignment, user_handoff: userHandoff, post_review_spot_check: mission.post_review_spot_check || mission.postReviewSpotCheck || missionDelivery.post_review_spot_check || missionDelivery.postReviewSpotCheck || null },
   }
