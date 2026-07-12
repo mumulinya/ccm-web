@@ -35,6 +35,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.runGlobalAgentHistorySyncSelfTest = runGlobalAgentHistorySyncSelfTest;
 exports.runGlobalAgentIntentSelfTest = runGlobalAgentIntentSelfTest;
+exports.buildAgenticContext = buildAgenticContext;
 exports.resumeGlobalAgentLoopsForServer = resumeGlobalAgentLoopsForServer;
 exports.startGlobalMissionSupervisionForServer = startGlobalMissionSupervisionForServer;
 exports.bootstrapGlobalAgentMemoryForServer = bootstrapGlobalAgentMemoryForServer;
@@ -54,6 +55,7 @@ const reliability_ledger_1 = require("../../system/reliability-ledger");
 const memory_1 = require("../../projects/memory");
 const worker_handoff_1 = require("../../agents/worker-handoff");
 const memory_2 = require("../collaboration/memory");
+const group_memory_index_1 = require("../collaboration/group-memory-index");
 const loop_1 = require("../../agents/global/loop");
 const mission_supervisor_1 = require("../../agents/global/mission-supervisor");
 const memory_3 = require("../../agents/global/memory");
@@ -4564,9 +4566,45 @@ function summarizeGlobalToolObservationForUser(observation, fallback = "操作�
         return "操作已返回结果，界面会同步执行对应动作。";
     return "操作已返回结果；详细记录已放入技术详情。";
 }
-function buildAgenticContext(query = "", sessionId = "") {
+function buildAgenticContext(query = "", sessionId = "", options = {}) {
     const tasks = (0, db_1.loadTasks)();
-    const groups = (0, collaboration_1.loadGroups)();
+    const groups = Array.isArray(options.groups) ? options.groups : (0, collaboration_1.loadGroups)();
+    const recordMaintenanceDelivery = !!sessionId || options.recordDelivery === true;
+    const maintenanceContextId = String(options.contextId || options.context_id || (sessionId
+        ? `global-agent-context:${sessionId}`
+        : `global-agent-context:${crypto.createHash("sha256").update(String(query || "status")).digest("hex").slice(0, 20)}`));
+    const maintenanceNotifications = groups
+        .map((group) => (0, group_memory_index_1.buildPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationContext)(String(group.id || ""), "global-agent", {
+        maxNotifications: 2,
+        at: options.at || options.now,
+        recordDelivery: recordMaintenanceDelivery,
+        contextId: maintenanceContextId,
+        consumerSessionId: sessionId || options.sessionId || options.session_id || "global-agent-internal-read",
+        channel: "global-agent-context",
+    }))
+        .filter((context) => context.pending_count > 0)
+        .slice(0, 8)
+        .map((context) => ({
+        group_id: context.group_id,
+        pending_count: context.pending_count,
+        notifications: context.notifications,
+        policy: context.policy,
+        advisory_only: true,
+        cross_group_authorization_allowed: false,
+    }));
+    const maintenanceDeliveryHealth = groups
+        .map((group) => (0, group_memory_index_1.inspectPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryHealth)(String(group.id || ""), { at: options.at || options.now }))
+        .filter((health) => health.pending_count > 0 || health.invalid_delivery_count > 0)
+        .slice(0, 8)
+        .map((health) => ({
+        group_id: health.group_id,
+        pending_count: health.pending_count,
+        delivered_pending_count: health.delivered_pending_count,
+        unseen_pending_count: health.unseen_pending_count,
+        repeated_unseen_count: health.repeated_unseen_count,
+        invalid_delivery_count: health.invalid_delivery_count,
+        policy: health.policy,
+    }));
     return {
         projects: safeProjectRows(),
         groups: groups.map((group) => ({ id: group.id, name: group.name, members: (group.members || []).map((member) => ({ project: member.project, agent: member.agent })) })),
@@ -4582,6 +4620,18 @@ function buildAgenticContext(query = "", sessionId = "") {
         },
         global_memory: query ? (0, memory_3.buildGlobalAgentMemoryPacket)(query, { sessionId, limit: 7 }) : "",
         group_memory_context: (0, memory_2.buildGlobalGroupMemoryContext)(query, { sessionId, groups, maxGroups: 6, maxTypedMemory: 3 }),
+        conflict_resolution_maintenance_notifications: {
+            schema: "ccm-global-conflict-resolution-maintenance-notification-context-v1",
+            group_count: maintenanceNotifications.length,
+            groups: maintenanceNotifications,
+            policy: "bounded_advisory_only_no_cross_group_authorization_no_task_no_approval_no_delete",
+        },
+        conflict_resolution_maintenance_delivery_health: {
+            schema: "ccm-global-conflict-resolution-maintenance-delivery-health-v1",
+            group_count: maintenanceDeliveryHealth.length,
+            groups: maintenanceDeliveryHealth,
+            policy: "read_only_health_no_cross_group_authorization_no_task_no_approval_no_delete",
+        },
     };
 }
 function localActionToAgenticDecision(localIntent, run) {

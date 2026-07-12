@@ -104,6 +104,56 @@ export declare function runGlobalAgentIntentSelfTest(): {
     };
     visibleReply: string;
 };
+export declare function buildAgenticContext(query?: string, sessionId?: string, options?: any): {
+    projects: {
+        name: any;
+        work_dir: any;
+        agent: any;
+        platform: any;
+    }[];
+    groups: any;
+    task_summary: {
+        total: number;
+        active: number;
+        recent: {
+            id: any;
+            title: any;
+            status: any;
+            status_detail: any;
+            group_id: any;
+            target_project: any;
+            updated_at: any;
+            trace_id: any;
+        }[];
+    };
+    cron_jobs: {
+        id: any;
+        name: any;
+        schedule: any;
+        enabled: boolean;
+        target_type: any;
+        group_id: any;
+        project: any;
+    }[];
+    tools: {
+        mcp: any[];
+        skills: any[];
+    };
+    global_memory: string;
+    group_memory_context: any;
+    conflict_resolution_maintenance_notifications: {
+        schema: string;
+        group_count: any;
+        groups: any;
+        policy: string;
+    };
+    conflict_resolution_maintenance_delivery_health: {
+        schema: string;
+        group_count: any;
+        groups: any;
+        policy: string;
+    };
+};
 export declare function resumeGlobalAgentLoopsForServer(ctx: CollabCtx, port: number): Promise<{
     total: number;
     resumed: number;

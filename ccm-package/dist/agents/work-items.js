@@ -406,7 +406,7 @@ function buildMainAgentWorkItems(task = {}, options = {}) {
     ];
     const fallback = !derivedItems.length ? fallbackTaskWorkItem(task) : null;
     const filteredExplicit = derivedItems.length
-        ? explicitItems.filter(item => item.source !== "task_target" || !derivedItems.some(derived => (derived.target || derived.owner) && [item.target, item.owner].includes(derived.target || derived.owner)))
+        ? explicitItems.filter(item => item.source !== "task_target")
         : explicitItems;
     const baseItems = filteredExplicit.length || derivedItems.length
         ? [...filteredExplicit, ...derivedItems]
@@ -658,6 +658,7 @@ function runMainAgentWorkItemSelfTest() {
         group_id: "group-1",
         workflow_type: "daily_dev",
         target_project: "coordinator",
+        work_items: [{ source: "task_target", target: "coordinator", owner: "coordinator", subject: "placeholder" }],
         workflow_meta: {
             sandbox_rehearsal: {
                 agent_plan: [{ project: "runtime-project", task: "修改功能并运行验证", reason: "项目 Agent 负责实现" }],

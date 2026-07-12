@@ -59,6 +59,7 @@ export declare function detectAgentCommandFailure(agentType: string, rawOutput: 
 export declare function runAgentRuntimeSessionSelfTest(): {
     pass: boolean;
     checks: {
+        claudeAutomatedModeAllowsProjectVerification: boolean;
         claudeCreatesNamedSession: boolean;
         claudeResumesSameSession: boolean;
         codexInitialIsPersistent: boolean;

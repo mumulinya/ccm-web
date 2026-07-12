@@ -5581,6 +5581,1797 @@ export function getPostCompactCompletionMemoryPreservationClosureConflictResolut
   return path.join(getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveDir(groupId), "gc-approval-receipts.json");
 }
 
+export function getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationFile(groupId: string) {
+  return path.join(getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveDir(groupId), "maintenance-notifications.json");
+}
+
+export function getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationReceiptFile(groupId: string) {
+  return path.join(getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveDir(groupId), "maintenance-notification-receipts.json");
+}
+
+export function getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryFile(groupId: string) {
+  return path.join(getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveDir(groupId), "maintenance-notification-deliveries.json");
+}
+
+function conflictResolutionMaintenanceState(groupId: string, options: any = {}) {
+  const at = String(options.at || options.now || now());
+  const generation = verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionManifestGenerations(groupId);
+  const quarantine = reconcilePostCompactCompletionMemoryPreservationClosureConflictResolutionOrphanShards(groupId, {
+    dryRun: true,
+    at,
+    gracePeriodMs: options.gracePeriodMs ?? options.grace_period_ms,
+  });
+  const recommendation = conflictResolutionMaintenanceRecommendation(generation, quarantine);
+  const stateFingerprint = checksum([
+    groupId,
+    generation.currentManifestChecksum || "",
+    generation.previousManifestChecksum || "",
+    quarantine.quarantine_checksum || "",
+    recommendation.severity || "",
+    recommendation.action || "",
+  ], 32);
+  return {
+    at,
+    group_id: groupId,
+    current_manifest_checksum: generation.currentManifestChecksum || "",
+    previous_manifest_checksum: generation.previousManifestChecksum || "",
+    quarantine_checksum: quarantine.quarantine_checksum || "",
+    grace_period_ms: Number(quarantine.grace_period_ms || 0),
+    recommendation,
+    state_fingerprint: stateFingerprint,
+    revalidated: !!generation && !!quarantine && !!quarantine.quarantine_checksum,
+    healthy: generation.valid === true && quarantine.quarantine_input_valid !== false,
+    valid: generation.valid === true && quarantine.quarantine_input_valid !== false,
+    generation,
+    quarantine,
+  };
+}
+
+function conflictResolutionMaintenanceNotificationReceiptChecksum(receipt: any = {}) {
+  return checksum({
+    receipt_id: receipt.receipt_id || "",
+    receipt_kind: receipt.receipt_kind || "",
+    group_id: receipt.group_id || "",
+    audience: receipt.audience || "",
+    notification_id: receipt.notification_id || "",
+    state_fingerprint: receipt.state_fingerprint || "",
+    current_manifest_checksum: receipt.current_manifest_checksum || "",
+    previous_manifest_checksum: receipt.previous_manifest_checksum || "",
+    quarantine_checksum: receipt.quarantine_checksum || "",
+    actor_role: receipt.actor_role || "",
+    actor_id: receipt.actor_id || "",
+    session_id: receipt.session_id || "",
+    reason: receipt.reason || "",
+    issued_at: receipt.issued_at || "",
+    expires_at: receipt.expires_at || "",
+    advisory_visibility_only: receipt.advisory_visibility_only === true,
+  }, 48);
+}
+
+function readConflictResolutionMaintenanceNotificationReceiptLedger(groupId: string) {
+  const file = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationReceiptFile(groupId);
+  const ledger = readJson(file, {});
+  return {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-receipt-ledger-v1",
+    version: 1,
+    group_id: groupId,
+    entries: Array.isArray(ledger.entries) ? ledger.entries : [],
+    file,
+    updated_at: ledger.updated_at || "",
+  };
+}
+
+function writeConflictResolutionMaintenanceNotificationReceiptLedger(groupId: string, entries: any[], at: string) {
+  const file = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationReceiptFile(groupId);
+  const value = {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-receipt-ledger-v1",
+    version: 1,
+    group_id: groupId,
+    entries: entries.slice(-320),
+    receipt_count: Math.min(entries.length, 320),
+    updated_at: at,
+  };
+  writeJsonAtomic(file, value);
+  return { ...value, file };
+}
+
+function createConflictResolutionMaintenanceNotificationReceipt(groupId: string, kind: "acknowledged" | "suppressed", input: any = {}) {
+  const at = String(input.at || input.issuedAt || input.issued_at || now());
+  const audience = String(input.audience || "").trim().toLowerCase();
+  const notificationId = String(input.notificationId || input.notification_id || "").trim();
+  const actorRole = String(input.actorRole || input.actor_role || audience).trim().toLowerCase();
+  const actorId = String(input.actorId || input.actor_id || input.actor || "").trim();
+  const sessionId = String(input.sessionId || input.session_id || "").trim();
+  const reason = String(input.reason || "").trim();
+  const requestedGroupId = String(input.groupId || input.group_id || groupId).trim();
+  if (requestedGroupId !== groupId) throw new Error("maintenance notification receipt group mismatch");
+  if (!new Set(["group-main-agent", "global-agent"]).has(audience)) throw new Error("maintenance notification receipt audience is invalid");
+  if (actorRole !== audience) throw new Error("maintenance notification receipt actor must match audience");
+  if (!notificationId) throw new Error("maintenance notification receipt requires notificationId");
+  if (!actorId || !sessionId) throw new Error("maintenance notification receipt requires actorId and sessionId");
+  if (kind === "suppressed" && !reason) throw new Error("maintenance notification suppression requires reason");
+  const notificationLedger = readJson(getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationFile(groupId), {});
+  const notification = (Array.isArray(notificationLedger.entries) ? notificationLedger.entries : [])
+    .find((entry: any) => String(entry.notification_id || "") === notificationId) || null;
+  if (!notification) throw new Error("maintenance notification not found");
+  if (String(notification.group_id || "") !== groupId) throw new Error("maintenance notification group mismatch");
+  if (String(notification.audience || "") !== audience) throw new Error("maintenance notification audience mismatch");
+  const state = conflictResolutionMaintenanceState(groupId, {
+    at: notification.state_observed_at || notification.first_seen_at || at,
+    gracePeriodMs: notification.grace_period_ms,
+  });
+  if (!state.revalidated) throw new Error("maintenance notification current archive state cannot be revalidated");
+  if (String(notification.state_fingerprint || "") !== state.state_fingerprint) throw new Error("maintenance notification state is stale");
+  const expiresInMs = Math.max(60_000, Math.min(30 * 24 * 60 * 60 * 1000, Number(input.expiresInMs || input.expires_in_ms || 7 * 24 * 60 * 60 * 1000)));
+  const receipt: any = {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-receipt-v1",
+    version: 1,
+    receipt_id: `conflict-resolution-maintenance-notification-${kind}:${checksum([groupId, audience, notificationId, state.state_fingerprint, actorId, sessionId, at], 24)}`,
+    receipt_kind: kind,
+    group_id: groupId,
+    audience,
+    notification_id: notificationId,
+    state_fingerprint: state.state_fingerprint,
+    current_manifest_checksum: state.current_manifest_checksum,
+    previous_manifest_checksum: state.previous_manifest_checksum,
+    quarantine_checksum: state.quarantine_checksum,
+    actor_role: actorRole,
+    actor_id: actorId,
+    session_id: sessionId,
+    reason: reason || "notification acknowledged",
+    issued_at: at,
+    expires_at: new Date(Date.parse(at) + expiresInMs).toISOString(),
+    advisory_visibility_only: true,
+    destructive_action_authorized: false,
+    should_create_real_task: false,
+    cross_group_authorization_allowed: false,
+  };
+  receipt.receipt_checksum = conflictResolutionMaintenanceNotificationReceiptChecksum(receipt);
+  const ledger = readConflictResolutionMaintenanceNotificationReceiptLedger(groupId);
+  writeConflictResolutionMaintenanceNotificationReceiptLedger(groupId, [
+    ...ledger.entries.filter((entry: any) => entry.receipt_id !== receipt.receipt_id),
+    receipt,
+  ], at);
+  return receipt;
+}
+
+export function acknowledgePostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotification(groupId: string, input: any = {}) {
+  return createConflictResolutionMaintenanceNotificationReceipt(groupId, "acknowledged", input);
+}
+
+export function suppressPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotification(groupId: string, input: any = {}) {
+  return createConflictResolutionMaintenanceNotificationReceipt(groupId, "suppressed", input);
+}
+
+export function inspectPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationReceipts(groupId: string, options: any = {}) {
+  const at = String(options.at || options.now || now());
+  const atMs = Date.parse(at);
+  const ledger = readConflictResolutionMaintenanceNotificationReceiptLedger(groupId);
+  const entries = ledger.entries.map((receipt: any) => {
+    const checksumValid = receipt.receipt_checksum === conflictResolutionMaintenanceNotificationReceiptChecksum(receipt);
+    const expiresAtMs = Date.parse(String(receipt.expires_at || ""));
+    const valid = receipt.schema === "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-receipt-v1"
+      && String(receipt.group_id || "") === groupId
+      && new Set(["acknowledged", "suppressed"]).has(String(receipt.receipt_kind || ""))
+      && receipt.actor_role === receipt.audience
+      && receipt.advisory_visibility_only === true
+      && receipt.destructive_action_authorized === false
+      && receipt.should_create_real_task === false
+      && checksumValid
+      && Number.isFinite(expiresAtMs)
+      && Number.isFinite(atMs)
+      && atMs <= expiresAtMs;
+    return { ...receipt, checksum_valid: checksumValid, expired: Number.isFinite(expiresAtMs) && Number.isFinite(atMs) ? atMs > expiresAtMs : true, valid };
+  });
+  return {
+    ...ledger,
+    entries,
+    valid_receipt_count: entries.filter((entry: any) => entry.valid).length,
+    invalid_receipt_count: entries.filter((entry: any) => !entry.valid).length,
+  };
+}
+
+function conflictResolutionMaintenanceNotificationDeliveryChecksum(entry: any = {}) {
+  return checksum({
+    delivery_id: entry.delivery_id || "",
+    group_id: entry.group_id || "",
+    audience: entry.audience || "",
+    notification_id: entry.notification_id || "",
+    state_fingerprint: entry.state_fingerprint || "",
+    context_id: entry.context_id || "",
+    consumer_session_id: entry.consumer_session_id || "",
+    channel: entry.channel || "",
+    first_delivered_at: entry.first_delivered_at || "",
+    last_delivered_at: entry.last_delivered_at || "",
+    delivery_count: Number(entry.delivery_count || 0),
+    advisory_only: entry.advisory_only === true,
+  }, 48);
+}
+
+function conflictResolutionMaintenanceNotificationDeliveryCompactChecksum(entry: any = {}) {
+  return checksum({
+    compact_id: entry.compact_id || "",
+    group_id: entry.group_id || "",
+    audience: entry.audience || "",
+    notification_id: entry.notification_id || "",
+    state_fingerprint: entry.state_fingerprint || "",
+    first_delivered_at: entry.first_delivered_at || "",
+    last_delivered_at: entry.last_delivered_at || "",
+    delivery_count: Number(entry.delivery_count || 0),
+    detailed_entry_count: Number(entry.detailed_entry_count || 0),
+    context_ids_root_checksum: entry.context_ids_root_checksum || "",
+    source_delivery_checksums_root: entry.source_delivery_checksums_root || "",
+  }, 48);
+}
+
+function conflictResolutionMaintenanceNotificationDeliveryLedgerChecksum(value: any = {}) {
+  return checksum({
+    schema: value.schema || "",
+    version: Number(value.version || 0),
+    group_id: value.group_id || "",
+    retention_generation: Number(value.retention_generation || 0),
+    previous_ledger_checksum: value.previous_ledger_checksum || "",
+    entries: (value.entries || []).map((entry: any) => ({ delivery_id: entry.delivery_id || "", delivery_checksum: entry.delivery_checksum || "" })),
+    compacted_entries: (value.compacted_entries || []).map((entry: any) => ({ compact_id: entry.compact_id || "", compact_checksum: entry.compact_checksum || "" })),
+    updated_at: value.updated_at || "",
+  }, 48);
+}
+
+function getConflictResolutionMaintenanceNotificationDeliveryPreviousFile(groupId: string) {
+  return path.join(getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveDir(groupId), "maintenance-notification-deliveries.previous.json");
+}
+
+export function getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryQuarantineFile(groupId: string) {
+  return path.join(getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveDir(groupId), "maintenance-notification-delivery-quarantine.json");
+}
+
+function getConflictResolutionMaintenanceNotificationDeliveryRecoveryEvidenceDir(groupId: string) {
+  return path.join(getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveDir(groupId), "delivery-telemetry-recovery-evidence");
+}
+
+function verifyConflictResolutionMaintenanceNotificationDeliveryLedgerCandidate(groupId: string, file: string) {
+  const present = fs.existsSync(file);
+  const value = readJson(file, null);
+  const detailed = Array.isArray(value?.entries) ? value.entries : [];
+  const compacted = Array.isArray(value?.compacted_entries) ? value.compacted_entries : [];
+  const detailedValid = detailed.every((entry: any) => entry?.schema === "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-v1"
+    && String(entry.group_id || "") === groupId
+    && entry.delivery_checksum === conflictResolutionMaintenanceNotificationDeliveryChecksum(entry));
+  const compactedValid = compacted.every((entry: any) => entry?.schema === "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-compact-v1"
+    && String(entry.group_id || "") === groupId
+    && entry.compact_checksum === conflictResolutionMaintenanceNotificationDeliveryCompactChecksum(entry));
+  const ledgerChecksumValid = !!value
+    && value.schema === "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-ledger-v2"
+    && value.ledger_checksum === conflictResolutionMaintenanceNotificationDeliveryLedgerChecksum(value);
+  const valid = present
+    && String(value?.group_id || "") === groupId
+    && ledgerChecksumValid
+    && detailedValid
+    && compactedValid;
+  return {
+    file,
+    present,
+    value,
+    valid,
+    group_valid: String(value?.group_id || "") === groupId,
+    ledger_checksum_valid: ledgerChecksumValid,
+    detailed_valid: detailedValid,
+    compacted_valid: compactedValid,
+    retention_generation: Number(value?.retention_generation || 0),
+    ledger_checksum: value?.ledger_checksum || "",
+    error: valid ? "" : !present ? "delivery_ledger_missing" : !value ? "delivery_ledger_json_invalid" : String(value?.group_id || "") !== groupId ? "delivery_ledger_group_mismatch" : !ledgerChecksumValid ? "delivery_ledger_checksum_invalid" : !detailedValid ? "delivery_detail_invalid" : "delivery_compact_invalid",
+  };
+}
+
+export function verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryGenerations(groupId: string) {
+  const currentFile = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryFile(groupId);
+  const previousFile = getConflictResolutionMaintenanceNotificationDeliveryPreviousFile(groupId);
+  const current = verifyConflictResolutionMaintenanceNotificationDeliveryLedgerCandidate(groupId, currentFile);
+  const previous = verifyConflictResolutionMaintenanceNotificationDeliveryLedgerCandidate(groupId, previousFile);
+  const previousRequired = current.valid && !!current.value?.previous_ledger_checksum;
+  const chainValid = !previousRequired || (previous.valid && current.value.previous_ledger_checksum === previous.ledger_checksum);
+  const recoverable = !current.valid && previous.valid;
+  return {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-generation-verification-v1",
+    group_id: groupId,
+    status: current.valid && chainValid ? "ok" : recoverable ? "recoverable" : current.present || previous.present ? "blocked" : "empty",
+    valid: current.valid && chainValid,
+    recoverable,
+    current,
+    previous,
+    previous_required: previousRequired,
+    chain_valid: chainValid,
+    gaps: [
+      ...(!current.valid && current.present ? [current.error] : []),
+      ...(previousRequired && !previous.valid ? [previous.error || "delivery_previous_invalid"] : []),
+      ...(!chainValid ? ["delivery_generation_chain_invalid"] : []),
+    ],
+  };
+}
+
+function appendConflictResolutionMaintenanceNotificationDeliveryQuarantine(groupId: string, entry: any, at: string) {
+  const file = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryQuarantineFile(groupId);
+  const ledger = readJson(file, {});
+  const previous = Array.isArray(ledger.entries) ? ledger.entries : [];
+  const quarantineId = String(entry.quarantine_id || `delivery-telemetry-quarantine:${checksum([groupId, entry.source_path, entry.content_checksum, entry.reason], 24)}`);
+  const normalized = {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-quarantine-entry-v1",
+    quarantine_id: quarantineId,
+    group_id: groupId,
+    source_path: entry.source_path || "",
+    evidence_path: entry.evidence_path || "",
+    content_checksum: entry.content_checksum || "",
+    reason: entry.reason || "unknown",
+    status: entry.status || "quarantined",
+    recovery_eligible: entry.recovery_eligible === true,
+    first_seen_at: entry.first_seen_at || at,
+    last_seen_at: at,
+  };
+  const byId = new Map(previous.map((row: any) => [String(row.quarantine_id || ""), row]));
+  const existing = byId.get(quarantineId) as any;
+  byId.set(quarantineId, { ...existing, ...normalized, first_seen_at: existing?.first_seen_at || normalized.first_seen_at });
+  const value = writeConflictResolutionMaintenanceNotificationDeliveryQuarantine(groupId, [...byId.values()], at, {
+    compactedEntries: Array.isArray(ledger.compacted_entries) ? ledger.compacted_entries : [],
+  });
+  return { ...value, file, entry: value.entries.find((row: any) => row.quarantine_id === quarantineId) || byId.get(quarantineId) };
+}
+
+function conflictResolutionMaintenanceNotificationDeliveryQuarantineCompactChecksum(value: any = {}) {
+  return checksum({
+    compact_id: value.compact_id || "",
+    group_id: value.group_id || "",
+    reason: value.reason || "",
+    cleaned_count: Number(value.cleaned_count || 0),
+    first_seen_at: value.first_seen_at || "",
+    last_cleaned_at: value.last_cleaned_at || "",
+    quarantine_ids_root: value.quarantine_ids_root || "",
+    cleanup_receipt_ids_root: value.cleanup_receipt_ids_root || "",
+  }, 48);
+}
+
+function retainConflictResolutionMaintenanceNotificationDeliveryQuarantine(groupId: string, entries: any[], compactedEntries: any[], at: string, options: any = {}) {
+  const unresolved = entries.filter((entry: any) => String(entry.status || "") !== "cleaned");
+  const cleaned = entries.filter((entry: any) => String(entry.status || "") === "cleaned");
+  const compactById = new Map<string, any>();
+  for (const entry of compactedEntries) {
+    if (entry?.schema !== "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-quarantine-compact-v1"
+      || String(entry.group_id || "") !== groupId
+      || entry.compact_checksum !== conflictResolutionMaintenanceNotificationDeliveryQuarantineCompactChecksum(entry)) continue;
+    compactById.set(String(entry.compact_id || ""), entry);
+  }
+  const cleanedByReason = new Map<string, any[]>();
+  for (const entry of cleaned) {
+    const reason = String(entry.reason || "unknown");
+    cleanedByReason.set(reason, [...(cleanedByReason.get(reason) || []), entry]);
+  }
+  for (const [reason, rows] of cleanedByReason) {
+    const compactId = `delivery-telemetry-quarantine-compact:${checksum([groupId, reason], 24)}`;
+    const existing = compactById.get(compactId) || null;
+    const quarantineIds = rows.map((row: any) => row.quarantine_id).filter(Boolean).sort();
+    const receiptIds = rows.map((row: any) => row.cleanup_receipt_id).filter(Boolean).sort();
+    const compact: any = {
+      schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-quarantine-compact-v1",
+      version: 1,
+      compact_id: compactId,
+      group_id: groupId,
+      reason,
+      cleaned_count: Number(existing?.cleaned_count || 0) + rows.length,
+      first_seen_at: [existing?.first_seen_at, ...rows.map((row: any) => row.first_seen_at)].filter(Boolean).sort()[0] || at,
+      last_cleaned_at: [existing?.last_cleaned_at, ...rows.map((row: any) => row.cleaned_at)].filter(Boolean).sort().slice(-1)[0] || at,
+      quarantine_ids_root: checksum([existing?.quarantine_ids_root || "", quarantineIds], 48),
+      cleanup_receipt_ids_root: checksum([existing?.cleanup_receipt_ids_root || "", receiptIds], 48),
+      terminal: true,
+      compacted_at: at,
+    };
+    compact.compact_checksum = conflictResolutionMaintenanceNotificationDeliveryQuarantineCompactChecksum(compact);
+    compactById.set(compactId, compact);
+  }
+  const maxCompactedEntries = Math.max(20, Math.min(500, Number(options.maxCompactedEntries || options.max_compacted_entries || 120)));
+  const compacted = [...compactById.values()]
+    .sort((a: any, b: any) => String(a.last_cleaned_at || "").localeCompare(String(b.last_cleaned_at || "")))
+    .slice(-maxCompactedEntries);
+  const recoveryProofs = unresolved.filter((entry: any) => entry.status === "quarantined_corrupt_current")
+    .sort((a: any, b: any) => String(b.last_seen_at || "").localeCompare(String(a.last_seen_at || "")));
+  return {
+    entries: unresolved.sort((a: any, b: any) => String(a.last_seen_at || "").localeCompare(String(b.last_seen_at || ""))),
+    compacted_entries: compacted,
+    retention: {
+      policy: "preserve_all_unresolved_and_latest_recovery_proof_compact_cleaned_terminal_only",
+      unresolved_count: unresolved.length,
+      cleaned_compacted_this_run_count: cleaned.length,
+      compacted_summary_count: compacted.length,
+      latest_recovery_proof_id: recoveryProofs[0]?.quarantine_id || "",
+      max_compacted_entries: maxCompactedEntries,
+    },
+  };
+}
+
+function writeConflictResolutionMaintenanceNotificationDeliveryQuarantine(groupId: string, entries: any[], at: string, options: any = {}) {
+  const file = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryQuarantineFile(groupId);
+  const retained = retainConflictResolutionMaintenanceNotificationDeliveryQuarantine(
+    groupId,
+    entries,
+    Array.isArray(options.compactedEntries) ? options.compactedEntries : [],
+    at,
+    options,
+  );
+  const value: any = {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-quarantine-v1",
+    version: 1,
+    group_id: groupId,
+    entries: retained.entries,
+    compacted_entries: retained.compacted_entries,
+    quarantine_count: retained.entries.length,
+    compacted_quarantine_count: retained.compacted_entries.reduce((sum: number, row: any) => sum + Number(row.cleaned_count || 0), 0),
+    retention: retained.retention,
+    updated_at: at,
+  };
+  value.quarantine_checksum = conflictResolutionMaintenanceNotificationDeliveryQuarantineChecksum(value);
+  writeJsonAtomic(file, value);
+  return { ...value, file };
+}
+
+function conflictResolutionMaintenanceNotificationDeliveryQuarantineChecksum(value: any = {}) {
+  const payload: any = {
+    group_id: value.group_id || "",
+    entries: (value.entries || []).map((row: any) => ({
+      quarantine_id: row.quarantine_id || "",
+      content_checksum: row.content_checksum || "",
+      reason: row.reason || "",
+      status: row.status || "",
+    })),
+  };
+  if (Array.isArray(value.compacted_entries) && value.compacted_entries.length) {
+    payload.compacted_entries = value.compacted_entries.map((row: any) => ({ compact_id: row.compact_id || "", compact_checksum: row.compact_checksum || "" }));
+  }
+  return checksum(payload, 48);
+}
+
+export function runPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryQuarantineRetention(groupId: string, options: any = {}) {
+  const at = String(options.at || options.now || now());
+  const file = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryQuarantineFile(groupId);
+  const ledger = readJson(file, {});
+  const present = fs.existsSync(file);
+  if (!present) return {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-quarantine-retention-v1",
+    group_id: groupId,
+    status: "empty",
+    destructive_action_authorized: false,
+    created_task_count: 0,
+    created_approval_receipt_count: 0,
+    deleted_count: 0,
+  };
+  if (String(ledger.group_id || "") !== groupId || ledger.quarantine_checksum !== conflictResolutionMaintenanceNotificationDeliveryQuarantineChecksum(ledger)) return {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-quarantine-retention-v1",
+    group_id: groupId,
+    status: "blocked",
+    reason: "delivery_quarantine_checksum_invalid",
+    destructive_action_authorized: false,
+    created_task_count: 0,
+    created_approval_receipt_count: 0,
+    deleted_count: 0,
+  };
+  const written = writeConflictResolutionMaintenanceNotificationDeliveryQuarantine(groupId, ledger.entries || [], at, {
+    ...options,
+    compactedEntries: ledger.compacted_entries || [],
+  });
+  return {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-quarantine-retention-v1",
+    group_id: groupId,
+    status: "ok",
+    retention: written.retention,
+    quarantine_checksum: written.quarantine_checksum,
+    unresolved_count: written.entries.length,
+    compacted_count: written.compacted_quarantine_count,
+    destructive_action_authorized: false,
+    created_task_count: 0,
+    created_approval_receipt_count: 0,
+    deleted_count: 0,
+    file,
+  };
+}
+
+export function getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupReceiptFile(groupId: string) {
+  return path.join(getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveDir(groupId), "maintenance-notification-delivery-cleanup-receipts.json");
+}
+
+function conflictResolutionMaintenanceNotificationDeliveryCleanupReceiptChecksum(receipt: any = {}) {
+  return checksum({
+    receipt_id: receipt.receipt_id || "",
+    group_id: receipt.group_id || "",
+    actor_role: receipt.actor_role || "",
+    actor_id: receipt.actor_id || "",
+    reason: receipt.reason || "",
+    quarantine_checksum: receipt.quarantine_checksum || "",
+    current_ledger_checksum: receipt.current_ledger_checksum || "",
+    previous_ledger_checksum: receipt.previous_ledger_checksum || "",
+    candidates: (receipt.candidates || []).map((candidate: any) => ({
+      quarantine_id: candidate.quarantine_id || "",
+      target_path: candidate.target_path || "",
+      target_kind: candidate.target_kind || "",
+      target_content_checksum: candidate.target_content_checksum || "",
+    })),
+    issued_at: receipt.issued_at || "",
+    expires_at: receipt.expires_at || "",
+    single_use: receipt.single_use === true,
+  }, 48);
+}
+
+function readConflictResolutionMaintenanceNotificationDeliveryCleanupReceiptLedger(groupId: string) {
+  const file = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupReceiptFile(groupId);
+  const ledger = readJson(file, {});
+  return {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-cleanup-receipt-ledger-v1",
+    version: 1,
+    group_id: groupId,
+    entries: Array.isArray(ledger.entries) ? ledger.entries : [],
+    file,
+  };
+}
+
+function writeConflictResolutionMaintenanceNotificationDeliveryCleanupReceiptLedger(groupId: string, entries: any[], at: string) {
+  const file = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupReceiptFile(groupId);
+  const open = entries.filter((entry: any) => entry.consumed !== true && entry.revoked !== true);
+  const terminal = entries.filter((entry: any) => entry.consumed === true || entry.revoked === true).slice(-160);
+  const value = {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-cleanup-receipt-ledger-v1",
+    version: 1,
+    group_id: groupId,
+    entries: [...open, ...terminal],
+    open_receipt_count: open.length,
+    consumed_receipt_count: terminal.filter((entry: any) => entry.consumed === true).length,
+    updated_at: at,
+  };
+  writeJsonAtomic(file, value);
+  return { ...value, file };
+}
+
+export function getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupJournalFile(groupId: string) {
+  return path.join(getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveDir(groupId), "maintenance-notification-delivery-cleanup-journals.json");
+}
+
+function conflictResolutionMaintenanceNotificationDeliveryCleanupJournalChecksum(journal: any = {}) {
+  return checksum({
+    execution_id: journal.execution_id || "",
+    group_id: journal.group_id || "",
+    receipt_id: journal.receipt_id || "",
+    receipt_checksum: journal.receipt_checksum || "",
+    quarantine_checksum: journal.quarantine_checksum || "",
+    current_ledger_checksum: journal.current_ledger_checksum || "",
+    previous_ledger_checksum: journal.previous_ledger_checksum || "",
+    latest_recovery_proof_id: journal.latest_recovery_proof_id || "",
+    status: journal.status || "",
+    candidates: (journal.candidates || []).map((candidate: any) => ({
+      quarantine_id: candidate.quarantine_id || "",
+      target_path: candidate.target_path || "",
+      target_kind: candidate.target_kind || "",
+      target_content_checksum: candidate.target_content_checksum || "",
+      status: candidate.status || "",
+      intent_at: candidate.intent_at || "",
+      deleted_at: candidate.deleted_at || "",
+    })),
+    started_at: journal.started_at || "",
+    updated_at: journal.updated_at || "",
+    completed_at: journal.completed_at || "",
+  }, 48);
+}
+
+function readConflictResolutionMaintenanceNotificationDeliveryCleanupJournalLedger(groupId: string) {
+  const file = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupJournalFile(groupId);
+  const ledger = readJson(file, {});
+  return {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-cleanup-journal-ledger-v1",
+    version: 1,
+    group_id: groupId,
+    entries: Array.isArray(ledger.entries) ? ledger.entries : [],
+    file,
+  };
+}
+
+function writeConflictResolutionMaintenanceNotificationDeliveryCleanupJournalLedger(groupId: string, entries: any[], at: string) {
+  const file = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupJournalFile(groupId);
+  const open = entries.filter((entry: any) => entry.status !== "completed" && entry.status !== "cancelled");
+  const terminal = entries.filter((entry: any) => entry.status === "completed" || entry.status === "cancelled").slice(-160);
+  const value = {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-cleanup-journal-ledger-v1",
+    version: 1,
+    group_id: groupId,
+    entries: [...open, ...terminal],
+    open_journal_count: open.length,
+    completed_journal_count: terminal.filter((entry: any) => entry.status === "completed").length,
+    updated_at: at,
+  };
+  writeJsonAtomic(file, value);
+  return { ...value, file };
+}
+
+function upsertConflictResolutionMaintenanceNotificationDeliveryCleanupJournal(groupId: string, journal: any, at: string) {
+  const ledger = readConflictResolutionMaintenanceNotificationDeliveryCleanupJournalLedger(groupId);
+  const normalized = { ...journal, updated_at: at };
+  normalized.journal_checksum = conflictResolutionMaintenanceNotificationDeliveryCleanupJournalChecksum(normalized);
+  const entries = [...ledger.entries.filter((entry: any) => entry.execution_id !== normalized.execution_id), normalized];
+  writeConflictResolutionMaintenanceNotificationDeliveryCleanupJournalLedger(groupId, entries, at);
+  return normalized;
+}
+
+export function reconcilePostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupJournals(groupId: string, options: any = {}) {
+  const at = String(options.at || options.now || now());
+  const ledger = readConflictResolutionMaintenanceNotificationDeliveryCleanupJournalLedger(groupId);
+  const receiptLedger = readConflictResolutionMaintenanceNotificationDeliveryCleanupReceiptLedger(groupId);
+  let reconciledCount = 0;
+  const updatedJournals: any[] = [];
+  const rows = ledger.entries.map((journalInput: any) => {
+    let journal = journalInput;
+    const checksumValid = journal.journal_checksum === conflictResolutionMaintenanceNotificationDeliveryCleanupJournalChecksum(journal);
+    const groupValid = String(journal.group_id || "") === groupId;
+    if (options.persist === true && journal.status === "in_progress" && checksumValid && groupValid) {
+      const recoveredCandidates = (journal.candidates || []).map((candidate: any) => candidate.status === "delete_intent" && !fs.existsSync(candidate.target_path)
+        ? { ...candidate, status: "deleted", deleted_at: candidate.deleted_at || at, recovered_from_intent_at: at }
+        : candidate);
+      if (recoveredCandidates.some((candidate: any, index: number) => candidate.status !== journal.candidates?.[index]?.status)) {
+        journal = upsertConflictResolutionMaintenanceNotificationDeliveryCleanupJournal(groupId, { ...journal, candidates: recoveredCandidates }, at);
+        reconciledCount++;
+      }
+      const allDeleted = recoveredCandidates.length > 0 && recoveredCandidates.every((candidate: any) => candidate.status === "deleted");
+      if (allDeleted) {
+        const receipt = receiptLedger.entries.find((entry: any) => entry.receipt_id === journal.receipt_id) || null;
+        const quarantineFile = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryQuarantineFile(groupId);
+        const quarantine = readJson(quarantineFile, {});
+        if (receipt
+          && receipt.receipt_checksum === conflictResolutionMaintenanceNotificationDeliveryCleanupReceiptChecksum(receipt)
+          && receipt.revoked !== true
+          && String(receipt.group_id || "") === groupId
+          && String(quarantine.group_id || "") === groupId) {
+          const candidateIds = new Set(recoveredCandidates.map((candidate: any) => candidate.quarantine_id));
+          const remainingCandidateRows = (quarantine.entries || []).filter((entry: any) => candidateIds.has(entry.quarantine_id));
+          if (quarantine.quarantine_checksum === journal.quarantine_checksum && remainingCandidateRows.length === recoveredCandidates.length) {
+            writeConflictResolutionMaintenanceNotificationDeliveryQuarantine(groupId, (quarantine.entries || []).map((entry: any) => candidateIds.has(entry.quarantine_id) ? {
+              ...entry,
+              status: "cleaned",
+              cleaned_at: at,
+              cleanup_receipt_id: receipt.receipt_id,
+            } : entry), at, { compactedEntries: quarantine.compacted_entries || [] });
+          } else if (remainingCandidateRows.length > 0) {
+            updatedJournals.push(journal);
+            return {
+              execution_id: journal.execution_id,
+              receipt_id: journal.receipt_id,
+              status: journal.status,
+              checksum_valid: checksumValid,
+              group_valid: groupValid,
+              resumable: false,
+              missing_after_intent_count: 0,
+              missing_without_intent_count: 0,
+              deleted_count: recoveredCandidates.length,
+              candidate_count: recoveredCandidates.length,
+              reconciliation_blocked_reason: "cleanup_quarantine_changed_with_unfinalized_candidates",
+            };
+          }
+          if (receipt.consumed !== true) {
+            writeConflictResolutionMaintenanceNotificationDeliveryCleanupReceiptLedger(groupId, receiptLedger.entries.map((entry: any) => entry.receipt_id === receipt.receipt_id ? {
+              ...entry,
+              consumed: true,
+              consumed_at: at,
+              deleted_count: recoveredCandidates.length,
+              execution_id: journal.execution_id,
+              execution_checksum: checksum({ receipt_id: receipt.receipt_id, candidates: recoveredCandidates, at }, 48),
+            } : entry), at);
+          }
+          journal = upsertConflictResolutionMaintenanceNotificationDeliveryCleanupJournal(groupId, { ...journal, candidates: recoveredCandidates, status: "completed", completed_at: at }, at);
+          reconciledCount++;
+        }
+      }
+    }
+    updatedJournals.push(journal);
+    let missingPendingCount = 0;
+    let missingIntentCount = 0;
+    for (const candidate of journal.candidates || []) {
+      if (candidate.status === "deleted") continue;
+      const exists = fs.existsSync(candidate.target_path);
+      if (!exists && candidate.status === "delete_intent") missingIntentCount++;
+      if (!exists && candidate.status === "pending") missingPendingCount++;
+    }
+    const resumable = journal.status === "in_progress" && checksumValid && groupValid && missingPendingCount === 0;
+    return {
+      execution_id: journal.execution_id,
+      receipt_id: journal.receipt_id,
+      status: journal.status,
+      checksum_valid: checksumValid,
+      group_valid: groupValid,
+      resumable,
+      missing_after_intent_count: missingIntentCount,
+      missing_without_intent_count: missingPendingCount,
+      deleted_count: (journal.candidates || []).filter((candidate: any) => candidate.status === "deleted").length + missingIntentCount,
+      candidate_count: (journal.candidates || []).length,
+    };
+  });
+  return {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-cleanup-journal-reconciliation-v1",
+    group_id: groupId,
+    generated_at: at,
+    journal_count: rows.length,
+    open_journal_count: rows.filter((row: any) => row.status === "in_progress").length,
+    resumable_journal_count: rows.filter((row: any) => row.resumable).length,
+    blocked_journal_count: rows.filter((row: any) => row.status === "in_progress" && !row.resumable).length,
+    invalid_journal_count: rows.filter((row: any) => !row.checksum_valid || !row.group_valid).length,
+    reconciled_journal_count: reconciledCount,
+    rows,
+    destructive_action_authorized: false,
+    resumed_count: 0,
+    deleted_count: 0,
+    policy: "scheduler_detects_only_explicit_execution_resumes_exact_journal",
+    file: ledger.file,
+  };
+}
+
+export function revokePostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupReceipt(groupId: string, input: any = {}) {
+  const at = String(input.at || input.revokedAt || input.revoked_at || now());
+  const receiptId = String(input.receiptId || input.receipt_id || "").trim();
+  const actorId = String(input.actorId || input.actor_id || input.actor || "").trim();
+  const reason = String(input.reason || "").trim();
+  if (input.explicitRevocation !== true && input.explicit_revocation !== true) throw new Error("delivery cleanup revocation requires explicitRevocation=true");
+  if (!actorId || !reason) throw new Error("delivery cleanup revocation requires actorId and reason");
+  const ledger = readConflictResolutionMaintenanceNotificationDeliveryCleanupReceiptLedger(groupId);
+  const receipt = ledger.entries.find((entry: any) => entry.receipt_id === receiptId) || null;
+  if (!receipt) throw new Error("delivery cleanup receipt not found");
+  if (String(receipt.group_id || "") !== groupId) throw new Error("delivery cleanup receipt group mismatch");
+  if (receipt.consumed === true) throw new Error("consumed delivery cleanup receipt cannot be revoked");
+  if (receipt.revoked === true) return receipt;
+  if (receipt.receipt_checksum !== conflictResolutionMaintenanceNotificationDeliveryCleanupReceiptChecksum(receipt)) throw new Error("delivery cleanup receipt checksum invalid");
+  const journals = readConflictResolutionMaintenanceNotificationDeliveryCleanupJournalLedger(groupId);
+  if (journals.entries.some((journal: any) => journal.receipt_id === receiptId && journal.status === "in_progress")) {
+    throw new Error("delivery cleanup receipt with in-progress journal cannot be revoked");
+  }
+  const revoked = {
+    ...receipt,
+    revoked: true,
+    revoked_at: at,
+    revoked_by: actorId,
+    revocation_reason: reason,
+  };
+  writeConflictResolutionMaintenanceNotificationDeliveryCleanupReceiptLedger(groupId, ledger.entries.map((entry: any) => entry.receipt_id === receiptId ? revoked : entry), at);
+  return revoked;
+}
+
+function pathWithinDirectory(target: string, directory: string) {
+  const resolvedTarget = path.resolve(target);
+  const resolvedDirectory = path.resolve(directory);
+  return resolvedTarget.startsWith(`${resolvedDirectory}${path.sep}`);
+}
+
+function buildConflictResolutionMaintenanceNotificationDeliveryCleanupCandidates(groupId: string, options: any = {}) {
+  const quarantineFile = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryQuarantineFile(groupId);
+  const quarantine = readJson(quarantineFile, {});
+  if (quarantine.schema !== "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-quarantine-v1"
+    || String(quarantine.group_id || "") !== groupId
+    || quarantine.quarantine_checksum !== conflictResolutionMaintenanceNotificationDeliveryQuarantineChecksum(quarantine)) {
+    throw new Error("delivery cleanup requires a valid group-local quarantine ledger");
+  }
+  const generation = verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryGenerations(groupId);
+  if (!generation.valid) throw new Error("delivery cleanup requires a valid current/previous delivery generation chain");
+  const entries = Array.isArray(quarantine.entries) ? quarantine.entries : [];
+  const latestRecoveryProofId = entries
+    .filter((entry: any) => entry.status === "quarantined_corrupt_current")
+    .sort((a: any, b: any) => String(b.last_seen_at || "").localeCompare(String(a.last_seen_at || "")))[0]?.quarantine_id || "";
+  const requestedRaw = options.quarantineIds || options.quarantine_ids;
+  const requested = Array.isArray(requestedRaw) ? new Set(uniqueStrings(requestedRaw, 1000)) : null;
+  const coldDir = getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveDir(groupId);
+  const evidenceDir = getConflictResolutionMaintenanceNotificationDeliveryRecoveryEvidenceDir(groupId);
+  const currentFile = path.resolve(getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryFile(groupId));
+  const previousFile = path.resolve(getConflictResolutionMaintenanceNotificationDeliveryPreviousFile(groupId));
+  const candidates: any[] = [];
+  for (const entry of entries) {
+    if (requested && !requested.has(String(entry.quarantine_id || ""))) continue;
+    if (entry.status === "cleaned" || entry.quarantine_id === latestRecoveryProofId) continue;
+    let targetPath = "";
+    let targetKind = "";
+    if (entry.status === "quarantined_corrupt_current" && entry.evidence_path) {
+      targetPath = String(entry.evidence_path);
+      targetKind = "recovery_evidence";
+      if (!pathWithinDirectory(targetPath, evidenceDir)) continue;
+    } else if (entry.reason === "interrupted_atomic_temp") {
+      targetPath = String(entry.source_path || "");
+      targetKind = "interrupted_temp";
+      if (!pathWithinDirectory(targetPath, coldDir)) continue;
+    } else if (entry.reason === "orphan_or_mismatched_previous") {
+      targetPath = String(entry.source_path || "");
+      targetKind = "orphan_previous";
+      if (!pathWithinDirectory(targetPath, coldDir)) continue;
+    }
+    if (!targetPath || !fs.existsSync(targetPath)) continue;
+    const resolvedTarget = path.resolve(targetPath);
+    if (resolvedTarget === currentFile || (resolvedTarget === previousFile && generation.previous_required)) continue;
+    let content = "";
+    try { content = fs.readFileSync(resolvedTarget, "utf-8"); } catch { continue; }
+    const targetContentChecksum = checksum(content, 48);
+    if (targetKind !== "recovery_evidence" && targetContentChecksum !== String(entry.content_checksum || "")) continue;
+    candidates.push({
+      quarantine_id: entry.quarantine_id,
+      reason: entry.reason,
+      target_path: resolvedTarget,
+      target_kind: targetKind,
+      target_content_checksum: targetContentChecksum,
+    });
+  }
+  if (requested && candidates.length !== requested.size) throw new Error("delivery cleanup requested set contains protected, missing or stale evidence");
+  return { quarantine, generation, latestRecoveryProofId, candidates };
+}
+
+export function createPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupReceipt(groupId: string, input: any = {}) {
+  const at = String(input.at || input.issuedAt || input.issued_at || now());
+  const actorRole = String(input.actorRole || input.actor_role || "").trim().toLowerCase();
+  const actorId = String(input.actorId || input.actor_id || input.actor || "").trim();
+  const reason = String(input.reason || "").trim();
+  if (input.explicitApproval !== true && input.explicit_approval !== true) throw new Error("delivery cleanup receipt requires explicitApproval=true");
+  if (!new Set(["group-main-agent", "global-agent", "local-user"]).has(actorRole)) throw new Error("delivery cleanup actor role is invalid");
+  if (!actorId || !reason) throw new Error("delivery cleanup receipt requires actorId and reason");
+  const selection = buildConflictResolutionMaintenanceNotificationDeliveryCleanupCandidates(groupId, input);
+  if (!selection.candidates.length) throw new Error("delivery cleanup requires at least one eligible non-current evidence file");
+  const expiresInMs = Math.max(60_000, Math.min(24 * 60 * 60 * 1000, Number(input.expiresInMs || input.expires_in_ms || 30 * 60 * 1000)));
+  const receipt: any = {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-cleanup-receipt-v1",
+    version: 1,
+    receipt_id: `delivery-telemetry-cleanup:${checksum([groupId, selection.quarantine.quarantine_checksum, selection.candidates, actorRole, actorId, at], 24)}`,
+    group_id: groupId,
+    actor_role: actorRole,
+    actor_id: actorId,
+    reason,
+    quarantine_checksum: selection.quarantine.quarantine_checksum,
+    current_ledger_checksum: selection.generation.current.ledger_checksum,
+    previous_ledger_checksum: selection.generation.previous.ledger_checksum,
+    latest_recovery_proof_id: selection.latestRecoveryProofId,
+    candidates: selection.candidates.sort((a: any, b: any) => a.target_path.localeCompare(b.target_path)),
+    issued_at: at,
+    expires_at: new Date(Date.parse(at) + expiresInMs).toISOString(),
+    single_use: true,
+    consumed: false,
+    authorization_boundary: "exact_group_quarantine_generation_and_file_checksum_only",
+  };
+  receipt.receipt_checksum = conflictResolutionMaintenanceNotificationDeliveryCleanupReceiptChecksum(receipt);
+  const ledger = readConflictResolutionMaintenanceNotificationDeliveryCleanupReceiptLedger(groupId);
+  writeConflictResolutionMaintenanceNotificationDeliveryCleanupReceiptLedger(groupId, [...ledger.entries, receipt], at);
+  return receipt;
+}
+
+export function executePostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupReceipt(groupId: string, input: any = {}) {
+  const at = String(input.at || input.executedAt || input.executed_at || now());
+  const trigger = String(input.trigger || input.source || "manual").trim().toLowerCase();
+  const receiptId = String(input.receiptId || input.receipt_id || "").trim();
+  const ledger = readConflictResolutionMaintenanceNotificationDeliveryCleanupReceiptLedger(groupId);
+  const receipt = ledger.entries.find((entry: any) => entry.receipt_id === receiptId) || null;
+  const blocked = (reason: string) => ({
+    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-cleanup-execution-v1",
+    group_id: groupId,
+    receipt_id: receiptId,
+    status: "blocked",
+    executed: false,
+    reason,
+    deleted_count: 0,
+  });
+  if (["background", "timer", "scheduler", "cron", "automatic", "auto"].includes(trigger)) return blocked("background_trigger_cannot_cleanup_delivery_evidence");
+  if (input.explicitExecution !== true && input.explicit_execution !== true) return blocked("explicit_execution_required");
+  if (!receipt) return blocked("cleanup_receipt_not_found");
+  if (String(receipt.group_id || "") !== groupId) return blocked("cleanup_receipt_group_mismatch");
+  if (receipt.consumed === true) return blocked("cleanup_receipt_already_consumed");
+  if (receipt.revoked === true) return blocked("cleanup_receipt_revoked");
+  if (receipt.single_use !== true || receipt.receipt_checksum !== conflictResolutionMaintenanceNotificationDeliveryCleanupReceiptChecksum(receipt)) return blocked("cleanup_receipt_checksum_invalid");
+  const journalLedger = readConflictResolutionMaintenanceNotificationDeliveryCleanupJournalLedger(groupId);
+  let journal = journalLedger.entries.find((entry: any) => entry.receipt_id === receiptId && entry.status === "in_progress") || null;
+  if (journal && (journal.journal_checksum !== conflictResolutionMaintenanceNotificationDeliveryCleanupJournalChecksum(journal)
+    || String(journal.group_id || "") !== groupId
+    || journal.receipt_checksum !== receipt.receipt_checksum)) return blocked("cleanup_journal_checksum_invalid");
+  const atMs = Date.parse(at);
+  const expiresAtMs = Date.parse(String(receipt.expires_at || ""));
+  if (!journal && (!Number.isFinite(atMs) || !Number.isFinite(expiresAtMs) || atMs > expiresAtMs)) return blocked("cleanup_receipt_expired");
+  const quarantineFile = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryQuarantineFile(groupId);
+  const quarantine = readJson(quarantineFile, {});
+  const generation = verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryGenerations(groupId);
+  if (!generation.valid) return blocked("cleanup_delivery_generation_stale");
+  if (quarantine.quarantine_checksum !== receipt.quarantine_checksum || String(quarantine.group_id || "") !== groupId) return blocked("cleanup_quarantine_stale");
+  const quarantineEntriesCurrent = Array.isArray(quarantine.entries) ? quarantine.entries : [];
+  const latestRecoveryProofId = quarantineEntriesCurrent
+    .filter((entry: any) => entry.status === "quarantined_corrupt_current")
+    .sort((a: any, b: any) => String(b.last_seen_at || "").localeCompare(String(a.last_seen_at || "")))[0]?.quarantine_id || "";
+  if (generation.current.ledger_checksum !== receipt.current_ledger_checksum || generation.previous.ledger_checksum !== receipt.previous_ledger_checksum) return blocked("cleanup_delivery_generation_stale");
+  if (latestRecoveryProofId !== receipt.latest_recovery_proof_id) return blocked("cleanup_latest_recovery_proof_changed");
+  if (!journal) {
+    let selection: any;
+    try { selection = buildConflictResolutionMaintenanceNotificationDeliveryCleanupCandidates(groupId, { quarantineIds: receipt.candidates.map((candidate: any) => candidate.quarantine_id) }); }
+    catch { return blocked("cleanup_candidate_state_stale_or_protected"); }
+    const selectedById = new Map(selection.candidates.map((candidate: any) => [candidate.quarantine_id, candidate]));
+    for (const candidate of receipt.candidates) {
+      const current = selectedById.get(candidate.quarantine_id) as any;
+      if (!current || current.target_path !== candidate.target_path || current.target_kind !== candidate.target_kind || current.target_content_checksum !== candidate.target_content_checksum) return blocked("cleanup_candidate_checksum_stale");
+    }
+    journal = {
+      schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-cleanup-journal-v1",
+      version: 1,
+      execution_id: `delivery-telemetry-cleanup-execution:${checksum([groupId, receiptId, receipt.receipt_checksum], 24)}`,
+      group_id: groupId,
+      receipt_id: receiptId,
+      receipt_checksum: receipt.receipt_checksum,
+      quarantine_checksum: receipt.quarantine_checksum,
+      current_ledger_checksum: receipt.current_ledger_checksum,
+      previous_ledger_checksum: receipt.previous_ledger_checksum,
+      latest_recovery_proof_id: receipt.latest_recovery_proof_id,
+      status: "in_progress",
+      candidates: receipt.candidates.map((candidate: any) => ({ ...candidate, status: "pending", intent_at: "", deleted_at: "" })),
+      started_at: at,
+      updated_at: at,
+      completed_at: "",
+    };
+    journal = upsertConflictResolutionMaintenanceNotificationDeliveryCleanupJournal(groupId, journal, at);
+  }
+  const resumed = String(journal.started_at || "") !== at;
+  let newlyDeleted = 0;
+  const simulateCrashAfterDeletes = Math.max(0, Number(input.simulateCrashAfterDeletes || input.simulate_crash_after_deletes || 0));
+  for (let index = 0; index < journal.candidates.length; index++) {
+    let candidate = journal.candidates[index];
+    if (candidate.status === "deleted") continue;
+    if (candidate.status === "pending") {
+      if (!fs.existsSync(candidate.target_path)) return blocked("cleanup_pending_candidate_missing_without_intent");
+      let content = "";
+      try { content = fs.readFileSync(candidate.target_path, "utf-8"); } catch { return blocked("cleanup_candidate_read_failed"); }
+      if (checksum(content, 48) !== candidate.target_content_checksum) return blocked("cleanup_candidate_checksum_stale");
+      candidate = { ...candidate, status: "delete_intent", intent_at: at };
+      journal = {
+        ...journal,
+        candidates: journal.candidates.map((entry: any, candidateIndex: number) => candidateIndex === index ? candidate : entry),
+      };
+      journal = upsertConflictResolutionMaintenanceNotificationDeliveryCleanupJournal(groupId, journal, at);
+    }
+    if (candidate.status === "delete_intent") {
+      if (fs.existsSync(candidate.target_path)) {
+        let content = "";
+        try { content = fs.readFileSync(candidate.target_path, "utf-8"); } catch { return blocked("cleanup_candidate_read_failed"); }
+        if (checksum(content, 48) !== candidate.target_content_checksum) return blocked("cleanup_candidate_checksum_stale");
+        fs.unlinkSync(candidate.target_path);
+      }
+      candidate = { ...candidate, status: "deleted", deleted_at: at };
+      journal = {
+        ...journal,
+        candidates: journal.candidates.map((entry: any, candidateIndex: number) => candidateIndex === index ? candidate : entry),
+      };
+      journal = upsertConflictResolutionMaintenanceNotificationDeliveryCleanupJournal(groupId, journal, at);
+      newlyDeleted++;
+      if (simulateCrashAfterDeletes > 0 && newlyDeleted >= simulateCrashAfterDeletes) return {
+        schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-cleanup-execution-v1",
+        group_id: groupId,
+        receipt_id: receiptId,
+        execution_id: journal.execution_id,
+        status: "interrupted",
+        executed: false,
+        resumed,
+        deleted_count: journal.candidates.filter((entry: any) => entry.status === "deleted").length,
+        remaining_count: journal.candidates.filter((entry: any) => entry.status !== "deleted").length,
+        reason: "simulated_process_interruption_after_delete",
+      };
+    }
+  }
+  if (input.simulateCrashBeforeFinalize === true || input.simulate_crash_before_finalize === true) return {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-cleanup-execution-v1",
+    group_id: groupId,
+    receipt_id: receiptId,
+    execution_id: journal.execution_id,
+    status: "interrupted",
+    executed: false,
+    resumed,
+    deleted_count: journal.candidates.length,
+    remaining_count: 0,
+    reason: "simulated_process_interruption_before_finalize",
+  };
+  const cleanedIds = new Set(journal.candidates.map((candidate: any) => candidate.quarantine_id));
+  const quarantineEntries = quarantineEntriesCurrent.map((entry: any) => cleanedIds.has(entry.quarantine_id) ? {
+    ...entry,
+    status: "cleaned",
+    cleaned_at: at,
+    cleanup_receipt_id: receiptId,
+  } : entry);
+  const updatedQuarantine = writeConflictResolutionMaintenanceNotificationDeliveryQuarantine(groupId, quarantineEntries, at, {
+    compactedEntries: quarantine.compacted_entries || [],
+  });
+  const updatedReceipts = ledger.entries.map((entry: any) => entry.receipt_id === receiptId ? {
+    ...entry,
+    consumed: true,
+    consumed_at: at,
+    deleted_count: journal.candidates.length,
+    execution_id: journal.execution_id,
+    execution_checksum: checksum({ receipt_id: receiptId, candidates: journal.candidates, at }, 48),
+  } : entry);
+  writeConflictResolutionMaintenanceNotificationDeliveryCleanupReceiptLedger(groupId, updatedReceipts, at);
+  journal = upsertConflictResolutionMaintenanceNotificationDeliveryCleanupJournal(groupId, {
+    ...journal,
+    status: "completed",
+    completed_at: at,
+  }, at);
+  return {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-cleanup-execution-v1",
+    group_id: groupId,
+    receipt_id: receiptId,
+    execution_id: journal.execution_id,
+    status: "executed",
+    executed: true,
+    resumed,
+    deleted_count: journal.candidates.length,
+    deleted_paths: journal.candidates.map((candidate: any) => candidate.target_path),
+    quarantine_checksum_after: updatedQuarantine.quarantine_checksum,
+    destructive_action_authorized: true,
+    explicit_receipt_required: true,
+    executed_at: at,
+  };
+}
+
+export function inspectPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanup(groupId: string, options: any = {}) {
+  const at = String(options.at || options.now || now());
+  const atMs = Date.parse(at);
+  const receipts = readConflictResolutionMaintenanceNotificationDeliveryCleanupReceiptLedger(groupId);
+  const receiptRows = receipts.entries.map((receipt: any) => {
+    const checksumValid = receipt.receipt_checksum === conflictResolutionMaintenanceNotificationDeliveryCleanupReceiptChecksum(receipt);
+    const expiresAtMs = Date.parse(String(receipt.expires_at || ""));
+    const valid = receipt.schema === "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-cleanup-receipt-v1"
+      && String(receipt.group_id || "") === groupId
+      && receipt.single_use === true
+      && checksumValid;
+    return { ...receipt, checksum_valid: checksumValid, expired: Number.isFinite(atMs) && Number.isFinite(expiresAtMs) ? atMs > expiresAtMs : true, valid };
+  });
+  const recoveryHealth = inspectPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryRecoveryHealth(groupId, { at });
+  const journalReconciliation = reconcilePostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupJournals(groupId, { at, persist: false });
+  const quarantine = readJson(recoveryHealth.quarantine_file, {});
+  const entries = Array.isArray(quarantine.entries) ? quarantine.entries : [];
+  const latestProof = recoveryHealth.latest_recovery_proof_id
+    ? entries.find((entry: any) => entry.quarantine_id === recoveryHealth.latest_recovery_proof_id) || null
+    : null;
+  return {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-cleanup-status-v1",
+    group_id: groupId,
+    generated_at: at,
+    receipt_file: receipts.file,
+    receipt_count: receiptRows.length,
+    open_receipt_count: receiptRows.filter((receipt: any) => receipt.consumed !== true && receipt.revoked !== true).length,
+    consumed_receipt_count: receiptRows.filter((receipt: any) => receipt.consumed === true).length,
+    invalid_receipt_count: receiptRows.filter((receipt: any) => !receipt.valid).length,
+    expired_open_receipt_count: receiptRows.filter((receipt: any) => receipt.expired && receipt.consumed !== true && receipt.revoked !== true).length,
+    receipts: receiptRows,
+    recovery_health: recoveryHealth,
+    unresolved_quarantine_count: entries.length,
+    compacted_quarantine_count: Number(quarantine.compacted_quarantine_count || recoveryHealth.compacted_quarantine_count || 0),
+    latest_recovery_proof_id: recoveryHealth.latest_recovery_proof_id || "",
+    latest_recovery_proof_present: !!latestProof && (!latestProof.evidence_path || fs.existsSync(latestProof.evidence_path)),
+    retention: quarantine.retention || {},
+    cleanup_journals: journalReconciliation,
+    open_journal_count: journalReconciliation.open_journal_count,
+    resumable_journal_count: journalReconciliation.resumable_journal_count,
+    blocked_journal_count: journalReconciliation.blocked_journal_count,
+    invalid_journal_count: journalReconciliation.invalid_journal_count,
+    scheduler_cleanup_authorized: false,
+    policy: "explicit_exact_checksum_single_use_cleanup_only_latest_recovery_proof_protected",
+  };
+}
+
+export function reconcilePostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryOrphans(groupId: string, options: any = {}) {
+  const at = String(options.at || options.now || now());
+  const coldDir = getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveDir(groupId);
+  const currentFile = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryFile(groupId);
+  const previousFile = getConflictResolutionMaintenanceNotificationDeliveryPreviousFile(groupId);
+  const generation = verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryGenerations(groupId);
+  const candidates: any[] = [];
+  let names: string[] = [];
+  try { names = fs.readdirSync(coldDir); } catch {}
+  for (const name of names.filter(name => /^maintenance-notification-deliveries(?:\.previous)?\.json\..+\.tmp$/.test(name))) {
+    const source = path.join(coldDir, name);
+    let content = "";
+    try { content = fs.readFileSync(source, "utf-8"); } catch {}
+    candidates.push({ source_path: source, content_checksum: checksum(content, 48), reason: "interrupted_atomic_temp", status: "quarantined_temp", recovery_eligible: false });
+  }
+  if (generation.current.valid && generation.previous.present && (!generation.previous_required || !generation.chain_valid)) {
+    let content = "";
+    try { content = fs.readFileSync(previousFile, "utf-8"); } catch {}
+    candidates.push({ source_path: previousFile, content_checksum: checksum(content, 48), reason: "orphan_or_mismatched_previous", status: "quarantined_previous", recovery_eligible: false });
+  }
+  const records = options.persist === false ? candidates : candidates.map(candidate => appendConflictResolutionMaintenanceNotificationDeliveryQuarantine(groupId, candidate, at).entry);
+  return {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-orphan-reconciliation-v1",
+    group_id: groupId,
+    status: "ok",
+    current_file: currentFile,
+    previous_file: previousFile,
+    candidate_count: candidates.length,
+    temp_candidate_count: candidates.filter(row => row.reason === "interrupted_atomic_temp").length,
+    orphan_previous_count: candidates.filter(row => row.reason === "orphan_or_mismatched_previous").length,
+    candidates: records,
+    generation,
+    destructive_action_authorized: false,
+    created_task_count: 0,
+    created_approval_receipt_count: 0,
+    deleted_count: 0,
+  };
+}
+
+export function inspectPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryRecoveryHealth(groupId: string, options: any = {}) {
+  const generation = verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryGenerations(groupId);
+  const orphans = reconcilePostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryOrphans(groupId, { ...options, persist: false });
+  const quarantineFile = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryQuarantineFile(groupId);
+  const quarantinePresent = fs.existsSync(quarantineFile);
+  const quarantine = readJson(quarantineFile, {});
+  const coldDir = path.resolve(getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveDir(groupId));
+  const evidenceDir = path.resolve(getConflictResolutionMaintenanceNotificationDeliveryRecoveryEvidenceDir(groupId));
+  const quarantineEntries = Array.isArray(quarantine.entries) ? quarantine.entries : [];
+  const compactedQuarantineEntries = Array.isArray(quarantine.compacted_entries) ? quarantine.compacted_entries : [];
+  const quarantineChecksumValid = !quarantinePresent || (quarantine.schema === "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-quarantine-v1"
+    && String(quarantine.group_id || "") === groupId
+    && quarantine.quarantine_checksum === conflictResolutionMaintenanceNotificationDeliveryQuarantineChecksum(quarantine));
+  const invalidQuarantineEntries = quarantineEntries.filter((entry: any) => {
+    const source = path.resolve(String(entry.source_path || coldDir));
+    const sourceLocal = source === coldDir || source.startsWith(`${coldDir}${path.sep}`);
+    const evidencePath = String(entry.evidence_path || "");
+    const evidenceLocal = !evidencePath || path.resolve(evidencePath).startsWith(`${evidenceDir}${path.sep}`);
+    const evidence = evidencePath ? readJson(evidencePath, null) : null;
+    const evidenceValid = !evidencePath || (!!evidence
+      && String(evidence.group_id || "") === groupId
+      && String(evidence.source_content_checksum || "") === String(entry.content_checksum || "")
+      && checksum(String(evidence.source_content || ""), 48) === String(entry.content_checksum || ""));
+    return String(entry.group_id || "") !== groupId || !sourceLocal || !evidenceLocal || !evidenceValid;
+  });
+  const invalidCompactedQuarantineEntries = compactedQuarantineEntries.filter((entry: any) => entry?.schema !== "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-quarantine-compact-v1"
+    || String(entry.group_id || "") !== groupId
+    || entry.compact_checksum !== conflictResolutionMaintenanceNotificationDeliveryQuarantineCompactChecksum(entry));
+  const latestRecoveryProof = quarantineEntries
+    .filter((entry: any) => entry.status === "quarantined_corrupt_current")
+    .sort((a: any, b: any) => String(b.last_seen_at || "").localeCompare(String(a.last_seen_at || "")))[0] || null;
+  const safe = (generation.valid || generation.status === "empty")
+    && quarantineChecksumValid
+    && invalidQuarantineEntries.length === 0
+    && invalidCompactedQuarantineEntries.length === 0
+    && orphans.destructive_action_authorized === false
+    && orphans.created_task_count === 0
+    && orphans.created_approval_receipt_count === 0
+    && orphans.deleted_count === 0;
+  return {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-recovery-health-v1",
+    group_id: groupId,
+    status: safe ? "ok" : generation.recoverable ? "recoverable" : "fail",
+    safe,
+    generation,
+    orphans,
+    quarantine_file: quarantineFile,
+    quarantine_present: quarantinePresent,
+    quarantine_checksum_valid: quarantineChecksumValid,
+    quarantine_count: quarantineEntries.length,
+    compacted_quarantine_count: compactedQuarantineEntries.reduce((sum: number, entry: any) => sum + Number(entry.cleaned_count || 0), 0),
+    invalid_quarantine_entry_count: invalidQuarantineEntries.length + invalidCompactedQuarantineEntries.length,
+    latest_recovery_proof_id: latestRecoveryProof?.quarantine_id || "",
+    latest_recovery_proof_present: !!latestRecoveryProof,
+    retention: quarantine.retention || {},
+    destructive_action_authorized: false,
+    created_task_count: 0,
+    created_approval_receipt_count: 0,
+    deleted_count: 0,
+  };
+}
+
+function readConflictResolutionMaintenanceNotificationDeliveryLedger(groupId: string) {
+  const file = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryFile(groupId);
+  const ledger = readJson(file, {});
+  const present = fs.existsSync(file);
+  const legacy = ledger.schema === "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-ledger-v1";
+  const checksumValid = !present || legacy || (ledger.schema === "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-ledger-v2"
+    && ledger.ledger_checksum === conflictResolutionMaintenanceNotificationDeliveryLedgerChecksum(ledger));
+  const previousFile = getConflictResolutionMaintenanceNotificationDeliveryPreviousFile(groupId);
+  const previous = readJson(previousFile, null);
+  const previousChainValid = !ledger.previous_ledger_checksum
+    || (!!previous
+      && previous.ledger_checksum === ledger.previous_ledger_checksum
+      && previous.ledger_checksum === conflictResolutionMaintenanceNotificationDeliveryLedgerChecksum(previous));
+  return {
+    schema: ledger.schema || "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-ledger-v2",
+    version: Number(ledger.version || (legacy ? 1 : 2)),
+    group_id: groupId,
+    entries: Array.isArray(ledger.entries) ? ledger.entries : [],
+    compacted_entries: Array.isArray(ledger.compacted_entries) ? ledger.compacted_entries : [],
+    retention_generation: Number(ledger.retention_generation || 0),
+    previous_ledger_checksum: ledger.previous_ledger_checksum || "",
+    ledger_checksum: ledger.ledger_checksum || "",
+    ledger_checksum_valid: checksumValid,
+    previous_chain_valid: previousChainValid,
+    previous_file: previousFile,
+    retention: ledger.retention || {},
+    file,
+    updated_at: ledger.updated_at || "",
+  };
+}
+
+function retainConflictResolutionMaintenanceNotificationDeliveries(groupId: string, entries: any[], compactedEntries: any[], at: string, options: any = {}) {
+  const atMs = Date.parse(at);
+  const terminalAgeMs = Math.max(60_000, Number(options.terminalAgeMs || options.terminal_age_ms || 30 * 24 * 60 * 60 * 1000));
+  const maxHotEntries = Math.max(20, Math.min(2000, Number(options.maxHotEntries || options.max_hot_entries || 320)));
+  const maxCompactedEntries = Math.max(20, Math.min(1000, Number(options.maxCompactedEntries || options.max_compacted_entries || 160)));
+  const currentNotifications = ["group-main-agent", "global-agent"].flatMap(audience => {
+    const context = buildPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationContext(groupId, audience, {
+      at,
+      maxNotifications: 20,
+      recordDelivery: false,
+    });
+    return context.notifications || [];
+  });
+  const currentByKey = new Map(currentNotifications.map((notification: any) => [
+    JSON.stringify([notification.audience, notification.notification_id, notification.state_fingerprint]),
+    notification,
+  ]));
+  const validRows: any[] = [];
+  const invalidRows: any[] = [];
+  for (const entry of entries) {
+    const valid = entry?.schema === "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-v1"
+      && String(entry.group_id || "") === groupId
+      && entry.delivery_checksum === conflictResolutionMaintenanceNotificationDeliveryChecksum(entry);
+    (valid ? validRows : invalidRows).push(entry);
+  }
+  const pinned: any[] = [];
+  const terminalCandidates: any[] = [];
+  const recentCandidates: any[] = [];
+  for (const entry of validRows) {
+    const key = JSON.stringify([entry.audience, entry.notification_id, entry.state_fingerprint]);
+    const current = currentByKey.get(key) as any;
+    const currentDelivery = !!current && (!current.state_observed_at || String(entry.last_delivered_at || "") >= String(current.state_observed_at));
+    if (currentDelivery) {
+      pinned.push(entry);
+      continue;
+    }
+    const deliveredAtMs = Date.parse(String(entry.last_delivered_at || ""));
+    const old = Number.isFinite(atMs) && Number.isFinite(deliveredAtMs) && atMs - deliveredAtMs >= terminalAgeMs;
+    (old ? terminalCandidates : recentCandidates).push(entry);
+  }
+  recentCandidates.sort((a: any, b: any) => String(b.last_delivered_at || "").localeCompare(String(a.last_delivered_at || "")));
+  const invalidHot = invalidRows.slice(-Math.min(40, maxHotEntries));
+  const hotCapacity = Math.max(0, maxHotEntries - pinned.length - invalidHot.length);
+  const recentHot = recentCandidates.slice(0, hotCapacity);
+  terminalCandidates.push(...recentCandidates.slice(hotCapacity));
+  const compactById = new Map<string, any>();
+  for (const entry of compactedEntries) {
+    if (entry?.schema !== "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-compact-v1"
+      || String(entry.group_id || "") !== groupId
+      || entry.compact_checksum !== conflictResolutionMaintenanceNotificationDeliveryCompactChecksum(entry)) continue;
+    compactById.set(String(entry.compact_id || ""), entry);
+  }
+  const terminalGroups = new Map<string, any[]>();
+  for (const entry of terminalCandidates) {
+    const key = JSON.stringify([entry.audience, entry.notification_id, entry.state_fingerprint]);
+    terminalGroups.set(key, [...(terminalGroups.get(key) || []), entry]);
+  }
+  for (const [key, rows] of terminalGroups) {
+    const [audience, notificationId, stateFingerprint] = JSON.parse(key);
+    const compactId = `conflict-resolution-maintenance-notification-delivery-compact:${checksum([groupId, key], 24)}`;
+    const existing = compactById.get(compactId) || null;
+    const contextIds = uniqueStrings(rows.map((entry: any) => entry.context_id), 5000).sort();
+    const sourceChecksums = rows.map((entry: any) => entry.delivery_checksum).filter(Boolean).sort();
+    const compact: any = {
+      schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-compact-v1",
+      version: 1,
+      compact_id: compactId,
+      group_id: groupId,
+      audience,
+      notification_id: notificationId,
+      state_fingerprint: stateFingerprint,
+      first_delivered_at: [existing?.first_delivered_at, ...rows.map((entry: any) => entry.first_delivered_at)].filter(Boolean).sort()[0] || at,
+      last_delivered_at: [existing?.last_delivered_at, ...rows.map((entry: any) => entry.last_delivered_at)].filter(Boolean).sort().slice(-1)[0] || at,
+      delivery_count: Number(existing?.delivery_count || 0) + rows.reduce((sum: number, entry: any) => sum + Number(entry.delivery_count || 0), 0),
+      detailed_entry_count: Number(existing?.detailed_entry_count || 0) + rows.length,
+      context_ids_root_checksum: checksum([existing?.context_ids_root_checksum || "", contextIds], 48),
+      source_delivery_checksums_root: checksum([existing?.source_delivery_checksums_root || "", sourceChecksums], 48),
+      terminal: true,
+      advisory_only: true,
+      destructive_action_authorized: false,
+      should_create_real_task: false,
+      compacted_at: at,
+    };
+    compact.compact_checksum = conflictResolutionMaintenanceNotificationDeliveryCompactChecksum(compact);
+    compactById.set(compactId, compact);
+  }
+  const compacted = [...compactById.values()]
+    .sort((a: any, b: any) => String(a.last_delivered_at || "").localeCompare(String(b.last_delivered_at || "")))
+    .slice(-maxCompactedEntries);
+  const hot = [...invalidHot, ...recentHot, ...pinned]
+    .sort((a: any, b: any) => String(a.last_delivered_at || "").localeCompare(String(b.last_delivered_at || "")));
+  return {
+    entries: hot,
+    compacted_entries: compacted,
+    retention: {
+      policy: "pin_current_delivery_compact_terminal_preserve_invalid_diagnostics",
+      max_hot_entries: maxHotEntries,
+      max_compacted_entries: maxCompactedEntries,
+      terminal_age_ms: terminalAgeMs,
+      input_detailed_count: entries.length,
+      hot_detailed_count: hot.length,
+      pinned_current_delivery_count: pinned.length,
+      invalid_hot_count: invalidHot.length,
+      compacted_this_run_count: terminalCandidates.length,
+      compacted_summary_count: compacted.length,
+      protected_current_notification_ids: currentNotifications.map((notification: any) => notification.notification_id),
+    },
+  };
+}
+
+function writeConflictResolutionMaintenanceNotificationDeliveryLedger(groupId: string, entries: any[], at: string, options: any = {}) {
+  const file = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryFile(groupId);
+  const previousRaw = options.previousLedgerOverride && typeof options.previousLedgerOverride === "object"
+    ? options.previousLedgerOverride
+    : readJson(file, {});
+  const previousValid = previousRaw.schema === "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-ledger-v2"
+    && previousRaw.ledger_checksum === conflictResolutionMaintenanceNotificationDeliveryLedgerChecksum(previousRaw);
+  const retained = retainConflictResolutionMaintenanceNotificationDeliveries(
+    groupId,
+    entries,
+    Array.isArray(options.compactedEntries) ? options.compactedEntries : (Array.isArray(previousRaw.compacted_entries) ? previousRaw.compacted_entries : []),
+    at,
+    options,
+  );
+  const value: any = {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-ledger-v2",
+    version: 2,
+    group_id: groupId,
+    retention_generation: Number(previousRaw.retention_generation || 0) + 1,
+    previous_ledger_checksum: previousValid ? previousRaw.ledger_checksum : "",
+    entries: retained.entries,
+    compacted_entries: retained.compacted_entries,
+    delivery_count: retained.entries.length,
+    compacted_delivery_count: retained.compacted_entries.reduce((sum: number, entry: any) => sum + Number(entry.delivery_count || 0), 0),
+    retention: retained.retention,
+    updated_at: at,
+  };
+  value.ledger_checksum = conflictResolutionMaintenanceNotificationDeliveryLedgerChecksum(value);
+  if (previousValid) writeJsonAtomic(getConflictResolutionMaintenanceNotificationDeliveryPreviousFile(groupId), previousRaw);
+  writeJsonAtomic(file, value);
+  return { ...value, file };
+}
+
+export function recoverPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryLedger(groupId: string, options: any = {}) {
+  const at = String(options.at || options.now || now());
+  const apply = options.apply === true || options.recover === true || options.dryRun === false || options.dry_run === false;
+  const generation = verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryGenerations(groupId);
+  const resultBase = {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-recovery-v1",
+    group_id: groupId,
+    generation,
+    destructive_action_authorized: false,
+    created_task_count: 0,
+    created_approval_receipt_count: 0,
+    deleted_count: 0,
+  };
+  if (generation.valid) return { ...resultBase, status: "current_valid", recovered: false, recovery_required: false };
+  if (!generation.recoverable) return {
+    ...resultBase,
+    status: generation.status === "empty" ? "empty" : "blocked",
+    recovered: false,
+    recovery_required: generation.status !== "empty",
+    reason: generation.status === "empty" ? "delivery_ledger_not_initialized" : "no_valid_same_group_previous_delivery_generation",
+  };
+  const currentFile = generation.current.file;
+  let currentContent = "";
+  try { currentContent = fs.readFileSync(currentFile, "utf-8"); } catch {}
+  const corruptChecksum = checksum(currentContent, 48);
+  const evidenceDir = getConflictResolutionMaintenanceNotificationDeliveryRecoveryEvidenceDir(groupId);
+  const evidenceFile = path.join(evidenceDir, `${corruptChecksum || "missing"}.json`);
+  if (!apply) return {
+    ...resultBase,
+    status: "recoverable",
+    recovered: false,
+    recovery_required: true,
+    selected_previous_checksum: generation.previous.ledger_checksum,
+    corrupt_current_checksum: corruptChecksum,
+    evidence_file: evidenceFile,
+  };
+  const evidence = {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-recovery-evidence-v1",
+    version: 1,
+    group_id: groupId,
+    source_file: currentFile,
+    source_content_checksum: corruptChecksum,
+    source_content: currentContent,
+    reason: generation.current.error || "current_delivery_generation_invalid",
+    quarantined_at: at,
+  };
+  writeJsonAtomic(evidenceFile, evidence);
+  appendConflictResolutionMaintenanceNotificationDeliveryQuarantine(groupId, {
+    source_path: currentFile,
+    evidence_path: evidenceFile,
+    content_checksum: corruptChecksum,
+    reason: generation.current.error || "current_delivery_generation_invalid",
+    status: "quarantined_corrupt_current",
+    recovery_eligible: false,
+  }, at);
+  const selected = generation.previous.value;
+  const written = writeConflictResolutionMaintenanceNotificationDeliveryLedger(groupId, selected.entries || [], at, {
+    ...options,
+    compactedEntries: selected.compacted_entries || [],
+    previousLedgerOverride: selected,
+  });
+  const verified = verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryGenerations(groupId);
+  return {
+    ...resultBase,
+    status: verified.valid ? "recovered" : "blocked",
+    recovered: verified.valid,
+    recovery_required: !verified.valid,
+    selected_previous_checksum: generation.previous.ledger_checksum,
+    corrupt_current_checksum: corruptChecksum,
+    evidence_file: evidenceFile,
+    retention_generation: written.retention_generation,
+    ledger_checksum: written.ledger_checksum,
+    verification: verified,
+  };
+}
+
+export function runPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryRetention(groupId: string, options: any = {}) {
+  const at = String(options.at || options.now || now());
+  const ledger = readConflictResolutionMaintenanceNotificationDeliveryLedger(groupId);
+  if (!ledger.ledger_checksum_valid) return {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-retention-v1",
+    group_id: groupId,
+    status: "blocked",
+    reason: "delivery_ledger_checksum_invalid",
+    destructive_action_authorized: false,
+    created_task_count: 0,
+    created_approval_receipt_count: 0,
+    deleted_count: 0,
+  };
+  const written = writeConflictResolutionMaintenanceNotificationDeliveryLedger(groupId, ledger.entries, at, {
+    ...options,
+    compactedEntries: ledger.compacted_entries,
+  });
+  const health = inspectPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryHealth(groupId, { ...options, at });
+  return {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-retention-v1",
+    group_id: groupId,
+    status: health.invalid_delivery_count === 0 ? "ok" : "warn",
+    retention_generation: written.retention_generation,
+    ledger_checksum: written.ledger_checksum,
+    previous_ledger_checksum: written.previous_ledger_checksum,
+    retention: written.retention,
+    health,
+    destructive_action_authorized: false,
+    created_task_count: 0,
+    created_approval_receipt_count: 0,
+    deleted_count: 0,
+    file: written.file,
+  };
+}
+
+export function recordPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDelivery(groupId: string, audience: string, notifications: any[] = [], input: any = {}) {
+  const normalizedAudience = String(audience || "").trim().toLowerCase();
+  if (!new Set(["group-main-agent", "global-agent"]).has(normalizedAudience)) throw new Error("maintenance notification delivery audience is invalid");
+  const at = String(input.at || input.deliveredAt || input.delivered_at || now());
+  const contextId = String(input.contextId || input.context_id || "").trim();
+  const consumerSessionId = String(input.consumerSessionId || input.consumer_session_id || input.sessionId || input.session_id || "").trim();
+  const channel = String(input.channel || normalizedAudience).trim().slice(0, 80) || normalizedAudience;
+  if (!contextId || !consumerSessionId) throw new Error("maintenance notification delivery requires contextId and consumerSessionId");
+  const safeNotifications = (Array.isArray(notifications) ? notifications : []).filter((entry: any) => entry
+    && String(entry.group_id || "") === groupId
+    && String(entry.audience || "") === normalizedAudience
+    && entry.notification_id
+    && entry.state_fingerprint
+    && entry.advisory_only === true
+    && entry.destructive_action_authorized === false
+    && entry.should_create_real_task === false
+    && entry.cross_group_authorization_allowed === false);
+  const ledger = readConflictResolutionMaintenanceNotificationDeliveryLedger(groupId);
+  if (!ledger.ledger_checksum_valid) throw new Error("maintenance notification delivery ledger checksum is invalid");
+  const byId = new Map<string, any>(ledger.entries.map((entry: any) => [String(entry.delivery_id || ""), entry]));
+  const recorded: any[] = [];
+  for (const notification of safeNotifications) {
+    const deliveryId = `conflict-resolution-maintenance-notification-delivery:${checksum([
+      groupId,
+      normalizedAudience,
+      notification.notification_id,
+      notification.state_fingerprint,
+      contextId,
+      consumerSessionId,
+    ], 24)}`;
+    const previous = byId.get(deliveryId) || null;
+    const entry: any = {
+      schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-v1",
+      version: 1,
+      delivery_id: deliveryId,
+      group_id: groupId,
+      audience: normalizedAudience,
+      notification_id: notification.notification_id,
+      state_fingerprint: notification.state_fingerprint,
+      severity: notification.severity || "info",
+      context_id: contextId,
+      consumer_session_id: consumerSessionId,
+      channel,
+      first_delivered_at: previous?.first_delivered_at || at,
+      last_delivered_at: at,
+      delivery_count: Number(previous?.delivery_count || 0) + 1,
+      advisory_only: true,
+      destructive_action_authorized: false,
+      should_create_real_task: false,
+      cross_group_authorization_allowed: false,
+    };
+    entry.delivery_checksum = conflictResolutionMaintenanceNotificationDeliveryChecksum(entry);
+    byId.set(deliveryId, entry);
+    recorded.push(entry);
+  }
+  if (recorded.length) writeConflictResolutionMaintenanceNotificationDeliveryLedger(groupId, [...byId.values()], at);
+  return {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-result-v1",
+    group_id: groupId,
+    audience: normalizedAudience,
+    context_id: contextId,
+    consumer_session_id: consumerSessionId,
+    recorded_count: recorded.length,
+    entries: recorded,
+    destructive_action_authorized: false,
+    created_task_count: 0,
+    created_approval_receipt_count: 0,
+    deleted_count: 0,
+  };
+}
+
+export function inspectPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryHealth(groupId: string, options: any = {}) {
+  const at = String(options.at || options.now || now());
+  const atMs = Date.parse(at);
+  const unseenAfterMs = Math.max(60_000, Number(options.unseenAfterMs || options.unseen_after_ms || 15 * 60 * 1000));
+  const repeatThreshold = Math.max(2, Number(options.repeatThreshold || options.repeat_threshold || 3));
+  const ledger = readConflictResolutionMaintenanceNotificationDeliveryLedger(groupId);
+  const notificationLedger = readJson(getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationFile(groupId), {});
+  const pinnedCurrentNotificationIds = new Set(uniqueStrings(notificationLedger.pinned_current_notification_ids || [], 20));
+  const deliveries = ledger.entries.map((entry: any) => {
+    const checksumValid = entry.delivery_checksum === conflictResolutionMaintenanceNotificationDeliveryChecksum(entry);
+    const valid = entry.schema === "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-v1"
+      && String(entry.group_id || "") === groupId
+      && new Set(["group-main-agent", "global-agent"]).has(String(entry.audience || ""))
+      && entry.advisory_only === true
+      && entry.destructive_action_authorized === false
+      && entry.should_create_real_task === false
+      && checksumValid;
+    return { ...entry, checksum_valid: checksumValid, valid };
+  });
+  const compactedDeliveries = ledger.compacted_entries.map((entry: any) => {
+    const checksumValid = entry.compact_checksum === conflictResolutionMaintenanceNotificationDeliveryCompactChecksum(entry);
+    const valid = entry.schema === "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-compact-v1"
+      && String(entry.group_id || "") === groupId
+      && new Set(["group-main-agent", "global-agent"]).has(String(entry.audience || ""))
+      && entry.advisory_only === true
+      && entry.destructive_action_authorized === false
+      && entry.should_create_real_task === false
+      && checksumValid;
+    return { ...entry, checksum_valid: checksumValid, valid };
+  });
+  const pending = ["group-main-agent", "global-agent"].flatMap(audience => {
+    const context = buildPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationContext(groupId, audience, {
+      at,
+      maxNotifications: 20,
+      recordDelivery: false,
+    });
+    return context.notifications || [];
+  });
+  const rows = pending.map((notification: any) => {
+    const matching = deliveries.filter((entry: any) => entry.valid === true
+      && entry.audience === notification.audience
+      && entry.notification_id === notification.notification_id
+      && entry.state_fingerprint === notification.state_fingerprint
+      && (!notification.state_observed_at || String(entry.last_delivered_at || "") >= String(notification.state_observed_at)));
+    const firstSeenMs = Date.parse(String(notification.first_seen_at || notification.last_seen_at || ""));
+    const ageMs = Number.isFinite(atMs) && Number.isFinite(firstSeenMs) ? Math.max(0, atMs - firstSeenMs) : 0;
+    const severe = new Set(["critical", "warn", "warning", "error"]).has(String(notification.severity || "").toLowerCase());
+    const delivered = matching.length > 0;
+    const repeatedUnseen = !delivered && severe && ageMs >= unseenAfterMs && Number(notification.seen_count || 0) >= repeatThreshold;
+    return {
+      group_id: groupId,
+      audience: notification.audience,
+      notification_id: notification.notification_id,
+      state_fingerprint: notification.state_fingerprint,
+      severity: notification.severity,
+      action: notification.action,
+      state_observed_at: notification.state_observed_at || "",
+      first_seen_at: notification.first_seen_at || "",
+      last_seen_at: notification.last_seen_at || "",
+      seen_count: Number(notification.seen_count || 0),
+      age_ms: ageMs,
+      delivered,
+      delivery_count: matching.reduce((sum: number, entry: any) => sum + Number(entry.delivery_count || 0), 0),
+      repeated_unseen: repeatedUnseen,
+      advisory_only: true,
+      should_create_real_task: false,
+    };
+  });
+  const currentKeys = new Map(rows.map((row: any) => [JSON.stringify([row.audience, row.notification_id, row.state_fingerprint]), row]));
+  const compactedCurrentDeliveryCount = compactedDeliveries.filter((entry: any) => {
+    const current = currentKeys.get(JSON.stringify([entry.audience, entry.notification_id, entry.state_fingerprint])) as any;
+    return !!current && (!current.state_observed_at || String(entry.last_delivered_at || "") >= String(current.state_observed_at));
+  }).length;
+  return {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-health-v1",
+    group_id: groupId,
+    generated_at: at,
+    pending_count: rows.length,
+    delivered_pending_count: rows.filter((row: any) => row.delivered).length,
+    unseen_pending_count: rows.filter((row: any) => !row.delivered).length,
+    repeated_unseen_count: rows.filter((row: any) => row.repeated_unseen).length,
+    invalid_delivery_count: deliveries.filter((entry: any) => !entry.valid).length + compactedDeliveries.filter((entry: any) => !entry.valid).length + (ledger.ledger_checksum_valid ? 0 : 1),
+    ledger_checksum_valid: ledger.ledger_checksum_valid,
+    previous_chain_valid: ledger.previous_chain_valid,
+    retention_generation: ledger.retention_generation,
+    hot_delivery_entry_count: deliveries.length,
+    compacted_delivery_entry_count: compactedDeliveries.length,
+    compacted_current_delivery_count: compactedCurrentDeliveryCount,
+    pinned_current_notification_count: pinnedCurrentNotificationIds.size,
+    unprotected_repeated_unseen_count: rows.filter((row: any) => row.repeated_unseen && !pinnedCurrentNotificationIds.has(row.notification_id)).length,
+    retention: ledger.retention || {},
+    rows,
+    policy: "read_only_delivery_observation_no_task_no_approval_no_delete",
+    destructive_action_authorized: false,
+    created_task_count: 0,
+    created_approval_receipt_count: 0,
+    deleted_count: 0,
+    file: ledger.file,
+  };
+}
+
+export function buildPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationContext(groupId: string, audience: string, options: any = {}) {
+  const normalizedAudience = String(audience || "").trim().toLowerCase();
+  if (!new Set(["group-main-agent", "global-agent"]).has(normalizedAudience)) throw new Error("maintenance notification context audience is invalid");
+  const at = String(options.at || options.now || now());
+  const notificationFile = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationFile(groupId);
+  const notificationLedger = readJson(notificationFile, {});
+  const audienceNotifications = (Array.isArray(notificationLedger.entries) ? notificationLedger.entries : [])
+    .filter((entry: any) => String(entry.group_id || "") === groupId && String(entry.audience || "") === normalizedAudience);
+  const pinnedIds = new Set(uniqueStrings(notificationLedger.pinned_current_notification_ids || [], 20));
+  const pinnedNotifications = audienceNotifications.filter((entry: any) => pinnedIds.has(String(entry.notification_id || "")));
+  const notifications = pinnedNotifications.length
+    ? pinnedNotifications
+    : audienceNotifications
+      .sort((a: any, b: any) => String(b.state_observed_at || b.last_seen_at || "").localeCompare(String(a.state_observed_at || a.last_seen_at || "")))
+      .slice(0, 8);
+  const receiptInspection = inspectPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationReceipts(groupId, { at });
+  const receipts = receiptInspection.entries.filter((entry: any) => entry.valid === true && entry.audience === normalizedAudience);
+  const stateCache = new Map<string, any>();
+  const currentRows = notifications.filter((entry: any) => {
+    const gracePeriodMs = Number(entry.grace_period_ms || 0);
+    const observedAt = String(entry.state_observed_at || entry.first_seen_at || at);
+    const cacheKey = `${observedAt}:${gracePeriodMs}`;
+    if (!stateCache.has(cacheKey)) stateCache.set(cacheKey, conflictResolutionMaintenanceState(groupId, { at: observedAt, gracePeriodMs }));
+    const state = stateCache.get(cacheKey);
+    return state.revalidated === true
+      && entry.state_fingerprint === state.state_fingerprint
+      && (!entry.current_manifest_checksum || entry.current_manifest_checksum === state.current_manifest_checksum)
+      && (!entry.previous_manifest_checksum || entry.previous_manifest_checksum === state.previous_manifest_checksum)
+      && (!entry.quarantine_checksum || entry.quarantine_checksum === state.quarantine_checksum);
+  });
+  const hiddenIds = new Set(receipts.map((receipt: any) => `${receipt.notification_id}:${receipt.state_fingerprint}`));
+  const maxNotifications = Math.max(1, Math.min(20, Number(options.maxNotifications || options.max_notifications || 4)));
+  const pending = currentRows
+    .filter((entry: any) => !hiddenIds.has(`${entry.notification_id}:${entry.state_fingerprint}`))
+    .sort((a: any, b: any) => String(b.last_seen_at || "").localeCompare(String(a.last_seen_at || "")))
+    .slice(0, maxNotifications)
+    .map((entry: any) => ({
+      notification_id: entry.notification_id,
+      group_id: groupId,
+      audience: normalizedAudience,
+      state_fingerprint: entry.state_fingerprint,
+      severity: entry.severity || "info",
+      action: entry.action || "continue_read_only_verification",
+      reason: String(entry.reason || "").slice(0, 360),
+      state_observed_at: entry.state_observed_at || "",
+      first_seen_at: entry.first_seen_at || "",
+      last_seen_at: entry.last_seen_at || "",
+      seen_count: Number(entry.seen_count || 1),
+      advisory_only: true,
+      destructive_action_authorized: false,
+      should_create_real_task: false,
+      cross_group_authorization_allowed: false,
+    }));
+  const delivery = options.recordDelivery === true && pending.length
+    ? recordPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDelivery(groupId, normalizedAudience, pending, {
+      at,
+      contextId: options.contextId || options.context_id,
+      consumerSessionId: options.consumerSessionId || options.consumer_session_id || options.sessionId || options.session_id,
+      channel: options.channel || normalizedAudience,
+    })
+    : null;
+  return {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-context-v1",
+    group_id: groupId,
+    audience: normalizedAudience,
+    generated_at: at,
+    pending_count: pending.length,
+    current_notification_count: currentRows.length,
+    hidden_by_valid_receipt_count: currentRows.length - pending.length,
+    notifications: pending,
+    policy: "advisory_visibility_only_no_task_no_approval_no_delete",
+    advisory_only: true,
+    cross_group_authorization_allowed: false,
+    notification_file: notificationFile,
+    receipt_file: receiptInspection.file,
+    delivery,
+  };
+}
+
+function emitConflictResolutionMaintenanceNotifications(groupId: string, run: any = {}, options: any = {}) {
+  const file = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationFile(groupId);
+  const ledger = readJson(file, {});
+  const previous = Array.isArray(ledger.entries) ? ledger.entries : [];
+  const at = String(run.at || options.at || now());
+  const stateFingerprint = checksum([
+    groupId,
+    run.current_manifest_checksum || "",
+    run.previous_manifest_checksum || "",
+    run.quarantine_checksum || "",
+    run.recommendation?.severity || "",
+    run.recommendation?.action || "",
+  ], 32);
+  const drafts = [
+    { audience: "group-main-agent", recommendation: run.group_main_agent_recommendation || run.recommendation || {} },
+    { audience: "global-agent", recommendation: run.global_agent_recommendation || run.recommendation || {} },
+  ].map((draft: any) => {
+    const notificationId = `conflict-resolution-maintenance-notification:${checksum([groupId, draft.audience, stateFingerprint], 24)}`;
+    return {
+      schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-v1",
+      version: 1,
+      notification_id: notificationId,
+      group_id: groupId,
+      audience: draft.audience,
+      state_fingerprint: stateFingerprint,
+      severity: draft.recommendation.severity || "info",
+      action: draft.recommendation.action || "continue_read_only_verification",
+      reason: draft.recommendation.reason || "",
+      advisory_only: true,
+      destructive_action_authorized: false,
+      should_create_real_task: false,
+      cross_group_authorization_allowed: false,
+      source_run_id: run.run_id || "",
+      state_observed_at: at,
+      current_manifest_checksum: run.current_manifest_checksum || "",
+      previous_manifest_checksum: run.previous_manifest_checksum || "",
+      quarantine_checksum: run.quarantine_checksum || "",
+      grace_period_ms: Number(run.grace_period_ms || 0),
+      first_seen_at: at,
+      last_seen_at: at,
+      seen_count: 1,
+    };
+  });
+  const byId = new Map<string, any>(previous.map((entry: any) => [String(entry.notification_id || ""), entry]));
+  let newCount = 0;
+  let deduplicatedCount = 0;
+  for (const draft of drafts) {
+    const existing = byId.get(draft.notification_id);
+    if (existing) {
+      deduplicatedCount++;
+      byId.set(draft.notification_id, {
+        ...existing,
+        ...draft,
+        first_seen_at: existing.first_seen_at || draft.first_seen_at,
+        last_seen_at: at,
+        seen_count: Number(existing.seen_count || 1) + 1,
+      });
+    } else {
+      newCount++;
+      byId.set(draft.notification_id, draft);
+    }
+  }
+  const pinnedIds = new Set(drafts.map((draft: any) => draft.notification_id));
+  const pinned = [...byId.values()].filter((entry: any) => pinnedIds.has(entry.notification_id));
+  const recent = [...byId.values()]
+    .filter((entry: any) => !pinnedIds.has(entry.notification_id))
+    .sort((a: any, b: any) => String(a.last_seen_at || a.first_seen_at || "").localeCompare(String(b.last_seen_at || b.first_seen_at || "")))
+    .slice(-Math.max(0, 240 - pinned.length));
+  const entries = [...recent, ...pinned]
+    .sort((a: any, b: any) => String(a.last_seen_at || a.first_seen_at || "").localeCompare(String(b.last_seen_at || b.first_seen_at || "")));
+  const value = {
+    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-ledger-v1",
+    version: 1,
+    group_id: groupId,
+    entries,
+    notification_count: entries.length,
+    new_notification_count: newCount,
+    deduplicated_notification_count: deduplicatedCount,
+    pinned_current_notification_ids: [...pinnedIds],
+    pinned_current_notification_count: pinned.length,
+    retention_policy: "pin_current_group_and_audience_state_then_keep_recent_terminal_notifications",
+    updated_at: at,
+  };
+  writeJsonAtomic(file, value);
+  return { ...value, file, stateFingerprint };
+}
+
 function conflictResolutionMaintenanceRecommendation(generation: any = {}, quarantine: any = {}) {
   if (generation.valid !== true) return {
     severity: "critical",
@@ -5639,6 +7430,7 @@ export function runPostCompactCompletionMemoryPreservationClosureConflictResolut
     orphan_count: Number(quarantine.orphan_count || 0),
     eligible_count: Number(quarantine.eligible_count || 0),
     protected_open_repair_count: Number(quarantine.protected_open_repair_count || 0),
+    grace_period_ms: Number(quarantine.grace_period_ms || 0),
   };
   const runId = `conflict-resolution-maintenance:${checksum(runCore, 24)}`;
   const run = {
@@ -5679,7 +7471,10 @@ export function runPostCompactCompletionMemoryPreservationClosureConflictResolut
     updated_at: at,
   };
   if (options.persist !== false) writeJsonAtomic(file, value);
-  return { ...run, file, ledger: value, generation, archive, quarantine };
+  const notifications = options.emitNotifications === true || options.emit_notifications === true
+    ? emitConflictResolutionMaintenanceNotifications(groupId, run, { at })
+    : null;
+  return { ...run, file, ledger: value, generation, archive, quarantine, notifications };
 }
 
 function conflictResolutionGcApprovalReceiptChecksum(receipt: any = {}) {
@@ -5893,6 +7688,8 @@ export function inspectPostCompactCompletionMemoryPreservationClosureConflictRes
   const maintenanceFile = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceLedgerFile(groupId);
   const maintenanceLedger = readJson(maintenanceFile, {});
   const approvalLedger = readConflictResolutionGcApprovalLedger(groupId);
+  const notificationFile = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationFile(groupId);
+  const notificationLedger = readJson(notificationFile, {});
   const receipts = approvalLedger.entries || [];
   const invalidReceipts = receipts.filter((receipt: any) => receipt.schema !== "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-gc-approval-receipt-v1"
     || String(receipt.group_id || "") !== groupId
@@ -5907,12 +7704,17 @@ export function inspectPostCompactCompletionMemoryPreservationClosureConflictRes
     at: options.at || options.now || now(),
     gracePeriodMs: options.gracePeriodMs ?? options.grace_period_ms,
   });
+  const notificationDeliveryHealth = inspectPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryHealth(groupId, options);
   return {
     schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-status-v1",
     groupId,
     status: latestRunSafe && invalidReceipts.length === 0 && generation.valid === true && quarantine.quarantine_input_valid !== false ? "ok" : "fail",
     maintenanceFile,
     approvalFile: approvalLedger.file,
+    notificationFile,
+    notifications: Array.isArray(notificationLedger.entries) ? notificationLedger.entries : [],
+    notificationCount: Number(notificationLedger.notification_count || 0),
+    notificationDeliveryHealth,
     latestRun,
     nextRunAt: maintenanceLedger.next_run_at || latestRun?.next_run_at || "",
     latestRunSafe,
@@ -5949,6 +7751,7 @@ export function runDuePostCompactCompletionMemoryPreservationClosureConflictReso
       intervalMs: options.intervalMs || options.interval_ms,
       gracePeriodMs: options.gracePeriodMs ?? options.grace_period_ms,
       persist: options.persist !== false,
+      emitNotifications: options.emitNotifications === true || options.emit_notifications === true,
     });
     return { groupId, due: true, skipped: false, run, nextRunAt: run.next_run_at, destructiveActionAuthorized: false };
   });

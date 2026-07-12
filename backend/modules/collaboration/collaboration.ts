@@ -8097,13 +8097,16 @@ function updateGroupTaskInlineStatus(task: any, status: string, detail = "") {
   const next = messages.map((message: any) => {
     if (message?.task_id !== task.id) return message;
     changed = true;
+    const {
+      taskRuntime: _storedTaskRuntime,
+      task_runtime: _storedTaskRuntimeSnake,
+      taskCard: _storedTaskCard,
+      task_card: _storedTaskCardSnake,
+      ...messageWithoutStoredRuntime
+    } = message;
     return {
-      ...message,
+      ...messageWithoutStoredRuntime,
       task: message.task ? { ...message.task, status, status_detail: detail || task.status_detail || "" } : message.task,
-      taskCard: runtime.taskCard,
-      task_card: runtime.task_card,
-      taskRuntime: runtime,
-      task_runtime: runtime,
       workflow: { ...(message.workflow || {}), phase: status === "done" ? "complete" : status === "failed" || status === "cancelled" ? "needs_rework" : status === "in_progress" ? "executing" : (message.workflow?.phase || "dispatching"), updated_at: new Date().toISOString() },
     };
   });
@@ -9165,6 +9168,8 @@ function isAdvisoryNeed(value: any, task: any = null) {
   return controlledSmokeCleanup
     || /^(?:建议|可选|如需|推荐|后续可|optional\b|recommend(?:ed)?\b)/i.test(text)
     || /可由.{0,40}(?:主 Agent|用户|coordinator)?.{0,20}(?:决定|选择)(?:是否)?/i.test(text)
+    || /(?:等待|请|需要).{0,24}(?:主\s*Agent|@?coordinator|协调\s*Agent).{0,64}(?:TestAgent|测试\s*Agent|独立复核|独立验证|最终抽查|最终验收|抽查验收|抽查并总结|完成总结)/i.test(text)
+    || /(?:等待|请|需要).{0,24}(?:TestAgent|测试\s*Agent).{0,24}(?:独立复核|独立验证|复核|验证)/i.test(text)
     || /人工(?:确认|检查|核验)/i.test(text);
 }
 
@@ -9266,16 +9271,9 @@ function parseFormattedReceiptsFromText(text: string) {
     const getLine = (label: string) => (section.match(new RegExp(`-\\s*${label}：\\s*([^\\n]+)`)) || [])[1]?.trim() || "";
     const status = getLine("状态");
     if (!status) continue;
-    const markerIndex = section.lastIndexOf("CCM_AGENT_RECEIPT");
+    const markerIndex = [...section.matchAll(/^CCM_AGENT_RECEIPT[ \t]*\r?$/gm)].at(-1)?.index ?? -1;
     const receiptArea = markerIndex >= 0 ? section.slice(markerIndex) : "";
-    const rawReceipt = receiptArea
-      ? [...receiptArea.matchAll(/```(?:json)?\s*([\s\S]*?)```/gi)]
-          .map(match => {
-            try { return JSON.parse(match[1].trim()); } catch { return null; }
-          })
-          .filter((item: any) => item && typeof item === "object")
-          .at(-1) || null
-      : null;
+    const rawReceipt = parseCoordinatorReceiptJsonObject(receiptArea);
     receipts.push({
       ...(rawReceipt || {}),
       agent,
@@ -9291,7 +9289,44 @@ function parseFormattedReceiptsFromText(text: string) {
       needs: splitEvidenceList(getLine("需要补充")),
     });
   }
-  return receipts;
+  const latestByAgent = new Map<string, any>();
+  for (const receipt of receipts) latestByAgent.set(String(receipt.agent || "").trim(), receipt);
+  return [...latestByAgent.values()];
+}
+
+function parseCoordinatorReceiptJsonObject(value: string) {
+  const source = String(value || "");
+  const start = source.indexOf("{");
+  if (start < 0) return null;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < source.length; index++) {
+    const char = source[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === '"') inString = false;
+      continue;
+    }
+    if (char === '"') {
+      inString = true;
+      continue;
+    }
+    if (char === "{") depth++;
+    else if (char === "}") {
+      depth--;
+      if (depth === 0) {
+        try {
+          const parsed = JSON.parse(source.slice(start, index + 1));
+          return parsed && typeof parsed === "object" ? parsed : null;
+        } catch {
+          return null;
+        }
+      }
+    }
+  }
+  return null;
 }
 
 function summarizeFileChange(file: any, agent = "") {
@@ -10432,7 +10467,8 @@ function getGroupTaskExecutionStatus(review: any, coordinatorResult: any, output
     });
   }
 
-  if (dispatchPolicy.requiresConfirmation || action === "ask_user" || action === "hold") {
+  const hasExecutedDailyDevWorkers = isDailyDev && childReceipts.length > 0;
+  if ((dispatchPolicy.requiresConfirmation || action === "ask_user" || action === "hold") && !hasExecutedDailyDevWorkers) {
     return buildGroupResult("waiting", {
       review,
       detail: dispatchPolicy.reason || "主 Agent 需要用户确认后继续",
@@ -10641,6 +10677,38 @@ function getDailyDevCompletionGateSelfTest() {
     "- 需要补充：无",
   ].join("\n");
   const doneWorkerOutput = formatCollectedAgentOutput("frontend", doneReceiptText, doneReceipt);
+  const staleAckThenDoneReceipts = parseFormattedReceiptsFromText([
+    formatCollectedAgentOutput("frontend", "ACK 完成，等待进入实现阶段", {
+      ...doneReceipt,
+      status: "needs_info",
+      summary: "ACK-only 前置确认完成，等待进入实现阶段",
+      filesChanged: [],
+      verification: [],
+    }),
+    doneWorkerOutput,
+  ].join("\n"));
+  const latestDoneReceiptSupersedesStaleAck = staleAckThenDoneReceipts.length === 1
+    && staleAckThenDoneReceipts[0]?.agent === "frontend"
+    && staleAckThenDoneReceipts[0]?.status === "done";
+  const embeddedFenceReceipt = {
+    ...doneReceipt,
+    agent: "test-agent",
+    postReviewSpotCheck: { required: true, pass: true, status: "passed" },
+    testAgentHandoff: {
+      metadata: {
+        coordinatorOutputPreview: "技术上下文包含协议字样 CCM_AGENT_RECEIPT 和围栏：```ts\nexport const sample = true\n```",
+      },
+    },
+  };
+  const embeddedFenceReceiptOutput = formatCollectedAgentOutput("test-agent", [
+    "TestAgent 已通过，主 Agent 抽查也已通过。",
+    "CCM_AGENT_RECEIPT",
+    "```json",
+    JSON.stringify(embeddedFenceReceipt, null, 2),
+    "```",
+  ].join("\n"), embeddedFenceReceipt);
+  const parsedEmbeddedFenceReceipt = parseFormattedReceiptsFromText(embeddedFenceReceiptOutput)[0] || null;
+  const embeddedMarkdownFenceDoesNotTruncateReceipt = parsedEmbeddedFenceReceipt?.postReviewSpotCheck?.pass === true;
   const noChild = getGroupTaskExecutionStatus(
     { status: "complete", content: "主 Agent 复盘完成" },
     coordinatorResult,
@@ -10700,6 +10768,16 @@ function getDailyDevCompletionGateSelfTest() {
   const waitingEvidencePromotesToDone = canCompleteDailyDevFromDeliverySummary(taskWithActualChanges, waitingExecutionWithCompleteEvidence, waitingSummaryWithCompleteEvidence);
   const blockedVerificationReceipt = { ...doneReceipt, verification: ["mvn test -B -q → 仍需交互审批，命令被沙箱拦截"], blockers: ["mvn test 被沙箱拦截"], needs: ["用户本地补充 mvn test 输出"] };
   const optionalRecommendationDoesNotBlock = !receiptHasOpenNeeds({ ...doneReceipt, blockers: [], needs: ["建议用户 npm start 后人工确认页面样式"] });
+  const coordinatorOwnedReviewFollowUpDoesNotBlock = !receiptHasOpenNeeds({
+    ...doneReceipt,
+    blockers: [],
+    needs: [
+      "等待主 Agent 安排 TestAgent 独立复核",
+      "等待主 Agent 最终抽查并总结",
+      "请 @coordinator 安排 TestAgent 独立复核，或主 Agent 直接抽查验收",
+      "等待 TestAgent 独立复核",
+    ],
+  });
   const blockedVerificationOutput = formatCollectedAgentOutput("frontend", "验证被沙箱拦截", blockedVerificationReceipt);
   const blockedVerificationGate = getVerificationEvidenceGate([blockedVerificationReceipt]);
   const zeroFailureVerificationGate = getVerificationEvidenceGate([{ verification: ["npm test — 11/11 通过，0 failed（exit code 0）"] }]);
@@ -10757,6 +10835,9 @@ function getDailyDevCompletionGateSelfTest() {
     blockedVerificationFailsGate: blockedVerificationGate.pass === false && blockedVerificationGate.failed.length > 0,
     zeroFailuresCountAsPass: zeroFailureVerificationGate.pass === true && zeroFailureVerificationGate.failed.length === 0,
     optionalRecommendationDoesNotBlock,
+    coordinatorOwnedReviewFollowUpDoesNotBlock,
+    latestDoneReceiptSupersedesStaleAck,
+    embeddedMarkdownFenceDoesNotTruncateReceipt,
     doneReceiptWithOpenNeedsStatus: withDoneReceiptButOpenNeeds.status,
     blockedEvidenceDoesNotPromote,
     withActualChangeNoExecutedVerificationStatus: withActualChangeNoExecutedVerification.status,
@@ -10770,6 +10851,9 @@ function getDailyDevCompletionGateSelfTest() {
       && blockedVerificationGate.pass === false
       && zeroFailureVerificationGate.pass === true
       && optionalRecommendationDoesNotBlock
+      && coordinatorOwnedReviewFollowUpDoesNotBlock
+      && latestDoneReceiptSupersedesStaleAck
+      && embeddedMarkdownFenceDoesNotTruncateReceipt
       && withDoneReceiptButOpenNeeds.status === "waiting"
       && blockedEvidenceDoesNotPromote
       && withActualChangeNoCoordinationEvidence.status === "waiting"
@@ -12830,7 +12914,7 @@ async function runAgentCliProbe(payload: any, ctx: CollabCtx) {
       writeAgentProbeStatus(result);
       return result;
     }
-    const output = await ctx.callAgent(selectedProject, prompt, runtime.workDir, agentType, Number(payload.timeout_ms || payload.timeoutMs || 120000), {
+    const callProbeAgent = (probePrompt: string) => ctx.callAgent(selectedProject, probePrompt, runtime.workDir, agentType, Number(payload.timeout_ms || payload.timeoutMs || 120000), {
       tab: "groups",
       groupId: target.group.id,
       project: selectedProject,
@@ -12840,7 +12924,18 @@ async function runAgentCliProbe(payload: any, ctx: CollabCtx) {
       runtimeToolSnapshot: runtimeToolSnapshotFromAudit(runtimeToolContext.audit, toolContext.allowedTools),
       runtimeToolDispatchGate: runtimeToolContext.dispatchGate,
     });
-    const writeCapability = verifyWriteCapability();
+    let probeAttempts = 1;
+    let output = await callProbeAgent(prompt);
+    let writeCapability = verifyWriteCapability();
+    if ((!/CCM_AGENT_PROBE_OK/i.test(output) || !writeCapability.pass) && payload.disable_probe_retry !== true && payload.disableProbeRetry !== true) {
+      probeAttempts++;
+      output = await callProbeAgent([
+        prompt,
+        "The previous probe attempt did not complete both required checks.",
+        "Retry the file write now and only print the success marker after the exact file content exists.",
+      ].join("\n"));
+      writeCapability = verifyWriteCapability();
+    }
     cleanupWriteProbe();
     const ok = /CCM_AGENT_PROBE_OK/i.test(output) && writeCapability.pass;
     const outputFailure = getAgentProbeOutputFailure(output);
@@ -12865,6 +12960,7 @@ async function runAgentCliProbe(payload: any, ctx: CollabCtx) {
       expected_marker: "CCM_AGENT_PROBE_OK",
       target: probeTarget,
       duration_ms: Date.now() - started,
+      probe_attempts: probeAttempts,
       output: String(output || "").slice(0, 2000),
       capabilities: { filesystem: capabilityWrite ? (writeCapability.pass ? "workspace_write" : "read_only") : "read_only", write: writeCapability },
       readiness,
@@ -13753,6 +13849,10 @@ async function processCrossAgents(
     const mentionStr = typeof mention === "string" ? String(mention) : mention.mention;
     const targetName = typeof mention === "string" ? (mentionStr.startsWith("@") ? mentionStr.slice(1) : mentionStr) : mention.targetName;
     const coordinatorProject = getCoordinatorMember(group).project;
+    if (targetName === sourceProject || targetName === coordinatorProject) {
+      if (taskId) addTaskLog(taskId, "info", `忽略不可执行的自派发目标：${sourceProject} -> ${targetName}`);
+      return outputs;
+    }
     const failChildDispatch = (reason: string, needs: string[] = []) => {
       const summary = String(reason || "子 Agent 派发失败");
       const content = `❌ 子 Agent 派发失败：@${targetName}\n${summary}`;
@@ -13797,8 +13897,11 @@ async function processCrossAgents(
       return outputs;
     };
 
+    const nativeTestAgentMention = typeof mention !== "string"
+      && isCoordinatorTestAgentName(targetName)
+      && !!(mention.testAgentHandoff || mention.test_agent_handoff || mention.testAgentWorkOrder || mention.test_agent_work_order);
     const targetMember = group.members.find((m: any) => m.project === targetName && m.project !== sourceProject);
-    if (!targetMember) {
+    if (!targetMember && !nativeTestAgentMention) {
       return failChildDispatch("未找到群聊成员", ["检查主 Agent 生成的目标 Agent 名称是否已加入当前开发群聊"]);
     }
 
@@ -16209,7 +16312,10 @@ function selectCoordinatorIndependentVerifier(group: any, originalTarget = "") {
       return { member, score, profile };
     })
     .sort((a: any, b: any) => b.score - a.score || String(a.member.project).localeCompare(String(b.member.project)));
-  const selected = candidates[0]?.member || null;
+  const configuredVerifier = candidates.find((item: any) => item.score >= 100)?.member || null;
+  const originalRuntime = resolveProjectRuntimeForTestAgentHandoff(group, original);
+  const nativeTestAgentAvailable = !!originalRuntime.workDir;
+  const selected = configuredVerifier || (nativeTestAgentAvailable ? { project: "test-agent" } : null);
   return {
     schema: "ccm-independent-verifier-selection-v1",
     available: !!selected,
@@ -16218,7 +16324,11 @@ function selectCoordinatorIndependentVerifier(group: any, originalTarget = "") {
     reason: selected
       ? `${selected.project} 将以独立视角复核 ${original || "原实现 Agent"} 的交付证据`
       : "当前群聊没有可用的非原实现者 Agent，无法完成独立复核",
-    candidates: candidates.map((item: any) => ({ project: item.member.project, score: item.score })).slice(0, 8),
+    nativeTestAgent: nativeTestAgentAvailable ? { available: true, project: original, workDir: originalRuntime.workDir } : { available: false },
+    candidates: [
+      ...(nativeTestAgentAvailable ? [{ project: "test-agent", score: 110, native: true }] : []),
+      ...candidates.map((item: any) => ({ project: item.member.project, score: item.score })),
+    ].slice(0, 8),
   };
 }
 
@@ -16229,6 +16339,11 @@ function isCoordinatorTestAgentName(value: any) {
 function resolveProjectRuntimeForTestAgentHandoff(group: any, project: string) {
   const name = String(project || "").trim();
   if (!name) return { workDir: "", agentType: "", source: "missing" };
+  const directMember = (group?.members || []).find((member: any) => String(member?.project || "").trim() === name);
+  const directWorkDir = String(directMember?.workDir || directMember?.work_dir || "").trim();
+  if (directWorkDir) {
+    return { workDir: directWorkDir, agentType: String(directMember?.agentType || directMember?.agent || ""), source: "group_member" };
+  }
   try {
     const runtime = resolveMemberRuntime(name, group, getConfigs());
     if (runtime?.workDir) return { workDir: String(runtime.workDir || ""), agentType: String(runtime.agentType || ""), source: "member_runtime" };
@@ -16265,13 +16380,57 @@ function collectCoordinatorChangedFiles(value: any, project = ""): string[] {
     .filter(Boolean)).slice(0, 40);
 }
 
+function normalizeCoordinatorVerificationEvidenceCommand(value: any) {
+  let source = String(value || "").trim();
+  if (!source) return "";
+  source = source
+    .replace(/^[-*+]\s+/, "")
+    .replace(/^`+|`+$/g, "")
+    .split(/\r?\n/, 1)[0]
+    .trim();
+  if (!source || /[;&|<>]/.test(source)) return "";
+
+  const packageCommand = source.match(/^(npm|pnpm|yarn|bun)\s+(?:run\s+)?([a-zA-Z0-9][a-zA-Z0-9:._-]*)\b/i);
+  if (packageCommand) {
+    const manager = packageCommand[1].toLowerCase();
+    const script = packageCommand[2];
+    return `${manager} run ${script}`;
+  }
+
+  const command = source
+    .split(/\s+(?:→|=>|passed\b|failed\b|verified\b|succeeded\b|exit(?:\s+code)?\s*[=:])/i, 1)[0]
+    .replace(/:\s+(?=(?:node|python|pytest|jest|vitest|verified|passed|failed|built|compiled|exit)\b).*$/i, "")
+    .trim();
+  if (!command || !/^(?:npx\s+(?:tsc|jest|vitest|eslint)|pytest\b|python\s+-m\s+pytest\b|jest\b|vitest\b|tsc\b|go\s+test\b|cargo\s+test\b|mvn(?:w|\.cmd)?\s+test\b|gradle(?:w|\.bat)?\s+test\b)/i.test(command)) return "";
+  return /^[a-zA-Z0-9_./:@%+=,\-\s]+$/.test(command) ? command : "";
+}
+
 function collectCoordinatorVerificationCommands(project: string, workDir = "", previousLedger: any = null) {
   const fromLedger = Array.isArray(previousLedger?.verification) ? previousLedger.verification : [];
   const commands = uniqueStrings([
     ...buildProjectVerificationHints(project, workDir),
-    ...fromLedger.filter((item: any) => /(?:npm|pnpm|yarn|bun|pytest|jest|vitest|go test|cargo test|tsc|lint|build)/i.test(String(item || ""))),
+    ...fromLedger.map(normalizeCoordinatorVerificationEvidenceCommand).filter(Boolean),
   ]);
   return commands.slice(0, 8);
+}
+
+function isCoordinatorOnlyAcceptanceCriterion(value: any) {
+  const criterion = String(value || "").trim();
+  if (!criterion) return true;
+  const namesCoordinator = /(?:主\s*Agent|主智能体|协调(?:者|Agent)|coordinator|global\s+agent)/i.test(criterion);
+  const describesCoordinatorDuty = /(?:总结|汇报|协调|分派|派发|调度|计划|todo|最终答复|最终回复|用户可见|技术详情)/i.test(criterion);
+  if (namesCoordinator && describesCoordinatorDuty) return true;
+  if (/(?:最终报告|最终总结|交付总结|完成报告).*(?:说明|包含|覆盖|变更文件|验证结果|风险|用户)/i.test(criterion)) return true;
+  if (/(?:涉及代码|代码任务|代码变更).*(?:实际文件变更|变更文件).*(?:构建|测试|验证).*证据/i.test(criterion)) return true;
+  if (/(?:TestAgent|测试\s*Agent|独立复核|独立验证|主\s*Agent.*抽查)/i.test(criterion)) return true;
+  return false;
+}
+
+function buildCoordinatorTestAgentAcceptanceCriteria(task: any, verificationCommands: string[]) {
+  const projectCriteria = splitUserAcceptanceText(task.acceptance_criteria || task.acceptanceCriteria)
+    .filter((criterion: string) => !isCoordinatorOnlyAcceptanceCriterion(criterion));
+  const commandCriteria = verificationCommands.map(command => `命令 ${command} 必须成功执行。`);
+  return uniqueStrings([...projectCriteria, ...commandCriteria]).slice(0, 10);
 }
 
 function buildTestAgentHandoffId(taskId = "", originalTarget = "") {
@@ -16472,14 +16631,8 @@ function buildCoordinatorTestAgentHandoff(item: any, input: {
     task.delivery_summary?.files_changed || [],
     task.deliverySummary?.filesChanged || [],
   ].flat(), originalTarget);
-  const acceptanceCriteria = uniqueStrings([
-    ...splitUserAcceptanceText(task.acceptance_criteria || task.acceptanceCriteria),
-    item?.reason || item?.summary || "",
-    `独立复核 ${originalTarget} 的交付证据，不得只复述原实现者结论。`,
-    changedFiles.length ? "核对改动文件是否覆盖用户目标和验收标准。" : "核对原实现 Agent 的完成声明是否有真实证据。",
-    "如果验证无法执行，明确写 blocked/needs，不能写成已通过。",
-  ]).slice(0, 10);
   const verificationCommands = collectCoordinatorVerificationCommands(originalTarget, runtime.workDir, previous);
+  const acceptanceCriteria = buildCoordinatorTestAgentAcceptanceCriteria(task, verificationCommands);
   const testAgentReviewConfig = collectConfiguredTestAgentReviewConfig(originalTarget);
   const completedTasks = uniqueStrings([
     previous.summary ? `${originalTarget} 上一轮结果：${previous.summary}` : "",
@@ -16490,6 +16643,14 @@ function buildCoordinatorTestAgentHandoff(item: any, input: {
     verificationCommands.length || !testAgentReviewConfig.hasExecutableSurface ? ["commands"] : [],
     testAgentReviewConfig.requiredChecks,
   ).slice(0, 20);
+  const requiresConfiguredAdversarialProbe = requiredChecks.includes("adversarial")
+    || testAgentReviewConfig.options.requireAdversarialProbe === true;
+  const commandOnlyAdversarialPolicy = !testAgentReviewConfig.hasExecutableSurface && !requiresConfiguredAdversarialProbe
+    ? {
+        requireAdversarialProbe: false,
+        adversarialProbeWaiver: "该变更仅提供静态文件与命令验证，没有已配置的 HTTP、浏览器或用户输入攻击面。",
+      }
+    : {};
   const warnings = uniqueStrings([
     runtime.workDir ? "" : `Project "${originalTarget}" is missing workDir; TestAgent plan preflight will block execution until the project path is configured.`,
     acceptanceCriteria.length ? "" : "No acceptance criteria were supplied; coverage will be weaker.",
@@ -16521,6 +16682,7 @@ function buildCoordinatorTestAgentHandoff(item: any, input: {
       browserProvider: "auto",
       autoDiscoverVerificationCommands: true,
       collectBrowserArtifacts: true,
+      ...commandOnlyAdversarialPolicy,
       ...testAgentReviewConfig.options,
     },
     metadata: {
@@ -16531,6 +16693,11 @@ function buildCoordinatorTestAgentHandoff(item: any, input: {
       previousLedger: previous,
       coordinatorOutputPreview: compactMemoryText(input.coordinatorOutput || "", 1000),
       projectRuntimeSource: runtime.source,
+      reviewInstructions: [
+        `独立复核 ${originalTarget} 的交付证据，不得只复述原实现者结论。`,
+        changedFiles.length ? "核对改动文件是否覆盖用户目标和验收标准。" : "核对原实现 Agent 的完成声明是否有真实证据。",
+        "如果验证无法执行，明确写 blocked/needs，不能写成已通过。",
+      ],
       ...(warnings.length ? { handoffWarnings: warnings } : {}),
     },
     target: targetName,
@@ -18275,6 +18442,12 @@ export function runCoordinatorReworkProtocolSelfTest() {
       { project: "web-app", role: "frontend" },
     ],
   }, "web-app");
+  const nativeVerifierSelection = selectCoordinatorIndependentVerifier({
+    members: [
+      { project: "coordinator", role: "coordinator" },
+      { project: "runtime-project", role: "implementation", workDir: os.tmpdir(), agent: "claudecode" },
+    ],
+  }, "runtime-project");
   const independentFollowUp = buildCoordinatorReworkFollowUp({
     project: "web-app",
     targetName: "web-app",
@@ -18314,6 +18487,42 @@ export function runCoordinatorReworkProtocolSelfTest() {
   const independentHandoffAcceptance = Array.isArray(independentHandoff?.acceptanceCriteria)
     ? independentHandoff.acceptanceCriteria.join("\n")
     : "";
+  const independentHandoffReviewInstructions = Array.isArray(independentHandoff?.metadata?.reviewInstructions)
+    ? independentHandoff.metadata.reviewInstructions.join("\n")
+    : "";
+  const commandOnlyHandoff = buildCoordinatorTestAgentHandoff({
+    targetName: "test-agent",
+    originalTarget: "runtime-command-only-selftest",
+    reviewSubject: "runtime-command-only-selftest",
+    reason: "主 Agent 必须协调 TestAgent 并在完成后给用户最终总结",
+  }, {
+    group: {
+      id: "runtime-command-only-group",
+      members: [{ project: "runtime-command-only-selftest", role: "implementation", workDir: os.tmpdir() }],
+    },
+    taskId: "runtime-command-only-task",
+    sourceTask: {
+      id: "runtime-command-only-task",
+      group_id: "runtime-command-only-group",
+      business_goal: "新增静态常量并验证构建结果",
+      acceptance_criteria: "导出的静态常量值符合需求；涉及代码的任务必须提供实际文件变更和已执行的构建或测试证据；完成后必须经过 TestAgent 独立复核；主 Agent 必须完成最终总结",
+    },
+    previousLedger: {
+      project: "runtime-command-only-selftest",
+      verification: [
+        "npm test: node scripts/test.mjs → verified:feature-ok",
+        "npm run build: node scripts/build.mjs → built:feature-output",
+        "主 Agent 已完成协调和总结",
+      ],
+    },
+  });
+  const commandOnlyProject = commandOnlyHandoff?.projects?.[0] || null;
+  const commandOnlyVerificationCommands = Array.isArray(commandOnlyProject?.verificationCommands)
+    ? commandOnlyProject.verificationCommands
+    : [];
+  const commandOnlyAcceptanceCriteria = Array.isArray(commandOnlyHandoff?.acceptanceCriteria)
+    ? commandOnlyHandoff.acceptanceCriteria
+    : [];
   const fakeVerdictDir = path.join(os.tmpdir(), `ccm-main-agent-test-agent-verdict-selftest-${process.pid}`);
   const fakeVerdictPath = path.join(fakeVerdictDir, "verdict.json");
   const fakeFailedVerdictDir = path.join(os.tmpdir(), `ccm-main-agent-test-agent-failed-verdict-selftest-${process.pid}`);
@@ -19620,6 +19829,9 @@ export function runCoordinatorReworkProtocolSelfTest() {
     independentVerifierSelectsTestAgent: verifierSelection.available === true && verifierSelection.targetName === "test-agent" && verifierSelection.originalTarget === "web-app",
     independentVerifierExcludesOriginalTarget: verifierSelection.candidates.every((item: any) => item.project !== "web-app"),
     independentVerifierReportsMissingCandidate: noVerifierSelection.available === false && noVerifierSelection.targetName === "",
+    nativeTestAgentDoesNotRequireGroupMembership: nativeVerifierSelection.available === true
+      && nativeVerifierSelection.targetName === "test-agent"
+      && nativeVerifierSelection.nativeTestAgent?.available === true,
     postReviewSpotCheckContractPasses: postReviewSpotCheckContract.pass === true,
     postReviewSpotCheckReusesSameVerifierAndHandoff: postReviewSpotCheckRoutedFollowUp.targetName === "test-agent"
       && postReviewSpotCheckRoutedFollowUp.reworkRoute?.strategy === "resume_verifier"
@@ -19670,11 +19882,24 @@ export function runCoordinatorReworkProtocolSelfTest() {
       && independentHandoffProject?.name === "web-app"
       && independentHandoff?.metadata?.reviewSubject === "web-app"
       && independentHandoff?.metadata?.verifier === "test-agent"
-      && independentHandoffAcceptance.includes("独立复核")
-      && independentHandoffAcceptance.includes("不得只复述原实现者结论")
+      && independentHandoffReviewInstructions.includes("独立复核")
+      && independentHandoffReviewInstructions.includes("不得只复述原实现者结论")
       && independentHandoff?.originalUserGoal.includes("完善订单详情页")
       && independentHandoff?.review_subject === "web-app"
       && !independentHandoff?.work_order,
+    descriptiveVerificationEvidenceIsNotExecutedAsShell: commandOnlyVerificationCommands.length === 2
+      && commandOnlyVerificationCommands[0] === "npm run test"
+      && commandOnlyVerificationCommands[1] === "npm run build"
+      && commandOnlyVerificationCommands.every((command: string) => !command.includes("node scripts/") && !command.includes("→")),
+    commandOnlyHandoffCarriesAdversarialWaiver: commandOnlyHandoff?.options?.requireAdversarialProbe === false
+      && String(commandOnlyHandoff?.options?.adversarialProbeWaiver || "").includes("没有已配置的 HTTP、浏览器或用户输入攻击面"),
+    testAgentAcceptanceExcludesCoordinatorResponsibilities: independentHandoffAcceptance.includes("订单详情变更覆盖用户目标")
+      && commandOnlyAcceptanceCriteria.some((criterion: string) => criterion.includes("导出的静态常量值符合需求"))
+      && commandOnlyAcceptanceCriteria.some((criterion: string) => criterion.includes("命令 npm run test 必须成功执行"))
+      && commandOnlyAcceptanceCriteria.every((criterion: string) => !criterion.includes("主 Agent")
+        && !criterion.includes("最终总结")
+        && !criterion.includes("实际文件变更")
+        && !criterion.includes("TestAgent")),
     independentReworkKeepsNativeHandoffOutOfVisibleText: independentFollowUp.message.includes("TestAgent 原生复核交接单")
       && !independentFollowUp.message.includes("```json")
       && !independentFollowUp.message.includes("ccm-test-agent-handoff-v1"),
@@ -25121,7 +25346,7 @@ export function runCollaborationProtocolSelfTest() {
     agentType: "claudecode",
   });
   const executionFixChecks = {
-    hasCliCheck: executionFixActions.some((item: string) => item.includes("claude --permission-mode acceptEdits -p") || item.includes("claude -p")),
+    hasCliCheck: executionFixActions.some((item: string) => item.includes("claude --permission-mode auto -p") || item.includes("claude --permission-mode acceptEdits -p") || item.includes("claude -p")),
     hasApiNetworkHint: executionFixActions.some((item: string) => item.includes("代理环境变量") || item.includes("API Base URL")),
     hasRetryAction: executionFixActions.some((item: string) => item.includes("复检执行通道") || item.includes("立即恢复自动任务")),
   };

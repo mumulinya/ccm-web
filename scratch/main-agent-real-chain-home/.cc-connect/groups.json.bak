@@ -1,0 +1,18 @@
+[
+  {
+    "id": "runtime-real-chain-group",
+    "name": "主 Agent 真实链路验收群",
+    "members": [
+      {
+        "project": "coordinator",
+        "role": "coordinator",
+        "agent": "coded-orchestrator"
+      },
+      {
+        "project": "runtime-e2e-project",
+        "agent": "claudecode"
+      }
+    ],
+    "created_at": "2026-07-12T04:04:46.004Z"
+  }
+]

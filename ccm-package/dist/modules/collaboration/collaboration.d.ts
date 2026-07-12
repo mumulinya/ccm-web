@@ -12708,8 +12708,9 @@ export declare function runCoordinatorReworkProtocolSelfTest(): {
         failedRouteKeepsSameWorker: boolean;
         independentRouteUsesFreshVerifier: boolean;
         independentVerifierSelectsTestAgent: boolean;
-        independentVerifierExcludesOriginalTarget: any;
+        independentVerifierExcludesOriginalTarget: boolean;
         independentVerifierReportsMissingCandidate: boolean;
+        nativeTestAgentDoesNotRequireGroupMembership: boolean;
         postReviewSpotCheckContractPasses: boolean;
         postReviewSpotCheckReusesSameVerifierAndHandoff: boolean;
         coordinatorReviewLoopAllowsRepairRecheckAndFinalAcceptance: boolean;
@@ -12722,6 +12723,9 @@ export declare function runCoordinatorReworkProtocolSelfTest(): {
         independentReworkDispatchesToVerifier: boolean;
         independentReworkTaskNamesReviewSubject: any;
         independentReworkBuildsNativeTestAgentHandoff: boolean;
+        descriptiveVerificationEvidenceIsNotExecutedAsShell: any;
+        commandOnlyHandoffCarriesAdversarialWaiver: boolean;
+        testAgentAcceptanceExcludesCoordinatorResponsibilities: boolean;
         independentReworkKeepsNativeHandoffOutOfVisibleText: boolean;
         nativeTestAgentReportBecomesIndependentReviewReceipt: boolean;
         nativeTestAgentReceiptConsumesVerdictArtifact: boolean;
@@ -12815,7 +12819,16 @@ export declare function runCoordinatorReworkProtocolSelfTest(): {
             originalTarget: string;
             targetName: any;
             reason: string;
-            candidates: any;
+            nativeTestAgent: {
+                available: boolean;
+                project: string;
+                workDir: string;
+            } | {
+                available: boolean;
+                project?: undefined;
+                workDir?: undefined;
+            };
+            candidates: any[];
         };
         noVerifierSelection: {
             schema: string;
@@ -12823,7 +12836,16 @@ export declare function runCoordinatorReworkProtocolSelfTest(): {
             originalTarget: string;
             targetName: any;
             reason: string;
-            candidates: any;
+            nativeTestAgent: {
+                available: boolean;
+                project: string;
+                workDir: string;
+            } | {
+                available: boolean;
+                project?: undefined;
+                workDir?: undefined;
+            };
+            candidates: any[];
         };
         independentFollowUp: any;
         independentGateFollowUps: any[];
@@ -13259,8 +13281,9 @@ export declare function runCollaborationProtocolSelfTest(): {
             failedRouteKeepsSameWorker: boolean;
             independentRouteUsesFreshVerifier: boolean;
             independentVerifierSelectsTestAgent: boolean;
-            independentVerifierExcludesOriginalTarget: any;
+            independentVerifierExcludesOriginalTarget: boolean;
             independentVerifierReportsMissingCandidate: boolean;
+            nativeTestAgentDoesNotRequireGroupMembership: boolean;
             postReviewSpotCheckContractPasses: boolean;
             postReviewSpotCheckReusesSameVerifierAndHandoff: boolean;
             coordinatorReviewLoopAllowsRepairRecheckAndFinalAcceptance: boolean;
@@ -13273,6 +13296,9 @@ export declare function runCollaborationProtocolSelfTest(): {
             independentReworkDispatchesToVerifier: boolean;
             independentReworkTaskNamesReviewSubject: any;
             independentReworkBuildsNativeTestAgentHandoff: boolean;
+            descriptiveVerificationEvidenceIsNotExecutedAsShell: any;
+            commandOnlyHandoffCarriesAdversarialWaiver: boolean;
+            testAgentAcceptanceExcludesCoordinatorResponsibilities: boolean;
             independentReworkKeepsNativeHandoffOutOfVisibleText: boolean;
             nativeTestAgentReportBecomesIndependentReviewReceipt: boolean;
             nativeTestAgentReceiptConsumesVerdictArtifact: boolean;
@@ -13366,7 +13392,16 @@ export declare function runCollaborationProtocolSelfTest(): {
                 originalTarget: string;
                 targetName: any;
                 reason: string;
-                candidates: any;
+                nativeTestAgent: {
+                    available: boolean;
+                    project: string;
+                    workDir: string;
+                } | {
+                    available: boolean;
+                    project?: undefined;
+                    workDir?: undefined;
+                };
+                candidates: any[];
             };
             noVerifierSelection: {
                 schema: string;
@@ -13374,7 +13409,16 @@ export declare function runCollaborationProtocolSelfTest(): {
                 originalTarget: string;
                 targetName: any;
                 reason: string;
-                candidates: any;
+                nativeTestAgent: {
+                    available: boolean;
+                    project: string;
+                    workDir: string;
+                } | {
+                    available: boolean;
+                    project?: undefined;
+                    workDir?: undefined;
+                };
+                candidates: any[];
             };
             independentFollowUp: any;
             independentGateFollowUps: any[];

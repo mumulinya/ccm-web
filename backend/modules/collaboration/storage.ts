@@ -34,17 +34,44 @@ export function saveGroups(groups: any[]) {
   if (fs.existsSync(GROUPS_FILE)) {
     try { if (fs.readFileSync(GROUPS_FILE, "utf-8") === content) return; } catch {}
   }
-  const temp = `${GROUPS_FILE}.${process.pid}.${Date.now()}.tmp`;
+  const temp = `${GROUPS_FILE}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}.tmp`;
   if (fs.existsSync(GROUPS_FILE)) {
     try { fs.copyFileSync(GROUPS_FILE, `${GROUPS_FILE}.bak`); } catch {}
   }
   fs.writeFileSync(temp, content, "utf-8");
-  fs.renameSync(temp, GROUPS_FILE);
+  replaceFileWithWindowsRetry(temp, GROUPS_FILE);
 }
 
 const groupMessagesCache = new Map<string, { mtimeMs: number; size: number; messages: any[] }>();
 type GroupMessageAppendHook = (groupId: string, message: any, messages: any[]) => void;
 var groupMessageAppendHooks: Set<GroupMessageAppendHook> | null = null;
+
+function replaceFileWithWindowsRetry(temp: string, file: string) {
+  let lastError: any = null;
+  for (let attempt = 0; attempt < 8; attempt++) {
+    try {
+      fs.renameSync(temp, file);
+      return;
+    } catch (error: any) {
+      lastError = error;
+      if (!['EPERM', 'EACCES', 'EBUSY', 'EEXIST'].includes(String(error?.code || ''))) throw error;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20 * (attempt + 1));
+    }
+  }
+  for (let attempt = 0; attempt < 12; attempt++) {
+    try {
+      if (fs.existsSync(file)) fs.unlinkSync(file);
+      fs.renameSync(temp, file);
+      return;
+    } catch (error: any) {
+      lastError = error;
+      if (!['EPERM', 'EACCES', 'EBUSY', 'EEXIST', 'ENOENT'].includes(String(error?.code || ''))) break;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50 * (attempt + 1));
+    }
+  }
+  try { if (fs.existsSync(temp)) fs.unlinkSync(temp); } catch {}
+  throw lastError || new Error(`无法替换文件：${file}`);
+}
 
 function getGroupMessageAppendHooks() {
   if (!groupMessageAppendHooks) groupMessageAppendHooks = new Set<GroupMessageAppendHook>();
@@ -108,12 +135,12 @@ export function saveGroupMessages(groupId: string, messages: any[]) {
     fs.mkdirSync(GROUP_MESSAGES_DIR, { recursive: true });
   }
   const file = path.join(GROUP_MESSAGES_DIR, `${groupId}.json`);
-  const temp = `${file}.${process.pid}.${Date.now()}.tmp`;
+  const temp = `${file}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}.tmp`;
   if (fs.existsSync(file)) {
     try { fs.copyFileSync(file, `${file}.bak`); } catch {}
   }
   fs.writeFileSync(temp, JSON.stringify(messages, null, 2), "utf-8");
-  fs.renameSync(temp, file);
+  replaceFileWithWindowsRetry(temp, file);
   const stat = fs.statSync(file);
   groupMessagesCache.set(groupId, { mtimeMs: stat.mtimeMs, size: stat.size, messages });
 }

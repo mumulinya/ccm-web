@@ -1,0 +1,186 @@
+{
+  "version": 1,
+  "trace_id": "e2e_mrh9srdj_31f18a71b6c8",
+  "created_at": "2026-07-12T04:05:17.819Z",
+  "events": [
+    {
+      "id": "op_dbc0b101dc95d1a8:attempt:1",
+      "at": "2026-07-12T04:05:17.819Z",
+      "type": "idempotency.acquired",
+      "status": "info",
+      "task_id": "",
+      "group_id": "",
+      "agent": "",
+      "runtime": "",
+      "message": "drill-feishu-event 操作已认领",
+      "data": {
+        "scope": "drill-feishu-event",
+        "attempt": 1,
+        "recovered_from_stale": false
+      }
+    },
+    {
+      "id": "op_dbc0b101dc95d1a8:duplicate:1",
+      "at": "2026-07-12T04:05:17.826Z",
+      "type": "idempotency.duplicate_suppressed",
+      "status": "warning",
+      "task_id": "",
+      "group_id": "",
+      "agent": "",
+      "runtime": "",
+      "message": "drill-feishu-event 重复操作已抑制",
+      "data": {
+        "scope": "drill-feishu-event",
+        "duplicate_count": 1,
+        "in_progress": true
+      }
+    },
+    {
+      "id": "e2e-task-1783829116564-ae0053:intake",
+      "at": "2026-07-12T04:05:17.829Z",
+      "type": "e2e.intake",
+      "status": "ok",
+      "task_id": "e2e-task-1783829116564-ae0053",
+      "group_id": "",
+      "agent": "",
+      "runtime": "",
+      "message": "群聊开发任务已接收",
+      "data": {}
+    },
+    {
+      "id": "op_dbc0b101dc95d1a8:completed:1",
+      "at": "2026-07-12T04:05:17.836Z",
+      "type": "idempotency.completed",
+      "status": "ok",
+      "task_id": "",
+      "group_id": "",
+      "agent": "",
+      "runtime": "",
+      "message": "drill-feishu-event 操作完成",
+      "data": {
+        "scope": "drill-feishu-event",
+        "attempt": 1
+      }
+    },
+    {
+      "id": "op_dbc0b101dc95d1a8:duplicate:2",
+      "at": "2026-07-12T04:05:17.842Z",
+      "type": "idempotency.duplicate_suppressed",
+      "status": "warning",
+      "task_id": "",
+      "group_id": "",
+      "agent": "",
+      "runtime": "",
+      "message": "drill-feishu-event 重复操作已抑制",
+      "data": {
+        "scope": "drill-feishu-event",
+        "duplicate_count": 2,
+        "in_progress": false
+      }
+    },
+    {
+      "id": "lease:e2e-task-1783829116564-ae0053:0:2026-07-12T04:05:17.845Z",
+      "at": "2026-07-12T04:05:17.848Z",
+      "type": "task.lease_acquired",
+      "status": "info",
+      "task_id": "e2e-task-1783829116564-ae0053",
+      "group_id": "",
+      "agent": "",
+      "runtime": "",
+      "message": "任务执行租约已获取",
+      "data": {
+        "owner_id": "DESKTOP-MN23N8A:24436:ddde84c8",
+        "recovery_count": 0
+      }
+    },
+    {
+      "id": "e2e-task-1783829116564-ae0053:backend-receipt",
+      "at": "2026-07-12T04:05:18.335Z",
+      "type": "worker.receipt",
+      "status": "ok",
+      "task_id": "e2e-task-1783829116564-ae0053",
+      "group_id": "",
+      "agent": "backend-agent",
+      "runtime": "",
+      "message": "支付计算实现完成",
+      "data": {
+        "filesChanged": [
+          "src/payment.js"
+        ]
+      }
+    },
+    {
+      "id": "e2e-task-1783829116564-ae0053:verification",
+      "at": "2026-07-12T04:05:18.844Z",
+      "type": "verification.completed",
+      "status": "ok",
+      "task_id": "e2e-task-1783829116564-ae0053",
+      "group_id": "",
+      "agent": "test-agent",
+      "runtime": "",
+      "message": "node --test passed",
+      "data": {}
+    },
+    {
+      "id": "op_8bf35ba05c0b7b7d:attempt:1",
+      "at": "2026-07-12T04:05:19.119Z",
+      "type": "idempotency.acquired",
+      "status": "info",
+      "task_id": "",
+      "group_id": "",
+      "agent": "",
+      "runtime": "",
+      "message": "drill-merge 操作已认领",
+      "data": {
+        "scope": "drill-merge",
+        "attempt": 1,
+        "recovered_from_stale": false
+      }
+    },
+    {
+      "id": "op_8bf35ba05c0b7b7d:completed:1",
+      "at": "2026-07-12T04:05:19.533Z",
+      "type": "idempotency.completed",
+      "status": "ok",
+      "task_id": "",
+      "group_id": "",
+      "agent": "",
+      "runtime": "",
+      "message": "drill-merge 操作完成",
+      "data": {
+        "scope": "drill-merge",
+        "attempt": 1
+      }
+    },
+    {
+      "id": "op_8bf35ba05c0b7b7d:duplicate:1",
+      "at": "2026-07-12T04:05:19.539Z",
+      "type": "idempotency.duplicate_suppressed",
+      "status": "warning",
+      "task_id": "",
+      "group_id": "",
+      "agent": "",
+      "runtime": "",
+      "message": "drill-merge 重复操作已抑制",
+      "data": {
+        "scope": "drill-merge",
+        "duplicate_count": 1,
+        "in_progress": false
+      }
+    },
+    {
+      "id": "lease:e2e-task-1783829116564-ae0053:released:2026-07-12T04:05:19.607Z",
+      "at": "2026-07-12T04:05:19.611Z",
+      "type": "task.lease_released",
+      "status": "ok",
+      "task_id": "e2e-task-1783829116564-ae0053",
+      "group_id": "",
+      "agent": "",
+      "runtime": "",
+      "message": "任务执行租约已释放：done",
+      "data": {}
+    }
+  ],
+  "updated_at": "2026-07-12T04:05:19.611Z",
+  "task_id": "e2e-task-1783829116564-ae0053"
+}

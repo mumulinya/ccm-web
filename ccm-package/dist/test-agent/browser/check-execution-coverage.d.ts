@@ -1,5 +1,5 @@
 import { BrowserCheckExecutionCoverageSummary, BrowserCheckExecutionIdentity, BrowserCheckExecutionPlan, BrowserCheckResult, NormalizedTestAgentProjectTarget, NormalizedTestAgentWorkOrder } from "../types";
-export declare function buildBrowserCheckExecutionPlan(workOrder: NormalizedTestAgentWorkOrder, preferredProvider?: "mcp" | "none" | "auto" | "playwright"): BrowserCheckExecutionPlan;
+export declare function buildBrowserCheckExecutionPlan(workOrder: NormalizedTestAgentWorkOrder, preferredProvider?: "mcp" | "auto" | "none" | "playwright"): BrowserCheckExecutionPlan;
 export declare function browserCheckExecutionPlanErrors(plan: BrowserCheckExecutionPlan): string[];
 export declare function browserCheckExecutionIdentity(input: {
     workOrder: NormalizedTestAgentWorkOrder;

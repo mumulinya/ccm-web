@@ -9456,6 +9456,249 @@ export declare function runMemoryCenterConflictResolutionManifestGenerationGcSel
         passed: any;
     };
 };
+export declare function runMemoryCenterConflictResolutionMaintenanceControllerSelfTest(): {
+    pass: boolean;
+    checks: {
+        backgroundDueRunIsReadOnly: any;
+        directTimerRunCannotAuthorizeDeletion: boolean;
+        recommendationsReachBothAgentsWithoutTasks: boolean;
+        approvalRequiresExplicitTrustedActor: boolean;
+        approvalBindsExactCurrentState: boolean;
+        backgroundExecutionIsBlocked: boolean;
+        crossGroupReceiptCannotExecute: boolean;
+        expiredReceiptCannotExecute: boolean;
+        generationChangeInvalidatesReceipt: boolean;
+        tamperedReceiptCannotExecute: boolean;
+        validReceiptDeletesOnlyApprovedShard: boolean;
+        consumedReceiptCannotReplay: boolean;
+        maintenanceStatusAuditsReceiptLifecycle: boolean;
+        maintenanceControllerQualityGatePasses: boolean;
+        controllerMaintainsGroupIsolation: boolean;
+        maintenanceCreatesNoRealTask: boolean;
+    };
+    dueRun: {
+        dueCount: any;
+        deletedCount: any;
+    };
+    receipt: {
+        receiptId: any;
+        candidateCount: any;
+        deletedCount: any;
+        replayReason: any;
+    };
+    recommendations: {
+        groupMainAgent: any;
+        globalAgent: any;
+    };
+    quality: {
+        id: any;
+        status: any;
+        checked: any;
+        passed: any;
+    };
+};
+export declare function runMemoryCenterConflictResolutionMaintenanceSchedulerSelfTest(): {
+    pass: boolean;
+    checks: {
+        schedulerFirstTickRunsBothGroupsReadOnly: boolean;
+        sameWindowTickIsIdempotentlySuppressed: boolean;
+        nextWindowRunsWithoutDuplicateNotifications: any;
+        notificationsAreAdvisoryAndDeduplicated: boolean;
+        failureEntersPersistentBackoff: boolean;
+        retryAfterBackoffRecovers: boolean;
+        schedulerNeverCreatesApprovalReceipts: boolean;
+        schedulerNeverDeletesShards: boolean;
+        schedulerNeverCreatesTasks: boolean;
+        schedulerStatusPreservesSafetyBoundary: boolean;
+        schedulerQualityGatePasses: boolean;
+        schedulerMaintainsGroupIsolation: any;
+    };
+    ticks: {
+        firstCompleted: any;
+        duplicateSuppressed: any;
+        restartSuppressed: any;
+        failed: any;
+        backoff: any;
+        recovered: any;
+    };
+    notifications: {
+        groupA: any;
+        groupB: any;
+    };
+    quality: {
+        id: any;
+        status: any;
+        checked: any;
+        passed: any;
+    };
+};
+export declare function runMemoryCenterConflictResolutionMaintenanceNotificationContextSelfTest(): {
+    pass: boolean;
+    checks: {
+        coordinatorPromptReceivesOnlyCurrentGroupNotification: boolean;
+        globalAgentReceivesBoundedMultiGroupAdvisories: any;
+        acknowledgementHidesExactAudienceState: boolean;
+        suppressionRequiresReasonAndHidesExactAudienceState: boolean;
+        wrongAudienceCrossGroupAndStaleUseRejected: boolean;
+        changedStateReappearsForBothAudiences: boolean;
+        notificationConsumptionIsNonDestructive: boolean;
+        notificationSafetyFlagsRemainHardFalse: boolean;
+        notificationContextQualityGatePasses: boolean;
+    };
+    pending: {
+        groupBefore: any;
+        groupAfterAck: any;
+        globalAfterSuppression: any;
+        groupAfterStateChange: any;
+        globalAfterStateChange: any;
+    };
+    receipts: {
+        acknowledgement: any;
+        suppression: any;
+    };
+    quality: {
+        id: any;
+        status: any;
+        checked: any;
+        passed: any;
+    };
+};
+export declare function runMemoryCenterConflictResolutionMaintenanceNotificationDeliveryHealthSelfTest(): {
+    pass: boolean;
+    checks: {
+        unhealthyManifestCriticalNotificationRemainsVisible: any;
+        repeatedUnseenCriticalIsDiagnosedReadOnly: boolean;
+        realCoordinatorContextHelperRecordsDelivery: boolean;
+        repeatedContextBuildIsIdempotentlyBounded: boolean;
+        globalAgentRecordsBoundedMultiGroupDeliveryAndHealth: boolean;
+        crossGroupDeliveryCannotBeRecorded: boolean;
+        deliveryObservationIsNonDestructive: boolean;
+        deliveryHealthQualityGatePasses: boolean;
+    };
+    health: {
+        before: {
+            pending: any;
+            repeatedUnseen: any;
+        };
+        afterMain: {
+            delivered: any;
+            repeatedUnseen: any;
+        };
+        afterGlobal: {
+            delivered: any;
+            repeatedUnseen: any;
+        };
+    };
+    deliveryLedger: {
+        entries: any;
+        mainDeliveryCount: any;
+    };
+    quality: {
+        id: any;
+        status: any;
+        checked: any;
+        passed: any;
+    };
+};
+export declare function runMemoryCenterConflictResolutionMaintenanceNotificationDeliveryRetentionSelfTest(): {
+    pass: boolean;
+    checks: {
+        currentOldFingerprintIsPinnedUnderNotificationPressure: boolean;
+        oldDeliveryCannotAuthorizeCurrentRecurrence: boolean;
+        terminalDetailsCompactButCurrentCriticalRemainsProtected: boolean;
+        restartRetentionPreservesChecksumChainWithoutDoubleCounting: boolean;
+        schedulerRunsRetentionReadOnlyForBothGroups: boolean;
+        currentFreshDeliveryIsPinnedAfterScheduler: boolean;
+        tamperedLedgerBlocksRetentionWithoutCrossGroupFallback: boolean;
+        retentionNeverMutatesTasksApprovalsOrShards: boolean;
+        retentionQualityGatePassesForBothGroups: boolean;
+    };
+    notificationRetention: {
+        count: any;
+        pinned: any;
+    };
+    deliveryRetention: {
+        firstGeneration: any;
+        restartGeneration: any;
+        compacted: any;
+        finalHot: any;
+    };
+    scheduler: {
+        retentionCount: any;
+        blocked: any;
+    };
+    quality: {
+        id: any;
+        status: any;
+        checked: any;
+        passed: any;
+    };
+};
+export declare function runMemoryCenterConflictResolutionMaintenanceNotificationDeliveryRecoverySelfTest(): {
+    pass: boolean;
+    checks: {
+        invalidCurrentWithValidSameGroupPreviousIsRecoverable: boolean;
+        dryRunDoesNotOverwriteCurrent: boolean;
+        schedulerAutomaticallyRecoversWithoutAuthority: boolean;
+        recoveryCreatesNewValidGenerationAndPreservesFreshness: boolean;
+        corruptCurrentAndInterruptedTempsAreQuarantinedAsEvidence: boolean;
+        crossGroupPreviousCannotRecover: boolean;
+        tamperedPreviousCannotRecover: boolean;
+        orphanPreviousIsDiagnosedWithoutDeletion: boolean;
+        recoveryNeverMutatesTasksApprovalsOrShards: boolean;
+        recoveryQualityGatePassesForBothGroups: boolean;
+    };
+    recovery: {
+        selectedPrevious: any;
+        recoveredGeneration: any;
+        quarantineCount: any;
+        tempCandidates: any;
+    };
+    blocked: {
+        crossGroup: any;
+        tamperedPrevious: any;
+    };
+    quality: {
+        id: any;
+        status: any;
+        checked: any;
+        passed: any;
+    };
+};
+export declare function runMemoryCenterConflictResolutionMaintenanceNotificationDeliveryCleanupSelfTest(): {
+    pass: boolean;
+    checks: {
+        unresolvedAndLatestRecoveryProofAreProtectedBeforeCleanup: boolean;
+        cleanupReceiptRequiresExplicitApproval: boolean;
+        expiredTamperedBackgroundAndCrossGroupExecutionBlocked: boolean;
+        validReceiptDeletesOnlyExactEligibleEvidence: boolean;
+        consumedReceiptCannotReplay: boolean;
+        cleanedDiagnosticsCompactWhileLatestProofRemainsHot: boolean;
+        schedulerNeverCreatesOrExecutesCleanupReceipt: boolean;
+        cleanupDoesNotChangeTasksGcApprovalsOrColdShards: boolean;
+        cleanupQualityGatePassesForBothGroups: boolean;
+    };
+    receipt: {
+        candidateCount: any;
+        deletedCount: any;
+        replayReason: any;
+    };
+    quarantine: {
+        before: any;
+        after: any;
+        compacted: any;
+    };
+    scheduler: {
+        retentionCount: any;
+        deletedCount: any;
+    };
+    quality: {
+        id: any;
+        status: any;
+        checked: any;
+        passed: any;
+    };
+};
 export declare function runMemoryCenterHistoricalCompactBoundaryReplaySelfTest(): {
     pass: boolean;
     checks: {

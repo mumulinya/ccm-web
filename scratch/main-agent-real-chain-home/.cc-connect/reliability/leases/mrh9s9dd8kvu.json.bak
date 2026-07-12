@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "task_id": "mrh9s9dd8kvu",
+  "trace_id": "group_mrh9s9c7_cf7732b42950",
+  "status": "active",
+  "owner_id": "DESKTOP-MN23N8A:24436:ddde84c8",
+  "owner_pid": 24436,
+  "acquired_at": "2026-07-12T04:04:53.321Z",
+  "renewed_at": "2026-07-12T04:06:23.447Z",
+  "expires_at": "2026-07-12T04:07:08.447Z",
+  "recovery_count": 0
+}

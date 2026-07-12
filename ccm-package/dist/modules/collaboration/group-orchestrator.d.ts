@@ -54,7 +54,84 @@ export declare function buildCoordinatorPrompt(input: {
     sharedFilesContext?: string;
     ragContext?: string;
     extraInstructions?: string;
+    maintenanceAt?: string;
+    contextId?: string;
+    sessionId?: string;
 }): string;
+export declare function buildCoordinatorMaintenanceNotificationInstructions(groupInput: any, options?: any): {
+    text: string;
+    context: {
+        schema: string;
+        group_id: string;
+        audience: string;
+        generated_at: string;
+        pending_count: any;
+        current_notification_count: any;
+        hidden_by_valid_receipt_count: number;
+        notifications: any;
+        policy: string;
+        advisory_only: boolean;
+        cross_group_authorization_allowed: boolean;
+        notification_file: string;
+        receipt_file: string;
+        delivery: {
+            schema: string;
+            group_id: string;
+            audience: string;
+            context_id: string;
+            consumer_session_id: string;
+            recorded_count: number;
+            entries: any[];
+            destructive_action_authorized: boolean;
+            created_task_count: number;
+            created_approval_receipt_count: number;
+            deleted_count: number;
+        };
+    };
+    health: {
+        schema: string;
+        group_id: string;
+        generated_at: string;
+        pending_count: number;
+        delivered_pending_count: number;
+        unseen_pending_count: number;
+        repeated_unseen_count: number;
+        invalid_delivery_count: any;
+        ledger_checksum_valid: boolean;
+        previous_chain_valid: boolean;
+        retention_generation: number;
+        hot_delivery_entry_count: any;
+        compacted_delivery_entry_count: any;
+        compacted_current_delivery_count: any;
+        pinned_current_notification_count: number;
+        unprotected_repeated_unseen_count: number;
+        retention: any;
+        rows: {
+            group_id: string;
+            audience: any;
+            notification_id: any;
+            state_fingerprint: any;
+            severity: any;
+            action: any;
+            state_observed_at: any;
+            first_seen_at: any;
+            last_seen_at: any;
+            seen_count: number;
+            age_ms: number;
+            delivered: boolean;
+            delivery_count: any;
+            repeated_unseen: boolean;
+            advisory_only: boolean;
+            should_create_real_task: boolean;
+        }[];
+        policy: string;
+        destructive_action_authorized: boolean;
+        created_task_count: number;
+        created_approval_receipt_count: number;
+        deleted_count: number;
+        file: string;
+    };
+};
 export declare function buildMemberPrompt(input: {
     group: any;
     projectName: string;
@@ -1630,6 +1707,10 @@ export declare function runGroupOrchestrator(input: {
     extraInstructions?: string;
     providerSwitchRequests?: any;
     provider_switch_requests?: any;
+    contextId?: string;
+    context_id?: string;
+    sessionId?: string;
+    session_id?: string;
 }): Promise<{
     agent: any;
     delegated: any[];

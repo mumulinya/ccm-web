@@ -79,6 +79,13 @@ function formatPluginDirArg(metadata: RuntimeLaunchMetadata) {
   return pluginDir ? ` --plugin-dir ${quoteCmdArg(pluginDir)}` : "";
 }
 
+function getClaudePermissionMode() {
+  const requested = String(process.env.CCM_CLAUDE_PERMISSION_MODE || "auto").trim();
+  return ["acceptEdits", "auto", "bypassPermissions", "dontAsk", "manual", "plan"].includes(requested)
+    ? requested
+    : "auto";
+}
+
 function formatWindowsEnvPrefix(values: Record<string, string>) {
   const assignments = Object.entries(values)
     .filter(([, value]) => String(value || "").trim())
@@ -158,7 +165,7 @@ export const AGENT_RUNTIMES: AgentRuntimeDescriptor[] = [
     id: "claudecode",
     aliases: ["claudecode", "claude-code", "claude_code", "cc", "claude"],
     label: "Claude Code",
-    commandLabel: "claude --permission-mode acceptEdits -p",
+    commandLabel: "claude --permission-mode auto -p",
     capabilities: {
       print: true,
       streaming: false,
@@ -173,7 +180,7 @@ export const AGENT_RUNTIMES: AgentRuntimeDescriptor[] = [
         ? (options.resumeSession ? ` --resume ${quoteCmdArg(sessionId)}` : ` --session-id ${quoteCmdArg(sessionId)}`)
         : "";
       const metadata = readRuntimeLaunchMetadata(options);
-      return `${pipeFileToCommand(msgFile, "claude --permission-mode acceptEdits", options)}${formatStrictMcpConfigArg(options)}${formatPluginDirArg(metadata)}${sessionArg} -p`;
+      return `${pipeFileToCommand(msgFile, `claude --permission-mode ${getClaudePermissionMode()}`, options)}${formatStrictMcpConfigArg(options)}${formatPluginDirArg(metadata)}${sessionArg} -p`;
     },
   },
   {
@@ -430,6 +437,7 @@ export function runAgentRuntimeSessionSelfTest() {
     session_id: sessionId,
   }), 0);
   const checks = {
+    claudeAutomatedModeAllowsProjectVerification: claudeInitial.includes("--permission-mode auto"),
     claudeCreatesNamedSession: claudeInitial.includes("--session-id") && claudeInitial.includes(sessionId),
     claudeResumesSameSession: claudeResume.includes("--resume") && claudeResume.includes(sessionId),
     codexInitialIsPersistent: codexInitial.includes("--json") && !codexInitial.includes("--ephemeral"),

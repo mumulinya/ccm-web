@@ -1,10 +1,13 @@
 import { sendJson } from "../../core/utils";
+import * as fs from "fs";
+import * as path from "path";
 import {
   loadAutoDevNotifyConfig,
   loadCronJobs,
   loadDevReports,
   loadDevWeeklyReports,
 } from "../../core/db";
+import { CCM_DIR } from "../../core/utils";
 import {
   claimReadyDailyDevBacklog,
   continueDailyDevTasksFromGaps,
@@ -42,9 +45,204 @@ import {
   upsertAutoDevDailyReport,
   upsertAutoDevWeeklyReport,
 } from "./cron-dev-reports";
+import { loadGroups } from "../collaboration/storage";
+import {
+  getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveManifestFile,
+  reconcilePostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryOrphans,
+  reconcilePostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupJournals,
+  recoverPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryLedger,
+  runDuePostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenance,
+  runPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryQuarantineRetention,
+  runPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryRetention,
+} from "../collaboration/group-memory-index";
 
 const runningCronJobs = new Set<string>();
 let schedulerTimer: NodeJS.Timeout | null = null;
+const CONFLICT_RESOLUTION_MAINTENANCE_SCHEDULER_STATE_FILE = path.join(CCM_DIR, "memory-control", "conflict-resolution-maintenance-scheduler.json");
+let latestConflictResolutionMaintenanceTick: any = null;
+
+function readConflictResolutionMaintenanceSchedulerState(file = CONFLICT_RESOLUTION_MAINTENANCE_SCHEDULER_STATE_FILE) {
+  try { return JSON.parse(fs.readFileSync(file, "utf-8")); } catch { return { schema: "ccm-conflict-resolution-maintenance-scheduler-state-v1", version: 1, groups: {}, updated_at: "" }; }
+}
+
+function writeConflictResolutionMaintenanceSchedulerState(value: any, file = CONFLICT_RESOLUTION_MAINTENANCE_SCHEDULER_STATE_FILE) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const temp = `${file}.${process.pid}.${Date.now()}.tmp`;
+  fs.writeFileSync(temp, JSON.stringify(value, null, 2), "utf-8");
+  fs.renameSync(temp, file);
+}
+
+export function runConflictResolutionMemoryMaintenanceSchedulerTick(options: any = {}) {
+  const at = String(options.at || options.now || new Date().toISOString());
+  const atMs = Date.parse(at);
+  const stateFile = String(options.stateFile || options.state_file || CONFLICT_RESOLUTION_MAINTENANCE_SCHEDULER_STATE_FILE);
+  const state = readConflictResolutionMaintenanceSchedulerState(stateFile);
+  const explicitGroupIds: any[] = Array.isArray(options.groupIds || options.group_ids) ? (options.groupIds || options.group_ids) : [];
+  const groupIds: string[] = [...new Set<string>((explicitGroupIds.length ? explicitGroupIds : loadGroups().map((group: any) => group.id || group.groupId))
+    .map((value: any) => String(value || "").trim())
+    .filter((groupId: string) => groupId && fs.existsSync(getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveManifestFile(groupId))))];
+  const tickWindowMs = Math.max(60_000, Number(options.tickWindowMs || options.tick_window_ms || 5 * 60 * 1000));
+  const baseBackoffMs = Math.max(1_000, Number(options.baseBackoffMs || options.base_backoff_ms || 60_000));
+  const maxBackoffMs = Math.max(baseBackoffMs, Number(options.maxBackoffMs || options.max_backoff_ms || 6 * 60 * 60 * 1000));
+  const runner = typeof options.runMaintenance === "function"
+    ? options.runMaintenance
+    : (ids: string[], runOptions: any) => runDuePostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenance(ids, runOptions);
+  const telemetryRetentionRunner = typeof options.runTelemetryRetention === "function"
+    ? options.runTelemetryRetention
+    : (groupId: string, runOptions: any) => runPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryRetention(groupId, runOptions);
+  const telemetryRecoveryRunner = typeof options.runTelemetryRecovery === "function"
+    ? options.runTelemetryRecovery
+    : (groupId: string, runOptions: any) => recoverPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryLedger(groupId, runOptions);
+  const telemetryOrphanRunner = typeof options.runTelemetryOrphanReconciliation === "function"
+    ? options.runTelemetryOrphanReconciliation
+    : (groupId: string, runOptions: any) => reconcilePostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryOrphans(groupId, runOptions);
+  const telemetryQuarantineRetentionRunner = typeof options.runTelemetryQuarantineRetention === "function"
+    ? options.runTelemetryQuarantineRetention
+    : (groupId: string, runOptions: any) => runPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryQuarantineRetention(groupId, runOptions);
+  const telemetryCleanupJournalRunner = typeof options.runTelemetryCleanupJournalReconciliation === "function"
+    ? options.runTelemetryCleanupJournalReconciliation
+    : (groupId: string, runOptions: any) => reconcilePostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupJournals(groupId, runOptions);
+  const rows: any[] = [];
+  for (const groupId of groupIds) {
+    const groupState = state.groups?.[groupId] || {};
+    const nextRetryMs = Date.parse(String(groupState.next_retry_at || ""));
+    if (Number.isFinite(nextRetryMs) && Number.isFinite(atMs) && atMs < nextRetryMs) {
+      rows.push({ groupId, status: "backoff", skipped: true, nextRetryAt: groupState.next_retry_at, destructiveActionAuthorized: false, deletedCount: 0 });
+      continue;
+    }
+    const windowKey = Number.isFinite(atMs) ? Math.floor(atMs / tickWindowMs) : Math.floor(Date.now() / tickWindowMs);
+    const operationKey = `${groupId}:${windowKey}`;
+    const operation = acquireIdempotency({
+      scope: "conflict-resolution-memory-maintenance",
+      key: operationKey,
+      leaseMs: Math.max(30_000, Math.min(tickWindowMs, 10 * 60 * 1000)),
+      metadata: { group_id: groupId, maintenance_window: windowKey, scheduler: true, destructive_action_authorized: false },
+    });
+    if (!operation.acquired) {
+      rows.push({
+        groupId,
+        status: "duplicate_suppressed",
+        skipped: true,
+        duplicate: true,
+        inProgress: operation.inProgress === true,
+        operationKey,
+        destructiveActionAuthorized: false,
+        deletedCount: 0,
+      });
+      continue;
+    }
+    try {
+      const result = runner([groupId], {
+        at,
+        force: options.force === true,
+        persist: true,
+        emitNotifications: true,
+        intervalMs: options.intervalMs || options.interval_ms,
+        gracePeriodMs: options.gracePeriodMs ?? options.grace_period_ms,
+      });
+      if (result?.destructiveActionAuthorized !== false || Number(result?.deletedCount || 0) !== 0) {
+        throw new Error("background maintenance violated non-destructive scheduler boundary");
+      }
+      const telemetryRecovery = telemetryRecoveryRunner(groupId, { at, apply: true, trigger: "background" });
+      const telemetryOrphans = telemetryOrphanRunner(groupId, { at, persist: true, trigger: "background" });
+      const telemetryCleanupJournals = telemetryCleanupJournalRunner(groupId, { at, persist: true, trigger: "background" });
+      const telemetryQuarantineRetention = telemetryQuarantineRetentionRunner(groupId, { at, trigger: "background" });
+      for (const telemetryResult of [telemetryRecovery, telemetryOrphans, telemetryCleanupJournals, telemetryQuarantineRetention]) {
+        if (telemetryResult?.destructive_action_authorized !== false
+          || Number(telemetryResult?.created_task_count || 0) !== 0
+          || Number(telemetryResult?.created_approval_receipt_count || 0) !== 0
+          || Number(telemetryResult?.deleted_count || 0) !== 0) {
+          throw new Error("background delivery telemetry recovery violated non-destructive scheduler boundary");
+        }
+      }
+      const telemetryRetention = telemetryRetentionRunner(groupId, {
+        at,
+        terminalAgeMs: options.deliveryTerminalAgeMs || options.delivery_terminal_age_ms,
+        maxHotEntries: options.deliveryMaxHotEntries || options.delivery_max_hot_entries,
+        maxCompactedEntries: options.deliveryMaxCompactedEntries || options.delivery_max_compacted_entries,
+      });
+      if (telemetryRetention?.destructive_action_authorized !== false
+        || Number(telemetryRetention?.created_task_count || 0) !== 0
+        || Number(telemetryRetention?.created_approval_receipt_count || 0) !== 0
+        || Number(telemetryRetention?.deleted_count || 0) !== 0) {
+        throw new Error("background delivery telemetry retention violated non-destructive scheduler boundary");
+      }
+      completeIdempotency("conflict-resolution-memory-maintenance", operationKey, {
+        success: true,
+        group_id: groupId,
+        due_count: Number(result?.dueCount || 0),
+        skipped_count: Number(result?.skippedCount || 0),
+        destructive_action_authorized: false,
+        deleted_count: 0,
+        delivery_retention_status: telemetryRetention?.status || "",
+        delivery_retention_generation: Number(telemetryRetention?.retention_generation || 0),
+        delivery_recovery_status: telemetryRecovery?.status || "",
+        delivery_orphan_candidate_count: Number(telemetryOrphans?.candidate_count || 0),
+        delivery_quarantine_retention_status: telemetryQuarantineRetention?.status || "",
+        delivery_cleanup_open_journal_count: Number(telemetryCleanupJournals?.open_journal_count || 0),
+        delivery_cleanup_reconciled_journal_count: Number(telemetryCleanupJournals?.reconciled_journal_count || 0),
+      });
+      state.groups = { ...(state.groups || {}), [groupId]: {
+        failure_count: 0,
+        next_retry_at: "",
+        last_success_at: at,
+        last_operation_key: operationKey,
+        last_status: Number(result?.dueCount || 0) > 0 ? "completed" : "not_due",
+      } };
+      rows.push({ groupId, status: Number(result?.dueCount || 0) > 0 ? "completed" : "not_due", skipped: Number(result?.dueCount || 0) === 0, operationKey, result, telemetryRecovery, telemetryOrphans, telemetryCleanupJournals, telemetryQuarantineRetention, telemetryRetention, destructiveActionAuthorized: false, deletedCount: 0 });
+    } catch (error: any) {
+      failIdempotency("conflict-resolution-memory-maintenance", operationKey, error);
+      const failureCount = Number(groupState.failure_count || 0) + 1;
+      const backoffMs = Math.min(maxBackoffMs, baseBackoffMs * Math.pow(2, Math.max(0, failureCount - 1)));
+      const nextRetryAt = new Date((Number.isFinite(atMs) ? atMs : Date.now()) + backoffMs).toISOString();
+      state.groups = { ...(state.groups || {}), [groupId]: {
+        ...groupState,
+        failure_count: failureCount,
+        next_retry_at: nextRetryAt,
+        last_failure_at: at,
+        last_error: String(error?.message || error).slice(0, 1000),
+        last_operation_key: operationKey,
+        last_status: "failed",
+      } };
+      rows.push({ groupId, status: "failed", skipped: false, operationKey, error: String(error?.message || error), failureCount, nextRetryAt, destructiveActionAuthorized: false, deletedCount: 0 });
+    }
+  }
+  const value = {
+    schema: "ccm-conflict-resolution-maintenance-scheduler-state-v1",
+    version: 1,
+    groups: state.groups || {},
+    updated_at: at,
+  };
+  if (options.persist !== false) writeConflictResolutionMaintenanceSchedulerState(value, stateFile);
+  const report = {
+    schema: "ccm-conflict-resolution-maintenance-scheduler-tick-v1",
+    at,
+    groupCount: groupIds.length,
+    completedCount: rows.filter(row => row.status === "completed").length,
+    notDueCount: rows.filter(row => row.status === "not_due").length,
+    duplicateSuppressedCount: rows.filter(row => row.status === "duplicate_suppressed").length,
+    backoffCount: rows.filter(row => row.status === "backoff").length,
+    failedCount: rows.filter(row => row.status === "failed").length,
+    destructiveActionAuthorized: false,
+    deletedCount: 0,
+    createdTaskCount: 0,
+    createdApprovalReceiptCount: 0,
+    deliveryRetentionCount: rows.filter(row => row.telemetryRetention).length,
+    deliveryRetentionBlockedCount: rows.filter(row => row.telemetryRetention?.status === "blocked").length,
+    deliveryRecoveryCount: rows.filter(row => row.telemetryRecovery?.recovered === true).length,
+    deliveryRecoveryBlockedCount: rows.filter(row => row.telemetryRecovery?.status === "blocked").length,
+    deliveryOrphanCandidateCount: rows.reduce((sum, row) => sum + Number(row.telemetryOrphans?.candidate_count || 0), 0),
+    deliveryQuarantineRetentionCount: rows.filter(row => row.telemetryQuarantineRetention && row.telemetryQuarantineRetention.status !== "empty").length,
+    deliveryQuarantineRetentionBlockedCount: rows.filter(row => row.telemetryQuarantineRetention?.status === "blocked").length,
+    deliveryCleanupOpenJournalCount: rows.reduce((sum, row) => sum + Number(row.telemetryCleanupJournals?.open_journal_count || 0), 0),
+    deliveryCleanupReconciledJournalCount: rows.reduce((sum, row) => sum + Number(row.telemetryCleanupJournals?.reconciled_journal_count || 0), 0),
+    deliveryCleanupDeletedCount: 0,
+    rows,
+    stateFile,
+  };
+  latestConflictResolutionMaintenanceTick = report;
+  return report;
+}
 
 function buildTaskFromCronJob(job: any, trigger: "manual" | "schedule") {
   const targetType = normalizeTargetType(job);
@@ -485,6 +683,11 @@ async function tickCronScheduler(ctx: CollabCtx) {
       .catch((e: any) => console.error("[Cron]", job.name, e.message));
   }
   await tickAutoDevReportNotifications(now);
+  try {
+    runConflictResolutionMemoryMaintenanceSchedulerTick({ at: now.toISOString() });
+  } catch (error: any) {
+    console.error("[Cron][MemoryMaintenance]", error?.message || error);
+  }
 }
 
 export function startCronScheduler(ctx: CollabCtx) {
@@ -500,11 +703,35 @@ export function stopCronScheduler() {
   schedulerTimer = null;
 }
 
+export function getConflictResolutionMemoryMaintenanceSchedulerStatus() {
+  const latest = latestConflictResolutionMaintenanceTick;
+  const safe = !latest || (latest.destructiveActionAuthorized === false
+    && Number(latest.deletedCount || 0) === 0
+    && Number(latest.createdTaskCount || 0) === 0
+    && Number(latest.createdApprovalReceiptCount || 0) === 0
+    && (latest.rows || []).every((row: any) => row.destructiveActionAuthorized === false && Number(row.deletedCount || 0) === 0));
+  return {
+    schema: "ccm-conflict-resolution-maintenance-scheduler-status-v1",
+    activeWithCronScheduler: !!schedulerTimer,
+    safe,
+    latest,
+    policy: "scheduler_verify_dry_run_only_no_task_no_approval_no_delete",
+  };
+}
+
 function schedulerStatus() {
   return {
     running: !!schedulerTimer,
     interval_ms: 30 * 1000,
     running_job_ids: Array.from(runningCronJobs),
+    conflict_resolution_memory_maintenance: latestConflictResolutionMaintenanceTick || {
+      schema: "ccm-conflict-resolution-maintenance-scheduler-tick-v1",
+      status: "not_run",
+      destructiveActionAuthorized: false,
+      deletedCount: 0,
+      createdTaskCount: 0,
+      createdApprovalReceiptCount: 0,
+    },
   };
 }
 

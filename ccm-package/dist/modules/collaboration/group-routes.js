@@ -2259,6 +2259,7 @@ function handleBasicGroupRoutes(req, res, parsed, ctx, deps) {
         const taskIds = new Set(rawMessages.map((message) => String(message?.task_id || message?.task?.id || "")).filter(Boolean));
         const taskMap = new Map(allTasks.filter((task) => taskIds.has(String(task.id))).map((task) => [String(task.id), task]));
         const runtimeMap = new Map();
+        const runtimeAttachedTaskIds = new Set();
         const getRuntime = (task) => {
             const taskId = String(task?.id || "");
             if (!taskId)
@@ -2270,10 +2271,12 @@ function handleBasicGroupRoutes(req, res, parsed, ctx, deps) {
         const messages = rawMessages.map((message) => {
             const taskId = String(message?.task_id || message?.task?.id || "");
             const task = taskMap.get(taskId);
-            if (!task)
-                return message;
+            const { taskRuntime: _storedTaskRuntime, task_runtime: _storedTaskRuntimeSnake, taskCard: _storedTaskCard, task_card: _storedTaskCardSnake, ...messageWithoutStoredRuntime } = message || {};
+            if (!task || runtimeAttachedTaskIds.has(taskId))
+                return messageWithoutStoredRuntime;
+            runtimeAttachedTaskIds.add(taskId);
             const runtime = getRuntime(task);
-            return { ...message, taskRuntime: runtime, task_runtime: runtime };
+            return { ...messageWithoutStoredRuntime, taskRuntime: runtime };
         });
         const memory = deps.loadGroupMemory(groupIdText);
         const agentQa = deps.getAgentQaItemsForGroup(groupIdText, 100);

@@ -1,0 +1,10 @@
+{
+  "enabled": true,
+  "format": "anthropic-compatible",
+  "apiUrl": "https://ciyuan.fast",
+  "apiKey": "sk-0370dd82da047397dda0556430045916deaf965dae9c7b2b9060c0ee66242739",
+  "model": "gpt5.6-sol",
+  "temperature": 0.2,
+  "timeoutMs": 15000,
+  "fallbackToRules": true
+}

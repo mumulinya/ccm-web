@@ -1,0 +1,73 @@
+{
+  "version": 1,
+  "sessions": [
+    {
+      "id": "tas_mrh9slp9_f7a57b",
+      "scopeId": "mrh9s9dd8kvu",
+      "taskId": "mrh9s9dd8kvu",
+      "groupId": "runtime-real-chain-group",
+      "project": "runtime-e2e-project",
+      "agentType": "claudecode",
+      "nativeSessionId": "ae75bbac-02bc-4103-9d96-0b48da838487",
+      "resumeMode": "native",
+      "status": "open",
+      "turnCount": 2,
+      "lastTurnSucceeded": true,
+      "createdAt": "2026-07-12T04:05:09.213Z",
+      "lastUsedAt": "2026-07-12T04:06:13.025Z",
+      "closedAt": "",
+      "closeReason": "",
+      "nativeCaptureFailures": 0,
+      "nativeRecoveryAttempts": 0,
+      "nativeSessionHistory": [
+        "ae75bbac-02bc-4103-9d96-0b48da838487"
+      ],
+      "lastNativeRecoveryAt": "",
+      "lastError": "",
+      "memoryContextSnapshotId": "tams_29d766d53cad67d0b7",
+      "memoryContextSnapshotPath": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\main-agent-real-chain-home\\.cc-connect\\task-agent-memory-context-snapshots\\tas_mrh9slp9_f7a57b\\tams_29d766d53cad67d0b7.json",
+      "memoryContextSnapshotChecksum": "646e632794df8b4229c414d5",
+      "memoryContextPacketId": "wcp_8e33eaefa62617",
+      "memoryContextSnapshotAt": "2026-07-12T04:05:49.058Z",
+      "memoryContextSnapshots": [
+        {
+          "snapshotId": "tams_2077a724011d6a1e4c",
+          "snapshotPath": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\main-agent-real-chain-home\\.cc-connect\\task-agent-memory-context-snapshots\\tas_mrh9slp9_f7a57b\\tams_2077a724011d6a1e4c.json",
+          "checksum": "5957b743a4aedb5b95cbb185",
+          "workerContextPacketId": "wcp_5945b388ce409b",
+          "workerHandoffId": "wh_508505a957b6e33c",
+          "gateIds": [
+            "gmd_530856f96a7415f058",
+            "ggmh_78d14391d8125c3704",
+            "cfr-rvg:11311b6bb04d65"
+          ],
+          "generatedAt": "2026-07-12T04:05:10.248Z"
+        },
+        {
+          "snapshotId": "tams_29d766d53cad67d0b7",
+          "snapshotPath": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\main-agent-real-chain-home\\.cc-connect\\task-agent-memory-context-snapshots\\tas_mrh9slp9_f7a57b\\tams_29d766d53cad67d0b7.json",
+          "checksum": "646e632794df8b4229c414d5",
+          "workerContextPacketId": "wcp_8e33eaefa62617",
+          "workerHandoffId": "wh_371c5c645eac79a2",
+          "gateIds": [
+            "gmd_a22cd5520e8b31b53b",
+            "ggmh_a61947b15063ce76e3",
+            "cfr-rvg:debbbc8d5dee43"
+          ],
+          "generatedAt": "2026-07-12T04:05:49.058Z"
+        }
+      ],
+      "permissionDriftCount": 0,
+      "lastPermissionDriftAt": "",
+      "runtimeSnapshotId": "86ace7f999b2ffc5",
+      "runtimeSnapshotPath": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\main-agent-real-chain-home\\.cc-connect\\agent-runtime\\claudecode\\86ace7f999b2ffc5\\runtime-tool-snapshot.json",
+      "mcpConfigPath": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\main-agent-real-chain-home\\.cc-connect\\agent-runtime\\claudecode\\86ace7f999b2ffc5\\mcp-86ace7f999b2ffc5.json",
+      "allowedTools": {
+        "mcp": [],
+        "skill": []
+      },
+      "permissionRules": [],
+      "runtimeToolUpdatedAt": "2026-07-12T04:06:13.025Z"
+    }
+  ]
+}

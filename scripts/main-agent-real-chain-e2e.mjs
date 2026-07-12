@@ -103,7 +103,9 @@ fs.writeFileSync(path.join(ccmHome, 'group-logs.json'), '{}')
 
 const orchestratorConfig = path.join(originalHome, '.cc-connect', 'group-orchestrator-config.json')
 assert.equal(fs.existsSync(orchestratorConfig), true, 'unified model config is required for the real-chain test')
-fs.copyFileSync(orchestratorConfig, path.join(ccmHome, 'group-orchestrator-config.json'))
+const isolatedOrchestratorConfig = JSON.parse(fs.readFileSync(orchestratorConfig, 'utf8'))
+isolatedOrchestratorConfig.timeoutMs = Math.min(15_000, Number(isolatedOrchestratorConfig.timeoutMs || 15_000))
+fs.writeFileSync(path.join(ccmHome, 'group-orchestrator-config.json'), JSON.stringify(isolatedOrchestratorConfig, null, 2))
 
 const child = spawn(process.execPath, [path.join(root, 'ccm-package', 'dist', 'server.js'), String(port)], {
   cwd: root,
@@ -311,8 +313,6 @@ try {
   const changedSource = fs.readFileSync(path.join(projectRoot, 'src', 'feature.js'), 'utf8')
   const testResult = spawnSync(process.execPath, [path.join(projectRoot, 'scripts', 'test.mjs')], { cwd: projectRoot, encoding: 'utf8', windowsHide: true })
   const buildResult = spawnSync(process.execPath, [path.join(projectRoot, 'scripts', 'build.mjs')], { cwd: projectRoot, encoding: 'utf8', windowsHide: true })
-  const groupMessagesResponse = await fetch(`${baseUrl}/api/groups/messages?id=runtime-real-chain-group&limit=200`)
-  const groupMessages = groupMessagesResponse.ok ? (await groupMessagesResponse.json()).messages || [] : []
 
   assert.equal(task.status, 'done', `real group task should complete: ${task.status_detail || task.result || task.error || ''}`)
   assert.equal(task.requires_independent_review, true, 'group task should persist the independent-review requirement')
@@ -322,6 +322,10 @@ try {
   assert.match(taskJson, /test.?agent/i, 'task evidence should include TestAgent execution')
   assert.match(taskJson, /independent.?review|独立复核/i, 'task evidence should include independent review')
   assert.match(taskJson, /post.?review.?spot.?check|完成前抽查|主 Agent.*抽查/i, 'task evidence should include the main-agent spot check')
+  const groupMessagesResponse = await fetch(`${baseUrl}/api/groups/messages?id=runtime-real-chain-group&limit=40`)
+  const groupMessagesText = groupMessagesResponse.ok ? await groupMessagesResponse.text() : '{}'
+  assert.ok(Buffer.byteLength(groupMessagesText) < 25 * 1024 * 1024, `group message payload should stay bounded; bytes=${Buffer.byteLength(groupMessagesText)}`)
+  const groupMessages = JSON.parse(groupMessagesText).messages || []
   assert.ok(groupMessages.some(message => message.role === 'assistant' && /完成|交付|验收/.test(String(message.content || ''))), 'group should publish a user-readable delivery summary')
 
   const diff = spawnSync('git', ['diff', '--', 'src/feature.js'], { cwd: projectRoot, encoding: 'utf8', windowsHide: true }).stdout
@@ -346,6 +350,7 @@ try {
       testAgentEvidencePersisted: true,
       mainAgentSpotCheckPersisted: true,
       userSummaryPublished: true,
+      groupMessagePayloadBounded: true,
     },
     diff: diff.slice(0, 2000),
   }, null, 2))
