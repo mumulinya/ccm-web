@@ -26,7 +26,7 @@ export const phaseLabel = (phase) => ({
   pending: '待执行',
   queued: '队列中',
   running: '执行中',
-  blocked: '需接管',
+  blocked: '需要处理',
   done: '已完成',
   failed: '失败',
   unknown: '未知'
@@ -75,12 +75,12 @@ export function useTaskExecutionDashboard(options = {}) {
   const dashboardItems = () => executionDashboard.value?.items || []
   const dashboardQueue = () => executionDashboard.value?.queue_status || {}
   const dashboardFilterOptions = () => {
-    const summary = dashboardSummary()
+    const items = dashboardItems()
     return [
-      { key: 'active', label: '活跃', count: summary.active || 0 },
-      { key: 'done', label: '已完成', count: summary.done || 0 },
-      { key: 'blocked', label: '需接管', count: summary.blocked || 0 },
-      { key: 'all', label: '全部', count: summary.total || dashboardItems().length || 0 }
+      { key: 'active', label: '活跃', count: items.filter(item => item.phase !== 'done').length },
+      { key: 'done', label: '已完成', count: items.filter(item => item.phase === 'done').length },
+      { key: 'blocked', label: '需要处理', count: items.filter(item => item.phase === 'blocked' || item.phase === 'failed').length },
+      { key: 'all', label: '最近记录', count: items.length }
     ]
   }
   const dashboardItemsForFilter = (filter = dashboardFilter.value) => {
@@ -117,7 +117,7 @@ export function useTaskExecutionDashboard(options = {}) {
     if (!summary) return []
     const receipts = summary.receipts?.length ? summary.receipts : (summary.receipt_statuses || [])
     return (summary.assignment_evidence || []).slice(0, 4).map((assignment, index) => {
-      const project = assignment.project || assignment.agent || `子 Agent ${index + 1}`
+      const project = assignment.project || assignment.agent || `执行成员 ${index + 1}`
       const receipt = receipts.find(item => String(item.agent || item.project || '').toLowerCase() === String(project).toLowerCase())
       const status = receipt?.status || assignment.status || (task.status === 'in_progress' ? 'running' : 'pending')
       return {

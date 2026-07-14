@@ -163,6 +163,7 @@ export declare function ingestGlobalAgentConversation(input: {
 export declare function recallGlobalAgentMemory(query: string, options?: {
     sessionId?: string;
     limit?: number;
+    recordMetric?: boolean;
 }): {
     ignored: boolean;
     items: any[];
@@ -180,6 +181,7 @@ export declare function buildGlobalAgentMemoryPacket(query: string, options?: {
     sessionId?: string;
     limit?: number;
     maxChars?: number;
+    recordMetric?: boolean;
 }): string;
 export declare function recordGlobalMissionMemory(input: any): GlobalMemoryItem;
 export declare function recordGlobalDirectDispatchMemory(input: any): GlobalMemoryItem;

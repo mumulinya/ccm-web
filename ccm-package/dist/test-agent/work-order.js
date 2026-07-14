@@ -1685,12 +1685,42 @@ function normalizeTestAgentWorkOrder(input, overrides = {}) {
         options.adversarialProbeWaiver = "";
     }
     const projects = (0, utils_1.asArray)(input?.projects).map((item, index) => normalizeProject(item, index, options.startupTimeoutMs, issues));
+    const productionMutationAuthorized = input?.metadata?.allowProductionMutation === true
+        && !!String(input?.metadata?.productionMutationAuthorizedByUser || "").trim();
     if (!projects.length) {
         issues.push({ severity: "error", code: "missing_projects", message: "TestAgent work order must include at least one project target." });
     }
     for (const project of projects) {
         if (!project.workDir)
             issues.push({ severity: "error", code: "missing_work_dir", message: "Project workDir is required.", project: project.name });
+        const workDirSafety = (0, utils_1.validateTestAgentWorkDir)(project.workDir);
+        if (!workDirSafety.valid)
+            issues.push({ severity: "error", code: "unsafe_work_dir", message: `Project workDir is not allowed: ${workDirSafety.error}.`, project: project.name });
+        for (const [label, candidate] of [["targetUrl", project.targetUrl], ["startupUrl", project.startupUrl]]) {
+            const safety = (0, utils_1.validateTestAgentUrl)(candidate);
+            if (!safety.valid)
+                issues.push({ severity: "error", code: "unsafe_target_url", message: `${label} is not allowed: ${safety.error}.`, project: project.name });
+        }
+        for (const check of [...project.httpChecks, ...project.adversarialHttpChecks]) {
+            const resolvedUrl = (0, utils_1.resolveUrl)(project.targetUrl || project.startupUrl, check.url);
+            const safety = (0, utils_1.validateTestAgentUrl)(resolvedUrl);
+            if (!safety.valid)
+                issues.push({ severity: "error", code: "unsafe_http_check_url", message: `HTTP check URL is not allowed: ${safety.error}.`, project: project.name });
+            const method = String(check.method || "GET").toUpperCase();
+            if ((0, utils_1.isLikelyProductionTestAgentUrl)(resolvedUrl) && !["GET", "HEAD", "OPTIONS"].includes(method) && !productionMutationAuthorized) {
+                issues.push({ severity: "error", code: "production_http_mutation_requires_authorization", message: `HTTP ${method} against a production-like URL requires explicit user authorization metadata.`, project: project.name });
+            }
+        }
+        for (const check of [...project.browserChecks, ...project.adversarialBrowserChecks]) {
+            const resolvedUrl = (0, utils_1.resolveUrl)(project.targetUrl || project.startupUrl, check.url || "");
+            const safety = (0, utils_1.validateTestAgentUrl)(resolvedUrl);
+            if (!safety.valid)
+                issues.push({ severity: "error", code: "unsafe_browser_check_url", message: `Browser check URL is not allowed: ${safety.error}.`, project: project.name });
+            const mutatingAction = (check.actions || []).some(action => /^(?:click|dblclick|fill|type|press|check|uncheck|selectOption|setInputFiles|upload|dragTo|clipboardWrite|storageSet|storageClear|cookieSet|cookieClear|networkOffline|networkOnline)$/i.test(String(action?.type || "")));
+            if ((0, utils_1.isLikelyProductionTestAgentUrl)(resolvedUrl) && mutatingAction && !productionMutationAuthorized) {
+                issues.push({ severity: "error", code: "production_browser_mutation_requires_authorization", message: "Mutating browser actions against a production-like URL require explicit user authorization metadata.", project: project.name });
+            }
+        }
         if (!project.verificationCommands.length && !project.targetUrl && !project.httpChecks.length && !project.adversarialHttpChecks.length && !project.browserChecks.length && !project.adversarialBrowserChecks.length) {
             issues.push({ severity: "warning", code: "no_executable_checks", message: "Project has no verification commands or browser target URL.", project: project.name });
         }

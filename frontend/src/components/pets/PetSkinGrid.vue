@@ -1,4 +1,6 @@
 <script setup>
+import PetSprite from './PetSprite.vue'
+
 defineProps({
   petTypes: { type: Array, default: () => [] },
   selectedType: { type: String, default: '' },
@@ -19,7 +21,8 @@ const emit = defineEmits(['select-skin', 'create-skin'])
       @click="emit('select-skin', petType.id)"
     >
       <div class="skin-avatar-wrap" :style="selectedType === petType.id ? `border-color: ${petType.color || '#3b82f6'};` : ''">
-        <img :src="getPetIconPath(petType.id)" width="44" height="44" :class="{ pixelated: isPixelated(petType.id) }">
+        <PetSprite v-if="Number(petType.spriteVersionNumber) === 2" :type="petType.id" :skin="petType" state="idle" :size="44" />
+        <img v-else :src="getPetIconPath(petType.id)" width="44" height="44" :class="{ pixelated: isPixelated(petType.id) }" alt="">
       </div>
       <span class="skin-name">{{ petType.name }}</span>
       <span v-if="selectedType === petType.id" class="skin-indicator">✓ 已装扮</span>
@@ -29,7 +32,7 @@ const emit = defineEmits(['select-skin', 'create-skin'])
         <span>➕</span>
       </div>
       <span class="skin-name">新建宠物皮肤</span>
-      <span class="skin-indicator muted">自定义外观</span>
+      <span class="skin-indicator muted">从参考图生成</span>
     </div>
   </div>
 </template>

@@ -7,6 +7,7 @@ export interface SelfContainedWorkerHandoffInput {
     reason?: string;
     workDir?: string;
     agentType?: string;
+    model?: string;
     traceId?: string;
     taskId?: string;
     analysis?: any;

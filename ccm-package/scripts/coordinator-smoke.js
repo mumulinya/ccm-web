@@ -8,33 +8,34 @@ process.env.CCM_MEMORY_CONTROL_DIR = path.join(globalMemoryTestDir, "control");
 process.env.CCM_AGENT_QUALITY_DIR = path.join(globalMemoryTestDir, "agent-quality");
 process.on("exit", () => { try { fs.rmSync(globalMemoryTestDir, { recursive: true, force: true }); } catch {} });
 const assert = require("assert");
-const { deriveTaskLifecycle, runCollaborationProtocolSelfTest, runGroupMemoryStorageRecoverySelfTest } = require("../dist/modules/collaboration.js");
-const { runCronDailyDevProtocolSelfTest } = require("../dist/modules/cron.js");
-const { defaultOrchestratorConfig, runCoordinatorProtocolSelfTest } = require("../dist/modules/group-orchestrator.js");
-const { runGlobalAgentIntentSelfTest } = require("../dist/modules/global-agent.js");
+const { deriveTaskLifecycle, runCollaborationProtocolSelfTest } = require("../dist/modules/collaboration/collaboration.js");
+const { runGroupMemoryStorageRecoverySelfTest } = require("../dist/modules/collaboration/memory.js");
+const { runCronDailyDevProtocolSelfTest } = require("../dist/modules/scheduling/cron.js");
+const { defaultOrchestratorConfig, runCoordinatorProtocolSelfTest } = require("../dist/modules/collaboration/group-orchestrator.js");
+const { runGlobalAgentIntentSelfTest } = require("../dist/modules/global/global-agent.js");
 const {
   runGroupMemoryCompactionSelfTest,
   runGroupMemoryCompactionIntegrationSelfTest,
   runGroupMemoryCompactionStressSelfTest,
-} = require("../dist/modules/group-memory-compaction.js");
-const { runAgentRuntimeSessionSelfTest } = require("../dist/agent-runtime.js");
-const { runProjectMemorySelfTest } = require("../dist/project-memory.js");
-const { runTaskAgentSessionSelfTest } = require("../dist/task-agent-sessions.js");
-const { runRuntimeToolSyncSelfTest } = require("../dist/runtime-tool-sync.js");
-const { runToolManagerRuntimeSelfTest } = require("../dist/tool-manager.js");
-const { runExecutionKernelSelfTest, runExecutionKernelCancellationSelfTest } = require("../dist/execution-kernel.js");
-const { runCollaborationResilienceSelfTest, runCollaborationResilienceIntegrationSelfTest } = require("../dist/collaboration-resilience.js");
-const { runReliabilityLedgerSelfTest } = require("../dist/reliability-ledger.js");
-const { runProductionReliabilityDrills } = require("../dist/reliability-drills.js");
-const { runSoakTestSelfTest } = require("../dist/soak-test.js");
-const { runProcessLifecycleSelfTest } = require("../dist/process-lifecycle.js");
-const { runGlobalAgentLoopSelfTest } = require("../dist/global-agent-loop.js");
-const { runGlobalMissionSupervisorSelfTest, runGlobalMissionSupervisorAsyncSelfTest } = require("../dist/global-mission-supervisor.js");
-const { runGlobalAgentMemorySelfTest, runGlobalAgentMemoryStressSelfTest } = require("../dist/global-agent-memory.js");
-const { runAgentQualityCenterSelfTest } = require("../dist/agent-quality-center.js");
-const { runAgentReasoningLoopSelfTest } = require("../dist/agent-reasoning-loop.js");
-const { runGlobalMemoryControlSelfTest } = require("../dist/modules/memory-control-center.js");
-const { runSlashCommandSelfTest } = require("../dist/modules/slash-commands.js");
+} = require("../dist/modules/collaboration/group-memory-compaction.js");
+const { runAgentRuntimeSessionSelfTest } = require("../dist/agents/runtime.js");
+const { runProjectMemorySelfTest } = require("../dist/projects/memory.js");
+const { runTaskAgentSessionSelfTest } = require("../dist/tasks/agent-sessions.js");
+const { runRuntimeToolSyncSelfTest } = require("../dist/tools/runtime-tool-sync.js");
+const { runToolManagerRuntimeSelfTest } = require("../dist/tools/tool-manager.js");
+const { runExecutionKernelSelfTest, runExecutionKernelCancellationSelfTest } = require("../dist/agents/execution-kernel.js");
+const { runCollaborationResilienceSelfTest, runCollaborationResilienceIntegrationSelfTest } = require("../dist/modules/collaboration/collaboration-resilience.js");
+const { runReliabilityLedgerSelfTest } = require("../dist/system/reliability-ledger.js");
+const { runProductionReliabilityDrills } = require("../dist/system/reliability-drills.js");
+const { runSoakTestSelfTest } = require("../dist/system/soak-test.js");
+const { runProcessLifecycleSelfTest } = require("../dist/system/process-lifecycle.js");
+const { runGlobalAgentLoopSelfTest } = require("../dist/agents/global/loop.js");
+const { runGlobalMissionSupervisorSelfTest, runGlobalMissionSupervisorAsyncSelfTest } = require("../dist/agents/global/mission-supervisor.js");
+const { runGlobalAgentMemorySelfTest, runGlobalAgentMemoryStressSelfTest } = require("../dist/agents/global/memory.js");
+const { runAgentQualityCenterSelfTest } = require("../dist/agents/quality-center.js");
+const { runAgentReasoningLoopSelfTest } = require("../dist/agents/reasoning-loop.js");
+const { runGlobalMemoryControlSelfTest } = require("../dist/modules/knowledge/memory-control-center.js");
+const { runSlashCommandSelfTest } = require("../dist/modules/tools/slash-commands.js");
 
 async function main() {
   const result = runCoordinatorProtocolSelfTest();
@@ -50,7 +51,7 @@ async function main() {
   const projectMemory = runProjectMemorySelfTest();
   const taskAgentSession = runTaskAgentSessionSelfTest();
   const runtimeToolSync = runRuntimeToolSyncSelfTest();
-  const toolManagerRuntime = runToolManagerRuntimeSelfTest();
+  const toolManagerRuntime = await runToolManagerRuntimeSelfTest();
   const executionKernel = runExecutionKernelSelfTest();
   const executionKernelCancellation = await runExecutionKernelCancellationSelfTest();
   const collaborationResilience = runCollaborationResilienceSelfTest();
@@ -72,7 +73,19 @@ async function main() {
     waitingDependencyKeepsSession: deriveTaskLifecycle({ status: "in_progress", delivery_summary: { agent_qa_open_count: 1 } }).state === "waiting_dependency",
     reworkKeepsSession: deriveTaskLifecycle({ status: "in_progress", delivery_summary: { rework_count: 1 } }).keepsSession === true,
     failedKeepsSession: deriveTaskLifecycle({ status: "failed", delivery_summary: {} }).keepsSession === true,
-    acceptedCompletionClosesSession: deriveTaskLifecycle({ status: "done", delivery_summary: { acceptance_gate_passed: true } }).keepsSession === false,
+    acceptedCompletionClosesSession: deriveTaskLifecycle({
+      status: "done",
+      delivery_summary: {
+        acceptance_gate_passed: true,
+        acceptance_gate: {
+          pass: true,
+          total: 1,
+          failed_count: 0,
+          checks: [{ id: "verification", ok: true, label: "独立验证已通过", detail: "TestAgent 证据已核对" }],
+        },
+      },
+    }).keepsSession === false,
+    bareCompletionIsNotTerminal: deriveTaskLifecycle({ status: "done", delivery_summary: { acceptance_gate_passed: true } }).terminal === false,
     falseCompletionIsNotTerminal: deriveTaskLifecycle({ status: "done", delivery_summary: { acceptance_gate_passed: false } }).terminal === false,
   };
 

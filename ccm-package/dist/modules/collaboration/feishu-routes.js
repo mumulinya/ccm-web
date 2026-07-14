@@ -4,6 +4,7 @@ exports.handleFeishuRoutes = handleFeishuRoutes;
 const utils_1 = require("../../core/utils");
 const db_1 = require("../../core/db");
 const feishu_1 = require("./feishu");
+const feishu_channel_1 = require("./feishu-channel");
 function handleFeishuRoutes(req, res, parsed) {
     const pathname = parsed.pathname;
     if (pathname === "/api/feishu/config" && req.method === "GET") {
@@ -14,7 +15,7 @@ function handleFeishuRoutes(req, res, parsed) {
                 notification_channel: "webhook",
                 app_id: config.app_id || "",
                 app_secret: config.app_secret ? "******" : "",
-                webhook_url: config.webhook_url || "",
+                webhook_url: config.webhook_url ? "******" : "",
                 sign_key: config.sign_key ? "******" : "",
                 webhook_ready: !!config.webhook_url,
                 notification_ready: !!config.webhook_url,
@@ -38,7 +39,7 @@ function handleFeishuRoutes(req, res, parsed) {
                 const updates = JSON.parse(body);
                 const config = (0, db_1.loadFeishuConfig)();
                 config.notification_channel = "webhook";
-                if (updates.webhook_url !== undefined)
+                if (updates.webhook_url !== undefined && updates.webhook_url !== "******")
                     config.webhook_url = String(updates.webhook_url || "").trim();
                 if (updates.sign_key !== undefined && updates.sign_key !== "******")
                     config.sign_key = String(updates.sign_key || "").trim();
@@ -176,6 +177,31 @@ function handleFeishuRoutes(req, res, parsed) {
             else
                 (0, utils_1.sendJson)(res, { error: result.error || "发送失败", result }, 400);
         }).catch((error) => (0, utils_1.sendJson)(res, { error: error?.message || "发送失败" }, 500));
+        return true;
+    }
+    if (pathname === "/api/feishu/health" && req.method === "GET") {
+        (0, utils_1.sendJson)(res, (0, feishu_channel_1.getFeishuChannelHealth)());
+        return true;
+    }
+    if (pathname === "/api/feishu/health/probe" && req.method === "POST") {
+        (0, feishu_1.probeFeishuControlBotApi)().then((probe) => {
+            const health = (0, feishu_channel_1.getFeishuChannelHealth)();
+            (0, utils_1.sendJson)(res, { ...health, healthy: health.healthy && probe.success === true, api_probe: probe }, probe.success ? 200 : 503);
+        }).catch((error) => (0, utils_1.sendJson)(res, { success: false, error: error?.message || "飞书健康探针失败" }, 503));
+        return true;
+    }
+    if (pathname === "/api/feishu/channel/self-test" && ["GET", "POST"].includes(req.method || "")) {
+        const result = (0, feishu_channel_1.runFeishuChannelSelfTest)();
+        (0, utils_1.sendJson)(res, result, result.pass ? 200 : 500);
+        return true;
+    }
+    if (pathname === "/api/feishu/channel/deliveries" && req.method === "GET") {
+        (0, utils_1.sendJson)(res, { success: true, ...(0, feishu_channel_1.getFeishuChannelDeliverySnapshot)(Number(parsed.query.limit || 50)) });
+        return true;
+    }
+    if (pathname === "/api/feishu/channel/outbox/retry" && req.method === "POST") {
+        (0, feishu_channel_1.tickFeishuNotificationOutbox)(new Date()).then((result) => (0, utils_1.sendJson)(res, { success: true, ...result }))
+            .catch((error) => (0, utils_1.sendJson)(res, { success: false, error: error?.message || "飞书通知重试失败" }, 500));
         return true;
     }
     return false;

@@ -3,6 +3,8 @@ export declare function runToolChainVerificationSelfTest(): {
     checks: {
         verifiedGatePassesObservedScope: boolean;
         readyUnverifiedRequiresObservation: boolean;
+        failedInvocationDoesNotVerifyScope: any;
+        incompleteScopeRoutesToRealBusinessTask: boolean;
         blockedGateBlocksDispatch: boolean;
         unconfiguredScopeExcludedFromConfiguredGate: boolean;
         runtimeResyncActionTargetsSnapshot: boolean;

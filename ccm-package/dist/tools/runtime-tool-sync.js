@@ -473,6 +473,7 @@ function probeRuntimeToolReadiness(audit, options = {}) {
         projectName: String(audit?.projectName || ""),
         groupId: String(audit?.groupId || ""),
         checkedAt: new Date().toISOString(),
+        snapshotGeneratedAt: String(audit?.timestamp || snapshot?.generatedAt || ""),
         deliveryReady,
         runtimeReady,
         deepChecked: options.deep === true,
@@ -700,6 +701,7 @@ function syncManagedSkills(skillRoot, skills, audit, skillPackagesDir = db_1.SKI
                 String(skill.name),
                 `skill:${String(skill.name)}`,
                 directoryName,
+                `$${directoryName}`,
             ].filter(Boolean))),
         });
     }
@@ -1425,7 +1427,7 @@ function syncRuntimeToolsWithCatalog(workDir, agentType, allowedTools, catalog =
         else if (runtime === "codex") {
             const runtimeHome = path.join(runtimeStorageRoot, "codex", authorizationId);
             const configPath = path.join(runtimeHome, "config.toml");
-            const skillRoot = path.join(runtimeHome, ".agents", "skills");
+            const skillRoot = path.join(runtimeHome, "skills");
             fs.mkdirSync(runtimeHome, { recursive: true });
             if (codexGateway?.linkAuth)
                 linkCodexAuth(runtimeHome, audit);
@@ -1871,21 +1873,18 @@ function detectInvokedSkillsFromText(text, allowedTools = {}, skills = (0, db_1.
     if (!allowed.size)
         return [];
     const haystack = String(text || "");
-    const lower = haystack.toLowerCase();
     return skills
         .filter(skill => skill?.enabled !== false && allowed.has(String(skill.name)))
         .filter(skill => {
         const name = String(skill.name || "");
         return new RegExp(`Skill\\s*[:：]\\s*${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "i").test(haystack)
-            || lower.includes(`skill:${name.toLowerCase()}`)
-            || lower.includes(`skill：${name.toLowerCase()}`)
-            || lower.includes(name.toLowerCase());
+            || new RegExp(`(?:^|[\\s,，;；])skill:${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:$|[\\s,，;；])`, "i").test(haystack);
     })
         .map(skill => ({
         name: String(skill.name),
         contentHash: crypto.createHash("sha256").update(String(skill.prompt || "")).digest("hex").slice(0, 16),
         invokedAt: new Date().toISOString(),
-        source: /Skill\s*[:：]/i.test(haystack) ? "receipt" : "output",
+        source: "receipt",
     }));
 }
 function recordRuntimeToolSyncAudit(audit, projectName = "", groupId = "") {

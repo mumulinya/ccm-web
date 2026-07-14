@@ -14,6 +14,7 @@ export function useGlobalAgentAttachments(options = {}) {
   const handleFileChange = (e) => {
     const files = Array.from(e.target.files || [])
     files.forEach(f => {
+      if (f.size > 25 * 1024 * 1024) return
       if (selectedFiles.value.some(existing => existing.name === f.name && existing.size === f.size)) return
       if (f.type.startsWith('image/')) {
         const reader = new FileReader()

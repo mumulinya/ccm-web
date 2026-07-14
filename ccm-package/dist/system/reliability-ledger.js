@@ -56,6 +56,7 @@ const fs = __importStar(require("fs"));
 const os = __importStar(require("os"));
 const path = __importStar(require("path"));
 const utils_1 = require("../core/utils");
+const task_replay_journal_1 = require("./task-replay-journal");
 const ROOT = path.join(utils_1.CCM_DIR, "reliability");
 const TRACE_DIR = path.join(ROOT, "traces");
 const IDEMPOTENCY_DIR = path.join(ROOT, "idempotency");
@@ -146,6 +147,12 @@ function appendTraceEvent(traceId, event) {
     if (next.group_id)
         current.group_id = next.group_id;
     writeJsonAtomic(file, current);
+    if (next.task_id) {
+        try {
+            (0, task_replay_journal_1.appendTaskReplayJournalEvent)(next.task_id, { ...next, trace_id: id });
+        }
+        catch { }
+    }
     return next;
 }
 function listTraces(limit = 50) {

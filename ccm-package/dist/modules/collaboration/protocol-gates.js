@@ -36,6 +36,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.extractContractSyncHints = extractContractSyncHints;
 exports.buildAckPreflightReview = buildAckPreflightReview;
 exports.buildContractTransferPlan = buildContractTransferPlan;
+exports.runContractTransferPlanSelfTest = runContractTransferPlanSelfTest;
 exports.getTaskAckRewriteRows = getTaskAckRewriteRows;
 exports.getTaskContractInjectionRows = getTaskContractInjectionRows;
 exports.evaluateContractInjectionGate = evaluateContractInjectionGate;
@@ -124,7 +125,14 @@ function evaluateContractConsumptionQuality(receipt, injectionId) {
 }
 function extractContractSyncHints(task, summary = {}) {
     const structured = (Array.isArray(summary.receipts) ? summary.receipts : [])
-        .flatMap((item) => Array.isArray(item.contractChanges || item.contract_changes) ? (item.contractChanges || item.contract_changes) : [])
+        .flatMap((item) => {
+        const changes = Array.isArray(item.contractChanges || item.contract_changes) ? (item.contractChanges || item.contract_changes) : [];
+        const producer = String(item.agent || item.project || "").trim();
+        return changes.map((change) => ({
+            ...change,
+            producers: normalizeStringArray(change?.producers || change?.producer || change?.provider || change?.owner || producer),
+        }));
+    })
         .filter((item) => item && typeof item === "object");
     const text = [
         task?.title,
@@ -187,8 +195,26 @@ function buildContractTransferPlan(contractSync, orders = []) {
     const changes = Array.isArray(contractSync?.changes) ? contractSync.changes : [];
     const orderProjects = new Set(orders.map((item) => String(item.project || "").trim()).filter(Boolean));
     const rows = changes.flatMap((change, index) => {
-        const consumers = normalizeStringArray(change.consumers || change.consumer || change.dependents);
-        const targets = consumers.length ? consumers : [...orderProjects].filter(project => !normalizeStringArray(change.producers || change.provider || change.owner).includes(project));
+        const declaredConsumers = normalizeStringArray(change.consumers || change.consumer || change.dependents);
+        const consumers = declaredConsumers.filter((consumer) => {
+            const value = consumer.trim();
+            if (/^(?:test[-_\s]?agent|测试\s*agent|主\s*agent|群聊主\s*agent|global[-_\s]?agent|coordinator)(?:\b|[（(])/i.test(value))
+                return false;
+            if (/[\\/]/.test(value))
+                return false;
+            if (/\.(?:m?[jt]sx?|vue|svelte|css|scss|less|json|ya?ml|toml|md|py|go|rs|java|kt|cs|php|rb)(?:\b|[（(])/i.test(value))
+                return false;
+            return true;
+        });
+        const changeType = String(change.type || "").trim().toLowerCase();
+        const isProjectInternalChange = ["export_added", "internal_export", "internal", "implementation"].includes(changeType);
+        const targets = consumers.length
+            ? consumers
+            : declaredConsumers.length
+                ? []
+                : isProjectInternalChange
+                    ? []
+                    : [...orderProjects].filter(project => !normalizeStringArray(change.producers || change.provider || change.owner).includes(project));
         return targets.map((target) => ({
             id: `contract_transfer_${index + 1}_${target}`,
             injection_id: stableInjectionId({ ...change, target }),
@@ -200,11 +226,55 @@ function buildContractTransferPlan(contractSync, orders = []) {
         }));
     }).slice(0, 12);
     return {
-        required: changes.length > 0,
-        status: rows.length ? (rows.some((row) => row.status === "needs_target") ? "needs_target" : "ready") : (contractSync?.required ? "needs_contract_changes" : "not_required"),
+        required: rows.length > 0,
+        status: rows.length
+            ? (rows.some((row) => row.status === "needs_target") ? "needs_target" : "ready")
+            : changes.length
+                ? "not_required"
+                : (contractSync?.required ? "needs_contract_changes" : "not_required"),
         rows,
         next_action: rows.length ? "将结构化契约变化注入给依赖子 Agent 或生成契约同步返工" : "暂无结构化契约需要传递",
     };
+}
+function runContractTransferPlanSelfTest() {
+    const receipt = {
+        agent: "runtime-project",
+        contractChanges: [{ type: "api", endpoint: "GET /api/runtime", note: "新增跨项目接口" }],
+    };
+    const sync = extractContractSyncHints({}, { receipts: [receipt] });
+    const singleProject = buildContractTransferPlan(sync, [{ project: "runtime-project" }]);
+    const multiProject = buildContractTransferPlan(sync, [{ project: "runtime-project" }, { project: "web-app" }]);
+    const explicitConsumer = buildContractTransferPlan({
+        required: true,
+        changes: [{ type: "api", producers: ["runtime-project"], consumers: ["mobile-app"] }],
+    }, [{ project: "runtime-project" }]);
+    const checks = {
+        receiptAgentBecomesProducer: sync.changes?.[0]?.producers?.includes("runtime-project") === true,
+        singleProjectDoesNotInjectIntoItself: singleProject.required === false && singleProject.rows.length === 0,
+        multiProjectTargetsOtherAgent: multiProject.rows.length === 1 && multiProject.rows[0].target === "web-app",
+        internalExportWithoutConsumerStaysLocal: buildContractTransferPlan({
+            required: true,
+            changes: [{ type: "export_added", producers: ["runtime-project"] }],
+        }, [{ project: "runtime-project" }, { project: "test-agent" }]).rows.length === 0,
+        testAgentReviewTargetIsNotAProjectConsumer: buildContractTransferPlan({
+            required: true,
+            changes: [{
+                    type: "export_added",
+                    producers: ["runtime-project"],
+                    consumers: ["test-agent（独立复核路径）"],
+                }],
+        }, [{ project: "runtime-project" }]).rows.length === 0,
+        filePathConsumerIsNotAProjectConsumer: buildContractTransferPlan({
+            required: true,
+            changes: [{
+                    type: "config_value_update",
+                    producers: ["runtime-project"],
+                    consumers: ["scripts/test.mjs（CCM_TEST_AGENT_REVIEW=1 模式）", "scripts/build.mjs"],
+                }],
+        }, [{ project: "runtime-project" }, { project: "web-app" }]).rows.length === 0,
+        explicitUnknownConsumerStillNeedsTarget: explicitConsumer.required === true && explicitConsumer.rows[0]?.status === "needs_target",
+    };
+    return { pass: Object.values(checks).every(Boolean), checks };
 }
 function getTaskAckRewriteRows(task) {
     const summary = task?.delivery_summary || {};

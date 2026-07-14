@@ -1,11 +1,27 @@
 import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
-import { getAgentRuntime, normalizeAgentRuntimeId } from "../agents/runtime";
+import { AGENT_RUNTIMES, getAgentRuntime, normalizeAgentRuntimeId } from "../agents/runtime";
 import { CCM_DIR } from "../core/utils";
+import {
+  extractGroupPostTurnSummaryDeliveryCapsule,
+  validateGroupPostTurnSummaryDeliveryCapsule,
+} from "../modules/collaboration/group-post-turn-summary";
+import { verifyGroupCompactTransactionReceipt } from "../modules/collaboration/group-memory-compaction";
+import { validateGroupCompactHeadBinding } from "../modules/collaboration/group-compact-head";
+import {
+  ensureGroupSessionLifecycleHead,
+  validateGroupSessionLifecycleBinding,
+} from "../modules/collaboration/group-session-lifecycle-head";
+import { readTaskAgentInvocationLineage } from "./task-agent-invocation-lineage";
+import { tryRecordTaskAgentContinuationSoakEvent } from "./task-agent-continuation-soak";
 
 const STORE_FILE = path.join(CCM_DIR, "task-agent-sessions.json");
 const STORE_BACKUP_FILE = `${STORE_FILE}.bak`;
+const STORE_LOCK_FILE = `${STORE_FILE}.lock`;
+const STORE_LOCK_TIMEOUT_MS = 15_000;
+const STORE_LOCK_STALE_MS = 60_000;
+const STORE_LOCK_RETRY_MS = 20;
 const MEMORY_CONTEXT_SNAPSHOT_DIR = path.join(CCM_DIR, "task-agent-memory-context-snapshots");
 const MAX_SESSION_RECORDS = 500;
 const MAX_MEMORY_CONTEXT_SNAPSHOTS_PER_SESSION = 20;
@@ -21,7 +37,14 @@ export type TaskAgentMemoryContextSnapshotRef = {
   workerContextPacketId?: string;
   workerHandoffId?: string;
   gateIds?: string[];
+  deliveryReceiptId?: string;
+  deliveryReceiptPath?: string;
+  deliveryReceiptChecksum?: string;
+  deliveryStatus?: string;
+  deliveredAt?: string;
   generatedAt: string;
+  invocationEdgeId?: string;
+  branchId?: string;
 };
 
 export type TaskAgentSession = {
@@ -59,6 +82,27 @@ export type TaskAgentSession = {
   memoryContextPacketId?: string;
   memoryContextSnapshotAt?: string;
   memoryContextSnapshots?: TaskAgentMemoryContextSnapshotRef[];
+  memoryContextDeliveryReceiptId?: string;
+  memoryContextDeliveryReceiptPath?: string;
+  memoryContextDeliveryReceiptChecksum?: string;
+  memoryContextDeliveryStatus?: string;
+  memoryContextDeliveredAt?: string;
+  modelContextWindow?: number;
+  capacityEvidenceChecksum?: string;
+  capacityRevalidationRequired?: boolean;
+  capacityDowngradeGate?: any;
+  capacityRevalidationProof?: any;
+  capacityRevalidationCommitReceipt?: any;
+  modelId?: string;
+  modelCapabilitySource?: string;
+  modelCapabilityCheckedAt?: string;
+  modelIdentityHistory?: any[];
+  providerContractId?: string;
+  pendingProviderContractId?: string;
+  providerRuntimeVersion?: string;
+  providerRuntimeIdentityChecksum?: string;
+  providerContractHistory?: any[];
+  lastProviderContractTransitionAt?: string;
 };
 
 function emptyStore() {
@@ -129,6 +173,114 @@ function writeJsonAtomic(file: string, value: any) {
   const tmp = `${file}.${process.pid}.tmp`;
   fs.writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`, "utf-8");
   fs.renameSync(tmp, file);
+}
+
+type TaskAgentSessionStoreLock = {
+  schema: "ccm-task-agent-session-store-lock-v1";
+  token: string;
+  pid: number;
+  acquiredAt: string;
+  expiresAt: string;
+};
+
+const STORE_LOCK_WAIT_ARRAY = new Int32Array(new SharedArrayBuffer(4));
+
+function sleepForStoreLock(ms: number) {
+  Atomics.wait(STORE_LOCK_WAIT_ARRAY, 0, 0, Math.max(1, ms));
+}
+
+function processIsAlive(pid: number) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  if (pid === process.pid) return true;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error: any) {
+    return error?.code === "EPERM";
+  }
+}
+
+function readTaskAgentSessionStoreLock() {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(STORE_LOCK_FILE, "utf-8"));
+    return parsed && typeof parsed === "object" ? parsed as TaskAgentSessionStoreLock : null;
+  } catch {
+    return null;
+  }
+}
+
+function removeStaleTaskAgentSessionStoreLock(nowMs = Date.now()) {
+  if (!fs.existsSync(STORE_LOCK_FILE)) return false;
+  const current = readTaskAgentSessionStoreLock();
+  let stale = false;
+  if (current) {
+    const expiresAt = Date.parse(String(current.expiresAt || ""));
+    stale = !processIsAlive(Number(current.pid || 0)) || (Number.isFinite(expiresAt) && expiresAt <= nowMs);
+  } else {
+    try {
+      stale = nowMs - fs.statSync(STORE_LOCK_FILE).mtimeMs >= STORE_LOCK_STALE_MS;
+    } catch {
+      stale = true;
+    }
+  }
+  if (!stale) return false;
+  try {
+    fs.rmSync(STORE_LOCK_FILE, { force: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function acquireTaskAgentSessionStoreLock(timeoutMs = STORE_LOCK_TIMEOUT_MS) {
+  fs.mkdirSync(path.dirname(STORE_LOCK_FILE), { recursive: true });
+  const deadline = Date.now() + Math.max(1, timeoutMs);
+  while (Date.now() <= deadline) {
+    const acquiredAtMs = Date.now();
+    const lock: TaskAgentSessionStoreLock = {
+      schema: "ccm-task-agent-session-store-lock-v1",
+      token: crypto.randomBytes(16).toString("hex"),
+      pid: process.pid,
+      acquiredAt: new Date(acquiredAtMs).toISOString(),
+      expiresAt: new Date(acquiredAtMs + STORE_LOCK_STALE_MS).toISOString(),
+    };
+    try {
+      const fd = fs.openSync(STORE_LOCK_FILE, "wx", 0o600);
+      try {
+        fs.writeFileSync(fd, `${JSON.stringify(lock)}\n`, "utf-8");
+        fs.fsyncSync(fd);
+      } finally {
+        fs.closeSync(fd);
+      }
+      return lock;
+    } catch (error: any) {
+      if (error?.code !== "EEXIST") throw error;
+      removeStaleTaskAgentSessionStoreLock();
+      sleepForStoreLock(STORE_LOCK_RETRY_MS);
+    }
+  }
+  const owner = readTaskAgentSessionStoreLock();
+  throw new Error(`task Agent session store lock timeout${owner?.pid ? ` (owner pid ${owner.pid})` : ""}`);
+}
+
+function releaseTaskAgentSessionStoreLock(lock: TaskAgentSessionStoreLock) {
+  const current = readTaskAgentSessionStoreLock();
+  if (!current || current.token !== lock.token || Number(current.pid || 0) !== process.pid) return false;
+  try {
+    fs.rmSync(STORE_LOCK_FILE, { force: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function withTaskAgentSessionStoreLock<T>(operation: () => T): T {
+  const lock = acquireTaskAgentSessionStoreLock();
+  try {
+    return operation();
+  } finally {
+    releaseTaskAgentSessionStoreLock(lock);
+  }
 }
 
 function safeFileSegment(value: any, fallback = "unknown") {
@@ -202,6 +354,11 @@ function normalizeMemorySnapshotRefs(value: any): TaskAgentMemoryContextSnapshot
     gateIds: Array.isArray(item?.gateIds || item?.gate_ids)
       ? (item.gateIds || item.gate_ids).map((id: any) => String(id || "").trim()).filter(Boolean).slice(0, 80)
       : [],
+    deliveryReceiptId: String(item?.deliveryReceiptId || item?.delivery_receipt_id || "").trim(),
+    deliveryReceiptPath: String(item?.deliveryReceiptPath || item?.delivery_receipt_path || "").trim(),
+    deliveryReceiptChecksum: String(item?.deliveryReceiptChecksum || item?.delivery_receipt_checksum || "").trim(),
+    deliveryStatus: String(item?.deliveryStatus || item?.delivery_status || "").trim(),
+    deliveredAt: String(item?.deliveredAt || item?.delivered_at || "").trim(),
     generatedAt: String(item?.generatedAt || item?.generated_at || "").trim(),
   })).filter((item: TaskAgentMemoryContextSnapshotRef) => item.snapshotId || item.snapshotPath);
 }
@@ -235,7 +392,7 @@ function listMemoryContextSnapshotFilesOnDisk() {
       if (!entry.isDirectory()) continue;
       const sessionDir = path.join(MEMORY_CONTEXT_SNAPSHOT_DIR, entry.name);
       for (const fileEntry of fs.readdirSync(sessionDir, { withFileTypes: true })) {
-        if (fileEntry.isFile() && fileEntry.name.endsWith(".json")) {
+        if (fileEntry.isFile() && fileEntry.name.endsWith(".json") && !fileEntry.name.endsWith(".delivery.json")) {
           files.push({ file: path.join(sessionDir, fileEntry.name), sessionId: entry.name });
         }
       }
@@ -266,6 +423,186 @@ function hasMeaningfulMemoryContext(value: any) {
   return Object.keys(value).length > 0;
 }
 
+function extractGroupSessionMemoryBinding(memoryContext: any = {}) {
+  const groupMemory = memoryContext?.schema === "ccm-group-memory-context-v1"
+    ? memoryContext
+    : memoryContext?.group_memory?.schema === "ccm-group-memory-context-v1"
+      ? memoryContext.group_memory
+      : null;
+  if (!groupMemory) return null;
+  const groupId = String(groupMemory.group_id || groupMemory.groupId || "").trim();
+  const groupSessionId = String(groupMemory.group_session_id || groupMemory.groupSessionId || "").trim();
+  const sessionMemory = groupMemory.compaction?.sessionMemory || groupMemory.compaction?.session_memory || null;
+  const sectionEvidence = sessionMemory?.sectionEvidence || sessionMemory?.section_evidence || null;
+  const modelReceipt = sessionMemory?.modelExtractionReceipt || sessionMemory?.model_extraction_receipt || null;
+  const replayEvidence = sessionMemory?.modelExtractionReplayEvidence || sessionMemory?.model_extraction_replay_evidence || null;
+  const factSupersession = sessionMemory?.factSupersession || sessionMemory?.fact_supersession || null;
+  const sessionBinding = groupMemory.session_binding || groupMemory.sessionBinding || {};
+  const compactTransactionReceipt = groupMemory.compaction?.compactTransactionReceipt
+    || groupMemory.compaction?.compact_transaction_receipt
+    || groupMemory.compactTransactionReceipt
+    || groupMemory.compact_transaction_receipt
+    || null;
+  const compactEpoch = String(
+    compactTransactionReceipt?.compact_epoch
+    || groupMemory.group_state?.typedMemory?.ledger?.compactEpoch
+    || groupMemory.group_state?.typed_memory?.ledger?.compact_epoch
+    || "precompact"
+  ).trim() || "precompact";
+  const compactTransactionReceiptRequired = compactEpoch !== "precompact";
+  const compactTransactionVerification = compactTransactionReceipt
+    ? verifyGroupCompactTransactionReceipt(compactTransactionReceipt, { groupId, groupSessionId, compactEpoch })
+    : { valid: false, issues: ["compact_transaction_receipt_missing"] };
+  const compactHead = groupMemory.compact_head || groupMemory.compactHead || null;
+  const compactHeadFenceRequired = groupSessionId.startsWith("gcs_")
+    && groupMemory.memory_policy?.ignored !== true
+    && groupMemory.memoryPolicy?.ignored !== true;
+  const compactHeadValidation = compactHeadFenceRequired
+    ? validateGroupCompactHeadBinding({
+      groupId,
+      groupSessionId,
+      compactEpoch,
+      compactTransactionReceiptChecksum: compactTransactionReceipt?.receipt_checksum || "",
+      compactTransactionBoundaryId: compactTransactionReceipt?.boundary_id || "",
+      compactHeadGeneration: Number(compactHead?.generation || 0),
+      compactHeadId: String(compactHead?.head_id || ""),
+      compactHeadChecksum: String(compactHead?.head_checksum || ""),
+    })
+    : { valid: true, status: "exempt", issues: [] };
+  const sessionLifecycleFenceRequired = groupSessionId.startsWith("gcs_");
+  let sessionLifecycleHead = groupMemory.session_lifecycle_head || groupMemory.sessionLifecycleHead || null;
+  if (sessionLifecycleFenceRequired && !sessionLifecycleHead) {
+    try {
+      sessionLifecycleHead = ensureGroupSessionLifecycleHead(groupId, groupSessionId, { reason: "task_agent_snapshot_lazy_adopt" }).head;
+    } catch {}
+  }
+  const sessionLifecycleValidation = sessionLifecycleFenceRequired
+    ? validateGroupSessionLifecycleBinding({
+      groupId,
+      groupSessionId,
+      lifecycleStatus: sessionLifecycleHead?.status,
+      lifecycleGeneration: sessionLifecycleHead?.generation,
+      lifecycleHeadId: sessionLifecycleHead?.lifecycle_head_id,
+      lifecycleHeadChecksum: sessionLifecycleHead?.head_checksum,
+    })
+    : { valid: true, status: "exempt", issues: [] };
+  const scopeId = groupSessionId === "default" || !groupSessionId ? groupId : `${groupId}--${groupSessionId}`;
+  const replayEvidencePayload = replayEvidence ? { ...replayEvidence } : null;
+  if (replayEvidencePayload) {
+    delete replayEvidencePayload.checksum;
+    delete replayEvidencePayload.checksumValid;
+  }
+  const replayEvidenceChecksumValid = !!replayEvidence?.checksum
+    && replayEvidence?.checksumValid === true
+    && hashValue(replayEvidencePayload || {}, 64) === String(replayEvidence.checksum || "");
+  const modelExtractionExecutionId = String(replayEvidence?.executionId || modelReceipt?.executionId || "").trim();
+  const modelExtractionReceiptChecksum = String(replayEvidence?.receiptChecksum || modelReceipt?.checksum || "").trim();
+  const factSupersessionGraphChecksum = String(factSupersession?.graphChecksum || factSupersession?.graph_checksum || "").trim();
+  const modelExtractionEvidenceRequired = String(modelReceipt?.status || "") === "committed" || !!modelExtractionExecutionId;
+  const modelExtractionEvidenceValid = !modelExtractionEvidenceRequired || (
+    replayEvidenceChecksumValid
+    && replayEvidence?.historyIntegrityValid === true
+    && replayEvidence?.replayPass === true
+    && String(replayEvidence?.replayStatus || "") === "verified"
+    && String(replayEvidence?.replayExecutionId || "") === modelExtractionExecutionId
+    && modelExtractionReceiptChecksum === String(modelReceipt?.checksum || "")
+    && String(replayEvidence?.factSupersessionGraphChecksum || "") === String(modelReceipt?.factSupersessionGraphChecksum || factSupersessionGraphChecksum)
+    && (!factSupersessionGraphChecksum || factSupersession?.graphValid === true)
+    && (!factSupersessionGraphChecksum || factSupersessionGraphChecksum === String(replayEvidence?.factSupersessionGraphChecksum || ""))
+  );
+  const activeFacts = factSupersession?.graphValid === true && Array.isArray(factSupersession?.activeFacts || factSupersession?.active_facts)
+    ? (factSupersession.activeFacts || factSupersession.active_facts).slice(0, 120).map((fact: any) => ({
+      factId: String(fact?.factId || fact?.fact_id || "").trim(),
+      factChecksum: String(fact?.factChecksum || fact?.fact_checksum || "").trim(),
+      sourceMessageId: String(fact?.sourceMessageId || fact?.source_message_id || "").trim(),
+    })).filter((fact: any) => fact.factId && fact.factChecksum)
+    : [];
+  const binding = {
+    schema: "ccm-task-agent-group-session-memory-binding-v2",
+    version: 2,
+    groupId,
+    groupSessionId,
+    scopeId,
+    memoryBindingId: String(sessionBinding.binding_id || sessionBinding.bindingId || "").trim(),
+    memoryPolicy: String(groupMemory.memory_policy?.use || groupMemory.memoryPolicy?.use || "").trim(),
+    memoryIgnored: groupMemory.memory_policy?.ignored === true || groupMemory.memoryPolicy?.ignored === true,
+    sessionMemoryAvailable: !!sessionMemory?.schema,
+    sessionMemorySnapshotFile: String(sessionMemory?.snapshotFile || sessionMemory?.snapshot_file || "").trim(),
+    sessionMemorySummaryFile: String(sessionMemory?.summaryFile || sessionMemory?.summary_file || "").trim(),
+    sessionMemoryChecksum: String(sessionMemory?.markdownChecksum || sessionMemory?.markdown_checksum || "").trim(),
+    sessionMemoryHasSummary: sessionMemory?.hasSummary === true || sessionMemory?.has_summary === true,
+    sessionMemoryFencingToken: Number(sessionMemory?.extractionTransaction?.fencingToken || sessionMemory?.extraction_transaction?.fencing_token || 0),
+    sessionMemorySectionEvidenceChecksum: String(sectionEvidence?.checksum || "").trim(),
+    sessionMemorySectionEvidence: Array.isArray(sectionEvidence?.sections)
+      ? sectionEvidence.sections.slice(0, 20).map((item: any) => ({
+        evidenceId: String(item?.evidenceId || item?.evidence_id || "").trim(),
+        section: String(item?.section || "").trim(),
+        sectionIndex: Number(item?.sectionIndex || item?.section_index || 0),
+        sectionChecksum: String(item?.sectionChecksum || item?.section_checksum || "").trim(),
+        sourceTranscriptChecksum: String(item?.sourceTranscriptChecksum || item?.source_transcript_checksum || sectionEvidence?.sourceTranscriptChecksum || "").trim(),
+        sourceFirstMessageId: String(item?.sourceFirstMessageId || item?.source_first_message_id || sectionEvidence?.sourceFirstMessageId || "").trim(),
+        sourceLastMessageId: String(item?.sourceLastMessageId || item?.source_last_message_id || sectionEvidence?.sourceLastMessageId || "").trim(),
+        sourceMessageIds: Array.from(new Set(
+          (Array.isArray(item?.sourceMessageIds || item?.source_message_ids)
+            ? (item.sourceMessageIds || item.source_message_ids)
+            : sectionEvidence?.sourceMessageIds || [])
+            .map((value: any) => String(value || "").trim())
+            .filter(Boolean)
+        )).slice(0, 240),
+      })).filter((item: any) => item.evidenceId && item.sectionChecksum)
+      : [],
+    modelExtractionExecutionId,
+    modelExtractionReceiptChecksum,
+    modelExtractionHistoryHeadChecksum: String(replayEvidence?.historyHeadChecksum || "").trim(),
+    modelExtractionReplayStatus: String(replayEvidence?.replayStatus || "").trim(),
+    modelExtractionReplayExecutionId: String(replayEvidence?.replayExecutionId || "").trim(),
+    modelExtractionReplayEvidenceChecksum: String(replayEvidence?.checksum || "").trim(),
+    modelExtractionEvidenceRequired,
+    modelExtractionEvidenceValid,
+    factSupersessionGraphChecksum,
+    factSupersessionGraphValid: factSupersession?.graphValid === true,
+    activeFactChecksums: activeFacts.map((fact: any) => fact.factChecksum),
+    activeFacts,
+    compactEpoch,
+    compactTransactionReceiptRequired,
+    compactTransactionReceipt: compactTransactionReceipt || null,
+    compactTransactionReceiptId: String(compactTransactionReceipt?.receipt_id || "").trim(),
+    compactTransactionBoundaryId: String(compactTransactionReceipt?.boundary_id || "").trim(),
+    compactTransactionReceiptChecksum: String(compactTransactionReceipt?.receipt_checksum || "").trim(),
+    compactTransactionReceiptValid: compactTransactionVerification.valid === true,
+    compactTransactionReceiptIssues: compactTransactionVerification.issues,
+    compactHeadFenceRequired,
+    compactHeadFenceValid: compactHeadValidation.valid === true,
+    compactHeadFenceStatus: compactHeadValidation.status,
+    compactHeadFenceIssues: compactHeadValidation.issues,
+    compactHeadId: String(compactHead?.head_id || ""),
+    compactHeadGeneration: Number(compactHead?.generation || 0),
+    compactHeadChecksum: String(compactHead?.head_checksum || ""),
+    sessionLifecycleFenceRequired,
+    sessionLifecycleFenceValid: sessionLifecycleValidation.valid === true,
+    sessionLifecycleFenceStatus: sessionLifecycleValidation.status,
+    sessionLifecycleFenceIssues: sessionLifecycleValidation.issues,
+    sessionLifecycleHeadId: String(sessionLifecycleHead?.lifecycle_head_id || ""),
+    sessionLifecycleGeneration: Number(sessionLifecycleHead?.generation || 0),
+    sessionLifecycleStatus: String(sessionLifecycleHead?.status || ""),
+    sessionLifecycleHeadChecksum: String(sessionLifecycleHead?.head_checksum || ""),
+    deliveryReady: modelExtractionEvidenceValid
+      && (!compactTransactionReceiptRequired || compactTransactionVerification.valid === true)
+      && compactHeadValidation.valid === true
+      && sessionLifecycleValidation.valid === true,
+  };
+  return { ...binding, checksum: hashValue(binding) };
+}
+
+export function verifyMemoryContextDeliveryReceiptChecksum(receipt: any) {
+  if (!receipt?.checksum) return false;
+  const payload = { ...receipt };
+  const expected = String(payload.checksum || "");
+  delete payload.checksum;
+  delete payload.receiptFile;
+  return hashValue(payload, 64) === expected;
+}
+
 export function openTaskAgentSession(input: {
   scopeId: string;
   taskId?: string;
@@ -273,8 +610,9 @@ export function openTaskAgentSession(input: {
   project: string;
   agentType: string;
 }) {
-  const store = loadStore();
-  const runtime = normalizeAgentRuntimeId(input.agentType);
+  return withTaskAgentSessionStoreLock(() => {
+    const store = loadStore();
+    const runtime = normalizeAgentRuntimeId(input.agentType);
   const existing = [...store.sessions].reverse().find((item: TaskAgentSession) =>
     item.status === "open"
     && item.scopeId === input.scopeId
@@ -319,18 +657,21 @@ export function openTaskAgentSession(input: {
   };
   store.sessions.push(session);
   saveStore(store);
-  return session;
+    return session;
+  });
 }
 
-export function recordTaskAgentSessionTurn(sessionId: string, result: { nativeSessionId?: string; success?: boolean; error?: string; nativeSessionInvalid?: boolean; permissionDrift?: boolean; runtimeToolSnapshot?: any } = {}) {
-  const store = loadStore();
-  const index = store.sessions.findIndex((item: TaskAgentSession) => item.id === sessionId);
-  if (index < 0) return null;
-  const current = store.sessions[index];
-  const next = advanceTaskAgentSession(current, result);
-  store.sessions[index] = next;
-  saveStore(store);
-  return next;
+export function recordTaskAgentSessionTurn(sessionId: string, result: { nativeSessionId?: string; success?: boolean; error?: string; nativeSessionInvalid?: boolean; nativeContinuationUnverified?: boolean; nativeContinuationEvidence?: any; permissionDrift?: boolean; runtimeToolSnapshot?: any; modelCapabilityRecord?: any; nativeModelCapabilityRecord?: any } = {}) {
+  return withTaskAgentSessionStoreLock(() => {
+    const store = loadStore();
+    const index = store.sessions.findIndex((item: TaskAgentSession) => item.id === sessionId);
+    if (index < 0) return null;
+    const current = store.sessions[index];
+    const next = advanceTaskAgentSession(current, result);
+    store.sessions[index] = next;
+    saveStore(store);
+    return next;
+  });
 }
 
 export function bindTaskAgentMemoryContextSnapshot(sessionId: string, input: {
@@ -349,15 +690,18 @@ export function bindTaskAgentMemoryContextSnapshot(sessionId: string, input: {
   renderedHandoff?: string;
   renderedPrompt?: string;
   runtimeToolSnapshot?: any;
+  invocationLineage?: any;
 } = {}) {
   const id = String(sessionId || "").trim();
   if (!id) return null;
-  const store = loadStore();
-  const index = store.sessions.findIndex((item: TaskAgentSession) => item.id === id);
-  if (index < 0) return null;
-  const current = store.sessions[index];
+  return withTaskAgentSessionStoreLock(() => {
+    const store = loadStore();
+    const index = store.sessions.findIndex((item: TaskAgentSession) => item.id === id);
+    if (index < 0) return null;
+    const current = store.sessions[index];
   const packet = input.workerContextPacket || input.workerHandoff?.worker_context_packet || input.workerHandoff?.workerContextPacket || {};
   const memoryContext = input.memoryContext || packet.memory || input.workerHandoff?.references?.memory_context || input.workerHandoff?.references?.memoryContext || null;
+  const groupSessionMemoryBinding = extractGroupSessionMemoryBinding(memoryContext || {});
   const workerHandoffId = String(input.workerHandoff?.handoff_id || input.workerHandoff?.handoffId || input.workerHandoffSummary?.handoff_id || input.workerHandoffSummary?.handoffId || "").trim();
   const workerContextPacketId = String(packet?.packet_id || packet?.packetId || input.workerHandoffSummary?.packet_id || input.workerHandoffSummary?.packetId || "").trim();
   const generatedAt = new Date().toISOString();
@@ -366,6 +710,31 @@ export function bindTaskAgentMemoryContextSnapshot(sessionId: string, input: {
     worker_handoff: input.workerHandoff || null,
     memory_context: memoryContext,
   })).slice(0, 100);
+  const postTurnSummaryCapsuleInput = packet?.post_turn_summary_delivery_capsule
+    || packet?.postTurnSummaryDeliveryCapsule
+    || extractGroupPostTurnSummaryDeliveryCapsule(memoryContext || packet || null);
+  const postTurnSummaryCapsule = validateGroupPostTurnSummaryDeliveryCapsule(postTurnSummaryCapsuleInput, {
+    expectedBinding: {
+      group_id: String(input.groupId || current.groupId || ""),
+      task_id: String(input.taskId || current.taskId || ""),
+      target_project: String(input.project || current.project || ""),
+      task_agent_session_id: current.id,
+      native_session_id: String(input.nativeSessionId || current.nativeSessionId || ""),
+      execution_id: String(input.executionId || ""),
+      attempt_sequence: Number(input.turn || current.turnCount + 1 || 0),
+      invocation_kind: Number(input.turn || current.turnCount + 1 || 0) > 1 ? "resume" : "spawn",
+      ...(input.invocationLineage?.invocation_edge_id ? {
+        invocation_edge_id: input.invocationLineage.invocation_edge_id,
+        parent_invocation_edge_id: input.invocationLineage.parent_invocation_edge_id || "",
+        root_invocation_edge_id: input.invocationLineage.root_invocation_edge_id || "",
+        branch_id: input.invocationLineage.branch_id || "",
+        parent_branch_id: input.invocationLineage.parent_branch_id || "",
+        branch_kind: input.invocationLineage.branch_kind || "main",
+        expected_lineage_head_checksum: input.invocationLineage.expected_lineage_head_checksum || "",
+      } : {}),
+    },
+    renderedPrompt: input.renderedPrompt || "",
+  });
   const snapshotSeed = [
     current.id,
     input.taskId || current.taskId,
@@ -402,6 +771,15 @@ export function bindTaskAgentMemoryContextSnapshot(sessionId: string, input: {
       worker_handoff_summary: input.workerHandoffSummary || null,
       memory_context: memoryContext || null,
       memory_context_checksum: hashValue(memoryContext || {}),
+      group_session_memory_binding: groupSessionMemoryBinding,
+      post_turn_summary_delivery_capsule: postTurnSummaryCapsule,
+      post_turn_summary_capsule_checksum: String(postTurnSummaryCapsule?.capsule_checksum || ""),
+      post_turn_summary_capsule_prompt_bound: postTurnSummaryCapsule?.prompt_bound === true,
+      post_turn_summary_capsule_selected_count: Number(postTurnSummaryCapsule?.selected_count || 0),
+      post_turn_summary_capsule_ledger_head_checksum: String(postTurnSummaryCapsule?.ledger_head_checksum || ""),
+      task_agent_invocation_lineage: input.invocationLineage || packet?.task_agent_invocation_lineage || null,
+      invocation_edge_id: String(input.invocationLineage?.invocation_edge_id || packet?.task_agent_invocation_lineage?.invocation_edge_id || ""),
+      invocation_branch_id: String(input.invocationLineage?.branch_id || packet?.task_agent_invocation_lineage?.branch_id || ""),
       rendered_handoff_checksum: input.renderedHandoff ? hashValue(input.renderedHandoff) : "",
       rendered_prompt_checksum: input.renderedPrompt ? hashValue(input.renderedPrompt) : "",
       rendered_prompt_excerpt: input.renderedPrompt ? String(input.renderedPrompt).slice(0, 4000) : "",
@@ -409,7 +787,7 @@ export function bindTaskAgentMemoryContextSnapshot(sessionId: string, input: {
       gate_ids: gateIds,
     },
   };
-  const checksum = hashValue(payloadWithoutChecksum);
+  const checksum = hashValue(JSON.parse(JSON.stringify(payloadWithoutChecksum)));
   const snapshot = {
     ...payloadWithoutChecksum,
     checksum,
@@ -424,6 +802,8 @@ export function bindTaskAgentMemoryContextSnapshot(sessionId: string, input: {
     workerHandoffId,
     gateIds,
     generatedAt,
+    invocationEdgeId: String(input.invocationLineage?.invocation_edge_id || packet?.task_agent_invocation_lineage?.invocation_edge_id || ""),
+    branchId: String(input.invocationLineage?.branch_id || packet?.task_agent_invocation_lineage?.branch_id || ""),
   };
   const refs = normalizeMemorySnapshotRefs(current.memoryContextSnapshots);
   refs.push(ref);
@@ -439,22 +819,285 @@ export function bindTaskAgentMemoryContextSnapshot(sessionId: string, input: {
   };
   store.sessions[index] = next;
   saveStore(store);
-  return { session: next, snapshot, ref };
+    return { session: next, snapshot, ref };
+  });
 }
 
-export function advanceTaskAgentSession(current: TaskAgentSession, result: { nativeSessionId?: string; success?: boolean; error?: string; nativeSessionInvalid?: boolean; permissionDrift?: boolean; runtimeToolSnapshot?: any } = {}) {
+export function recordTaskAgentMemoryContextDelivery(sessionId: string, input: {
+  snapshotId?: string;
+  renderedPrompt?: string;
+  snapshotRenderedPrompt?: string;
+  executionId?: string;
+  traceId?: string;
+  runtime?: string;
+  attempt?: number;
+  nativeSessionId?: string;
+  runnerRequestId?: string;
+  dispatched?: boolean;
+  executionSucceeded?: boolean;
+  output?: string;
+  fileChanges?: any;
+  nativeContinuationEvidence?: any;
+  runnerStarted?: boolean;
+  recoveryOutcome?: string;
+  invocationEdgeId?: string;
+} = {}) {
+  const id = String(sessionId || "").trim();
+  if (!id) return null;
+  return withTaskAgentSessionStoreLock(() => {
+    const store = loadStore();
+    const index = store.sessions.findIndex((item: TaskAgentSession) => item.id === id);
+    if (index < 0) return null;
+    const current = store.sessions[index];
+  const snapshotId = String(input.snapshotId || current.memoryContextSnapshotId || "").trim();
+  const refs = normalizeMemorySnapshotRefs(current.memoryContextSnapshots);
+  const refIndex = refs.findIndex(ref => ref.snapshotId === snapshotId);
+  const ref = refIndex >= 0 ? refs[refIndex] : null;
+  const snapshotFile = String(ref?.snapshotPath || current.memoryContextSnapshotPath || "").trim();
+  const snapshot = safeReadJson(snapshotFile, null);
+  if (!snapshot || !verifyMemoryContextSnapshotChecksum(snapshot)) return null;
+  const actualPrompt = String(input.renderedPrompt || "");
+  const snapshotPrompt = String(input.snapshotRenderedPrompt || "");
+  const declaredSnapshotPromptChecksum = String(snapshot.context?.rendered_prompt_checksum || "").trim();
+  const snapshotPromptChecksum = snapshotPrompt ? hashValue(snapshotPrompt) : "";
+  const basePromptMatchesSnapshot = !!snapshotPrompt && snapshotPromptChecksum === declaredSnapshotPromptChecksum;
+  const promptBindingMode = basePromptMatchesSnapshot
+    ? actualPrompt === snapshotPrompt ? "exact" : actualPrompt.includes(snapshotPrompt) ? "contains_snapshot_prompt" : "mismatch"
+    : "snapshot_prompt_unverified";
+  const delivered = input.dispatched !== false
+    && basePromptMatchesSnapshot
+    && (promptBindingMode === "exact" || promptBindingMode === "contains_snapshot_prompt");
+  const deliveredAt = new Date().toISOString();
+  const receiptId = `tamdr_${hashValue([id, snapshotId, input.executionId || "", input.attempt || 0, deliveredAt].join("\0"), 20)}`;
+  const receiptFile = path.join(getMemoryContextSnapshotDir(id), `${snapshotId}.${receiptId}.delivery.json`);
+  const groupSessionMemoryBinding = snapshot.context?.group_session_memory_binding || extractGroupSessionMemoryBinding(snapshot.context?.memory_context || {});
+  const compactTransactionReceiptRequired = groupSessionMemoryBinding?.compactTransactionReceiptRequired === true;
+  const compactTransactionReceiptValid = groupSessionMemoryBinding?.compactTransactionReceiptValid === true;
+  const compactHeadValidation = groupSessionMemoryBinding?.compactHeadFenceRequired === true
+    ? validateGroupCompactHeadBinding({
+      groupId: groupSessionMemoryBinding.groupId,
+      groupSessionId: groupSessionMemoryBinding.groupSessionId,
+      compactEpoch: groupSessionMemoryBinding.compactEpoch,
+      compactTransactionReceiptChecksum: groupSessionMemoryBinding.compactTransactionReceiptChecksum,
+      compactTransactionBoundaryId: groupSessionMemoryBinding.compactTransactionBoundaryId,
+      compactHeadGeneration: groupSessionMemoryBinding.compactHeadGeneration,
+      compactHeadId: groupSessionMemoryBinding.compactHeadId,
+      compactHeadChecksum: groupSessionMemoryBinding.compactHeadChecksum,
+    })
+    : { valid: true, status: "exempt", issues: [], expected: null };
+  const compactHeadFenceValid = compactHeadValidation.valid === true;
+  const deliveryGroupSessionId = String(groupSessionMemoryBinding?.groupSessionId || "");
+  const sessionLifecycleFenceRequired = deliveryGroupSessionId.startsWith("gcs_");
+  const sessionLifecycleValidation = sessionLifecycleFenceRequired
+    ? validateGroupSessionLifecycleBinding({
+      groupId: groupSessionMemoryBinding.groupId,
+      groupSessionId: groupSessionMemoryBinding.groupSessionId,
+      lifecycleStatus: groupSessionMemoryBinding.sessionLifecycleStatus,
+      lifecycleGeneration: groupSessionMemoryBinding.sessionLifecycleGeneration,
+      lifecycleHeadId: groupSessionMemoryBinding.sessionLifecycleHeadId,
+      lifecycleHeadChecksum: groupSessionMemoryBinding.sessionLifecycleHeadChecksum,
+    })
+    : { valid: true, status: "exempt", issues: [], expected: null };
+  const sessionLifecycleFenceValid = sessionLifecycleValidation.valid === true;
+  const memoryEvidenceReady = (!groupSessionMemoryBinding || groupSessionMemoryBinding.deliveryReady !== false)
+    && compactHeadFenceValid
+    && sessionLifecycleFenceValid;
+  const fileChangeRows = (Array.isArray(input.fileChanges?.files)
+    ? input.fileChanges.files
+    : Array.isArray(input.fileChanges) ? input.fileChanges : [])
+    .map((item: any) => ({
+      path: String(item?.path || item?.file || "").trim(),
+      status: String(item?.statusKind || item?.status || item?.statusText || "changed").trim(),
+      diffChecksum: item?.diff ? hashValue(item.diff, 32) : "",
+    }))
+    .filter((item: any) => item.path)
+    .slice(0, 80);
+  const fileChangeChecksum = fileChangeRows.length ? hashValue(fileChangeRows, 64) : "";
+  const outputChecksum = input.output ? hashValue(String(input.output)) : "";
+  const runnerStarted = input.runnerStarted !== undefined ? input.runnerStarted === true : input.dispatched !== false;
+  const taskArtifactProven = delivered
+    && memoryEvidenceReady
+    && input.executionSucceeded !== false
+    && runnerStarted
+    && !!String(input.runnerRequestId || "").trim()
+    && !!outputChecksum
+    && fileChangeRows.length > 0;
+  const payload = {
+    schema: "ccm-task-agent-memory-context-delivery-receipt-v2",
+    version: 2,
+    receiptId,
+    source: "ccm_runner_dispatch_witness",
+    status: delivered && memoryEvidenceReady
+      ? "delivered"
+      : !sessionLifecycleFenceValid ? "session_lifecycle_stale" : !compactHeadFenceValid ? "compact_head_stale" : "binding_failed",
+    delivered: delivered && memoryEvidenceReady,
+    deliveredAt,
+    taskAgentSessionId: id,
+    taskId: String(snapshot.session?.task_id || current.taskId || "").trim(),
+    groupId: String(snapshot.session?.group_id || current.groupId || "").trim(),
+    project: String(snapshot.session?.project || current.project || "").trim(),
+    runtime: normalizeAgentRuntimeId(input.runtime || current.agentType || ""),
+    nativeSessionId: String(input.nativeSessionId || current.nativeSessionId || "").trim(),
+    executionId: String(input.executionId || snapshot.context?.execution_id || "").trim(),
+    traceId: String(input.traceId || snapshot.context?.trace_id || "").trim(),
+    attempt: Math.max(1, Number(input.attempt || 1)),
+    runnerRequestId: String(input.runnerRequestId || "").trim(),
+    memoryContextSnapshotId: snapshotId,
+    memoryContextSnapshotChecksum: String(snapshot.checksum || "").trim(),
+    memoryContextChecksum: String(snapshot.context?.memory_context_checksum || "").trim(),
+    workerContextPacketId: String(snapshot.context?.worker_context_packet_id || "").trim(),
+    groupSessionMemoryBinding: groupSessionMemoryBinding || null,
+    groupSessionMemoryBindingChecksum: String(groupSessionMemoryBinding?.checksum || ""),
+    modelExtractionEvidenceValid: groupSessionMemoryBinding?.modelExtractionEvidenceValid !== false,
+    compactEpoch: String(groupSessionMemoryBinding?.compactEpoch || "precompact"),
+    compactTransactionReceiptRequired,
+    compactTransactionReceiptValid,
+    compactTransactionReceiptId: String(groupSessionMemoryBinding?.compactTransactionReceiptId || ""),
+    compactTransactionBoundaryId: String(groupSessionMemoryBinding?.compactTransactionBoundaryId || ""),
+    compactTransactionReceiptChecksum: String(groupSessionMemoryBinding?.compactTransactionReceiptChecksum || ""),
+    compactHeadFenceRequired: groupSessionMemoryBinding?.compactHeadFenceRequired === true,
+    compactHeadFenceValid,
+    compactHeadFenceStatus: compactHeadValidation.status,
+    compactHeadFenceIssues: compactHeadValidation.issues,
+    compactHeadId: String(groupSessionMemoryBinding?.compactHeadId || ""),
+    compactHeadGeneration: Number(groupSessionMemoryBinding?.compactHeadGeneration || 0),
+    compactHeadChecksum: String(groupSessionMemoryBinding?.compactHeadChecksum || ""),
+    currentCompactHead: compactHeadValidation.expected,
+    sessionLifecycleFenceRequired,
+    sessionLifecycleFenceValid,
+    sessionLifecycleFenceStatus: sessionLifecycleValidation.status,
+    sessionLifecycleFenceIssues: sessionLifecycleValidation.issues,
+    sessionLifecycleHeadId: String(groupSessionMemoryBinding?.sessionLifecycleHeadId || ""),
+    sessionLifecycleGeneration: Number(groupSessionMemoryBinding?.sessionLifecycleGeneration || 0),
+    sessionLifecycleStatus: String(groupSessionMemoryBinding?.sessionLifecycleStatus || ""),
+    sessionLifecycleHeadChecksum: String(groupSessionMemoryBinding?.sessionLifecycleHeadChecksum || ""),
+    currentSessionLifecycleHead: sessionLifecycleValidation.expected,
+    snapshotRenderedPromptChecksum: declaredSnapshotPromptChecksum,
+    actualRenderedPromptChecksum: hashValue(actualPrompt),
+    promptBindingMode,
+    executionSucceeded: input.executionSucceeded !== false,
+    outputChecksum,
+    runnerStarted,
+    fileChangeCount: fileChangeRows.length,
+    fileChangeChecksum,
+    fileChangePaths: fileChangeRows.map((item: any) => item.path),
+    taskArtifactProven,
+    providerContractId: String(input.nativeContinuationEvidence?.providerContractId || ""),
+    providerRuntimeVersion: String(input.nativeContinuationEvidence?.providerRuntimeVersion || ""),
+  };
+  const receipt = { ...payload, checksum: hashValue(payload, 64), receiptFile };
+  writeJsonAtomic(receiptFile, receipt);
+  const nextRef = {
+    ...(ref || {
+      snapshotId,
+      snapshotPath: snapshotFile,
+      checksum: String(snapshot.checksum || ""),
+      generatedAt: String(snapshot.generated_at || ""),
+    }),
+    deliveryReceiptId: receiptId,
+    deliveryReceiptPath: receiptFile,
+    deliveryReceiptChecksum: receipt.checksum,
+    deliveryStatus: receipt.status,
+    deliveredAt,
+  };
+  if (refIndex >= 0) refs[refIndex] = nextRef;
+  else refs.push(nextRef);
+  const next: TaskAgentSession = {
+    ...current,
+    memoryContextDeliveryReceiptId: receiptId,
+    memoryContextDeliveryReceiptPath: receiptFile,
+    memoryContextDeliveryReceiptChecksum: receipt.checksum,
+    memoryContextDeliveryStatus: receipt.status,
+    memoryContextDeliveredAt: deliveredAt,
+    memoryContextSnapshots: refs.slice(-MAX_MEMORY_CONTEXT_SNAPSHOTS_PER_SESSION),
+    lastUsedAt: deliveredAt,
+  };
+  store.sessions[index] = next;
+  saveStore(store);
+  const groupSessionId = String(groupSessionMemoryBinding?.groupSessionId || "");
+  const invocationEdgeId = String(input.invocationEdgeId || snapshot.context?.invocation_edge_id || "");
+  const invocationEdge = groupSessionId.startsWith("gcs_") && invocationEdgeId
+    ? readTaskAgentInvocationLineage(String(receipt.groupId || current.groupId || ""), groupSessionId, id)
+      .edges.find((edge: any) => edge.invocation_edge_id === invocationEdgeId) || null
+    : null;
+  if (groupSessionId.startsWith("gcs_") && receipt.runnerRequestId) tryRecordTaskAgentContinuationSoakEvent({
+    groupId: String(receipt.groupId || current.groupId || ""),
+    groupSessionId,
+    taskAgentSessionId: id,
+    phase: "task_artifact_committed",
+    status: taskArtifactProven ? "proven" : "observed",
+    eventKey: `task-artifact:${receipt.checksum}`,
+    evidence: {
+      invocation_edge_id: invocationEdgeId,
+      runner_request_id: receipt.runnerRequestId,
+      memory_context_snapshot_id: snapshotId,
+      worker_context_packet_id: String(invocationEdge?.worker_context_packet_id || receipt.workerContextPacketId || ""),
+      compact_epoch: String(invocationEdge?.compact_epoch || "precompact"),
+      nativeContinuationEvidence: input.nativeContinuationEvidence || null,
+      recovery_outcome: String(input.recoveryOutcome || ""),
+      taskArtifactEvidence: {
+        taskArtifactProven,
+        taskOutputChecksum: outputChecksum,
+        fileChangeCount: fileChangeRows.length,
+        fileChangeChecksum,
+        fileChangePaths: fileChangeRows.map((item: any) => item.path),
+        memoryDeliveryReceiptChecksum: receipt.checksum,
+        memoryPromptChecksum: receipt.actualRenderedPromptChecksum,
+        memoryContextChecksum: receipt.memoryContextChecksum,
+        groupSessionMemoryBindingChecksum: receipt.groupSessionMemoryBindingChecksum,
+        compactTransactionReceiptChecksum: receipt.compactTransactionReceiptChecksum,
+        compactTransactionReceiptValid: receipt.compactTransactionReceiptValid,
+        compactTransactionBoundaryId: receipt.compactTransactionBoundaryId,
+        compactHeadFenceValid: receipt.compactHeadFenceValid,
+        compactHeadGeneration: receipt.compactHeadGeneration,
+        compactHeadChecksum: receipt.compactHeadChecksum,
+        sessionLifecycleFenceValid: receipt.sessionLifecycleFenceValid,
+        sessionLifecycleGeneration: receipt.sessionLifecycleGeneration,
+        sessionLifecycleHeadChecksum: receipt.sessionLifecycleHeadChecksum,
+      },
+    },
+    source: "task_agent_memory_delivery",
+  });
+    return { session: next, receipt, ref: nextRef };
+  });
+}
+
+export function readTaskAgentMemoryContextDeliveryReceipt(file: string) {
+  const receipt = safeReadJson(String(file || ""), null);
+  if (!receipt) return null;
+  return { ...receipt, checksumValid: verifyMemoryContextDeliveryReceiptChecksum(receipt) };
+}
+
+export function advanceTaskAgentSession(current: TaskAgentSession, result: { nativeSessionId?: string; success?: boolean; error?: string; nativeSessionInvalid?: boolean; nativeContinuationUnverified?: boolean; nativeContinuationEvidence?: any; permissionDrift?: boolean; runtimeToolSnapshot?: any; modelCapabilityRecord?: any; nativeModelCapabilityRecord?: any } = {}) {
   const errorText = String(result.error || "");
   const invalidNativeSession = result.nativeSessionInvalid === true || /(?:session|thread).*(?:not found|invalid|expired|不存在|无效|过期)|无法恢复.*(?:session|会话)/i.test(errorText);
+  const nativeContinuationUnverified = result.nativeContinuationUnverified === true;
   const permissionDrift = result.permissionDrift === true;
+  const continuationEvidence = result.nativeContinuationEvidence || null;
+  const observedProviderContractId = String(continuationEvidence?.providerContractId || "").trim();
+  const providerContractTrusted = continuationEvidence?.providerContractCurrentEvidenceVerified === true
+    && continuationEvidence?.providerContractContinuityVerified === true
+    && continuationEvidence?.nativeSessionReusable === true;
+  const providerContractTransition = continuationEvidence?.providerContractTransition === true;
   const capturedNativeId = String(result.nativeSessionId || current.nativeSessionId || "").trim();
   const requiresCapturedId = current.resumeMode === "native"
     && getAgentRuntime(current.agentType).capabilities.sessionResume
     && normalizeAgentRuntimeId(current.agentType) !== "claudecode";
-  const captureFailed = result.success !== false && requiresCapturedId && !capturedNativeId;
+  const captureFailed = result.success !== false && requiresCapturedId && (!capturedNativeId || nativeContinuationUnverified);
   const previousIds = [...new Set([...(current.nativeSessionHistory || []), current.nativeSessionId].filter(Boolean))].slice(-10);
+  const providerContractHistory = Array.isArray(current.providerContractHistory) ? current.providerContractHistory.slice(-19) : [];
+  if (providerContractTrusted && observedProviderContractId && observedProviderContractId !== String(current.providerContractId || "")) {
+    if (current.providerContractId) providerContractHistory.push({
+      contractId: current.providerContractId,
+      runtimeVersion: current.providerRuntimeVersion || "",
+      runtimeIdentityChecksum: current.providerRuntimeIdentityChecksum || "",
+      status: "superseded",
+      at: new Date().toISOString(),
+    });
+  }
   const next: TaskAgentSession = {
     ...current,
-    nativeSessionId: permissionDrift ? createNativeSessionId(current.agentType) : invalidNativeSession ? "" : capturedNativeId,
+    nativeSessionId: permissionDrift ? createNativeSessionId(current.agentType) : invalidNativeSession || captureFailed ? "" : capturedNativeId,
     resumeMode: permissionDrift ? "native" : captureFailed ? "scratchpad" : invalidNativeSession && getAgentRuntime(current.agentType).capabilities.sessionResume ? "native" : current.resumeMode,
     nativeCaptureFailures: Number(current.nativeCaptureFailures || 0) + (captureFailed ? 1 : 0),
     nativeRecoveryAttempts: Number(current.nativeRecoveryAttempts || 0) + (invalidNativeSession || permissionDrift ? 1 : 0),
@@ -462,11 +1105,61 @@ export function advanceTaskAgentSession(current: TaskAgentSession, result: { nat
     lastNativeRecoveryAt: invalidNativeSession || permissionDrift ? new Date().toISOString() : current.lastNativeRecoveryAt || "",
     turnCount: permissionDrift ? 0 : Number(current.turnCount || 0) + 1,
     lastTurnSucceeded: result.success !== false,
-    lastError: permissionDrift ? "检测到实际只读权限与可写任务声明不一致；已隔离旧 native session，下轮创建可写恢复会话" : invalidNativeSession ? "原生会话已失效，下轮将创建恢复会话并承接工作区" : result.success === false ? (errorText || "Agent 执行失败") : captureFailed ? "CLI 未返回原生 session ID，已安全降级为 scratchpad 续跑" : "",
+    lastError: permissionDrift ? "检测到实际只读权限与可写任务声明不一致；已隔离旧 native session，下轮创建可写恢复会话" : invalidNativeSession ? "原生会话已失效，下轮将创建恢复会话并承接工作区" : result.success === false ? (errorText || "Agent 执行失败") : nativeContinuationUnverified ? "CLI 续接输出契约未验证，已安全降级为 scratchpad 续跑" : captureFailed ? "CLI 未返回原生 session ID，已安全降级为 scratchpad 续跑" : "",
     permissionDriftCount: Number(current.permissionDriftCount || 0) + (permissionDrift ? 1 : 0),
     lastPermissionDriftAt: permissionDrift ? new Date().toISOString() : current.lastPermissionDriftAt || "",
+    providerContractId: providerContractTrusted && observedProviderContractId ? observedProviderContractId : current.providerContractId || "",
+    pendingProviderContractId: providerContractTrusted
+      ? ""
+      : observedProviderContractId && observedProviderContractId !== String(current.providerContractId || "")
+        ? observedProviderContractId
+        : current.pendingProviderContractId || "",
+    providerRuntimeVersion: continuationEvidence?.providerRuntimeVersion || current.providerRuntimeVersion || "",
+    providerRuntimeIdentityChecksum: continuationEvidence?.providerRuntimeIdentityChecksum || current.providerRuntimeIdentityChecksum || "",
+    providerContractHistory: providerContractHistory.slice(-20),
+    lastProviderContractTransitionAt: providerContractTransition ? new Date().toISOString() : current.lastProviderContractTransitionAt || "",
     lastUsedAt: new Date().toISOString(),
   };
+  const identityHistory = Array.isArray(current.modelIdentityHistory) ? current.modelIdentityHistory.slice(-19) : [];
+  if ((permissionDrift || invalidNativeSession) && (current.modelId || current.capacityEvidenceChecksum)) {
+    identityHistory.push({
+      provider: current.agentType,
+      model: current.modelId || "",
+      contextWindow: Number(current.modelContextWindow || 0),
+      evidenceChecksum: current.capacityEvidenceChecksum || "",
+      nativeSessionId: current.nativeSessionId || "",
+      status: "invalidated",
+      reason: permissionDrift ? "permission_drift_new_native_session" : "native_session_invalid_or_expired",
+      at: new Date().toISOString(),
+    });
+    next.modelId = "";
+    next.modelContextWindow = 0;
+    next.capacityEvidenceChecksum = "";
+    next.modelCapabilitySource = "";
+    next.modelCapabilityCheckedAt = "";
+  }
+  const capabilityRecord = result.modelCapabilityRecord || result.nativeModelCapabilityRecord || null;
+  const capabilityEntry = capabilityRecord?.recorded === true ? capabilityRecord.entry || {} : {};
+  if (capabilityRecord?.recorded === true && !permissionDrift && !invalidNativeSession) {
+    next.modelId = String(capabilityEntry.model || current.modelId || "");
+    next.modelContextWindow = Number(capabilityEntry.contextWindow || current.modelContextWindow || 0);
+    next.capacityEvidenceChecksum = String(capabilityEntry.checksum || current.capacityEvidenceChecksum || "");
+    next.modelCapabilitySource = String(capabilityEntry.source || current.modelCapabilitySource || "");
+    next.modelCapabilityCheckedAt = String(capabilityEntry.checkedAt || new Date().toISOString());
+    const identity = {
+      provider: next.agentType,
+      model: next.modelId || "",
+      contextWindow: Number(next.modelContextWindow || 0),
+      evidenceChecksum: next.capacityEvidenceChecksum || "",
+      nativeSessionId: next.nativeSessionId || "",
+      status: "verified",
+      reason: "native_model_capability_receipt",
+      at: next.modelCapabilityCheckedAt,
+    };
+    const last = identityHistory[identityHistory.length - 1];
+    if (!last || last.evidenceChecksum !== identity.evidenceChecksum || last.nativeSessionId !== identity.nativeSessionId) identityHistory.push(identity);
+  }
+  next.modelIdentityHistory = identityHistory.slice(-20);
   if (result.runtimeToolSnapshot && typeof result.runtimeToolSnapshot === "object") {
     next.runtimeSnapshotId = String(result.runtimeToolSnapshot.snapshotId || current.runtimeSnapshotId || "");
     next.runtimeSnapshotPath = String(result.runtimeToolSnapshot.snapshotPath || current.runtimeSnapshotPath || "");
@@ -482,45 +1175,49 @@ export function advanceTaskAgentSession(current: TaskAgentSession, result: { nat
 
 export function closeTaskAgentSessions(input: { scopeId?: string; taskId?: string; groupId?: string }, reason = "主 Agent 已完成最终验收") {
   if (!String(input.scopeId || "").trim() && !String(input.taskId || "").trim()) return [];
-  const store = loadStore();
-  const now = new Date().toISOString();
-  const closed: TaskAgentSession[] = [];
-  store.sessions = store.sessions.map((item: TaskAgentSession) => {
-    const matches = item.status === "open"
-      && (!input.scopeId || item.scopeId === input.scopeId)
-      && (!input.taskId || item.taskId === input.taskId)
-      && (!input.groupId || item.groupId === input.groupId);
-    if (!matches) return item;
-    const next: TaskAgentSession = { ...item, status: "closed", closedAt: now, closeReason: reason, lastUsedAt: now };
-    closed.push(next);
-    return next;
+  return withTaskAgentSessionStoreLock(() => {
+    const store = loadStore();
+    const now = new Date().toISOString();
+    const closed: TaskAgentSession[] = [];
+    store.sessions = store.sessions.map((item: TaskAgentSession) => {
+      const matches = item.status === "open"
+        && (!input.scopeId || item.scopeId === input.scopeId)
+        && (!input.taskId || item.taskId === input.taskId)
+        && (!input.groupId || item.groupId === input.groupId);
+      if (!matches) return item;
+      const next: TaskAgentSession = { ...item, status: "closed", closedAt: now, closeReason: reason, lastUsedAt: now };
+      closed.push(next);
+      return next;
+    });
+    if (closed.length) saveStore(store);
+    return closed;
   });
-  if (closed.length) saveStore(store);
-  return closed;
 }
 
 export function reopenTaskAgentSessions(taskId: string, reason = "用户在同一任务中继续修改") {
   const id = String(taskId || "").trim();
   if (!id) return [];
-  const store = loadStore();
-  const now = new Date().toISOString();
-  const latestByLane = new Map<string, TaskAgentSession>();
-  for (const session of store.sessions) {
-    if (session.taskId !== id && session.scopeId !== id) continue;
-    const key = `${session.groupId}::${session.project}::${session.agentType}`;
-    const previous = latestByLane.get(key);
-    if (!previous || String(session.lastUsedAt || session.createdAt) > String(previous.lastUsedAt || previous.createdAt)) latestByLane.set(key, session);
-  }
-  const ids = new Set(Array.from(latestByLane.values()).map(item => item.id));
-  const reopened: TaskAgentSession[] = [];
-  store.sessions = store.sessions.map((session: TaskAgentSession) => {
-    if (!ids.has(session.id) || session.status === "open") return session;
-    const next = { ...session, status: "open" as const, closedAt: "", closeReason: "", lastUsedAt: now, lastError: reason };
-    reopened.push(next);
-    return next;
+  return withTaskAgentSessionStoreLock(() => {
+    const store = loadStore();
+    const now = new Date().toISOString();
+    const latestByLane = new Map<string, TaskAgentSession>();
+    for (const session of store.sessions) {
+      if (session.taskId !== id && session.scopeId !== id) continue;
+      const key = `${session.groupId}::${session.project}::${session.agentType}`;
+      const previous = latestByLane.get(key);
+      if (!previous || String(session.lastUsedAt || session.createdAt) > String(previous.lastUsedAt || previous.createdAt)) latestByLane.set(key, session);
+    }
+    const ids = new Set(Array.from(latestByLane.values()).map(item => item.id));
+    const reopened: TaskAgentSession[] = [];
+    store.sessions = store.sessions.map((session: TaskAgentSession) => {
+      if (!ids.has(session.id) || session.status === "open") return session;
+      const next = { ...session, status: "open" as const, closedAt: "", closeReason: "", lastUsedAt: now, lastError: reason };
+      reopened.push(next);
+      return next;
+    });
+    if (reopened.length) saveStore(store);
+    return reopened;
   });
-  if (reopened.length) saveStore(store);
-  return reopened;
 }
 
 export function getTaskAgentSessionOptions(session: TaskAgentSession) {
@@ -528,6 +1225,9 @@ export function getTaskAgentSessionOptions(session: TaskAgentSession) {
     sessionId: session.nativeSessionId,
     resumeSession: session.resumeMode === "native" && session.turnCount > 0 && !!session.nativeSessionId,
     persistSession: session.resumeMode === "native",
+    expectedProviderContractId: session.pendingProviderContractId || session.providerContractId || "",
+    providerContractId: session.providerContractId || "",
+    providerRuntimeVersion: session.providerRuntimeVersion || "",
     runtimeSnapshotId: session.runtimeSnapshotId || "",
     mcpConfigPath: session.mcpConfigPath || "",
   };
@@ -545,6 +1245,10 @@ export function getTaskAgentSessionContinuity(session: TaskAgentSession) {
     runtimeSnapshotId: session.runtimeSnapshotId || "",
     mcpConfigPath: session.mcpConfigPath || "",
     runtimeToolUpdatedAt: session.runtimeToolUpdatedAt || "",
+    providerContractId: session.providerContractId || "",
+    pendingProviderContractId: session.pendingProviderContractId || "",
+    providerRuntimeVersion: session.providerRuntimeVersion || "",
+    providerContractHistory: session.providerContractHistory || [],
   };
 }
 
@@ -556,6 +1260,335 @@ export function listTaskAgentSessions(filter: { scopeId?: string; taskId?: strin
     && (!filter.project || item.project === filter.project)
     && (!filter.status || item.status === filter.status)
   );
+}
+
+function sessionSnapshotContextWindow(session: TaskAgentSession) {
+  const snapshot = safeReadJson(String(session.memoryContextSnapshotPath || ""), null);
+  return Number(
+    session.modelContextWindow
+    || snapshot?.context?.worker_context_packet?.model_context_capacity?.contextWindow
+    || snapshot?.context?.worker_context_packet?.context_usage?.capacity_provenance?.contextWindow
+    || 0
+  );
+}
+
+function capacityRevalidationGroupSessionId(packet: any = {}) {
+  const memory = packet?.memory || packet?.worker_context_packet?.memory || {};
+  const groupMemory = memory?.schema === "ccm-group-memory-context-v1"
+    ? memory
+    : memory?.group_memory?.schema === "ccm-group-memory-context-v1" ? memory.group_memory : {};
+  return String(
+    packet?.group_session_id
+    || packet?.groupSessionId
+    || groupMemory?.group_session_id
+    || groupMemory?.groupSessionId
+    || packet?.post_turn_summary_delivery_capsule?.group_session_id
+    || "",
+  ).trim();
+}
+
+export function markTaskAgentSessionsForCapacityDowngrade(input: any = {}) {
+  const rawProvider = String(input.provider || input.agentType || input.agent_type || "").trim().toLowerCase();
+  const runtime = AGENT_RUNTIMES.find(item => item.id === rawProvider || item.aliases.includes(rawProvider));
+  if (!runtime) return { marked: 0, sessions: [], reason: "unsupported_provider" };
+  const provider = runtime.id;
+  const currentContextWindow = Math.max(0, Number(input.currentContextWindow || input.current_context_window || 0));
+  if (!currentContextWindow) return { marked: 0, sessions: [] };
+  return withTaskAgentSessionStoreLock(() => {
+    const store = loadStore();
+    const marked: any[] = [];
+    const detectedAt = new Date().toISOString();
+    store.sessions = store.sessions.map((session: TaskAgentSession) => {
+      if (session.status !== "open" || normalizeAgentRuntimeId(session.agentType) !== provider) return session;
+      const previousContextWindow = sessionSnapshotContextWindow(session);
+      if (!previousContextWindow || previousContextWindow <= currentContextWindow) return session;
+      const gate: any = {
+        schema: "ccm-task-agent-session-capacity-downgrade-gate-v1",
+        provider,
+        model: String(input.model || ""),
+        previous_context_window: previousContextWindow,
+        current_context_window: currentContextWindow,
+        previous_evidence_checksum: String(session.capacityEvidenceChecksum || input.previousEvidenceChecksum || ""),
+        current_evidence_checksum: String(input.currentEvidenceChecksum || ""),
+        action: "rebuild_and_recompact_before_next_dispatch",
+        detected_at: detectedAt,
+      };
+      marked.push({ sessionId: session.id, taskId: session.taskId, groupId: session.groupId, project: session.project, gate });
+      gate.gate_id = `tacdg_${hashValue([session.id, provider, previousContextWindow, currentContextWindow, detectedAt], 24)}`;
+      gate.gate_checksum = hashValue(gate, 64);
+      return {
+        ...session,
+        capacityRevalidationRequired: true,
+        capacityDowngradeGate: gate,
+        capacityRevalidationProof: null,
+        capacityRevalidationCommitReceipt: null,
+        lastUsedAt: detectedAt,
+      };
+    });
+    if (marked.length) saveStore(store);
+    return { marked: marked.length, sessions: marked };
+  });
+}
+
+function capacityRevalidationGateChecksum(gate: any) {
+  const payload = { ...(gate || {}) };
+  delete payload.gate_checksum;
+  return hashValue(payload, 64);
+}
+
+function capacityRevalidationProofChecksum(proof: any) {
+  const payload = { ...(proof || {}) };
+  delete payload.proof_checksum;
+  delete payload.checksum_valid;
+  return hashValue(payload, 64);
+}
+
+function capacityRevalidationCommitChecksum(receipt: any) {
+  const payload = { ...(receipt || {}) };
+  delete payload.receipt_checksum;
+  delete payload.checksum_valid;
+  return hashValue(payload, 64);
+}
+
+export function verifyTaskAgentSessionCapacityRevalidationProof(proof: any, session: TaskAgentSession | null = null) {
+  const issues: string[] = [];
+  if (proof?.schema !== "ccm-task-agent-session-capacity-revalidation-proof-v1" || Number(proof?.version || 0) !== 1) issues.push("proof_schema_invalid");
+  if (String(proof?.proof_checksum || "") !== capacityRevalidationProofChecksum(proof)) issues.push("proof_checksum_invalid");
+  if (!String(proof?.worker_context_packet_id || "")) issues.push("worker_context_packet_missing");
+  if (!Number(proof?.packet_context_window || 0)) issues.push("packet_context_window_missing");
+  if (String(proof?.context_usage_status || "") === "over_budget") issues.push("packet_context_still_over_budget");
+  if (proof?.typed_memory_capsule_present === true) {
+    if (!String(proof?.typed_memory_capsule_checksum || "")) issues.push("typed_memory_capsule_checksum_missing");
+    if (!Number(proof?.typed_memory_capsule_context_window || 0)) issues.push("typed_memory_capsule_window_missing");
+  }
+  if (session) {
+    if (String(proof?.task_agent_session_id || "") !== String(session.id || "")) issues.push("task_agent_session_mismatch");
+    if (String(proof?.group_id || "") !== String(session.groupId || "")) issues.push("group_mismatch");
+    if (String(proof?.task_id || "") !== String(session.taskId || "")) issues.push("task_mismatch");
+    const gate = session.capacityDowngradeGate || null;
+    if (String(proof?.capacity_downgrade_gate_checksum || "") !== capacityRevalidationGateChecksum(gate)) issues.push("capacity_downgrade_gate_mismatch");
+    const targetWindow = Number(gate?.current_context_window || 0);
+    if (targetWindow > 0 && Number(proof?.packet_context_window || 0) > targetWindow) issues.push("packet_capacity_not_revalidated");
+  }
+  return { valid: issues.length === 0, issues };
+}
+
+export function verifyTaskAgentSessionCapacityRevalidationCommitReceipt(receipt: any, proof: any = null) {
+  const issues: string[] = [];
+  if (receipt?.schema !== "ccm-task-agent-session-capacity-revalidation-commit-v1" || Number(receipt?.version || 0) !== 1) issues.push("receipt_schema_invalid");
+  if (String(receipt?.receipt_checksum || "") !== capacityRevalidationCommitChecksum(receipt)) issues.push("receipt_checksum_invalid");
+  if (!String(receipt?.dispatch_witness_id || "")) issues.push("dispatch_witness_missing");
+  if (proof && String(receipt?.capacity_revalidation_proof_checksum || "") !== String(proof?.proof_checksum || "")) issues.push("proof_checksum_mismatch");
+  return { valid: issues.length === 0, issues };
+}
+
+function validateCapacityRevalidationPacket(current: TaskAgentSession, packet: any = {}) {
+  const capacity = packet?.model_context_capacity || packet?.context_usage?.capacity_provenance || {};
+  const contextWindow = Number(capacity.contextWindow || 0);
+  const targetWindow = Number(current.capacityDowngradeGate?.current_context_window || 0);
+  if (!String(packet?.packet_id || "")) return { valid: false, reason: "worker_context_packet_missing" };
+  if (!contextWindow || (targetWindow > 0 && contextWindow > targetWindow)) return { valid: false, reason: "packet_capacity_not_revalidated" };
+  const contextUsageStatus = String(packet?.context_usage?.status || "unknown");
+  const typedMemoryCapsule = packet?.typed_memory_delivery_capsule || packet?.typedMemoryDeliveryCapsule || null;
+  if (typedMemoryCapsule?.schema === "ccm-child-typed-memory-delivery-capsule-v1") {
+    const capsuleBudget = typedMemoryCapsule.budget || {};
+    const capsuleWindow = Number(capsuleBudget.model_context_window || typedMemoryCapsule.model_context_window || 0);
+    const configuredMaxTokens = Number(capsuleBudget.configured_max_tokens || typedMemoryCapsule.configured_max_tokens || 0);
+    const effectiveMaxTokens = Number(capsuleBudget.effective_max_tokens || typedMemoryCapsule.effective_max_tokens || 0);
+    const expectedEffectiveMaxTokens = Math.min(configuredMaxTokens, Math.max(1000, Math.floor(capsuleWindow * 0.02)));
+    if (typedMemoryCapsule.trusted_for_delivery !== true
+      || !capsuleWindow
+      || (targetWindow > 0 && capsuleWindow > targetWindow)
+      || effectiveMaxTokens !== expectedEffectiveMaxTokens) {
+      return { valid: false, reason: "typed_memory_capsule_capacity_not_revalidated" };
+    }
+  }
+  if (["critical", "over_budget"].includes(contextUsageStatus)) return { valid: false, reason: "packet_context_still_over_budget" };
+  return { valid: true, capacity, contextWindow, contextUsageStatus, typedMemoryCapsule };
+}
+
+export function prepareTaskAgentSessionCapacityRevalidation(sessionId: string, packet: any = {}) {
+  const id = String(sessionId || "").trim();
+  if (!id) return null;
+  return withTaskAgentSessionStoreLock(() => {
+    const store = loadStore();
+    const index = store.sessions.findIndex((session: TaskAgentSession) => session.id === id);
+    if (index < 0) return null;
+    const current = store.sessions[index];
+    if (current.capacityRevalidationRequired !== true) return { prepared: true, required: false, proof: null, session: current, reason: "capacity_revalidation_not_required" };
+    const validated: any = validateCapacityRevalidationPacket(current, packet);
+    if (!validated.valid) return { prepared: false, required: true, proof: null, session: current, reason: validated.reason };
+    const typedMemoryCapsule = validated.typedMemoryCapsule;
+    const capsuleBudget = typedMemoryCapsule?.budget || {};
+    const groupSessionId = capacityRevalidationGroupSessionId(packet);
+    const proof: any = {
+      schema: "ccm-task-agent-session-capacity-revalidation-proof-v1",
+      version: 1,
+      proof_id: `tacrp_${hashValue([current.id, current.capacityDowngradeGate, packet.packet_id, typedMemoryCapsule?.capsule_checksum || ""], 24)}`,
+      task_agent_session_id: current.id,
+      group_id: current.groupId,
+      group_session_id: groupSessionId,
+      task_id: current.taskId,
+      project: current.project,
+      provider: normalizeAgentRuntimeId(current.agentType),
+      capacity_downgrade_gate_id: String(current.capacityDowngradeGate?.gate_id || ""),
+      capacity_downgrade_gate_checksum: capacityRevalidationGateChecksum(current.capacityDowngradeGate),
+      worker_context_packet_id: String(packet.packet_id || ""),
+      worker_context_memory_checksum: hashValue(packet.memory || {}, 64),
+      packet_context_window: validated.contextWindow,
+      packet_capacity_evidence_checksum: String(validated.capacity?.evidenceChecksum || ""),
+      context_usage_status: validated.contextUsageStatus,
+      typed_memory_capsule_present: typedMemoryCapsule?.schema === "ccm-child-typed-memory-delivery-capsule-v1",
+      typed_memory_capsule_checksum: String(typedMemoryCapsule?.capsule_checksum || ""),
+      typed_memory_capsule_context_window: Number(capsuleBudget.model_context_window || typedMemoryCapsule?.model_context_window || 0),
+      typed_memory_capsule_effective_tokens: Number(capsuleBudget.effective_max_tokens || typedMemoryCapsule?.effective_max_tokens || 0),
+      prepared_at: new Date().toISOString(),
+      state: "prepared",
+    };
+    proof.proof_checksum = capacityRevalidationProofChecksum(proof);
+    const next = { ...current, capacityRevalidationProof: proof, lastUsedAt: proof.prepared_at };
+    store.sessions[index] = next;
+    saveStore(store);
+    if (groupSessionId.startsWith("gcs_")) tryRecordTaskAgentContinuationSoakEvent({
+      groupId: current.groupId,
+      groupSessionId,
+      taskAgentSessionId: current.id,
+      phase: "capacity_revalidation_prepared",
+      status: "pending",
+      eventKey: `capacity:prepared:${proof.proof_checksum}`,
+      evidence: { capacityRevalidationProof: proof, invocation_edge_id: packet?.task_agent_invocation_lineage?.invocation_edge_id || "" },
+      source: "capacity_runtime",
+    });
+    return { prepared: true, required: true, proof, session: next, reason: "packet_rebuilt_under_downgraded_capacity_prepared" };
+  });
+}
+
+export function commitTaskAgentSessionCapacityRevalidation(sessionId: string, proof: any, dispatchWitness: any = {}) {
+  const id = String(sessionId || "").trim();
+  if (!id) return null;
+  return withTaskAgentSessionStoreLock(() => {
+    const store = loadStore();
+    const index = store.sessions.findIndex((session: TaskAgentSession) => session.id === id);
+    if (index < 0) return null;
+    const current = store.sessions[index];
+    if (current.capacityRevalidationRequired !== true) {
+      const existing = current.capacityRevalidationCommitReceipt || null;
+      return { acknowledged: !!existing, committed: !!existing, idempotent: true, receipt: existing, session: current, reason: existing ? "capacity_revalidation_already_committed" : "capacity_revalidation_not_required" };
+    }
+    const validation = verifyTaskAgentSessionCapacityRevalidationProof(proof, current);
+    if (!validation.valid) return { acknowledged: false, committed: false, session: current, reason: validation.issues[0] || "capacity_revalidation_proof_invalid", issues: validation.issues };
+    if (String(current.capacityRevalidationProof?.proof_checksum || "") !== String(proof?.proof_checksum || "")) {
+      return { acknowledged: false, committed: false, session: current, reason: "capacity_revalidation_prepared_proof_mismatch" };
+    }
+    const walChecksum = String(dispatchWitness.typedMemoryDispatchWalRecordChecksum || dispatchWitness.typed_memory_dispatch_wal_record_checksum || "");
+    const walState = String(dispatchWitness.typedMemoryDispatchWalState || dispatchWitness.typed_memory_dispatch_wal_state || "");
+    const runnerRequestId = String(dispatchWitness.runnerRequestId || dispatchWitness.runner_request_id || "");
+    const runnerStarted = dispatchWitness.runnerStarted === true || dispatchWitness.runner_started === true;
+    const walStarted = !!walChecksum && ["dispatch_started", "runner_returned", "committed"].includes(walState);
+    const runnerReturned = !!runnerRequestId && runnerStarted;
+    if (!walStarted && !runnerReturned) {
+      return { acknowledged: false, committed: false, session: current, reason: "durable_dispatch_witness_missing" };
+    }
+    const committedAt = new Date().toISOString();
+    const receipt: any = {
+      schema: "ccm-task-agent-session-capacity-revalidation-commit-v1",
+      version: 1,
+      receipt_id: `tacrc_${hashValue([proof.proof_checksum, walChecksum, walState, runnerRequestId, committedAt], 24)}`,
+      task_agent_session_id: current.id,
+      group_id: current.groupId,
+      task_id: current.taskId,
+      capacity_revalidation_proof_id: String(proof.proof_id || ""),
+      capacity_revalidation_proof_checksum: String(proof.proof_checksum || ""),
+      worker_context_packet_id: String(proof.worker_context_packet_id || ""),
+      dispatch_witness_kind: walStarted ? "typed_memory_dispatch_wal" : "runner_returned",
+      dispatch_witness_id: walStarted ? walChecksum : runnerRequestId,
+      typed_memory_dispatch_wal_record_checksum: walChecksum,
+      typed_memory_dispatch_wal_state: walState,
+      runner_request_id: runnerRequestId,
+      committed_at: committedAt,
+    };
+    receipt.receipt_checksum = capacityRevalidationCommitChecksum(receipt);
+    const next = {
+      ...current,
+      modelContextWindow: Number(proof.packet_context_window || current.modelContextWindow || 0),
+      capacityEvidenceChecksum: String(proof.packet_capacity_evidence_checksum || current.capacityEvidenceChecksum || ""),
+      capacityRevalidationRequired: false,
+      capacityDowngradeGate: null,
+      capacityRevalidationProof: proof,
+      capacityRevalidationCommitReceipt: receipt,
+      lastUsedAt: committedAt,
+    };
+    store.sessions[index] = next;
+    saveStore(store);
+    const groupSessionId = String(proof?.group_session_id || "");
+    if (groupSessionId.startsWith("gcs_")) tryRecordTaskAgentContinuationSoakEvent({
+      groupId: current.groupId,
+      groupSessionId,
+      taskAgentSessionId: current.id,
+      phase: "capacity_revalidation_committed",
+      status: "committed",
+      eventKey: `capacity:committed:${receipt.receipt_checksum}`,
+      evidence: { capacityRevalidationProof: proof, capacityRevalidationCommitReceipt: receipt },
+      source: "capacity_runtime",
+    });
+    return { acknowledged: true, committed: true, proof, receipt, session: next, reason: "packet_rebuilt_under_downgraded_capacity_committed" };
+  });
+}
+
+export function acknowledgeTaskAgentSessionCapacityRevalidation(sessionId: string, packet: any = {}, dispatchWitness: any = {}) {
+  const prepared = prepareTaskAgentSessionCapacityRevalidation(sessionId, packet);
+  if (!prepared?.prepared || prepared.required !== true) {
+    return { acknowledged: prepared?.prepared === true, committed: prepared?.required !== true, ...prepared };
+  }
+  return commitTaskAgentSessionCapacityRevalidation(sessionId, prepared.proof, dispatchWitness);
+}
+
+export function runTaskAgentSessionModelIdentitySelfTest() {
+  const base: TaskAgentSession = {
+    id: "tas-model-identity-selftest",
+    scopeId: "task-model-identity-selftest",
+    taskId: "task-model-identity-selftest",
+    groupId: "group-model-identity-selftest",
+    project: "project-model-identity-selftest",
+    agentType: "codex",
+    nativeSessionId: "thread-model-identity-selftest",
+    resumeMode: "native",
+    status: "open",
+    turnCount: 1,
+    lastTurnSucceeded: true,
+    createdAt: "2026-07-12T00:00:00.000Z",
+    lastUsedAt: "2026-07-12T00:00:00.000Z",
+    closedAt: "",
+    closeReason: "",
+  };
+  const next = advanceTaskAgentSession(base, {
+    nativeSessionId: base.nativeSessionId,
+    success: true,
+    nativeModelCapabilityRecord: {
+      recorded: true,
+      entry: {
+        model: "gpt-phase219",
+        contextWindow: 516_000,
+        checksum: "capacity-checksum-phase219",
+        source: "native_executor_receipt",
+        checkedAt: "2026-07-12T01:00:00.000Z",
+      },
+    },
+  });
+  const checks = {
+    modelIdPersists: next.modelId === "gpt-phase219",
+    contextWindowPersists: next.modelContextWindow === 516_000,
+    evidenceChecksumPersists: next.capacityEvidenceChecksum === "capacity-checksum-phase219",
+    sourceAndTimePersist: next.modelCapabilitySource === "native_executor_receipt" && next.modelCapabilityCheckedAt === "2026-07-12T01:00:00.000Z",
+    nativeSessionContinuityPreserved: next.nativeSessionId === base.nativeSessionId && next.turnCount === 2,
+    verifiedIdentityAddedToHistory: next.modelIdentityHistory?.some(item => item.status === "verified" && item.model === "gpt-phase219") === true,
+  };
+  const drifted = advanceTaskAgentSession(next, { success: false, permissionDrift: true, error: "sandbox read-only" });
+  const driftChecks = {
+    permissionDriftClearsActiveModel: drifted.modelId === "" && drifted.modelContextWindow === 0 && drifted.capacityEvidenceChecksum === "",
+    permissionDriftArchivesIdentity: drifted.modelIdentityHistory?.some(item => item.status === "invalidated" && item.reason === "permission_drift_new_native_session" && item.model === "gpt-phase219") === true,
+  };
+  return { pass: Object.values({ ...checks, ...driftChecks }).every(Boolean), checks: { ...checks, ...driftChecks }, session: next, drifted };
 }
 
 export function listTaskAgentMemoryContextSnapshots(filter: { scopeId?: string; taskId?: string; groupId?: string; project?: string; status?: string; sessionId?: string } = {}) {
@@ -585,6 +1618,7 @@ export function listTaskAgentMemoryContextSnapshots(filter: { scopeId?: string; 
       if (!key || seen.has(key)) continue;
       seen.add(key);
       const loaded = safeReadJson(ref.snapshotPath, null);
+      const deliveryReceipt = ref.deliveryReceiptPath ? safeReadJson(ref.deliveryReceiptPath, null) : null;
       snapshots.push({
         ...(loaded || {}),
         schema: loaded?.schema || "ccm-task-agent-memory-context-snapshot-ref-v1",
@@ -604,6 +1638,8 @@ export function listTaskAgentMemoryContextSnapshots(filter: { scopeId?: string; 
           resume_mode: session.resumeMode,
         },
         ref,
+        delivery_receipt: deliveryReceipt,
+        delivery_receipt_checksum_valid: deliveryReceipt ? verifyMemoryContextDeliveryReceiptChecksum(deliveryReceipt) : false,
       });
     }
   }
@@ -644,6 +1680,72 @@ function buildTaskAgentMemorySnapshotRow(input: {
   const ageDays = ageMs === null ? null : Math.round((ageMs / (24 * 60 * 60 * 1000)) * 10) / 10;
   const context = loaded?.context || {};
   const memoryContext = context.memory_context || context.worker_context_packet?.memory || null;
+  const groupMemoryContext = memoryContext?.group_memory || memoryContext?.groupMemory || memoryContext || {};
+  const postTurnSummaryState = groupMemoryContext?.group_state?.postTurnSummaries || groupMemoryContext?.group_state?.post_turn_summaries || {};
+  const postTurnSummaryExpected = groupMemoryContext?.memory_policy?.ignored !== true
+    && Array.isArray(postTurnSummaryState.latest)
+    && postTurnSummaryState.latest.length > 0
+    && String(loadedSession.id || input.session?.id || "").startsWith("tas_");
+  const postTurnSummaryCapsuleInput = context.post_turn_summary_delivery_capsule
+    || context.worker_context_packet?.post_turn_summary_delivery_capsule
+    || extractGroupPostTurnSummaryDeliveryCapsule(memoryContext || null);
+  const invocationLineage = context.task_agent_invocation_lineage || context.worker_context_packet?.task_agent_invocation_lineage || null;
+  const postTurnSummaryCapsule = validateGroupPostTurnSummaryDeliveryCapsule(postTurnSummaryCapsuleInput, {
+    expectedBinding: {
+      group_id: String(loadedSession.group_id || input.session?.groupId || ""),
+      task_id: String(loadedSession.task_id || input.session?.taskId || ""),
+      target_project: String(loadedSession.project || input.session?.project || ""),
+      task_agent_session_id: String(loadedSession.id || input.session?.id || ""),
+      native_session_id: String(loadedSession.native_session_id || input.session?.nativeSessionId || ""),
+      attempt_sequence: Number(loadedSession.turn || 0),
+      invocation_kind: Number(loadedSession.turn || 0) > 1 ? "resume" : "spawn",
+      ...(invocationLineage?.invocation_edge_id ? {
+        invocation_edge_id: invocationLineage.invocation_edge_id,
+        parent_invocation_edge_id: invocationLineage.parent_invocation_edge_id || "",
+        root_invocation_edge_id: invocationLineage.root_invocation_edge_id || "",
+        branch_id: invocationLineage.branch_id || "",
+        parent_branch_id: invocationLineage.parent_branch_id || "",
+        branch_kind: invocationLineage.branch_kind || "main",
+        expected_lineage_head_checksum: invocationLineage.expected_lineage_head_checksum || "",
+      } : {}),
+    },
+  });
+  const postTurnSummaryCapsulePresent = !!postTurnSummaryCapsuleInput?.schema;
+  const postTurnSummaryCapsuleValid = postTurnSummaryCapsule?.trusted_for_delivery === true;
+  const postTurnSummaryCapsulePromptBound = context.post_turn_summary_capsule_prompt_bound === true;
+  const snapshotCompactEpoch = String(groupMemoryContext?.group_state?.typedMemory?.ledger?.compactEpoch || groupMemoryContext?.group_state?.typed_memory?.ledger?.compact_epoch || "");
+  const postTurnSummaryCapsuleCompactEpochBound = !postTurnSummaryCapsulePresent || !snapshotCompactEpoch
+    || String(postTurnSummaryCapsule?.compact_epoch || "") === snapshotCompactEpoch;
+  const snapshotLedgerHead = String(postTurnSummaryState.headChecksum || postTurnSummaryState.head_checksum || "");
+  const postTurnSummaryCapsuleLedgerHeadBound = !postTurnSummaryCapsulePresent || !snapshotLedgerHead
+    || String(postTurnSummaryCapsule?.ledger_head_checksum || "") === snapshotLedgerHead;
+  const snapshotSummaryIds = new Set((Array.isArray(postTurnSummaryState.latest) ? postTurnSummaryState.latest : []).map((row: any) => String(row.summaryId || row.summary_id || "")));
+  const postTurnSummaryCapsuleSelectionBound = !postTurnSummaryCapsulePresent
+    || (postTurnSummaryCapsule?.selected_summaries || []).every((row: any) => snapshotSummaryIds.has(String(row.summary_id || "")));
+  const invocationEdgeId = String(invocationLineage?.invocation_edge_id || postTurnSummaryCapsule?.invocation_edge_id || input.ref?.invocationEdgeId || "");
+  const invocationEdge = (() => {
+    if (!invocationEdgeId) return null;
+    try {
+      const ledger = readTaskAgentInvocationLineage(
+        String(loadedSession.group_id || input.session?.groupId || ""),
+        String(postTurnSummaryCapsule?.group_session_id || groupMemoryContext?.group_session_id || ""),
+        String(loadedSession.id || input.session?.id || "")
+      );
+      return ledger.edges.find((edge: any) => edge.invocation_edge_id === invocationEdgeId) || null;
+    } catch { return null; }
+  })();
+  const invocationLineageExpected = !!postTurnSummaryCapsule?.invocation_edge_id;
+  const invocationLineageBound = !invocationLineageExpected || !!invocationLineage
+    && invocationEdgeId === String(postTurnSummaryCapsule?.invocation_edge_id || "")
+    && String(invocationLineage.branch_id || "") === String(postTurnSummaryCapsule?.branch_id || "")
+    && String(invocationLineage.parent_invocation_edge_id || "") === String(postTurnSummaryCapsule?.parent_invocation_edge_id || "");
+  const invocationLedgerBound = !invocationLineageExpected || !!invocationEdge
+    && invocationEdge.group_id === String(loadedSession.group_id || input.session?.groupId || "")
+    && invocationEdge.group_session_id === String(postTurnSummaryCapsule?.group_session_id || "")
+    && invocationEdge.task_agent_session_id === String(loadedSession.id || input.session?.id || "")
+    && invocationEdge.task_id === String(loadedSession.task_id || input.session?.taskId || "")
+    && invocationEdge.target_project === String(loadedSession.project || input.session?.project || "");
+  const groupSessionMemoryBinding = context.group_session_memory_binding || extractGroupSessionMemoryBinding(memoryContext || {});
   const gateIds = Array.isArray(context.gate_ids || input.ref?.gateIds)
     ? (context.gate_ids || input.ref?.gateIds).map((id: any) => String(id || "").trim()).filter(Boolean)
     : [];
@@ -657,6 +1759,42 @@ function buildTaskAgentMemorySnapshotRow(input: {
   const schemaOk = loaded?.schema === TASK_AGENT_MEMORY_CONTEXT_SNAPSHOT_SCHEMA;
   const checksumMatches = !!loaded && verifyMemoryContextSnapshotChecksum(loaded);
   const memoryContextPresent = hasMeaningfulMemoryContext(memoryContext);
+  const deliveryReceiptFile = String(
+    input.ref?.deliveryReceiptPath
+    || (input.ref?.snapshotId && input.ref.snapshotId === session?.memoryContextSnapshotId ? session?.memoryContextDeliveryReceiptPath : "")
+    || ""
+  ).trim();
+  const deliveryReceipt = deliveryReceiptFile ? safeReadJson(deliveryReceiptFile, null) : null;
+  const deliveryReceiptChecksumValid = !!deliveryReceipt && verifyMemoryContextDeliveryReceiptChecksum(deliveryReceipt);
+  const deliverySnapshotBound = !!deliveryReceipt
+    && String(deliveryReceipt.memoryContextSnapshotId || "") === snapshotId
+    && String(deliveryReceipt.memoryContextSnapshotChecksum || "") === String(loaded?.checksum || input.ref?.checksum || "")
+    && String(deliveryReceipt.taskAgentSessionId || "") === sessionId;
+  const deliveryGroupSessionBound = !deliveryReceipt || !groupSessionMemoryBinding?.scopeId
+    || String(deliveryReceipt.groupSessionMemoryBinding?.scopeId || "") === String(groupSessionMemoryBinding.scopeId || "")
+      && String(deliveryReceipt.groupSessionMemoryBinding?.checksum || "") === String(groupSessionMemoryBinding.checksum || "");
+  const memoryContextDelivered = deliveryReceipt?.delivered === true
+    && deliveryReceipt?.status === "delivered"
+    && deliveryReceiptChecksumValid
+    && deliverySnapshotBound
+    && deliveryGroupSessionBound;
+  const compactHeadFenceRequired = groupSessionMemoryBinding?.compactHeadFenceRequired === true;
+  const compactHeadFenceValid = deliveryReceipt
+    ? deliveryReceipt.compactHeadFenceValid === true
+    : groupSessionMemoryBinding?.compactHeadFenceValid === true;
+  const sessionLifecycleFenceRequired = String(groupSessionMemoryBinding?.groupSessionId || "").startsWith("gcs_");
+  const sessionLifecycleValidation = sessionLifecycleFenceRequired
+    ? validateGroupSessionLifecycleBinding({
+      groupId: groupSessionMemoryBinding.groupId,
+      groupSessionId: groupSessionMemoryBinding.groupSessionId,
+      lifecycleStatus: groupSessionMemoryBinding.sessionLifecycleStatus,
+      lifecycleGeneration: groupSessionMemoryBinding.sessionLifecycleGeneration,
+      lifecycleHeadId: groupSessionMemoryBinding.sessionLifecycleHeadId,
+      lifecycleHeadChecksum: groupSessionMemoryBinding.sessionLifecycleHeadChecksum,
+    })
+    : { valid: true, status: "exempt", issues: [] };
+  const sessionLifecycleFenceValid = sessionLifecycleValidation.valid === true
+    && (!deliveryReceipt || deliveryReceipt.sessionLifecycleFenceValid === true);
   const stale = ageDays !== null && ageDays >= input.policy.staleDays;
   const latestRank = input.latestRank ?? null;
   const latestForSession = latestRank === 0;
@@ -674,6 +1812,21 @@ function buildTaskAgentMemorySnapshotRow(input: {
   if (input.source === "session_ref" && !sessionBound) hardGaps.push({ reason: "快照未绑定到实际 task Agent session" });
   if (loaded && !memoryContextPresent) hardGaps.push({ reason: "快照缺少可注入 memory_context" });
   if (loaded && !workerContextPacketId) hardGaps.push({ reason: "快照缺少 worker context packet id" });
+  if (loaded && postTurnSummaryExpected && !postTurnSummaryCapsulePresent) hardGaps.push({ reason: "快照注入了逐轮摘要但缺少 delivery capsule" });
+  if (loaded && postTurnSummaryCapsulePresent && !postTurnSummaryCapsuleValid) hardGaps.push({ reason: `逐轮摘要 delivery capsule 无效：${(postTurnSummaryCapsule?.validation_issues || []).join(",") || "unknown"}` });
+  if (loaded && postTurnSummaryCapsulePresent && !postTurnSummaryCapsulePromptBound) hardGaps.push({ reason: "逐轮摘要 delivery capsule checksum 未绑定 rendered prompt" });
+  if (loaded && postTurnSummaryCapsulePresent && !postTurnSummaryCapsuleCompactEpochBound) hardGaps.push({ reason: "逐轮摘要 delivery capsule compact epoch 与快照记忆不一致" });
+  if (loaded && postTurnSummaryCapsulePresent && !postTurnSummaryCapsuleLedgerHeadBound) hardGaps.push({ reason: "逐轮摘要 delivery capsule ledger head 与快照记忆不一致" });
+  if (loaded && postTurnSummaryCapsulePresent && !postTurnSummaryCapsuleSelectionBound) hardGaps.push({ reason: "逐轮摘要 delivery capsule 选择集未完整绑定快照摘要" });
+  if (loaded && invocationLineageExpected && !invocationLineageBound) hardGaps.push({ reason: "快照 invocation lineage 与摘要胶囊不一致" });
+  if (loaded && invocationLineageExpected && !invocationLedgerBound) hardGaps.push({ reason: "快照 invocation edge 在 durable lineage ledger 中缺失或身份不一致" });
+  if (deliveryReceipt && !deliveryReceiptChecksumValid) hardGaps.push({ reason: "runner memory delivery receipt checksum 不匹配" });
+  if (deliveryReceipt && !deliverySnapshotBound) hardGaps.push({ reason: "runner memory delivery receipt 未绑定当前 task Agent snapshot/session" });
+  if (deliveryReceipt && !deliveryGroupSessionBound) hardGaps.push({ reason: "runner memory delivery receipt 群聊会话 scope/checksum 不匹配" });
+  if (deliveryReceipt && compactHeadFenceRequired && !compactHeadFenceValid) hardGaps.push({ reason: `runner compact head 已过期：${(deliveryReceipt.compactHeadFenceIssues || []).join(",") || deliveryReceipt.compactHeadFenceStatus || "stale"}` });
+  if (sessionLifecycleFenceRequired && !sessionLifecycleFenceValid) hardGaps.push({ reason: `群聊会话生命周期已变化：${(sessionLifecycleValidation.issues || []).join(",") || sessionLifecycleValidation.status || "stale"}` });
+  if (deliveryReceipt && deliveryReceipt.delivered !== true) hardGaps.push({ reason: `runner memory delivery 失败：${deliveryReceipt.promptBindingMode || deliveryReceipt.status || "unknown"}` });
+  if (input.source === "session_ref" && !deliveryReceipt) warningGaps.push({ reason: "快照尚无 runner memory delivery receipt" });
   if (loaded && !gateIds.length) warningGaps.push({ reason: "快照未捕获 memory gate ids" });
   if (input.source === "orphan_file") warningGaps.push({ reason: "快照文件未被 task-agent-sessions 索引引用" });
   if (stale) warningGaps.push({ reason: `快照超过 ${input.policy.staleDays} 天未刷新` });
@@ -712,6 +1865,51 @@ function buildTaskAgentMemorySnapshotRow(input: {
     schemaOk,
     sessionBound,
     memoryContextPresent,
+    groupSessionMemoryBinding,
+    groupSessionId: String(groupSessionMemoryBinding?.groupSessionId || ""),
+    groupSessionScopeId: String(groupSessionMemoryBinding?.scopeId || ""),
+    sessionMemoryChecksum: String(groupSessionMemoryBinding?.sessionMemoryChecksum || ""),
+    sessionMemoryHasSummary: groupSessionMemoryBinding?.sessionMemoryHasSummary === true,
+    postTurnSummaryExpected,
+    postTurnSummaryCapsulePresent,
+    postTurnSummaryCapsuleValid,
+    postTurnSummaryCapsulePromptBound,
+    postTurnSummaryCapsuleChecksum: String(postTurnSummaryCapsule?.capsule_checksum || ""),
+    postTurnSummaryCapsuleSessionBound: postTurnSummaryCapsule?.binding_valid === true,
+    postTurnSummaryCapsuleCompactEpoch: String(postTurnSummaryCapsule?.compact_epoch || ""),
+    postTurnSummaryCapsuleCompactEpochBound,
+    postTurnSummaryCapsuleLedgerHeadChecksum: String(postTurnSummaryCapsule?.ledger_head_checksum || ""),
+    postTurnSummaryCapsuleLedgerHeadBound,
+    postTurnSummaryCapsuleSelectionBound,
+    postTurnSummaryCapsuleSelectedCount: Number(postTurnSummaryCapsule?.selected_count || 0),
+    invocationLineageExpected,
+    invocationLineageBound,
+    invocationLedgerBound,
+    invocationEdgeId,
+    invocationParentEdgeId: String(invocationLineage?.parent_invocation_edge_id || ""),
+    invocationRootEdgeId: String(invocationLineage?.root_invocation_edge_id || ""),
+    invocationBranchId: String(invocationLineage?.branch_id || ""),
+    invocationBranchKind: String(invocationLineage?.branch_kind || ""),
+    invocationEdgeStatus: String(invocationEdge?.status || ""),
+    postTurnSummaryCapsuleInvocationKind: String(postTurnSummaryCapsule?.invocation_kind || ""),
+    deliveryReceiptId: String(deliveryReceipt?.receiptId || input.ref?.deliveryReceiptId || ""),
+    deliveryReceiptFile,
+    deliveryReceiptChecksumValid,
+    deliverySnapshotBound,
+    deliveryGroupSessionBound,
+    memoryContextDelivered,
+    deliveryStatus: String(deliveryReceipt?.status || input.ref?.deliveryStatus || "missing"),
+    deliveryPromptBindingMode: String(deliveryReceipt?.promptBindingMode || ""),
+    compactHeadFenceRequired,
+    compactHeadFenceValid,
+    compactHeadGeneration: Number(deliveryReceipt?.compactHeadGeneration || groupSessionMemoryBinding?.compactHeadGeneration || 0),
+    compactHeadFenceStatus: String(deliveryReceipt?.compactHeadFenceStatus || groupSessionMemoryBinding?.compactHeadFenceStatus || ""),
+    sessionLifecycleFenceRequired,
+    sessionLifecycleFenceValid,
+    sessionLifecycleGeneration: Number(deliveryReceipt?.sessionLifecycleGeneration || groupSessionMemoryBinding?.sessionLifecycleGeneration || 0),
+    sessionLifecycleFenceStatus: String(deliveryReceipt?.sessionLifecycleFenceStatus || sessionLifecycleValidation.status || ""),
+    sessionLifecycleStatus: String(deliveryReceipt?.sessionLifecycleStatus || groupSessionMemoryBinding?.sessionLifecycleStatus || ""),
+    deliveredAt: String(deliveryReceipt?.deliveredAt || input.ref?.deliveredAt || ""),
     renderedPromptChecksum: String(context.rendered_prompt_checksum || "").trim(),
     gaps,
   };
@@ -822,18 +2020,40 @@ export function buildTaskAgentMemoryContextSnapshotInventory(filter: {
   const byGroup = new Map<string, any>();
   for (const row of rows) {
     const groupId = row.groupId || "unknown";
-    const current = byGroup.get(groupId) || { groupId, snapshotCount: 0, okCount: 0, warnCount: 0, failCount: 0, prunableCount: 0, staleCount: 0, projects: new Set<string>() };
+    const current = byGroup.get(groupId) || { groupId, snapshotCount: 0, okCount: 0, warnCount: 0, failCount: 0, prunableCount: 0, staleCount: 0, deliveredCount: 0, deliveryMissingCount: 0, deliveryFailedCount: 0, compactHeadFenceRequiredCount: 0, compactHeadFenceValidCount: 0, compactHeadFenceStaleCount: 0, sessionLifecycleFenceRequiredCount: 0, sessionLifecycleFenceValidCount: 0, sessionLifecycleFenceStaleCount: 0, postTurnSummaryCapsuleCount: 0, postTurnSummaryCapsuleValidCount: 0, postTurnSummaryCapsuleMissingCount: 0, postTurnSummaryCapsuleInvalidCount: 0, postTurnSummaryCapsulePromptBoundCount: 0, postTurnSummaryCapsuleCompactEpochMismatchCount: 0, postTurnSummaryCapsuleLedgerHeadMismatchCount: 0, invocationEdgeCount: 0, invocationLineageBoundCount: 0, invocationLedgerMissingCount: 0, invocationBranchIds: new Set<string>(), projects: new Set<string>() };
     current.snapshotCount += 1;
     if (row.status === "ok") current.okCount += 1;
     if (row.status === "warn") current.warnCount += 1;
     if (row.status === "fail") current.failCount += 1;
     if (row.prunable) current.prunableCount += 1;
     if (row.stale) current.staleCount += 1;
+    if (row.memoryContextDelivered) current.deliveredCount += 1;
+    if (!row.deliveryReceiptId) current.deliveryMissingCount += 1;
+    if (row.deliveryReceiptId && !row.memoryContextDelivered) current.deliveryFailedCount += 1;
+    if (row.compactHeadFenceRequired) current.compactHeadFenceRequiredCount += 1;
+    if (row.compactHeadFenceRequired && row.compactHeadFenceValid) current.compactHeadFenceValidCount += 1;
+    if (row.compactHeadFenceRequired && !row.compactHeadFenceValid) current.compactHeadFenceStaleCount += 1;
+    if (row.sessionLifecycleFenceRequired) current.sessionLifecycleFenceRequiredCount += 1;
+    if (row.sessionLifecycleFenceRequired && row.sessionLifecycleFenceValid) current.sessionLifecycleFenceValidCount += 1;
+    if (row.sessionLifecycleFenceRequired && !row.sessionLifecycleFenceValid) current.sessionLifecycleFenceStaleCount += 1;
+    if (row.postTurnSummaryCapsulePresent) current.postTurnSummaryCapsuleCount += 1;
+    if (row.postTurnSummaryCapsuleValid) current.postTurnSummaryCapsuleValidCount += 1;
+    if (row.postTurnSummaryExpected && !row.postTurnSummaryCapsulePresent) current.postTurnSummaryCapsuleMissingCount += 1;
+    if (row.postTurnSummaryCapsulePresent && !row.postTurnSummaryCapsuleValid) current.postTurnSummaryCapsuleInvalidCount += 1;
+    if (row.postTurnSummaryCapsulePromptBound) current.postTurnSummaryCapsulePromptBoundCount += 1;
+    if (row.postTurnSummaryCapsulePresent && !row.postTurnSummaryCapsuleCompactEpochBound) current.postTurnSummaryCapsuleCompactEpochMismatchCount += 1;
+    if (row.postTurnSummaryCapsulePresent && !row.postTurnSummaryCapsuleLedgerHeadBound) current.postTurnSummaryCapsuleLedgerHeadMismatchCount += 1;
+    if (row.invocationEdgeId) current.invocationEdgeCount += 1;
+    if (row.invocationLineageExpected && row.invocationLineageBound && row.invocationLedgerBound) current.invocationLineageBoundCount += 1;
+    if (row.invocationLineageExpected && !row.invocationLedgerBound) current.invocationLedgerMissingCount += 1;
+    if (row.invocationBranchId) current.invocationBranchIds.add(row.invocationBranchId);
     if (row.project) current.projects.add(row.project);
     byGroup.set(groupId, current);
   }
   const groups = Array.from(byGroup.values()).map(group => ({
     ...group,
+    invocationBranchCount: group.invocationBranchIds.size,
+    invocationBranchIds: Array.from(group.invocationBranchIds).slice(0, 20),
     projects: Array.from(group.projects).slice(0, 12),
   })).sort((a, b) => Number(b.failCount + b.warnCount) - Number(a.failCount + a.warnCount));
   return {
@@ -862,6 +2082,33 @@ export function buildTaskAgentMemoryContextSnapshotInventory(filter: {
       checksumMismatchCount: rows.filter(row => row.readable && !row.checksumMatches).length,
       missingPacketCount: rows.filter(row => row.readable && !row.workerContextPacketId).length,
       missingGateCount: rows.filter(row => row.readable && !row.gateCount).length,
+      groupSessionBoundCount: rows.filter(row => !!row.groupSessionScopeId).length,
+      deliveredCount: rows.filter(row => row.memoryContextDelivered).length,
+      deliveryMissingCount: rows.filter(row => !row.deliveryReceiptId).length,
+      deliveryFailedCount: rows.filter(row => row.deliveryReceiptId && !row.memoryContextDelivered).length,
+      deliveryChecksumMismatchCount: rows.filter(row => row.deliveryReceiptId && !row.deliveryReceiptChecksumValid).length,
+      deliveryScopeMismatchCount: rows.filter(row => row.deliveryReceiptId && !row.deliveryGroupSessionBound).length,
+      compactHeadFenceRequiredCount: rows.filter(row => row.compactHeadFenceRequired).length,
+      compactHeadFenceValidCount: rows.filter(row => row.compactHeadFenceRequired && row.compactHeadFenceValid).length,
+      compactHeadFenceStaleCount: rows.filter(row => row.compactHeadFenceRequired && !row.compactHeadFenceValid).length,
+      sessionLifecycleFenceRequiredCount: rows.filter(row => row.sessionLifecycleFenceRequired).length,
+      sessionLifecycleFenceValidCount: rows.filter(row => row.sessionLifecycleFenceRequired && row.sessionLifecycleFenceValid).length,
+      sessionLifecycleFenceStaleCount: rows.filter(row => row.sessionLifecycleFenceRequired && !row.sessionLifecycleFenceValid).length,
+      postTurnSummaryCapsuleCount: rows.filter(row => row.postTurnSummaryCapsulePresent).length,
+      postTurnSummaryCapsuleValidCount: rows.filter(row => row.postTurnSummaryCapsuleValid).length,
+      postTurnSummaryCapsuleMissingCount: rows.filter(row => row.postTurnSummaryExpected && !row.postTurnSummaryCapsulePresent).length,
+      postTurnSummaryCapsuleInvalidCount: rows.filter(row => row.postTurnSummaryCapsulePresent && !row.postTurnSummaryCapsuleValid).length,
+      postTurnSummaryCapsulePromptBoundCount: rows.filter(row => row.postTurnSummaryCapsulePromptBound).length,
+      postTurnSummaryCapsuleSessionBoundCount: rows.filter(row => row.postTurnSummaryCapsuleSessionBound).length,
+      postTurnSummaryCapsuleCompactEpochCount: rows.filter(row => !!row.postTurnSummaryCapsuleCompactEpoch).length,
+      postTurnSummaryCapsuleCompactEpochMismatchCount: rows.filter(row => row.postTurnSummaryCapsulePresent && !row.postTurnSummaryCapsuleCompactEpochBound).length,
+      postTurnSummaryCapsuleLedgerHeadMismatchCount: rows.filter(row => row.postTurnSummaryCapsulePresent && !row.postTurnSummaryCapsuleLedgerHeadBound).length,
+      postTurnSummaryCapsuleSelectionMismatchCount: rows.filter(row => row.postTurnSummaryCapsulePresent && !row.postTurnSummaryCapsuleSelectionBound).length,
+      invocationEdgeCount: rows.filter(row => row.invocationEdgeId).length,
+      invocationLineageExpectedCount: rows.filter(row => row.invocationLineageExpected).length,
+      invocationLineageBoundCount: rows.filter(row => row.invocationLineageExpected && row.invocationLineageBound && row.invocationLedgerBound).length,
+      invocationLedgerMissingCount: rows.filter(row => row.invocationLineageExpected && !row.invocationLedgerBound).length,
+      invocationBranchCount: new Set(rows.map(row => row.invocationBranchId).filter(Boolean)).size,
       staleCount: rows.filter(row => row.stale).length,
       prunableCount: rows.filter(row => row.prunable).length,
       groupCount: groups.length,
@@ -881,12 +2128,13 @@ export function pruneTaskAgentMemoryContextSnapshots(options: any = {}) {
   const skipped: any[] = [];
   for (const row of candidates) {
     if (dryRun) {
-      pruned.push({ snapshotId: row.snapshotId, snapshotFile: row.snapshotFile, sessionId: row.sessionId, dryRun: true, reason: row.source === "orphan_file" ? "orphan_file" : "retention_expired" });
+      pruned.push({ snapshotId: row.snapshotId, snapshotFile: row.snapshotFile, deliveryReceiptFile: row.deliveryReceiptFile || "", sessionId: row.sessionId, dryRun: true, reason: row.source === "orphan_file" ? "orphan_file" : "retention_expired" });
       continue;
     }
     try {
       fs.rmSync(row.snapshotFile, { force: true });
-      pruned.push({ snapshotId: row.snapshotId, snapshotFile: row.snapshotFile, sessionId: row.sessionId, dryRun: false, reason: row.source === "orphan_file" ? "orphan_file" : "retention_expired" });
+      if (row.deliveryReceiptFile && pathIsInsideMemorySnapshotDir(row.deliveryReceiptFile)) fs.rmSync(row.deliveryReceiptFile, { force: true });
+      pruned.push({ snapshotId: row.snapshotId, snapshotFile: row.snapshotFile, deliveryReceiptFile: row.deliveryReceiptFile || "", sessionId: row.sessionId, dryRun: false, reason: row.source === "orphan_file" ? "orphan_file" : "retention_expired" });
       try {
         const dir = path.dirname(row.snapshotFile);
         if (pathIsInsideMemorySnapshotDir(dir) && fs.existsSync(dir) && fs.readdirSync(dir).length === 0) fs.rmdirSync(dir);
@@ -898,27 +2146,34 @@ export function pruneTaskAgentMemoryContextSnapshots(options: any = {}) {
   if (!dryRun && pruned.length) {
     const prunedIds = new Set(pruned.map(row => String(row.snapshotId || "")).filter(Boolean));
     const prunedFiles = new Set(pruned.map(row => normalizeSnapshotFileKey(row.snapshotFile)).filter(Boolean));
-    const store = loadStore();
-    store.sessions = store.sessions.map((session: TaskAgentSession) => {
-      const refs = normalizeMemorySnapshotRefs(session.memoryContextSnapshots).filter(ref =>
-        !prunedIds.has(ref.snapshotId)
-        && !prunedFiles.has(normalizeSnapshotFileKey(ref.snapshotPath))
-      );
-      const currentPruned = prunedIds.has(String(session.memoryContextSnapshotId || ""))
-        || prunedFiles.has(normalizeSnapshotFileKey(session.memoryContextSnapshotPath || ""));
-      if (!currentPruned && refs.length === normalizeMemorySnapshotRefs(session.memoryContextSnapshots).length) return session;
-      const latest = [...refs].sort((a, b) => String(b.generatedAt || "").localeCompare(String(a.generatedAt || "")))[0] || null;
-      return {
-        ...session,
-        memoryContextSnapshotId: latest?.snapshotId || "",
-        memoryContextSnapshotPath: latest?.snapshotPath || "",
-        memoryContextSnapshotChecksum: latest?.checksum || "",
-        memoryContextPacketId: latest?.workerContextPacketId || "",
-        memoryContextSnapshotAt: latest?.generatedAt || "",
-        memoryContextSnapshots: refs,
-      };
+    withTaskAgentSessionStoreLock(() => {
+      const store = loadStore();
+      store.sessions = store.sessions.map((session: TaskAgentSession) => {
+        const refs = normalizeMemorySnapshotRefs(session.memoryContextSnapshots).filter(ref =>
+          !prunedIds.has(ref.snapshotId)
+          && !prunedFiles.has(normalizeSnapshotFileKey(ref.snapshotPath))
+        );
+        const currentPruned = prunedIds.has(String(session.memoryContextSnapshotId || ""))
+          || prunedFiles.has(normalizeSnapshotFileKey(session.memoryContextSnapshotPath || ""));
+        if (!currentPruned && refs.length === normalizeMemorySnapshotRefs(session.memoryContextSnapshots).length) return session;
+        const latest = [...refs].sort((a, b) => String(b.generatedAt || "").localeCompare(String(a.generatedAt || "")))[0] || null;
+        return {
+          ...session,
+          memoryContextSnapshotId: latest?.snapshotId || "",
+          memoryContextSnapshotPath: latest?.snapshotPath || "",
+          memoryContextSnapshotChecksum: latest?.checksum || "",
+          memoryContextPacketId: latest?.workerContextPacketId || "",
+          memoryContextSnapshotAt: latest?.generatedAt || "",
+          memoryContextDeliveryReceiptId: latest?.deliveryReceiptId || "",
+          memoryContextDeliveryReceiptPath: latest?.deliveryReceiptPath || "",
+          memoryContextDeliveryReceiptChecksum: latest?.deliveryReceiptChecksum || "",
+          memoryContextDeliveryStatus: latest?.deliveryStatus || "",
+          memoryContextDeliveredAt: latest?.deliveredAt || "",
+          memoryContextSnapshots: refs,
+        };
+      });
+      saveStore(store);
     });
-    saveStore(store);
   }
   return {
     schema: "ccm-task-agent-memory-context-snapshot-retention-result-v1",
@@ -937,33 +2192,39 @@ export function pruneTaskAgentMemoryContextSnapshots(options: any = {}) {
 export function purgeTaskAgentSessions(taskId: string) {
   const id = String(taskId || "").trim();
   if (!id) return [];
-  const store = loadStore();
-  const removed = store.sessions.filter((item: TaskAgentSession) => item.taskId === id || item.scopeId === id);
-  if (!removed.length) return [];
-  store.sessions = store.sessions.filter((item: TaskAgentSession) => item.taskId !== id && item.scopeId !== id);
-  for (const session of removed) purgeMemoryContextSnapshotsForSession(session.id);
-  saveStore(store);
-  return removed;
+  return withTaskAgentSessionStoreLock(() => {
+    const store = loadStore();
+    const removed = store.sessions.filter((item: TaskAgentSession) => item.taskId === id || item.scopeId === id);
+    if (!removed.length) return [];
+    store.sessions = store.sessions.filter((item: TaskAgentSession) => item.taskId !== id && item.scopeId !== id);
+    for (const session of removed) purgeMemoryContextSnapshotsForSession(session.id);
+    saveStore(store);
+    // A purged session must not be recoverable from the store backup.
+    try { fs.copyFileSync(STORE_FILE, STORE_BACKUP_FILE); } catch {}
+    return removed;
+  });
 }
 
 export function reconcileTaskAgentSessions(tasks: any[], nowMs = Date.now()) {
   const taskMap = new Map((Array.isArray(tasks) ? tasks : []).map((task: any) => [String(task.id || ""), task]));
-  const store = loadStore();
-  const closed: TaskAgentSession[] = [];
-  const now = new Date(nowMs).toISOString();
-  store.sessions = store.sessions.map((session: TaskAgentSession) => {
-    if (session.status !== "open") return session;
-    const task: any = taskMap.get(session.taskId || session.scopeId);
-    const inactiveMs = nowMs - Date.parse(session.lastUsedAt || session.createdAt || now);
-    const terminal = !task || task.archived || task.deleted_at || ["done", "cancelled", "archived"].includes(String(task.status || ""));
-    const abandoned = inactiveMs > 30 * 24 * 60 * 60 * 1000 && String(task?.status || "") !== "in_progress";
-    if (!terminal && !abandoned) return session;
-    const next = { ...session, status: "closed" as const, closedAt: now, lastUsedAt: now, closeReason: terminal ? "任务已终态、归档或不存在，自动关闭残留会话" : "会话超过 30 天未使用，自动关闭" };
-    closed.push(next);
-    return next;
+  return withTaskAgentSessionStoreLock(() => {
+    const store = loadStore();
+    const closed: TaskAgentSession[] = [];
+    const now = new Date(nowMs).toISOString();
+    store.sessions = store.sessions.map((session: TaskAgentSession) => {
+      if (session.status !== "open") return session;
+      const task: any = taskMap.get(session.taskId || session.scopeId);
+      const inactiveMs = nowMs - Date.parse(session.lastUsedAt || session.createdAt || now);
+      const terminal = !task || task.archived || task.deleted_at || ["done", "cancelled", "archived"].includes(String(task.status || ""));
+      const abandoned = inactiveMs > 30 * 24 * 60 * 60 * 1000 && String(task?.status || "") !== "in_progress";
+      if (!terminal && !abandoned) return session;
+      const next = { ...session, status: "closed" as const, closedAt: now, lastUsedAt: now, closeReason: terminal ? "任务已终态、归档或不存在，自动关闭残留会话" : "会话超过 30 天未使用，自动关闭" };
+      closed.push(next);
+      return next;
+    });
+    if (closed.length) saveStore(store);
+    return { closed: closed.length, sessions: closed };
   });
-  if (closed.length) saveStore(store);
-  return { closed: closed.length, sessions: closed };
 }
 
 export function shouldCloseTaskAgentSessions(input: { taskId?: string; reviewStatus?: string; taskStatus?: string }) {

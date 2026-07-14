@@ -1,11 +1,50 @@
+export declare const CRON_RUN_HISTORY_LIMIT = 40;
+export declare const DEFAULT_CRON_TIMEZONE = "Asia/Shanghai";
+export declare function normalizeCronRunHistory(job: any): any;
+export declare function aggregateCronRunStatus(taskStates: Record<string, any>, fallback?: string): string;
 export declare function pad2(value: number): string;
-export declare function minuteKey(date: Date): string;
+export declare function normalizeCronTimezone(value: any): string;
+export declare function minuteKey(date: Date, timezone?: string): string;
 export declare function validateCronExpression(expression: string): void;
-export declare function matchesCron(expression: string, date: Date): boolean;
-export declare function computeNextRun(expression: string, from?: Date): string;
+export declare function matchesCron(expression: string, date: Date, timezone?: string): boolean;
+export declare function computeNextRun(expression: string, from?: Date, timezone?: string): string;
 export declare function normalizeTargetType(job: any): any;
 export declare function normalizeCronJob(job: any): any;
 export declare function patchCronJob(id: string, updates: any): any;
+export declare function appendCronRun(jobId: string, input?: any): {
+    id: string;
+    trigger: any;
+    started_at: string;
+    dispatched_at: any;
+    completed_at: any;
+    status: any;
+    result: string;
+    task_ids: string[];
+    primary_task_id: string;
+    task_states: any;
+    meta: any;
+    attempt: number;
+    parent_run_id: string;
+    scheduled_for: any;
+    next_retry_at: any;
+    notifications: any;
+};
+export declare function patchCronRun(jobId: string, runId: string, updates?: any): any;
+export declare function findCronRunForTask(job: any, taskId: string, preferredRunId?: string): any;
+export declare function syncCronRunTask(jobId: string, runId: string, taskId: string, status: string, result?: string, updatedAt?: string): any;
+export declare function runCronRunHistoryContractSelfTest(): {
+    pass: boolean;
+    checks: {
+        batchRunningUntilAllDone: boolean;
+        batchDoneWhenAllDone: boolean;
+        failureWins: boolean;
+        waitingVisible: boolean;
+        legacyBackfill: boolean;
+        timezoneMatch: boolean;
+        timezoneMinuteKey: boolean;
+        timezoneNextRun: boolean;
+    };
+};
 export declare function validateCronJobPayload(job: any): void;
 export declare function createCronJob(job: any): {
     id: string;
@@ -18,6 +57,13 @@ export declare function createCronJob(job: any): {
     schedule: string;
     prompt: string;
     priority: any;
+    timezone: string;
+    retry_limit: number;
+    retry_interval_minutes: number;
+    misfire_policy: string;
+    misfire_grace_minutes: number;
+    notification_enabled: boolean;
+    notify_on: unknown[];
     backlog_batch_limit: number;
     import_shared_docs: any;
     continue_gaps: any;
@@ -30,6 +76,8 @@ export declare function createCronJob(job: any): {
     last_status: string;
     last_result: string;
     last_task_id: any;
+    last_task_ids: any[];
+    run_history: any[];
     run_count: number;
     next_run: string;
 };

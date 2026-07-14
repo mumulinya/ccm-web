@@ -3,6 +3,8 @@ import { ref, onMounted, computed } from 'vue'
 import { toolsApi } from '../../api/index.js'
 import { toast, confirmDialog } from '../../utils/toast.js'
 
+const emit = defineEmits(['navigate'])
+
 const mcpTools = ref([])
 const skills = ref([])
 const customSkills = ref([]) // 本地物理加载的高级 Customization Skills
@@ -19,6 +21,8 @@ const toolInvocationAuditLoading = ref(false)
 const toolInvocationAuditFilter = ref({})
 const toolChainVerification = ref({ summary: { totalScopes: 0, configuredScopes: 0, verified: 0, readyNotObserved: 0, needsAttention: 0, authorizationBlocked: 0, runtimeMissing: 0, runtimeNeedsResync: 0, unauthorizedAttempts: 0, observedInvocations: 0 }, gate: {}, rows: [] })
 const toolChainVerificationLoading = ref(false)
+const realCliMatrix = ref({ status: 'not_run', complete: false, running: false, results: [] })
+const realCliMatrixLoading = ref(false)
 
 // 抽屉状态
 const showDrawer = ref(false)
@@ -155,7 +159,8 @@ const loadTools = async () => {
     loadRuntimeReadiness(false),
     loadAuthorizationInventory(),
     loadToolInvocationAudit(),
-    loadToolChainVerification()
+    loadToolChainVerification(),
+    loadRealCliMatrix()
   ])
 
   // 重置激活状态
@@ -308,6 +313,43 @@ const loadToolChainVerification = async () => {
     console.error('加载工具链路验收失败:', e)
   } finally {
     toolChainVerificationLoading.value = false
+  }
+}
+
+const loadRealCliMatrix = async () => {
+  try {
+    const res = await toolsApi.realCliMatrix.status()
+    if (res.success) realCliMatrix.value = res
+  } catch (e) {
+    console.error('加载第三方 Agent 工具验收状态失败:', e)
+  }
+}
+
+const waitForRealCliMatrix = async () => {
+  for (let attempt = 0; attempt < 240; attempt += 1) {
+    await new Promise(resolve => setTimeout(resolve, 3000))
+    await loadRealCliMatrix()
+    if (!realCliMatrix.value.running) return
+  }
+}
+
+const runRealCliMatrix = async () => {
+  const confirmed = await confirmDialog('将依次调用 Claude Code、Cursor 和 Codex，真实验证 MCP 与 Skill。过程可能需要几分钟，是否继续？')
+  if (!confirmed) return
+  realCliMatrixLoading.value = true
+  try {
+    const res = await toolsApi.realCliMatrix.run()
+    if (!res.success) throw new Error(res.error || '验收启动失败')
+    realCliMatrix.value = res.status || realCliMatrix.value
+    toast.success(res.accepted ? '真实工具验收已启动' : '真实工具验收正在运行')
+    await waitForRealCliMatrix()
+    await Promise.all([loadToolChainVerification(), loadRuntimeReadiness(false)])
+    if (realCliMatrix.value.complete) toast.success('三种第三方 Agent 的 MCP 与 Skill 真实验收已通过', 6000)
+    else toast.warning('真实工具验收未全部通过，请查看各运行时状态', 6000)
+  } catch (e) {
+    toast.error('真实工具验收失败: ' + e.message)
+  } finally {
+    realCliMatrixLoading.value = false
   }
 }
 
@@ -529,7 +571,7 @@ const chainVerificationGateClass = computed(() => ({
 const chainVerificationStatusClass = (row) => ({
   connected: ['verified', 'ready_not_observed', 'not_configured'].includes(row?.status),
   failed: ['authorization_blocked', 'runtime_missing', 'runtime_needs_resync', 'unauthorized_attempts'].includes(row?.status),
-  auth: row?.status === 'ready_not_observed'
+  auth: ['ready_not_observed', 'verification_incomplete'].includes(row?.status)
 })
 
 const chainVerificationScopeLabel = (row) => row?.scope === 'group' ? '群聊' : '项目'
@@ -545,8 +587,21 @@ const chainVerificationInvocationText = (row) => {
   const summary = row?.invocation?.summary || {}
   const observed = Number(summary.totalObserved || 0)
   if (!observed && !Number(summary.unauthorized || 0)) return '未观察到调用'
-  return `调用 ${observed} · Skill ${Number(summary.skillInvocations || 0)} · 越权 ${Number(summary.unauthorized || 0)}`
+  const mcp = summary.requiresMcp ? (summary.mcpVerified ? 'MCP 已通过' : 'MCP 未通过') : 'MCP 未配置'
+  const skill = summary.requiresSkill ? (summary.skillVerified ? 'Skill 已通过' : 'Skill 未通过') : 'Skill 未配置'
+  return `${mcp} · ${skill} · 越权 ${Number(summary.unauthorized || 0)}`
 }
+
+const realCliRuntimeLabel = (runtime) => ({ claudecode: 'Claude Code', cursor: 'Cursor', codex: 'Codex' }[runtime] || runtime || '-')
+const realCliResultLabel = (row) => {
+  if (realCliMatrix.value.running && !row.checked_at) return '等待中'
+  if (row.success && row.fresh) return '真实调用已通过'
+  if (row.success && !row.versionMatches) return 'CLI 已升级，需重验'
+  if (row.success) return '证据已过期'
+  if (row.cliAvailable === false) return 'CLI 不可用'
+  return row.checked_at ? '真实调用未通过' : '尚未验收'
+}
+const realCliResultClass = (row) => ({ connected: row.success && row.fresh, auth: row.success && !row.fresh, failed: !!row.checked_at && !row.success })
 
 const chainVerificationRecentTitle = (item) => invocationAuditTitle(item)
 
@@ -595,6 +650,19 @@ const runChainVerificationAction = async (row, action) => {
   }
   if (action?.kind === 'runtime_resync') {
     await resyncChainVerificationRuntime(row, action)
+    return
+  }
+  if (action?.kind === 'open_scope_real_task') {
+    const scope = action.scope || row?.scope
+    const scopeId = action.scopeId || row?.id || ''
+    const scopeName = action.scopeName || row?.name || scopeId
+    if (scope === 'group') {
+      toast.info(`请在“${scopeName}”中执行一次会调用已授权 MCP 与 Skill 的真实任务，完成后验收状态会根据审计证据更新。`, 7000)
+      emit('navigate', { tab: 'groups', groupId: scopeId })
+      return
+    }
+    toast.info(`请在“${scopeName}”中执行一次会调用已授权 MCP 与 Skill 的真实任务，完成后验收状态会根据审计证据更新。`, 7000)
+    emit('navigate', { tab: 'projects', project: scopeId })
   }
 }
 
@@ -1414,9 +1482,28 @@ onMounted(loadTools)
 
           <!-- 3. MCP / Skill 子 Agent 链路验收 -->
           <template v-if="currentFilter === 'chain-verification'">
+            <div class="tool-card real-cli-matrix-card">
+              <div class="runtime-card-head">
+                <div>
+                  <div class="tool-name">第三方 Agent 真实工具验收</div>
+                  <div class="tool-desc">只有原生 Skill 被读取、MCP 服务端收到调用且授权快照通过，才算验收成功。</div>
+                </div>
+                <button class="btn btn-primary btn-sm" :disabled="realCliMatrixLoading || realCliMatrix.running" @click="runRealCliMatrix">
+                  {{ realCliMatrix.running ? '验收中...' : (realCliMatrixLoading ? '启动中...' : '运行真实验收') }}
+                </button>
+              </div>
+              <div class="real-cli-matrix-grid">
+                <div v-for="row in realCliMatrix.results" :key="row.runtime">
+                  <strong>{{ realCliRuntimeLabel(row.runtime) }}</strong>
+                  <span class="conn-status" :class="realCliResultClass(row)">{{ realCliResultLabel(row) }}</span>
+                  <small>MCP {{ row.mcpInvocationObserved ? '已调用' : '未验证' }} · Skill {{ row.skillInvocationObserved ? '已调用' : '未验证' }}</small>
+                </div>
+              </div>
+            </div>
             <div class="runtime-summary chain-verification-summary">
-              <div><strong>{{ chainVerificationSummary.verified || 0 }}</strong><span>已观察到调用</span></div>
+              <div><strong>{{ chainVerificationSummary.verified || 0 }}</strong><span>已验证可用</span></div>
               <div><strong>{{ chainVerificationSummary.readyNotObserved || 0 }}</strong><span>就绪未调用</span></div>
+              <div><strong>{{ chainVerificationSummary.verificationIncomplete || 0 }}</strong><span>调用未通过</span></div>
               <div><strong>{{ chainVerificationSummary.needsAttention || 0 }}</strong><span>需处理范围</span></div>
               <div><strong>{{ chainVerificationSummary.runtimeNeedsResync || 0 }}</strong><span>待重同步</span></div>
               <div><strong>{{ chainVerificationSummary.unauthorizedAttempts || 0 }}</strong><span>越权尝试</span></div>
@@ -2100,6 +2187,11 @@ onMounted(loadTools)
 .invocation-audit-meta { display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-top:10px; font-size:10.5px; color:var(--text-muted); min-width:0; }
 .invocation-audit-meta span { max-width:280px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding:3px 7px; border-radius:5px; background:rgba(148,163,184,.12); }
 .chain-verification-summary { margin-bottom:10px; }
+.real-cli-matrix-card { display:block; margin-bottom:10px; }
+.real-cli-matrix-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; margin-top:12px; }
+.real-cli-matrix-grid > div { min-width:0; display:grid; gap:5px; padding:9px 10px; border:1px solid rgba(148,163,184,.22); border-radius:8px; background:rgba(255,255,255,.65); }
+.real-cli-matrix-grid strong { font-size:12px; color:var(--text-primary); }
+.real-cli-matrix-grid small { color:var(--text-muted); font-size:10.5px; overflow-wrap:anywhere; }
 .chain-verification-card { display:block; }
 .chain-verification-gate-strip { font-weight:600; }
 .chain-verification-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
@@ -2127,6 +2219,7 @@ onMounted(loadTools)
   .invocation-audit-filter-strip .btn { width:100%; margin-left:0; }
   .invocation-audit-meta span { max-width:100%; }
   .chain-verification-grid { grid-template-columns:1fr; }
+  .real-cli-matrix-grid { grid-template-columns:1fr; }
   .chain-verification-recent > div { grid-template-columns:1fr; }
 }
 

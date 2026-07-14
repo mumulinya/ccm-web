@@ -44,6 +44,7 @@ const artifact_verifier_1 = require("./artifact-verifier");
 const cli_options_1 = require("./cli-options");
 const contract_1 = require("./contract");
 const execution_plan_1 = require("./execution-plan");
+const invocation_1 = require("./invocation");
 const provider_gaps_1 = require("./browser/provider-gaps");
 const provider_summary_1 = require("./browser/provider-summary");
 const flow_summary_1 = require("./browser/flow-summary");
@@ -295,6 +296,19 @@ async function runTestAgentCli(args = process.argv.slice(2), io = {}) {
         return { exitCode: 2 };
     }
     const overrides = (0, cli_options_1.cliOverrides)(options);
+    if (options.invocationJson) {
+        const invocation = await (0, invocation_1.invokeTestAgent)({
+            schema: "ccm-test-agent-invocation-request-v1",
+            source: options.handoffPath ? "handoff" : "work_order",
+            payload: workOrderJson.input,
+        }, overrides);
+        stdout.write(`${JSON.stringify(invocation, null, 2)}\n`);
+        return {
+            exitCode: invocation.status === "completed"
+                ? (invocation.canAccept ? 0 : 1)
+                : 2,
+        };
+    }
     let workOrderInput = null;
     let validation;
     if (options.handoffPath) {

@@ -9,11 +9,13 @@ export function useMusicAgentChat(options = {}) {
   const agentLoading = ref(false)
   const agentChatEl = ref(null)
   const isAgentChatPinnedToBottom = ref(true)
+  const agentRequestStopped = ref(false)
 
   const agentMessageKeyMap = new WeakMap()
   let agentMessageKeySeq = 0
   let agentMessageIdSeq = 0
   let agentChatResizeObserver = null
+  let activeRequestController = null
 
   const nowLabel = () => options.nowLabel?.() || '00:00:00'
   const greetingMessage = (time = '00:00:00') => ({ role: 'agent', content: options.greeting || DEFAULT_GREETING, time })
@@ -26,7 +28,7 @@ export function useMusicAgentChat(options = {}) {
   }
 
   const normalizeAgentMessages = (messages) => {
-    return (messages || []).map(normalizeAgentMessage)
+    return (messages || []).filter(msg => msg?.role !== 'bash').map(normalizeAgentMessage)
   }
 
   const pushAgentMessage = (msg) => {
@@ -51,6 +53,21 @@ export function useMusicAgentChat(options = {}) {
     updateAgentMessage(target, (item) => {
       item.content = text || ''
     })
+  }
+
+  const setAgentMessageResults = (target, results) => {
+    updateAgentMessage(target, (item) => { item.results = Array.isArray(results) ? results : [] })
+  }
+
+  const buildAgentRequestHistory = ({ exclude = null, limit = 10 } = {}) => {
+    return agentMessages.value
+      .filter((item) => item !== exclude && item?._localId !== exclude?._localId)
+      .map((item) => ({
+        role: item?.role,
+        content: typeof item?.content === 'string' ? item.content.trim() : '',
+      }))
+      .filter((item) => ['operator', 'user', 'agent', 'assistant'].includes(item.role) && item.content)
+      .slice(-Math.max(1, limit))
   }
 
   const getAgentMessageKey = (msg) => {
@@ -152,6 +169,27 @@ export function useMusicAgentChat(options = {}) {
     return true
   }
 
+  const beginAgentRequest = () => {
+    activeRequestController?.abort()
+    activeRequestController = new AbortController()
+    agentRequestStopped.value = false
+    return activeRequestController.signal
+  }
+
+  const finishAgentRequest = () => {
+    activeRequestController = null
+  }
+
+  const stopAgentRequest = () => {
+    if (!activeRequestController) return false
+    agentRequestStopped.value = true
+    activeRequestController.abort()
+    activeRequestController = null
+    return true
+  }
+
+  const lastUserMessage = () => [...agentMessages.value].reverse().find(item => ['operator', 'user'].includes(item?.role) && String(item?.content || '').trim()) || null
+
   watch(agentMessages, () => {
     saveChatMessages()
   }, { deep: true })
@@ -165,6 +203,8 @@ export function useMusicAgentChat(options = {}) {
     pushAgentMessage,
     appendAgentMessageContent,
     setAgentMessageContent,
+    setAgentMessageResults,
+    buildAgentRequestHistory,
     getAgentMessageKey,
     captureAgentChatScroll,
     updateAgentChatScrollState,
@@ -174,5 +214,10 @@ export function useMusicAgentChat(options = {}) {
     loadChatMessages,
     saveChatMessages,
     clearChatHistory,
+    agentRequestStopped,
+    beginAgentRequest,
+    finishAgentRequest,
+    stopAgentRequest,
+    lastUserMessage,
   }
 }

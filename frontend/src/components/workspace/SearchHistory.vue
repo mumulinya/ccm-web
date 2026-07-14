@@ -1,445 +1,297 @@
 <script setup>
-import { ref, computed, nextTick } from 'vue'
+import { computed, nextTick, onUnmounted, ref } from 'vue'
+import ConversationSearchResult from './search/ConversationSearchResult.vue'
 import { toast } from '../../utils/toast.js'
 
 const emit = defineEmits(['go-to'])
+const RECENT_KEY = 'ccm-conversation-search-recent-v2'
+const FAVORITES_KEY = 'ccm-conversation-search-favorites-v2'
 
-const keyword = ref('')
-const results = ref([])
+const query = ref('')
+const source = ref('all')
+const role = ref('')
+const agent = ref('')
+const location = ref('')
+const timeRange = ref('all')
+const startDate = ref('')
+const endDate = ref('')
+const matchMode = ref('all')
+const sort = ref('newest')
+const showFilters = ref(false)
+const viewMode = ref('results')
 const loading = ref(false)
 const searched = ref(false)
-const filterProject = ref('')
+const errorMessage = ref('')
+const response = ref({ results: [], total: 0, page: 1, page_count: 0, facets: {}, query: { terms: [] } })
+const pageSize = 25
+let activeRequest = null
+let requestSequence = 0
 
-// 高级过滤与分析状态
-const showFilters = ref(false)
-const filterRole = ref('')
-const filterTimeRange = ref('')
-const sortOrder = ref('newest')
-const hotWords = ref([])
+const readStored = (key) => {
+  try {
+    const value = JSON.parse(localStorage.getItem(key) || '[]')
+    return Array.isArray(value) ? value : []
+  } catch { return [] }
+}
 
-// 搜索对话历史
-const search = async () => {
-  if (!keyword.value.trim()) return
+const recentSearches = ref(readStored(RECENT_KEY))
+const favorites = ref(readStored(FAVORITES_KEY))
+const results = computed(() => response.value.results || [])
+const terms = computed(() => response.value.query?.terms || query.value.trim().split(/\s+/).filter(Boolean))
+const locationOptions = computed(() => {
+  const facets = response.value.facets || {}
+  const projects = Object.entries(facets.projects || {}).filter(([name]) => name && name !== '未标记').map(([name, count]) => ({ value: `project:${name}`, label: `项目 · ${name}`, count }))
+  const groups = Object.entries(facets.groups || {}).filter(([name]) => name && name !== '未标记').map(([name, count]) => ({ value: `group-name:${name}`, label: `群聊 · ${name}`, count }))
+  return [...projects, ...groups]
+})
+const activeFilterCount = computed(() => [role.value, agent.value, location.value, timeRange.value !== 'all' ? timeRange.value : '', matchMode.value !== 'all' ? matchMode.value : '', sort.value !== 'newest' ? sort.value : ''].filter(Boolean).length)
+const favoriteIds = computed(() => new Set(favorites.value.map(item => item.id)))
+
+const persist = (key, value) => localStorage.setItem(key, JSON.stringify(value))
+
+const dateBounds = () => {
+  const now = new Date()
+  if (timeRange.value === 'today') {
+    const start = new Date(now)
+    start.setHours(0, 0, 0, 0)
+    return { start: start.toISOString(), end: '' }
+  }
+  if (['3days', 'week', 'month'].includes(timeRange.value)) {
+    const days = timeRange.value === '3days' ? 3 : timeRange.value === 'week' ? 7 : 30
+    return { start: new Date(now.getTime() - days * 86_400_000).toISOString(), end: '' }
+  }
+  if (timeRange.value === 'custom') {
+    const start = startDate.value ? new Date(`${startDate.value}T00:00:00`).toISOString() : ''
+    const end = endDate.value ? new Date(new Date(`${endDate.value}T00:00:00`).getTime() + 86_400_000).toISOString() : ''
+    return { start, end }
+  }
+  return { start: '', end: '' }
+}
+
+const buildParams = (page = 1) => {
+  const params = new URLSearchParams({ q: query.value.trim(), page: String(page), page_size: String(pageSize), source: source.value, match: matchMode.value, sort: sort.value })
+  if (role.value) params.set('role', role.value)
+  if (agent.value.trim()) params.set('agent', agent.value.trim())
+  if (location.value.startsWith('project:')) params.set('project', location.value.slice(8))
+  if (location.value.startsWith('group:')) params.set('group_id', location.value.slice(6))
+  if (location.value.startsWith('group-name:')) params.set('group_name', location.value.slice(11))
+  const bounds = dateBounds()
+  if (bounds.start) params.set('start', bounds.start)
+  if (bounds.end) params.set('end', bounds.end)
+  return params
+}
+
+const saveRecent = () => {
+  const item = { id: `${query.value.trim()}|${source.value}|${role.value}|${timeRange.value}|${matchMode.value}`, query: query.value.trim(), source: source.value, role: role.value, agent: agent.value, location: location.value, timeRange: timeRange.value, startDate: startDate.value, endDate: endDate.value, matchMode: matchMode.value, sort: sort.value, searchedAt: new Date().toISOString() }
+  recentSearches.value = [item, ...recentSearches.value.filter(row => row.id !== item.id)].slice(0, 10)
+  persist(RECENT_KEY, recentSearches.value)
+}
+
+const search = async (page = 1, { remember = true } = {}) => {
+  if (!query.value.trim()) return
+  activeRequest?.abort()
+  const controller = new AbortController()
+  activeRequest = controller
+  const sequence = ++requestSequence
   loading.value = true
   searched.value = true
+  viewMode.value = 'results'
+  errorMessage.value = ''
   try {
-    const params = new URLSearchParams({ q: keyword.value.trim(), limit: '50' })
-    if (filterProject.value) params.set('project', filterProject.value)
-    const res = await fetch(`/api/search?${params}`)
-    const data = await res.json()
-    results.value = data.results || []
-    
-    // 生成频次分析热词
-    extractHotWords()
-  } catch (e) {
-    results.value = []
-    hotWords.value = []
+    const res = await fetch(`/api/search?${buildParams(page)}`, { signal: controller.signal })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok || data.success === false) throw new Error(data.error || `搜索失败 (${res.status})`)
+    if (sequence !== requestSequence) return
+    response.value = data
+    if (remember && page === 1) saveRecent()
+  } catch (error) {
+    if (error.name !== 'AbortError' && sequence === requestSequence) {
+      errorMessage.value = error.message || '对话搜索暂时不可用'
+      toast.error(errorMessage.value)
+    }
+  } finally {
+    if (sequence === requestSequence) loading.value = false
   }
-  loading.value = false
 }
 
-// 级联级前端多条件计算过滤
-const processedResults = computed(() => {
-  let list = [...results.value]
-  
-  // 1. 角色过滤
-  if (filterRole.value) {
-    list = list.filter(item => item.role === filterRole.value)
-  }
-  
-  // 2. 时间范围过滤
-  if (filterTimeRange.value) {
-    const now = Date.now()
-    let rangeMs = 0
-    if (filterTimeRange.value === 'today') {
-      rangeMs = 24 * 60 * 60 * 1000
-    } else if (filterTimeRange.value === '3days') {
-      rangeMs = 3 * 24 * 60 * 60 * 1000
-    } else if (filterTimeRange.value === 'week') {
-      rangeMs = 7 * 24 * 60 * 60 * 1000
-    }
-    
-    if (rangeMs > 0) {
-      list = list.filter(item => {
-        const itemTime = new Date(item.timestamp).getTime()
-        return (now - itemTime) <= rangeMs
-      })
-    }
-  }
-  
-  // 3. 升降序排列
-  list.sort((a, b) => {
-    const timeA = new Date(a.timestamp).getTime()
-    const timeB = new Date(b.timestamp).getTime()
-    return sortOrder.value === 'newest' ? timeB - timeA : timeA - timeB
-  })
-  
-  return list
-})
-
-// 常见非特征停用词
-const STOP_WORDS = new Set([
-  '的', '了', '是', '我', '你', '他', '她', '它', '在', '有', '和', '也', '而', '及', '与', 
-  '这', '那', '我们', '你们', '他们', '这个', '那个', '一个', '一些', '请', '帮', '给', '就',
-  '要', '去', '来', '到', '用', '做', '写', '说', '看', '听', '想', '对于', '关于', '已经',
-  '可以', '能够', '会', '将', '被', '让', '使', '通过', '使用', '进行', '如何', '怎么',
-  'the', 'to', 'and', 'of', 'a', 'in', 'is', 'that', 'it', 'for', 'on', 'with', 'as', 'at',
-  'by', 'an', 'be', 'this', 'are', 'from', 'or', 'you', 'your', 'i', 'we', 'they', 'he', 'she'
-])
-
-// 统计词频并提取前8个热词
-const extractHotWords = () => {
-  if (results.value.length === 0) {
-    hotWords.value = []
-    return
-  }
-  
-  const wordFreq = {}
-  results.value.forEach(item => {
-    const content = item.content || ''
-    const regex = /[\u4e00-\u9fa5]{2,4}|[a-zA-Z]+/g
-    let match
-    while ((match = regex.exec(content)) !== null) {
-      const word = match[0].toLowerCase()
-      if (word.length < 2) continue
-      if (STOP_WORDS.has(word)) continue
-      if (/^\d+$/.test(word)) continue
-      wordFreq[word] = (wordFreq[word] || 0) + 1
-    }
-  })
-  
-  const sorted = Object.entries(wordFreq)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 8)
-    .map(entry => entry[0])
-    
-  hotWords.value = sorted
+const applyRecent = async (item) => {
+  query.value = item.query || ''
+  source.value = item.source || 'all'
+  role.value = item.role || ''
+  agent.value = item.agent || ''
+  location.value = item.location || ''
+  timeRange.value = item.timeRange || 'all'
+  startDate.value = item.startDate || ''
+  endDate.value = item.endDate || ''
+  matchMode.value = item.matchMode || 'all'
+  sort.value = item.sort || 'newest'
+  await nextTick()
+  search(1)
 }
 
-// 点击标签热词追加回填
-const appendHotWord = (word) => {
-  if (keyword.value.trim()) {
-    keyword.value = keyword.value.trim() + ' ' + word
+const clearSearch = () => {
+  activeRequest?.abort()
+  query.value = ''
+  searched.value = false
+  errorMessage.value = ''
+  response.value = { results: [], total: 0, page: 1, page_count: 0, facets: {}, query: { terms: [] } }
+}
+
+const resetFilters = () => {
+  role.value = ''
+  agent.value = ''
+  location.value = ''
+  timeRange.value = 'all'
+  startDate.value = ''
+  endDate.value = ''
+  matchMode.value = 'all'
+  sort.value = 'newest'
+  if (searched.value) search(1, { remember: false })
+}
+
+const toggleFavorite = (item) => {
+  if (favoriteIds.value.has(item.id)) {
+    favorites.value = favorites.value.filter(row => row.id !== item.id)
+    toast.info('已取消收藏')
   } else {
-    keyword.value = word
+    favorites.value = [{ ...item, favoriteAt: new Date().toISOString() }, ...favorites.value].slice(0, 50)
+    toast.success('已收藏这条消息')
   }
-  search()
+  persist(FAVORITES_KEY, favorites.value)
 }
 
-// 复制消息全文
-const copyContent = (item) => {
-  navigator.clipboard.writeText(item.content).then(() => {
-    toast.success('已复制对话文本内容')
-  }).catch(() => {
-    toast.error('复制失败，请手动复制')
-  })
+const copyText = async (value, message) => {
+  try {
+    await navigator.clipboard.writeText(value)
+    toast.success(message)
+  } catch { toast.error('复制失败') }
 }
 
-// 导出 Markdown 对话卡片
-const exportMarkdown = (item) => {
-  const roleName = item.role === 'user' ? '👤 用户' : `🤖 Agent (${item.agent || '主 Agent'})`
-  const formattedTime = formatTime(item.timestamp)
-  
-  const md = `### ${item.isGroup ? '💬 群聊' : '📂 项目'}: ${item.project} | 会话: ${item.sessionName}
-- **时间**: ${formattedTime}
-- **说话人**: ${roleName}
+const copyResult = item => copyText(item.content || '', '已复制消息')
+const copyMarkdown = item => copyText(`### ${item.sourceLabel} · ${item.sessionName}\n\n- 时间：${formatTime(item.timestamp)}\n- 角色：${item.role === 'user' ? '用户' : item.agent || 'Agent'}\n${item.taskId ? `- 关联任务：${item.taskTitle || item.taskId}\n` : ''}\n${item.content || ''}`, '已复制 Markdown')
+const goTo = item => emit('go-to', { ...item, query: query.value.trim() || (item.matchTerms || []).join(' ') })
+const goToTask = item => emit('go-to', { conversationType: 'task', taskId: item.taskId })
+const formatTime = value => value ? new Date(value).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '时间未记录'
 
----
-
-${item.content}
-`
-  navigator.clipboard.writeText(md).then(() => {
-    toast.success('Markdown 格式会话卡片已复制，可直接粘贴分享！')
-  }).catch(() => {
-    toast.error('导出失败，请手动复制')
-  })
-}
-
-// 支持空格分词的多词霓虹高亮
-const highlightKeyword = (text, keyword) => {
-  if (!text || !keyword) return text
-  const words = keyword.trim().split(/\s+/).filter(Boolean)
-  if (words.length === 0) return text
-  
-  let highlighted = text
-  words.forEach(word => {
-    const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    const regex = new RegExp(`(${escaped})`, 'gi')
-    highlighted = highlighted.replace(regex, '<mark class="hl-neon">$1</mark>')
-  })
-  return highlighted
-}
-
-const truncate = (text, max = 250) => {
-  if (!text) return ''
-  return text.length > max ? text.substring(0, max) + '...' : text
-}
-
-const formatTime = (ts) => {
-  if (!ts) return ''
-  return new Date(ts).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
-}
-
-const handleKeydown = (e) => {
-  if (e.key === 'Enter') search()
-}
-
-const goToItem = (item) => {
-  emit('go-to', { ...item, _keyword: keyword.value })
-}
+onUnmounted(() => activeRequest?.abort())
 </script>
 
 <template>
-  <div class="search-page">
-    <!-- 搜索栏区域 -->
-    <div class="search-bar-container">
-      <div class="search-bar">
-        <div class="search-input-wrap">
-          <span class="search-icon">🔍</span>
-          <input
-            v-model="keyword"
-            class="search-input"
-            placeholder="搜索所有项目的对话历史...（空格分隔可进行多词分词检索）"
-            @keydown="handleKeydown"
-            autofocus
-          />
-          <button v-if="keyword" class="clear-btn" @click="keyword = ''; results = []; searched = false; hotWords = []">&times;</button>
+  <div class="conversation-search-page">
+    <header class="search-command-bar">
+      <div class="search-input-wrap">
+        <span class="search-symbol" aria-hidden="true">⌕</span>
+        <input v-model="query" type="search" placeholder="搜索对话" aria-label="搜索对话" autofocus @keydown.enter="search(1)">
+        <button v-if="query" class="icon-button" title="清空搜索" aria-label="清空搜索" @click="clearSearch">×</button>
+      </div>
+      <button class="filter-button" :class="{ active: showFilters || activeFilterCount }" @click="showFilters = !showFilters">
+        筛选<span v-if="activeFilterCount"> {{ activeFilterCount }}</span>
+      </button>
+      <button class="primary-button" :disabled="loading || !query.trim()" @click="search(1)">{{ loading ? '搜索中' : '搜索' }}</button>
+    </header>
+
+    <nav class="source-tabs" aria-label="对话来源">
+      <button v-for="item in [{ id: 'all', label: '全部' }, { id: 'global', label: '全局助手' }, { id: 'group', label: '群聊' }, { id: 'project', label: '项目' }, { id: 'feishu', label: '飞书' }]" :key="item.id" :class="{ active: source === item.id }" @click="source = item.id; searched && search(1, { remember: false })">
+        {{ item.label }}
+      </button>
+      <button class="favorites-tab" :class="{ active: viewMode === 'favorites' }" @click="viewMode = 'favorites'">收藏 {{ favorites.length || '' }}</button>
+    </nav>
+
+    <section v-if="showFilters" class="filter-panel">
+      <label><span>匹配方式</span><select v-model="matchMode"><option value="all">包含全部词</option><option value="phrase">完整短语</option><option value="any">包含任一词</option></select></label>
+      <label><span>发送角色</span><select v-model="role"><option value="">全部角色</option><option value="user">用户</option><option value="assistant">Agent</option><option value="system">系统</option></select></label>
+      <label><span>Agent</span><input v-model="agent" placeholder="全部 Agent"></label>
+      <label><span>位置</span><select v-model="location"><option value="">全部位置</option><option v-for="item in locationOptions" :key="item.value" :value="item.value">{{ item.label }} ({{ item.count }})</option></select></label>
+      <label><span>时间</span><select v-model="timeRange"><option value="all">全部时间</option><option value="today">今天</option><option value="3days">最近 3 天</option><option value="week">最近 7 天</option><option value="month">最近 30 天</option><option value="custom">自定义</option></select></label>
+      <label><span>排序</span><select v-model="sort"><option value="newest">最新在前</option><option value="oldest">最早在前</option></select></label>
+      <template v-if="timeRange === 'custom'"><label><span>开始日期</span><input v-model="startDate" type="date"></label><label><span>结束日期</span><input v-model="endDate" type="date"></label></template>
+      <div class="filter-actions"><button @click="resetFilters">重置</button><button class="apply-filter" :disabled="!query.trim()" @click="search(1)">应用筛选</button></div>
+    </section>
+
+    <main class="search-content">
+      <section v-if="viewMode === 'favorites'" class="saved-view">
+        <div class="result-summary"><strong>收藏消息</strong><span>{{ favorites.length }} 条</span></div>
+        <p v-if="!favorites.length" class="empty-state">还没有收藏消息</p>
+        <div v-else class="result-list">
+          <ConversationSearchResult v-for="item in favorites" :key="item.id" :item="item" :terms="item.matchTerms || []" favorite @open="goTo" @task="goToTask" @favorite="toggleFavorite" @copy="copyResult" @copy-markdown="copyMarkdown" />
         </div>
-        <div class="search-actions">
-          <button class="btn btn-outline" @click="showFilters = !showFilters" :class="{ active: showFilters || filterRole || filterTimeRange }">
-            🛠️ 高级过滤 {{ (filterRole || filterTimeRange) ? '●' : '' }}
-          </button>
-          <button class="btn btn-primary" @click="search" :disabled="loading || !keyword.trim()">
-            {{ loading ? '搜索中...' : '搜索' }}
-          </button>
-        </div>
-      </div>
+      </section>
 
-      <!-- 可收折过滤面板 -->
-      <transition name="fade-slide">
-        <div v-if="showFilters" class="filters-panel">
-          <div class="filter-row">
-            <div class="filter-group">
-              <label>👤 发送角色</label>
-              <select v-model="filterRole" class="select">
-                <option value="">全部角色</option>
-                <option value="user">👤 用户 (User)</option>
-                <option value="assistant">🤖 Agent (Assistant)</option>
-                <option value="system">⚠️ 系统消息</option>
-              </select>
-            </div>
-            
-            <div class="filter-group">
-              <label>📅 时间范围</label>
-              <select v-model="filterTimeRange" class="select">
-                <option value="">全部时间</option>
-                <option value="today">📅 今天内</option>
-                <option value="3days">📅 最近 3 天</option>
-                <option value="week">📅 最近一周</option>
-              </select>
-            </div>
-
-            <div class="filter-group">
-              <label>⬇️ 时间排序</label>
-              <select v-model="sortOrder" class="select">
-                <option value="newest">最新在前 ⬇️</option>
-                <option value="oldest">最早在前 ⬆️</option>
-              </select>
-            </div>
+      <template v-else>
+        <section v-if="!searched" class="start-view">
+          <div v-if="recentSearches.length" class="recent-section">
+            <div class="result-summary"><strong>最近搜索</strong><button @click="recentSearches = []; persist(RECENT_KEY, [])">清除</button></div>
+            <div class="recent-list"><button v-for="item in recentSearches" :key="item.id" @click="applyRecent(item)"><span>{{ item.query }}</span><small>{{ formatTime(item.searchedAt) }}</small></button></div>
           </div>
-        </div>
-      </transition>
-    </div>
+          <p v-else class="empty-state">暂无搜索记录</p>
+        </section>
 
-    <!-- 检索分析热词标签条 -->
-    <div v-if="hotWords.length > 0" class="hot-words-bar">
-      <span class="hot-words-title">💡 检索分析热词：</span>
-      <div class="hot-words-list">
-        <span v-for="word in hotWords" :key="word" class="hot-word-tag" @click="appendHotWord(word)">
-          # {{ word }}
-        </span>
-      </div>
-    </div>
-
-    <!-- 结果统计 -->
-    <div v-if="searched" class="result-info">
-      <span v-if="!loading">在过滤后找到 {{ processedResults.length }} / {{ results.length }} 条匹配结果</span>
-      <span v-if="filterProject" class="filter-tag">
-        📂 {{ filterProject }}
-        <button @click="filterProject = ''; search()">&times;</button>
-      </span>
-    </div>
-
-    <!-- 结果列表 -->
-    <div class="result-list">
-      <div v-if="!searched" class="empty-state">
-        <span class="icon">🔍</span>
-        <p>检索全栈多 Agent 的对话历史</p>
-        <p class="sub">实时索引用户提问、Agent 决策及群聊时序记录</p>
-      </div>
-      <div v-else-if="loading" class="empty-state">
-        <span class="icon">⏳</span>
-        <p>安全检索并解密日志库中...</p>
-      </div>
-      <div v-else-if="processedResults.length === 0" class="empty-state">
-        <span class="icon">😕</span>
-        <p>没有找到符合当前过滤条件的匹配结果</p>
-        <p class="sub" v-if="results.length > 0">（已检索到 {{ results.length }} 条记录，但被高级过滤条件拦截）</p>
-      </div>
-      <div v-else>
-        <!-- 玻璃卡片列表 -->
-        <div v-for="(item, i) in processedResults" :key="i" class="result-card">
-          <!-- 卡片顶栏 -->
-          <div class="card-top" @click="goToItem(item)">
-            <span class="result-project" @click.stop="filterProject = item.project; search()">
-              {{ item.isGroup ? '💬' : '📂' }} {{ item.project }}
-            </span>
-            <span class="result-session">{{ item.sessionName }}</span>
-            <span class="result-time">{{ formatTime(item.timestamp) }}</span>
+        <p v-else-if="errorMessage" class="error-state">{{ errorMessage }} <button @click="search(response.page || 1, { remember: false })">重试</button></p>
+        <p v-else-if="loading && !results.length" class="empty-state">正在搜索...</p>
+        <section v-else class="results-view">
+          <div class="result-summary"><strong>{{ response.total || 0 }} 条结果</strong><span v-if="response.total">第 {{ response.page }} / {{ response.page_count }} 页</span></div>
+          <p v-if="!results.length" class="empty-state">没有找到匹配消息</p>
+          <div v-else class="result-list">
+            <ConversationSearchResult v-for="item in results" :key="item.id" :item="item" :terms="terms" :favorite="favoriteIds.has(item.id)" @open="goTo" @task="goToTask" @favorite="toggleFavorite" @copy="copyResult" @copy-markdown="copyMarkdown" />
           </div>
-
-          <!-- 卡片内容 -->
-          <div class="card-body" @click="goToItem(item)">
-            <div class="role-badge-row">
-              <span v-if="item.role === 'user'" class="role-badge user">👤 用户</span>
-              <span v-else-if="item.role === 'assistant'" class="role-badge assistant">🤖 {{ item.agent || 'Agent' }}</span>
-              <span v-else class="role-badge system">⚠️ {{ item.role }}</span>
-            </div>
-            <div class="result-content" v-html="highlightKeyword(truncate(item.content, 250), keyword)"></div>
-          </div>
-
-          <!-- 卡片底栏操作 -->
-          <div class="card-footer">
-            <button class="action-btn" title="点击跳转至原始会话上下文" @click="goToItem(item)">
-              🔗 进入会话
-            </button>
-            <div style="margin-left: auto; display: flex; gap: 8px;">
-              <button class="action-btn text-btn" @click="copyContent(item)">
-                📋 复制文本
-              </button>
-              <button class="action-btn text-btn primary" @click="exportMarkdown(item)">
-                📝 导出 Markdown 卡片
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
+          <nav v-if="response.page_count > 1" class="pagination" aria-label="搜索结果分页">
+            <button :disabled="response.page <= 1 || loading" @click="search(response.page - 1, { remember: false })">上一页</button>
+            <span>{{ response.page }} / {{ response.page_count }}</span>
+            <button :disabled="!response.has_more || loading" @click="search(response.page + 1, { remember: false })">下一页</button>
+          </nav>
+        </section>
+      </template>
+    </main>
   </div>
 </template>
 
 <style scoped>
-.search-page { display: flex; flex-direction: column; height: 100%; background: transparent; }
-
-/* 搜索容器 */
-.search-bar-container { background: rgba(255, 255, 255, 0.25); backdrop-filter: blur(20px); border-bottom: 1px solid rgba(0, 0, 0, 0.05); padding: 16px 24px; display: flex; flex-direction: column; gap: 12px; }
-.search-bar { display: flex; gap: 12px; align-items: center; }
-.search-input-wrap { flex: 1; position: relative; display: flex; align-items: center; }
-.search-icon { position: absolute; left: 16px; font-size: 16px; pointer-events: none; opacity: 0.6; }
-.search-input { width: 100%; padding: 12px 40px 12px 46px; border-radius: 12px; border: 1px solid rgba(0, 0, 0, 0.08); background: rgba(255, 255, 255, 0.85); color: var(--text-primary); font-size: 13.5px; outline: none; transition: all 0.25s ease; box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.02); }
-.search-input:focus { border-color: var(--accent-blue); box-shadow: 0 0 15px rgba(59, 130, 246, 0.12), inset 0 1px 2px rgba(0, 0, 0, 0.01); }
-.clear-btn { position: absolute; right: 14px; background: rgba(0,0,0,0.04); border: none; width: 20px; height: 20px; border-radius: 50%; color: var(--text-muted); font-size: 14px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s; }
-.clear-btn:hover { background: rgba(0,0,0,0.08); color: var(--text-primary); }
-
-.search-actions { display: flex; gap: 8px; }
-
-/* 过滤面板 */
-.filters-panel { background: rgba(255, 255, 255, 0.4); border-radius: 12px; border: 1px solid rgba(0, 0, 0, 0.04); padding: 14px; margin-top: 4px; }
-.filter-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
-.filter-group { display: flex; flex-direction: column; gap: 6px; }
-.filter-group label { font-size: 11.5px; font-weight: 600; color: var(--text-secondary); }
-.select { padding: 8px 12px; border-radius: 8px; border: 1px solid rgba(0, 0, 0, 0.08); background: rgba(255, 255, 255, 0.9); color: var(--text-primary); font-size: 12.5px; outline: none; transition: all 0.2s; }
-.select:focus { border-color: var(--accent-blue); }
-
-/* 热词气泡 */
-.hot-words-bar { display: flex; align-items: center; gap: 8px; padding: 10px 24px; background: rgba(255, 255, 255, 0.1); border-bottom: 1px solid rgba(0, 0, 0, 0.03); }
-.hot-words-title { font-size: 11.5px; font-weight: 600; color: var(--text-muted); }
-.hot-words-list { display: flex; flex-wrap: wrap; gap: 6px; }
-.hot-word-tag { font-size: 11px; padding: 3px 10px; background: rgba(59, 130, 246, 0.08); color: var(--accent-blue); border-radius: 20px; cursor: pointer; border: 1px solid rgba(59, 130, 246, 0.15); transition: all 0.2s ease; font-weight: 500; }
-.hot-word-tag:hover { background: var(--gradient-blue); color: white; border-color: transparent; transform: translateY(-1px); box-shadow: 0 4px 10px rgba(59, 130, 246, 0.2); }
-
-/* 结果说明 */
-.result-info { padding: 10px 24px; font-size: 12px; color: var(--text-muted); display: flex; align-items: center; gap: 12px; }
-.filter-tag { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; background: rgba(59, 130, 246, 0.08); color: var(--accent-blue); border-radius: 6px; font-size: 11px; border: 1px solid rgba(59, 130, 246, 0.15); }
-.filter-tag button { background: none; border: none; color: inherit; cursor: pointer; font-size: 14px; padding: 0; display: flex; align-items: center; }
-
-/* 结果卡片 */
-.result-list { flex: 1; overflow-y: auto; padding: 12px 24px; }
-.result-card { background: rgba(255, 255, 255, 0.45); backdrop-filter: blur(25px); border: 1px solid rgba(0, 0, 0, 0.05); border-radius: 14px; padding: 18px; margin-bottom: 16px; transition: all 0.25s ease; box-shadow: 0 8px 32px 0 rgba(15, 23, 42, 0.03); display: flex; flex-direction: column; gap: 12px; position: relative; overflow: hidden; }
-.result-card::before { content: ''; position: absolute; top: 0; left: 0; width: 4px; height: 100%; background: transparent; transition: background 0.2s; }
-.result-card:hover { border-color: rgba(59, 130, 246, 0.2); transform: translateY(-2px); box-shadow: 0 12px 30px rgba(59, 130, 246, 0.06); }
-.result-card:hover::before { background: var(--accent-blue); }
-
-.card-top { display: flex; align-items: center; gap: 10px; font-size: 12px; padding-bottom: 8px; border-bottom: 1px dashed rgba(0, 0, 0, 0.04); cursor: pointer; }
-.result-project { color: var(--accent-blue); cursor: pointer; font-weight: 600; transition: color 0.2s; }
-.result-project:hover { text-decoration: underline; color: #2563eb; }
-.result-session { color: var(--text-muted); }
-.result-time { color: var(--text-muted); margin-left: auto; }
-
-.card-body { cursor: pointer; display: flex; flex-direction: column; gap: 8px; }
-.role-badge-row { display: flex; }
-.role-badge { font-size: 10.5px; padding: 2px 8px; border-radius: 6px; font-weight: 500; border: 1px solid transparent; }
-.role-badge.user { background: rgba(59, 130, 246, 0.08); color: var(--accent-blue); border-color: rgba(59, 130, 246, 0.15); }
-.role-badge.assistant { background: rgba(34, 197, 94, 0.08); color: var(--accent-green); border-color: rgba(34, 197, 94, 0.15); }
-.role-badge.system { background: rgba(250, 204, 21, 0.08); color: var(--accent-yellow); border-color: rgba(250, 204, 21, 0.15); }
-
-.result-content { font-size: 13px; color: var(--text-secondary); line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
-
-/* 霓虹高亮标记 */
-.result-content :deep(.hl-neon) { background: rgba(250, 204, 21, 0.18); color: var(--text-primary); border-radius: 4px; padding: 1px 4px; font-weight: 600; border-bottom: 2px solid rgba(250, 204, 21, 0.8); text-shadow: 0 0 8px rgba(250, 204, 21, 0.15); }
-
-/* 卡片底端动作栏 */
-.card-footer { display: flex; align-items: center; border-top: 1px solid rgba(0, 0, 0, 0.04); padding-top: 12px; margin-top: 4px; }
-.action-btn { padding: 6px 12px; border-radius: 8px; border: 1px solid rgba(0,0,0,0.06); background: rgba(0,0,0,0.01); color: var(--text-secondary); cursor: pointer; font-size: 11.5px; font-weight: 500; transition: all 0.2s; display: flex; align-items: center; gap: 4px; }
-.action-btn:hover { background: rgba(59, 130, 246, 0.06); border-color: rgba(59, 130, 246, 0.18); color: var(--accent-blue); }
-.action-btn.text-btn { background: transparent; border: none; font-size: 11px; color: var(--text-muted); }
-.action-btn.text-btn:hover { color: var(--text-primary); text-decoration: underline; background: transparent; }
-.action-btn.text-btn.primary { color: var(--accent-blue); }
-.action-btn.text-btn.primary:hover { color: #2563eb; }
-
-/* 缺省页 */
-.empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 350px; color: var(--text-muted); }
-.empty-state .icon { font-size: 48px; opacity: 0.35; margin-bottom: 16px; }
-.empty-state p { font-size: 14.5px; font-weight: 500; color: var(--text-secondary); }
-.empty-state .sub { font-size: 12px; color: var(--text-muted); margin-top: 6px; }
-
-/* 按钮通用 */
-.btn { padding: 10px 18px; border-radius: 10px; border: 1px solid transparent; cursor: pointer; font-size: 13px; font-weight: 600; transition: all 0.25s; display: flex; align-items: center; gap: 4px; }
-.btn-primary { background: var(--gradient-blue); color: white; box-shadow: 0 4px 12px rgba(59, 130, 246, 0.15); }
-.btn-primary:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(59, 130, 246, 0.22); }
-.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: none; }
-.btn-outline { background: rgba(255, 255, 255, 0.7); border-color: rgba(0, 0, 0, 0.08); color: var(--text-secondary); }
-.btn-outline:hover { background: rgba(255, 255, 255, 0.95); border-color: rgba(0,0,0,0.15); }
-.btn-outline.active { background: rgba(59, 130, 246, 0.06); border-color: rgba(59, 130, 246, 0.25); color: var(--accent-blue); box-shadow: 0 0 10px rgba(59, 130, 246, 0.06); }
-
-/* 折叠面板动画 */
-.fade-slide-enter-active, .fade-slide-leave-active { transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); max-height: 120px; opacity: 1; overflow: hidden; }
-.fade-slide-enter-from, .fade-slide-leave-to { max-height: 0; opacity: 0; transform: translateY(-8px); overflow: hidden; }
-
-/* 暗色适配 */
-[data-theme="dark"] .search-bar-container { background: rgba(30, 41, 59, 0.25); border-bottom-color: var(--border-color); }
-[data-theme="dark"] .search-input { background: var(--bg-primary); border-color: var(--border-color); color: var(--text-primary); }
-[data-theme="dark"] .search-input:focus { box-shadow: 0 0 18px rgba(59, 130, 246, 0.2); }
-[data-theme="dark"] .filters-panel { background: rgba(30, 41, 59, 0.4); border-color: var(--border-color); }
-[data-theme="dark"] .select { background: var(--bg-primary); border-color: var(--border-color); color: var(--text-primary); }
-[data-theme="dark"] .btn-outline { background: var(--surface); border-color: var(--border-color); color: var(--text-primary); }
-[data-theme="dark"] .btn-outline:hover { background: var(--bg-primary); }
-[data-theme="dark"] .btn-outline.active { background: rgba(59, 130, 246, 0.12); border-color: rgba(59, 130, 246, 0.3); }
-[data-theme="dark"] .hot-words-bar { background: rgba(0,0,0,0.2); border-bottom-color: var(--border-color); }
-[data-theme="dark"] .hot-word-tag { background: rgba(59, 130, 246, 0.12); border-color: rgba(59, 130, 246, 0.25); }
-[data-theme="dark"] .hot-word-tag:hover { background: var(--gradient-blue); }
-[data-theme="dark"] .result-card { background: rgba(30, 41, 59, 0.4); border-color: var(--border-color); box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.2); }
-[data-theme="dark"] .result-card:hover { border-color: rgba(59, 130, 246, 0.3); box-shadow: 0 12px 30px rgba(0, 0, 0, 0.35); }
-[data-theme="dark"] .card-top { border-bottom-color: var(--border-color); }
-[data-theme="dark"] .card-footer { border-top-color: var(--border-color); }
-[data-theme="dark"] .action-btn { background: rgba(255,255,255,0.02); border-color: var(--border-color); color: var(--text-secondary); }
-[data-theme="dark"] .action-btn:hover { background: rgba(59, 130, 246, 0.12); border-color: rgba(59, 130, 246, 0.3); color: var(--text-primary); }
-[data-theme="dark"] .result-content :deep(.hl-neon) { background: rgba(250, 204, 21, 0.25); color: #ffffff; }
-
-@media (max-width: 768px) {
-  .search-bar { flex-direction: column; align-items: stretch; }
-  .search-actions { justify-content: flex-end; }
-  .filter-row { grid-template-columns: 1fr; gap: 10px; }
-  .result-card { padding: 14px; }
+.conversation-search-page { display: flex; flex-direction: column; height: 100%; min-width: 0; overflow: hidden; background: var(--bg-primary); color: var(--text-primary); }
+.search-command-bar { display: grid; grid-template-columns: minmax(220px, 1fr) auto auto; gap: 8px; padding: 14px 20px 10px; border-bottom: 1px solid var(--border-color); background: var(--surface); }
+.search-input-wrap { position: relative; display: flex; align-items: center; min-width: 0; }
+.search-symbol { position: absolute; left: 12px; color: var(--text-muted); font-size: 20px; }
+.search-input-wrap input { width: 100%; min-height: 38px; padding: 8px 36px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-primary); color: var(--text-primary); font: inherit; font-size: 13px; }
+.search-input-wrap input:focus { border-color: var(--accent-blue); outline: 2px solid color-mix(in srgb, var(--accent-blue) 14%, transparent); }
+.icon-button { position: absolute; right: 8px; width: 26px; height: 26px; border: 0; background: transparent; color: var(--text-muted); font-size: 18px; cursor: pointer; }
+.filter-button, .primary-button, .filter-actions button, .pagination button { min-height: 38px; padding: 8px 13px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--surface); color: var(--text-secondary); font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
+.filter-button.active { border-color: color-mix(in srgb, var(--accent-blue) 45%, var(--border-color)); color: var(--accent-blue); }
+.primary-button, .filter-actions .apply-filter { border-color: var(--accent-blue); background: var(--accent-blue); color: white; }
+button:disabled { opacity: .5; cursor: not-allowed; }
+.source-tabs { display: flex; gap: 2px; padding: 0 20px; overflow-x: auto; border-bottom: 1px solid var(--border-color); background: var(--surface); }
+.source-tabs button { position: relative; flex: 0 0 auto; min-height: 39px; padding: 8px 12px; border: 0; background: transparent; color: var(--text-muted); font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
+.source-tabs button.active { color: var(--accent-blue); }
+.source-tabs button.active::after { position: absolute; right: 8px; bottom: 0; left: 8px; height: 2px; background: var(--accent-blue); content: ''; }
+.source-tabs .favorites-tab { margin-left: auto; }
+.filter-panel { display: grid; grid-template-columns: repeat(6, minmax(120px, 1fr)); gap: 10px; padding: 12px 20px; border-bottom: 1px solid var(--border-color); background: var(--surface); }
+.filter-panel label { display: grid; gap: 5px; min-width: 0; }
+.filter-panel label span { color: var(--text-muted); font-size: 10.5px; font-weight: 700; }
+.filter-panel input, .filter-panel select { width: 100%; min-width: 0; min-height: 34px; padding: 6px 8px; border: 1px solid var(--border-color); border-radius: 5px; background: var(--bg-primary); color: var(--text-primary); font: inherit; font-size: 11.5px; }
+.filter-actions { display: flex; align-items: end; gap: 7px; }
+.filter-actions button { min-height: 34px; padding: 6px 10px; }
+.search-content { flex: 1; min-height: 0; overflow-y: auto; }
+.start-view, .results-view, .saved-view { width: min(100%, 1100px); margin: 0 auto; padding: 14px 20px 40px; }
+.result-summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 34px; color: var(--text-muted); font-size: 11.5px; }
+.result-summary strong { color: var(--text-primary); font-size: 12.5px; }
+.result-summary button { border: 0; background: transparent; color: var(--accent-blue); font: inherit; cursor: pointer; }
+.result-list { border-top: 1px solid var(--border-color); }
+.recent-section { max-width: 760px; margin: 0 auto; }
+.recent-list { display: grid; border-top: 1px solid var(--border-color); }
+.recent-list button { display: flex; justify-content: space-between; gap: 16px; padding: 12px 4px; border: 0; border-bottom: 1px solid var(--border-color); background: transparent; color: var(--text-primary); text-align: left; cursor: pointer; }
+.recent-list small { flex: 0 0 auto; color: var(--text-muted); }
+.empty-state, .error-state { margin: 0; padding: 70px 20px; color: var(--text-muted); text-align: center; }
+.error-state { color: #b91c1c; }
+.error-state button { margin-left: 8px; border: 0; background: transparent; color: var(--accent-blue); cursor: pointer; }
+.pagination { display: flex; align-items: center; justify-content: center; gap: 12px; padding: 18px 0 4px; color: var(--text-muted); font-size: 12px; }
+.pagination button { min-height: 32px; padding: 5px 10px; }
+@media (max-width: 980px) { .filter-panel { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 640px) {
+  .search-command-bar { grid-template-columns: minmax(0, 1fr) auto; padding: 10px; }
+  .search-command-bar .search-input-wrap { grid-column: 1 / -1; }
+  .filter-button, .primary-button { min-height: 34px; }
+  .source-tabs { padding: 0 8px; }
+  .source-tabs .favorites-tab { margin-left: 0; }
+  .filter-panel { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 10px; }
+  .filter-actions { grid-column: 1 / -1; }
+  .start-view, .results-view, .saved-view { padding: 10px 10px 90px; }
 }
 </style>

@@ -838,7 +838,7 @@ function relevanceScore(item: any, query: string) {
   return { score: pinned + hits * 12 + Number(item.importance || 0) * .18 + Number(item.confidence || 0) * 10 + freshness + typeBoost - lengthPenalty, matchedTerms };
 }
 
-export function recallGlobalAgentMemory(query: string, options: { sessionId?: string; limit?: number } = {}) {
+export function recallGlobalAgentMemory(query: string, options: { sessionId?: string; limit?: number; recordMetric?: boolean } = {}) {
   if (/(?:忽略|不要使用|别用|不参考).{0,12}(?:记忆|历史)/.test(query)) return { ignored: true, items: [], sessionSummary: null, citations: [] };
   const raw = loadGlobalAgentMemory();
   const memory = applyMemoryControls("global" as any, "global-agent", raw);
@@ -850,7 +850,9 @@ export function recallGlobalAgentMemory(query: string, options: { sessionId?: st
     .sort((a: any, b: any) => b.score - a.score)
     .slice(0, limit);
   const session = options.sessionId ? memory.sessions.find((item: any) => item.sessionId === options.sessionId) : null;
-  recordMemoryMetric(all.length > 0 ? "recall_hit" : "recall_miss", { scope: "global", scopeId: "global-agent", sessionId: options.sessionId || "", queryHash: sha(query, 16), selected: all.map((item: any) => item.id) });
+  if (options.recordMetric !== false) {
+    recordMemoryMetric(all.length > 0 ? "recall_hit" : "recall_miss", { scope: "global", scopeId: "global-agent", sessionId: options.sessionId || "", queryHash: sha(query, 16), selected: all.map((item: any) => item.id) });
+  }
   return {
     ignored: false,
     items: all,
@@ -860,7 +862,7 @@ export function recallGlobalAgentMemory(query: string, options: { sessionId?: st
   };
 }
 
-export function buildGlobalAgentMemoryPacket(query: string, options: { sessionId?: string; limit?: number; maxChars?: number } = {}) {
+export function buildGlobalAgentMemoryPacket(query: string, options: { sessionId?: string; limit?: number; maxChars?: number; recordMetric?: boolean } = {}) {
   const recalled = recallGlobalAgentMemory(query, options);
   if (recalled.ignored) return "[全局记忆已按用户要求忽略]";
   const lines = [

@@ -36,6 +36,18 @@ export declare function buildContractTransferPlan(contractSync: any, orders?: an
     rows: any;
     next_action: string;
 };
+export declare function runContractTransferPlanSelfTest(): {
+    pass: boolean;
+    checks: {
+        receiptAgentBecomesProducer: boolean;
+        singleProjectDoesNotInjectIntoItself: boolean;
+        multiProjectTargetsOtherAgent: boolean;
+        internalExportWithoutConsumerStaysLocal: boolean;
+        testAgentReviewTargetIsNotAProjectConsumer: boolean;
+        filePathConsumerIsNotAProjectConsumer: boolean;
+        explicitUnknownConsumerStillNeedsTarget: boolean;
+    };
+};
 export declare function getTaskAckRewriteRows(task: any): any;
 export declare function getTaskContractInjectionRows(task: any): {
     sync: {

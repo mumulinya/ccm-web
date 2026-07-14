@@ -1,0 +1,112 @@
+export declare const GROUP_POST_TURN_SUMMARY_SCHEMA = "ccm-group-post-turn-summary-v1";
+export declare const GROUP_POST_TURN_SUMMARY_DELIVERY_CAPSULE_SCHEMA = "ccm-group-post-turn-summary-delivery-capsule-v1";
+export declare const GROUP_POST_TURN_SUMMARY_LEDGER_DIR: string;
+export declare function getGroupPostTurnSummaryLedgerFile(groupId: string, sessionId: string): string;
+export declare function verifyGroupPostTurnSummaryDeliveryCapsuleChecksum(capsule: any): boolean;
+export declare function extractGroupPostTurnSummaryDeliveryCapsule(value: any, seen?: Set<any>): any;
+export declare function buildGroupPostTurnSummaryDeliveryCapsule(input?: any): any;
+export declare function validateGroupPostTurnSummaryDeliveryCapsule(input?: any, options?: any): any;
+export declare function buildGroupPostTurnSummary(groupId: string, sessionId: string, message: any, options?: any): any;
+export declare function readGroupPostTurnSummaries(groupId: string, sessionId: string, options?: any): {
+    schema: string;
+    version: number;
+    groupId: string;
+    groupSessionId: string;
+    file: string;
+    valid: boolean;
+    issues: any[];
+    eventCount: number;
+    summaryCount: number;
+    bytes: number;
+    headChecksum: string;
+    chainOriginChecksum: string;
+    firstSequence: number;
+    lastSequence: number;
+    archiveCount: number;
+    latest: any[];
+};
+export declare function recordGroupPostTurnSummary(groupId: string, sessionId: string, message: any, options?: any): {
+    recorded: boolean;
+    reason: string;
+    idempotent?: undefined;
+    summary?: undefined;
+    ledger?: undefined;
+} | {
+    recorded: boolean;
+    idempotent: boolean;
+    reason: string;
+    summary: any;
+    ledger: {
+        schema: string;
+        version: number;
+        groupId: string;
+        groupSessionId: string;
+        file: string;
+        valid: boolean;
+        issues: any[];
+        eventCount: number;
+        summaryCount: number;
+        bytes: number;
+        headChecksum: string;
+        chainOriginChecksum: string;
+        firstSequence: number;
+        lastSequence: number;
+        archiveCount: number;
+        latest: any[];
+    };
+} | {
+    recorded: boolean;
+    summary: any;
+    ledger: {
+        schema: string;
+        version: number;
+        groupId: string;
+        groupSessionId: string;
+        file: string;
+        valid: boolean;
+        issues: any[];
+        eventCount: number;
+        summaryCount: number;
+        bytes: number;
+        headChecksum: string;
+        chainOriginChecksum: string;
+        firstSequence: number;
+        lastSequence: number;
+        archiveCount: number;
+        latest: any[];
+    };
+    reason?: undefined;
+    idempotent?: undefined;
+};
+export declare function backfillGroupPostTurnSummaries(groupId: string, sessionId: string, messages?: any[], options?: any): {
+    recorded: number;
+    skipped: number;
+    reason: string;
+    ledger: any;
+} | {
+    recorded: number;
+    skipped: number;
+    ledger: {
+        schema: string;
+        version: number;
+        groupId: string;
+        groupSessionId: string;
+        file: string;
+        valid: boolean;
+        issues: any[];
+        eventCount: number;
+        summaryCount: number;
+        bytes: number;
+        headChecksum: string;
+        chainOriginChecksum: string;
+        firstSequence: number;
+        lastSequence: number;
+        archiveCount: number;
+        latest: any[];
+    };
+    reason?: undefined;
+};
+export declare function deleteGroupPostTurnSummaryArtifacts(groupId: string, sessionId: string): {
+    deleted: string[];
+    deletedCount: number;
+};

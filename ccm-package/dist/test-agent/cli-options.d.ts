@@ -12,6 +12,7 @@ export interface TestAgentCliOptions {
     help: boolean;
     validateOnly: boolean;
     planOnly: boolean;
+    invocationJson: boolean;
     summary: boolean;
     json: boolean;
     artifactDir?: string;

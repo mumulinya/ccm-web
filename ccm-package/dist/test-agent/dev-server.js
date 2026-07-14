@@ -73,12 +73,19 @@ async function startProjectServer(project, maxOutputChars) {
             stop: () => { },
         };
     }
+    const invocation = (0, utils_1.verificationCommandInvocation)(command);
+    if (invocation.error) {
+        return {
+            result: { project: project.name, command, cwd: project.workDir, url, status: "failed", startedAt, error: invocation.error },
+            stop: () => { },
+        };
+    }
     let output = "";
-    const child = (0, child_process_1.spawn)(command, {
+    const child = (0, child_process_1.spawn)(invocation.executable, invocation.args, {
         cwd: project.workDir,
-        shell: true,
+        shell: invocation.requiresShell,
         windowsHide: true,
-        env: { ...process.env, ...project.env },
+        env: (0, utils_1.buildTestAgentSubprocessEnv)(project.env),
     });
     child.stdout?.on("data", chunk => { output = (0, utils_1.appendLimited)(output, chunk, maxOutputChars); });
     child.stderr?.on("data", chunk => { output = (0, utils_1.appendLimited)(output, chunk, maxOutputChars); });
@@ -92,12 +99,12 @@ async function startProjectServer(project, maxOutputChars) {
         const error = exitError || `Dev server did not become reachable at ${url} within ${project.startupTimeoutMs}ms.`;
         stopProcessTree(child);
         return {
-            result: { project: project.name, command, cwd: project.workDir, url, status: "failed", startedAt, error, output: (0, utils_1.compactText)(output, maxOutputChars) },
+            result: { project: project.name, command, cwd: project.workDir, url, status: "failed", startedAt, error: (0, utils_1.redactTestAgentSensitiveText)(error, Object.values(project.env)), output: (0, utils_1.compactText)((0, utils_1.redactTestAgentSensitiveText)(output, Object.values(project.env)), maxOutputChars) },
             stop: () => { },
         };
     }
     return {
-        result: { project: project.name, command, cwd: project.workDir, url, status: "started", startedAt, readyAt: (0, utils_1.nowIso)(), output: (0, utils_1.compactText)(output, maxOutputChars) },
+        result: { project: project.name, command, cwd: project.workDir, url, status: "started", startedAt, readyAt: (0, utils_1.nowIso)(), output: (0, utils_1.compactText)((0, utils_1.redactTestAgentSensitiveText)(output, Object.values(project.env)), maxOutputChars) },
         stop: () => stopProcessTree(child),
     };
 }

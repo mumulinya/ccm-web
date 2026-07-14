@@ -23,6 +23,54 @@ const selftestResidueArchiveLoading = ref(false)
 const selftestResidueArchiveResult = ref(null)
 const taskAgentSnapshotRetentionLoading = ref(false)
 const taskAgentSnapshotRetentionResult = ref(null)
+const contextSettingsLoading = ref(false)
+const contextSettingsSaving = ref(false)
+const modelCapacityStatus = ref(null)
+const modelCapabilityEntries = ref([])
+const modelCapabilityRefreshPlan = ref(null)
+const modelCapabilityRefreshStatus = ref(null)
+const modelCapabilityRefreshOutcomeLedger = ref(null)
+const invalidModelCapabilityRefreshOutcomes = ref({ outcomes: [], pendingAcknowledgementCount: 0, acknowledgedCount: 0 })
+const modelCapabilityDowngradeAlerts = ref([])
+const modelCapabilitySaving = ref(false)
+const modelCapabilityMaintenanceRunning = ref(false)
+const invalidRefreshOutcomeAcknowledging = ref('')
+const modelCapabilitySetting = ref({ provider: '', model: '', contextWindow: 200000, maxOutputTokens: 20000 })
+const sessionRetentionStatus = ref(null)
+const sessionRetentionRunning = ref(false)
+const sessionMemoryReplayLoading = ref('')
+const sessionMemoryReplayResult = ref(null)
+const sessionMemoryArtifactRetentionRunning = ref('')
+const sessionMemoryArtifactRetentionResult = ref(null)
+const dispatchRecovery = ref({ summary: {}, rows: [] })
+const dispatchRecoveryLoading = ref(false)
+const dispatchResolveLoading = ref(false)
+const dispatchResolveState = ref(null)
+const expandedDispatchId = ref('')
+const contextSettings = ref({
+  memoryContextPreset: 'default',
+  modelContextWindow: 0,
+  modelAutoCompactTokenLimit: 0,
+  typedMemoryDeliveryMaxDocuments: 5,
+  typedMemoryDeliveryMaxBytesPerDocument: 4096,
+  typedMemoryDeliveryMaxLinesPerDocument: 200,
+  typedMemoryDeliveryMaxSessionBytes: 61440,
+  typedMemoryDeliveryMaxTokens: 5000,
+  groupSessionRetentionDays: 30,
+  groupSessionMaxArchived: 20,
+  groupSessionAutoPruneEnabled: false,
+  groupSessionRetentionIntervalHours: 24,
+  groupSessionArtifactAutoArchiveEnabled: true,
+  groupSessionArtifactHotExecutions: 50,
+  groupSessionArtifactMaxHotMb: 64,
+  groupSessionArtifactMaxAgeDays: 30
+})
+const contextPresets = [
+  { id: 'default', label: '默认', note: '按模型能力自动计算', window: 0, threshold: 0 },
+  { id: '516k', label: '预设 516K', note: '上下文 516000 / 紧凑 460000', window: 516000, threshold: 460000 },
+  { id: '1m', label: '预设 1M', note: '上下文 1000000 / 紧凑 900000', window: 1000000, threshold: 900000 },
+  { id: 'custom', label: '自定义', note: '手动填写窗口与阈值', window: null, threshold: null }
+]
 
 const scopes = computed(() => [
   ...(overview.value.globals || []).map(item => ({ ...item, scope: 'global' })),
@@ -63,6 +111,114 @@ const metricCards = computed(() => {
   ]
 })
 
+const sessionMemoryFleetReport = computed(() => overview.value.groupSessionMemoryFleetReport || null)
+const sessionMemoryFleetOverall = computed(() => sessionMemoryFleetReport.value?.overall || {})
+const sessionMemoryFleetState = computed(() => sessionMemoryFleetOverall.value.status || 'empty')
+const sessionMemoryFleetCards = computed(() => {
+  const overall = sessionMemoryFleetOverall.value
+  return [
+    { label: 'sessions', value: overall.sessionCount || 0, note: `${overall.groupCount || 0} groups` },
+    { label: 'covered', value: overall.sessionsCovered || 0, note: `${overall.coverageRate ?? '—'}%` },
+    { label: 'tokens', value: overall.totalMarkdownTokens || 0, note: 'fleet total' },
+    { label: 'max session', value: overall.maxObservedSessionTokens || 0, note: `/ ${overall.ccMaxTotalTokens || 12000}` },
+    { label: 'over budget', value: overall.budgetExceededCount || 0, note: `near ${overall.budgetNearLimitCount || 0}` },
+    { label: 'legacy default', value: overall.legacyDefaultSessionCount || 0, note: 'expected 0' },
+    { label: 'turn summaries', value: overall.postTurnSummaryCount || 0, note: `${overall.postTurnSummaryEventCount || 0} events` },
+    { label: 'missing turns', value: overall.postTurnSummaryMissingCount || 0, note: 'expected 0' },
+    { label: 'invalid ledgers', value: overall.postTurnSummaryInvalidLedgerCount || 0, note: 'expected 0' },
+    { label: 'turn archives', value: overall.postTurnSummaryArchiveCount || 0, note: 'hash-chain files' },
+    { label: 'initialized', value: overall.cadenceInitializedSessionCount || 0, note: `waiting ${overall.cadenceWaitingInitializationCount || 0}` },
+    { label: 'extractions', value: overall.totalSessionMemoryExtractionCount || 0, note: `active ${overall.activeExtractionCount || 0} · failed ${overall.failedExtractionSessionCount || 0}` },
+    { label: 'model extracted', value: overall.modelExtractedSessionCount || 0, note: `verified ${overall.modelReceiptVerifiedCount || 0}` },
+    { label: 'model pending', value: overall.modelExtractionPendingCount || 0, note: `backoff ${overall.modelExtractionBackoffCount || 0}` },
+    { label: 'invalid receipt', value: overall.modelReceiptInvalidCount || 0, note: 'expected 0' },
+    { label: 'history events', value: overall.modelExtractionHistoryEventCount || 0, note: `invalid ${overall.modelExtractionHistoryInvalidCount || 0}` },
+    { label: 'history chain', value: overall.modelExtractionHistoryChainInvalidCount || 0, note: 'broken links' },
+    { label: 'replay verified', value: overall.modelExtractionReplayObservedCount || 0, note: `invalid ${overall.modelExtractionReplayInvalidCount || 0}` },
+    { label: 'delivery evidence', value: overall.modelExtractionDeliveryEvidenceCount || 0, note: `invalid ${overall.modelExtractionDeliveryEvidenceInvalidCount || 0}` },
+    { label: 'artifact hot', value: overall.modelExtractionArtifactHotCount || 0, note: formatBytes(overall.modelExtractionArtifactHotBytes || 0) },
+    { label: 'artifact archive', value: overall.modelExtractionArtifactArchivedCount || 0, note: formatBytes(overall.modelExtractionArtifactArchivedBytes || 0) },
+    { label: 'archive due', value: overall.modelExtractionArtifactCandidateExecutionCount || 0, note: `invalid ${overall.modelExtractionArtifactInvalidCount || 0}` },
+    { label: 'input bounded', value: overall.modelInputDegradedCount || 0, note: `over ${overall.modelInputOverBudgetCount || 0}` },
+    { label: 'merge quality', value: overall.modelMergeQualityObservedCount || 0, note: `failed ${overall.modelMergeQualityFailedCount || 0}` },
+    { label: 'supersession', value: overall.factSupersessionEdgeCount || 0, note: `graphs ${overall.factSupersessionGraphObservedCount || 0}` },
+    { label: 'unjustified loss', value: overall.factSupersessionUnjustifiedLostCount || 0, note: `invalid ${overall.factSupersessionGraphInvalidCount || 0}` }
+  ]
+})
+const sessionMemoryFleetRows = computed(() => {
+  const report = sessionMemoryFleetReport.value || {}
+  const weak = report.weakGroups || []
+  return (weak.length ? weak : report.groups || []).slice(0, 8)
+})
+const sessionMemoryHistoryRows = computed(() => (sessionMemoryFleetReport.value?.groups || [])
+  .flatMap((row) => (row.modelExtractionHistory?.rows || []).map((event) => ({
+    ...event,
+    groupId: row.groupId,
+    groupSessionId: row.groupSessionId,
+    scopeId: row.modelExtractionScopeId || row.scopeId
+  })))
+  .sort((a, b) => (Date.parse(b.at || b.completedAt || b.failedAt || '') || 0) - (Date.parse(a.at || a.completedAt || a.failedAt || '') || 0))
+  .slice(0, 10))
+const sessionMemoryReplayChecks = computed(() => Object.entries(sessionMemoryReplayResult.value?.checks || {}))
+const sessionMemoryReplayCheckLabels = {
+  historyIntegrity: '历史链完整',
+  attemptPresent: '开始事件存在',
+  terminalPresent: '终态事件存在',
+  requestArtifactValid: '请求制品有效',
+  requestArtifactBoundToAttempt: '请求制品绑定开始事件',
+  promptRebuildMatches: '提示词可确定性重建',
+  resultArtifactValid: '结果制品有效',
+  resultArtifactBoundToTerminal: '结果制品绑定终态事件',
+  rawOutputChecksumMatches: '原始输出校验一致',
+  terminalStatusMatches: '终态状态一致',
+  receiptChecksumValid: '结果说明签名有效',
+  receiptBoundToTerminal: '结果说明绑定终态事件',
+  outputRevalidates: '输出可重新验证',
+  markdownChecksumMatches: '记忆校验一致',
+  mergeQualityReplays: '合并质量可复算',
+  factSupersessionGraphValid: '事实替代图有效',
+  factSupersessionGraphReplays: '事实替代图可复算',
+  failureClassMatches: '失败分类一致',
+  failedOutputDoesNotClaimCommit: '失败结果未伪装提交'
+}
+
+const dispatchRecoveryRows = computed(() => (dispatchRecovery.value?.rows || []).slice(0, 40))
+const dispatchRecoverySummaryCards = computed(() => {
+  const summary = dispatchRecovery.value?.summary || {}
+  return [
+    { label: 'total', value: summary.total || 0 },
+    { label: 'recoverable', value: summary.recoverable || 0 },
+    { label: 'active', value: summary.active || 0 },
+    { label: 'uncertain', value: summary.uncertain || 0 },
+    { label: 'invalid', value: summary.invalid || 0 },
+    { label: 'committed', value: summary.committed || 0 }
+  ]
+})
+
+const dispatchStateLabel = state => ({
+  recoverable_commit: '可恢复提交',
+  cancel_prepared: '未启动',
+  active: '执行中',
+  uncertain: '不确定',
+  invalid: '证据异常',
+  terminal: '已终结'
+}[state] || state || '未知')
+
+const dispatchActionLabel = action => ({
+  retry_recovery: '重试强证据恢复',
+  acknowledge_uncertain: '确认不确定状态',
+  cancel_prepared: '取消未启动派发',
+  prune_terminal: '清理完整终态证据'
+}[action] || action)
+
+const dispatchActions = row => {
+  if (row.recoverability === 'recoverable_commit') return ['retry_recovery']
+  if (row.recoverability === 'uncertain' && !row.acknowledged) return ['acknowledge_uncertain']
+  if (row.recoverability === 'cancel_prepared') return ['cancel_prepared']
+  if (row.recoverability === 'terminal' && row.direct?.pairValid) return ['prune_terminal']
+  return []
+}
+
 const qualityChecks = computed(() => qualityReport.value?.checks || [])
 const qualityStatusText = computed(() => {
   const status = qualityReport.value?.status
@@ -90,7 +246,7 @@ const crossProjectPressureUsageCheck = computed(() => qualityCheckById('worker_c
 const crossProjectPressureUsageReport = computed(() => crossProjectPressureUsageCheck.value?.report || overview.value.workerContextPacketCrossGroupPressureRecallUsageReport || {})
 const globalSelftestContaminationCheck = computed(() => qualityCheckById('global_memory_selftest_contamination'))
 const taskAgentMemoryContextSnapshotCheck = computed(() => qualityCheckById('task_agent_memory_context_snapshots'))
-const taskAgentSnapshotReport = computed(() => taskAgentMemoryContextSnapshotCheck.value?.report || overview.value.taskAgentMemoryContextSnapshotReport || {})
+const taskAgentSnapshotReport = computed(() => overview.value.taskAgentMemoryContextSnapshotReport || taskAgentMemoryContextSnapshotCheck.value?.report || {})
 const taskAgentSnapshotState = computed(() => taskAgentSnapshotReport.value?.overall?.status || taskAgentMemoryContextSnapshotCheck.value?.status || 'empty')
 const taskAgentSnapshotCards = computed(() => {
   const overall = taskAgentSnapshotReport.value?.overall || {}
@@ -99,6 +255,30 @@ const taskAgentSnapshotCards = computed(() => {
   return [
     { label: 'snapshots', value: overall.snapshotCount || 0, note: `${overall.sessionCount || 0} sessions` },
     { label: 'healthy', value: overall.okCount || 0, note: `warn ${overall.warnCount || 0} / fail ${overall.failCount || 0}` },
+    { label: 'delivered', value: overall.deliveredCount || 0, note: `missing ${overall.deliveryMissingCount || 0} · failed ${overall.deliveryFailedCount || 0}` },
+    { label: 'invocation edges', value: overall.invocationEdgeCount || 0, note: `valid ${overall.invocationValidCount || 0} · invalid ${overall.invocationInvalidCount || 0}` },
+    { label: 'branches', value: overall.invocationBranchCount || 0, note: `retry ${overall.invocationRetryCount || 0} · switch ${overall.invocationProviderSwitchCount || 0}` },
+    { label: 'recovered', value: overall.invocationRecoveredCount || 0, note: `uncertain ${overall.invocationUncertainCount || 0} · quarantine ${overall.invocationRecoveryQuarantinedCount || 0}` },
+    { label: 'live edges', value: overall.invocationRecoveryActiveCount || 0, note: `pending ${overall.invocationRecoveryPendingCount || 0} · open ${overall.invocationNonTerminalCount || 0}` },
+    { label: 'adoption', value: overall.invocationAdoptionVerifiedCount || 0, note: `required ${overall.invocationAdoptionRequiredCount || 0} · invalid ${overall.invocationAdoptionInvalidCount || 0}` },
+    { label: 're-injected', value: overall.invocationReinjectionProvenCount || 0, note: `required ${overall.invocationReinjectionRequiredCount || 0} · unverified ${overall.invocationReinjectionUnverifiedCount || 0}` },
+    { label: 'native resume', value: overall.invocationNativeContinuationAcknowledgedCount || 0, note: `receipts ${overall.invocationNativeContinuationReceiptCount || 0} · unverified ${overall.invocationNativeContinuationUnverifiedCount || 0} · drift ${overall.invocationNativeContinuationOutputFormatDriftCount || 0}` },
+    { label: 're-budget', value: overall.invocationContextRebudgetVerifiedCount || 0, note: `drift ${overall.invocationContextRebudgetDriftCount || 0} · unavailable ${overall.invocationContextRebudgetUnavailableCount || 0}` },
+    { label: 'compact epoch fence', value: overall.invocationCompactHeadFenceValidatedCount || 0, note: `required ${overall.invocationCompactHeadFenceRequiredCount || 0} · dispatch stale ${overall.invocationCompactHeadFenceStaleCount || 0} · delivery stale ${overall.compactHeadFenceStaleCount || 0}` },
+    { label: 'session lifecycle fence', value: overall.invocationSessionLifecycleFenceValidatedCount || 0, note: `required ${overall.invocationSessionLifecycleFenceRequiredCount || 0} · dispatch stale ${overall.invocationSessionLifecycleFenceStaleCount || 0} · delivery stale ${overall.sessionLifecycleFenceStaleCount || 0}` },
+    { label: 'capacity commit', value: overall.capacityRevalidationCommittedCount || 0, note: `prepared ${overall.capacityRevalidationPreparedCount || 0} · pending ${overall.capacityRevalidationPendingCount || 0} · invalid ${overall.capacityRevalidationInvalidCount || 0}` },
+    { label: 'soak health', value: overall.continuationSoakHealthyChainCount || 0, note: `chains ${overall.continuationSoakChainCount || 0} · multi-turn ${overall.continuationSoakMultiTurnChainCount || 0} · restart ${overall.continuationSoakRestartObservedChainCount || 0}` },
+    { label: 'evidence chain', value: overall.continuationSoakValidChainCount || 0, note: `invalid ${overall.continuationSoakInvalidChainCount || 0} · recovered ${overall.continuationSoakRecoveredEventCount || 0} · drift ${overall.continuationSoakOutputFormatDriftCount || 0}` },
+    { label: 'contract epochs', value: overall.continuationSoakProviderContractEpochCount || 0, note: `transitions ${overall.continuationSoakProviderContractTransitionCount || 0}` },
+    { label: 'version transition', value: overall.continuationSoakProviderContractTransitionVerifiedCount || 0, note: `unverified ${overall.continuationSoakProviderContractTransitionUnverifiedCount || 0}` },
+    { label: 'real task output', value: overall.continuationSoakTaskArtifactProvenCount || 0, note: `evidence ${overall.continuationSoakTaskArtifactEvidenceCount || 0} · unproven ${overall.continuationSoakTaskArtifactUnprovenCount || 0}` },
+    { label: 'memory-bound output', value: overall.continuationSoakMemoryBoundTaskArtifactCount || 0, note: `recovered ${overall.continuationSoakRecoveredTaskArtifactCount || 0} · cross-version chains ${overall.continuationSoakCrossVersionTaskArtifactChainCount || 0}` },
+    { label: 'post-compact output', value: overall.continuationSoakPostCompactArtifactClosureProvenCount || 0, note: `evidence ${overall.continuationSoakPostCompactTaskArtifactEvidenceCount || 0} · unproven ${overall.continuationSoakPostCompactArtifactClosureUnprovenCount || 0}` },
+    { label: 'closure recovery', value: overall.continuationSoakPostCompactArtifactRecoveryClosureCount || 0, note: `cross-version chains ${overall.continuationSoakCrossVersionPostCompactArtifactChainCount || 0} · identity drift ${overall.continuationSoakPostCompactArtifactIdentityMismatchCount || 0}` },
+    { label: 'compact receipt drift', value: overall.continuationSoakPostCompactArtifactCompactTransactionReceiptMismatchCount || 0, note: `head drift ${overall.continuationSoakPostCompactArtifactCompactHeadFenceMismatchCount || 0} · epoch drift ${overall.continuationSoakPostCompactArtifactEpochMismatchCount || 0} · delivery drift ${overall.continuationSoakPostCompactArtifactDeliveryMismatchCount || 0}` },
+    { label: 'provider CLIs', value: overall.providerRuntimeContractHealthyCount || 0, note: `checked ${overall.providerRuntimeContractCount || 0} · failed ${overall.providerRuntimeContractFailedCount || 0}` },
+    { label: 'recovery fence', value: overall.invocationRecoveryMaxFencingToken || 0, note: `leases ${overall.invocationRecoveryLeasedCount || 0} · takeover ${overall.invocationRecoveryLeaseTakeoverCount || 0}` },
+    { label: 'session bound', value: overall.groupSessionBoundCount || 0, note: `scope mismatch ${overall.deliveryScopeMismatchCount || 0}` },
     { label: 'orphan', value: overall.orphanFileCount || 0, note: `missing ${overall.missingFileCount || 0}` },
     { label: 'packet gaps', value: overall.missingPacketCount || 0, note: `gate gaps ${overall.missingGateCount || 0}` },
     { label: 'prunable', value: overall.prunableCount ?? retention.candidateCount ?? 0, note: `stale ${overall.staleCount || 0}` },
@@ -110,6 +290,15 @@ const taskAgentSnapshotRows = computed(() => {
   const rows = report.weakRows?.length ? report.weakRows : report.rows || []
   return rows.slice(0, 8)
 })
+const taskAgentInvocationRows = computed(() => {
+  const rows = taskAgentSnapshotReport.value?.invocationLineage?.rows || []
+  return [...rows].sort((a, b) => {
+    const rank = row => row.valid === false ? 0 : row.recovery_outcome === 'uncertain' ? 1 : !['completed', 'failed'].includes(row.status) ? 2 : 3
+    return rank(a) - rank(b) || String(b.prepared_at || '').localeCompare(String(a.prepared_at || ''))
+  }).slice(0, 8)
+})
+const taskAgentContinuationSoakRows = computed(() => (taskAgentSnapshotReport.value?.continuationSoak?.rows || []).slice(0, 8))
+const providerRuntimeContractRows = computed(() => (taskAgentSnapshotReport.value?.providerRuntimeContracts?.rows || []).slice(0, 8))
 const taskAgentSnapshotHasPrunable = computed(() => Number(taskAgentSnapshotReport.value?.overall?.prunableCount ?? taskAgentSnapshotReport.value?.retention?.candidateCount ?? 0) > 0)
 const globalSelftestScan = computed(() => globalSelftestContaminationCheck.value?.report || {})
 const globalSelftestArchiveState = computed(() => {
@@ -366,6 +555,7 @@ const postCompactDiscipline = computed(() => postCompactUsage.value?.discipline 
 const postCompactDispatch = computed(() => postCompactUsage.value?.dispatch || null)
 const childAgentReliability = computed(() => postCompactUsage.value?.agentReliability || null)
 const compactBoundaryTimeline = computed(() => postCompactUsage.value?.boundaryTimeline || null)
+const resumeProjection = computed(() => postCompactUsage.value?.resumeProjection || null)
 const compactStrategyDecision = computed(() => postCompactUsage.value?.compactStrategyDecision || null)
 const postCompactCleanupAudit = computed(() => postCompactUsage.value?.postCompactCleanupAudit || null)
 const apiMicroCompactEditPlan = computed(() => postCompactUsage.value?.apiMicroCompactEditPlan || null)
@@ -403,6 +593,7 @@ const replayRepairDispatchRows = computed(() => {
 })
 const postCompactCards = computed(() => {
   const scoring = postCompactUsage.value?.typedMemory?.recallScoring || {}
+  const semantic = postCompactUsage.value?.typedMemory?.semanticRecallScoring || {}
   const archive = postCompactUsage.value?.archive || {}
   const discipline = postCompactDiscipline.value || {}
   return [
@@ -413,6 +604,7 @@ const postCompactCards = computed(() => {
     { label: '严格分类率', value: discipline.effectiveStrictClassificationRate ?? discipline.strictClassificationRate ?? '—', suffix: discipline.effectiveStrictClassificationRate !== null && discipline.effectiveStrictClassificationRate !== undefined ? '%' : '', note: `阈值 ${discipline.threshold || 90}%` },
     { label: 'stale promoted', value: discipline.stalePromoted || 0, note: '旧候选直接 used' },
     { label: '召回加权', value: scoring.boosted_count || 0, note: `降权 ${scoring.deprioritized_count || 0}` },
+    { label: '语义召回', value: semantic.boosted_count || 0, note: `冲突 ${semantic.conflict_penalized_count || 0} · 去重 ${semantic.semantic_duplicate_count || 0}` },
     { label: '低优先归档', value: archive.archivedCount || 0, note: '蒸馏后不默认提升' }
   ]
 })
@@ -480,9 +672,9 @@ const taskAgentMemoryContextSnapshotCards = computed(() => {
   const snapshots = taskAgentMemoryContextSnapshots.value || {}
   return [
     { label: 'snapshots', value: snapshots.snapshotCount || 0, note: `${(snapshots.projects || []).length} projects` },
-    { label: 'healthy', value: snapshots.okCount || 0, note: `warn ${snapshots.warnCount || 0}` },
-    { label: 'failed', value: snapshots.failCount || 0, note: 'broken evidence' },
-    { label: 'stale', value: snapshots.staleCount || 0, note: `prunable ${snapshots.prunableCount || 0}` }
+    { label: 'summary capsules', value: snapshots.postTurnSummaryCapsuleCount || 0, note: `valid ${snapshots.postTurnSummaryCapsuleValidCount || 0}` },
+    { label: 'capsule gaps', value: Number(snapshots.postTurnSummaryCapsuleMissingCount || 0) + Number(snapshots.postTurnSummaryCapsuleInvalidCount || 0), note: `prompt ${snapshots.postTurnSummaryCapsulePromptBoundCount || 0} · epoch drift ${snapshots.postTurnSummaryCapsuleCompactEpochMismatchCount || 0}` },
+    { label: 'failed / stale', value: snapshots.failCount || 0, note: `stale ${snapshots.staleCount || 0} · prunable ${snapshots.prunableCount || 0}` }
   ]
 })
 const taskAgentMemoryContextSnapshotRows = computed(() => {
@@ -868,6 +1060,57 @@ const postCompactRecallRows = computed(() => [
   ...(postCompactUsage.value?.typedMemory?.boostedDocs || []).map(row => ({ ...row, kind: 'boosted' })),
   ...(postCompactUsage.value?.typedMemory?.deprioritizedDocs || []).map(row => ({ ...row, kind: 'deprioritized' }))
 ])
+const semanticRecallScoring = computed(() => postCompactUsage.value?.typedMemory?.semanticRecallScoring || {})
+const semanticRecallRows = computed(() => [
+  ...(postCompactUsage.value?.typedMemory?.semanticConflictDocs || []).map(row => ({ ...row, kind: 'conflict' })),
+  ...(postCompactUsage.value?.typedMemory?.semanticDuplicateDocs || []).map(row => ({ ...row, kind: 'duplicate' })),
+  ...(postCompactUsage.value?.typedMemory?.semanticBoostedDocs || []).map(row => ({ ...row, kind: 'boosted' }))
+])
+const typedMemoryConsumptionScoring = computed(() => postCompactUsage.value?.typedMemory?.typedMemoryConsumptionScoring || {})
+const typedMemoryConsumptionLedger = computed(() => postCompactUsage.value?.typedMemory?.consumptionLedger || null)
+const typedMemoryStaleCandidateLedger = computed(() => postCompactUsage.value?.typedMemory?.staleCandidateLedger || null)
+const typedMemoryStaleCandidates = computed(() => typedMemoryStaleCandidateLedger.value?.candidates || [])
+const pendingTypedMemoryStaleCandidates = computed(() => typedMemoryStaleCandidates.value.filter(candidate => candidate.status === 'pending'))
+const typedMemoryWriteAdmission = computed(() => postCompactUsage.value?.typedMemory?.writeAdmission || null)
+const typedMemoryWriteAdmissionCards = computed(() => {
+  const admission = typedMemoryWriteAdmission.value || {}
+  return [
+    { label: '原始候选', value: admission.evaluatedThisRun || 0, note: '本轮代码级评估' },
+    { label: '准入长期记忆', value: admission.admittedThisRun || 0, note: '跨会话且非流水' },
+    { label: '拒绝流水', value: admission.rejectedThisRun || 0, note: `hard ${admission.hardExclusionThisRun || 0}` },
+    { label: '清退旧噪声', value: admission.evictedExistingFactCount || 0, note: '同步移除陈旧 Markdown' },
+    { label: '拒绝观察', value: admission.observationCount || 0, note: '仅元数据审计' },
+    { label: '活动流水', value: admission.reasonCounts?.activity_log_noise || 0, note: 'PR / Git / 周报' },
+    { label: '正向确认', value: admission.positiveConfirmationAdmittedCount || 0, note: `候选 ${admission.positiveConfirmationCandidateCount || 0}` },
+    { label: '无效确认', value: admission.positiveConfirmationRejectedCount || 0, note: `绑定异常 ${admission.positiveConfirmationInvalidBindingCount || 0}` },
+    { label: '活动正向记忆', value: admission.positiveFeedbackActiveCount || 0, note: '当前可注入' },
+    { label: '已撤回', value: admission.positiveFeedbackRevokedCount || 0, note: `无效撤回 ${admission.positiveFeedbackLifecycleRejectedThisRun || 0}` },
+    { label: '已替代', value: admission.positiveFeedbackSupersededCount || 0, note: `当前源证明 ${admission.positiveFeedbackCurrentSourceProofCount || 0}` },
+    { label: '撤回绑定异常', value: admission.positiveFeedbackLifecycleInvalidBindingThisRun || 0, note: '不记录被拒绝正文' },
+  ]
+})
+const typedMemoryConsumptionCards = computed(() => {
+  const scoring = typedMemoryConsumptionScoring.value
+  const ledger = typedMemoryConsumptionLedger.value || {}
+  const totals = ledger.totals || {}
+  return [
+    { label: '可信记录', value: ledger.validEntryCount || 0, note: `原始 ${ledger.rawEntryCount || 0}` },
+    { label: 'used', value: totals.used || 0, note: '已用于子 Agent 任务' },
+    { label: 'verified', value: totals.verified || 0, note: '服务端复算当前源' },
+    { label: 'ignored', value: totals.ignored || 0, note: '明确未采用' },
+    { label: '当前源证明', value: ledger.proofVerifiedEntryCount || 0, note: `降级 ${ledger.downgradedVerifiedEntryCount || 0}` },
+    { label: '异常声明', value: ledger.anomalyEntryCount || 0, note: `平均置信度 ${Number(ledger.averageEvidenceConfidence || 0).toFixed(2)}` },
+    { label: 'stale', value: ledger.staleEntryCount || 0, note: `${scoring.stale_after_days || 90} 天后失效` },
+    { label: '无效', value: ledger.invalidEntryCount || 0, note: ledger.checksumValid === false ? '账本校验失败' : '条目校验失败' },
+    { label: '加权', value: scoring.boosted_count || 0, note: `降权 ${scoring.deprioritized_count || 0}` },
+    { label: '冲突', value: scoring.conflict_count || 0, note: '本轮重新判断' }
+  ]
+})
+const typedMemoryConsumptionRows = computed(() => [
+  ...(postCompactUsage.value?.typedMemory?.consumptionConflictDocs || []).map(row => ({ ...row, kind: 'conflict' })),
+  ...(postCompactUsage.value?.typedMemory?.consumptionDeprioritizedDocs || []).map(row => ({ ...row, kind: 'deprioritized' })),
+  ...(postCompactUsage.value?.typedMemory?.consumptionBoostedDocs || []).map(row => ({ ...row, kind: 'boosted' }))
+])
 
 const typeLabels = {
   persistentRequirements: '用户约束', factAnchors: '事实锚点', decisions: '架构决策',
@@ -887,6 +1130,12 @@ const formatMetric = (value, suffix = '') => {
 }
 const formatTime = value => value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '暂无记录'
 const formatSigned = value => `${Number(value || 0) > 0 ? '+' : ''}${Number(value || 0)}`
+const formatBytes = value => {
+  const bytes = Number(value || 0)
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
 const compactDisplay = (value, max = 620) => {
   const text = String(value || '')
   return text.length > max ? `${text.slice(0, max)}…` : text
@@ -903,6 +1152,277 @@ const requestJson = async (url, options) => {
   const data = await res.json()
   if (!res.ok || data.success === false) throw new Error(data.error || '请求失败')
   return data
+}
+
+const replaySessionMemoryExtraction = async (event) => {
+  const executionId = String(event?.executionId || '')
+  const scopeId = String(event?.scopeId || '')
+  if (!executionId || !scopeId) return
+  sessionMemoryReplayLoading.value = executionId
+  try {
+    const data = await requestJson(`/api/memory-center/session-memory-extraction-replay?scope_id=${encodeURIComponent(scopeId)}&execution_id=${encodeURIComponent(executionId)}`)
+    sessionMemoryReplayResult.value = data.replay || null
+    if (data.replay?.pass) toast.success('提炼证据重放通过')
+    else toast.error('提炼证据重放未通过')
+  } catch (error) {
+    sessionMemoryReplayResult.value = null
+    toast.error(error.message || '提炼证据重放失败')
+  } finally {
+    sessionMemoryReplayLoading.value = ''
+  }
+}
+
+const loadContextSettings = async () => {
+  contextSettingsLoading.value = true
+  try {
+    const [data, capacityData, retentionData, capabilityData] = await Promise.all([
+      requestJson('/api/orchestrator/config'),
+      requestJson('/api/groups/memory/capacity'),
+      requestJson('/api/groups/sessions/maintenance'),
+      requestJson('/api/groups/memory/capabilities')
+    ])
+    const config = data.config || {}
+    modelCapacityStatus.value = capacityData || null
+    sessionRetentionStatus.value = retentionData.status || null
+    modelCapabilityEntries.value = capabilityData.entries || []
+    modelCapabilityRefreshPlan.value = capabilityData.refreshPlan || null
+    modelCapabilityRefreshStatus.value = capabilityData.refreshStatus || null
+    modelCapabilityRefreshOutcomeLedger.value = capabilityData.refreshOutcomeLedger || null
+    invalidModelCapabilityRefreshOutcomes.value = capabilityData.invalidRefreshOutcomes || { outcomes: [], pendingAcknowledgementCount: 0, acknowledgedCount: 0 }
+    modelCapabilityDowngradeAlerts.value = capabilityData.downgradeAlerts || []
+    contextSettings.value = {
+      memoryContextPreset: config.memoryContextPreset || 'default',
+      modelContextWindow: Number(config.modelContextWindow || 0),
+      modelAutoCompactTokenLimit: Number(config.modelAutoCompactTokenLimit || 0),
+      typedMemoryDeliveryMaxDocuments: Number(config.typedMemoryDeliveryMaxDocuments || 5),
+      typedMemoryDeliveryMaxBytesPerDocument: Number(config.typedMemoryDeliveryMaxBytesPerDocument || 4096),
+      typedMemoryDeliveryMaxLinesPerDocument: Number(config.typedMemoryDeliveryMaxLinesPerDocument || 200),
+      typedMemoryDeliveryMaxSessionBytes: Number(config.typedMemoryDeliveryMaxSessionBytes || 61440),
+      typedMemoryDeliveryMaxTokens: Number(config.typedMemoryDeliveryMaxTokens || 5000),
+      groupSessionRetentionDays: Number(config.groupSessionRetentionDays || 30),
+      groupSessionMaxArchived: Number(config.groupSessionMaxArchived || 20),
+      groupSessionAutoPruneEnabled: config.groupSessionAutoPruneEnabled === true,
+      groupSessionRetentionIntervalHours: Number(config.groupSessionRetentionIntervalHours || 24),
+      groupSessionArtifactAutoArchiveEnabled: config.groupSessionArtifactAutoArchiveEnabled !== false,
+      groupSessionArtifactHotExecutions: Number(config.groupSessionArtifactHotExecutions || 50),
+      groupSessionArtifactMaxHotMb: Number(config.groupSessionArtifactMaxHotMb || 64),
+      groupSessionArtifactMaxAgeDays: Number(config.groupSessionArtifactMaxAgeDays || 30)
+    }
+  } finally {
+    contextSettingsLoading.value = false
+  }
+}
+
+const saveModelCapability = async () => {
+  const setting = modelCapabilitySetting.value
+  const provider = String(setting.provider || '').trim()
+  const contextWindow = Number(setting.contextWindow || 0)
+  const maxOutputTokens = Number(setting.maxOutputTokens || 0)
+  if (!provider) return toast.error('请填写 provider，例如 codex、cursor 或 claudecode')
+  if (!Number.isFinite(contextWindow) || contextWindow < 32000 || contextWindow > 4000000) return toast.error('上下文窗口必须介于 32,000 和 4,000,000 token')
+  if (!Number.isFinite(maxOutputTokens) || maxOutputTokens < 0 || maxOutputTokens > contextWindow - 16000) return toast.error('最大输出 token 与上下文窗口不兼容')
+  modelCapabilitySaving.value = true
+  try {
+    await requestJson('/api/groups/memory/capabilities', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        source: 'user_setting',
+        provider,
+        model: String(setting.model || '').trim(),
+        contextWindow,
+        maxOutputTokens,
+        checkedAt: new Date().toISOString()
+      })
+    })
+    await loadContextSettings()
+    toast.success('Provider 模型容量已保存')
+  } catch (error) {
+    toast.error(error.message || '保存 Provider 模型容量失败')
+  } finally {
+    modelCapabilitySaving.value = false
+  }
+}
+
+const revokeModelCapability = async entry => {
+  if (!await confirmDialog(`撤销 ${entry.provider}${entry.model ? ` / ${entry.model}` : ''} 的容量证据？`)) return
+  try {
+    await requestJson('/api/groups/memory/capabilities/revoke', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ evidenceId: entry.evidenceId, reason: 'memory_center_manual_revocation' })
+    })
+    await loadContextSettings()
+    toast.success('容量证据已撤销')
+  } catch (error) {
+    toast.error(error.message || '撤销容量证据失败')
+  }
+}
+
+const runModelCapabilityMaintenance = async execute => {
+  if (modelCapabilityMaintenanceRunning.value) return
+  if (execute && !await confirmDialog('清理已过期或已撤销超过 30 天的容量证据？')) return
+  modelCapabilityMaintenanceRunning.value = true
+  try {
+    const data = await requestJson('/api/groups/memory/capabilities/maintenance', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dryRun: !execute, explicitExecution: execute, retentionDays: 30 })
+    })
+    await loadContextSettings()
+    toast.success(execute ? `已清理 ${data.result?.deletedCount || 0} 条证据` : `发现 ${data.result?.candidateCount || 0} 条清理候选`)
+  } catch (error) {
+    toast.error(error.message || '容量缓存维护失败')
+  } finally {
+    modelCapabilityMaintenanceRunning.value = false
+  }
+}
+
+const acknowledgeInvalidRefreshOutcome = async outcome => {
+  if (invalidRefreshOutcomeAcknowledging.value) return
+  if (!await confirmDialog(`确认已检查隔离记录 ${outcome.originalFileName || outcome.invalidOutcomeId}？取证文件会继续保留。`)) return
+  invalidRefreshOutcomeAcknowledging.value = outcome.invalidOutcomeId
+  try {
+    const data = await requestJson('/api/groups/memory/capabilities/invalid-outcomes/acknowledge', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ invalidOutcomeId: outcome.invalidOutcomeId, note: 'acknowledged_in_memory_center' })
+    })
+    invalidModelCapabilityRefreshOutcomes.value = data.invalidRefreshOutcomes || invalidModelCapabilityRefreshOutcomes.value
+    await loadContextSettings()
+    toast.success('隔离记录已确认，取证材料仍保留')
+  } catch (error) {
+    toast.error(error.message || '确认隔离记录失败')
+  } finally {
+    invalidRefreshOutcomeAcknowledging.value = ''
+  }
+}
+
+const selectContextPreset = preset => {
+  contextSettings.value.memoryContextPreset = preset.id
+  if (preset.id !== 'custom') {
+    contextSettings.value.modelContextWindow = preset.window
+    contextSettings.value.modelAutoCompactTokenLimit = preset.threshold
+  }
+}
+
+const saveContextSettings = async () => {
+  const settings = contextSettings.value
+  const windowTokens = Number(settings.modelContextWindow || 0)
+  const thresholdTokens = Number(settings.modelAutoCompactTokenLimit || 0)
+  if (settings.memoryContextPreset === 'custom') {
+    if (!Number.isFinite(windowTokens) || windowTokens < 32000) return toast.error('上下文窗口不能小于 32,000 token')
+    if (!Number.isFinite(thresholdTokens) || thresholdTokens < 18000 || thresholdTokens >= windowTokens - 3000) {
+      return toast.error('自动压缩阈值需大于等于 18,000，并至少比上下文窗口低 3,000 token')
+    }
+  }
+  if (Number(settings.groupSessionArtifactHotExecutions || 0) < 2 || Number(settings.groupSessionArtifactHotExecutions || 0) > 1000) return toast.error('热抽取记录数必须介于 2 和 1000')
+  if (Number(settings.groupSessionArtifactMaxHotMb || 0) < 1 || Number(settings.groupSessionArtifactMaxHotMb || 0) > 10240) return toast.error('抽取制品热存储必须介于 1 和 10240 MB')
+  if (Number(settings.groupSessionArtifactMaxAgeDays || 0) < 1 || Number(settings.groupSessionArtifactMaxAgeDays || 0) > 3650) return toast.error('抽取制品热存储天数必须介于 1 和 3650 天')
+  if (Number(settings.typedMemoryDeliveryMaxDocuments || 0) < 1 || Number(settings.typedMemoryDeliveryMaxDocuments || 0) > 5) return toast.error('每轮记忆文件数必须介于 1 和 5')
+  if (Number(settings.typedMemoryDeliveryMaxBytesPerDocument || 0) < 512 || Number(settings.typedMemoryDeliveryMaxBytesPerDocument || 0) > 4096) return toast.error('单份记忆容量必须介于 512 和 4096 bytes')
+  if (Number(settings.typedMemoryDeliveryMaxLinesPerDocument || 0) < 10 || Number(settings.typedMemoryDeliveryMaxLinesPerDocument || 0) > 200) return toast.error('单份记忆行数必须介于 10 和 200 行')
+  if (Number(settings.typedMemoryDeliveryMaxSessionBytes || 0) < 4096 || Number(settings.typedMemoryDeliveryMaxSessionBytes || 0) > 61440) return toast.error('单个压缩周期容量必须介于 4096 和 61440 bytes')
+  if (Number(settings.typedMemoryDeliveryMaxTokens || 0) < 500 || Number(settings.typedMemoryDeliveryMaxTokens || 0) > 20000) return toast.error('记忆投递 token 必须介于 500 和 20000')
+  contextSettingsSaving.value = true
+  try {
+    const data = await requestJson('/api/orchestrator/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        memoryContextPreset: settings.memoryContextPreset,
+        modelContextWindow: windowTokens,
+        modelAutoCompactTokenLimit: thresholdTokens,
+        typedMemoryDeliveryMaxDocuments: Number(settings.typedMemoryDeliveryMaxDocuments || 5),
+        typedMemoryDeliveryMaxBytesPerDocument: Number(settings.typedMemoryDeliveryMaxBytesPerDocument || 4096),
+        typedMemoryDeliveryMaxLinesPerDocument: Number(settings.typedMemoryDeliveryMaxLinesPerDocument || 200),
+        typedMemoryDeliveryMaxSessionBytes: Number(settings.typedMemoryDeliveryMaxSessionBytes || 61440),
+        typedMemoryDeliveryMaxTokens: Number(settings.typedMemoryDeliveryMaxTokens || 5000),
+        groupSessionRetentionDays: Number(settings.groupSessionRetentionDays || 30),
+        groupSessionMaxArchived: Number(settings.groupSessionMaxArchived || 20),
+        groupSessionAutoPruneEnabled: settings.groupSessionAutoPruneEnabled === true,
+        groupSessionRetentionIntervalHours: Number(settings.groupSessionRetentionIntervalHours || 24),
+        groupSessionArtifactAutoArchiveEnabled: settings.groupSessionArtifactAutoArchiveEnabled === true,
+        groupSessionArtifactHotExecutions: Number(settings.groupSessionArtifactHotExecutions || 50),
+        groupSessionArtifactMaxHotMb: Number(settings.groupSessionArtifactMaxHotMb || 64),
+        groupSessionArtifactMaxAgeDays: Number(settings.groupSessionArtifactMaxAgeDays || 30)
+      })
+    })
+    const config = data.config || {}
+    contextSettings.value = {
+      memoryContextPreset: config.memoryContextPreset || 'default',
+      modelContextWindow: Number(config.modelContextWindow || 0),
+      modelAutoCompactTokenLimit: Number(config.modelAutoCompactTokenLimit || 0),
+      typedMemoryDeliveryMaxDocuments: Number(config.typedMemoryDeliveryMaxDocuments || 5),
+      typedMemoryDeliveryMaxBytesPerDocument: Number(config.typedMemoryDeliveryMaxBytesPerDocument || 4096),
+      typedMemoryDeliveryMaxLinesPerDocument: Number(config.typedMemoryDeliveryMaxLinesPerDocument || 200),
+      typedMemoryDeliveryMaxSessionBytes: Number(config.typedMemoryDeliveryMaxSessionBytes || 61440),
+      typedMemoryDeliveryMaxTokens: Number(config.typedMemoryDeliveryMaxTokens || 5000),
+      groupSessionRetentionDays: Number(config.groupSessionRetentionDays || 30),
+      groupSessionMaxArchived: Number(config.groupSessionMaxArchived || 20),
+      groupSessionAutoPruneEnabled: config.groupSessionAutoPruneEnabled === true,
+      groupSessionRetentionIntervalHours: Number(config.groupSessionRetentionIntervalHours || 24),
+      groupSessionArtifactAutoArchiveEnabled: config.groupSessionArtifactAutoArchiveEnabled !== false,
+      groupSessionArtifactHotExecutions: Number(config.groupSessionArtifactHotExecutions || 50),
+      groupSessionArtifactMaxHotMb: Number(config.groupSessionArtifactMaxHotMb || 64),
+      groupSessionArtifactMaxAgeDays: Number(config.groupSessionArtifactMaxAgeDays || 30)
+    }
+    await loadContextSettings()
+    toast.success('上下文与压缩阈值已保存')
+  } catch (error) {
+    toast.error(error.message || '保存上下文设置失败')
+  } finally {
+    contextSettingsSaving.value = false
+  }
+}
+
+const runSessionRetentionMaintenance = async execute => {
+  if (sessionRetentionRunning.value) return
+  if (execute && !await confirmDialog('执行归档会话清理？只会处理超过保留期限或数量上限的归档会话，未完成任务会阻止删除。')) return
+  sessionRetentionRunning.value = true
+  try {
+    const data = await requestJson('/api/groups/sessions/maintenance', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dryRun: !execute, explicitExecution: execute })
+    })
+    sessionRetentionStatus.value = data.status || null
+    toast.success(execute ? `归档清理完成：删除 ${data.status?.deletedCount || 0}` : `清理预览完成：候选 ${data.status?.candidateCount || 0}`)
+  } catch (error) {
+    toast.error(error.message || '会话保留维护失败')
+  } finally {
+    sessionRetentionRunning.value = false
+  }
+}
+
+const runSessionMemoryArtifactRetention = async (row, execute) => {
+  const scopeId = `${row.groupId}::${row.groupSessionId}`
+  if (sessionMemoryArtifactRetentionRunning.value) return
+  if (execute && !await confirmDialog(`归档会话 ${row.groupSessionId} 的旧模型抽取制品？历史链和回放能力会保留。`)) return
+  sessionMemoryArtifactRetentionRunning.value = scopeId
+  try {
+    const data = await requestJson('/api/memory-center/operation', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        scope: 'group',
+        scope_id: scopeId,
+        operation: 'retain_model_extraction_artifacts',
+        reason: execute ? '用户在记忆中心执行模型抽取制品冷归档' : '用户在记忆中心预览模型抽取制品冷归档',
+        dryRun: !execute,
+        explicitExecution: execute
+      })
+    })
+    sessionMemoryArtifactRetentionResult.value = { scopeId, ...(data.result || {}) }
+    toast.success(execute
+      ? `已归档 ${data.result?.archivedThisRun || 0} 个抽取制品`
+      : `发现 ${data.result?.candidateExecutionCount || 0} 次抽取可归档`)
+    await loadOverview(true)
+  } catch (error) {
+    toast.error(error.message || '模型抽取制品维护失败')
+  } finally {
+    sessionMemoryArtifactRetentionRunning.value = ''
+  }
 }
 
 const qualityStatusFromScore = score => {
@@ -956,10 +1476,73 @@ const mergeTargetedQualityReport = (targetedReport, requestedCheckId) => {
   qualityTargetedSummary.value = lastTargetedRefresh
 }
 
+const loadDispatchRecovery = async (showToast = false) => {
+  dispatchRecoveryLoading.value = true
+  try {
+    const data = await requestJson('/api/memory-center/dispatch-recovery?limit=300')
+    dispatchRecovery.value = data.inventory || { summary: {}, rows: [] }
+    if (showToast) toast.success('派发恢复证据已刷新')
+  } catch (error) {
+    if (showToast) toast.error(error.message || '读取派发恢复证据失败')
+  } finally {
+    dispatchRecoveryLoading.value = false
+  }
+}
+
+const openDispatchResolve = (row, action) => {
+  dispatchResolveState.value = {
+    row,
+    action,
+    reason: action === 'retry_recovery' ? 'Memory Center 使用强证据重试恢复'
+      : action === 'acknowledge_uncertain' ? '人工确认该派发结果无法安全推断'
+        : action === 'cancel_prepared' ? '取消尚未启动的子 Agent 派发'
+          : '清理已完成保留期审计的终态派发证据'
+  }
+}
+
+const submitDispatchResolve = async () => {
+  const state = dispatchResolveState.value
+  if (!state?.reason?.trim() || dispatchResolveLoading.value) return
+  dispatchResolveLoading.value = true
+  try {
+    const row = state.row
+    const data = await requestJson('/api/memory-center/dispatch-recovery/resolve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: state.action,
+        ticketId: row.ticketId,
+        ticketChecksum: row.ticketChecksum,
+        recordChecksum: row.recordChecksum,
+        runnerRequestId: row.runnerRequestId || '',
+        requestChecksum: row.direct?.requestChecksum || '',
+        transcriptHeadChecksum: row.direct?.transcript?.headChecksum || '',
+        explicitConfirmation: true,
+        actor: 'memory-center',
+        reason: state.reason.trim()
+      })
+    })
+    dispatchRecovery.value = data.inventory || dispatchRecovery.value
+    dispatchResolveState.value = null
+    toast.success(dispatchActionLabel(state.action) + '已完成')
+  } catch (error) {
+    toast.error(error.message || '派发恢复操作失败')
+  } finally {
+    dispatchResolveLoading.value = false
+  }
+}
+
+const toggleDispatchTranscript = row => {
+  const id = row.ticketId || row.runnerRequestId
+  expandedDispatchId.value = expandedDispatchId.value === id ? '' : id
+}
+
 const loadOverview = async (preserveSelection = true) => {
   loading.value = true
   try {
+    await loadContextSettings()
     overview.value = await requestJson('/api/memory-center/overview')
+    await loadDispatchRecovery(false)
     await loadQuality(false)
     const stillExists = scopes.value.some(item => item.scope === selectedScope.value && item.id === selectedId.value)
     if (!preserveSelection || !stillExists) {
@@ -1286,6 +1869,35 @@ const updateReplayRepairWorkItem = async (item, action) => {
   await updateReplayRepairWorkItemForGroup(selectedId.value, item, action)
 }
 
+const resolveTypedMemoryStaleCandidate = async (candidate, action) => {
+  if (selectedScope.value !== 'group') return toast.info('陈旧记忆候选只属于群聊会话')
+  const actionLabel = action === 'reject' ? '拒绝候选' : action === 'confirm_remove' ? '确认删除旧记忆' : '确认更新记忆'
+  const reason = window.prompt(`${actionLabel}原因`, candidate.conflictReason || '')
+  if (reason === null) return
+  if (!reason.trim()) return toast.info('确认或拒绝候选必须填写原因')
+  const confirmed = await confirmDialog(`${actionLabel}：${candidate.relPath}。该操作只影响当前群聊会话，确定继续？`)
+  if (!confirmed) return
+  try {
+    await requestJson('/api/memory-center/stale-candidates', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        scope_id: selectedId.value,
+        candidate_id: candidate.candidateId,
+        candidate_checksum: candidate.candidateChecksum,
+        action,
+        reason: reason.trim(),
+        actor: 'memory-center-user',
+        explicit_confirmation: true
+      })
+    })
+    toast.success(action === 'reject' ? '候选已拒绝，长期记忆未变更' : action === 'confirm_remove' ? '旧记忆已从当前会话召回中移除' : '旧记忆已替换为确认后的新版本')
+    await loadDetail()
+  } catch (error) {
+    toast.error(error.message || '陈旧记忆候选处理失败')
+  }
+}
+
 const submitFeedback = async type => {
   try {
     const data = await requestJson('/api/memory-center/feedback', {
@@ -1330,6 +1942,210 @@ onMounted(() => loadOverview(false))
       </div>
     </header>
 
+    <section class="context-capacity-panel aura-card">
+      <div class="context-capacity-head">
+        <div>
+          <div class="eyebrow">MODEL CONTEXT POLICY</div>
+          <h3>上下文与压缩阈值</h3>
+        </div>
+        <div class="context-capacity-actions">
+          <button class="btn btn-outline" :disabled="contextSettingsLoading" @click="loadContextSettings">{{ contextSettingsLoading ? '刷新中' : '刷新' }}</button>
+          <button class="btn btn-primary" :disabled="contextSettingsSaving" @click="saveContextSettings">{{ contextSettingsSaving ? '保存中' : '保存' }}</button>
+        </div>
+      </div>
+      <div class="context-preset-grid">
+        <button
+          v-for="preset in contextPresets"
+          :key="preset.id"
+          class="context-preset"
+          :class="{ active: contextSettings.memoryContextPreset === preset.id }"
+          @click="selectContextPreset(preset)"
+        >
+          <strong>{{ preset.label }}</strong>
+          <span>{{ preset.note }}</span>
+        </button>
+      </div>
+      <p class="context-capacity-note">默认模式按模型能力和 CC 公式计算；预设与自定义值作为所有群聊的全局容量上限。</p>
+      <div v-if="modelCapacityStatus" class="capacity-runtime-strip">
+        <span><small>解析来源</small><strong>{{ modelCapacityStatus.capacity?.source || 'unknown' }}</strong></span>
+        <span><small>缓存状态</small><strong>{{ modelCapacityStatus.capacity?.cacheStatus || '—' }}</strong></span>
+        <span><small>可信度</small><strong>{{ modelCapacityStatus.capacity?.confidence ?? '—' }}</strong></span>
+        <span><small>模型窗口</small><strong>{{ formatNumber(modelCapacityStatus.capacity?.contextWindow) }}</strong></span>
+        <span><small>输出预留</small><strong>{{ formatNumber(modelCapacityStatus.capacity?.reservedOutputTokens) }}</strong></span>
+        <span><small>有效窗口</small><strong>{{ formatNumber(modelCapacityStatus.capacity?.effectiveContextWindow) }}</strong></span>
+        <span><small>压缩触发线</small><strong>{{ formatNumber(modelCapacityStatus.effectiveAutoCompactThreshold) }}</strong></span>
+        <span><small>能力缓存</small><strong>{{ modelCapacityStatus.capabilityCache?.active || 0 }} 有效 / {{ modelCapacityStatus.capabilityCache?.expired || 0 }} 过期 / {{ modelCapacityStatus.capabilityCache?.revoked || 0 }} 撤销</strong></span>
+        <span><small>能力到期</small><strong>{{ formatTime(modelCapacityStatus.capacity?.expiresAt) }}</strong></span>
+        <span><small>待刷新</small><strong>{{ modelCapabilityRefreshPlan?.requestCount || 0 }}</strong></span>
+        <span><small>刷新租约</small><strong>#{{ modelCapabilityRefreshStatus?.lease?.fencingToken || 0 }} / PID {{ modelCapabilityRefreshStatus?.lease?.ownerPid || '—' }}</strong></span>
+        <span><small>刷新健康</small><strong>{{ modelCapabilityRefreshOutcomeLedger?.totals?.degradedProviders || 0 }} 异常 / {{ modelCapabilityRefreshOutcomeLedger?.outcomeCount || 0 }} 条记录</strong></span>
+        <span><small>结果记录</small><strong>{{ modelCapabilityRefreshOutcomeLedger?.valid === false ? `待恢复 · ${modelCapabilityRefreshOutcomeLedger?.recoveryReason || 'invalid'}` : '校验通过' }}</strong></span>
+        <span><small>隔离待确认</small><strong>{{ invalidModelCapabilityRefreshOutcomes?.pendingAcknowledgementCount || 0 }}</strong></span>
+      </div>
+      <div class="provider-capability-editor">
+        <div class="context-capacity-head">
+          <div>
+            <div class="eyebrow">PROVIDER CAPABILITY</div>
+            <h3>子 Agent 模型容量</h3>
+          </div>
+          <div class="context-capacity-actions">
+            <button class="btn btn-outline" :disabled="modelCapabilityMaintenanceRunning" @click="runModelCapabilityMaintenance(false)">预览维护</button>
+            <button class="btn btn-outline" :disabled="modelCapabilityMaintenanceRunning" @click="runModelCapabilityMaintenance(true)">清理过期</button>
+            <button class="btn btn-outline" :disabled="modelCapabilitySaving" @click="saveModelCapability">{{ modelCapabilitySaving ? '保存中' : '保存容量' }}</button>
+          </div>
+        </div>
+        <div class="context-field-grid provider-capability-fields">
+          <label>
+            <span>Provider</span>
+            <input v-model.trim="modelCapabilitySetting.provider" type="text" placeholder="codex">
+          </label>
+          <label>
+            <span>模型（可选）</span>
+            <input v-model.trim="modelCapabilitySetting.model" type="text" placeholder="默认模型">
+          </label>
+          <label>
+            <span>上下文窗口</span>
+            <input v-model.number="modelCapabilitySetting.contextWindow" type="number" min="32000" max="4000000" step="1000">
+          </label>
+          <label>
+            <span>最大输出</span>
+            <input v-model.number="modelCapabilitySetting.maxOutputTokens" type="number" min="0" max="3984000" step="1000">
+          </label>
+        </div>
+        <div v-if="modelCapabilityEntries.length" class="provider-capability-list">
+          <span v-for="entry in modelCapabilityEntries.slice(0, 12)" :key="`${entry.key}:${entry.source}`">
+            <span>
+              <strong>{{ entry.provider }}{{ entry.model ? ` / ${entry.model}` : '' }}</strong>
+              <small>{{ formatNumber(entry.contextWindow) }} · {{ entry.source }} · {{ entry.revoked ? '已撤销' : entry.expired ? '已过期' : '有效' }}</small>
+            </span>
+            <button v-if="!entry.revoked" class="btn btn-outline capability-revoke" @click="revokeModelCapability(entry)">撤销</button>
+          </span>
+        </div>
+        <div v-if="modelCapabilityDowngradeAlerts.length" class="capability-downgrade-list">
+          <span v-for="alert in modelCapabilityDowngradeAlerts.slice(-5).reverse()" :key="alert.alertId">
+            <strong>{{ alert.provider }}{{ alert.model ? ` / ${alert.model}` : '' }}</strong>
+            <small>{{ formatNumber(alert.previousContextWindow) }} -> {{ formatNumber(alert.currentContextWindow) }} · 影响 {{ alert.affectedSessionCount || 0 }} 个活跃会话 · {{ formatTime(alert.detectedAt) }}</small>
+          </span>
+        </div>
+        <div v-if="modelCapabilityRefreshPlan?.requests?.length" class="capability-refresh-list">
+          <span v-for="request in modelCapabilityRefreshPlan.requests.slice(0, 8)" :key="request.requestId">
+            <strong>{{ request.provider }}{{ request.model ? ` / ${request.model}` : '' }}</strong>
+            <small>{{ request.status }} · 尝试 {{ request.attemptCount || 0 }} 次 · {{ request.retryAt ? `重试 ${formatTime(request.retryAt)}` : formatTime(request.expiresAt) }}</small>
+          </span>
+        </div>
+        <div v-if="modelCapabilityRefreshOutcomeLedger?.providers?.length" class="capability-health-list">
+          <span v-for="provider in modelCapabilityRefreshOutcomeLedger.providers" :key="provider.provider">
+            <strong :class="provider.health">{{ provider.provider }} · {{ provider.health }}</strong>
+            <small>刷新 {{ provider.refreshed }}/{{ provider.total }} · 成功率 {{ provider.refreshSuccessRate }}% · 连续缺失 {{ provider.consecutiveMetadataAbsent }}</small>
+          </span>
+        </div>
+        <div v-if="modelCapabilityRefreshStatus?.ledgerRecovery?.recovered" class="capability-recovery-proof">
+          <strong>账本已从 journal 恢复</strong>
+          <small>{{ modelCapabilityRefreshStatus.ledgerRecovery.recoveryReason }} · {{ formatTime(modelCapabilityRefreshStatus.ledgerRecovery.recoveredAt) }} · archive 剩余 {{ modelCapabilityRefreshStatus.archiveRetention?.remaining || 0 }}</small>
+        </div>
+        <div v-if="invalidModelCapabilityRefreshOutcomes?.outcomes?.length" class="invalid-refresh-outcome-list">
+          <span v-for="outcome in invalidModelCapabilityRefreshOutcomes.outcomes.slice(0, 8)" :key="outcome.invalidOutcomeId">
+            <span>
+              <strong>{{ outcome.originalFileName || outcome.invalidOutcomeId }}</strong>
+              <small>{{ outcome.reason || 'invalid pending outcome' }} · {{ formatTime(outcome.quarantinedAt) }} · {{ outcome.checksumValid ? '取证校验通过' : '取证校验失败' }}</small>
+            </span>
+            <button v-if="outcome.status === 'pending_ack'" class="btn btn-outline capability-revoke" :disabled="invalidRefreshOutcomeAcknowledging === outcome.invalidOutcomeId" @click="acknowledgeInvalidRefreshOutcome(outcome)">{{ invalidRefreshOutcomeAcknowledging === outcome.invalidOutcomeId ? '确认中' : '确认' }}</button>
+            <small v-else class="invalid-outcome-ack">已确认</small>
+          </span>
+        </div>
+      </div>
+      <div class="context-field-grid">
+        <label>
+          <span>上下文窗口</span>
+          <input v-model.number="contextSettings.modelContextWindow" type="number" min="32000" max="4000000" step="1000" :disabled="contextSettings.memoryContextPreset !== 'custom'">
+          <small>写入 model_context_window，仅在“自定义”模式可编辑。</small>
+        </label>
+        <label>
+          <span>自动压缩阈值</span>
+          <input v-model.number="contextSettings.modelAutoCompactTokenLimit" type="number" min="18000" max="3980000" step="1000" :disabled="contextSettings.memoryContextPreset !== 'custom'">
+          <small>写入 model_auto_compact_token_limit，仅在“自定义”模式可编辑。</small>
+        </label>
+        <label>
+          <span>每轮记忆文件数</span>
+          <input v-model.number="contextSettings.typedMemoryDeliveryMaxDocuments" type="number" min="1" max="5" step="1">
+          <small>Claude Code 同级 attachment 边界，每轮最多 5 份相关记忆。</small>
+        </label>
+        <label>
+          <span>单份记忆容量（bytes）</span>
+          <input v-model.number="contextSettings.typedMemoryDeliveryMaxBytesPerDocument" type="number" min="512" max="4096" step="256">
+          <small>按 UTF-8 实际字节裁剪，中文不会按字符数误算。</small>
+        </label>
+        <label>
+          <span>单份记忆行数</span>
+          <input v-model.number="contextSettings.typedMemoryDeliveryMaxLinesPerDocument" type="number" min="10" max="200" step="10">
+          <small>每份相关记忆最多投递 200 行。</small>
+        </label>
+        <label>
+          <span>单周期累计容量（bytes）</span>
+          <input v-model.number="contextSettings.typedMemoryDeliveryMaxSessionBytes" type="number" min="4096" max="61440" step="1024">
+          <small>同一 tas_* 与 compact epoch 最多累计 60KB，压缩后自动重置。</small>
+        </label>
+        <label>
+          <span>记忆投递 token 上限</span>
+          <input v-model.number="contextSettings.typedMemoryDeliveryMaxTokens" type="number" min="500" max="20000" step="500">
+          <small>实际额度还会按当前子 Agent 模型窗口的 2% 自动下调。</small>
+        </label>
+        <label>
+          <span>归档保留天数</span>
+          <input v-model.number="contextSettings.groupSessionRetentionDays" type="number" min="1" max="3650" step="1">
+          <small>超过这个期限的归档会话进入清理候选，未完成任务会阻止删除。</small>
+        </label>
+        <label>
+          <span>最大归档会话数</span>
+          <input v-model.number="contextSettings.groupSessionMaxArchived" type="number" min="1" max="1000" step="1">
+          <small>超过数量上限时优先清理最旧归档会话，不影响活跃会话。</small>
+        </label>
+        <label class="retention-toggle-field">
+          <span>自动归档清理</span>
+          <div class="retention-toggle-row">
+            <input v-model="contextSettings.groupSessionAutoPruneEnabled" type="checkbox">
+            <strong>{{ contextSettings.groupSessionAutoPruneEnabled ? '已开启' : '默认关闭' }}</strong>
+          </div>
+          <small>开启后才会由服务器调度器执行实际清理；关闭时只允许手动预览。</small>
+        </label>
+        <label>
+          <span>维护周期（小时）</span>
+          <input v-model.number="contextSettings.groupSessionRetentionIntervalHours" type="number" min="1" max="720" step="1">
+          <small>服务监听成功后启动调度，首次执行延迟 60 秒。</small>
+        </label>
+        <label class="retention-toggle-field">
+          <span>抽取制品自动冷归档</span>
+          <div class="retention-toggle-row">
+            <input v-model="contextSettings.groupSessionArtifactAutoArchiveEnabled" type="checkbox">
+            <strong>{{ contextSettings.groupSessionArtifactAutoArchiveEnabled ? '已开启' : '已关闭' }}</strong>
+          </div>
+          <small>只归档回放审计制品，不改变注入模型的 Session Memory。</small>
+        </label>
+        <label>
+          <span>热抽取记录数</span>
+          <input v-model.number="contextSettings.groupSessionArtifactHotExecutions" type="number" min="2" max="1000" step="1">
+          <small>始终保护最近成功、最近失败和正在执行的抽取。</small>
+        </label>
+        <label>
+          <span>热制品容量（MB）</span>
+          <input v-model.number="contextSettings.groupSessionArtifactMaxHotMb" type="number" min="1" max="10240" step="1">
+          <small>超出后按会话从最旧制品开始归档。</small>
+        </label>
+        <label>
+          <span>热制品天数</span>
+          <input v-model.number="contextSettings.groupSessionArtifactMaxAgeDays" type="number" min="1" max="3650" step="1">
+          <small>旧制品进入带校验清单的会话冷存储。</small>
+        </label>
+      </div>
+      <div class="retention-maintenance-row">
+        <span>上次运行 {{ formatTime(sessionRetentionStatus?.lastRunAt) }} · 候选 {{ sessionRetentionStatus?.candidateCount || 0 }} · 已删 {{ sessionRetentionStatus?.deletedCount || 0 }} · 租约 #{{ sessionRetentionStatus?.lease?.fencingToken || 0 }} / PID {{ sessionRetentionStatus?.lease?.ownerPid || '—' }}</span>
+        <div>
+          <button class="btn btn-outline" :disabled="sessionRetentionRunning" @click="runSessionRetentionMaintenance(false)">预览清理</button>
+          <button class="btn btn-outline danger" :disabled="sessionRetentionRunning" @click="runSessionRetentionMaintenance(true)">执行清理</button>
+        </div>
+      </div>
+    </section>
+
     <section class="summary-strip">
       <article class="summary-card">
         <span class="summary-label">健康范围</span>
@@ -1346,6 +2162,107 @@ onMounted(() => loadOverview(false))
         <strong>{{ formatRate(metric.value) }}</strong>
         <small>{{ metric.note }}</small>
       </article>
+    </section>
+
+    <section :class="['dispatch-recovery-panel', { alert: (dispatchRecovery.summary?.uncertain || 0) + (dispatchRecovery.summary?.invalid || 0) > 0 }]">
+      <div class="dispatch-recovery-head">
+        <div><span class="panel-kicker">DISPATCH RECOVERY</span><h4>子 Agent 记忆派发恢复</h4></div>
+        <button class="btn btn-outline" :disabled="dispatchRecoveryLoading" title="刷新派发恢复证据" @click="loadDispatchRecovery(true)">{{ dispatchRecoveryLoading ? '刷新中…' : '刷新' }}</button>
+      </div>
+      <div class="dispatch-recovery-counters">
+        <span v-for="card in dispatchRecoverySummaryCards" :key="card.label"><small>{{ card.label }}</small><strong>{{ formatNumber(card.value) }}</strong></span>
+      </div>
+      <div v-if="dispatchRecoveryRows.length" class="dispatch-recovery-list">
+        <article v-for="row in dispatchRecoveryRows" :key="row.ticketId || row.runnerRequestId" :class="row.recoverability">
+          <div class="dispatch-recovery-row">
+            <span :class="['dispatch-recovery-state', row.recoverability]">{{ dispatchStateLabel(row.recoverability) }}</span>
+            <div class="dispatch-recovery-identity">
+              <strong>{{ row.project || row.direct?.project || 'unknown project' }}</strong>
+              <small>{{ row.groupId || 'no-group' }} · {{ row.groupSessionId || 'no-gcs' }} · {{ row.taskAgentSessionId || 'no-tas' }}</small>
+            </div>
+            <div class="dispatch-recovery-proof">
+              <code>{{ row.ticketId || 'WAL missing' }}</code>
+              <small>{{ row.runnerRequestId || 'runner pending' }} · {{ row.direct?.requestStatus || 'missing' }} · transcript {{ row.direct?.transcript?.valid ? 'valid' : row.direct?.transcript?.present ? 'invalid' : 'none' }}</small>
+            </div>
+            <time>{{ formatTime(row.updatedAt || row.direct?.completedAt || row.direct?.createdAt) }}</time>
+            <div class="dispatch-recovery-actions">
+              <button v-if="row.direct?.transcript?.present" class="btn btn-outline" title="查看增量执行轨迹" @click="toggleDispatchTranscript(row)">轨迹</button>
+              <button v-for="action in dispatchActions(row)" :key="action" class="btn btn-outline" :class="{ danger: ['cancel_prepared', 'prune_terminal'].includes(action) }" :title="dispatchActionLabel(action)" @click="openDispatchResolve(row, action)">{{ dispatchActionLabel(action) }}</button>
+            </div>
+          </div>
+          <div v-if="row.acknowledged" class="dispatch-recovery-ack">已确认 · {{ row.acknowledgement?.actor }} · {{ formatTime(row.acknowledgement?.completedAt) }}</div>
+          <div v-if="expandedDispatchId === (row.ticketId || row.runnerRequestId)" class="dispatch-transcript-list">
+            <div class="dispatch-transcript-meta"><code>{{ row.direct?.transcript?.headChecksum || 'no-head' }}</code><span>{{ formatBytes(row.direct?.transcript?.bytes || 0) }} · {{ row.direct?.transcript?.eventCount || 0 }} events</span></div>
+            <div v-for="event in row.direct?.transcript?.events || []" :key="event.sequence" class="dispatch-transcript-event">
+              <time>{{ formatTime(event.at) }}</time><strong>{{ event.type }}</strong><pre>{{ event.payload?.text || JSON.stringify(event.payload || {}) }}</pre>
+            </div>
+          </div>
+        </article>
+      </div>
+      <div v-else class="dispatch-recovery-empty">暂无记忆派发恢复记录</div>
+    </section>
+
+    <section v-if="sessionMemoryFleetReport" :class="['session-memory-fleet-panel', sessionMemoryFleetState]">
+      <div class="session-memory-fleet-head">
+        <div><span class="panel-kicker">SESSION MEMORY FLEET</span><h4>群聊会话记忆预算</h4></div>
+        <code>{{ sessionMemoryFleetState }}</code>
+      </div>
+      <div class="session-memory-fleet-cards">
+        <article v-for="card in sessionMemoryFleetCards" :key="card.label">
+          <span>{{ card.label }}</span>
+          <strong>{{ formatNumber(card.value) }}</strong>
+          <small>{{ card.note }}</small>
+        </article>
+      </div>
+      <div v-if="sessionMemoryFleetRows.length" class="session-memory-fleet-list">
+        <article v-for="row in sessionMemoryFleetRows" :key="row.scopeId" :class="row.status">
+          <span :class="['usage-state', row.status === 'ok' ? 'used' : row.status === 'empty' ? 'waiting' : row.status]">{{ row.status }}</span>
+          <strong>{{ row.groupSessionId || 'default' }}</strong>
+          <p>{{ row.groupId }} · turns {{ formatNumber(row.postTurnSummaryCount || 0) }}/{{ formatNumber(row.postTurnSummaryAssistantMessageCount || 0) }} · missing {{ formatNumber(row.postTurnSummaryMissingCount || 0) }} · ledger {{ row.postTurnSummaryLedgerValid ? 'verified' : 'invalid' }} · archives {{ formatNumber(row.postTurnSummaryArchiveCount || 0) }} · {{ row.extractionMethod || 'deterministic_structured_fallback' }} · receipt {{ row.modelReceiptChecksumValid ? 'verified' : row.modelExtracted ? 'invalid' : row.modelExtractionBackoff ? 'backoff' : 'pending' }} · delivery {{ row.modelExtracted ? row.modelExtractionDeliveryEvidenceValid ? 'verified' : 'invalid' : 'unobserved' }} · quality {{ row.modelMergeQualityStatus || 'unobserved' }} {{ formatNumber(row.modelMergeQualityScore || 0) }} · facts {{ row.factSupersessionGraphPresent ? row.factSupersessionGraphValid ? 'verified' : 'invalid' : 'unobserved' }} {{ formatNumber(row.factSupersessionEdgeCount || 0) }}/{{ formatNumber(row.factSupersessionUnjustifiedLostCount || 0) }} · chain {{ row.modelExtractionHistoryChainValid && row.modelExtractionHistoryHeadMatches ? 'verified' : row.modelExtractionHistoryTotalCount ? 'invalid' : 'empty' }} · replay {{ row.modelExtractionReplayStatus || 'unobserved' }} · artifacts {{ row.modelExtractionArtifactRetentionStatus || 'empty' }} hot {{ formatBytes(row.modelExtractionArtifactHotBytes) }} / cold {{ formatBytes(row.modelExtractionArtifactArchivedBytes) }} / due {{ formatNumber(row.modelExtractionArtifactCandidateExecutionCount || 0) }} · input {{ row.modelInputBudgetStatus || 'unobserved' }} {{ formatNumber(row.modelInputEstimatedTokens || 0) }}/{{ formatNumber(row.modelInputMaxTokens || 0) }} · omitted {{ formatNumber(row.modelInputOmittedMessageCount || 0) }}{{ row.modelInputClipped ? ' · clipped' : '' }} · {{ row.cadenceStatus || 'unobserved' }} · tx {{ row.extractionStatus || 'idle' }} · Δ {{ formatNumber(row.cadenceTokensSinceLastExtraction || 0) }}</p>
+          <code>{{ formatNumber(row.markdownTokens || 0) }} / {{ formatNumber(row.totalTokenBudget || 12000) }}</code>
+          <div class="session-memory-artifact-actions">
+            <button class="btn btn-outline" :disabled="!!sessionMemoryArtifactRetentionRunning" title="预览该会话的抽取制品归档" @click="runSessionMemoryArtifactRetention(row, false)">预览归档</button>
+            <button class="btn btn-outline" :disabled="!!sessionMemoryArtifactRetentionRunning || !row.modelExtractionArtifactCandidateExecutionCount" title="执行该会话的抽取制品归档" @click="runSessionMemoryArtifactRetention(row, true)">执行归档</button>
+          </div>
+        </article>
+      </div>
+      <div v-if="sessionMemoryHistoryRows.length" class="session-memory-history-list">
+        <article v-for="event in sessionMemoryHistoryRows" :key="event.eventId">
+          <span :class="['usage-state', event.status === 'committed' ? 'used' : event.status === 'failed' ? 'fail' : 'waiting']">{{ event.status }}</span>
+          <strong>{{ event.groupSessionId }}</strong>
+          <p>{{ event.reason || event.failureClass || event.executionId || 'model extraction' }} · quality {{ event.mergeQuality?.status || 'unobserved' }} {{ formatNumber(event.mergeQuality?.score || 0) }}</p>
+          <code>{{ formatTime(event.at || event.completedAt || event.failedAt) }}</code>
+          <button
+            v-if="['committed', 'failed'].includes(event.status)"
+            class="session-memory-replay-btn"
+            :disabled="sessionMemoryReplayLoading === event.executionId"
+            title="重新校验该次提炼的历史链、压缩制品和模型输出"
+            @click="replaySessionMemoryExtraction(event)"
+          >{{ sessionMemoryReplayLoading === event.executionId ? '校验中…' : '重放' }}</button>
+        </article>
+      </div>
+      <div v-if="sessionMemoryReplayResult" :class="['session-memory-replay-panel', sessionMemoryReplayResult.pass ? 'ok' : 'fail']">
+        <div class="session-memory-replay-head">
+          <div>
+            <span class="panel-kicker">EXTRACTION REPLAY</span>
+            <h5>{{ sessionMemoryReplayResult.pass ? '提炼证据重放通过' : '提炼证据重放失败' }}</h5>
+          </div>
+          <button class="session-memory-replay-close" title="关闭重放结果" @click="sessionMemoryReplayResult = null">关闭</button>
+        </div>
+        <div class="session-memory-replay-meta">
+          <code>{{ sessionMemoryReplayResult.executionId }}</code>
+          <span>历史链 {{ sessionMemoryReplayResult.history?.integrityValid ? '完整' : '异常' }}</span>
+          <span>请求 {{ sessionMemoryReplayResult.request?.valid ? '有效' : '无效' }} · {{ sessionMemoryReplayResult.request?.tier || 'missing' }} · {{ formatBytes(sessionMemoryReplayResult.request?.compressedBytes) }}</span>
+          <span>结果 {{ sessionMemoryReplayResult.result?.valid ? '有效' : '无效' }} · {{ sessionMemoryReplayResult.result?.tier || 'missing' }} · {{ formatBytes(sessionMemoryReplayResult.result?.compressedBytes) }}</span>
+          <span>输入 {{ sessionMemoryReplayResult.request?.inputBudgetStatus || 'unobserved' }} · {{ formatNumber(sessionMemoryReplayResult.request?.estimatedInputTokens || 0) }} tokens</span>
+        </div>
+        <div class="session-memory-replay-checks">
+          <article v-for="([key, passed]) in sessionMemoryReplayChecks" :key="key" :class="passed ? 'ok' : 'fail'">
+            <span>{{ passed ? '通过' : '失败' }}</span>
+            <strong>{{ sessionMemoryReplayCheckLabels[key] || key }}</strong>
+          </article>
+        </div>
+      </div>
     </section>
 
     <section v-if="overview.alerts?.length" class="global-alerts">
@@ -1506,7 +2423,7 @@ onMounted(() => loadOverview(false))
           </article>
         </div>
       </div>
-      <div v-if="taskAgentMemoryContextSnapshotCheck" :class="['task-agent-snapshot-panel', taskAgentSnapshotState]">
+      <div v-if="taskAgentMemoryContextSnapshotCheck || taskAgentSnapshotReport?.schema" :class="['task-agent-snapshot-panel', taskAgentSnapshotState]">
         <div class="task-agent-snapshot-head">
           <div>
             <span class="panel-kicker">TASK AGENT MEMORY</span>
@@ -1534,8 +2451,44 @@ onMounted(() => loadOverview(false))
           <article v-for="row in taskAgentSnapshotRows" :key="`${row.snapshotId}:${row.snapshotFile}`" :class="row.status">
             <span :class="['usage-state', row.status === 'fail' ? 'fail' : row.status === 'warn' ? 'warn' : 'verified']">{{ row.status }}</span>
             <strong>{{ row.snapshotId || row.sessionId || 'snapshot' }}</strong>
-            <p>{{ compactDisplay(`${row.groupId || 'group'} · ${row.project || 'project'} · ${row.taskId || 'task'} · ${(row.gaps || [])[0]?.reason || row.workerContextPacketId || row.snapshotFile}`, 300) }}</p>
-            <code>{{ row.prunable ? 'prunable' : row.gateCount ? `${row.gateCount} gates` : 'gate check' }}</code>
+            <p>{{ compactDisplay(`${row.groupId || 'group'} · ${row.groupSessionId || 'session-unbound'} · ${row.project || 'project'} · ${row.taskId || 'task'} · ${(row.gaps || [])[0]?.reason || row.invocationEdgeId || row.workerContextPacketId || row.snapshotFile}`, 300) }}</p>
+            <code>{{ row.prunable ? 'prunable' : `lifecycle #${row.sessionLifecycleGeneration || 0} ${row.sessionLifecycleFenceStatus || 'pending'} · ${row.invocationEdgeId ? `${row.invocationBranchKind || 'main'} · ${row.invocationEdgeStatus || 'prepared'} · ${row.invocationEdgeId}` : row.memoryContextDelivered ? `delivered · ${row.deliveryPromptBindingMode || 'bound'}` : row.deliveryStatus || (row.gateCount ? `${row.gateCount} gates` : 'gate check')}` }}</code>
+          </article>
+        </div>
+        <div v-if="taskAgentInvocationRows.length" class="task-agent-snapshot-list task-agent-invocation-list">
+          <div class="recall-diagnostic-head">
+            <strong>Invocation Recovery</strong>
+            <span>{{ taskAgentSnapshotReport?.overall?.invocationNonTerminalCount || 0 }} open</span>
+          </div>
+          <article v-for="row in taskAgentInvocationRows" :key="row.invocation_edge_id" :class="row.valid === false ? 'fail' : row.recovery_outcome === 'uncertain' || !['completed', 'failed'].includes(row.status) ? 'warn' : 'ok'">
+            <span :class="['usage-state', row.valid === false ? 'fail' : row.recovery_outcome === 'uncertain' || !['completed', 'failed'].includes(row.status) ? 'warn' : 'verified']">{{ row.status }}</span>
+            <strong>{{ row.invocation_edge_id }}</strong>
+            <p>{{ compactDisplay(`${row.group_id} · ${row.group_session_id} · ${row.task_agent_session_id} · ${row.recovery_outcome || row.terminal_reason || row.branch_kind} · adoption ${row.adoption_status || 'pending'} · native ${row.native_continuation_status || 'pending'} · reinjection ${row.reinjection_status || 'pending'}`, 340) }}</p>
+            <code>{{ row.branch_kind || 'main' }} · budget {{ row.context_rebudget_status || 'pending' }} · lifecycle #{{ row.session_lifecycle_generation || 0 }} {{ row.session_lifecycle_dispatch_fence_status || 'pending' }} · compact #{{ row.compact_head_generation || 0 }} {{ row.compact_head_dispatch_fence_status || 'pending' }} · recovery {{ row.recovery_fencing_token || 0 }} · {{ row.dispatch_ticket_id || row.runner_request_id || 'no dispatch witness' }}</code>
+          </article>
+        </div>
+        <div v-if="taskAgentContinuationSoakRows.length" class="task-agent-snapshot-list task-agent-invocation-list">
+          <div class="recall-diagnostic-head">
+            <strong>Continuation Soak</strong>
+            <span>{{ taskAgentSnapshotReport?.continuationSoak?.overall?.healthyChainCount || 0 }} healthy</span>
+          </div>
+          <article v-for="row in taskAgentContinuationSoakRows" :key="row.file" :class="row.status">
+            <span :class="['usage-state', row.status === 'fail' ? 'fail' : row.status === 'warn' ? 'warn' : 'verified']">{{ row.status }}</span>
+            <strong>{{ row.taskAgentSessionId }}</strong>
+            <p>{{ compactDisplay(`${row.groupId} · ${row.groupSessionId} · turns ${row.turnCount} · resume ${row.continuationAcknowledgedCount}/${row.continuationCount} · task output ${row.taskArtifactProvenCount || 0}/${row.taskArtifactEvidenceCount || 0} · post-compact ${row.postCompactArtifactClosureProvenCount || 0}/${row.postCompactTaskArtifactEvidenceCount || 0}`, 340) }}</p>
+            <code>events {{ row.eventCount }} · service {{ row.serviceEpochCount }} · contracts {{ row.providerContractEpochCount || 0 }} · compact chain {{ row.crossVersionPostCompactArtifact ? 'proven' : 'pending' }} · receipt drift {{ row.postCompactArtifactCompactTransactionReceiptMismatchCount || 0 }} · recovery {{ row.postCompactArtifactRecoveryClosureCount || 0 }} · {{ row.latestProviderRuntimeVersion || 'version pending' }} · {{ (row.gaps || [])[0] || row.headChecksum }}</code>
+          </article>
+        </div>
+        <div v-if="providerRuntimeContractRows.length" class="task-agent-snapshot-list task-agent-invocation-list">
+          <div class="recall-diagnostic-head">
+            <strong>Provider Contract Inventory</strong>
+            <span>{{ taskAgentSnapshotReport?.overall?.providerRuntimeContractHealthyCount || 0 }} healthy</span>
+          </div>
+          <article v-for="row in providerRuntimeContractRows" :key="row.provider" :class="row.status === 'ok' ? 'ok' : 'warn'">
+            <span :class="['usage-state', row.status === 'ok' ? 'verified' : 'warn']">{{ row.status }}</span>
+            <strong>{{ row.provider }}</strong>
+            <p>{{ row.versionText || row.semanticVersion || row.error || 'version unavailable' }}</p>
+            <code>{{ row.executableIdentityChecksum ? row.executableIdentityChecksum.slice(0, 20) : 'identity unavailable' }}</code>
           </article>
         </div>
       </div>
@@ -1579,7 +2532,7 @@ onMounted(() => loadOverview(false))
         <div class="scope-list">
           <button v-for="item in scopes" :key="`${item.scope}:${item.id}`" class="scope-item" :class="{ active: item.scope === selectedScope && item.id === selectedId }" @click="selectScope(item)">
             <span class="scope-mark" :class="[item.scope, item.health]">{{ item.scope === 'global' ? 'A' : item.scope === 'group' ? 'G' : 'P' }}</span>
-            <span class="scope-copy"><strong>{{ item.label }}</strong><small>{{ item.scope === 'global' ? '全局 Agent 记忆' : item.scope === 'group' ? '群聊上下文' : '项目长期记忆' }}</small></span>
+            <span class="scope-copy"><strong>{{ item.label }}</strong><small>{{ item.scope === 'global' ? '全局 Agent 记忆' : item.scope === 'group' ? `群聊会话记忆 · ${item.groupSessionId || 'default'}` : '项目长期记忆' }}</small></span>
             <span v-if="item.alerts" class="alert-count">{{ item.alerts }}</span>
             <span v-else class="health-dot"></span>
           </button>
@@ -1668,6 +2621,31 @@ onMounted(() => loadOverview(false))
               <article><span>事实校验</span><strong>{{ detail.memory.integrity?.pass === false || detail.memory.compaction?.validation?.pass === false ? '失败' : '通过' }}</strong></article>
               <article><span>最近压缩</span><strong>{{ formatTime(detail.memory.compaction?.lastCompactedAt || detail.memory.compression?.lastCompactedAt) }}</strong></article>
             </div>
+            <section v-if="selectedScope === 'group' && resumeProjection" :class="['discipline-panel', resumeProjection.status === 'verified' || resumeProjection.status === 'no_boundary' ? 'ok' : 'fail']">
+              <div class="discipline-head">
+                <div>
+                  <span class="panel-kicker">DURABLE RESUME</span>
+                  <h4>会话恢复投影</h4>
+                </div>
+                <code>{{ resumeProjection.status || 'unknown' }}</code>
+              </div>
+              <div class="discipline-cards">
+                <article><span>会话</span><strong>{{ detail.groupSessionId || 'default' }}</strong><small>{{ detail.groupId || selectedId }}</small></article>
+                <article><span>原始消息</span><strong>{{ formatNumber(resumeProjection.rawMessageCount || 0) }}</strong><small>完整 transcript</small></article>
+                <article><span>已摘要跳过</span><strong>{{ formatNumber(resumeProjection.omittedMessageCount || 0) }}</strong><small>仅在证明通过后剪枝</small></article>
+                <article><span>恢复窗口</span><strong>{{ formatNumber(resumeProjection.projectedMessageCount || 0) }}</strong><small>保留段 + 新消息</small></article>
+                <article><span>提交序号</span><strong>#{{ resumeProjection.boundary?.sequence || 0 }}</strong><small>fence {{ resumeProjection.boundary?.fencingToken || 0 }}</small></article>
+                <article><span>恢复证明</span><strong>{{ resumeProjection.proofs?.proofCount || 0 }}</strong><small>{{ resumeProjection.proofs?.valid === false ? '账本异常' : '校验通过' }}</small></article>
+              </div>
+              <div class="discipline-gap-list">
+                <article>
+                  <span :class="['usage-state', resumeProjection.verified ? 'used' : 'fail']">{{ resumeProjection.verified ? 'verified' : 'fail closed' }}</span>
+                  <strong>{{ resumeProjection.boundary?.boundaryId || '尚无压缩边界' }}</strong>
+                  <p>{{ resumeProjection.reason || 'empty session' }}</p>
+                </article>
+              </div>
+              <code>{{ resumeProjection.journal?.file || '尚未创建 boundary journal' }}</code>
+            </section>
             <section v-if="selectedScope === 'group' && postCompactUsage" class="post-compact-panel">
               <div class="post-compact-head">
                 <div><span class="panel-kicker">POST-COMPACT USAGE</span><h4>压缩重注入候选</h4></div>
@@ -1681,6 +2659,38 @@ onMounted(() => loadOverview(false))
                     <strong>{{ formatMetric(card.value, card.suffix) }}</strong>
                     <small>{{ card.note }}</small>
                   </article>
+                </div>
+                <div v-if="typedMemoryStaleCandidateLedger" :class="['discipline-panel', typedMemoryStaleCandidateLedger.checksumValid === false || typedMemoryStaleCandidateLedger.invalidCount ? 'fail' : pendingTypedMemoryStaleCandidates.length ? 'warn' : 'ok']">
+                  <div class="discipline-head">
+                    <div>
+                      <strong>陈旧记忆更新候选</strong>
+                      <span>子 Agent 只能提交候选，确认后才会更新当前群聊会话记忆</span>
+                    </div>
+                    <code>{{ typedMemoryStaleCandidateLedger.checksumValid === false ? 'checksum failed' : `${typedMemoryStaleCandidateLedger.pendingCount || 0} pending` }}</code>
+                  </div>
+                  <div class="discipline-cards">
+                    <article><span>待确认</span><strong>{{ typedMemoryStaleCandidateLedger.pendingCount || 0 }}</strong><small>只属于当前 gcs 会话</small></article>
+                    <article><span>已执行</span><strong>{{ typedMemoryStaleCandidateLedger.appliedCount || 0 }}</strong><small>旧版本已停止召回</small></article>
+                    <article><span>已拒绝</span><strong>{{ typedMemoryStaleCandidateLedger.rejectedCount || 0 }}</strong><small>不展示候选正文</small></article>
+                    <article><span>无效证明</span><strong>{{ typedMemoryStaleCandidateLedger.invalidCount || 0 }}</strong><small>账本失败时关闭执行</small></article>
+                  </div>
+                  <div v-if="typedMemoryStaleCandidates.length" class="stale-candidate-list">
+                    <article v-for="candidate in typedMemoryStaleCandidates.slice(0, 12)" :key="candidate.candidateId" :class="['stale-candidate-row', candidate.status]">
+                      <div class="stale-candidate-head">
+                        <span :class="['usage-state', candidate.status === 'pending' ? 'mentioned' : candidate.status === 'applied' ? 'verified' : 'ignored']">{{ candidate.status }}</span>
+                        <strong>{{ candidate.relPath }}</strong>
+                        <code>{{ candidate.recommendedAction }}</code>
+                      </div>
+                      <p>{{ candidate.conflictReason }}</p>
+                      <div v-if="candidate.replacementMemory" class="stale-candidate-replacement">{{ candidate.replacementMemory }}</div>
+                      <small>{{ candidate.currentSourceRelativePath }} · {{ formatTime(candidate.generatedAt) }}</small>
+                      <div v-if="candidate.status === 'pending'" class="stale-candidate-actions">
+                        <button class="btn btn-sm btn-primary" @click="resolveTypedMemoryStaleCandidate(candidate, candidate.recommendedAction === 'remove' ? 'confirm_remove' : 'confirm_update')">{{ candidate.recommendedAction === 'remove' ? '确认移除' : '确认更新' }}</button>
+                        <button class="btn btn-sm btn-outline" @click="resolveTypedMemoryStaleCandidate(candidate, 'reject')">拒绝</button>
+                      </div>
+                      <div v-else-if="candidate.resolution" class="stale-candidate-resolution">{{ candidate.resolution.reason }} · {{ formatTime(candidate.resolution.resolvedAt) }}</div>
+                    </article>
+                  </div>
                 </div>
                 <div v-if="groupSessionMemory" :class="['discipline-panel', groupSessionMemory.markdownChecksumMatches ? 'ok' : groupSessionMemory.markdownExists ? 'warn' : 'fail']">
                   <div class="discipline-head">
@@ -1753,7 +2763,7 @@ onMounted(() => loadOverview(false))
                       <span :class="['usage-state', row.status === 'fail' ? 'fail' : row.status === 'warn' ? 'warn' : 'verified']">{{ row.status }}</span>
                       <strong>{{ row.snapshotId || row.sessionId || 'snapshot' }}</strong>
                       <p>{{ compactDisplay(`${row.project || 'project'} · ${row.taskId || 'task'} · ${(row.gaps || [])[0]?.reason || row.workerContextPacketId || row.snapshotFile}`, 260) }}</p>
-                      <code>{{ row.prunable ? 'prunable' : row.gateCount ? `${row.gateCount} gates` : 'gate check' }}</code>
+                      <code>{{ row.postTurnSummaryCapsuleChecksum ? `summary ${row.postTurnSummaryCapsuleSelectedCount || 0}` : row.prunable ? 'prunable' : row.gateCount ? `${row.gateCount} gates` : 'gate check' }}</code>
                     </article>
                   </div>
                 </div>
@@ -2467,6 +3477,69 @@ onMounted(() => loadOverview(false))
                     <code>{{ formatSigned(row.adjustment) }}</code>
                   </article>
                 </div>
+                <div v-if="semanticRecallRows.length" class="recall-diagnostic-list">
+                  <div class="recall-diagnostic-head">
+                    <strong>自然语言语义召回</strong>
+                    <span>matched {{ semanticRecallScoring.boosted_count || 0 }} · conflict {{ semanticRecallScoring.conflict_penalized_count || 0 }} · dedup {{ semanticRecallScoring.semantic_duplicate_count || 0 }}</span>
+                  </div>
+                  <article v-for="row in semanticRecallRows.slice(0, 8)" :key="`semantic:${row.kind}:${row.relPath}`" :class="['recall-diagnostic-row', `semantic-${row.kind}`]">
+                    <span>{{ row.kind === 'conflict' ? '冲突' : row.kind === 'duplicate' ? '去重' : '匹配' }}</span>
+                    <strong :title="(row.concepts || []).join(', ')">{{ row.relPath }}<template v-if="row.duplicateOf"> → {{ row.duplicateOf }}</template></strong>
+                    <code>{{ formatSigned(row.adjustment) }}</code>
+                  </article>
+                </div>
+                <div v-if="typedMemoryWriteAdmission" class="discipline-panel ok">
+                  <div class="discipline-head">
+                    <div>
+                      <strong>长期记忆写入准入</strong>
+                      <span>Claude Code 非流水门槛 · failure 与 success 均可记忆 · 拒绝记录不保存正文</span>
+                    </div>
+                    <code>{{ typedMemoryWriteAdmission.admittedThisRun || 0 }}/{{ typedMemoryWriteAdmission.evaluatedThisRun || 0 }}</code>
+                  </div>
+                  <div class="discipline-cards">
+                    <article v-for="card in typedMemoryWriteAdmissionCards" :key="`write-admission:${card.label}`">
+                      <span>{{ card.label }}</span>
+                      <strong>{{ formatNumber(card.value) }}</strong>
+                      <small>{{ card.note }}</small>
+                    </article>
+                  </div>
+                </div>
+
+                <div v-if="typedMemoryConsumptionLedger" :class="['discipline-panel', typedMemoryConsumptionLedger.checksumValid === false || typedMemoryConsumptionLedger.invalidEntryCount ? 'fail' : typedMemoryConsumptionLedger.staleEntryCount || typedMemoryConsumptionLedger.anomalyEntryCount ? 'warn' : 'ok']">
+                  <div class="discipline-head">
+                    <div>
+                      <strong>类型化记忆消费反馈</strong>
+                      <span>half-life {{ typedMemoryConsumptionScoring.half_life_days || 30 }} 天 · 当前群聊会话独立账本</span>
+                    </div>
+                    <code>{{ typedMemoryConsumptionLedger.checksumValid === false ? 'fail' : typedMemoryConsumptionLedger.anomalyEntryCount ? 'review' : 'trusted' }}</code>
+                  </div>
+                  <div class="discipline-cards">
+                    <article v-for="card in typedMemoryConsumptionCards" :key="`consumption:${card.label}`">
+                      <span>{{ card.label }}</span>
+                      <strong>{{ card.value }}</strong>
+                      <small>{{ card.note }}</small>
+                    </article>
+                  </div>
+                  <div v-if="typedMemoryConsumptionRows.length" class="recall-diagnostic-list consumption-diagnostic-list">
+                    <div class="recall-diagnostic-head">
+                      <strong>消费证据对本轮召回的影响</strong>
+                      <span>matched {{ typedMemoryConsumptionScoring.matched_doc_count || 0 }}</span>
+                    </div>
+                    <article v-for="row in typedMemoryConsumptionRows.slice(0, 8)" :key="`consumption:${row.kind}:${row.relPath}`" :class="['recall-diagnostic-row', `consumption-${row.kind}`]">
+                      <span>{{ row.kind === 'conflict' ? '冲突' : row.kind === 'deprioritized' ? '降权' : '加权' }}</span>
+                      <strong>{{ row.relPath }}</strong>
+                      <code>{{ formatSigned(row.adjustment) }}</code>
+                    </article>
+                  </div>
+                  <div v-if="typedMemoryConsumptionLedger.staleRows?.length" class="recent-usage-list consumption-stale-list">
+                    <div class="recall-diagnostic-head"><strong>已过期消费证据</strong><span>{{ typedMemoryConsumptionLedger.staleEntryCount }} rows</span></div>
+                    <article v-for="row in typedMemoryConsumptionLedger.staleRows.slice(0, 6)" :key="row.entryId" class="recent-usage-row">
+                      <span :class="['usage-state', row.usageState]">{{ row.usageState }}</span>
+                      <strong>{{ row.relPath }}</strong>
+                      <p>{{ row.ageDays }} 天 · {{ row.targetProject || 'agent' }}</p>
+                    </article>
+                  </div>
+                </div>
                 <div v-if="postCompactUsage.ledger?.recentEntries?.length" class="recent-usage-list">
                   <div class="recall-diagnostic-head"><strong>最近子 Agent 结果说明</strong><span>{{ formatTime(postCompactUsage.ledger.updatedAt) }}</span></div>
                   <article v-for="entry in postCompactUsage.ledger.recentEntries.slice(0, 5)" :key="entry.entry_id" class="recent-usage-row">
@@ -2510,6 +3583,18 @@ onMounted(() => loadOverview(false))
       </main>
     </div>
 
+    <div v-if="dispatchResolveState" class="mc-modal-overlay" @click.self="dispatchResolveState = null">
+      <div class="mc-modal">
+        <div><span class="panel-kicker">DISPATCH RESOLUTION</span><h3>{{ dispatchActionLabel(dispatchResolveState.action) }}</h3></div>
+        <div class="dispatch-resolve-identity">
+          <code>{{ dispatchResolveState.row.ticketId }}</code>
+          <span>{{ dispatchResolveState.row.groupId }} · {{ dispatchResolveState.row.groupSessionId }} · {{ dispatchResolveState.row.taskAgentSessionId }}</span>
+        </div>
+        <label>操作原因<textarea v-model="dispatchResolveState.reason" rows="3" placeholder="记录本次派发恢复处理原因"></textarea></label>
+        <div class="modal-actions"><button class="btn" :disabled="dispatchResolveLoading" @click="dispatchResolveState = null">取消</button><button class="btn" :class="['cancel_prepared', 'prune_terminal'].includes(dispatchResolveState.action) ? 'btn-danger' : 'btn-primary'" :disabled="dispatchResolveLoading || !dispatchResolveState.reason.trim()" @click="submitDispatchResolve">{{ dispatchResolveLoading ? '处理中…' : '确认执行' }}</button></div>
+      </div>
+    </div>
+
     <div v-if="editState" class="mc-modal-overlay" @click.self="editState = null">
       <div class="mc-modal">
         <div><span class="panel-kicker">MEMORY CORRECTION</span><h3>{{ editState.mode === 'edit' ? '修改这条记忆' : '删除这条记忆' }}</h3></div>
@@ -2541,14 +3626,21 @@ onMounted(() => loadOverview(false))
 </template>
 
 <style scoped>
+.context-capacity-panel{margin:0 0 12px;padding:16px;border-radius:8px}.context-capacity-head{display:flex;align-items:center;justify-content:space-between;gap:16px}.context-capacity-head h3{font-size:16px;margin-top:4px}.context-capacity-actions{display:flex;gap:8px}.context-preset-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:13px}.context-preset{min-height:76px;padding:11px;text-align:left;border:1px solid var(--border-color);border-radius:8px;background:rgba(255,255,255,.42);color:var(--text-primary);cursor:pointer;display:flex;flex-direction:column;gap:4px}.context-preset:hover{border-color:rgba(var(--accent-blue-rgb),.28)}.context-preset.active{border-color:var(--accent-blue);box-shadow:0 0 0 1px rgba(var(--accent-blue-rgb),.16);background:rgba(var(--accent-blue-rgb),.05)}.context-preset strong{font-size:12px}.context-preset span{font-size:9px;line-height:1.4;color:var(--text-muted)}.context-capacity-note{margin:10px 0;color:var(--text-muted);font-size:9px}.context-field-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.context-field-grid label{padding:11px;border:1px solid var(--border-color);border-radius:8px;background:rgba(255,255,255,.3);display:flex;flex-direction:column;gap:7px}.context-field-grid label>span{font-size:11px;font-weight:800}.context-field-grid input{width:100%;min-width:0;padding:9px 10px;border:1px solid var(--border-color);border-radius:7px;background:var(--surface-color);color:var(--text-primary);font-family:var(--font-tech);font-size:12px}.context-field-grid input:disabled{opacity:.7}.context-field-grid small{font-size:8px;line-height:1.45;color:var(--text-muted)}
+.capacity-runtime-strip{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;padding:10px 0;margin-bottom:10px;border-top:1px solid var(--border-color);border-bottom:1px solid var(--border-color)}.capacity-runtime-strip span{min-width:0;display:flex;flex-direction:column;gap:3px}.capacity-runtime-strip small{font-size:8px;color:var(--text-muted)}.capacity-runtime-strip strong{font-family:var(--font-tech);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.retention-toggle-row{display:flex;align-items:center;gap:9px;min-height:36px}.context-field-grid .retention-toggle-row input{width:18px;height:18px;padding:0}.retention-toggle-row strong{font-size:10px;color:var(--accent-blue)}.retention-maintenance-row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:10px;padding-top:10px;border-top:1px solid var(--border-color);font-size:9px;color:var(--text-muted)}.retention-maintenance-row>div{display:flex;gap:6px}.retention-maintenance-row .danger{color:var(--accent-red);border-color:rgba(239,68,68,.2)}
+.provider-capability-editor{margin:0 0 12px;padding:12px 0;border-bottom:1px solid var(--border-color)}.provider-capability-editor .context-capacity-head h3{font-size:13px}.provider-capability-fields{grid-template-columns:repeat(4,minmax(0,1fr));margin-top:9px}.provider-capability-list{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0 14px;margin-top:10px}.provider-capability-list>span{min-width:0;padding:8px 0;border-top:1px solid var(--border-color);display:flex;align-items:center;justify-content:space-between;gap:8px}.provider-capability-list>span>span{min-width:0;display:flex;flex-direction:column;gap:3px}.provider-capability-list strong,.provider-capability-list small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.provider-capability-list strong{font-size:10px}.provider-capability-list small{font-size:8px;color:var(--text-muted)}.provider-capability-list .capability-revoke{flex:0 0 auto;padding:5px 7px;font-size:8px}
+.capability-downgrade-list{margin-top:8px;border-top:1px solid rgba(239,68,68,.2)}.capability-downgrade-list>span{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid var(--border-color)}.capability-downgrade-list strong{font-size:9px;color:var(--accent-red)}.capability-downgrade-list small{font-size:8px;color:var(--text-muted);text-align:right}
+.capability-refresh-list{margin-top:8px;border-top:1px solid var(--border-color)}.capability-refresh-list>span{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid var(--border-color)}.capability-refresh-list strong{font-size:9px;color:var(--accent-blue)}.capability-refresh-list small{font-size:8px;color:var(--text-muted);text-align:right}
+.capability-health-list{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0 12px;margin-top:8px}.capability-health-list>span{min-width:0;padding:7px 0;border-top:1px solid var(--border-color);display:flex;flex-direction:column;gap:3px}.capability-health-list strong{font-size:9px}.capability-health-list strong.degraded,.capability-health-list strong.unsupported{color:var(--accent-red)}.capability-health-list strong.healthy{color:var(--accent-green)}.capability-health-list small{font-size:8px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.capability-recovery-proof{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:8px;padding:8px;border:1px solid rgba(16,185,129,.2);border-radius:8px;background:rgba(16,185,129,.05)}.capability-recovery-proof strong{font-size:9px;color:var(--accent-green)}.capability-recovery-proof small{font-size:8px;color:var(--text-muted);text-align:right}.invalid-refresh-outcome-list{margin-top:8px;border-top:1px solid rgba(239,68,68,.18)}.invalid-refresh-outcome-list>span{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px solid var(--border-color)}.invalid-refresh-outcome-list>span>span{min-width:0;display:flex;flex-direction:column;gap:3px}.invalid-refresh-outcome-list strong{font-size:9px;color:var(--accent-red);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.invalid-refresh-outcome-list small{font-size:8px;color:var(--text-muted)}.invalid-outcome-ack{white-space:nowrap;color:var(--accent-green)!important}
 .memory-center{height:100%;overflow:auto;padding:18px 20px 36px;color:var(--text-primary)}
 .aura-card{background:var(--bg-card);border:1px solid var(--border-color);box-shadow:var(--shadow-lg);backdrop-filter:blur(24px) saturate(150%)}
 .mc-header{border-radius:16px;padding:22px 26px;display:flex;align-items:center;justify-content:space-between;gap:24px}.eyebrow,.panel-kicker{font-family:var(--font-tech);font-size:10px;letter-spacing:1.8px;color:var(--accent-blue);font-weight:700}.mc-header h2{font-size:24px;margin:5px 0 4px}.mc-header p,.detail-header p,.modal-note{color:var(--text-muted);font-size:13px;line-height:1.55}.header-actions{display:flex;align-items:center;gap:12px}.sync-time{font-size:11px;color:var(--text-muted)}
 .summary-strip{display:grid;grid-template-columns:repeat(6,minmax(145px,1fr));gap:10px;margin:12px 0}.summary-card{min-height:105px;padding:16px;border-radius:13px;background:rgba(255,255,255,.55);border:1px solid var(--border-color);display:flex;flex-direction:column}.summary-label{font-size:11px;color:var(--text-muted);font-weight:700}.summary-card strong{font-family:var(--font-tech);font-size:24px;margin:9px 0 5px}.summary-card small{font-size:10px;color:var(--text-muted);line-height:1.4}.summary-card.warning strong,.summary-card.risk strong{color:var(--accent-yellow)}
-.global-alerts{display:flex;flex-direction:column;gap:6px;margin:-2px 0 12px}.global-alert{display:grid;grid-template-columns:7px auto minmax(0,1fr) auto;align-items:center;gap:9px;padding:9px 12px;border-radius:9px;border:1px solid rgba(245,158,11,.18);background:rgba(245,158,11,.06);font-size:10px}.global-alert>span{width:7px;height:7px;border-radius:50%;background:var(--accent-yellow)}.global-alert strong{font-family:monospace}.global-alert p{color:var(--text-secondary)}.global-alert small{color:var(--text-muted)}.global-alert.critical{border-color:rgba(239,68,68,.2);background:rgba(239,68,68,.06)}.global-alert.critical>span{background:var(--accent-red)}
-.quality-panel{border-radius:16px;padding:18px;margin:12px 0}.quality-panel-head{display:flex;align-items:flex-start;justify-content:space-between;gap:18px}.quality-panel-head h3{font-size:17px;margin:4px 0}.quality-panel-head p{font-size:11px;color:var(--text-muted);line-height:1.5}.quality-score{min-width:112px;padding:12px 14px;border-radius:13px;background:rgba(100,116,139,.08);text-align:right}.quality-score strong{display:block;font-family:var(--font-tech);font-size:26px}.quality-score span,.quality-score small{display:block;font-size:10px;color:var(--text-muted)}.quality-score small{margin-top:4px;max-width:132px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.quality-score.ok strong{color:var(--accent-green)}.quality-score.warn strong{color:var(--accent-yellow)}.quality-score.fail strong{color:var(--accent-red)}.quality-check-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin-top:14px}.quality-check-card{min-width:0;padding:12px;border-radius:11px;border:1px solid var(--border-color);background:rgba(255,255,255,.42)}.quality-check-card.ok{border-color:rgba(16,185,129,.18);background:rgba(16,185,129,.045)}.quality-check-card.warn{border-color:rgba(245,158,11,.22);background:rgba(245,158,11,.06)}.quality-check-card.fail{border-color:rgba(239,68,68,.2);background:rgba(239,68,68,.055)}.quality-check-top{display:flex;align-items:center;justify-content:space-between;gap:8px}.quality-check-top strong{min-width:0;font-size:12px;color:var(--text-primary);overflow-wrap:anywhere}.quality-check-actions{display:flex;align-items:center;gap:5px;flex:0 0 auto}.quality-check-top span{font-family:var(--font-tech);font-size:13px;color:var(--accent-blue)}.quality-refresh-btn{width:24px;height:24px;border-radius:8px;border:1px solid rgba(37,99,235,.18);background:rgba(37,99,235,.06);color:var(--accent-blue);font-size:13px;font-weight:900;line-height:1;cursor:pointer}.quality-refresh-btn:disabled{cursor:not-allowed;opacity:.52}.quality-check-card p{min-height:42px;margin:8px 0 10px;font-size:9.5px;line-height:1.45;color:var(--text-muted)}.quality-check-stats{display:flex;gap:5px;flex-wrap:wrap}.quality-check-stats span{padding:3px 6px;border-radius:999px;background:rgba(15,23,42,.055);font-size:9px;color:var(--text-secondary)}.quality-check-detail{margin-top:8px;font-size:9px;color:var(--text-muted)}.quality-check-detail summary{cursor:pointer;font-weight:800}.quality-check-detail ul{margin:6px 0 0;padding-left:16px;line-height:1.45}.quality-next-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px}.quality-next-actions strong{font-size:10px;color:var(--text-muted);padding:4px 0}.quality-next-actions span{padding:5px 8px;border-radius:999px;background:rgba(245,158,11,.08);color:#a16207;font-size:9px}
+.global-alerts{display:flex;min-width:0;flex-direction:column;gap:6px;margin:-2px 0 12px}.global-alert{display:grid;min-width:0;grid-template-columns:7px auto minmax(0,1fr) auto;align-items:center;gap:9px;padding:9px 12px;border-radius:9px;border:1px solid rgba(245,158,11,.18);background:rgba(245,158,11,.06);font-size:10px}.global-alert>span{width:7px;height:7px;border-radius:50%;background:var(--accent-yellow)}.global-alert strong{font-family:monospace}.global-alert strong,.global-alert p,.global-alert small{min-width:0;overflow-wrap:anywhere}.global-alert p{color:var(--text-secondary)}.global-alert small{color:var(--text-muted)}.global-alert.critical{border-color:rgba(239,68,68,.2);background:rgba(239,68,68,.06)}.global-alert.critical>span{background:var(--accent-red)}
+.quality-panel{border-radius:16px;padding:18px;margin:12px 0}.quality-panel-head{display:flex;align-items:flex-start;justify-content:space-between;gap:18px}.quality-panel-head h3{font-size:17px;margin:4px 0}.quality-panel-head p{font-size:11px;color:var(--text-muted);line-height:1.5}.quality-score{min-width:112px;padding:12px 14px;border-radius:13px;background:rgba(100,116,139,.08);text-align:right}.quality-score strong{display:block;font-family:var(--font-tech);font-size:26px}.quality-score span,.quality-score small{display:block;font-size:10px;color:var(--text-muted)}.quality-score small{margin-top:4px;max-width:132px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.quality-score.ok strong{color:var(--accent-green)}.quality-score.warn strong{color:var(--accent-yellow)}.quality-score.fail strong{color:var(--accent-red)}.quality-check-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin-top:14px}.quality-check-card{min-width:0;padding:12px;border-radius:11px;border:1px solid var(--border-color);background:rgba(255,255,255,.42)}.quality-check-card.ok{border-color:rgba(16,185,129,.18);background:rgba(16,185,129,.045)}.quality-check-card.warn{border-color:rgba(245,158,11,.22);background:rgba(245,158,11,.06)}.quality-check-card.fail{border-color:rgba(239,68,68,.2);background:rgba(239,68,68,.055)}.quality-check-top{display:flex;align-items:center;justify-content:space-between;gap:8px}.quality-check-top strong{min-width:0;font-size:12px;color:var(--text-primary);overflow-wrap:anywhere}.quality-check-actions{display:flex;align-items:center;gap:5px;flex:0 0 auto}.quality-check-top span{font-family:var(--font-tech);font-size:13px;color:var(--accent-blue)}.quality-refresh-btn{width:24px;height:24px;border-radius:8px;border:1px solid rgba(37,99,235,.18);background:rgba(37,99,235,.06);color:var(--accent-blue);font-size:13px;font-weight:900;line-height:1;cursor:pointer}.quality-refresh-btn:disabled{cursor:not-allowed;opacity:.52}.quality-check-card p{min-height:42px;margin:8px 0 10px;font-size:9.5px;line-height:1.45;color:var(--text-muted)}.quality-check-stats{display:flex;gap:5px;flex-wrap:wrap}.quality-check-stats span{padding:3px 6px;border-radius:999px;background:rgba(15,23,42,.055);font-size:9px;color:var(--text-secondary)}.quality-check-detail{margin-top:8px;font-size:9px;color:var(--text-muted)}.quality-check-detail summary{cursor:pointer;font-weight:800}.quality-check-detail ul{margin:6px 0 0;padding-left:16px;line-height:1.45}.quality-next-actions{display:flex;min-width:0;gap:6px;flex-wrap:wrap;margin-top:12px}.quality-next-actions strong{font-size:10px;color:var(--text-muted);padding:4px 0}.quality-next-actions span{max-width:100%;padding:5px 8px;border-radius:999px;background:rgba(245,158,11,.08);color:#a16207;font-size:9px;overflow-wrap:anywhere}
 .selftest-residue-panel{margin-top:12px;border:1px solid rgba(16,185,129,.16);border-radius:12px;background:rgba(16,185,129,.04);overflow:hidden}.selftest-residue-panel.warn{border-color:rgba(245,158,11,.22);background:rgba(245,158,11,.055)}.selftest-residue-panel.fail{border-color:rgba(239,68,68,.22);background:rgba(239,68,68,.055)}.selftest-residue-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 11px;border-bottom:1px solid var(--border-color)}.selftest-residue-head h4{font-size:13px;margin-top:3px}.selftest-residue-actions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}.selftest-residue-cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px;padding:9px}.selftest-residue-cards article{min-width:0;border:1px solid var(--border-color);border-radius:8px;background:rgba(255,255,255,.38);padding:8px;display:flex;flex-direction:column;gap:3px}.selftest-residue-cards span{font-size:8px;color:var(--text-muted);font-weight:800}.selftest-residue-cards strong{font-family:var(--font-tech);font-size:15px;color:var(--accent-blue);overflow-wrap:anywhere}.selftest-residue-cards small{font-size:7px;color:var(--text-muted);line-height:1.35}.selftest-residue-result{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:0 9px 9px;font-size:9px;color:var(--text-muted)}.selftest-residue-result strong{font-size:10px;color:var(--text-primary)}.selftest-residue-result span{padding:3px 6px;border-radius:999px;background:rgba(100,116,139,.08)}.selftest-residue-list{border-top:1px solid var(--border-color)}.selftest-residue-list article{display:grid;grid-template-columns:64px minmax(80px,150px) minmax(0,1fr);gap:8px;align-items:center;padding:8px 10px;border-top:1px solid rgba(100,116,139,.08);font-size:9px}.selftest-residue-list article:first-child{border-top:0}.selftest-residue-list article.warn{background:rgba(245,158,11,.045)}.selftest-residue-list article.fail{background:rgba(239,68,68,.045)}.selftest-residue-list strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.selftest-residue-list p{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-muted)}
-.task-agent-snapshot-panel{margin-top:12px;border:1px solid rgba(var(--accent-blue-rgb),.14);border-radius:12px;background:rgba(var(--accent-blue-rgb),.035);overflow:hidden}.task-agent-snapshot-panel.warn,.task-agent-snapshot-panel.waiting{border-color:rgba(245,158,11,.22);background:rgba(245,158,11,.055)}.task-agent-snapshot-panel.fail{border-color:rgba(239,68,68,.22);background:rgba(239,68,68,.055)}.task-agent-snapshot-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 11px;border-bottom:1px solid var(--border-color)}.task-agent-snapshot-head h4{font-size:13px;margin-top:3px}.task-agent-snapshot-actions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}.task-agent-snapshot-cards{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:7px;padding:9px}.task-agent-snapshot-cards article{min-width:0;border:1px solid var(--border-color);border-radius:8px;background:rgba(255,255,255,.38);padding:8px;display:flex;flex-direction:column;gap:3px}.task-agent-snapshot-cards span{font-size:8px;color:var(--text-muted);font-weight:800}.task-agent-snapshot-cards strong{font-family:var(--font-tech);font-size:15px;color:var(--accent-blue);overflow-wrap:anywhere}.task-agent-snapshot-cards small{font-size:7px;color:var(--text-muted);line-height:1.35}.task-agent-snapshot-result{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:0 9px 9px;font-size:9px;color:var(--text-muted)}.task-agent-snapshot-result strong{font-size:10px;color:var(--text-primary)}.task-agent-snapshot-result span{padding:3px 6px;border-radius:999px;background:rgba(100,116,139,.08)}.task-agent-snapshot-list{border-top:1px solid var(--border-color)}.task-agent-snapshot-list article{display:grid;grid-template-columns:64px minmax(110px,210px) minmax(0,1fr) 80px;gap:8px;align-items:center;padding:8px 10px;border-top:1px solid rgba(100,116,139,.08);font-size:9px}.task-agent-snapshot-list article:first-child{border-top:0}.task-agent-snapshot-list article.warn{background:rgba(245,158,11,.045)}.task-agent-snapshot-list article.fail{background:rgba(239,68,68,.045)}.task-agent-snapshot-list article.ok{background:rgba(16,185,129,.035)}.task-agent-snapshot-list strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.task-agent-snapshot-list p{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-muted)}.task-agent-snapshot-list code{font-size:8px;color:var(--text-muted);text-align:right}
+.task-agent-snapshot-panel{margin-top:12px;border:1px solid rgba(var(--accent-blue-rgb),.14);border-radius:12px;background:rgba(var(--accent-blue-rgb),.035);overflow:hidden}.task-agent-snapshot-panel.warn,.task-agent-snapshot-panel.waiting{border-color:rgba(245,158,11,.22);background:rgba(245,158,11,.055)}.task-agent-snapshot-panel.fail{border-color:rgba(239,68,68,.22);background:rgba(239,68,68,.055)}.task-agent-snapshot-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 11px;border-bottom:1px solid var(--border-color)}.task-agent-snapshot-head h4{font-size:13px;margin-top:3px}.task-agent-snapshot-actions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}.task-agent-snapshot-cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px;padding:9px}.task-agent-snapshot-cards article{min-width:0;border:1px solid var(--border-color);border-radius:8px;background:rgba(255,255,255,.38);padding:8px;display:flex;flex-direction:column;gap:3px}.task-agent-snapshot-cards span{font-size:8px;color:var(--text-muted);font-weight:800}.task-agent-snapshot-cards strong{font-family:var(--font-tech);font-size:15px;color:var(--accent-blue);overflow-wrap:anywhere}.task-agent-snapshot-cards small{font-size:7px;color:var(--text-muted);line-height:1.35}.task-agent-snapshot-result{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:0 9px 9px;font-size:9px;color:var(--text-muted)}.task-agent-snapshot-result strong{font-size:10px;color:var(--text-primary)}.task-agent-snapshot-result span{padding:3px 6px;border-radius:999px;background:rgba(100,116,139,.08)}.task-agent-snapshot-list{border-top:1px solid var(--border-color)}.task-agent-snapshot-list article{display:grid;grid-template-columns:64px minmax(110px,210px) minmax(0,1fr) 80px;gap:8px;align-items:center;padding:8px 10px;border-top:1px solid rgba(100,116,139,.08);font-size:9px}.task-agent-snapshot-list article:first-child{border-top:0}.task-agent-snapshot-list article.warn{background:rgba(245,158,11,.045)}.task-agent-snapshot-list article.fail{background:rgba(239,68,68,.045)}.task-agent-snapshot-list article.ok{background:rgba(16,185,129,.035)}.task-agent-snapshot-list strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.task-agent-snapshot-list p{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-muted)}.task-agent-snapshot-list code{font-size:8px;color:var(--text-muted);text-align:right}
 .cross-group-quality-panel{margin-top:12px;border:1px solid rgba(var(--accent-blue-rgb),.12);border-radius:12px;background:rgba(var(--accent-blue-rgb),.035);overflow:hidden}.cross-group-quality-panel.warn,.cross-group-quality-panel.waiting{border-color:rgba(245,158,11,.22);background:rgba(245,158,11,.055)}.cross-group-quality-panel.fail{border-color:rgba(239,68,68,.22);background:rgba(239,68,68,.055)}.cross-group-quality-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 11px;border-bottom:1px solid var(--border-color)}.cross-group-quality-head h4{font-size:13px;margin-top:3px}.cross-group-quality-actions{display:flex;gap:5px}.cross-group-quality-cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px;padding:9px}.cross-group-quality-cards article{min-width:0;border:1px solid var(--border-color);border-radius:8px;background:rgba(255,255,255,.38);padding:8px;display:flex;flex-direction:column;gap:3px}.cross-group-quality-cards span{font-size:8px;color:var(--text-muted);font-weight:800}.cross-group-quality-cards strong{font-family:var(--font-tech);font-size:15px;color:var(--accent-blue)}.cross-group-quality-cards small{font-size:7px;color:var(--text-muted);line-height:1.35}.cross-group-quality-table{border-top:1px solid var(--border-color)}.cross-group-quality-table article{display:grid;grid-template-columns:64px minmax(130px,230px) minmax(0,1fr) 92px;gap:8px;align-items:center;padding:8px 10px;border-top:1px solid rgba(100,116,139,.08);font-size:9px}.cross-group-quality-table article:first-child{border-top:0}.cross-group-quality-table article.ok{background:rgba(16,185,129,.035)}.cross-group-quality-table article.warn,.cross-group-quality-table article.waiting{background:rgba(245,158,11,.045)}.cross-group-quality-table article.fail{background:rgba(239,68,68,.045)}.cross-group-quality-table strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.cross-group-quality-table p{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-muted)}.cross-group-quality-table code{font-size:8px;color:var(--text-muted);text-align:right}.cross-group-quality-empty{padding:13px 10px;border-top:1px solid var(--border-color);font-size:10px;color:var(--text-muted);text-align:center}
 .ignore-memory-receipt-panel{margin-top:12px;border:1px solid rgba(16,185,129,.16);border-radius:12px;background:rgba(16,185,129,.04);overflow:hidden}.ignore-memory-receipt-panel.warn,.ignore-memory-receipt-panel.waiting{border-color:rgba(245,158,11,.22);background:rgba(245,158,11,.055)}.ignore-memory-receipt-panel.fail{border-color:rgba(239,68,68,.22);background:rgba(239,68,68,.055)}.ignore-memory-receipt-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 11px;border-bottom:1px solid var(--border-color)}.ignore-memory-receipt-head h4{font-size:13px;margin-top:3px}.ignore-memory-receipt-actions{display:flex;gap:5px;justify-content:flex-end}.ignore-memory-receipt-cards{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:7px;padding:9px}.ignore-memory-receipt-cards article{min-width:0;border:1px solid var(--border-color);border-radius:8px;background:rgba(255,255,255,.38);padding:8px;display:flex;flex-direction:column;gap:3px}.ignore-memory-receipt-cards span{font-size:8px;color:var(--text-muted);font-weight:800}.ignore-memory-receipt-cards strong{font-family:var(--font-tech);font-size:15px;color:var(--accent-blue);overflow-wrap:anywhere}.ignore-memory-receipt-cards small{font-size:7px;color:var(--text-muted);line-height:1.35}.ignore-memory-receipt-list{border-top:1px solid var(--border-color)}.ignore-memory-receipt-list article{display:grid;grid-template-columns:64px minmax(130px,220px) minmax(0,1fr) 120px;gap:8px;align-items:center;padding:8px 10px;border-top:1px solid rgba(100,116,139,.08);font-size:9px}.ignore-memory-receipt-list article:first-child{border-top:0}.ignore-memory-receipt-list article.ok{background:rgba(16,185,129,.035)}.ignore-memory-receipt-list article.warn,.ignore-memory-receipt-list article.waiting{background:rgba(245,158,11,.045)}.ignore-memory-receipt-list article.fail{background:rgba(239,68,68,.045)}.ignore-memory-receipt-list strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ignore-memory-receipt-list p{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-muted)}.ignore-memory-receipt-list code{font-size:8px;color:var(--text-muted);text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ignore-memory-receipt-empty{padding:13px 10px;border-top:1px solid var(--border-color);font-size:10px;color:var(--text-muted);text-align:center}
 .ignore-memory-receipt-work-list{border-top:1px solid var(--border-color);background:rgba(var(--accent-blue-rgb),.025)}.ignore-memory-receipt-work-list article{display:grid;grid-template-columns:74px minmax(140px,230px) minmax(0,1fr) minmax(128px,auto);gap:8px;align-items:center;padding:8px 10px;border-top:1px solid rgba(100,116,139,.08);font-size:9px}.ignore-memory-receipt-work-list article.pending{background:rgba(var(--accent-blue-rgb),.035)}.ignore-memory-receipt-work-list article.in_progress{background:rgba(99,102,241,.045)}.ignore-memory-receipt-work-list article.blocked,.ignore-memory-receipt-work-list article.warn{background:rgba(245,158,11,.055)}.ignore-memory-receipt-work-list article.completed,.ignore-memory-receipt-work-list article.ok{background:rgba(16,185,129,.035)}.ignore-memory-receipt-work-list article.fail{background:rgba(239,68,68,.045)}.ignore-memory-receipt-work-list strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ignore-memory-receipt-work-list p{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-muted)}
@@ -2557,14 +3649,14 @@ onMounted(() => loadOverview(false))
 .alerts-block{margin-top:14px;display:flex;flex-direction:column;gap:6px}.alert-row{display:flex;align-items:center;gap:8px;padding:9px 11px;border:1px solid rgba(245,158,11,.18);background:rgba(245,158,11,.06);border-radius:9px;font-size:11px}.alert-row.critical{border-color:rgba(239,68,68,.2);background:rgba(239,68,68,.06)}.alert-signal{width:7px;height:7px;border-radius:50%;background:var(--accent-yellow)}.critical .alert-signal{background:var(--accent-red)}
 .context-meter{margin-top:15px;padding:14px;border-radius:11px;background:rgba(var(--accent-blue-rgb),.035);border:1px solid rgba(var(--accent-blue-rgb),.08)}.meter-copy,.meter-notes{display:flex;justify-content:space-between;gap:12px}.meter-copy{font-size:11px}.meter-copy strong{font-family:var(--font-tech);color:var(--accent-blue)}.meter-track{height:5px;background:rgba(var(--accent-blue-rgb),.1);border-radius:4px;margin:9px 0;overflow:hidden}.meter-track span{display:block;height:100%;background:var(--gradient-cyber);border-radius:4px}.meter-notes{font-size:9px;color:var(--text-muted)}
 .view-tabs{display:flex;gap:4px;border-bottom:1px solid var(--border-color);margin-top:15px}.view-tabs button{border:0;background:transparent;color:var(--text-muted);padding:10px 13px;font-size:11px;font-weight:700;cursor:pointer;border-bottom:2px solid transparent}.view-tabs button.active{color:var(--accent-blue);border-bottom-color:var(--accent-blue)}.view-tabs span{margin-left:4px;padding:1px 5px;border-radius:8px;background:rgba(var(--accent-blue-rgb),.08)}
-.memory-toolbar{display:flex;flex-direction:column;gap:8px;padding:13px 0 8px}.type-filters{display:flex;gap:5px;overflow:auto;padding-bottom:3px}.type-filters button{white-space:nowrap;border:1px solid var(--border-color);background:rgba(255,255,255,.4);border-radius:16px;padding:5px 9px;font-size:10px;color:var(--text-muted);cursor:pointer}.type-filters button.active{border-color:rgba(var(--accent-blue-rgb),.25);background:rgba(var(--accent-blue-rgb),.08);color:var(--accent-blue)}.memory-search{width:100%;padding:7px 10px;font-size:11px}.memory-stats-line{display:flex;gap:14px;font-size:10px;color:var(--text-muted);padding:2px 0 10px}.memory-groups{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;max-height:560px;overflow:auto;padding-right:4px}.memory-group{border:1px solid var(--border-color);border-radius:11px;padding:10px;background:rgba(255,255,255,.25)}.group-heading{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}.group-heading h4{font-size:12px}.group-heading span{font-family:var(--font-tech);font-size:9px;color:var(--text-muted)}.memory-item{padding:10px;border-radius:9px;background:rgba(255,255,255,.55);border:1px solid transparent;margin-top:7px}.memory-item.pinned{border-color:rgba(var(--accent-blue-rgb),.25)}.memory-item.deprecated{opacity:.58;border-style:dashed}.memory-item p{font-size:11px;line-height:1.6;white-space:pre-wrap}.item-state{display:flex;gap:4px;margin-bottom:5px;min-height:14px}.state-tag{font-size:8px;font-weight:800;padding:2px 5px;border-radius:6px}.state-tag.pin{color:var(--accent-blue);background:rgba(var(--accent-blue-rgb),.1)}.state-tag.edit{color:var(--accent-purple);background:rgba(99,102,241,.1)}.state-tag.off{color:var(--accent-red);background:rgba(239,68,68,.08)}.state-tag.archive{color:var(--text-muted);background:rgba(100,116,139,.1)}.original-text{font-size:9px;color:var(--text-muted);padding:6px 8px;margin-top:7px;border-left:2px solid rgba(99,102,241,.2);line-height:1.5}.item-footer{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:8px;color:var(--text-muted);font-size:8px}.item-actions{display:flex;gap:2px;flex-wrap:wrap;justify-content:flex-end}.item-actions button{border:0;background:transparent;color:var(--text-muted);font-size:8px;padding:3px 4px;cursor:pointer}.item-actions button:hover{color:var(--accent-blue)}.item-actions button:disabled{opacity:.35;cursor:default}
+.memory-toolbar{display:flex;min-width:0;flex-direction:column;gap:8px;padding:13px 0 8px}.type-filters{display:flex;width:100%;min-width:0;max-width:100%;gap:5px;overflow-x:auto;padding-bottom:3px}.type-filters button{flex:0 0 auto;white-space:nowrap;border:1px solid var(--border-color);background:rgba(255,255,255,.4);border-radius:16px;padding:5px 9px;font-size:10px;color:var(--text-muted);cursor:pointer}.type-filters button.active{border-color:rgba(var(--accent-blue-rgb),.25);background:rgba(var(--accent-blue-rgb),.08);color:var(--accent-blue)}.memory-search{width:100%;padding:7px 10px;font-size:11px}.memory-stats-line{display:flex;gap:14px;font-size:10px;color:var(--text-muted);padding:2px 0 10px}.memory-groups{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;max-height:560px;overflow:auto;padding-right:4px}.memory-group{border:1px solid var(--border-color);border-radius:11px;padding:10px;background:rgba(255,255,255,.25)}.group-heading{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}.group-heading h4{font-size:12px}.group-heading span{font-family:var(--font-tech);font-size:9px;color:var(--text-muted)}.memory-item{padding:10px;border-radius:9px;background:rgba(255,255,255,.55);border:1px solid transparent;margin-top:7px}.memory-item.pinned{border-color:rgba(var(--accent-blue-rgb),.25)}.memory-item.deprecated{opacity:.58;border-style:dashed}.memory-item p{font-size:11px;line-height:1.6;white-space:pre-wrap}.item-state{display:flex;gap:4px;margin-bottom:5px;min-height:14px}.state-tag{font-size:8px;font-weight:800;padding:2px 5px;border-radius:6px}.state-tag.pin{color:var(--accent-blue);background:rgba(var(--accent-blue-rgb),.1)}.state-tag.edit{color:var(--accent-purple);background:rgba(99,102,241,.1)}.state-tag.off{color:var(--accent-red);background:rgba(239,68,68,.08)}.state-tag.archive{color:var(--text-muted);background:rgba(100,116,139,.1)}.original-text{font-size:9px;color:var(--text-muted);padding:6px 8px;margin-top:7px;border-left:2px solid rgba(99,102,241,.2);line-height:1.5}.item-footer{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:8px;color:var(--text-muted);font-size:8px}.item-actions{display:flex;gap:2px;flex-wrap:wrap;justify-content:flex-end}.item-actions button{border:0;background:transparent;color:var(--text-muted);font-size:8px;padding:3px 4px;cursor:pointer}.item-actions button:hover{color:var(--accent-blue)}.item-actions button:disabled{opacity:.35;cursor:default}
 .boundary-grid,.metrics-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin:14px 0}.boundary-grid article,.metrics-grid article{padding:13px;border-radius:10px;border:1px solid var(--border-color);background:rgba(255,255,255,.4);display:flex;flex-direction:column;gap:7px}.boundary-grid span,.metrics-grid span{font-size:9px;color:var(--text-muted)}.boundary-grid strong{font-size:11px;overflow-wrap:anywhere}.metrics-grid strong{font-family:var(--font-tech);font-size:22px;color:var(--accent-blue)}.metrics-grid p{font-size:9px;color:var(--text-muted)}.summary-preview{border:1px solid var(--border-color);border-radius:11px;overflow:hidden}.preview-heading{padding:11px 13px;display:flex;justify-content:space-between;background:rgba(var(--accent-blue-rgb),.035)}.preview-heading h4{font-size:11px}.preview-heading span{font-family:monospace;font-size:9px;color:var(--text-muted)}.summary-preview pre,.evidence-row pre{margin:0;padding:14px;max-height:360px;overflow:auto;font:10px/1.6 'JetBrains Mono',monospace;white-space:pre-wrap;color:var(--text-secondary)}
 .post-compact-panel{margin:12px 0;border:1px solid rgba(var(--accent-blue-rgb),.12);border-radius:12px;background:rgba(var(--accent-blue-rgb),.035);padding:13px}.post-compact-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:10px}.post-compact-head h4{font-size:13px;margin-top:3px}.post-compact-head code{max-width:52%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:8px;color:var(--text-muted);background:rgba(100,116,139,.08);padding:5px 7px;border-radius:7px}.post-compact-error{padding:10px;border-radius:8px;background:rgba(239,68,68,.06);color:var(--accent-red);font-size:10px}.post-compact-cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px}.post-compact-cards article{min-width:0;padding:10px;border-radius:9px;border:1px solid var(--border-color);background:rgba(255,255,255,.48);display:flex;flex-direction:column;gap:4px}.post-compact-cards span{font-size:8px;color:var(--text-muted);font-weight:800}.post-compact-cards strong{font-family:var(--font-tech);font-size:17px;color:var(--accent-blue)}.post-compact-cards small{font-size:8px;color:var(--text-muted);line-height:1.35}.discipline-panel{margin-top:9px;border:1px solid rgba(16,185,129,.16);border-radius:10px;background:rgba(16,185,129,.045);overflow:hidden}.discipline-panel.warn,.discipline-panel.waiting{border-color:rgba(245,158,11,.22);background:rgba(245,158,11,.055)}.discipline-panel.fail{border-color:rgba(239,68,68,.22);background:rgba(239,68,68,.055)}.discipline-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 10px;border-bottom:1px solid var(--border-color)}.discipline-head div{display:flex;flex-direction:column;gap:2px;min-width:0}.discipline-head strong{font-size:10px;color:var(--text-primary)}.discipline-head span{font-size:8px;color:var(--text-muted)}.discipline-head code{font-family:var(--font-tech);font-size:18px;color:var(--accent-green)}.discipline-panel.warn .discipline-head code,.discipline-panel.waiting .discipline-head code{color:var(--accent-yellow)}.discipline-panel.fail .discipline-head code{color:var(--accent-red)}.discipline-cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px;padding:9px}.discipline-cards article,.discipline-buckets article{min-width:0;border:1px solid var(--border-color);border-radius:8px;background:rgba(255,255,255,.38);padding:8px;display:flex;flex-direction:column;gap:3px}.discipline-cards span,.discipline-buckets span{font-size:8px;color:var(--text-muted);font-weight:800}.discipline-cards strong,.discipline-buckets strong{font-family:var(--font-tech);font-size:15px;color:var(--accent-blue)}.discipline-cards small,.discipline-buckets small{font-size:7px;color:var(--text-muted);line-height:1.35}.discipline-buckets{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:5px;padding:0 9px 9px}.discipline-buckets article.weak{border-color:rgba(245,158,11,.24);background:rgba(245,158,11,.06)}.discipline-gap-list{border-top:1px solid var(--border-color)}.discipline-gap-list article{display:grid;grid-template-columns:64px minmax(90px,170px) minmax(0,1fr);gap:8px;align-items:center;padding:8px 10px;border-top:1px solid rgba(100,116,139,.08);font-size:9px}.discipline-gap-list article:first-child{border-top:0}.discipline-gap-list strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.discipline-gap-list p{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-muted)}.post-compact-buckets{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:9px}.post-compact-bucket{min-width:0;border:1px solid var(--border-color);border-radius:10px;background:rgba(255,255,255,.34);padding:9px}.bucket-heading{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}.bucket-heading h5{font-size:10px}.bucket-heading span{font-family:var(--font-tech);font-size:9px;color:var(--text-muted)}.candidate-row{border-radius:8px;border:1px solid transparent;background:rgba(255,255,255,.52);padding:8px;margin-top:6px}.candidate-row.useful{border-color:rgba(16,185,129,.14)}.candidate-row.ignored,.candidate-row.archive{border-color:rgba(245,158,11,.18)}.candidate-row.missing{border-color:rgba(99,102,241,.18)}.candidate-top{display:flex;align-items:center;justify-content:space-between;gap:8px}.candidate-top strong{font-size:9px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.candidate-top span{font-size:8px;color:var(--accent-blue);font-weight:800;white-space:nowrap}.candidate-row p{font-size:9px;line-height:1.5;color:var(--text-secondary);margin:5px 0;overflow-wrap:anywhere}.usage-counts{display:flex;gap:4px;flex-wrap:wrap}.usage-counts span{font-size:7px;color:var(--text-muted);background:rgba(100,116,139,.08);border-radius:999px;padding:2px 5px}.recall-diagnostic-list,.recent-usage-list{margin-top:9px;border:1px solid var(--border-color);border-radius:10px;background:rgba(255,255,255,.32);overflow:hidden}.recall-diagnostic-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;background:rgba(100,116,139,.06);font-size:9px;color:var(--text-muted)}.recall-diagnostic-head strong{font-size:10px;color:var(--text-primary)}.recall-diagnostic-row,.recent-usage-row{display:grid;grid-template-columns:44px minmax(0,1fr) 44px;gap:8px;align-items:center;padding:8px 10px;border-top:1px solid var(--border-color);font-size:9px}.recall-diagnostic-row span{font-weight:800;color:var(--accent-green)}.recall-diagnostic-row.deprioritized span{color:var(--accent-yellow)}.recall-diagnostic-row strong,.recent-usage-row strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.recall-diagnostic-row code{text-align:right;color:var(--accent-blue)}.recent-usage-row{grid-template-columns:64px 90px minmax(0,1fr)}.recent-usage-row p{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-muted)}.usage-state{font-size:8px;font-weight:800;border-radius:999px;padding:3px 6px;text-align:center;background:rgba(100,116,139,.1);color:var(--text-muted)}.usage-state.used{background:rgba(16,185,129,.1);color:var(--accent-green)}.usage-state.ignored,.usage-state.warn,.usage-state.waiting{background:rgba(245,158,11,.12);color:var(--accent-yellow)}.usage-state.verified{background:rgba(var(--accent-blue-rgb),.1);color:var(--accent-blue)}.usage-state.mentioned{background:rgba(99,102,241,.1);color:var(--accent-purple)}.usage-state.fail{background:rgba(239,68,68,.1);color:var(--accent-red)}
 .audit-view{padding-top:12px;max-height:560px;overflow:auto}.audit-item{display:grid;grid-template-columns:145px minmax(0,1fr) auto;gap:12px;padding:11px;border-bottom:1px solid var(--border-color);align-items:center}.audit-time{font-size:9px;color:var(--text-muted)}.audit-item strong{font-size:11px}.audit-item p{font-size:9px;color:var(--text-muted);margin-top:3px}.audit-item code{font-size:8px;color:var(--accent-blue)}.feedback-panel{display:flex;align-items:center;justify-content:space-between;gap:18px;margin-top:12px;padding:14px;border-radius:10px;background:rgba(var(--accent-blue-rgb),.04);border:1px solid rgba(var(--accent-blue-rgb),.1)}.feedback-panel h4{font-size:12px;margin-bottom:4px}.feedback-panel p{font-size:9px;color:var(--text-muted)}.feedback-actions{display:flex;gap:5px;flex-wrap:wrap}.counter-table{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:10px}.counter-table div{padding:11px;border-bottom:2px solid rgba(var(--accent-blue-rgb),.12);display:flex;justify-content:space-between;font-size:10px}.counter-table span{color:var(--text-muted)}
 .acceptance-note{margin-top:9px;padding:9px 11px;border-radius:8px;background:rgba(16,185,129,.06);color:var(--text-muted);font-size:9px;border:1px solid rgba(16,185,129,.12)}
 .empty-state{padding:35px;text-align:center;color:var(--text-muted);font-size:11px}.empty-state.large{padding-top:180px}.mc-modal-overlay{position:fixed;inset:0;background:rgba(15,23,42,.24);backdrop-filter:blur(10px);z-index:200;display:grid;place-items:center}.mc-modal{width:min(520px,calc(100vw - 36px));max-height:80vh;overflow:auto;border:1px solid var(--border-color);background:rgba(255,255,255,.92);box-shadow:0 26px 80px rgba(15,23,42,.18);border-radius:15px;padding:22px}.mc-modal h3{font-size:19px;margin:4px 0 14px}.mc-modal label{display:flex;flex-direction:column;gap:6px;font-size:10px;font-weight:700;color:var(--text-muted);margin-top:13px}.mc-modal textarea{resize:vertical;font-size:12px;line-height:1.5}.modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}.evidence-modal{width:min(760px,calc(100vw - 36px))}.evidence-row{border:1px solid var(--border-color);border-radius:10px;margin-top:9px;overflow:hidden}.evidence-row>div{display:flex;justify-content:space-between;padding:9px 12px;background:rgba(var(--accent-blue-rgb),.04);font-size:9px;color:var(--text-muted)}
 @media(max-width:1100px){.summary-strip{grid-template-columns:repeat(3,1fr)}.memory-groups{grid-template-columns:1fr}.workspace-grid{grid-template-columns:220px minmax(0,1fr)}.quality-check-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.cross-group-quality-cards,.ignore-memory-receipt-cards,.selftest-residue-cards,.task-agent-snapshot-cards,.post-compact-cards,.discipline-cards{grid-template-columns:repeat(2,minmax(0,1fr))}.discipline-buckets{grid-template-columns:repeat(4,minmax(0,1fr))}.post-compact-buckets{grid-template-columns:1fr}}
-@media(max-width:760px){.memory-center{padding:10px}.mc-header,.detail-header,.feedback-panel,.quality-panel-head,.post-compact-head,.cross-group-quality-head,.ignore-memory-receipt-head,.selftest-residue-head,.task-agent-snapshot-head{flex-direction:column;align-items:flex-start}.summary-strip{grid-template-columns:repeat(2,1fr)}.workspace-grid{grid-template-columns:1fr}.scope-panel{max-height:240px}.detail-panel{padding:13px}.maintenance-actions{justify-content:flex-start}.memory-toolbar{flex-direction:column}.memory-search{width:100%}.boundary-grid,.metrics-grid{grid-template-columns:repeat(2,1fr)}.quality-check-grid{grid-template-columns:1fr}.audit-item{grid-template-columns:1fr}.counter-table{grid-template-columns:repeat(2,1fr)}.post-compact-head code{max-width:100%;white-space:normal;overflow-wrap:anywhere}.cross-group-quality-cards,.ignore-memory-receipt-cards,.selftest-residue-cards,.task-agent-snapshot-cards,.post-compact-cards,.discipline-cards{grid-template-columns:repeat(2,minmax(0,1fr))}.discipline-buckets{grid-template-columns:repeat(2,minmax(0,1fr))}.cross-group-quality-table article,.ignore-memory-receipt-list article,.ignore-memory-receipt-work-list article,.selftest-residue-list article,.task-agent-snapshot-list article,.recall-diagnostic-row,.recent-usage-row,.discipline-gap-list article{grid-template-columns:1fr}.cross-group-quality-table code,.ignore-memory-receipt-list code,.task-agent-snapshot-list code{text-align:left}}
+@media(max-width:760px){.memory-center{padding:10px}.mc-header,.detail-header,.feedback-panel,.quality-panel-head,.post-compact-head,.cross-group-quality-head,.ignore-memory-receipt-head,.selftest-residue-head,.task-agent-snapshot-head,.context-capacity-head{flex-direction:column;align-items:flex-start}.context-preset-grid,.context-field-grid{grid-template-columns:1fr}.summary-strip{grid-template-columns:repeat(2,1fr)}.global-alert{grid-template-columns:7px minmax(0,1fr);align-items:start}.global-alert>span{margin-top:3px}.global-alert strong,.global-alert p,.global-alert small{grid-column:2}.workspace-grid{grid-template-columns:1fr}.scope-panel{max-height:240px}.detail-panel{padding:13px}.maintenance-actions{justify-content:flex-start}.memory-toolbar{flex-direction:column}.memory-search{width:100%}.boundary-grid,.metrics-grid{grid-template-columns:repeat(2,1fr)}.quality-check-grid{grid-template-columns:1fr}.audit-item{grid-template-columns:1fr}.counter-table{grid-template-columns:repeat(2,1fr)}.post-compact-head code{max-width:100%;white-space:normal;overflow-wrap:anywhere}.cross-group-quality-cards,.ignore-memory-receipt-cards,.selftest-residue-cards,.task-agent-snapshot-cards,.post-compact-cards,.discipline-cards{grid-template-columns:repeat(2,minmax(0,1fr))}.discipline-buckets{grid-template-columns:repeat(2,minmax(0,1fr))}.cross-group-quality-table article,.ignore-memory-receipt-list article,.ignore-memory-receipt-work-list article,.selftest-residue-list article,.task-agent-snapshot-list article,.recall-diagnostic-row,.recent-usage-row,.discipline-gap-list article{grid-template-columns:1fr}.cross-group-quality-table code,.ignore-memory-receipt-list code,.task-agent-snapshot-list code{text-align:left}}
 :global([data-theme='dark']) .memory-center .aura-card,:global([data-theme='dark']) .summary-card,:global([data-theme='dark']) .memory-group,:global([data-theme='dark']) .memory-item,:global([data-theme='dark']) .boundary-grid article,:global([data-theme='dark']) .metrics-grid article,:global([data-theme='dark']) .quality-check-card,:global([data-theme='dark']) .ignore-memory-receipt-cards article,:global([data-theme='dark']) .ignore-memory-receipt-work-list article,:global([data-theme='dark']) .selftest-residue-cards article,:global([data-theme='dark']) .task-agent-snapshot-cards article,:global([data-theme='dark']) .post-compact-cards article,:global([data-theme='dark']) .discipline-cards article,:global([data-theme='dark']) .discipline-buckets article,:global([data-theme='dark']) .post-compact-bucket,:global([data-theme='dark']) .candidate-row,:global([data-theme='dark']) .recall-diagnostic-list,:global([data-theme='dark']) .recent-usage-list{background:rgba(15,23,42,.54)}:global([data-theme='dark']) .mc-modal{background:rgba(15,23,42,.94)}
 .scope-mark.global{background:linear-gradient(135deg,var(--accent-purple),var(--accent-blue))}
 .memory-policy-strip{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:8px 0 12px;font-size:10px;color:var(--text-muted)}.memory-policy-strip button{border:1px solid rgba(239,68,68,.18);background:rgba(239,68,68,.06);color:var(--accent-red);border-radius:14px;padding:4px 8px;cursor:pointer}
@@ -2580,5 +3672,23 @@ onMounted(() => loadOverview(false))
 .agent-reliability-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;padding:0 9px 9px}.agent-reliability-list article{min-width:0;border:1px solid var(--border-color);border-radius:8px;background:rgba(255,255,255,.38);padding:8px;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:5px;align-items:start}.agent-reliability-list article.fail{border-color:rgba(239,68,68,.22);background:rgba(239,68,68,.055)}.agent-reliability-list article.warn{border-color:rgba(245,158,11,.22);background:rgba(245,158,11,.055)}.agent-reliability-list div{min-width:0;display:flex;gap:5px;align-items:center}.agent-reliability-list strong{font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.agent-reliability-list span{font-size:7px;font-weight:800;color:var(--text-muted);text-transform:uppercase}.agent-reliability-list code{font-family:var(--font-tech);font-size:14px;color:var(--accent-blue)}.agent-reliability-list p{grid-column:1/-1;font-size:8px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 @media(max-width:1100px){.timeline-component-list{grid-template-columns:repeat(3,minmax(0,1fr))}.timeline-event-list article{grid-template-columns:74px minmax(0,1fr) 100px}.timeline-event-list p{grid-column:1/-1;white-space:normal}}
 @media(max-width:760px){.agent-reliability-list{grid-template-columns:1fr}.timeline-component-list{grid-template-columns:repeat(2,minmax(0,1fr))}.timeline-event-list article,.hook-ledger-list article,.replay-needle-list article,.replay-repair-list article,.replay-attempt-list article,.replay-work-list article,.historical-boundary-list article,.agent-type-replay-list article,.agent-type-target-list article{grid-template-columns:1fr}.timeline-event-list code,.hook-ledger-list code{text-align:left}}
+@media(max-width:760px){.capacity-runtime-strip,.provider-capability-fields,.provider-capability-list,.capability-health-list{grid-template-columns:repeat(2,minmax(0,1fr))}.retention-maintenance-row{flex-direction:column;align-items:flex-start}}
 :global([data-theme='dark']) .agent-reliability-list article,:global([data-theme='dark']) .timeline-component-list article{background:rgba(15,23,42,.54)}
+.dispatch-recovery-panel{margin:10px 0;border:1px solid rgba(16,185,129,.2);border-radius:8px;background:rgba(16,185,129,.025);overflow:hidden}.dispatch-recovery-panel.alert{border-color:rgba(245,158,11,.28);background:rgba(245,158,11,.035)}.dispatch-recovery-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 12px;border-bottom:1px solid var(--border-color)}.dispatch-recovery-head h4{margin:2px 0 0;font-size:13px}.dispatch-recovery-head .btn{padding:6px 9px;font-size:8px}.dispatch-recovery-counters{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));border-bottom:1px solid var(--border-color)}.dispatch-recovery-counters span{min-width:0;padding:8px 10px;border-left:1px solid var(--border-color);display:flex;align-items:center;justify-content:space-between;gap:6px}.dispatch-recovery-counters span:first-child{border-left:0}.dispatch-recovery-counters small{font-size:7px;font-weight:800;color:var(--text-muted);text-transform:uppercase;overflow:hidden;text-overflow:ellipsis}.dispatch-recovery-counters strong{font-family:var(--font-tech);font-size:13px;color:var(--accent-green)}.dispatch-recovery-panel.alert .dispatch-recovery-counters strong{color:var(--accent-yellow)}.dispatch-recovery-list>article{border-top:1px solid rgba(100,116,139,.1)}.dispatch-recovery-list>article:first-child{border-top:0}.dispatch-recovery-list>article.invalid,.dispatch-recovery-list>article.uncertain{background:rgba(245,158,11,.035)}.dispatch-recovery-row{display:grid;grid-template-columns:86px minmax(150px,220px) minmax(190px,1fr) 108px minmax(150px,auto);gap:8px;align-items:center;padding:9px 10px}.dispatch-recovery-state{border-radius:5px;padding:4px 6px;font-size:7px;font-weight:800;text-align:center;background:rgba(100,116,139,.1);color:var(--text-muted)}.dispatch-recovery-state.recoverable_commit{background:rgba(16,185,129,.1);color:var(--accent-green)}.dispatch-recovery-state.active{background:rgba(var(--accent-blue-rgb),.1);color:var(--accent-blue)}.dispatch-recovery-state.cancel_prepared,.dispatch-recovery-state.uncertain{background:rgba(245,158,11,.12);color:var(--accent-yellow)}.dispatch-recovery-state.invalid{background:rgba(239,68,68,.1);color:var(--accent-red)}.dispatch-recovery-identity,.dispatch-recovery-proof{min-width:0;display:flex;flex-direction:column;gap:3px}.dispatch-recovery-identity strong,.dispatch-recovery-identity small,.dispatch-recovery-proof code,.dispatch-recovery-proof small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dispatch-recovery-identity strong{font-size:9px}.dispatch-recovery-identity small,.dispatch-recovery-proof small{font-size:7px;color:var(--text-muted)}.dispatch-recovery-proof code{font-size:8px;color:var(--accent-blue)}.dispatch-recovery-row>time{font-size:7px;color:var(--text-muted);text-align:right}.dispatch-recovery-actions{display:flex;justify-content:flex-end;gap:5px;flex-wrap:wrap}.dispatch-recovery-actions .btn{padding:5px 7px;font-size:7px;white-space:nowrap}.dispatch-recovery-actions .danger{color:var(--accent-red);border-color:rgba(239,68,68,.2)}.dispatch-recovery-ack{padding:0 10px 8px;font-size:7px;color:var(--accent-green)}.dispatch-transcript-list{max-height:280px;overflow:auto;border-top:1px solid var(--border-color);background:rgba(15,23,42,.025)}.dispatch-transcript-meta{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 10px;border-bottom:1px solid var(--border-color)}.dispatch-transcript-meta code,.dispatch-transcript-meta span{min-width:0;font-size:7px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dispatch-transcript-event{display:grid;grid-template-columns:88px 130px minmax(0,1fr);gap:8px;padding:6px 10px;border-top:1px solid rgba(100,116,139,.08);align-items:start}.dispatch-transcript-event:first-child{border-top:0}.dispatch-transcript-event time,.dispatch-transcript-event strong{font-size:7px;color:var(--text-muted)}.dispatch-transcript-event strong{color:var(--accent-blue)}.dispatch-transcript-event pre{margin:0;max-height:72px;overflow:auto;font-family:var(--font-tech);font-size:7px;line-height:1.45;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--text-secondary)}.dispatch-recovery-empty{padding:14px;text-align:center;font-size:9px;color:var(--text-muted)}.dispatch-resolve-identity{display:flex;flex-direction:column;gap:5px;padding:8px;border:1px solid var(--border-color);border-radius:7px;background:rgba(var(--accent-blue-rgb),.035)}.dispatch-resolve-identity code{font-size:8px;color:var(--accent-blue);overflow-wrap:anywhere}.dispatch-resolve-identity span{font-size:8px;color:var(--text-muted);overflow-wrap:anywhere}
+@media(max-width:1100px){.dispatch-recovery-row{grid-template-columns:82px minmax(140px,1fr) minmax(180px,1.5fr)}.dispatch-recovery-row>time{display:none}.dispatch-recovery-actions{grid-column:2/-1}.dispatch-recovery-counters{grid-template-columns:repeat(3,minmax(0,1fr))}.dispatch-recovery-counters span:nth-child(4){border-left:0;border-top:1px solid var(--border-color)}}
+@media(max-width:760px){.dispatch-recovery-head{align-items:flex-start}.dispatch-recovery-counters{grid-template-columns:repeat(2,minmax(0,1fr))}.dispatch-recovery-counters span:nth-child(3),.dispatch-recovery-counters span:nth-child(5){border-left:0}.dispatch-recovery-counters span:nth-child(n+3){border-top:1px solid var(--border-color)}.dispatch-recovery-row{grid-template-columns:1fr}.dispatch-recovery-actions{grid-column:1;justify-content:flex-start}.dispatch-recovery-identity small,.dispatch-recovery-proof code,.dispatch-recovery-proof small{white-space:normal;overflow-wrap:anywhere}.dispatch-transcript-event{grid-template-columns:1fr}.dispatch-transcript-meta{align-items:flex-start;flex-direction:column}}
+:global([data-theme='dark']) .dispatch-transcript-list{background:rgba(15,23,42,.38)}
+.session-memory-fleet-panel{margin:10px 0;border:1px solid rgba(var(--accent-blue-rgb),.18);border-radius:8px;background:rgba(var(--accent-blue-rgb),.035);overflow:hidden}.session-memory-fleet-panel.warn{border-color:rgba(245,158,11,.28);background:rgba(245,158,11,.045)}.session-memory-fleet-panel.fail{border-color:rgba(239,68,68,.28);background:rgba(239,68,68,.045)}.session-memory-fleet-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 12px;border-bottom:1px solid var(--border-color)}.session-memory-fleet-head h4{margin:2px 0 0;font-size:13px}.session-memory-fleet-head code{font-size:9px;font-weight:800;color:var(--accent-blue);text-transform:uppercase}.session-memory-fleet-panel.warn .session-memory-fleet-head code{color:var(--accent-yellow)}.session-memory-fleet-panel.fail .session-memory-fleet-head code{color:var(--accent-red)}.session-memory-fleet-cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;padding:9px 10px}.session-memory-fleet-cards article{min-width:0;border:1px solid var(--border-color);border-radius:7px;background:rgba(255,255,255,.42);padding:8px;display:flex;flex-direction:column;gap:3px}.session-memory-fleet-cards span{font-size:8px;font-weight:800;color:var(--text-muted);text-transform:uppercase}.session-memory-fleet-cards strong{font-family:var(--font-tech);font-size:15px;color:var(--accent-blue);overflow:hidden;text-overflow:ellipsis}.session-memory-fleet-cards small{font-size:8px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.session-memory-fleet-list{border-top:1px solid var(--border-color)}.session-memory-fleet-list article{display:grid;grid-template-columns:64px minmax(120px,210px) minmax(0,1fr) 110px 136px;gap:8px;align-items:center;padding:8px 10px;border-top:1px solid rgba(100,116,139,.08);font-size:9px}.session-memory-fleet-list article:first-child{border-top:0}.session-memory-fleet-list strong,.session-memory-fleet-list p{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.session-memory-fleet-list p{color:var(--text-muted)}.session-memory-fleet-list code{text-align:right;font-size:8px;color:var(--text-muted)}.session-memory-artifact-actions{display:flex;justify-content:flex-end;gap:5px}.session-memory-artifact-actions .btn{padding:5px 7px;font-size:8px;white-space:nowrap}
+.session-memory-history-list{border-top:1px solid var(--border-color);padding:7px 10px}.session-memory-history-list article{display:grid;grid-template-columns:76px minmax(120px,210px) minmax(0,1fr) 120px 54px;gap:8px;align-items:center;padding:6px 0;border-top:1px solid rgba(100,116,139,.08);font-size:9px}.session-memory-history-list article:first-child{border-top:0}.session-memory-history-list strong,.session-memory-history-list p{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.session-memory-history-list p{color:var(--text-muted)}.session-memory-history-list code{text-align:right;font-size:8px;color:var(--text-muted)}.session-memory-replay-btn,.session-memory-replay-close{border:1px solid rgba(var(--accent-blue-rgb),.2);background:rgba(var(--accent-blue-rgb),.07);color:var(--accent-blue);border-radius:6px;padding:5px 8px;font-size:8px;font-weight:800;cursor:pointer}.session-memory-replay-btn:disabled{opacity:.55;cursor:wait}.session-memory-replay-panel{margin:0 10px 10px;border:1px solid rgba(16,185,129,.22);border-radius:8px;background:rgba(16,185,129,.04);overflow:hidden}.session-memory-replay-panel.fail{border-color:rgba(239,68,68,.25);background:rgba(239,68,68,.04)}.session-memory-replay-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 11px;border-bottom:1px solid var(--border-color)}.session-memory-replay-head h5{margin-top:2px;font-size:11px}.session-memory-replay-close{color:var(--text-muted);border-color:var(--border-color);background:transparent}.session-memory-replay-meta{display:flex;align-items:center;gap:7px;flex-wrap:wrap;padding:8px 11px;border-bottom:1px solid var(--border-color)}.session-memory-replay-meta span,.session-memory-replay-meta code{font-size:8px;color:var(--text-muted)}.session-memory-replay-meta code{color:var(--accent-blue);overflow-wrap:anywhere}.session-memory-replay-checks{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;padding:9px 10px}.session-memory-replay-checks article{min-width:0;display:flex;align-items:center;gap:6px;border:1px solid rgba(16,185,129,.16);border-radius:6px;padding:7px;background:rgba(255,255,255,.35)}.session-memory-replay-checks article.fail{border-color:rgba(239,68,68,.2);background:rgba(239,68,68,.04)}.session-memory-replay-checks span{flex:none;font-size:7px;font-weight:800;color:var(--accent-green)}.session-memory-replay-checks article.fail span{color:var(--accent-red)}.session-memory-replay-checks strong{min-width:0;font-size:8px;overflow-wrap:anywhere}
+@media(max-width:1100px){.session-memory-fleet-cards{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:760px){.session-memory-fleet-head,.session-memory-replay-head{align-items:flex-start}.session-memory-fleet-cards{grid-template-columns:repeat(2,minmax(0,1fr))}.session-memory-fleet-list article,.session-memory-history-list article{grid-template-columns:1fr}.session-memory-fleet-list code,.session-memory-history-list code{text-align:left}.session-memory-fleet-list p,.session-memory-history-list p{white-space:normal;overflow-wrap:anywhere}.session-memory-artifact-actions{justify-content:flex-start;flex-wrap:wrap}.session-memory-replay-btn{justify-self:start}.session-memory-replay-checks{grid-template-columns:1fr}}
+:global([data-theme='dark']) .session-memory-fleet-cards article,:global([data-theme='dark']) .session-memory-replay-checks article{background:rgba(15,23,42,.54)}
+.recall-diagnostic-row.semantic-duplicate span{color:var(--accent-yellow)}
+.recall-diagnostic-row.semantic-conflict span{color:var(--accent-red)}
+.recall-diagnostic-row.consumption-deprioritized span{color:var(--accent-yellow)}
+.recall-diagnostic-row.consumption-conflict span{color:var(--accent-red)}
+.consumption-diagnostic-list,.consumption-stale-list{margin:0 9px 9px}
+.stale-candidate-list{border-top:1px solid var(--border-color)}.stale-candidate-row{padding:10px;border-top:1px solid rgba(100,116,139,.08);background:rgba(255,255,255,.18)}.stale-candidate-row:first-child{border-top:0}.stale-candidate-row.pending{background:rgba(245,158,11,.035)}.stale-candidate-row.applied{background:rgba(16,185,129,.03)}.stale-candidate-row.rejected{opacity:.72}.stale-candidate-head{display:grid;grid-template-columns:72px minmax(0,1fr) 72px;gap:8px;align-items:center}.stale-candidate-head strong{min-width:0;font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.stale-candidate-head code{text-align:right;font-size:8px;color:var(--text-muted)}.stale-candidate-row>p{margin:7px 0;font-size:9px;line-height:1.55;color:var(--text-secondary)}.stale-candidate-row>small{display:block;margin-top:7px;font-size:8px;color:var(--text-muted);overflow-wrap:anywhere}.stale-candidate-replacement{max-height:150px;overflow:auto;padding:8px;border:1px solid var(--border-color);border-radius:7px;background:rgba(var(--accent-blue-rgb),.035);font-family:var(--font-tech);font-size:8px;line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere}.stale-candidate-actions{display:flex;justify-content:flex-end;gap:6px;margin-top:8px}.stale-candidate-resolution{margin-top:7px;font-size:8px;color:var(--text-muted)}
+@media(max-width:760px){.stale-candidate-head{grid-template-columns:1fr}.stale-candidate-head code{text-align:left}.stale-candidate-actions{justify-content:flex-start}}
+:global([data-theme='dark']) .stale-candidate-row{background:rgba(15,23,42,.42)}
 </style>

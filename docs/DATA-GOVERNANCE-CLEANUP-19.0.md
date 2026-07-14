@@ -112,9 +112,9 @@
 - `GET /api/cleanup/summary`
   - 汇总任务、定时任务、项目运行、项目会话、群聊消息、全局 Agent 会话和执行产物数量。
 - `POST /api/cleanup/preview`
-  - 输入 `{ action }`，返回影响数量、风险等级、是否不可撤销。
+  - 输入 `{ action, retention_days }`，返回影响数量、精确候选清单和 10 分钟有效的预览令牌。
 - `POST /api/cleanup/run`
-  - 输入 `{ action, confirm: true }`，执行清理动作。
+  - 输入 `{ action, confirm: true, preview_token, selected_ids }`，只处理预览中勾选且状态未变化的记录。
 
 当前清理中心支持的动作：
 
@@ -123,9 +123,13 @@
 - `purge_archived_project_runs`
   - 永久清除已归档项目运行，并级联清理 session/execution artifacts。
 - `purge_archived_tasks`
-  - 永久清除已归档任务，并级联清理 task agent sessions 和 execution artifacts。
+  - 永久清除已归档任务，并级联清理队列、租约、工作树、子 Agent 会话、执行产物、TestAgent 证据和任务回放。
 - `purge_archived_cron`
   - 永久清除已归档定时任务。
+
+生产化升级记录见：
+
+`docs/main-agent-workchain/operations-and-integrations/cleanup-center/2026-07-14-cleanup-center-production-v1.md`
 
 ## 后续建议
 

@@ -157,7 +157,7 @@ export const buildGlobalTaskKnowledgePayload = ({ msg = {}, card = {}, sessionId
       类型: mission.id ? '全局跨项目任务' : '全局 Agent 执行',
       会话: sessionId,
       任务: card.task_id || mission.id || run.id || '',
-      Trace: card.technical?.trace_id || run.trace_id || mission.trace_id || '',
+      执行记录: card.technical?.trace_id || run.trace_id || mission.trace_id ? '已关联' : '无',
       Agent: 'global-agent',
       状态: card.phase_label || card.status || run.status || mission.status || '',
     })),

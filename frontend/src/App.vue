@@ -1,5 +1,34 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick, watch, provide, defineAsyncComponent } from 'vue'
+import {
+  Activity,
+  Bot,
+  BookOpen,
+  Brain,
+  ChevronDown,
+  Clock3,
+  FileDiff,
+  FolderKanban,
+  History,
+  LayoutDashboard,
+  Link,
+  ListTodo,
+  Menu,
+  MessageSquare,
+  Moon,
+  Music2,
+  PawPrint,
+  Search,
+  Settings2,
+  SlidersHorizontal,
+  Sparkles,
+  SquareTerminal,
+  Sun,
+  Trash2,
+  Wrench,
+  Workflow,
+  X,
+} from '@lucide/vue'
 import UsabilityWorkbench from './components/common/UsabilityWorkbench.vue'
 
 const ProjectManager = defineAsyncComponent(() => import('./components/projects/ProjectManager.vue'))
@@ -11,7 +40,6 @@ const Terminal = defineAsyncComponent(() => import('./components/tools/Terminal.
 const Settings = defineAsyncComponent(() => import('./components/settings/Settings.vue'))
 const CodeChanges = defineAsyncComponent(() => import('./components/tools/CodeChanges.vue'))
 const CronJobs = defineAsyncComponent(() => import('./components/tools/CronJobs.vue'))
-const Templates = defineAsyncComponent(() => import('./components/templates/Templates.vue'))
 const AgentMetrics = defineAsyncComponent(() => import('./components/agents/AgentMetrics.vue'))
 const SearchHistory = defineAsyncComponent(() => import('./components/workspace/SearchHistory.vue'))
 const MusicPlayer = defineAsyncComponent(() => import('./components/music/MusicPlayer.vue'))
@@ -20,11 +48,14 @@ const PetMenu = defineAsyncComponent(() => import('./components/pets/PetMenu.vue
 const GlobalAgent = defineAsyncComponent(() => import('./components/global/GlobalAgent.vue'))
 const KnowledgeBase = defineAsyncComponent(() => import('./components/knowledge/KnowledgeBase.vue'))
 const MemoryCenter = defineAsyncComponent(() => import('./components/knowledge/MemoryCenter.vue'))
-const SystemDiagnostics = defineAsyncComponent(() => import('./components/system/SystemDiagnostics.vue'))
-const CleanupCenter = defineAsyncComponent(() => import('./components/system/CleanupCenter.vue'))
+const CleanupCenter = defineAsyncComponent(() => import('./components/system/cleanup/CleanupCenter.vue'))
 const TraceReplay = defineAsyncComponent(() => import('./components/system/TraceReplay.vue'))
 
 const currentTab = ref('')
+const RETIRED_TAB_REDIRECTS = {
+  diagnostics: 'settings',
+  templates: 'dashboard',
+}
 const projects = ref([])
 const GLOBAL_PET_AGENT_NAME = 'global-agent'
 const MUSIC_PET_AGENT_NAME = 'music-agent'
@@ -54,13 +85,14 @@ const musicPetAgent = computed(() => ({
 const petAgents = computed(() => [globalPetAgent.value, musicPetAgent.value])
 const isMobile = ref(window.innerWidth <= 768)
 const isDark = ref(localStorage.getItem('theme') === 'dark')
+const showMobileMenu = ref(false)
 
 // 全局对话模板分发总线
 const activeSelectedTemplate = ref(null)
 provide('activeSelectedTemplate', activeSelectedTemplate)
 provide('slashNavigate', (tab) => switchTab(tab))
 provide('applyTemplate', (template, targetTab, targetId) => {
-  currentTab.value = targetTab
+  switchTab(targetTab)
   if (targetTab === 'groups') {
     navigateTo.value = { tab: 'groups', groupId: targetId }
   } else if (targetTab === 'projects') {
@@ -75,10 +107,14 @@ const goToResult = async (item) => {
   // 先清空再设置，确保 watch 能触发
   navigateTo.value = null
   await nextTick()
-  if (item.isGroup) {
-    navigateTo.value = { tab: 'groups', groupId: item.sessionId, keyword: item._keyword || '' }
+  if (item.conversationType === 'task') {
+    navigateTo.value = { tab: 'tasks', taskId: item.taskId }
+  } else if (item.conversationType === 'global') {
+    navigateTo.value = { tab: 'global-agent', sessionId: item.sessionId, messageId: item.messageId, messageIndex: item.messageIndex, keyword: item.query || item._keyword || '' }
+  } else if (item.conversationType === 'group' || item.isGroup) {
+    navigateTo.value = { tab: 'groups', groupId: item.groupId || item.sessionId, groupSessionId: item.conversationType === 'group' ? item.sessionId : '', messageId: item.messageId, messageIndex: item.messageIndex, keyword: item.query || item._keyword || '' }
   } else {
-    navigateTo.value = { tab: 'projects', project: item.project, sessionId: item.sessionId, keyword: item._keyword || '' }
+    navigateTo.value = { tab: 'projects', project: item.project, sessionId: item.sessionId, messageId: item.messageId, messageIndex: item.messageIndex, keyword: item.query || item._keyword || '' }
   }
   switchTab(navigateTo.value.tab)
 }
@@ -88,7 +124,7 @@ let petNavigationReconnectTimer = null
 
 const cleanNavigationUrl = () => {
   const url = new URL(window.location.href)
-  const navigationKeys = ['tab', 'project', 'sessionId', 'groupId', 'keyword', 'trace_id', 'traceId', 'scope']
+  const navigationKeys = ['tab', 'project', 'sessionId', 'groupId', 'keyword', 'task_id', 'taskId', 'trace_id', 'traceId', 'scope']
   let changed = false
   for (const key of navigationKeys) {
     if (url.searchParams.has(key)) {
@@ -110,6 +146,7 @@ const readNavigationTargetFromUrl = () => {
   if (tab === 'trace-replay') {
     return {
       tab: 'trace-replay',
+      task_id: params.get('task_id') || params.get('taskId') || '',
       trace_id: params.get('trace_id') || params.get('traceId') || '',
       scope: params.get('scope') || 'orchestrator'
     }
@@ -294,6 +331,10 @@ watch(currentTab, () => {
 })
 
 const handleSettingsStorage = (e) => {
+  if (!e || e.key === 'theme') {
+    isDark.value = localStorage.getItem('theme') === 'dark'
+    document.documentElement.setAttribute('data-theme', isDark.value ? 'dark' : 'light')
+  }
   if (!e || e.key === 'theme-preset') {
     const preset = localStorage.getItem('theme-preset') || 'default'
     document.documentElement.setAttribute('data-theme-preset', preset)
@@ -351,21 +392,53 @@ const DEFAULT_TABS = [
   { id: 'pets', icon: '🐾', label: '宠物空间' },
   { id: 'changes', icon: '📝', label: '代码变更' },
   { id: 'tasks', icon: '📋', label: '任务派发' },
-  { id: 'trace-replay', icon: '🔁', label: 'Trace 回放' },
+  { id: 'trace-replay', icon: '🔁', label: '任务回放' },
   { id: 'autodev', icon: '🧭', label: '自动开发' },
-  { id: 'diagnostics', icon: '🩺', label: '系统自检与体检' },
   { id: 'knowledge', icon: '📖', label: '知识库与文档' },
   { id: 'memory-center', icon: '🧠', label: '记忆控制中心' },
   { id: 'cleanup-center', icon: '🧹', label: '清理中心' },
   { id: 'cron', icon: '⏰', label: '定时任务' },
   { id: 'terminal', icon: '💻', label: '内置终端' },
-  { id: 'templates', icon: '📚', label: '对话模板' },
   { id: 'metrics', icon: '📈', label: '性能监控' },
   { id: 'search', icon: '🔍', label: '对话搜索' },
   { id: 'music', icon: '🎵', label: '音乐播放' },
   { id: 'settings', icon: '⚙️', label: '系统设置' },
   { id: 'menumanager', icon: '📋', label: '菜单管理' },
 ]
+
+const TAB_ICONS = {
+  dashboard: LayoutDashboard,
+  projects: FolderKanban,
+  groups: MessageSquare,
+  'global-agent': Bot,
+  tools: Wrench,
+  pets: PawPrint,
+  changes: FileDiff,
+  tasks: ListTodo,
+  'trace-replay': History,
+  autodev: Workflow,
+  knowledge: BookOpen,
+  'memory-center': Brain,
+  'cleanup-center': Trash2,
+  cron: Clock3,
+  terminal: SquareTerminal,
+  metrics: Activity,
+  search: Search,
+  music: Music2,
+  settings: Settings2,
+  menumanager: Menu,
+}
+
+const GROUP_ICONS = {
+  core: Sparkles,
+  dev: Wrench,
+  collab: MessageSquare,
+  data: Activity,
+  system: Settings2,
+  ungrouped: Menu,
+}
+
+const MOBILE_PRIMARY_TAB_IDS = ['dashboard', 'global-agent', 'groups', 'tasks']
 
 function getMergedTabs() {
   let custom = []
@@ -401,6 +474,20 @@ function saveTabOrder() {
 }
 
 const currentTabInfo = () => tabs.value.find(t => t.id === currentTab.value)
+const getTabIcon = (tabId) => TAB_ICONS[tabId] || Link
+const getGroupIcon = (groupId) => GROUP_ICONS[groupId] || Menu
+const mobilePrimaryTabs = computed(() => MOBILE_PRIMARY_TAB_IDS
+  .map(id => tabs.value.find(tab => tab.id === id))
+  .filter(Boolean))
+const mobileMoreTabs = computed(() => tabs.value.filter(tab => (
+  !tab.hiddenFromMenu && !MOBILE_PRIMARY_TAB_IDS.includes(tab.id)
+)))
+const mobileMoreActive = computed(() => !MOBILE_PRIMARY_TAB_IDS.includes(currentTab.value))
+
+const openMobileTab = (tabId) => {
+  showMobileMenu.value = false
+  switchTab(tabId)
+}
 
 // 菜单分组（始终从 localStorage 读取，保证刷新后生效）
 const DEFAULT_GROUPS = [
@@ -412,8 +499,8 @@ const DEFAULT_GROUPS = [
 ]
 const DEFAULT_TAB_GROUPS = {
   dashboard: 'core', projects: 'core', groups: 'collab', tasks: 'collab', 'trace-replay': 'collab', autodev: 'collab', 'global-agent': 'core',
-  tools: 'dev', changes: 'dev', terminal: 'dev', templates: 'dev',
-  metrics: 'data', search: 'data', 'memory-center': 'data', knowledge: 'data', diagnostics: 'data',
+  tools: 'dev', changes: 'dev', terminal: 'dev',
+  metrics: 'data', search: 'data', 'memory-center': 'data', knowledge: 'data',
   cron: 'system', pets: 'system', music: 'system', settings: 'system',
 }
 
@@ -440,7 +527,7 @@ function getMenuTabGroups() {
 const menuGroups = computed(() => { menuVersion.value; return getMenuGroups() })
 const menuTabGroups = computed(() => { menuVersion.value; return getMenuTabGroups() })
 
-const getGroupTabs = (groupId) => tabs.value.filter(t => (menuTabGroups.value[t.id] || 'ungrouped') === groupId)
+const getGroupTabs = (groupId) => tabs.value.filter(t => !t.hiddenFromMenu && (menuTabGroups.value[t.id] || 'ungrouped') === groupId)
 const toggleGroup = (groupId) => { collapsedGroups.value[groupId] = !collapsedGroups.value[groupId] }
 
 const updateMenuGroups = (data) => {
@@ -491,11 +578,13 @@ const handleWorkbenchNavigate = (target = {}) => {
 }
 
 const switchTab = (tabId) => {
-  currentTab.value = tabId
+  tabId = RETIRED_TAB_REDIRECTS[tabId] || tabId
+  const tabInfo = tabs.value.find(t => t.id === tabId)
+  if (!tabInfo) return
   if (!openTabs.value.find(t => t.id === tabId)) {
-    const tabInfo = tabs.value.find(t => t.id === tabId)
-    if (tabInfo) openTabs.value.push(tabInfo)
+    openTabs.value.push(tabInfo)
   }
+  currentTab.value = tabId
 }
 
 const isTabOpen = (tabId) => openTabs.value.some(tab => tab?.id === tabId)
@@ -529,8 +618,9 @@ const closeTab = (tabId, event) => {
             @dragover.prevent="onGroupDragOver($event, gi)"
             @dragend="endGroupDrag"
             @click="toggleGroup(group.id)">
-            <span class="group-arrow" :class="{ collapsed: collapsedGroups[group.id] }">▼</span>
-            <span>{{ group.icon }} {{ group.label }}</span>
+            <ChevronDown class="group-arrow" :class="{ collapsed: collapsedGroups[group.id] }" :size="13" />
+            <component :is="getGroupIcon(group.id)" class="group-icon" :size="15" />
+            <span>{{ group.label }}</span>
           </div>
           <div v-show="!collapsedGroups[group.id]" class="nav-group-items">
             <div
@@ -540,26 +630,27 @@ const closeTab = (tabId, event) => {
               :class="{ active: currentTab === tab.id }"
               @click="switchTab(tab.id)"
             >
-              <span class="nav-icon">{{ tab.icon }}</span>
+              <component :is="getTabIcon(tab.id)" class="nav-icon" :size="16" />
               <span>{{ tab.label }}</span>
             </div>
           </div>
         </template>
         <!-- 未分组 -->
-        <template v-if="tabs.filter(t => !menuTabGroups[t.id] || !menuGroups.find(g => g.id === menuTabGroups[t.id])).length > 0">
+        <template v-if="tabs.filter(t => !t.hiddenFromMenu && (!menuTabGroups[t.id] || !menuGroups.find(g => g.id === menuTabGroups[t.id]))).length > 0">
           <div class="nav-group-header" @click="toggleGroup('ungrouped')">
-            <span class="group-arrow" :class="{ collapsed: collapsedGroups['ungrouped'] }">▼</span>
-            <span>📦 其他</span>
+            <ChevronDown class="group-arrow" :class="{ collapsed: collapsedGroups['ungrouped'] }" :size="13" />
+            <Menu class="group-icon" :size="15" />
+            <span>其他</span>
           </div>
           <div v-show="!collapsedGroups['ungrouped']" class="nav-group-items">
             <div
-              v-for="tab in tabs.filter(t => !menuTabGroups[t.id] || !menuGroups.find(g => g.id === menuTabGroups[t.id]))"
+              v-for="tab in tabs.filter(t => !t.hiddenFromMenu && (!menuTabGroups[t.id] || !menuGroups.find(g => g.id === menuTabGroups[t.id])))"
               :key="tab.id"
               class="nav-item"
               :class="{ active: currentTab === tab.id }"
               @click="switchTab(tab.id)"
             >
-              <span class="nav-icon">{{ tab.icon }}</span>
+              <component :is="getTabIcon(tab.id)" class="nav-icon" :size="16" />
               <span>{{ tab.label }}</span>
             </div>
           </div>
@@ -570,40 +661,41 @@ const closeTab = (tabId, event) => {
     <!-- 右侧主内容区 -->
     <main class="main-wrapper">
       <div class="header">
-        <h2>{{ currentTabInfo()?.icon }} {{ currentTabInfo()?.label }}</h2>
-        <button class="theme-toggle" @click="toggleTheme" :title="isDark ? '切换浅色' : '切换深色'">
-          {{ isDark ? '☀️' : '🌙' }}
-        </button>
-      </div>
-      <!-- 浏览器风格标签页栏 -->
-      <div class="tab-bar" v-if="openTabs.length > 0">
-        <div v-for="tab in openTabs" :key="tab.id"
-          class="tab-item" :class="{ active: currentTab === tab.id }"
-          @click="switchTab(tab.id)"
-          @contextmenu.prevent="closeTab(tab.id, $event)">
-          <span class="tab-icon">{{ tab.icon }}</span>
-          <span class="tab-label">{{ tab.label }}</span>
-          <button class="tab-close" @click.stop="closeTab(tab.id)" title="关闭">&times;</button>
+        <h2>
+          <component :is="getTabIcon(currentTab)" :size="17" />
+          <span>{{ currentTabInfo()?.label }}</span>
+        </h2>
+        <div class="tab-bar" v-if="openTabs.length > 0">
+          <div v-for="tab in openTabs" :key="tab.id"
+            class="tab-item" :class="{ active: currentTab === tab.id }"
+            @click="switchTab(tab.id)"
+            @contextmenu.prevent="closeTab(tab.id, $event)">
+            <component :is="getTabIcon(tab.id)" class="tab-icon" :size="14" />
+            <span class="tab-label">{{ tab.label }}</span>
+            <button class="tab-close" @click.stop="closeTab(tab.id)" :aria-label="`关闭${tab.label}`" title="关闭"><X :size="13" /></button>
+          </div>
         </div>
+        <button class="theme-toggle" @click="toggleTheme" :title="isDark ? '切换浅色' : '切换深色'">
+          <Sun v-if="isDark" :size="17" />
+          <Moon v-else :size="17" />
+        </button>
       </div>
 
       <div class="content-area" :class="{ 'has-bottom-bar': isMobile, 'pets-content-area': currentTab === 'pets' }" @wheel.stop>
         <div v-if="isTabOpen('projects')" v-show="currentTab === 'projects'" class="tab-pane"><ProjectManager :navigate-to="navigateTo" @navigated="navigateTo = null" /></div>
         <div v-if="isTabOpen('groups')" v-show="currentTab === 'groups'" class="tab-pane"><GroupChat :navigate-to="navigateTo" @navigated="navigateTo = null" /></div>
-        <div v-if="isTabOpen('global-agent')" v-show="currentTab === 'global-agent'" class="tab-pane"><GlobalAgent @switch-tab="switchTab" @set-navigation="(target) => navigateTo = target" /></div>
-        <div v-if="isTabOpen('tools')" v-show="currentTab === 'tools'" class="tab-pane"><ToolsConfig /></div>
+        <div v-if="isTabOpen('global-agent')" v-show="currentTab === 'global-agent'" class="tab-pane"><GlobalAgent :navigate-to="navigateTo" @navigated="navigateTo = null" @switch-tab="switchTab" @set-navigation="(target) => navigateTo = target" /></div>
+        <div v-if="isTabOpen('tools')" v-show="currentTab === 'tools'" class="tab-pane"><ToolsConfig @navigate="applyPetNavigationTarget" /></div>
         <div v-if="isTabOpen('pets')" v-show="currentTab === 'pets'" class="tab-pane pet-tab-pane"><PetMenu :agents="petAgents" :projects="projects" @agents-updated="refreshMusicPetAgent" /></div>
         <div v-if="isTabOpen('changes')" v-show="currentTab === 'changes'" class="tab-pane"><CodeChanges /></div>
         <div v-if="isTabOpen('tasks')" v-show="currentTab === 'tasks'" class="tab-pane"><TaskManager :navigate-to="navigateTo" @navigated="navigateTo = null" /></div>
         <div v-if="isTabOpen('trace-replay')" v-show="currentTab === 'trace-replay'" class="tab-pane"><TraceReplay :navigate-to="navigateTo" /></div>
-        <div v-if="isTabOpen('autodev')" v-show="currentTab === 'autodev'" class="tab-pane"><AutoDevOps /></div>
-        <div v-if="isTabOpen('diagnostics')" v-show="currentTab === 'diagnostics'" class="tab-pane"><SystemDiagnostics /></div>
+        <div v-if="isTabOpen('autodev')" v-show="currentTab === 'autodev'" class="tab-pane"><AutoDevOps @navigate="handleWorkbenchNavigate" /></div>
         <div v-if="isTabOpen('knowledge')" v-show="currentTab === 'knowledge'" class="tab-pane"><KnowledgeBase /></div>
         <div v-if="isTabOpen('memory-center')" v-show="currentTab === 'memory-center'" class="tab-pane"><MemoryCenter /></div>
         <div v-if="isTabOpen('cleanup-center')" v-show="currentTab === 'cleanup-center'" class="tab-pane"><CleanupCenter @navigate="switchTab" /></div>
-        <div v-if="isTabOpen('cron')" v-show="currentTab === 'cron'" class="tab-pane"><CronJobs /></div>
+        <div v-if="isTabOpen('cron')" v-show="currentTab === 'cron'" class="tab-pane"><CronJobs @navigate="handleWorkbenchNavigate" /></div>
         <div v-if="isTabOpen('terminal')" v-show="currentTab === 'terminal'" class="tab-pane"><Terminal /></div>
-        <div v-if="isTabOpen('templates')" v-show="currentTab === 'templates'" class="tab-pane"><Templates /></div>
         <div v-if="isTabOpen('dashboard')" v-show="currentTab === 'dashboard'" class="tab-pane scrollable-pane"><UsabilityWorkbench @navigate="handleWorkbenchNavigate" /></div>
         <div v-if="isTabOpen('metrics')" v-show="currentTab === 'metrics'" class="tab-pane"><AgentMetrics /></div>
         <div v-if="isTabOpen('search')" v-show="currentTab === 'search'" class="tab-pane"><SearchHistory @go-to="goToResult" /></div>
@@ -619,17 +711,45 @@ const closeTab = (tabId, event) => {
     </main>
 
     <!-- 移动端底部 Tab 栏 -->
-    <nav class="bottom-bar" v-if="isMobile">
-      <div
-        v-for="tab in tabs"
+    <div v-if="isMobile && showMobileMenu" class="mobile-menu-backdrop" @click="showMobileMenu = false"></div>
+    <section v-if="isMobile && showMobileMenu" class="mobile-more-menu" aria-label="更多功能">
+      <div class="mobile-more-header">
+        <div>
+          <strong>更多功能</strong>
+          <span>打开项目、工具和系统页面</span>
+        </div>
+        <button type="button" aria-label="关闭更多功能" title="关闭" @click="showMobileMenu = false"><X :size="18" /></button>
+      </div>
+      <div class="mobile-more-grid">
+        <button
+          v-for="tab in mobileMoreTabs"
+          :key="tab.id"
+          type="button"
+          :class="{ active: currentTab === tab.id }"
+          @click="openMobileTab(tab.id)"
+        >
+          <component :is="getTabIcon(tab.id)" :size="19" />
+          <span>{{ tab.label }}</span>
+        </button>
+      </div>
+    </section>
+
+    <nav class="bottom-bar" v-if="isMobile" aria-label="移动端主导航">
+      <button
+        v-for="tab in mobilePrimaryTabs"
         :key="tab.id"
         class="bottom-item"
         :class="{ active: currentTab === tab.id }"
-        @click="switchTab(tab.id)"
+        type="button"
+        @click="openMobileTab(tab.id)"
       >
-        <span class="bottom-icon">{{ tab.icon }}</span>
-        <span class="bottom-label">{{ tab.label.slice(0, 2) }}</span>
-      </div>
+        <component :is="getTabIcon(tab.id)" class="bottom-icon" :size="19" />
+        <span class="bottom-label">{{ tab.label.replace('我的', '') }}</span>
+      </button>
+      <button class="bottom-item" :class="{ active: mobileMoreActive || showMobileMenu }" type="button" @click="showMobileMenu = !showMobileMenu">
+        <Menu class="bottom-icon" :size="19" />
+        <span class="bottom-label">更多</span>
+      </button>
     </nav>
 
     <!-- 菜单管理弹窗 -->
@@ -675,18 +795,18 @@ const closeTab = (tabId, event) => {
 }
 
 .nav-sidebar {
-  width: 264px;
-  min-width: 264px;
+  width: 232px;
+  min-width: 232px;
   background: var(--surface-nav);
   border-right: 1px solid var(--border-color);
   display: flex;
   flex-direction: column;
-  padding: 14px 10px;
+  padding: 10px 8px;
   box-shadow: none;
 }
 
 .nav-logo {
-  padding: 10px 10px 14px;
+  padding: 8px 10px 12px;
   border-bottom: 1px solid var(--border-color);
   margin-bottom: 10px;
 }
@@ -729,8 +849,8 @@ const closeTab = (tabId, event) => {
 }
 
 .nav-item {
-  min-height: 36px;
-  padding: 8px 10px;
+  min-height: 34px;
+  padding: 7px 9px;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -765,10 +885,8 @@ const closeTab = (tabId, event) => {
 }
 
 .nav-icon {
-  font-size: 14px;
+  flex: 0 0 auto;
   width: 20px;
-  text-align: center;
-  filter: none;
   opacity: 0.88;
 }
 
@@ -782,13 +900,14 @@ const closeTab = (tabId, event) => {
 }
 
 .header {
-  min-height: 56px;
-  padding: 0 18px;
+  min-height: 48px;
+  height: 48px;
+  padding: 0 10px 0 16px;
   background: var(--surface);
   border-bottom: 1px solid var(--border-color);
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 12px;
   box-shadow: none;
 }
 .theme-toggle {
@@ -813,21 +932,27 @@ const closeTab = (tabId, event) => {
 }
 
 .header h2 {
-  font-size: 16px;
+  min-width: 142px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
   font-weight: 760;
   letter-spacing: 0;
   color: var(--text-primary);
 }
 
 .tab-bar {
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
-  gap: 6px;
-  background: var(--surface);
-  border-bottom: 1px solid var(--border-color);
+  gap: 4px;
+  background: transparent;
+  border: 0;
   overflow-x: auto;
-  min-height: 42px;
-  padding: 6px 10px;
+  min-height: 32px;
+  padding: 0;
   scrollbar-width: none;
 }
 .tab-bar::-webkit-scrollbar { display: none; }
@@ -835,8 +960,8 @@ const closeTab = (tabId, event) => {
   display: flex;
   align-items: center;
   gap: 6px;
-  height: 30px;
-  padding: 0 9px;
+  height: 28px;
+  padding: 0 8px;
   font-size: 12px;
   color: var(--text-secondary);
   border: 1px solid transparent;
@@ -853,16 +978,16 @@ const closeTab = (tabId, event) => {
   color: var(--text-primary);
 }
 .tab-item.active {
-  background: var(--bg-secondary);
+  background: var(--accent-soft);
   color: var(--accent-blue);
   border-color: var(--border-color);
 }
-.tab-icon { font-size: 13px; }
+.tab-icon { flex: 0 0 auto; }
 .tab-label { max-width: 100px; overflow: hidden; text-overflow: ellipsis; }
 .tab-close {
   width: 16px; height: 16px;
   border: none; background: none;
-  color: var(--text-muted); font-size: 14px;
+  color: var(--text-muted);
   cursor: pointer; border-radius: 3px;
   display: flex; align-items: center; justify-content: center;
   opacity: 0; transition: all 0.15s;
@@ -948,17 +1073,18 @@ const closeTab = (tabId, event) => {
   bottom: 0;
   left: 0;
   right: 0;
-  height: 56px;
+  height: calc(58px + env(safe-area-inset-bottom));
+  padding-bottom: env(safe-area-inset-bottom);
   background: var(--surface);
   border-top: 1px solid var(--border-color);
   display: flex;
   z-index: 1000;
-  overflow-x: auto;
+  overflow: hidden;
   box-shadow: 0 -8px 24px rgba(20, 24, 22, 0.08);
 }
 .bottom-item {
-  flex: 1;
-  min-width: 56px;
+  flex: 1 1 20%;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -968,16 +1094,110 @@ const closeTab = (tabId, event) => {
   color: var(--text-muted);
   transition: all 0.2s;
   padding: 4px 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
 }
 .bottom-item.active {
   color: var(--accent-blue);
   background: var(--accent-soft);
 }
-.bottom-icon { font-size: 16px; }
-.bottom-label { font-size: 11px; white-space: nowrap; }
+.bottom-icon { flex: 0 0 auto; }
+.bottom-label { max-width: 100%; overflow: hidden; text-overflow: ellipsis; font-size: 10px; white-space: nowrap; }
 
 .content-area.has-bottom-bar {
-  padding-bottom: 64px;
+  padding-bottom: calc(64px + env(safe-area-inset-bottom));
+}
+
+.mobile-menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1080;
+  background: rgba(18, 24, 20, 0.42);
+}
+
+.mobile-more-menu {
+  position: fixed;
+  left: 8px;
+  right: 8px;
+  bottom: calc(66px + env(safe-area-inset-bottom));
+  z-index: 1090;
+  max-height: min(70vh, 560px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+}
+
+.mobile-more-header {
+  min-height: 56px;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.mobile-more-header > div {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mobile-more-header strong { font-size: 14px; }
+.mobile-more-header span { color: var(--text-muted); font-size: 11px; }
+.mobile-more-header button {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text-secondary);
+}
+
+.mobile-more-grid {
+  padding: 8px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  overflow-y: auto;
+}
+
+.mobile-more-grid button {
+  min-width: 0;
+  min-height: 46px;
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: var(--panel-muted);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+}
+
+.mobile-more-grid button.active {
+  border-color: color-mix(in srgb, var(--accent-blue) 28%, transparent);
+  background: var(--accent-soft);
+  color: var(--accent-blue);
+}
+
+.mobile-more-grid button span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 @media (max-width: 768px) {
@@ -985,18 +1205,20 @@ const closeTab = (tabId, event) => {
     display: none !important;
   }
   .header {
-    min-height: 50px;
+    min-height: 48px;
+    height: 48px;
     padding: 0 14px;
   }
   .header h2 {
+    min-width: 0;
+    flex: 1;
     font-size: 14px;
   }
   .tab-bar {
-    min-height: 40px;
-    padding: 5px 8px;
+    display: none;
   }
   .tab-pane {
-    inset: 8px 8px 64px;
+    inset: 0 0 calc(58px + env(safe-area-inset-bottom));
   }
 }
 
@@ -1021,8 +1243,9 @@ const closeTab = (tabId, event) => {
 .nav-group-header:hover { color: var(--text-primary); background: var(--control-hover); }
 .nav-group-header[draggable="true"] { cursor: grab; }
 .nav-group-header[draggable="true"]:active { cursor: grabbing; opacity: 0.7; border-left-color: var(--accent-blue); }
-.group-arrow { font-size: 8px; transition: transform 0.2s; }
+.group-arrow { flex: 0 0 auto; transition: transform 0.2s; }
 .group-arrow.collapsed { transform: rotate(-90deg); }
+.group-icon { flex: 0 0 auto; opacity: 0.82; }
 .nav-group-items { display: flex; flex-direction: column; gap: 2px; }
 
 .menu-edit-btn {

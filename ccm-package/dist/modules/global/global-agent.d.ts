@@ -11,6 +11,15 @@ export declare function runGlobalAgentHistorySyncSelfTest(): {
         sanitizesArtifactPathContent: boolean;
     };
 };
+export declare function runFeishuGlobalAgentSessionRoutingSelfTest(): {
+    pass: boolean;
+    checks: {
+        removesDeletedWebSession: boolean;
+        usesValidCurrentSession: boolean;
+        fallsBackToMostRecentWebSession: boolean;
+        onlyUsesAcpSessionWithoutWebHistory: boolean;
+    };
+};
 export declare function runGlobalAgentIntentSelfTest(): {
     passed: boolean;
     results: ({
@@ -48,10 +57,13 @@ export declare function runGlobalAgentIntentSelfTest(): {
     fallbackCronCannotWrite: boolean;
     ambiguousFallbackCannotWrite: boolean;
     fallbackObservationFriendly: boolean;
+    fallbackGreetingStaysConversation: boolean;
+    groupMemoryModelContextBounded: boolean;
     globalHistoryMergePreservesBackendCompletion: boolean;
     statusChecks: {
         globalStatusFollowupRecognized: boolean;
         globalStatusFollowupAvoidsManagementMutation: boolean;
+        globalStatusShortcutDoesNotCaptureExplicitDevelopment: boolean;
         globalStatusSummaryFriendly: boolean;
         globalStatusShowsChildAgentWaitingState: boolean;
         globalStatusWeakMissionStaysReviewing: boolean;
@@ -104,6 +116,25 @@ export declare function runGlobalAgentIntentSelfTest(): {
     };
     visibleReply: string;
 };
+export declare function buildGlobalAgentGroupMemoryModelContext(bundle: any, options?: any): {
+    schema: string;
+    source_schema: string;
+    generated_at: string;
+    query: string;
+    total_group_count: number;
+    selected_group_count: number;
+    selected_groups: any;
+    memory_policy: any;
+    rendered_text: string;
+    context_budget: {
+        max_chars: number;
+        used_chars: number;
+        approximate_tokens: number;
+        source_bytes: number;
+        truncated: boolean;
+        full_context_available_via: string;
+    };
+};
 export declare function buildAgenticContext(query?: string, sessionId?: string, options?: any): {
     projects: {
         name: any;
@@ -140,7 +171,12 @@ export declare function buildAgenticContext(query?: string, sessionId?: string, 
         skills: any[];
     };
     global_memory: string;
-    group_memory_context: any;
+    memory_context_boundary: {
+        schema: string;
+        policy: string;
+        group_session_context_included: boolean;
+        routing_directory_included: boolean;
+    };
     conflict_resolution_maintenance_notifications: {
         schema: string;
         group_count: any;
@@ -151,6 +187,15 @@ export declare function buildAgenticContext(query?: string, sessionId?: string, 
         schema: string;
         group_count: any;
         groups: any;
+        policy: string;
+    };
+    cleanup_commit_repair_context: {
+        schema: string;
+        group_count: any;
+        groups: any;
+        can_claim_or_dispatch: boolean;
+        can_resolve_without_receipt: boolean;
+        cross_group_authorization_allowed: boolean;
         policy: string;
     };
 };
@@ -175,3 +220,10 @@ export declare function bootstrapGlobalAgentMemoryForServer(): {
 };
 export declare function stopGlobalMissionSupervisionForServer(): void;
 export declare function handleGlobalAgentApi(pathname: string, req: any, res: any, parsed: any, ctx: CollabCtx): boolean;
+export declare function runGlobalModelRetrySelfTest(): Promise<{
+    pass: boolean;
+    checks: {
+        transientFailureRetriesOnce: boolean;
+        permanentClientErrorDoesNotRetry: boolean;
+    };
+}>;

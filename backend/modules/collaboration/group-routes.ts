@@ -6,27 +6,167 @@ import { sendJson, GROUP_MESSAGES_DIR } from "../../core/utils";
 import { loadTasks } from "../../core/db";
 import {
   appendGroupMessage,
+  archiveGroupChatSession,
+  createGroupChatSession,
+  deleteGroupChatSession,
+  getActiveGroupChatSessionId,
   getGroupMessages,
+  listGroupChatSessions,
   loadGroups,
+  purgeLegacyDefaultGroupChatSession,
+  pruneArchivedGroupChatSessions,
+  renameGroupChatSession,
   saveGroupMessages,
   saveGroups,
+  selectGroupChatSession,
 } from "./storage";
 import { loadGroupLogs, saveGroupLogs } from "./logs";
-import { getCoordinatorMember, normalizeGroupOrchestrator } from "./group-orchestrator";
-import { buildToolAuthorizationPayload, normalizeToolAuthorization, recordToolAuthorizationChange } from "../../tools/tool-authorization";
+import { getCoordinatorMember, loadOrchestratorConfig, normalizeGroupOrchestrator } from "./group-orchestrator";
+import { buildFreshToolAuthorizationPayload, buildToolAuthorizationPayload, normalizeToolAuthorization, recordToolAuthorizationChange } from "../../tools/tool-authorization";
 import { sanitizeMainAgentDeliveryText } from "../../agents/delivery-report";
+import { getGroupAutoCompactThreshold, resolveGroupModelContextCapacity } from "./group-memory-compaction";
+import { acknowledgeInvalidPendingModelCapabilityRefreshOutcome, buildModelCapabilityRefreshPlan, readInvalidPendingModelCapabilityRefreshOutcomes, readModelCapabilityCache, readModelCapabilityDowngradeAlerts, readModelCapabilityRefreshOutcomeLedger, readModelCapabilityRefreshStatus, recordModelCapabilityEvidence, revokeModelCapabilityEvidence, runModelCapabilityCacheMaintenance, summarizeModelCapabilityCache } from "./model-capability-cache";
+import { readGroupSessionRetentionMaintenanceStatus, runGroupSessionRetentionMaintenance } from "./group-session-maintenance";
 
 type BasicGroupRouteDeps = {
-  getGroupMemoryFile: (groupId: string) => string;
-  loadGroupMemory: (groupId: string) => any;
-  saveGroupMemory: (groupId: string, memory: any) => any;
+  getGroupMemoryFile: (groupId: string, sessionId?: string) => string;
+  loadGroupMemory: (groupId: string, sessionId?: string) => any;
+  saveGroupMemory: (groupId: string, memory: any, sessionId?: string) => any;
   buildGroupMemoryContext: (memory: any) => string;
-  buildAgentMemoryPacket: (groupId: string, project: string) => string;
+  buildAgentMemoryPacket: (groupId: string, project: string, task?: string, options?: any) => string;
   buildInlineTaskRuntime: (task: any) => any;
   getAgentQaItemsForGroup: (groupId: string, limit?: number) => any[];
+  deleteGroupSessionMemoryArtifacts?: (groupId: string, sessionId: string) => any;
 };
 
 const GROUP_MAIN_AGENT_PROGRESS_REFRESH_STALE_MS = 15 * 60 * 1000;
+const GROUP_MESSAGE_RUNTIME_MAX_BYTES = 4 * 1024 * 1024;
+
+const GROUP_MESSAGE_RUNTIME_OMIT_KEYS = new Set([
+  "task_card",
+  "displayStream",
+  "planAlignment",
+  "agentCoordination",
+  "agentProgressSummary",
+  "changeSummary",
+  "receiptReworkSummary",
+  "userHandoff",
+  "runtimeKernel",
+  "recoverySummary",
+  "continuationStatus",
+  "workItemClaimSummary",
+  "workItemUnlockSummary",
+  "completionReadinessSummary",
+  "progressCheckpoints",
+  "deliveryReport",
+  "postReviewSpotCheckSummary",
+  "completionCard",
+  "pickupSummary",
+  "technical",
+  "runtime_kernel",
+  "raw",
+  "rawEvents",
+  "raw_events",
+  "payload",
+  "metadata",
+  "previousLedger",
+  "previous_ledger",
+  "coordinatorOutputPreview",
+  "coordinator_output_preview",
+  "testAgentHandoff",
+  "test_agent_handoff",
+  "testAgentReport",
+  "test_agent_report",
+  "workerContextPacket",
+  "worker_context_packet",
+  "workerHandoff",
+  "worker_handoff",
+  "runtimeToolSnapshot",
+  "runtime_tool_snapshot",
+  "receipts",
+  "receipt",
+  "executions",
+]);
+
+function compactGroupMessageRuntimeValue(value: any, depth = 0): any {
+  if (value === null || value === undefined) return value;
+  if (typeof value === "string") return value.length > 4000 ? `${value.slice(0, 4000)}...` : value;
+  if (typeof value !== "object") return value;
+  if (depth >= 8) return Array.isArray(value) ? [] : {};
+  if (Array.isArray(value)) return value.slice(0, 40).map(item => compactGroupMessageRuntimeValue(item, depth + 1));
+  const result: any = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (GROUP_MESSAGE_RUNTIME_OMIT_KEYS.has(key)) continue;
+    if (key === "summary" && depth >= 2 && item && typeof item === "object") continue;
+    result[key] = compactGroupMessageRuntimeValue(item, depth + 1);
+  }
+  return result;
+}
+
+function compactGroupMessageTaskRuntime(runtime: any) {
+  if (!runtime || typeof runtime !== "object") return runtime;
+  const sourceCard = runtime.taskCard || runtime.task_card || null;
+  const card = compactGroupMessageRuntimeValue(sourceCard);
+  if (card && sourceCard?.technical) {
+    const technical = sourceCard.technical;
+    card.technical = {
+      trace_id: technical.trace_id || "",
+      execution_ids: Array.isArray(technical.execution_ids) ? technical.execution_ids.slice(0, 40) : [],
+      session_ids: Array.isArray(technical.session_ids) ? technical.session_ids.slice(0, 40) : [],
+      work_item_ids: Array.isArray(technical.work_item_ids) ? technical.work_item_ids.slice(0, 40) : [],
+      entity_chain_endpoint: technical.entity_chain_endpoint || "",
+      details_compacted: true,
+    };
+  }
+  const compact = {
+    taskId: runtime.taskId || runtime.task_id || "",
+    status: runtime.status || "",
+    statusText: compactGroupStatusText(runtime.statusText || runtime.status_text || "", 500),
+    updatedAt: runtime.updatedAt || runtime.updated_at || "",
+    lifecycle: compactGroupMessageRuntimeValue(runtime.lifecycle),
+    reasoning: compactGroupMessageRuntimeValue(runtime.reasoning),
+    counts: compactGroupMessageRuntimeValue(runtime.counts),
+    agents: compactGroupMessageRuntimeValue(runtime.agents),
+    sessions: compactGroupMessageRuntimeValue(runtime.sessions),
+    taskCard: card,
+  };
+  const bytes = Buffer.byteLength(JSON.stringify(compact));
+  if (bytes <= GROUP_MESSAGE_RUNTIME_MAX_BYTES) return compact;
+  return {
+    ...compact,
+    taskCard: card ? {
+      version: card.version,
+      visible: card.visible,
+      task_id: card.task_id,
+      title: card.title,
+      goal: card.goal,
+      phase: card.phase,
+      phase_label: card.phase_label,
+      status: card.status,
+      progress: card.progress,
+      active_agents: card.active_agents,
+      agents: card.agents,
+      live_todo_plan: card.live_todo_plan,
+      work_items: card.work_items,
+      work_item_summary: card.work_item_summary,
+      completion_readiness_summary: card.completion_readiness_summary,
+      progress_checkpoints: card.progress_checkpoints,
+      acceptance_review: card.acceptance_review,
+      change_summary: card.change_summary,
+      user_handoff: card.user_handoff,
+      completed: card.completed,
+      blockers: card.blockers,
+      next_action: card.next_action,
+      post_review_spot_check_summary: card.post_review_spot_check_summary,
+      completion_card: card.completion_card,
+      pickup_summary: card.pickup_summary,
+      delivery: card.delivery,
+      actions: card.actions,
+      technical: card.technical,
+      updated_at: card.updated_at,
+    } : null,
+  };
+}
 
 function compactGroupStatusText(value: any, max = 180) {
   const text = String(value || "").replace(/\s+/g, " ").trim();
@@ -2212,14 +2352,14 @@ export function handleBasicGroupRoutes(
     const group = groups.find(g => g.id === groupId);
     if (!group) return sendJson(res, { error: "群聊不存在" }, 404);
     const toolAuth = buildToolAuthorizationPayload(group.tools || {});
-    sendJson(res, { tools: toolAuth.tools, tool_audit: toolAuth.tool_audit, authorization_readiness: toolAuth.authorization_readiness });
+    sendJson(res, { tools: toolAuth.tools, tool_audit: toolAuth.tool_audit, authorization_readiness: toolAuth.authorization_readiness, connection_preflight: toolAuth.connection_preflight });
     return true;
   }
 
   if (pathname === "/api/groups/tools" && req.method === "POST") {
     let body = "";
     req.on("data", (chunk) => body += chunk);
-    req.on("end", () => {
+    req.on("end", async () => {
       try {
         const { group_id, tools } = JSON.parse(body);
         const groups = loadGroups();
@@ -2228,7 +2368,7 @@ export function handleBasicGroupRoutes(
         const previousTools = normalizeToolAuthorization(group.tools || {});
         group.tools = normalizeToolAuthorization(tools);
         saveGroups(groups);
-        const toolAuth = buildToolAuthorizationPayload(group.tools);
+        const toolAuth = await buildFreshToolAuthorizationPayload(group.tools);
         const authorizationChange = recordToolAuthorizationChange({
           scope: "group",
           scopeId: group_id,
@@ -2239,7 +2379,7 @@ export function handleBasicGroupRoutes(
           toolAudit: toolAuth.tool_audit,
           authorizationReadiness: toolAuth.authorization_readiness,
         });
-        sendJson(res, { success: true, tools: toolAuth.tools, tool_audit: toolAuth.tool_audit, authorization_readiness: toolAuth.authorization_readiness, authorization_change: authorizationChange });
+        sendJson(res, { success: true, tools: toolAuth.tools, tool_audit: toolAuth.tool_audit, authorization_readiness: toolAuth.authorization_readiness, connection_preflight: toolAuth.connection_preflight, authorization_change: authorizationChange });
       } catch (e: any) {
         sendJson(res, { error: e.message }, 400);
       }
@@ -2357,21 +2497,196 @@ export function handleBasicGroupRoutes(
     return true;
   }
 
+  if (pathname === "/api/groups/memory/capacity" && req.method === "GET") {
+    const config = loadOrchestratorConfig();
+    const capacity = resolveGroupModelContextCapacity(config);
+    sendJson(res, {
+      success: true,
+      schema: "ccm-group-memory-capacity-status-v1",
+      capacity,
+      capabilityCache: summarizeModelCapabilityCache(readModelCapabilityCache()),
+      configuredAutoCompactThreshold: Number(config.modelAutoCompactTokenLimit || 0),
+      effectiveAutoCompactThreshold: getGroupAutoCompactThreshold(config),
+      preset: String(config.memoryContextPreset || "default"),
+      model: String(config.model || ""),
+      generatedAt: new Date().toISOString(),
+    });
+    return true;
+  }
+
+  if (pathname === "/api/groups/memory/capabilities" && req.method === "GET") {
+    const cache = readModelCapabilityCache();
+    sendJson(res, { success: true, cache: summarizeModelCapabilityCache(cache), entries: cache.entries, refreshPlan: buildModelCapabilityRefreshPlan(), refreshStatus: readModelCapabilityRefreshStatus(), refreshOutcomeLedger: readModelCapabilityRefreshOutcomeLedger(), invalidRefreshOutcomes: readInvalidPendingModelCapabilityRefreshOutcomes(), downgradeAlerts: readModelCapabilityDowngradeAlerts(20), generatedAt: new Date().toISOString() });
+    return true;
+  }
+
+  if (pathname === "/api/groups/memory/capabilities/invalid-outcomes" && req.method === "GET") {
+    sendJson(res, { success: true, ...readInvalidPendingModelCapabilityRefreshOutcomes(), generatedAt: new Date().toISOString() });
+    return true;
+  }
+
+  if (pathname === "/api/groups/memory/capabilities/invalid-outcomes/acknowledge" && req.method === "POST") {
+    let body = "";
+    req.on("data", (chunk) => body += chunk);
+    req.on("end", () => {
+      try {
+        const payload = JSON.parse(body || "{}");
+        const result = acknowledgeInvalidPendingModelCapabilityRefreshOutcome({ ...payload, acknowledgedBy: "memory-center" });
+        if (!result.acknowledged) return sendJson(res, { success: false, error: result.reason || "确认失败", result }, 409);
+        sendJson(res, { success: true, result, invalidRefreshOutcomes: readInvalidPendingModelCapabilityRefreshOutcomes() });
+      } catch (error: any) {
+        sendJson(res, { success: false, error: error.message }, 400);
+      }
+    });
+    return true;
+  }
+
+  if (pathname === "/api/groups/memory/capabilities" && req.method === "POST") {
+    let body = "";
+    req.on("data", (chunk) => body += chunk);
+    req.on("end", () => {
+      try {
+        const payload = JSON.parse(body || "{}");
+        if (String(payload.source || "") !== "user_setting") {
+          return sendJson(res, { error: "Memory Center 只能写入 user_setting；provider 与 native receipt 由可信执行链写入" }, 400);
+        }
+        const result = recordModelCapabilityEvidence({ ...payload, source: "user_setting" });
+        sendJson(res, { success: true, ...result });
+      } catch (error: any) {
+        sendJson(res, { error: error.message }, 400);
+      }
+    });
+    return true;
+  }
+
+  if (pathname === "/api/groups/memory/capabilities/revoke" && req.method === "POST") {
+    let body = "";
+    req.on("data", (chunk) => body += chunk);
+    req.on("end", () => {
+      try {
+        const payload = JSON.parse(body || "{}");
+        const result = revokeModelCapabilityEvidence({ ...payload, actor: "memory-center" });
+        sendJson(res, { success: true, result });
+      } catch (error: any) {
+        sendJson(res, { error: error.message }, 400);
+      }
+    });
+    return true;
+  }
+
+  if (pathname === "/api/groups/memory/capabilities/maintenance" && req.method === "POST") {
+    let body = "";
+    req.on("data", (chunk) => body += chunk);
+    req.on("end", () => {
+      try {
+        const payload = JSON.parse(body || "{}");
+        const dryRun = payload.dryRun !== false && payload.dry_run !== false;
+        if (!dryRun && payload.explicitExecution !== true && payload.explicit_execution !== true) {
+          return sendJson(res, { error: "实际清理需要 explicitExecution=true" }, 400);
+        }
+        const result = runModelCapabilityCacheMaintenance({ ...payload, dryRun });
+        sendJson(res, { success: true, result, cache: summarizeModelCapabilityCache(readModelCapabilityCache()) });
+      } catch (error: any) {
+        sendJson(res, { error: error.message }, 400);
+      }
+    });
+    return true;
+  }
+
+  if (pathname === "/api/groups/sessions/maintenance" && req.method === "GET") {
+    sendJson(res, { success: true, status: readGroupSessionRetentionMaintenanceStatus() });
+    return true;
+  }
+
+  if (pathname === "/api/groups/sessions/maintenance" && req.method === "POST") {
+    let body = "";
+    req.on("data", (chunk) => body += chunk);
+    req.on("end", () => {
+      try {
+        const payload = JSON.parse(body || "{}");
+        const dryRun = payload.dryRun !== false && payload.dry_run !== false;
+        if (!dryRun && payload.explicitExecution !== true && payload.explicit_execution !== true) {
+          return sendJson(res, { error: "实际清理需要 explicitExecution=true" }, 400);
+        }
+        const status = runGroupSessionRetentionMaintenance({ ...payload, dryRun, force: true, trigger: "manual-api" });
+        sendJson(res, { success: true, status });
+      } catch (e: any) {
+        sendJson(res, { error: e.message }, 400);
+      }
+    });
+    return true;
+  }
+
+  if (pathname === "/api/groups/sessions" && req.method === "GET") {
+    const groupId = String(parsed.query.id || parsed.query.group_id || "").trim();
+    if (!groupId) return sendJson(res, { error: "缺少群聊 ID" }, 400);
+    sendJson(res, { success: true, ...listGroupChatSessions(groupId) });
+    return true;
+  }
+
+  if (pathname === "/api/groups/sessions" && req.method === "POST") {
+    let body = "";
+    req.on("data", (chunk) => body += chunk);
+    req.on("end", () => {
+      try {
+        const payload = JSON.parse(body || "{}");
+        const groupId = String(payload.id || payload.group_id || "").trim();
+        if (!groupId) return sendJson(res, { error: "缺少群聊 ID" }, 400);
+        const action = String(payload.action || "create").trim().toLowerCase();
+        const sessionId = String(payload.session_id || payload.sessionId || "");
+        let session: any = null;
+        let result: any = null;
+        if (action === "select") session = selectGroupChatSession(groupId, sessionId);
+        else if (action === "rename") session = renameGroupChatSession(groupId, sessionId, String(payload.title || ""));
+        else if (action === "archive" || action === "restore") session = archiveGroupChatSession(groupId, sessionId, action === "archive");
+        else if (action === "delete") {
+          result = deleteGroupChatSession(groupId, sessionId, { force: payload.force === true });
+          result.memoryArtifacts = deps.deleteGroupSessionMemoryArtifacts?.(groupId, sessionId) || null;
+        } else if (action === "purge_legacy") {
+          result = purgeLegacyDefaultGroupChatSession(groupId, { force: payload.force === true });
+          if (result.purged) result.memoryArtifacts = deps.deleteGroupSessionMemoryArtifacts?.(groupId, "default") || null;
+        } else if (action === "prune") {
+          const retentionConfig = loadOrchestratorConfig();
+          result = pruneArchivedGroupChatSessions(groupId, {
+            retentionDays: retentionConfig.groupSessionRetentionDays,
+            maxArchived: retentionConfig.groupSessionMaxArchived,
+            ...payload,
+          });
+          if (result.dryRun === false) {
+            for (const row of result.results || []) {
+              if (row.deleted) row.memoryArtifacts = deps.deleteGroupSessionMemoryArtifacts?.(groupId, row.id) || null;
+            }
+          }
+        } else session = createGroupChatSession(groupId, String(payload.title || ""));
+        sendJson(res, { success: true, session, result, ...listGroupChatSessions(groupId) });
+      } catch (e: any) {
+        sendJson(res, { error: e.message }, 400);
+      }
+    });
+    return true;
+  }
+
   if (pathname === "/api/groups/messages" && req.method === "GET") {
     const groupId = parsed.query.id;
     if (!groupId) return sendJson(res, { error: "缺少群聊 ID" }, 400);
-    const limit = parseInt(String(parsed.query.limit || "")) || 100;
+    const requestedLimit = parseInt(String(parsed.query.limit || "")) || 100;
+    const limit = Math.max(1, Math.min(2000, requestedLimit));
     const groupIdText = String(groupId);
-    const rawMessages = getGroupMessages(groupIdText).slice(-limit);
+    const sessionId = String(parsed.query.session_id || parsed.query.sessionId || getActiveGroupChatSessionId(groupIdText));
+    const rawMessages = getGroupMessages(groupIdText, sessionId).slice(-limit);
     const allTasks = loadTasks();
+    const sessionTasks = allTasks.filter((task: any) => String(task?.group_id || "") === groupIdText
+      && String(task?.group_session_id || task?.groupSessionId || "default") === sessionId);
     const taskIds = new Set(rawMessages.map((message: any) => String(message?.task_id || message?.task?.id || "")).filter(Boolean));
-    const taskMap = new Map(allTasks.filter((task: any) => taskIds.has(String(task.id))).map((task: any) => [String(task.id), task]));
+    const taskMap = new Map(sessionTasks.filter((task: any) => taskIds.has(String(task.id))).map((task: any) => [String(task.id), task]));
     const runtimeMap = new Map<string, any>();
     const runtimeAttachedTaskIds = new Set<string>();
     const getRuntime = (task: any) => {
       const taskId = String(task?.id || "");
       if (!taskId) return null;
-      if (!runtimeMap.has(taskId)) runtimeMap.set(taskId, deps.buildInlineTaskRuntime(task));
+      if (!runtimeMap.has(taskId)) {
+        runtimeMap.set(taskId, compactGroupMessageTaskRuntime(deps.buildInlineTaskRuntime(task)));
+      }
       return runtimeMap.get(taskId);
     };
     const messages = rawMessages.map((message: any) => {
@@ -2389,10 +2704,12 @@ export function handleBasicGroupRoutes(
       const runtime = getRuntime(task);
       return { ...messageWithoutStoredRuntime, taskRuntime: runtime };
     });
-    const memory = deps.loadGroupMemory(groupIdText);
-    const agentQa = deps.getAgentQaItemsForGroup(groupIdText, 100);
-    const mainAgentStatus = buildGroupMainAgentStatus({ groupId: groupIdText, tasks: allTasks, agentQa, getRuntime });
-    sendJson(res, { messages, memory, agentQa, mainAgentStatus });
+    const memory = deps.loadGroupMemory(groupIdText, sessionId);
+    const sessionTaskIds = new Set(sessionTasks.map((task: any) => String(task.id || "")));
+    const agentQa = deps.getAgentQaItemsForGroup(groupIdText, 100).filter((item: any) => sessionTaskIds.has(String(item?.task_id || item?.taskId || ""))
+      || String(item?.group_session_id || item?.groupSessionId || "") === sessionId);
+    const mainAgentStatus = buildGroupMainAgentStatus({ groupId: groupIdText, tasks: sessionTasks, agentQa, getRuntime });
+    sendJson(res, { messages, memory, agentQa, mainAgentStatus, sessionId, sessions: listGroupChatSessions(groupIdText).sessions });
     return true;
   }
 
@@ -2406,12 +2723,13 @@ export function handleBasicGroupRoutes(
         if (!groupId) return sendJson(res, { error: "缺少群聊 ID" }, 400);
         const group = loadGroups().find((item: any) => item.id === groupId);
         if (!group) return sendJson(res, { error: "群聊不存在" }, 404);
-        const before = getGroupMessages(groupId).length;
-        saveGroupMessages(groupId, []);
+        const sessionId = String(payload.session_id || payload.sessionId || getActiveGroupChatSessionId(groupId));
+        const before = getGroupMessages(groupId, sessionId).length;
+        saveGroupMessages(groupId, [], sessionId);
         if (payload.clear_memory === true || payload.clearMemory === true) {
-          try { fs.unlinkSync(deps.getGroupMemoryFile(groupId)); } catch {}
+          try { fs.unlinkSync(deps.getGroupMemoryFile(groupId, sessionId)); } catch {}
         }
-        sendJson(res, { success: true, cleared: before, memory_cleared: payload.clear_memory === true || payload.clearMemory === true });
+        sendJson(res, { success: true, cleared: before, session_id: sessionId, memory_cleared: payload.clear_memory === true || payload.clearMemory === true });
       } catch (e: any) {
         sendJson(res, { error: e.message }, 400);
       }
@@ -2422,13 +2740,14 @@ export function handleBasicGroupRoutes(
   if (pathname === "/api/groups/memory" && req.method === "GET") {
     const groupId = parsed.query.id;
     if (!groupId) return sendJson(res, { error: "缺少群聊 ID" }, 400);
+    const sessionId = String(parsed.query.session_id || parsed.query.sessionId || getActiveGroupChatSessionId(String(groupId)));
     const project = parsed.query.project ? String(parsed.query.project) : "";
-    const memory = deps.saveGroupMemory(String(groupId), deps.loadGroupMemory(String(groupId)));
+    const memory = deps.saveGroupMemory(String(groupId), deps.loadGroupMemory(String(groupId), sessionId), sessionId);
     sendJson(res, {
       success: true,
       memory,
       context: deps.buildGroupMemoryContext(memory),
-      agentPacket: project ? deps.buildAgentMemoryPacket(String(groupId), project) : "",
+      agentPacket: project ? deps.buildAgentMemoryPacket(String(groupId), project, "", { groupSessionId: sessionId }) : "",
     });
     return true;
   }

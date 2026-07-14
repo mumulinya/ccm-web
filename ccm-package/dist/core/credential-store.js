@@ -53,7 +53,7 @@ const ROOT = path.join(os.homedir(), ".cc-connect", "private");
 const KEY_FILE = path.join(ROOT, "credential-master.key");
 const STORE_FILE = path.join(ROOT, "credentials.enc.json");
 const REF_PREFIX = "ccm-secret://";
-const SECRET_KEY_PATTERN = /(?:secret|token|password|api[_-]?key|hook[_-]?token)$/i;
+const SECRET_KEY_PATTERN = /(?:secret|token|password|api[_-]?key|hook[_-]?token|webhook[_-]?url)$/i;
 function ensurePrivateDir() {
     fs.mkdirSync(ROOT, { recursive: true });
     try {

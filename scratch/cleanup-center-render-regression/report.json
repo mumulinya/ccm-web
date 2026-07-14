@@ -1,0 +1,39 @@
+{
+  "pass": true,
+  "generatedAt": "2026-07-14T02:31:55.566Z",
+  "baseUrl": "http://127.0.0.1:3082",
+  "checks": [
+    {
+      "name": "desktop overview has no overflow, raw JSON or open technical details",
+      "pass": true
+    },
+    {
+      "name": "dangerous action requires exact preview selection and confirmation phrase",
+      "pass": true
+    },
+    {
+      "name": "desktop danger preview has no overflow, raw JSON or open technical details",
+      "pass": true
+    },
+    {
+      "name": "desktop history has no overflow, raw JSON or open technical details",
+      "pass": true
+    },
+    {
+      "name": "mobile overview has no overflow, raw JSON or open technical details",
+      "pass": true
+    },
+    {
+      "name": "mobile danger preview has no overflow, raw JSON or open technical details",
+      "pass": true
+    }
+  ],
+  "errors": [],
+  "screenshots": [
+    "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\cleanup-center-render-regression\\desktop-overview.png",
+    "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\cleanup-center-render-regression\\desktop-danger-preview.png",
+    "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\cleanup-center-render-regression\\desktop-history.png",
+    "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\cleanup-center-render-regression\\mobile-overview.png",
+    "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\cleanup-center-render-regression\\mobile-danger-preview.png"
+  ]
+}

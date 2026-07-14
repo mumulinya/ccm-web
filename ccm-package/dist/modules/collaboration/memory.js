@@ -33,12 +33,16 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.GROUP_GLOBAL_MEMORY_HEALTH_GATE_VERSION = exports.GROUP_GLOBAL_MEMORY_ARBITRATION_LEDGER_VERSION = exports.GROUP_COMPACT_FILE_REFERENCE_READ_PLAN_REVALIDATION_GATE_VERSION = exports.GROUP_COMPACT_FILE_REFERENCE_LEDGER_VERSION = exports.GROUP_TOOL_CONTINUITY_SNAPSHOT_VERSION = exports.GROUP_SESSION_MEMORY_SNAPSHOT_VERSION = exports.GROUP_API_MICROCOMPACT_NATIVE_APPLY_TELEMETRY_MAX_AGE_MS = exports.GROUP_API_MICROCOMPACT_NATIVE_APPLY_REQUEST_TELEMETRY_LEDGER_VERSION = exports.GROUP_API_MICROCOMPACT_NATIVE_APPLY_PROOF_LEDGER_VERSION = exports.GROUP_MEMORY_POST_COMPACT_CANDIDATE_USAGE_LEDGER_VERSION = exports.GROUP_MEMORY_POST_COMPACT_FIRST_DISPATCH_MARKER_VERSION = exports.GROUP_MEMORY_POST_COMPACT_REINJECTION_GATE_VERSION = exports.GROUP_MEMORY_DISPATCH_FRESHNESS_GATE_VERSION = exports.GROUP_MEMORY_SOURCE_CHANGE_TRIGGER_VERSION = exports.GROUP_MEMORY_RELOAD_AUDIT_VERSION = exports.GROUP_MEMORY_SOURCE_MANIFEST_VERSION = void 0;
+exports.GROUP_GLOBAL_MEMORY_HEALTH_GATE_VERSION = exports.GROUP_GLOBAL_MEMORY_ARBITRATION_LEDGER_VERSION = exports.GROUP_COMPACT_FILE_REFERENCE_READ_PLAN_REVALIDATION_GATE_VERSION = exports.GROUP_COMPACT_FILE_REFERENCE_LEDGER_VERSION = exports.GROUP_TOOL_CONTINUITY_SNAPSHOT_VERSION = exports.GROUP_SESSION_MEMORY_TOOL_CALLS_BETWEEN_UPDATES = exports.GROUP_SESSION_MEMORY_MIN_TOKENS_BETWEEN_UPDATES = exports.GROUP_SESSION_MEMORY_MIN_TOKENS_TO_INIT = exports.GROUP_SESSION_MEMORY_MAX_TOTAL_TOKENS = exports.GROUP_SESSION_MEMORY_MAX_SECTION_TOKENS = exports.GROUP_SESSION_MEMORY_SNAPSHOT_VERSION = exports.GROUP_API_MICROCOMPACT_NATIVE_APPLY_TELEMETRY_MAX_AGE_MS = exports.GROUP_API_MICROCOMPACT_NATIVE_APPLY_REQUEST_TELEMETRY_LEDGER_VERSION = exports.GROUP_API_MICROCOMPACT_NATIVE_APPLY_PROOF_LEDGER_VERSION = exports.GROUP_MEMORY_POST_COMPACT_CANDIDATE_USAGE_LEDGER_VERSION = exports.GROUP_MEMORY_POST_COMPACT_FIRST_DISPATCH_MARKER_VERSION = exports.GROUP_MEMORY_POST_COMPACT_REINJECTION_GATE_VERSION = exports.GROUP_MEMORY_DISPATCH_FRESHNESS_GATE_VERSION = exports.GROUP_MEMORY_SOURCE_CHANGE_TRIGGER_VERSION = exports.GROUP_MEMORY_RELOAD_AUDIT_VERSION = exports.GROUP_MEMORY_SOURCE_MANIFEST_VERSION = void 0;
+exports.getGroupSessionMemoryScopeId = getGroupSessionMemoryScopeId;
 exports.getGroupMemoryFile = getGroupMemoryFile;
+exports.getGroupMemoryReloadLedgerFile = getGroupMemoryReloadLedgerFile;
 exports.getGroupPostCompactDispatchLedgerFile = getGroupPostCompactDispatchLedgerFile;
 exports.getGroupPostCompactCandidateUsageLedgerFile = getGroupPostCompactCandidateUsageLedgerFile;
 exports.getGroupApiMicrocompactNativeApplyProofLedgerFile = getGroupApiMicrocompactNativeApplyProofLedgerFile;
 exports.getGroupApiMicrocompactNativeApplyRequestTelemetryLedgerFile = getGroupApiMicrocompactNativeApplyRequestTelemetryLedgerFile;
+exports.getGroupReplayRepairLedgerFile = getGroupReplayRepairLedgerFile;
+exports.getGroupReplayRepairWorkItemsFile = getGroupReplayRepairWorkItemsFile;
 exports.getGroupSessionMemorySnapshotFile = getGroupSessionMemorySnapshotFile;
 exports.getGroupSessionMemoryMarkdownFile = getGroupSessionMemoryMarkdownFile;
 exports.getGroupToolContinuitySnapshotFile = getGroupToolContinuitySnapshotFile;
@@ -57,7 +61,14 @@ exports.buildChildGlobalAgentMemoryHealthGate = buildChildGlobalAgentMemoryHealt
 exports.readGroupGlobalMemoryArbitrationLedger = readGroupGlobalMemoryArbitrationLedger;
 exports.recordGroupGlobalMemoryArbitrationLedger = recordGroupGlobalMemoryArbitrationLedger;
 exports.distillGroupGlobalMemoryArbitrationToTypedMemory = distillGroupGlobalMemoryArbitrationToTypedMemory;
+exports.analyzeGroupSessionMemoryBudget = analyzeGroupSessionMemoryBudget;
+exports.evaluateGroupSessionMemoryUpdateCadence = evaluateGroupSessionMemoryUpdateCadence;
+exports.enforceGroupSessionMemoryBudget = enforceGroupSessionMemoryBudget;
+exports.buildGroupSessionMemorySectionEvidence = buildGroupSessionMemorySectionEvidence;
+exports.buildGroupSessionMemorySnapshot = buildGroupSessionMemorySnapshot;
 exports.persistGroupSessionMemorySnapshot = persistGroupSessionMemorySnapshot;
+exports.commitGroupSessionMemorySnapshot = commitGroupSessionMemorySnapshot;
+exports.persistGroupSessionMemoryCadenceObservation = persistGroupSessionMemoryCadenceObservation;
 exports.readGroupSessionMemorySnapshotSummary = readGroupSessionMemorySnapshotSummary;
 exports.persistGroupToolContinuitySnapshot = persistGroupToolContinuitySnapshot;
 exports.readGroupToolContinuitySnapshotSummary = readGroupToolContinuitySnapshotSummary;
@@ -72,6 +83,8 @@ exports.latestGroupCompactFileReferenceReadPlanRows = latestGroupCompactFileRefe
 exports.latestGroupCompactFileReferenceReadPlanRevalidationGate = latestGroupCompactFileReferenceReadPlanRevalidationGate;
 exports.buildGroupCompactFileReferenceReadPlanRevalidationGate = buildGroupCompactFileReferenceReadPlanRevalidationGate;
 exports.buildGroupMemoryContext = buildGroupMemoryContext;
+exports.deleteGroupSessionMemoryArtifacts = deleteGroupSessionMemoryArtifacts;
+exports.prepareGroupMemoryResumeProjection = prepareGroupMemoryResumeProjection;
 exports.buildGroupMemorySourceManifest = buildGroupMemorySourceManifest;
 exports.readGroupPostCompactDispatchLedger = readGroupPostCompactDispatchLedger;
 exports.readGroupPostCompactCandidateUsageLedger = readGroupPostCompactCandidateUsageLedger;
@@ -90,7 +103,17 @@ exports.scheduleGroupMemoryAutoCompaction = scheduleGroupMemoryAutoCompaction;
 exports.runGroupMemoryAutoCompactionNow = runGroupMemoryAutoCompactionNow;
 exports.ensureGroupMemoryAutoCompactionHook = ensureGroupMemoryAutoCompactionHook;
 exports.runGroupMemoryAutoCompactionSelfTest = runGroupMemoryAutoCompactionSelfTest;
+exports.buildChildTypedMemoryRecallLedgerScope = buildChildTypedMemoryRecallLedgerScope;
+exports.buildChildTypedMemoryDeliveryCapsule = buildChildTypedMemoryDeliveryCapsule;
 exports.buildAgentMemoryContextBundle = buildAgentMemoryContextBundle;
+exports.admitChildPostTurnSummaryDelivery = admitChildPostTurnSummaryDelivery;
+exports.admitChildTypedMemoryDelivery = admitChildTypedMemoryDelivery;
+exports.commitChildTypedMemoryDelivery = commitChildTypedMemoryDelivery;
+exports.createChildTypedMemoryDispatchWal = createChildTypedMemoryDispatchWal;
+exports.markChildTypedMemoryDispatchStarted = markChildTypedMemoryDispatchStarted;
+exports.markChildTypedMemoryRunnerReturned = markChildTypedMemoryRunnerReturned;
+exports.markChildTypedMemoryDispatchCommitted = markChildTypedMemoryDispatchCommitted;
+exports.recoverChildTypedMemoryDispatchWal = recoverChildTypedMemoryDispatchWal;
 exports.renderGroupMemoryContextBundle = renderGroupMemoryContextBundle;
 exports.buildAgentMemoryPacket = buildAgentMemoryPacket;
 exports.buildGlobalGroupMemoryContext = buildGlobalGroupMemoryContext;
@@ -126,9 +149,21 @@ const context_budget_1 = require("../../system/context-budget");
 const tool_authorization_1 = require("../../tools/tool-authorization");
 const group_memory_compaction_1 = require("./group-memory-compaction");
 const group_memory_index_1 = require("./group-memory-index");
+const runtime_kernel_1 = require("../../agents/runtime-kernel");
 const storage_1 = require("./storage");
+const group_memory_boundary_journal_1 = require("./group-memory-boundary-journal");
+const group_session_memory_extraction_1 = require("./group-session-memory-extraction");
 const memory_1 = require("../../agents/global/memory");
+const execution_kernel_1 = require("../../agents/execution-kernel");
+const direct_dispatch_spool_1 = require("../../agents/direct-dispatch-spool");
+const agent_sessions_1 = require("../../tasks/agent-sessions");
+const typed_memory_dispatch_wal_1 = require("./typed-memory-dispatch-wal");
+const group_post_turn_summary_1 = require("./group-post-turn-summary");
+const task_agent_invocation_lineage_1 = require("../../tasks/task-agent-invocation-lineage");
+const task_agent_continuation_soak_1 = require("../../tasks/task-agent-continuation-soak");
+const group_compact_head_1 = require("./group-compact-head");
 const GROUP_MEMORY_DIR = path.join(utils_1.CCM_DIR, "group-memory");
+const GROUP_SESSION_SCOPED_MEMORY_DIR = path.join(utils_1.CCM_DIR, "group-memory-sessions");
 exports.GROUP_MEMORY_SOURCE_MANIFEST_VERSION = 1;
 exports.GROUP_MEMORY_RELOAD_AUDIT_VERSION = 1;
 exports.GROUP_MEMORY_SOURCE_CHANGE_TRIGGER_VERSION = 1;
@@ -139,7 +174,12 @@ exports.GROUP_MEMORY_POST_COMPACT_CANDIDATE_USAGE_LEDGER_VERSION = 1;
 exports.GROUP_API_MICROCOMPACT_NATIVE_APPLY_PROOF_LEDGER_VERSION = 1;
 exports.GROUP_API_MICROCOMPACT_NATIVE_APPLY_REQUEST_TELEMETRY_LEDGER_VERSION = 1;
 exports.GROUP_API_MICROCOMPACT_NATIVE_APPLY_TELEMETRY_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000;
-exports.GROUP_SESSION_MEMORY_SNAPSHOT_VERSION = 1;
+exports.GROUP_SESSION_MEMORY_SNAPSHOT_VERSION = 3;
+exports.GROUP_SESSION_MEMORY_MAX_SECTION_TOKENS = 2_000;
+exports.GROUP_SESSION_MEMORY_MAX_TOTAL_TOKENS = 12_000;
+exports.GROUP_SESSION_MEMORY_MIN_TOKENS_TO_INIT = 10_000;
+exports.GROUP_SESSION_MEMORY_MIN_TOKENS_BETWEEN_UPDATES = 5_000;
+exports.GROUP_SESSION_MEMORY_TOOL_CALLS_BETWEEN_UPDATES = 3;
 exports.GROUP_TOOL_CONTINUITY_SNAPSHOT_VERSION = 1;
 exports.GROUP_COMPACT_FILE_REFERENCE_LEDGER_VERSION = 1;
 exports.GROUP_COMPACT_FILE_REFERENCE_READ_PLAN_REVALIDATION_GATE_VERSION = 1;
@@ -156,29 +196,46 @@ const GROUP_SESSION_MEMORY_DIR = path.join(utils_1.CCM_DIR, "group-session-memor
 const GROUP_TOOL_CONTINUITY_DIR = path.join(utils_1.CCM_DIR, "group-tool-continuity");
 const GROUP_COMPACT_FILE_REFERENCE_DIR = path.join(utils_1.CCM_DIR, "group-memory-file-references");
 const GROUP_GLOBAL_MEMORY_ARBITRATION_DIR = path.join(utils_1.CCM_DIR, "group-global-memory-arbitration");
-function getGroupMemoryFile(groupId) {
-    return path.join(GROUP_MEMORY_DIR, `${groupId}.json`);
+function cleanGroupMemoryScopePart(value) {
+    return String(value || "").replace(/[^a-zA-Z0-9._-]+/g, "-").slice(0, 120) || "unknown";
 }
-function getGroupMemoryReloadLedgerFile(groupId) {
-    return path.join(GROUP_MEMORY_RELOAD_DIR, `${String(groupId || "unknown").replace(/[^a-zA-Z0-9._:-]+/g, "-")}.json`);
+function getGroupSessionSidecarFile(root, groupId, sessionId = "") {
+    const cleanSessionId = String(sessionId || (0, storage_1.getActiveGroupChatSessionId)(groupId)).trim();
+    if (!cleanSessionId || cleanSessionId === "default") {
+        return path.join(root, `${cleanGroupMemoryScopePart(groupId)}.json`);
+    }
+    return path.join(root, cleanGroupMemoryScopePart(groupId), `${cleanGroupMemoryScopePart(cleanSessionId)}.json`);
 }
-function getGroupPostCompactDispatchLedgerFile(groupId) {
-    return path.join(GROUP_MEMORY_POST_COMPACT_DISPATCH_DIR, `${String(groupId || "unknown").replace(/[^a-zA-Z0-9._:-]+/g, "-")}.json`);
+function getGroupSessionMemoryScopeId(groupId, sessionId = "") {
+    const cleanSessionId = String(sessionId || "").trim();
+    return !cleanSessionId || cleanSessionId === "default" ? groupId : `${groupId}--${cleanSessionId}`;
 }
-function getGroupPostCompactCandidateUsageLedgerFile(groupId) {
-    return path.join(GROUP_MEMORY_POST_COMPACT_CANDIDATE_USAGE_DIR, `${String(groupId || "unknown").replace(/[^a-zA-Z0-9._:-]+/g, "-")}.json`);
+function getGroupMemoryFile(groupId, sessionId = "") {
+    const resolvedSessionId = String(sessionId || (0, storage_1.getActiveGroupChatSessionId)(groupId));
+    if (resolvedSessionId === "default")
+        return path.join(GROUP_MEMORY_DIR, `${groupId}.json`);
+    return path.join(GROUP_SESSION_SCOPED_MEMORY_DIR, cleanGroupMemoryScopePart(groupId), `${cleanGroupMemoryScopePart(resolvedSessionId)}.json`);
 }
-function getGroupApiMicrocompactNativeApplyProofLedgerFile(groupId) {
-    return path.join(GROUP_API_MICROCOMPACT_NATIVE_APPLY_PROOF_DIR, `${String(groupId || "unknown").replace(/[^a-zA-Z0-9._:-]+/g, "-").slice(0, 160) || "unknown"}.json`);
+function getGroupMemoryReloadLedgerFile(groupId, sessionId = "") {
+    return getGroupSessionSidecarFile(GROUP_MEMORY_RELOAD_DIR, groupId, sessionId);
 }
-function getGroupApiMicrocompactNativeApplyRequestTelemetryLedgerFile(groupId) {
-    return path.join(GROUP_API_MICROCOMPACT_NATIVE_APPLY_REQUEST_TELEMETRY_DIR, `${String(groupId || "unknown").replace(/[^a-zA-Z0-9._:-]+/g, "-").slice(0, 160) || "unknown"}.json`);
+function getGroupPostCompactDispatchLedgerFile(groupId, sessionId = "") {
+    return getGroupSessionSidecarFile(GROUP_MEMORY_POST_COMPACT_DISPATCH_DIR, groupId, sessionId);
 }
-function getGroupReplayRepairLedgerFile(groupId) {
-    return path.join(GROUP_MEMORY_REPLAY_REPAIR_DIR, `${String(groupId || "unknown").replace(/[^a-zA-Z0-9._:-]+/g, "-").slice(0, 160) || "unknown"}.json`);
+function getGroupPostCompactCandidateUsageLedgerFile(groupId, sessionId = "") {
+    return getGroupSessionSidecarFile(GROUP_MEMORY_POST_COMPACT_CANDIDATE_USAGE_DIR, groupId, sessionId);
 }
-function getGroupReplayRepairWorkItemsFile(groupId) {
-    return path.join(GROUP_MEMORY_REPLAY_REPAIR_WORK_ITEMS_DIR, `${String(groupId || "unknown").replace(/[^a-zA-Z0-9._:-]+/g, "-").slice(0, 160) || "unknown"}.json`);
+function getGroupApiMicrocompactNativeApplyProofLedgerFile(groupId, sessionId = "") {
+    return getGroupSessionSidecarFile(GROUP_API_MICROCOMPACT_NATIVE_APPLY_PROOF_DIR, groupId, sessionId);
+}
+function getGroupApiMicrocompactNativeApplyRequestTelemetryLedgerFile(groupId, sessionId = "") {
+    return getGroupSessionSidecarFile(GROUP_API_MICROCOMPACT_NATIVE_APPLY_REQUEST_TELEMETRY_DIR, groupId, sessionId);
+}
+function getGroupReplayRepairLedgerFile(groupId, sessionId = "") {
+    return getGroupSessionSidecarFile(GROUP_MEMORY_REPLAY_REPAIR_DIR, groupId, sessionId);
+}
+function getGroupReplayRepairWorkItemsFile(groupId, sessionId = "") {
+    return getGroupSessionSidecarFile(GROUP_MEMORY_REPLAY_REPAIR_WORK_ITEMS_DIR, groupId, sessionId);
 }
 function getGroupSessionMemoryDir(groupId) {
     return path.join(GROUP_SESSION_MEMORY_DIR, String(groupId || "unknown").replace(/[^a-zA-Z0-9._:-]+/g, "-").slice(0, 160) || "unknown");
@@ -204,8 +261,8 @@ function getGroupCompactFileReferenceLedgerFile(groupId) {
 function getGroupGlobalMemoryArbitrationLedgerFile(groupId) {
     return path.join(GROUP_GLOBAL_MEMORY_ARBITRATION_DIR, `${String(groupId || "unknown").replace(/[^a-zA-Z0-9._:-]+/g, "-").slice(0, 160) || "unknown"}.json`);
 }
-function readGroupReplayRepairLedgerSummary(groupId) {
-    const file = getGroupReplayRepairLedgerFile(groupId);
+function readGroupReplayRepairLedgerSummary(groupId, sessionId = "") {
+    const file = getGroupReplayRepairLedgerFile(groupId, sessionId);
     try {
         const ledger = JSON.parse(fs.readFileSync(file, "utf-8"));
         if (ledger?.schema !== "ccm-compact-boundary-replay-repair-ledger-v1")
@@ -243,8 +300,8 @@ function readGroupReplayRepairLedgerSummary(groupId) {
         return null;
     }
 }
-function readGroupReplayRepairWorkItemsSummary(groupId) {
-    const file = getGroupReplayRepairWorkItemsFile(groupId);
+function readGroupReplayRepairWorkItemsSummary(groupId, sessionId = "") {
+    const file = getGroupReplayRepairWorkItemsFile(groupId, sessionId);
     try {
         const ledger = JSON.parse(fs.readFileSync(file, "utf-8"));
         if (ledger?.schema !== "ccm-compact-boundary-replay-repair-work-items-v1")
@@ -354,8 +411,8 @@ function replayRepairCandidatePriorityRank(item) {
         return 2;
     return 9;
 }
-function readGroupReplayRepairDispatchCandidatesSummary(groupId, limit = 12) {
-    const file = getGroupReplayRepairWorkItemsFile(groupId);
+function readGroupReplayRepairDispatchCandidatesSummary(groupId, limit = 12, sessionId = "") {
+    const file = getGroupReplayRepairWorkItemsFile(groupId, sessionId);
     try {
         const ledger = JSON.parse(fs.readFileSync(file, "utf-8"));
         if (ledger?.schema !== "ccm-compact-boundary-replay-repair-work-items-v1")
@@ -513,12 +570,14 @@ function buildChildAgentTypeSummary(memory = {}) {
         rows,
     };
 }
-function getGroupMemoryBackupFile(groupId) {
-    return `${getGroupMemoryFile(groupId)}.bak`;
+function getGroupMemoryBackupFile(groupId, sessionId = "") {
+    return `${getGroupMemoryFile(groupId, sessionId)}.bak`;
 }
-function createEmptyGroupMemory(groupId) {
+function createEmptyGroupMemory(groupId, sessionId = "") {
+    const resolvedSessionId = String(sessionId || (0, storage_1.getActiveGroupChatSessionId)(groupId));
     return {
         groupId,
+        groupSessionId: resolvedSessionId,
         goal: "",
         summary: "",
         currentPhase: "idle",
@@ -542,39 +601,131 @@ function createEmptyGroupMemory(groupId) {
         updated_at: new Date().toISOString(),
     };
 }
-function loadGroupMemory(groupId) {
-    const file = getGroupMemoryFile(groupId);
+function loadGroupMemory(groupId, sessionId = "") {
+    const resolvedSessionId = String(sessionId || (0, storage_1.getActiveGroupChatSessionId)(groupId));
+    const file = getGroupMemoryFile(groupId, resolvedSessionId);
     if (!fs.existsSync(file))
-        return createEmptyGroupMemory(groupId);
+        return createEmptyGroupMemory(groupId, resolvedSessionId);
     try {
-        return { ...createEmptyGroupMemory(groupId), ...JSON.parse(fs.readFileSync(file, "utf-8")) };
+        return { ...createEmptyGroupMemory(groupId, resolvedSessionId), ...JSON.parse(fs.readFileSync(file, "utf-8")), groupSessionId: resolvedSessionId };
     }
     catch {
-        const backup = getGroupMemoryBackupFile(groupId);
+        const backup = getGroupMemoryBackupFile(groupId, resolvedSessionId);
         try {
-            const recovered = { ...createEmptyGroupMemory(groupId), ...JSON.parse(fs.readFileSync(backup, "utf-8")) };
+            const recovered = { ...createEmptyGroupMemory(groupId, resolvedSessionId), ...JSON.parse(fs.readFileSync(backup, "utf-8")), groupSessionId: resolvedSessionId };
             const temp = `${file}.${process.pid}.recover.tmp`;
             fs.writeFileSync(temp, JSON.stringify(recovered, null, 2), "utf-8");
             fs.renameSync(temp, file);
             return recovered;
         }
         catch { }
-        return createEmptyGroupMemory(groupId);
+        return createEmptyGroupMemory(groupId, resolvedSessionId);
     }
 }
-function saveGroupMemory(groupId, memory) {
-    if (!fs.existsSync(GROUP_MEMORY_DIR))
-        fs.mkdirSync(GROUP_MEMORY_DIR, { recursive: true });
+function saveGroupMemory(groupId, memory, sessionId = "", options = {}) {
+    const resolvedSessionId = String(sessionId || memory?.groupSessionId || (0, storage_1.getActiveGroupChatSessionId)(groupId));
+    const snapshotScopeId = resolvedSessionId === "default" ? groupId : `${groupId}--${resolvedSessionId}`;
+    const file = getGroupMemoryFile(groupId, resolvedSessionId);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
     let next = compressGroupMemory({
-        ...createEmptyGroupMemory(groupId),
+        ...createEmptyGroupMemory(groupId, resolvedSessionId),
         ...(memory || {}),
         groupId,
+        groupSessionId: resolvedSessionId,
         updated_at: new Date().toISOString(),
     });
     try {
+        const cadenceDecision = options.sessionMemoryCadenceDecision || options.session_memory_cadence_decision || null;
+        let sessionMemory = null;
+        if (cadenceDecision?.shouldExtract === true
+            && !options.sessionMemoryModelMarkdown
+            && !options.session_memory_model_markdown) {
+            sessionMemory = persistGroupSessionMemoryCadenceObservation(snapshotScopeId, {
+                ...cadenceDecision,
+                shouldExtract: false,
+                status: "model_extraction_due",
+                modelExtractionRequired: true,
+                modelExtractionQueuedAt: new Date().toISOString(),
+            });
+        }
+        else if (cadenceDecision && cadenceDecision.shouldExtract !== true) {
+            sessionMemory = persistGroupSessionMemoryCadenceObservation(snapshotScopeId, cadenceDecision);
+        }
+        else {
+            const transaction = (0, group_session_memory_extraction_1.runGroupSessionMemoryExtractionTransaction)(snapshotScopeId, (extraction) => {
+                const prepared = buildGroupSessionMemorySnapshot(snapshotScopeId, next, {
+                    reason: cadenceDecision ? "automatic_session_memory_extraction" : "save_group_memory_manual",
+                    cadenceDecision,
+                    extractionTransaction: {
+                        schema: "ccm-group-session-memory-extraction-transaction-v1",
+                        status: "prepared",
+                        leaseId: extraction.lease?.leaseId || "",
+                        fencingToken: Number(extraction.lease?.fencingToken || 0),
+                        recovered: extraction.recovered === true,
+                        startedAt: extraction.state?.startedAt || "",
+                    },
+                });
+                return {
+                    schema: "ccm-group-session-memory-extraction-staged-commit-v1",
+                    commit: () => commitGroupSessionMemorySnapshot(prepared),
+                };
+            }, {
+                failBeforeCommit: options.failSessionMemoryExtractionBeforeCommit === true || options.fail_session_memory_extraction_before_commit === true,
+                at: options.sessionMemoryExtractionAt || options.session_memory_extraction_at,
+                ttlMs: options.sessionMemoryExtractionTtlMs || options.session_memory_extraction_ttl_ms,
+            });
+            if (transaction.committed) {
+                sessionMemory = transaction.value;
+            }
+            else if (transaction.status === "lease_busy") {
+                const existing = readGroupSessionMemorySnapshotSummary(snapshotScopeId) || {};
+                sessionMemory = {
+                    ...existing,
+                    extractionTransaction: {
+                        schema: "ccm-group-session-memory-extraction-transaction-v1",
+                        status: "in_progress",
+                        leaseId: transaction.acquired?.status?.lease?.leaseId || "",
+                        fencingToken: Number(transaction.acquired?.status?.lease?.fencingToken || 0),
+                    },
+                };
+            }
+            else if (transaction.status === "failed") {
+                const existing = readGroupSessionMemorySnapshotSummary(snapshotScopeId) || {};
+                const failedCadence = cadenceDecision || existing.updateCadence || null;
+                sessionMemory = failedCadence
+                    ? persistGroupSessionMemoryCadenceObservation(snapshotScopeId, {
+                        ...failedCadence,
+                        shouldExtract: false,
+                        status: "extraction_failed",
+                        lastExtractionError: transaction.error || transaction.status,
+                    })
+                    : existing;
+                sessionMemory = {
+                    ...sessionMemory,
+                    extractionTransaction: {
+                        schema: "ccm-group-session-memory-extraction-transaction-v1",
+                        status: "failed",
+                        error: transaction.error || transaction.status,
+                        leaseId: transaction.lease?.leaseId || "",
+                        fencingToken: Number(transaction.lease?.fencingToken || 0),
+                    },
+                };
+            }
+            else {
+                const existing = readGroupSessionMemorySnapshotSummary(snapshotScopeId) || {};
+                sessionMemory = {
+                    ...existing,
+                    extractionTransaction: {
+                        schema: "ccm-group-session-memory-extraction-transaction-v1",
+                        status: "blocked",
+                        error: transaction.error || transaction.status,
+                    },
+                };
+            }
+        }
         next = {
             ...next,
-            sessionMemory: persistGroupSessionMemorySnapshot(groupId, next, { reason: "save_group_memory" }),
+            sessionMemory,
         };
     }
     catch (error) {
@@ -584,8 +735,8 @@ function saveGroupMemory(groupId, memory) {
                 schema: "ccm-group-session-memory-snapshot-v1",
                 version: exports.GROUP_SESSION_MEMORY_SNAPSHOT_VERSION,
                 groupId,
-                snapshotFile: getGroupSessionMemorySnapshotFile(groupId),
-                summaryFile: getGroupSessionMemoryMarkdownFile(groupId),
+                snapshotFile: getGroupSessionMemorySnapshotFile(snapshotScopeId),
+                summaryFile: getGroupSessionMemoryMarkdownFile(snapshotScopeId),
                 generatedAt: new Date().toISOString(),
                 error: error?.message || String(error),
             },
@@ -594,7 +745,7 @@ function saveGroupMemory(groupId, memory) {
     try {
         next = {
             ...next,
-            toolContinuity: persistGroupToolContinuitySnapshot(groupId, next, { reason: "save_group_memory" }),
+            toolContinuity: persistGroupToolContinuitySnapshot(snapshotScopeId, next, { reason: "save_group_memory" }),
         };
     }
     catch (error) {
@@ -604,8 +755,8 @@ function saveGroupMemory(groupId, memory) {
                 schema: "ccm-group-tool-continuity-snapshot-v1",
                 version: exports.GROUP_TOOL_CONTINUITY_SNAPSHOT_VERSION,
                 groupId,
-                snapshotFile: getGroupToolContinuitySnapshotFile(groupId),
-                summaryFile: getGroupToolContinuityMarkdownFile(groupId),
+                snapshotFile: getGroupToolContinuitySnapshotFile(snapshotScopeId),
+                summaryFile: getGroupToolContinuityMarkdownFile(snapshotScopeId),
                 generatedAt: new Date().toISOString(),
                 shouldReuseAsContext: true,
                 shouldBypassAuthorization: false,
@@ -613,8 +764,7 @@ function saveGroupMemory(groupId, memory) {
             },
         };
     }
-    const file = getGroupMemoryFile(groupId);
-    const backup = getGroupMemoryBackupFile(groupId);
+    const backup = getGroupMemoryBackupFile(groupId, resolvedSessionId);
     const temp = `${file}.${process.pid}.${Date.now()}.tmp`;
     if (fs.existsSync(file)) {
         try {
@@ -625,6 +775,17 @@ function saveGroupMemory(groupId, memory) {
     }
     fs.writeFileSync(temp, JSON.stringify(next, null, 2), "utf-8");
     fs.renameSync(temp, file);
+    try {
+        (0, group_memory_boundary_journal_1.commitGroupMemoryCompactBoundary)({
+            groupId,
+            sessionId: resolvedSessionId,
+            memory: next,
+            boundary: next.compactBoundary,
+            messages: (0, storage_1.getGroupMessages)(groupId, resolvedSessionId).filter((message) => !String(message?.content || "").startsWith("📤")),
+            transcriptPath: getGroupMessagesFileHint(groupId, resolvedSessionId),
+        });
+    }
+    catch { }
     return next;
 }
 function runGroupMemoryStorageRecoverySelfTest() {
@@ -912,6 +1073,35 @@ function buildChildGlobalAgentMemoryContext(query, options = {}) {
 }
 function hashSessionMemoryText(value, length = 16) {
     return crypto.createHash("sha256").update(String(value || "")).digest("hex").slice(0, length);
+}
+function verifyGroupSessionMemoryFactSupersessionGraphForContext(graph) {
+    if (!graph?.checksum || graph.schema !== "ccm-group-session-memory-fact-supersession-graph-v1")
+        return false;
+    const payload = { ...graph };
+    delete payload.checksum;
+    if (hashSessionMemoryText(JSON.stringify(payload), 64) !== String(graph.checksum || ""))
+        return false;
+    const facts = Array.isArray(graph.facts) ? graph.facts : [];
+    const edges = Array.isArray(graph.edges) ? graph.edges : [];
+    const factById = new Map(facts.map((fact) => [String(fact.factId || ""), fact]));
+    return edges.every((edge) => {
+        const oldFact = factById.get(String(edge.oldFactId || ""));
+        return !!oldFact
+            && oldFact.status === "superseded"
+            && String(oldFact.factChecksum || "") === String(edge.oldFactChecksum || "")
+            && String(oldFact.supersessionEdgeId || "") === String(edge.edgeId || "")
+            && !!String(edge.sourceMessageId || "").trim()
+            && !!String(edge.replacementText || "").trim()
+            && hashSessionMemoryText(edge.replacementText, 32) === String(edge.newFactChecksum || "")
+            && hashSessionMemoryText(edge.sourceMessageText, 32) === String(edge.sourceMessageChecksum || "");
+    });
+}
+function verifyGroupSessionMemoryModelExtractionDeliveryEvidenceForContext(evidence) {
+    if (!evidence?.checksum || evidence.schema !== "ccm-group-session-memory-model-extraction-delivery-evidence-v1")
+        return false;
+    const payload = { ...evidence };
+    delete payload.checksum;
+    return hashSessionMemoryText(JSON.stringify(payload), 64) === String(evidence.checksum || "");
 }
 function globalMemorySuppressionKey(value = {}) {
     const id = String(value.globalMemoryId || value.global_memory_id || value.id || value.memoryId || value.memory_id || "").trim();
@@ -1824,6 +2014,213 @@ function arbitrateChildGlobalAgentMemoryItem(item, localEvidence = []) {
         })),
     };
 }
+function groupSessionMemorySectionTokenLimit(header) {
+    const normalized = String(header || "").replace(/^#+\s*/, "").trim().toLowerCase();
+    if (normalized === "ccm group session memory")
+        return 600;
+    if (normalized === "goal")
+        return 900;
+    if (normalized === "session summary")
+        return exports.GROUP_SESSION_MEMORY_MAX_SECTION_TOKENS;
+    if (normalized === "persistent requirements")
+        return 1_600;
+    if (normalized === "fact anchors")
+        return 1_400;
+    if (normalized === "decisions" || normalized === "worker state")
+        return 1_200;
+    if (normalized === "open questions")
+        return 800;
+    if (normalized === "next actions")
+        return 1_000;
+    if (normalized === "use policy")
+        return 700;
+    return Math.min(800, exports.GROUP_SESSION_MEMORY_MAX_SECTION_TOKENS);
+}
+function splitGroupSessionMemorySections(markdown) {
+    const sections = [];
+    let current = { header: "", lines: [] };
+    for (const line of String(markdown || "").split("\n")) {
+        if (/^#{1,2}\s+/.test(line)) {
+            if (current.header || current.lines.some(item => item.trim()))
+                sections.push(current);
+            current = { header: line, lines: [] };
+        }
+        else {
+            current.lines.push(line);
+        }
+    }
+    if (current.header || current.lines.some(item => item.trim()))
+        sections.push(current);
+    return sections;
+}
+function truncateGroupSessionMemorySection(section, maxTokens) {
+    const marker = "[... section truncated for session memory budget; raw transcript remains authoritative ...]";
+    const original = [section.header, ...section.lines].filter((line, index) => index > 0 || !!line).join("\n").trim();
+    const tokensBefore = (0, group_memory_compaction_1.estimateGroupTextTokens)(original);
+    if (tokensBefore <= maxTokens) {
+        return { text: original, truncated: false, tokensBefore, tokensAfter: tokensBefore };
+    }
+    const kept = section.header ? [section.header] : [];
+    for (const line of section.lines) {
+        const candidate = [...kept, line, marker].join("\n").trim();
+        if ((0, group_memory_compaction_1.estimateGroupTextTokens)(candidate) <= maxTokens) {
+            kept.push(line);
+            continue;
+        }
+        let low = 0;
+        let high = line.length;
+        while (low < high) {
+            const middle = Math.ceil((low + high) / 2);
+            const partial = [...kept, line.slice(0, middle), marker].join("\n").trim();
+            if ((0, group_memory_compaction_1.estimateGroupTextTokens)(partial) <= maxTokens)
+                low = middle;
+            else
+                high = middle - 1;
+        }
+        if (low > 0)
+            kept.push(line.slice(0, low).trimEnd());
+        break;
+    }
+    kept.push(marker);
+    const text = kept.join("\n").trim();
+    return { text, truncated: true, tokensBefore, tokensAfter: (0, group_memory_compaction_1.estimateGroupTextTokens)(text) };
+}
+function analyzeGroupSessionMemoryBudget(markdown) {
+    const sections = splitGroupSessionMemorySections(markdown).map(section => {
+        const text = [section.header, ...section.lines].filter((line, index) => index > 0 || !!line).join("\n").trim();
+        const tokens = text ? (0, group_memory_compaction_1.estimateGroupTextTokens)(text) : 0;
+        return {
+            header: section.header || "preamble",
+            tokens,
+            maxTokens: exports.GROUP_SESSION_MEMORY_MAX_SECTION_TOKENS,
+            overBudget: tokens > exports.GROUP_SESSION_MEMORY_MAX_SECTION_TOKENS,
+        };
+    });
+    const totalTokens = String(markdown || "").trim() ? (0, group_memory_compaction_1.estimateGroupTextTokens)(markdown) : 0;
+    const oversizedSections = sections.filter(section => section.overBudget);
+    const totalUtilizationPercent = Math.round(totalTokens / exports.GROUP_SESSION_MEMORY_MAX_TOTAL_TOKENS * 1000) / 10;
+    const maxSectionUtilizationPercent = sections.length
+        ? Math.round(Math.max(...sections.map(section => section.tokens / exports.GROUP_SESSION_MEMORY_MAX_SECTION_TOKENS)) * 1000) / 10
+        : 0;
+    const status = totalTokens > exports.GROUP_SESSION_MEMORY_MAX_TOTAL_TOKENS || oversizedSections.length
+        ? "over_budget"
+        : totalUtilizationPercent >= 90 || maxSectionUtilizationPercent >= 90
+            ? "near_budget"
+            : totalTokens > 0 ? "ok" : "empty";
+    return {
+        schema: "ccm-group-session-memory-budget-v1",
+        version: 1,
+        status,
+        estimator: "ccm-model-context-conservative-ascii-cjk-v1",
+        ccParitySource: "Claude Code SessionMemory MAX_SECTION_LENGTH=2000 MAX_TOTAL_SESSION_MEMORY_TOKENS=12000",
+        totalTokens,
+        maxTotalTokens: exports.GROUP_SESSION_MEMORY_MAX_TOTAL_TOKENS,
+        totalUtilizationPercent,
+        maxSectionTokens: exports.GROUP_SESSION_MEMORY_MAX_SECTION_TOKENS,
+        maxSectionUtilizationPercent,
+        sectionCount: sections.length,
+        oversizedSectionCount: oversizedSections.length,
+        oversizedSections,
+        sections,
+    };
+}
+function groupSessionMemoryToolCallCount(message = {}) {
+    const direct = [message.tool_calls, message.toolCalls, message.tool_uses, message.toolUses]
+        .filter(Array.isArray)
+        .reduce((sum, rows) => sum + rows.length, 0);
+    const content = Array.isArray(message?.content)
+        ? message.content
+        : Array.isArray(message?.message?.content) ? message.message.content : [];
+    return direct + content.filter((block) => String(block?.type || "").toLowerCase() === "tool_use").length;
+}
+function groupSessionMemoryToolCallsSince(messages, sinceMessageId = "") {
+    const rows = Array.isArray(messages) ? messages : [];
+    const start = sinceMessageId
+        ? rows.findIndex((message, index) => getMemoryMessageIdentity(message, index) === sinceMessageId)
+        : -1;
+    return rows.slice(Math.max(0, start + 1)).reduce((sum, message) => sum + groupSessionMemoryToolCallCount(message), 0);
+}
+function groupSessionMemoryLastAssistantTurnHasToolCalls(messages) {
+    const rows = Array.isArray(messages) ? messages : [];
+    for (let index = rows.length - 1; index >= 0; index -= 1) {
+        const row = rows[index];
+        if (String(row?.role || row?.type || "").toLowerCase() === "assistant")
+            return groupSessionMemoryToolCallCount(row) > 0;
+    }
+    return false;
+}
+function evaluateGroupSessionMemoryUpdateCadence(messages, previousSnapshot = {}, options = {}) {
+    const rows = Array.isArray(messages) ? messages : [];
+    const previous = previousSnapshot?.updateCadence || previousSnapshot?.update_cadence || {};
+    const minimumMessageTokensToInit = Math.max(1, Number(options.minimumMessageTokensToInit || options.minimum_message_tokens_to_init || previous.minimumMessageTokensToInit || exports.GROUP_SESSION_MEMORY_MIN_TOKENS_TO_INIT));
+    const minimumTokensBetweenUpdate = Math.max(1, Number(options.minimumTokensBetweenUpdate || options.minimum_tokens_between_update || previous.minimumTokensBetweenUpdate || exports.GROUP_SESSION_MEMORY_MIN_TOKENS_BETWEEN_UPDATES));
+    const toolCallsBetweenUpdates = Math.max(1, Number(options.toolCallsBetweenUpdates || options.tool_calls_between_updates || previous.toolCallsBetweenUpdates || exports.GROUP_SESSION_MEMORY_TOOL_CALLS_BETWEEN_UPDATES));
+    const currentContextTokens = Math.max(0, Number(options.currentContextTokens || options.current_context_tokens || rows.reduce((sum, message) => sum + (0, group_memory_compaction_1.estimateGroupMessageTokens)(message), 0)));
+    const initialized = previous.initialized === true || currentContextTokens >= minimumMessageTokensToInit;
+    const tokensAtLastExtraction = Math.max(0, Number(previous.tokensAtLastExtraction || 0));
+    const tokensSinceLastExtraction = currentContextTokens - tokensAtLastExtraction;
+    const lastExtractionMessageId = String(previous.lastExtractionMessageId || previous.last_extraction_message_id || "");
+    const toolCallsSinceLastExtraction = groupSessionMemoryToolCallsSince(rows, lastExtractionMessageId);
+    const lastAssistantTurnHasToolCalls = groupSessionMemoryLastAssistantTurnHasToolCalls(rows);
+    const tokenThresholdMet = initialized && tokensSinceLastExtraction >= minimumTokensBetweenUpdate;
+    const toolCallThresholdMet = toolCallsSinceLastExtraction >= toolCallsBetweenUpdates;
+    const naturalBreak = !lastAssistantTurnHasToolCalls;
+    const shouldExtract = tokenThresholdMet && (toolCallThresholdMet || naturalBreak);
+    const lastMessageId = rows.length ? getMemoryMessageIdentity(rows[rows.length - 1], rows.length - 1) : "";
+    const status = shouldExtract
+        ? "extraction_due"
+        : !initialized ? "waiting_initialization_tokens"
+            : !tokenThresholdMet ? "waiting_update_tokens"
+                : "waiting_tool_calls_or_natural_break";
+    return {
+        schema: "ccm-group-session-memory-update-cadence-v1",
+        version: 1,
+        ccParitySource: "Claude Code SessionMemory minimumMessageTokensToInit=10000 minimumTokensBetweenUpdate=5000 toolCallsBetweenUpdates=3",
+        minimumMessageTokensToInit,
+        minimumTokensBetweenUpdate,
+        toolCallsBetweenUpdates,
+        initialized,
+        status,
+        shouldExtract,
+        currentContextTokens,
+        tokensAtLastExtraction,
+        tokensSinceLastExtraction,
+        toolCallsSinceLastExtraction,
+        lastAssistantTurnHasToolCalls,
+        tokenThresholdMet,
+        toolCallThresholdMet,
+        naturalBreak,
+        lastObservedMessageId: lastMessageId,
+        lastExtractionMessageId,
+        extractionCount: Math.max(0, Number(previous.extractionCount || 0)),
+        lastExtractedAt: String(previous.lastExtractedAt || ""),
+        observedAt: String(options.now || new Date().toISOString()),
+    };
+}
+function enforceGroupSessionMemoryBudget(markdown) {
+    const before = analyzeGroupSessionMemoryBudget(markdown);
+    const truncatedSections = [];
+    const renderedSections = splitGroupSessionMemorySections(markdown).map(section => {
+        const limit = Math.min(exports.GROUP_SESSION_MEMORY_MAX_SECTION_TOKENS, groupSessionMemorySectionTokenLimit(section.header));
+        const result = truncateGroupSessionMemorySection(section, limit);
+        if (result.truncated)
+            truncatedSections.push(section.header || "preamble");
+        return result.text;
+    });
+    let bounded = renderedSections.filter(Boolean).join("\n\n").trim();
+    if ((0, group_memory_compaction_1.estimateGroupTextTokens)(bounded) > exports.GROUP_SESSION_MEMORY_MAX_TOTAL_TOKENS) {
+        const whole = truncateGroupSessionMemorySection({ header: "", lines: bounded.split("\n") }, exports.GROUP_SESSION_MEMORY_MAX_TOTAL_TOKENS);
+        bounded = whole.text;
+        truncatedSections.push("total");
+    }
+    return {
+        markdown: bounded,
+        wasTruncated: truncatedSections.length > 0,
+        truncatedSections: [...new Set(truncatedSections)],
+        before,
+        after: analyzeGroupSessionMemoryBudget(bounded),
+    };
+}
 function renderGroupSessionMemoryMarkdown(groupId, memory = {}) {
     const compaction = memory.compaction || {};
     const compression = memory.messageCompression || {};
@@ -1861,31 +2258,146 @@ function renderGroupSessionMemoryMarkdown(groupId, memory = {}) {
     addList("Open Questions", memory.openQuestions || [], (item) => item.question || String(item || ""), 8);
     addList("Next Actions", memory.nextActions || [], (item) => item.action || String(item || ""), 8);
     lines.push("", "## Use Policy", "- Treat this file as the compacted session memory for this group chat.", "- Child Agent sessions may be fresh third-party CLI sessions; inject this summary together with recent raw messages.", "- If the user asks to ignore memory, behave as if this file were empty and declare memoryIgnored in the receipt.");
-    return compactPreserveLines(lines.join("\n"), 18_000);
+    return enforceGroupSessionMemoryBudget(lines.join("\n")).markdown;
+}
+function buildGroupSessionMemorySectionEvidence(markdown, source = {}) {
+    const text = String(markdown || "").trim();
+    const markdownChecksum = hashSessionMemoryText(text, 24);
+    const matches = Array.from(text.matchAll(/^# ([^\r\n]+)\r?$/gm));
+    const sourceTranscriptChecksum = String(source.sourceTranscriptChecksum || source.source_transcript_checksum || "").trim();
+    const sourceFirstMessageId = String(source.sourceFirstMessageId || source.source_first_message_id || "").trim();
+    const sourceLastMessageId = String(source.sourceLastMessageId || source.source_last_message_id || "").trim();
+    const sourceMessageCount = Math.max(0, Number(source.sourceMessageCount || source.source_message_count || 0));
+    const sourceMessageIds = Array.from(new Set((Array.isArray(source.sourceMessageIds || source.source_message_ids) ? (source.sourceMessageIds || source.source_message_ids) : [])
+        .map((item) => String(item || "").trim())
+        .filter(Boolean))).slice(0, 240);
+    const sourceType = String(source.sourceType || source.source_type || (sourceTranscriptChecksum ? "model_transcript_range" : "deterministic_memory_snapshot"));
+    const sections = matches.map((match, index) => {
+        const start = Number(match.index || 0);
+        const end = index + 1 < matches.length ? Number(matches[index + 1].index || text.length) : text.length;
+        const section = String(match[1] || "").trim();
+        const sectionMarkdown = text.slice(start, end).trim();
+        const sectionChecksum = hashSessionMemoryText(sectionMarkdown, 24);
+        const evidenceSeed = [markdownChecksum, section, sectionChecksum, sourceTranscriptChecksum, sourceFirstMessageId, sourceLastMessageId].join("\0");
+        return {
+            evidenceId: `gsmse_${hashSessionMemoryText(evidenceSeed, 20)}`,
+            section,
+            sectionIndex: index + 1,
+            sectionChecksum,
+            sourceTranscriptChecksum,
+            sourceFirstMessageId,
+            sourceLastMessageId,
+            sourceMessageCount,
+            sourceMessageIds,
+        };
+    });
+    const payload = {
+        schema: "ccm-group-session-memory-section-evidence-v1",
+        version: 1,
+        sourceType,
+        markdownChecksum,
+        sourceTranscriptChecksum,
+        sourceFirstMessageId,
+        sourceLastMessageId,
+        sourceMessageCount,
+        sourceMessageIds,
+        sections,
+    };
+    return { ...payload, checksum: hashSessionMemoryText(JSON.stringify(payload), 32) };
 }
 function buildGroupSessionMemorySnapshot(groupId, memory = {}, options = {}) {
     const markdownFile = getGroupSessionMemoryMarkdownFile(groupId);
     const snapshotFile = getGroupSessionMemorySnapshotFile(groupId);
-    const markdown = renderGroupSessionMemoryMarkdown(groupId, memory);
+    const modelMarkdown = String(options.sessionMemoryModelMarkdown || options.session_memory_model_markdown || options.markdown || "").trim();
+    const boundedMarkdown = enforceGroupSessionMemoryBudget(modelMarkdown || renderGroupSessionMemoryMarkdown(groupId, memory));
+    const markdown = boundedMarkdown.markdown;
+    const budget = analyzeGroupSessionMemoryBudget(markdown);
     const compaction = memory.compaction || {};
     const compression = memory.messageCompression || {};
     const boundary = memory.compactBoundary || {};
     const summaryText = String(memory.messageDigest || (0, group_memory_compaction_1.renderConversationSummary)(memory.conversationSummary || null) || "");
+    const semanticSummary = {
+        goal: String(memory.goal || ""),
+        summary: String(memory.summary || ""),
+        messageDigest: summaryText,
+        persistentRequirements: Array.isArray(memory.persistentRequirements) ? memory.persistentRequirements : [],
+        factAnchors: Array.isArray(memory.factAnchors) ? memory.factAnchors : [],
+        decisions: Array.isArray(memory.decisions) ? memory.decisions : [],
+        workerLedger: Array.isArray(memory.workerLedger) ? memory.workerLedger : [],
+        openQuestions: Array.isArray(memory.openQuestions) ? memory.openQuestions : [],
+        nextActions: Array.isArray(memory.nextActions) ? memory.nextActions : [],
+    };
+    const hasSummary = !!modelMarkdown || Object.values(semanticSummary).some(value => Array.isArray(value) ? value.length > 0 : !!String(value || "").trim());
+    const semanticSummaryChecksum = hashSessionMemoryText(JSON.stringify(semanticSummary), 24);
     const generatedAt = String(options.generatedAt || options.generated_at || new Date().toISOString());
+    const cadenceInput = options.cadenceDecision || options.cadence_decision || memory?.sessionMemory?.updateCadence || {};
+    const updateCadence = cadenceInput?.schema
+        ? {
+            ...cadenceInput,
+            status: cadenceInput.shouldExtract === true ? "extracted" : cadenceInput.status,
+            shouldExtract: false,
+            extractedThisObservation: cadenceInput.shouldExtract === true,
+            tokensAtLastExtraction: cadenceInput.shouldExtract === true ? Number(cadenceInput.currentContextTokens || 0) : Number(cadenceInput.tokensAtLastExtraction || 0),
+            lastExtractionMessageId: cadenceInput.shouldExtract === true ? String(cadenceInput.lastObservedMessageId || "") : String(cadenceInput.lastExtractionMessageId || ""),
+            extractionCount: Math.max(0, Number(cadenceInput.extractionCount || 0)) + (cadenceInput.shouldExtract === true ? 1 : 0),
+            lastExtractedAt: cadenceInput.shouldExtract === true ? generatedAt : String(cadenceInput.lastExtractedAt || ""),
+        }
+        : null;
+    const extractionInput = options.extractionTransaction || options.extraction_transaction || null;
+    const extractionTransaction = extractionInput?.schema
+        ? {
+            ...extractionInput,
+            status: "completed",
+            committedAt: generatedAt,
+        }
+        : memory?.sessionMemory?.extractionTransaction || null;
+    const modelExtractionReceipt = options.modelExtractionReceipt || options.model_extraction_receipt || null;
+    const modelMergeQuality = options.modelMergeQuality || options.model_merge_quality || modelExtractionReceipt?.mergeQuality || null;
+    const factSupersessionGraph = options.factSupersessionGraph
+        || options.fact_supersession_graph
+        || modelExtractionReceipt?.factSupersessionGraph
+        || modelMergeQuality?.factSupersessionGraph
+        || null;
+    const extractionMethod = modelMarkdown ? "forked_model_session_memory" : "deterministic_structured_fallback";
+    const sectionEvidence = options.sectionEvidence || options.section_evidence || buildGroupSessionMemorySectionEvidence(markdown, {
+        sourceType: modelMarkdown ? "model_transcript_range" : "deterministic_memory_snapshot",
+        sourceTranscriptChecksum: modelExtractionReceipt?.requestAudit?.sourceTranscriptChecksum || semanticSummaryChecksum,
+        sourceFirstMessageId: modelExtractionReceipt?.requestAudit?.sourceFirstMessageId || "",
+        sourceLastMessageId: modelExtractionReceipt?.requestAudit?.sourceLastMessageId || String(compaction.lastCompactedMessageId || boundary.summarizedThroughMessageId || ""),
+        sourceMessageCount: modelExtractionReceipt?.requestAudit?.sourceMessageCount || 0,
+        sourceMessageIds: modelExtractionReceipt?.requestAudit?.sourceMessageIds || [],
+    });
     return {
         schema: "ccm-group-session-memory-snapshot-v1",
         version: exports.GROUP_SESSION_MEMORY_SNAPSHOT_VERSION,
         groupId,
         generatedAt,
         reason: String(options.reason || "save_group_memory"),
-        strategy: String(compression.strategy || compaction.modelMode || "cc-session-memory-v3-sync"),
+        strategy: modelMarkdown ? "cc-session-memory-forked-model-v1" : String(compression.strategy || compaction.modelMode || "cc-session-memory-v3-sync"),
+        extractionMethod,
+        modelExtracted: !!modelMarkdown,
+        deterministicFallback: !modelMarkdown,
+        modelExtractionReceipt,
+        modelMergeQuality,
+        factSupersessionGraph,
+        sectionEvidence,
+        budgetEnforcement: {
+            wasTruncated: boundedMarkdown.wasTruncated,
+            truncatedSections: boundedMarkdown.truncatedSections,
+            before: boundedMarkdown.before,
+            after: boundedMarkdown.after,
+        },
         summaryFile: markdownFile,
         snapshotFile,
         lastSummarizedMessageId: String(compaction.lastCompactedMessageId || boundary.summarizedThroughMessageId || ""),
-        summaryChecksum: String(compaction.summaryChecksum || boundary.summaryChecksum || hashSessionMemoryText(summaryText, 24)),
+        summaryChecksum: String(compaction.summaryChecksum || boundary.summaryChecksum || semanticSummaryChecksum),
         markdownChecksum: hashSessionMemoryText(markdown, 24),
         markdownChars: markdown.length,
-        hasSummary: !!summaryText.trim(),
+        markdownTokens: budget.totalTokens,
+        memoryBudget: budget,
+        updateCadence,
+        extractionTransaction,
+        hasSummary,
         compactedMessageCount: Number(compaction.compactedMessageCount || compression.compressedMessages || 0),
         preservedRecentMessages: Number(compaction.preservedRecentMessages || compression.recentMessages || 0),
         preCompactTokenCount: Number(compaction.preCompactTokenCount || compression.preCompactTokenCount || 0),
@@ -1907,9 +2419,45 @@ function summarizeGroupSessionMemorySnapshot(snapshot = {}) {
 }
 function persistGroupSessionMemorySnapshot(groupId, memory = {}, options = {}) {
     const snapshot = buildGroupSessionMemorySnapshot(groupId, memory, options);
+    return commitGroupSessionMemorySnapshot(snapshot);
+}
+function commitGroupSessionMemorySnapshot(snapshot = {}) {
+    if (!snapshot?.schema || !snapshot?.summaryFile || !snapshot?.snapshotFile) {
+        throw new Error("invalid_group_session_memory_snapshot_commit");
+    }
     writeTextAtomic(snapshot.summaryFile, snapshot.markdown);
     writeJsonAtomic(snapshot.snapshotFile, summarizeGroupSessionMemorySnapshot(snapshot));
     return summarizeGroupSessionMemorySnapshot(snapshot);
+}
+function persistGroupSessionMemoryCadenceObservation(groupId, cadenceDecision = {}) {
+    const snapshotFile = getGroupSessionMemorySnapshotFile(groupId);
+    const summaryFile = getGroupSessionMemoryMarkdownFile(groupId);
+    let previous = null;
+    try {
+        if (fs.existsSync(snapshotFile))
+            previous = JSON.parse(fs.readFileSync(snapshotFile, "utf-8"));
+    }
+    catch { }
+    const next = {
+        ...(previous?.schema === "ccm-group-session-memory-snapshot-v1" ? previous : {
+            schema: "ccm-group-session-memory-snapshot-v1",
+            version: exports.GROUP_SESSION_MEMORY_SNAPSHOT_VERSION,
+            groupId,
+            snapshotFile,
+            summaryFile,
+            generatedAt: "",
+            hasSummary: false,
+            markdownChars: 0,
+            markdownTokens: 0,
+        }),
+        version: exports.GROUP_SESSION_MEMORY_SNAPSHOT_VERSION,
+        snapshotFile,
+        summaryFile,
+        updateCadence: { ...cadenceDecision, shouldExtract: false },
+        cadenceUpdatedAt: String(cadenceDecision.observedAt || new Date().toISOString()),
+    };
+    writeJsonAtomic(snapshotFile, next);
+    return summarizeGroupSessionMemorySnapshot(next);
 }
 function readGroupSessionMemorySnapshotSummary(groupId) {
     const snapshotFile = getGroupSessionMemorySnapshotFile(groupId);
@@ -1917,6 +2465,7 @@ function readGroupSessionMemorySnapshotSummary(groupId) {
     try {
         const parsed = JSON.parse(fs.readFileSync(snapshotFile, "utf-8"));
         const markdown = fs.existsSync(summaryFile) ? fs.readFileSync(summaryFile, "utf-8") : "";
+        const memoryBudget = analyzeGroupSessionMemoryBudget(markdown);
         return {
             ...parsed,
             schema: "ccm-group-session-memory-snapshot-v1",
@@ -1926,18 +2475,31 @@ function readGroupSessionMemorySnapshotSummary(groupId) {
             summaryFile,
             markdownExists: !!markdown,
             markdownChecksumMatches: markdown ? hashSessionMemoryText(markdown, 24) === parsed.markdownChecksum : false,
+            markdownChars: markdown.length,
+            markdownTokens: memoryBudget.totalTokens,
+            memoryBudget,
             markdownExcerpt: compactPreserveLines(parsed.markdownExcerpt || markdown, 1200),
         };
     }
     catch {
+        let markdown = "";
+        try {
+            if (fs.existsSync(summaryFile))
+                markdown = fs.readFileSync(summaryFile, "utf-8");
+        }
+        catch { }
+        const memoryBudget = analyzeGroupSessionMemoryBudget(markdown);
         return {
             schema: "ccm-group-session-memory-snapshot-v1",
             version: exports.GROUP_SESSION_MEMORY_SNAPSHOT_VERSION,
             groupId,
             snapshotFile,
             summaryFile,
-            markdownExists: fs.existsSync(summaryFile),
+            markdownExists: !!markdown,
             markdownChecksumMatches: false,
+            markdownChars: markdown.length,
+            markdownTokens: memoryBudget.totalTokens,
+            memoryBudget,
             hasSummary: false,
             generatedAt: "",
         };
@@ -2302,7 +2864,7 @@ function buildGroupToolContinuitySnapshot(groupId, memory = {}, options = {}) {
             at: item.time || item.timestamp || "",
         });
     }
-    for (const message of (0, storage_1.getGroupMessages)(groupId).slice(-160)) {
+    for (const message of (0, storage_1.getGroupMessages)(groupId, String(memory?.groupSessionId || "")).slice(-160)) {
         visitRuntimeCarrier(message, {
             messageId: message.id || message.uuid || "",
             taskId: message.task_id || message.taskId || "",
@@ -2508,6 +3070,7 @@ function uniqueCompactFileReferences(refs = [], limit = 40) {
 }
 function buildGroupCompactFileReferences(groupId, input = {}) {
     const refs = [];
+    const groupSessionId = String(input.groupSessionId || input.group_session_id || "default");
     const sourceManifest = input.sourceManifest || input.source_manifest || {};
     const rawSources = input.rawSources || input.raw_sources || {};
     const sessionMemory = input.sessionMemory || input.session_memory || {};
@@ -2536,8 +3099,8 @@ function buildGroupCompactFileReferences(groupId, input = {}) {
     });
     add("typed_memory_index", rawSources.group_typed_memory_index_file || typedMemory.sync?.indexFile || typedMemory.sync?.index_file, "typed MEMORY.md 入口；长期记忆索引和召回入口。");
     add("typed_memory_dir", rawSources.group_typed_memory_dir || typedMemory.sync?.memoryDir || typedMemory.sync?.memory_dir, "typed memory 目录；必要时按索引继续读取具体记忆文档。");
-    add("group_memory_json", rawSources.group_memory_file || getGroupMemoryFile(groupId), "群聊结构化记忆 JSON；压缩摘要、约束和工作账本的结构化来源。");
-    add("raw_group_messages_json", rawSources.group_messages_file || getGroupMessagesFileHint(groupId), "群聊原始消息 JSON；最高保真来源，按 message id 回溯。");
+    add("group_memory_json", rawSources.group_memory_file || getGroupMemoryFile(groupId, groupSessionId), "群聊结构化记忆 JSON；压缩摘要、约束和工作账本的结构化来源。");
+    add("raw_group_messages_json", rawSources.group_messages_file || getGroupMessagesFileHint(groupId, groupSessionId), "群聊原始消息 JSON；最高保真来源，按 message id 回溯。");
     add("global_agent_memory_json", rawSources.global_agent_memory_file, "全局 Agent 长期记忆 JSON；只注入与当前任务匹配的全局约束/历史结论，使用前必须核验当前状态。");
     add("global_memory_arbitration_ledger", rawSources.group_global_memory_arbitration_ledger_file, "全局/群聊记忆仲裁账本；用于核对被本群聊新证据降权或冲突的全局记忆，并为 typed memory 蒸馏提供候选。");
     add("global_memory_cross_group_arbitration", rawSources.global_memory_cross_group_arbitration_dir, "跨群聊全局记忆仲裁 ledger 目录；用于核对同一全局记忆是否已在其他群聊被降权/冲突，避免 stale 全局记忆重复注入子 Agent。");
@@ -2825,7 +3388,7 @@ function summarizeGroupCompactFileReferenceAccess(groupId, references = {}, memo
             ].filter(Boolean).join("\n"),
         });
     }
-    for (const message of (0, storage_1.getGroupMessages)(groupId).slice(-160)) {
+    for (const message of (0, storage_1.getGroupMessages)(groupId, String(memory?.groupSessionId || "")).slice(-160)) {
         evidenceSources.push({
             source: "group_message",
             target_project: message.agent || message.target || "",
@@ -2901,7 +3464,7 @@ function summarizeGroupCompactFileReferenceReadPlanAccess(groupId, readPlan = {}
             ].filter(Boolean).join("\n"),
         });
     }
-    for (const message of (0, storage_1.getGroupMessages)(groupId).slice(-160)) {
+    for (const message of (0, storage_1.getGroupMessages)(groupId, String(memory?.groupSessionId || "")).slice(-160)) {
         evidenceSources.push({
             source: "group_message",
             target_project: message.agent || message.target || "",
@@ -3436,6 +3999,111 @@ function normalizeAgentMemories(agentMemories = {}, workerLedger = []) {
         next = upsertAgentMemory(next, item);
     return next;
 }
+function removeSessionDirectoryWithin(root, target) {
+    const safeRoot = path.resolve(root);
+    const safeTarget = path.resolve(target);
+    if (safeTarget === safeRoot || !safeTarget.startsWith(`${safeRoot}${path.sep}`))
+        throw new Error(`unsafe session artifact path: ${safeTarget}`);
+    if (!fs.existsSync(safeTarget))
+        return 0;
+    let deleted = 0;
+    for (const entry of fs.readdirSync(safeTarget, { withFileTypes: true })) {
+        const child = path.join(safeTarget, entry.name);
+        if (entry.isDirectory())
+            deleted += removeSessionDirectoryWithin(root, child);
+        else {
+            fs.unlinkSync(child);
+            deleted += 1;
+        }
+    }
+    fs.rmdirSync(safeTarget);
+    return deleted;
+}
+function deleteGroupSessionMemoryArtifacts(groupId, sessionId) {
+    const cleanSessionId = String(sessionId || "").trim();
+    if (!cleanSessionId)
+        throw new Error("缺少群聊会话 ID");
+    const scopeId = cleanSessionId === "default" ? groupId : `${groupId}--${cleanSessionId}`;
+    const files = [
+        getGroupMemoryFile(groupId, cleanSessionId),
+        `${getGroupMemoryFile(groupId, cleanSessionId)}.bak`,
+        getGroupCompactFileReferenceLedgerFile(scopeId),
+        `${getGroupCompactFileReferenceLedgerFile(scopeId)}.bak`,
+        getGroupMemoryReloadLedgerFile(groupId, cleanSessionId),
+        `${getGroupMemoryReloadLedgerFile(groupId, cleanSessionId)}.bak`,
+        getGroupPostCompactDispatchLedgerFile(groupId, cleanSessionId),
+        `${getGroupPostCompactDispatchLedgerFile(groupId, cleanSessionId)}.bak`,
+        getGroupPostCompactCandidateUsageLedgerFile(groupId, cleanSessionId),
+        `${getGroupPostCompactCandidateUsageLedgerFile(groupId, cleanSessionId)}.bak`,
+        getGroupApiMicrocompactNativeApplyProofLedgerFile(groupId, cleanSessionId),
+        `${getGroupApiMicrocompactNativeApplyProofLedgerFile(groupId, cleanSessionId)}.bak`,
+        getGroupApiMicrocompactNativeApplyRequestTelemetryLedgerFile(groupId, cleanSessionId),
+        `${getGroupApiMicrocompactNativeApplyRequestTelemetryLedgerFile(groupId, cleanSessionId)}.bak`,
+        getGroupReplayRepairLedgerFile(groupId, cleanSessionId),
+        `${getGroupReplayRepairLedgerFile(groupId, cleanSessionId)}.bak`,
+        getGroupReplayRepairWorkItemsFile(groupId, cleanSessionId),
+        `${getGroupReplayRepairWorkItemsFile(groupId, cleanSessionId)}.bak`,
+    ];
+    let deletedFiles = 0;
+    for (const file of files) {
+        try {
+            if (fs.existsSync(file)) {
+                fs.unlinkSync(file);
+                deletedFiles += 1;
+            }
+        }
+        catch { }
+    }
+    const directories = [
+        { root: GROUP_SESSION_MEMORY_DIR, target: path.join(GROUP_SESSION_MEMORY_DIR, scopeId) },
+        { root: GROUP_TOOL_CONTINUITY_DIR, target: path.join(GROUP_TOOL_CONTINUITY_DIR, scopeId) },
+        { root: path.dirname((0, group_memory_index_1.getGroupTypedMemoryDir)(scopeId)), target: (0, group_memory_index_1.getGroupTypedMemoryDir)(scopeId) },
+    ];
+    for (const item of directories) {
+        try {
+            deletedFiles += removeSessionDirectoryWithin(item.root, item.target);
+        }
+        catch { }
+    }
+    let typedMemoryDispatchWalDeleted = 0;
+    if (cleanSessionId.startsWith("gcs_")) {
+        try {
+            typedMemoryDispatchWalDeleted = removeSessionDirectoryWithin(typed_memory_dispatch_wal_1.TYPED_MEMORY_DISPATCH_WAL_DIR, (0, typed_memory_dispatch_wal_1.getTypedMemoryDispatchWalScopeDir)(groupId, cleanSessionId));
+            deletedFiles += typedMemoryDispatchWalDeleted;
+        }
+        catch { }
+    }
+    const boundaryArtifacts = (0, group_memory_boundary_journal_1.deleteGroupMemoryBoundaryArtifacts)(groupId, cleanSessionId);
+    deletedFiles += Number(boundaryArtifacts.deletedFiles || 0);
+    const invocationLineageArtifacts = cleanSessionId.startsWith("gcs_")
+        ? (0, task_agent_invocation_lineage_1.deleteTaskAgentInvocationLineageArtifacts)(groupId, cleanSessionId)
+        : { deleted: 0, recoveryDeleted: 0 };
+    const recoveryDeleted = "recoveryDeleted" in invocationLineageArtifacts
+        ? invocationLineageArtifacts.recoveryDeleted
+        : 0;
+    deletedFiles += Number(invocationLineageArtifacts.deleted || 0) + Number(recoveryDeleted || 0);
+    const continuationSoakArtifacts = cleanSessionId.startsWith("gcs_")
+        ? (0, task_agent_continuation_soak_1.deleteTaskAgentContinuationSoakArtifacts)(groupId, cleanSessionId)
+        : { deleted: 0 };
+    deletedFiles += Number(continuationSoakArtifacts.deleted || 0);
+    const compactHeadArtifacts = cleanSessionId.startsWith("gcs_")
+        ? (0, group_compact_head_1.deleteGroupCompactHead)(groupId, cleanSessionId)
+        : { deleted: 0 };
+    deletedFiles += Number(compactHeadArtifacts.deleted || 0);
+    return {
+        schema: "ccm-group-session-memory-artifact-delete-v1",
+        groupId,
+        sessionId: cleanSessionId,
+        scopeId,
+        deletedFiles,
+        boundaryArtifacts,
+        typedMemoryDispatchWalArtifacts: { deletedFiles: typedMemoryDispatchWalDeleted },
+        invocationLineageArtifacts,
+        continuationSoakArtifacts,
+        compactHeadArtifacts,
+        deletedAt: new Date().toISOString(),
+    };
+}
 function getMemoryMessageContent(message) {
     return String(message?.content || message?.delivery_summary?.headline || message?.receipt?.summary || "").trim();
 }
@@ -3506,7 +4174,97 @@ function getCompactBoundaryIndex(memory, messages) {
         return -1;
     return (messages || []).findIndex((message, index) => getMemoryMessageIdentity(message, index) === boundaryId);
 }
+function clearUntrustedGroupCompactionState(memory, reason) {
+    const now = new Date().toISOString();
+    return {
+        ...(memory || {}),
+        conversationSummary: null,
+        messageDigest: "",
+        compactBoundary: null,
+        compaction: {
+            version: group_memory_compaction_1.GROUP_MEMORY_COMPACTION_VERSION,
+            enabled: true,
+            health: "recovering",
+            boundaries: [],
+            compactedMessageCount: 0,
+            preservedRecentMessages: 0,
+            lastCompactedMessageId: "",
+            summaryChecksum: "",
+            resumeRecovery: {
+                schema: "ccm-group-memory-resume-recovery-v1",
+                status: "rebuilding_from_full_raw_transcript",
+                reason,
+                startedAt: now,
+            },
+        },
+        messageCompression: {
+            ...(memory?.messageCompression || {}),
+            compressedMessages: 0,
+            lastCompressedAt: "",
+            preservedSegment: null,
+        },
+    };
+}
+function prepareGroupMemoryResumeProjection(groupId, groupSessionId, allMessages, storedMemory, options = {}) {
+    const projectionOptions = {
+        groupId,
+        sessionId: groupSessionId,
+        messages: allMessages,
+        memory: storedMemory,
+    };
+    const before = (0, group_memory_boundary_journal_1.buildGroupMemoryResumeProjection)(projectionOptions);
+    const recoveryRequired = before.status === "fail_closed_rebuild_required";
+    let recoveryRotation = null;
+    let memoryBase = storedMemory;
+    if (recoveryRequired) {
+        if (before.reason === "boundary_journal_invalid") {
+            recoveryRotation = (0, group_memory_boundary_journal_1.quarantineInvalidGroupMemoryBoundaryJournal)(groupId, groupSessionId);
+        }
+        else if (before.reason === "memory_boundary_missing") {
+            recoveryRotation = (0, group_memory_boundary_journal_1.retireGroupMemoryBoundaryJournal)(groupId, groupSessionId);
+        }
+        memoryBase = clearUntrustedGroupCompactionState(storedMemory, before.reason);
+    }
+    const memory = refreshGroupConversationMemorySnapshot(groupId, allMessages, memoryBase, {
+        ...options,
+        groupSessionId,
+    });
+    let projection = (0, group_memory_boundary_journal_1.buildGroupMemoryResumeProjection)({
+        groupId,
+        sessionId: groupSessionId,
+        messages: allMessages,
+        memory,
+    });
+    if (!memory?.compactBoundary && projection.status === "fail_closed_rebuild_required") {
+        recoveryRotation = (0, group_memory_boundary_journal_1.retireGroupMemoryBoundaryJournal)(groupId, groupSessionId);
+        projection = (0, group_memory_boundary_journal_1.buildGroupMemoryResumeProjection)({
+            groupId,
+            sessionId: groupSessionId,
+            messages: allMessages,
+            memory,
+        });
+    }
+    const proof = (0, group_memory_boundary_journal_1.recordGroupMemoryResumeProjectionProof)(projection, {
+        recovered: recoveryRequired,
+        recoveryReason: recoveryRequired ? before.reason : "",
+        priorStatus: before.status,
+        priorReason: before.reason,
+    });
+    return {
+        schema: "ccm-group-memory-resume-preparation-v1",
+        groupId,
+        groupSessionId,
+        memory,
+        projection,
+        proof,
+        recovered: recoveryRequired,
+        recoveryReason: recoveryRequired ? before.reason : "",
+        recoveryRotation,
+    };
+}
 function refreshGroupConversationMemorySnapshot(groupId, allMessages, memory, options = {}) {
+    const groupSessionId = String(options.groupSessionId || options.group_session_id || memory?.groupSessionId || (0, storage_1.getActiveGroupChatSessionId)(groupId));
+    const sessionMemoryScopeId = groupSessionId === "default" ? groupId : `${groupId}--${groupSessionId}`;
     const recentLimit = Math.max(4, Number(options.recentLimit || options.recent_limit || memory?.messageCompression?.recentLimit || 12));
     const olderLimit = Math.max(6, Number(options.olderLimit || options.older_limit || memory?.messageCompression?.olderLimit || 30));
     const messages = (allMessages || []).filter((message) => !String(message?.content || "").startsWith("📤"));
@@ -3522,6 +4280,7 @@ function refreshGroupConversationMemorySnapshot(groupId, allMessages, memory, op
     const messagesToSummarize = messages.slice(0, keepIndex);
     const keptMessages = messages.slice(keepIndex);
     const activeTokenEstimate = messages.reduce((sum, message) => sum + (0, group_memory_compaction_1.estimateGroupMessageTokens)(message), 0);
+    const sessionMemoryCadenceDecision = evaluateGroupSessionMemoryUpdateCadence(messages, readGroupSessionMemorySnapshotSummary(sessionMemoryScopeId) || memory?.sessionMemory || {}, { ...options, currentContextTokens: activeTokenEstimate });
     const currentPressureWarning = (0, group_memory_compaction_1.calculateGroupCompactWarningState)({
         activeTokens: activeTokenEstimate,
         activeMessageCount: messages.length,
@@ -3531,6 +4290,7 @@ function refreshGroupConversationMemorySnapshot(groupId, allMessages, memory, op
     const persistentRequirements = mergeFactAnchorList(memory?.persistentRequirements || [], extractPersistentRequirementsFromAnchors(anchors), 160);
     if (!messagesToSummarize.length) {
         const now = new Date().toISOString();
+        const hasCommittedCompactBoundary = !!memory?.compactBoundary?.id;
         const compactStrategyDecision = (0, group_memory_compaction_1.buildGroupCompactStrategyDecision)({
             groupId,
             messages,
@@ -3544,7 +4304,7 @@ function refreshGroupConversationMemorySnapshot(groupId, allMessages, memory, op
             activeMessageCount: messages.length,
             preCompactTokenCount: activeTokenEstimate,
             postCompactTokenCount: activeTokenEstimate,
-            transcriptPath: getGroupMessagesFileHint(groupId),
+            transcriptPath: getGroupMessagesFileHint(groupId, groupSessionId),
             reason: "recent window only; no sync snapshot compaction needed",
             now,
         });
@@ -3557,18 +4317,24 @@ function refreshGroupConversationMemorySnapshot(groupId, allMessages, memory, op
         });
         return saveGroupMemory(groupId, {
             ...memory,
-            conversationSummary: null,
-            messageDigest: "",
-            compactBoundary: null,
+            conversationSummary: hasCommittedCompactBoundary ? (memory?.conversationSummary || null) : null,
+            messageDigest: hasCommittedCompactBoundary ? String(memory?.messageDigest || "") : "",
+            compactBoundary: hasCommittedCompactBoundary ? memory.compactBoundary : null,
             compaction: {
                 ...(memory?.compaction || {}),
                 version: group_memory_compaction_1.GROUP_MEMORY_COMPACTION_VERSION,
                 enabled: true,
-                health: messages.length ? "recent-window-only" : "empty",
-                compactedMessageCount: 0,
+                health: hasCommittedCompactBoundary
+                    ? String(memory?.compaction?.health || "healthy")
+                    : messages.length ? "recent-window-only" : "empty",
+                compactedMessageCount: hasCommittedCompactBoundary
+                    ? Number(memory?.compaction?.compactedMessageCount || memory?.compactBoundary?.summarizedMessageCount || 0)
+                    : 0,
                 totalMessagesSeen: messages.length,
                 preservedRecentMessages: messages.length,
-                lastCompactedMessageId: "",
+                lastCompactedMessageId: hasCommittedCompactBoundary
+                    ? String(memory?.compaction?.lastCompactedMessageId || memory?.compactBoundary?.summarizedThroughMessageId || "")
+                    : "",
                 contextPressureWarning: currentPressureWarning,
                 compactWarning: currentPressureWarning,
                 compactStrategyDecision,
@@ -3585,14 +4351,16 @@ function refreshGroupConversationMemorySnapshot(groupId, allMessages, memory, op
                 recentLimit: messages.length,
                 olderLimit,
                 totalMessages: messages.length,
-                compressedMessages: 0,
+                compressedMessages: hasCommittedCompactBoundary
+                    ? Number(memory?.messageCompression?.compressedMessages || memory?.compaction?.compactedMessageCount || memory?.compactBoundary?.summarizedMessageCount || 0)
+                    : 0,
                 recentMessages: messages.length,
                 contextPressureWarning: currentPressureWarning,
                 compactStrategyDecision,
                 apiMicroCompactEditPlan,
                 lastCompressedAt: now,
             },
-        });
+        }, groupSessionId, { sessionMemoryCadenceDecision });
     }
     const conversationSummary = (0, group_memory_compaction_1.buildDeterministicConversationSummary)(messagesToSummarize, memory, memory?.conversationSummary || {});
     const microCompact = (0, group_memory_compaction_1.buildGroupMicroCompactPlan)(messagesToSummarize);
@@ -3636,7 +4404,7 @@ function refreshGroupConversationMemorySnapshot(groupId, allMessages, memory, op
         postCompactTokenCount,
         restoredMessageDigestMaxChars: 14_000,
         summaryChecksum,
-        transcriptPath: getGroupMessagesFileHint(groupId),
+        transcriptPath: getGroupMessagesFileHint(groupId, groupSessionId),
         config: options.config || options,
         now,
     });
@@ -3665,12 +4433,13 @@ function refreshGroupConversationMemorySnapshot(groupId, allMessages, memory, op
             : baseContextBudget;
     const boundaryThrough = messagesToSummarize[messagesToSummarize.length - 1];
     const preservedSegment = (0, group_memory_compaction_1.buildGroupPreservedSegment)(messages, keepIndex, {
+        groupId,
         floorIndex: 0,
         minMessages: minKeepMessages,
         minTokens: minKeepTokens,
         maxTokens: maxKeepTokens,
         summaryChecksum,
-        transcriptPath: getGroupMessagesFileHint(groupId),
+        transcriptPath: getGroupMessagesFileHint(groupId, groupSessionId),
         now,
     });
     const compactStrategyDecision = (0, group_memory_compaction_1.buildGroupCompactStrategyDecision)({
@@ -3690,7 +4459,7 @@ function refreshGroupConversationMemorySnapshot(groupId, allMessages, memory, op
         preCompactTokenCount,
         postCompactTokenCount,
         summaryChecksum,
-        transcriptPath: getGroupMessagesFileHint(groupId),
+        transcriptPath: getGroupMessagesFileHint(groupId, groupSessionId),
         reason: "sync snapshot compact selected session-memory style summary plus recent window",
         now,
     });
@@ -3701,7 +4470,7 @@ function refreshGroupConversationMemorySnapshot(groupId, allMessages, memory, op
         maxInputTokens: options.apiMicrocompactMaxInputTokens || options.api_microcompact_max_input_tokens,
         now,
     });
-    const boundary = {
+    let boundary = {
         id: `compact-sync-${Date.now().toString(36)}`,
         type: "sync-context",
         summarizedFromMessageId: getMemoryMessageIdentity(messagesToSummarize[0], 0),
@@ -3720,7 +4489,7 @@ function refreshGroupConversationMemorySnapshot(groupId, allMessages, memory, op
             preservedSegment,
             strategyDecision: compactStrategyDecision,
             apiMicroCompactEditPlan,
-            transcriptPath: getGroupMessagesFileHint(groupId),
+            transcriptPath: getGroupMessagesFileHint(groupId, groupSessionId),
             microCompact,
             reinjectionPlan: postCompactReinject,
             ptlRecovery,
@@ -3731,6 +4500,26 @@ function refreshGroupConversationMemorySnapshot(groupId, allMessages, memory, op
         summarySource: "deterministic-sync",
         createdAt: now,
     };
+    const previousBoundary = memory?.compactBoundary || null;
+    const previousSegment = previousBoundary?.preservedSegment || previousBoundary?.post_compact_restore?.preservedSegment || null;
+    if (previousBoundary?.id
+        && String(previousBoundary.summarizedThroughMessageId || "") === String(boundary.summarizedThroughMessageId || "")
+        && String(memory?.compaction?.summaryChecksum || previousBoundary?.summaryChecksum || previousSegment?.summaryChecksum || "") === summaryChecksum
+        && previousSegment?.schema === "ccm-group-preserved-segment-v1") {
+        boundary = {
+            ...boundary,
+            id: previousBoundary.id,
+            createdAt: previousBoundary.createdAt || boundary.createdAt,
+            refreshedAt: now,
+            preservedMessageIds: previousBoundary.preservedMessageIds || boundary.preservedMessageIds,
+            preservedSegment: previousSegment,
+            post_compact_restore: {
+                ...(boundary.post_compact_restore || {}),
+                preservedMessageIds: previousBoundary?.post_compact_restore?.preservedMessageIds || boundary.post_compact_restore?.preservedMessageIds,
+                preservedSegment: previousSegment,
+            },
+        };
+    }
     const postCompactRecoveryAudit = (0, group_memory_compaction_1.buildGroupPostCompactRecoveryAudit)({
         groupId,
         messages,
@@ -3739,7 +4528,7 @@ function refreshGroupConversationMemorySnapshot(groupId, allMessages, memory, op
         conversationSummary,
         messageDigest,
         summaryChecksum,
-        transcriptPath: getGroupMessagesFileHint(groupId),
+        transcriptPath: getGroupMessagesFileHint(groupId, groupSessionId),
         preservedSegment,
         postCompactReinject,
         microCompact,
@@ -3758,7 +4547,7 @@ function refreshGroupConversationMemorySnapshot(groupId, allMessages, memory, op
         microCompact,
         postCompactReinject,
         preservedSegment,
-        transcriptPath: getGroupMessagesFileHint(groupId),
+        transcriptPath: getGroupMessagesFileHint(groupId, groupSessionId),
         summaryChecksum,
         now,
     });
@@ -3829,10 +4618,10 @@ function refreshGroupConversationMemorySnapshot(groupId, allMessages, memory, op
             contextPressureWarning: postCompactWarning,
             lastCompressedAt: now,
         },
-    });
+    }, groupSessionId, { sessionMemoryCadenceDecision });
 }
-function getGroupMessagesFileHint(groupId) {
-    return path.join(utils_1.CCM_DIR, "group-messages", `${groupId}.json`);
+function getGroupMessagesFileHint(groupId, sessionId = "") {
+    return (0, storage_1.getGroupChatSessionMessagesFile)(groupId, sessionId);
 }
 function hashGroupMemoryFileWindow(file, stat, maxBytes = 256_000) {
     const hash = crypto.createHash("sha256");
@@ -3918,16 +4707,18 @@ function buildGroupMemorySourceEntry(id, sourcePath, purpose, extra = {}) {
 }
 function buildGroupMemorySourceManifest(groupId, input = {}) {
     const generatedAt = String(input.generatedAt || input.generated_at || new Date().toISOString());
+    const groupSessionId = String(input.groupSessionId || input.group_session_id || "default");
+    const typedMemoryScopeId = groupSessionId === "default" ? groupId : `${groupId}--${groupSessionId}`;
     const typedSync = input.typedMemorySync || input.typed_memory_sync || {};
     const typedIndex = typedSync.index || typedSync || {};
     const typedDocs = Array.isArray(input.typedDocs || input.typed_docs)
         ? (input.typedDocs || input.typed_docs)
         : Array.isArray(typedIndex.docs) ? typedIndex.docs : [];
     const baseEntries = [
-        buildGroupMemorySourceEntry("group_memory", getGroupMemoryFile(groupId), "group_memory_json"),
-        buildGroupMemorySourceEntry("group_messages", getGroupMessagesFileHint(groupId), "raw_group_messages_json"),
-        buildGroupMemorySourceEntry("typed_memory_dir", typedIndex.dir || (0, group_memory_index_1.getGroupTypedMemoryDir)(groupId), "typed_memory_directory"),
-        buildGroupMemorySourceEntry("typed_memory_index", typedIndex.file || path.join((0, group_memory_index_1.getGroupTypedMemoryDir)(groupId), "MEMORY.md"), "typed_memory_entrypoint"),
+        buildGroupMemorySourceEntry("group_memory", getGroupMemoryFile(groupId, groupSessionId), "group_memory_json"),
+        buildGroupMemorySourceEntry("group_messages", getGroupMessagesFileHint(groupId, groupSessionId), "raw_group_messages_json"),
+        buildGroupMemorySourceEntry("typed_memory_dir", typedIndex.dir || (0, group_memory_index_1.getGroupTypedMemoryDir)(typedMemoryScopeId), "typed_memory_directory"),
+        buildGroupMemorySourceEntry("typed_memory_index", typedIndex.file || path.join((0, group_memory_index_1.getGroupTypedMemoryDir)(typedMemoryScopeId), "MEMORY.md"), "typed_memory_entrypoint"),
     ];
     if (input.distillationLedgerFile || input.distillation_ledger_file || input.typedLogDistillation?.ledgerFile) {
         baseEntries.push(buildGroupMemorySourceEntry("typed_memory_distillation_ledger", input.distillationLedgerFile || input.distillation_ledger_file || input.typedLogDistillation?.ledgerFile, "typed_memory_distillation_ledger"));
@@ -3972,6 +4763,7 @@ function buildGroupMemorySourceManifest(groupId, input = {}) {
         schema: "ccm-group-memory-source-manifest-v1",
         version: exports.GROUP_MEMORY_SOURCE_MANIFEST_VERSION,
         groupId,
+        groupSessionId,
         generatedAt,
         status,
         pass: status === "pass",
@@ -3997,8 +4789,8 @@ function buildGroupMemorySourceManifest(groupId, input = {}) {
         entries,
     };
 }
-function readGroupMemoryReloadLedger(groupId) {
-    const file = getGroupMemoryReloadLedgerFile(groupId);
+function readGroupMemoryReloadLedger(groupId, sessionId = "") {
+    const file = getGroupMemoryReloadLedgerFile(groupId, sessionId);
     try {
         const parsed = JSON.parse(fs.readFileSync(file, "utf-8"));
         return {
@@ -4013,6 +4805,7 @@ function readGroupMemoryReloadLedger(groupId) {
             schema: "ccm-group-memory-reload-ledger-v1",
             version: 1,
             groupId,
+            groupSessionId: String(sessionId || "default"),
             file,
             scopes: {},
             entries: [],
@@ -4020,22 +4813,23 @@ function readGroupMemoryReloadLedger(groupId) {
         };
     }
 }
-function writeGroupMemoryReloadLedger(groupId, ledger) {
-    const file = getGroupMemoryReloadLedgerFile(groupId);
+function writeGroupMemoryReloadLedger(groupId, ledger, sessionId = "") {
+    const file = getGroupMemoryReloadLedgerFile(groupId, sessionId);
     fs.mkdirSync(path.dirname(file), { recursive: true });
     const temp = `${file}.${process.pid}.${Date.now()}.tmp`;
     fs.writeFileSync(temp, JSON.stringify({
         schema: "ccm-group-memory-reload-ledger-v1",
         version: 1,
         groupId,
+        groupSessionId: String(sessionId || "default"),
         scopes: ledger.scopes || {},
         entries: (ledger.entries || []).slice(-120),
         updatedAt: ledger.updatedAt || new Date().toISOString(),
     }, null, 2), "utf-8");
     fs.renameSync(temp, file);
 }
-function readGroupPostCompactDispatchLedger(groupId) {
-    const file = getGroupPostCompactDispatchLedgerFile(groupId);
+function readGroupPostCompactDispatchLedger(groupId, sessionId = "") {
+    const file = getGroupPostCompactDispatchLedgerFile(groupId, sessionId);
     try {
         const parsed = JSON.parse(fs.readFileSync(file, "utf-8"));
         return {
@@ -4050,6 +4844,7 @@ function readGroupPostCompactDispatchLedger(groupId) {
             schema: "ccm-group-post-compact-dispatch-ledger-v1",
             version: 1,
             groupId,
+            groupSessionId: String(sessionId || "default"),
             file,
             scopes: {},
             entries: [],
@@ -4057,22 +4852,23 @@ function readGroupPostCompactDispatchLedger(groupId) {
         };
     }
 }
-function writeGroupPostCompactDispatchLedger(groupId, ledger) {
-    const file = getGroupPostCompactDispatchLedgerFile(groupId);
+function writeGroupPostCompactDispatchLedger(groupId, ledger, sessionId = "") {
+    const file = getGroupPostCompactDispatchLedgerFile(groupId, sessionId);
     fs.mkdirSync(path.dirname(file), { recursive: true });
     const temp = `${file}.${process.pid}.${Date.now()}.tmp`;
     fs.writeFileSync(temp, JSON.stringify({
         schema: "ccm-group-post-compact-dispatch-ledger-v1",
         version: 1,
         groupId,
+        groupSessionId: String(sessionId || "default"),
         scopes: ledger.scopes || {},
         entries: (ledger.entries || []).slice(-160),
         updatedAt: ledger.updatedAt || new Date().toISOString(),
     }, null, 2), "utf-8");
     fs.renameSync(temp, file);
 }
-function readGroupPostCompactCandidateUsageLedger(groupId) {
-    const file = getGroupPostCompactCandidateUsageLedgerFile(groupId);
+function readGroupPostCompactCandidateUsageLedger(groupId, sessionId = "") {
+    const file = getGroupPostCompactCandidateUsageLedgerFile(groupId, sessionId);
     try {
         const parsed = JSON.parse(fs.readFileSync(file, "utf-8"));
         return {
@@ -4088,6 +4884,7 @@ function readGroupPostCompactCandidateUsageLedger(groupId) {
             schema: "ccm-group-post-compact-candidate-usage-ledger-v1",
             version: exports.GROUP_MEMORY_POST_COMPACT_CANDIDATE_USAGE_LEDGER_VERSION,
             groupId,
+            groupSessionId: String(sessionId || "default"),
             file,
             stats: {},
             entries: [],
@@ -4096,8 +4893,8 @@ function readGroupPostCompactCandidateUsageLedger(groupId) {
         };
     }
 }
-function writeGroupPostCompactCandidateUsageLedger(groupId, ledger) {
-    const file = getGroupPostCompactCandidateUsageLedgerFile(groupId);
+function writeGroupPostCompactCandidateUsageLedger(groupId, ledger, sessionId = "") {
+    const file = getGroupPostCompactCandidateUsageLedgerFile(groupId, sessionId);
     fs.mkdirSync(path.dirname(file), { recursive: true });
     const entries = (Array.isArray(ledger.entries) ? ledger.entries : []).slice(-240);
     const temp = `${file}.${process.pid}.${Date.now()}.tmp`;
@@ -4105,6 +4902,7 @@ function writeGroupPostCompactCandidateUsageLedger(groupId, ledger) {
         schema: "ccm-group-post-compact-candidate-usage-ledger-v1",
         version: exports.GROUP_MEMORY_POST_COMPACT_CANDIDATE_USAGE_LEDGER_VERSION,
         groupId,
+        groupSessionId: String(sessionId || "default"),
         stats: ledger.stats || {},
         entries,
         totals: ledger.totals || { used: 0, ignored: 0, verified: 0, mentioned: 0, total: 0 },
@@ -4112,8 +4910,8 @@ function writeGroupPostCompactCandidateUsageLedger(groupId, ledger) {
     }, null, 2), "utf-8");
     fs.renameSync(temp, file);
 }
-function readGroupApiMicrocompactNativeApplyProofLedger(groupId) {
-    const file = getGroupApiMicrocompactNativeApplyProofLedgerFile(groupId);
+function readGroupApiMicrocompactNativeApplyProofLedger(groupId, sessionId = "") {
+    const file = getGroupApiMicrocompactNativeApplyProofLedgerFile(groupId, sessionId);
     try {
         const parsed = JSON.parse(fs.readFileSync(file, "utf-8"));
         return {
@@ -4129,6 +4927,7 @@ function readGroupApiMicrocompactNativeApplyProofLedger(groupId) {
             schema: "ccm-group-api-microcompact-native-apply-proof-ledger-v1",
             version: exports.GROUP_API_MICROCOMPACT_NATIVE_APPLY_PROOF_LEDGER_VERSION,
             groupId,
+            groupSessionId: String(sessionId || "default"),
             file,
             stats: {},
             entries: [],
@@ -4137,8 +4936,8 @@ function readGroupApiMicrocompactNativeApplyProofLedger(groupId) {
         };
     }
 }
-function writeGroupApiMicrocompactNativeApplyProofLedger(groupId, ledger) {
-    const file = getGroupApiMicrocompactNativeApplyProofLedgerFile(groupId);
+function writeGroupApiMicrocompactNativeApplyProofLedger(groupId, ledger, sessionId = "") {
+    const file = getGroupApiMicrocompactNativeApplyProofLedgerFile(groupId, sessionId);
     fs.mkdirSync(path.dirname(file), { recursive: true });
     const entries = (Array.isArray(ledger.entries) ? ledger.entries : []).slice(-320);
     const temp = `${file}.${process.pid}.${Date.now()}.tmp`;
@@ -4146,6 +4945,7 @@ function writeGroupApiMicrocompactNativeApplyProofLedger(groupId, ledger) {
         schema: "ccm-group-api-microcompact-native-apply-proof-ledger-v1",
         version: exports.GROUP_API_MICROCOMPACT_NATIVE_APPLY_PROOF_LEDGER_VERSION,
         groupId,
+        groupSessionId: String(sessionId || "default"),
         stats: ledger.stats || {},
         entries,
         totals: ledger.totals || { verified: 0, failed: 0, advisory: 0, not_supported: 0, native_claims: 0, total: 0 },
@@ -4153,8 +4953,8 @@ function writeGroupApiMicrocompactNativeApplyProofLedger(groupId, ledger) {
     }, null, 2), "utf-8");
     fs.renameSync(temp, file);
 }
-function readGroupApiMicrocompactNativeApplyRequestTelemetryLedger(groupId) {
-    const file = getGroupApiMicrocompactNativeApplyRequestTelemetryLedgerFile(groupId);
+function readGroupApiMicrocompactNativeApplyRequestTelemetryLedger(groupId, sessionId = "") {
+    const file = getGroupApiMicrocompactNativeApplyRequestTelemetryLedgerFile(groupId, sessionId);
     try {
         const parsed = JSON.parse(fs.readFileSync(file, "utf-8"));
         return {
@@ -4170,6 +4970,7 @@ function readGroupApiMicrocompactNativeApplyRequestTelemetryLedger(groupId) {
             schema: "ccm-group-api-microcompact-native-apply-request-telemetry-ledger-v1",
             version: exports.GROUP_API_MICROCOMPACT_NATIVE_APPLY_REQUEST_TELEMETRY_LEDGER_VERSION,
             groupId,
+            groupSessionId: String(sessionId || "default"),
             file,
             stats: {},
             entries: [],
@@ -4178,8 +4979,8 @@ function readGroupApiMicrocompactNativeApplyRequestTelemetryLedger(groupId) {
         };
     }
 }
-function writeGroupApiMicrocompactNativeApplyRequestTelemetryLedger(groupId, ledger) {
-    const file = getGroupApiMicrocompactNativeApplyRequestTelemetryLedgerFile(groupId);
+function writeGroupApiMicrocompactNativeApplyRequestTelemetryLedger(groupId, ledger, sessionId = "") {
+    const file = getGroupApiMicrocompactNativeApplyRequestTelemetryLedgerFile(groupId, sessionId);
     fs.mkdirSync(path.dirname(file), { recursive: true });
     const entries = (Array.isArray(ledger.entries) ? ledger.entries : []).slice(-320);
     const temp = `${file}.${process.pid}.${Date.now()}.tmp`;
@@ -4187,6 +4988,7 @@ function writeGroupApiMicrocompactNativeApplyRequestTelemetryLedger(groupId, led
         schema: "ccm-group-api-microcompact-native-apply-request-telemetry-ledger-v1",
         version: exports.GROUP_API_MICROCOMPACT_NATIVE_APPLY_REQUEST_TELEMETRY_LEDGER_VERSION,
         groupId,
+        groupSessionId: String(sessionId || "default"),
         stats: ledger.stats || {},
         entries,
         totals: ledger.totals || { sent: 0, matched_contract: 0, invalid: 0, failed: 0, total: 0 },
@@ -4227,6 +5029,7 @@ function buildPostCompactCandidateEntry(groupId, input = {}, row = {}) {
     const generatedAt = String(input.generatedAt || input.generated_at || new Date().toISOString());
     const entryCore = {
         group_id: groupId,
+        group_session_id: String(input.groupSessionId || input.group_session_id || "default"),
         target_project: targetProject,
         agent,
         task_id: taskId,
@@ -4265,6 +5068,7 @@ function recordGroupPostCompactCandidateUsageLedger(groupId, input = {}) {
     groupId = String(groupId || "").trim();
     if (!groupId || input.disabled === true || input.disableLedger === true || input.disable_ledger === true)
         return null;
+    const groupSessionId = String(input.groupSessionId || input.group_session_id || "default");
     const rows = Array.isArray(input.rows)
         ? input.rows
         : Array.isArray(input.receiptRows || input.receipt_rows)
@@ -4284,12 +5088,13 @@ function recordGroupPostCompactCandidateUsageLedger(groupId, input = {}) {
         .filter((row) => row && row.usage_state !== "unreferenced" && (row.referenced === true || ["used", "ignored", "verified", "mentioned"].includes(normalizePostCompactUsageState(row.usage_state || row.usageState))))
         .map((row) => buildPostCompactCandidateEntry(groupId, input, row))
         .filter(Boolean);
-    const file = getGroupPostCompactCandidateUsageLedgerFile(groupId);
+    const file = getGroupPostCompactCandidateUsageLedgerFile(groupId, groupSessionId);
     if (!entries.length) {
-        const ledger = readGroupPostCompactCandidateUsageLedger(groupId);
+        const ledger = readGroupPostCompactCandidateUsageLedger(groupId, groupSessionId);
         return {
             schema: "ccm-group-post-compact-candidate-usage-record-v1",
             groupId,
+            groupSessionId,
             file,
             skipped: true,
             reason: "no_candidate_usage_rows",
@@ -4297,7 +5102,7 @@ function recordGroupPostCompactCandidateUsageLedger(groupId, input = {}) {
             totals: ledger.totals || {},
         };
     }
-    const ledger = readGroupPostCompactCandidateUsageLedger(groupId);
+    const ledger = readGroupPostCompactCandidateUsageLedger(groupId, groupSessionId);
     const seen = new Set((ledger.entries || []).map((entry) => entry.entry_id));
     const newEntries = entries.filter((entry) => !seen.has(entry.entry_id));
     const stats = ledger.stats || {};
@@ -4351,10 +5156,11 @@ function recordGroupPostCompactCandidateUsageLedger(groupId, input = {}) {
         entries: allEntries,
         totals,
         updatedAt,
-    });
+    }, groupSessionId);
     return {
         schema: "ccm-group-post-compact-candidate-usage-record-v1",
         groupId,
+        groupSessionId,
         file,
         recorded_count: newEntries.length,
         duplicate_count: entries.length - newEntries.length,
@@ -4364,7 +5170,8 @@ function recordGroupPostCompactCandidateUsageLedger(groupId, input = {}) {
 }
 function buildGroupPostCompactCandidateUsageSummary(groupId, options = {}) {
     groupId = String(groupId || "").trim();
-    const ledger = readGroupPostCompactCandidateUsageLedger(groupId);
+    const groupSessionId = String(options.groupSessionId || options.group_session_id || "default");
+    const ledger = readGroupPostCompactCandidateUsageLedger(groupId, groupSessionId);
     const targetProject = String(options.targetProject || options.target_project || "").trim().toLowerCase();
     const candidates = Array.isArray(options.candidates) ? options.candidates : [];
     const candidateKeys = new Set(candidates.map((candidate) => postCompactCandidateStatsKey(candidate, targetProject)).filter(Boolean));
@@ -4393,6 +5200,7 @@ function buildGroupPostCompactCandidateUsageSummary(groupId, options = {}) {
         schema: "ccm-group-post-compact-candidate-usage-summary-v1",
         version: exports.GROUP_MEMORY_POST_COMPACT_CANDIDATE_USAGE_LEDGER_VERSION,
         groupId,
+        groupSessionId,
         target_project: targetProject,
         ledger_file: ledger.file,
         has_history: statsRows.length > 0,
@@ -4453,6 +5261,7 @@ function buildApiMicrocompactNativeApplyProofEntry(groupId, input = {}, receiptR
     const usageState = String(planRow.usage_state || planRow.usageState || "").trim();
     const entryCore = {
         group_id: groupId,
+        group_session_id: String(input.groupSessionId || input.group_session_id || "default"),
         target_project: targetProject,
         agent,
         task_id: taskId,
@@ -4743,6 +5552,7 @@ function buildApiMicrocompactNativeApplyTelemetryEntry(groupId, input = {}, rece
         || betaHeaders.includes("context-management-2025-06-27");
     const entryCore = {
         group_id: groupId,
+        group_session_id: String(input.groupSessionId || input.group_session_id || "default"),
         target_project: targetProject,
         agent,
         task_id: taskId,
@@ -4838,6 +5648,7 @@ function recordGroupApiMicrocompactNativeApplyRequestTelemetryLedger(groupId, in
     groupId = String(groupId || "").trim();
     if (!groupId || input.disabled === true || input.disableLedger === true || input.disable_ledger === true)
         return null;
+    const groupSessionId = String(input.groupSessionId || input.group_session_id || "default");
     const directRows = Array.isArray(input.rows) ? input.rows : [];
     const receiptRows = Array.isArray(input.receipts || input.receiptRows || input.receipt_rows)
         ? (input.receipts || input.receiptRows || input.receipt_rows)
@@ -4862,12 +5673,13 @@ function recordGroupApiMicrocompactNativeApplyRequestTelemetryLedger(groupId, in
     const entries = rows
         .map(({ receipt, row }) => buildApiMicrocompactNativeApplyTelemetryEntry(groupId, input, receipt, row))
         .filter(Boolean);
-    const file = getGroupApiMicrocompactNativeApplyRequestTelemetryLedgerFile(groupId);
+    const file = getGroupApiMicrocompactNativeApplyRequestTelemetryLedgerFile(groupId, groupSessionId);
     if (!entries.length) {
-        const ledger = readGroupApiMicrocompactNativeApplyRequestTelemetryLedger(groupId);
+        const ledger = readGroupApiMicrocompactNativeApplyRequestTelemetryLedger(groupId, groupSessionId);
         return {
             schema: "ccm-group-api-microcompact-native-apply-request-telemetry-record-v1",
             groupId,
+            groupSessionId,
             file,
             skipped: true,
             reason: "no_request_telemetry_rows",
@@ -4875,7 +5687,7 @@ function recordGroupApiMicrocompactNativeApplyRequestTelemetryLedger(groupId, in
             totals: ledger.totals || {},
         };
     }
-    const ledger = readGroupApiMicrocompactNativeApplyRequestTelemetryLedger(groupId);
+    const ledger = readGroupApiMicrocompactNativeApplyRequestTelemetryLedger(groupId, groupSessionId);
     const entryMap = new Map((Array.isArray(ledger.entries) ? ledger.entries : []).map((entry) => [entry.entry_id, entry]));
     let recordedCount = 0;
     let updatedCount = 0;
@@ -4927,10 +5739,11 @@ function recordGroupApiMicrocompactNativeApplyRequestTelemetryLedger(groupId, in
         entries: allEntries,
         totals,
         updatedAt,
-    });
+    }, groupSessionId);
     return {
         schema: "ccm-group-api-microcompact-native-apply-request-telemetry-record-v1",
         groupId,
+        groupSessionId,
         file,
         recorded_count: recordedCount,
         updated_count: updatedCount,
@@ -4993,12 +5806,13 @@ function enrichApiMicrocompactNativeApplyProofWithTelemetry(entry = {}, telemetr
                 : matchedContract && !adapterCaptured
                     ? "receipt_only"
                     : telemetryStatus,
-        request_telemetry_file: matched ? getGroupApiMicrocompactNativeApplyRequestTelemetryLedgerFile(entry.group_id || "") : "",
+        request_telemetry_file: matched ? getGroupApiMicrocompactNativeApplyRequestTelemetryLedgerFile(entry.group_id || "", entry.group_session_id || "") : "",
     };
 }
 function buildGroupApiMicrocompactNativeApplyRequestTelemetrySummary(groupId, options = {}) {
     groupId = String(groupId || "").trim();
-    const ledger = readGroupApiMicrocompactNativeApplyRequestTelemetryLedger(groupId);
+    const groupSessionId = String(options.groupSessionId || options.group_session_id || "default");
+    const ledger = readGroupApiMicrocompactNativeApplyRequestTelemetryLedger(groupId, groupSessionId);
     const targetProject = String(options.targetProject || options.target_project || "").trim().toLowerCase();
     const planChecksums = new Set((Array.isArray(options.planChecksums || options.plan_checksums) ? (options.planChecksums || options.plan_checksums) : [])
         .map((item) => String(item || "").trim())
@@ -5018,6 +5832,7 @@ function buildGroupApiMicrocompactNativeApplyRequestTelemetrySummary(groupId, op
         schema: "ccm-group-api-microcompact-native-apply-request-telemetry-summary-v1",
         version: exports.GROUP_API_MICROCOMPACT_NATIVE_APPLY_REQUEST_TELEMETRY_LEDGER_VERSION,
         groupId,
+        groupSessionId,
         target_project: targetProject,
         ledger_file: ledger.file,
         has_history: entries.length > 0,
@@ -5035,6 +5850,7 @@ function recordGroupApiMicrocompactNativeApplyProofLedger(groupId, input = {}) {
     groupId = String(groupId || "").trim();
     if (!groupId || input.disabled === true || input.disableLedger === true || input.disable_ledger === true)
         return null;
+    const groupSessionId = String(input.groupSessionId || input.group_session_id || "default");
     const receiptRows = Array.isArray(input.receiptRows || input.receipt_rows || input.apiMicrocompactReceiptRows || input.api_microcompact_receipt_rows)
         ? (input.receiptRows || input.receipt_rows || input.apiMicrocompactReceiptRows || input.api_microcompact_receipt_rows)
         : [];
@@ -5045,12 +5861,13 @@ function recordGroupApiMicrocompactNativeApplyProofLedger(groupId, input = {}) {
             .map((row) => buildApiMicrocompactNativeApplyProofEntry(groupId, input, receiptRow, row))
             .filter(Boolean);
     });
-    const file = getGroupApiMicrocompactNativeApplyProofLedgerFile(groupId);
+    const file = getGroupApiMicrocompactNativeApplyProofLedgerFile(groupId, groupSessionId);
     if (!entries.length) {
-        const ledger = readGroupApiMicrocompactNativeApplyProofLedger(groupId);
+        const ledger = readGroupApiMicrocompactNativeApplyProofLedger(groupId, groupSessionId);
         return {
             schema: "ccm-group-api-microcompact-native-apply-proof-record-v1",
             groupId,
+            groupSessionId,
             file,
             skipped: true,
             reason: "no_api_microcompact_receipt_rows",
@@ -5058,7 +5875,7 @@ function recordGroupApiMicrocompactNativeApplyProofLedger(groupId, input = {}) {
             totals: ledger.totals || {},
         };
     }
-    const ledger = readGroupApiMicrocompactNativeApplyProofLedger(groupId);
+    const ledger = readGroupApiMicrocompactNativeApplyProofLedger(groupId, groupSessionId);
     const entryMap = new Map((Array.isArray(ledger.entries) ? ledger.entries : []).map((entry) => [entry.entry_id, entry]));
     let recordedCount = 0;
     let updatedCount = 0;
@@ -5109,10 +5926,11 @@ function recordGroupApiMicrocompactNativeApplyProofLedger(groupId, input = {}) {
         entries: allEntries,
         totals,
         updatedAt,
-    });
+    }, groupSessionId);
     return {
         schema: "ccm-group-api-microcompact-native-apply-proof-record-v1",
         groupId,
+        groupSessionId,
         file,
         recorded_count: recordedCount,
         updated_count: updatedCount,
@@ -5122,7 +5940,8 @@ function recordGroupApiMicrocompactNativeApplyProofLedger(groupId, input = {}) {
 }
 function buildGroupApiMicrocompactNativeApplyProofSummary(groupId, options = {}) {
     groupId = String(groupId || "").trim();
-    const ledger = readGroupApiMicrocompactNativeApplyProofLedger(groupId);
+    const groupSessionId = String(options.groupSessionId || options.group_session_id || "default");
+    const ledger = readGroupApiMicrocompactNativeApplyProofLedger(groupId, groupSessionId);
     const telemetrySummary = buildGroupApiMicrocompactNativeApplyRequestTelemetrySummary(groupId, options);
     const telemetryEntries = [
         ...(Array.isArray(telemetrySummary.matched_entries) ? telemetrySummary.matched_entries : []),
@@ -5161,6 +5980,7 @@ function buildGroupApiMicrocompactNativeApplyProofSummary(groupId, options = {})
         schema: "ccm-group-api-microcompact-native-apply-proof-summary-v1",
         version: exports.GROUP_API_MICROCOMPACT_NATIVE_APPLY_PROOF_LEDGER_VERSION,
         groupId,
+        groupSessionId,
         target_project: targetProject,
         ledger_file: ledger.file,
         has_history: entries.length > 0,
@@ -5273,6 +6093,7 @@ function diffSourceManifestSnapshots(previousEntries = [], currentEntries = []) 
 }
 function recordGroupMemoryReloadAudit(groupId, input = {}) {
     const generatedAt = String(input.generatedAt || input.generated_at || new Date().toISOString());
+    const groupSessionId = String(input.groupSessionId || input.group_session_id || "default");
     const sourceManifest = input.sourceManifest || input.source_manifest || {};
     const loadPlan = input.loadPlan || input.load_plan || {};
     const scope = String(input.scope || input.contextScope || input.context_scope || "default");
@@ -5287,7 +6108,7 @@ function recordGroupMemoryReloadAudit(groupId, input = {}) {
         checksum: entry.checksum,
         pathGlobs: entry.pathGlobs || [],
     })))).digest("hex").slice(0, 24);
-    const ledger = readGroupMemoryReloadLedger(groupId);
+    const ledger = readGroupMemoryReloadLedger(groupId, groupSessionId);
     const previous = ledger.scopes?.[scope] || null;
     const sourceManifestChanged = !!previous && previous.sourceManifestChecksum !== sourceManifestChecksum;
     const sourceShapeChanged = !!previous && previous.stableSourceFingerprint !== stableSourceFingerprint;
@@ -5332,6 +6153,7 @@ function recordGroupMemoryReloadAudit(groupId, input = {}) {
         schema: "ccm-group-memory-reload-audit-v1",
         version: exports.GROUP_MEMORY_RELOAD_AUDIT_VERSION,
         groupId,
+        groupSessionId,
         scope,
         contextKind: input.contextKind || input.context_kind || "child_agent",
         reason,
@@ -5390,8 +6212,8 @@ function recordGroupMemoryReloadAudit(groupId, input = {}) {
     };
     ledger.entries = [...(ledger.entries || []), audit].slice(-120);
     ledger.updatedAt = generatedAt;
-    writeGroupMemoryReloadLedger(groupId, ledger);
-    return { ...audit, ledgerFile: getGroupMemoryReloadLedgerFile(groupId) };
+    writeGroupMemoryReloadLedger(groupId, ledger, groupSessionId);
+    return { ...audit, ledgerFile: getGroupMemoryReloadLedgerFile(groupId, groupSessionId) };
 }
 function buildGroupMemoryDispatchFreshnessGate(input = {}) {
     const sourceManifest = input.sourceManifest || input.source_manifest || {};
@@ -5608,17 +6430,18 @@ function resolvePostCompactBoundaryMarkerParts(groupId, input = {}) {
 }
 function recordGroupPostCompactFirstDispatchMarker(groupId, input = {}) {
     const generatedAt = String(input.generatedAt || input.generated_at || new Date().toISOString());
+    const groupSessionId = String(input.groupSessionId || input.group_session_id || "default");
     const targetProject = String(input.targetProject || input.target_project || "").trim();
     const scope = String(input.scope || (targetProject ? `child:${targetProject}` : "child"));
     const parts = resolvePostCompactBoundaryMarkerParts(groupId, input);
     if (!parts)
         return null;
-    const ledgerFile = getGroupPostCompactDispatchLedgerFile(groupId);
+    const ledgerFile = getGroupPostCompactDispatchLedgerFile(groupId, groupSessionId);
     const ledgerDisabled = input.disableLedger === true
         || input.disable_ledger === true
         || input.disablePostCompactDispatchLedger === true
         || input.disable_post_compact_dispatch_ledger === true;
-    const ledger = ledgerDisabled ? { scopes: {}, entries: [] } : readGroupPostCompactDispatchLedger(groupId);
+    const ledger = ledgerDisabled ? { scopes: {}, entries: [] } : readGroupPostCompactDispatchLedger(groupId, groupSessionId);
     const scopeKey = `${scope}|${parts.boundaryId}`;
     const previous = ledger.scopes?.[scopeKey] || null;
     const dispatchSequence = Number(previous?.dispatchSequence || previous?.dispatch_sequence || 0) + 1;
@@ -5635,6 +6458,7 @@ function recordGroupPostCompactFirstDispatchMarker(groupId, input = {}) {
             dispatchSequence,
         ])).digest("hex").slice(0, 18)}`,
         group_id: groupId,
+        group_session_id: groupSessionId,
         target_project: targetProject,
         scope,
         generated_at: generatedAt,
@@ -5671,6 +6495,7 @@ function recordGroupPostCompactFirstDispatchMarker(groupId, input = {}) {
         ledger.scopes = ledger.scopes || {};
         ledger.scopes[scopeKey] = {
             groupId,
+            groupSessionId,
             targetProject,
             scope,
             boundaryId: parts.boundaryId,
@@ -5686,7 +6511,7 @@ function recordGroupPostCompactFirstDispatchMarker(groupId, input = {}) {
         };
         ledger.entries = [...(ledger.entries || []), markerCore].slice(-160);
         ledger.updatedAt = generatedAt;
-        writeGroupPostCompactDispatchLedger(groupId, ledger);
+        writeGroupPostCompactDispatchLedger(groupId, ledger, groupSessionId);
     }
     return marker;
 }
@@ -5731,34 +6556,38 @@ function scheduleGroupMemoryAutoCompaction(groupId, options = {}) {
     const id = String(groupId || "").trim();
     if (!id)
         return { scheduled: false, reason: "missing_group_id" };
-    if (groupMemoryAutoCompactTimers.has(id)) {
-        clearTimeout(groupMemoryAutoCompactTimers.get(id));
+    const sessionId = String(options.sessionId || options.session_id || (0, storage_1.getActiveGroupChatSessionId)(id));
+    const scopeKey = `${id}::${sessionId}`;
+    if (groupMemoryAutoCompactTimers.has(scopeKey)) {
+        clearTimeout(groupMemoryAutoCompactTimers.get(scopeKey));
     }
     const delayMs = Math.max(0, Number(options.delayMs ?? GROUP_MEMORY_AUTO_COMPACT_DEBOUNCE_MS));
     const timer = setTimeout(() => {
-        groupMemoryAutoCompactTimers.delete(id);
-        void runGroupMemoryAutoCompactionNow(id, options);
+        groupMemoryAutoCompactTimers.delete(scopeKey);
+        void runGroupMemoryAutoCompactionNow(id, { ...options, sessionId });
     }, delayMs);
-    groupMemoryAutoCompactTimers.set(id, timer);
-    return { scheduled: true, groupId: id, delayMs };
+    groupMemoryAutoCompactTimers.set(scopeKey, timer);
+    return { scheduled: true, groupId: id, sessionId, delayMs };
 }
 async function runGroupMemoryAutoCompactionNow(groupId, options = {}) {
     const id = String(groupId || "").trim();
     if (!id)
         return { success: false, compacted: false, reason: "missing_group_id" };
-    if (groupMemoryAutoCompactTimers.has(id)) {
-        clearTimeout(groupMemoryAutoCompactTimers.get(id));
-        groupMemoryAutoCompactTimers.delete(id);
+    const sessionId = String(options.sessionId || options.session_id || (0, storage_1.getActiveGroupChatSessionId)(id));
+    const scopeKey = `${id}::${sessionId}`;
+    if (groupMemoryAutoCompactTimers.has(scopeKey)) {
+        clearTimeout(groupMemoryAutoCompactTimers.get(scopeKey));
+        groupMemoryAutoCompactTimers.delete(scopeKey);
     }
-    if (groupMemoryAutoCompactRunning.has(id)) {
-        groupMemoryAutoCompactPending.add(id);
+    if (groupMemoryAutoCompactRunning.has(scopeKey)) {
+        groupMemoryAutoCompactPending.add(scopeKey);
         return { success: true, compacted: false, scheduled: true, reason: "already_running" };
     }
-    groupMemoryAutoCompactRunning.add(id);
+    groupMemoryAutoCompactRunning.add(scopeKey);
     const startedAt = new Date().toISOString();
     try {
-        const messages = (0, storage_1.getGroupMessages)(id).filter((message) => !String(message?.content || "").startsWith("📤"));
-        const memory = loadGroupMemory(id);
+        const messages = (0, storage_1.getGroupMessages)(id, sessionId).filter((message) => !String(message?.content || "").startsWith("📤"));
+        const memory = loadGroupMemory(id, sessionId);
         const config = loadGroupMemoryCompactionConfig(options.config || {});
         const modelCompactionEnabled = isGroupModelCompactionEnabled(config);
         const previousSummarySource = String(memory?.compaction?.summarySource || "");
@@ -5766,10 +6595,11 @@ async function runGroupMemoryAutoCompactionNow(groupId, options = {}) {
         const force = options.force === true;
         const result = await (0, group_memory_compaction_1.compactGroupConversationMemory)({
             groupId: id,
+            groupSessionId: sessionId,
             messages,
             memory,
             config,
-            transcriptPath: getGroupMessagesFileHint(id),
+            transcriptPath: (0, storage_1.getGroupChatSessionMessagesFile)(id, sessionId),
             force,
             rebuild,
         });
@@ -5802,11 +6632,14 @@ async function runGroupMemoryAutoCompactionNow(groupId, options = {}) {
                 background,
                 logDistillation,
             },
-        });
-        return { success: true, compacted: !!result.compacted, boundary: result.boundary || null, keepIndex: result.keepIndex, background, memory: saved };
+        }, sessionId);
+        const compactHead = sessionId.startsWith("gcs_") && result.compacted && result.compactTransactionReceipt
+            ? (0, group_compact_head_1.commitGroupCompactHead)({ groupId: id, groupSessionId: sessionId, compactTransactionReceipt: result.compactTransactionReceipt })
+            : null;
+        return { success: true, compacted: !!result.compacted, boundary: result.boundary || null, keepIndex: result.keepIndex, background, memory: saved, compactHead };
     }
     catch (error) {
-        const memory = loadGroupMemory(id);
+        const memory = loadGroupMemory(id, sessionId);
         const background = buildBackgroundCompactionState({
             status: "failed",
             reason: options.reason || "message_append",
@@ -5825,14 +6658,14 @@ async function runGroupMemoryAutoCompactionNow(groupId, options = {}) {
                 lastFailure: background.error,
                 lastFailureAt: background.completedAt,
             },
-        });
+        }, sessionId);
         return { success: false, compacted: false, error: background.error, background };
     }
     finally {
-        groupMemoryAutoCompactRunning.delete(id);
-        if (groupMemoryAutoCompactPending.has(id)) {
-            groupMemoryAutoCompactPending.delete(id);
-            scheduleGroupMemoryAutoCompaction(id, { reason: "pending_after_run", delayMs: GROUP_MEMORY_AUTO_COMPACT_DEBOUNCE_MS });
+        groupMemoryAutoCompactRunning.delete(scopeKey);
+        if (groupMemoryAutoCompactPending.has(scopeKey)) {
+            groupMemoryAutoCompactPending.delete(scopeKey);
+            scheduleGroupMemoryAutoCompaction(id, { reason: "pending_after_run", delayMs: GROUP_MEMORY_AUTO_COMPACT_DEBOUNCE_MS, sessionId });
         }
     }
 }
@@ -5840,9 +6673,13 @@ function ensureGroupMemoryAutoCompactionHook() {
     if (groupMemoryAutoCompactHookRegistered)
         return { registered: true, already: true };
     (0, storage_1.registerGroupMessageAppendHook)((groupId, message) => {
+        const sessionId = String(message?.group_session_id || message?.groupSessionId || "");
+        if (sessionId.startsWith("gcs_"))
+            (0, group_post_turn_summary_1.recordGroupPostTurnSummary)(groupId, sessionId, message);
         scheduleGroupMemoryAutoCompaction(groupId, {
             reason: "message_append",
             messageId: String(message?.id || ""),
+            sessionId,
         });
     });
     groupMemoryAutoCompactHookRegistered = true;
@@ -6586,20 +7423,294 @@ function buildPostCompactReinjectionRepairReceiptWorkerContextRecall(groupId, ta
         ].slice(-28),
     };
 }
+function buildChildTypedMemoryRecallLedgerScope(targetProject, sessionBinding = {}, memory = {}, options = {}) {
+    const project = normalizeAgentMemoryProject(targetProject);
+    const taskAgentSessionId = String(sessionBinding?.task_agent_session_id
+        || sessionBinding?.taskAgentSessionId
+        || options.taskAgentSessionId
+        || options.task_agent_session_id
+        || "").trim();
+    const taskId = String(sessionBinding?.task_id
+        || sessionBinding?.taskId
+        || options.taskId
+        || options.task_id
+        || "").trim();
+    const compactTransactionReceipt = memory?.compaction?.compactTransactionReceipt
+        || memory?.compactBoundary?.compactTransactionReceipt
+        || memory?.compactBoundary?.post_compact_restore?.compactTransactionReceipt
+        || null;
+    const rawCompactEpoch = String(options.typedMemoryRecallEpoch
+        || options.typed_memory_recall_epoch
+        || compactTransactionReceipt?.compact_epoch
+        || memory?.compactBoundary?.id
+        || memory?.compactBoundary?.boundary_id
+        || memory?.compactBoundary?.boundaryId
+        || memory?.compaction?.summaryChecksum
+        || memory?.compaction?.summary_checksum
+        || memory?.messageCompression?.summaryChecksum
+        || memory?.messageCompression?.summary_checksum
+        || "precompact").trim() || "precompact";
+    const compactEpoch = rawCompactEpoch === "precompact" || rawCompactEpoch.startsWith("cmp_")
+        ? rawCompactEpoch
+        : (0, group_memory_compaction_1.buildGroupCompactEpoch)(rawCompactEpoch);
+    const scopeKind = taskAgentSessionId ? "task_agent_session" : taskId ? "task" : "project_preview";
+    const identity = taskAgentSessionId || taskId || "preview";
+    const explicitScope = String(options.typedMemoryRecallScope || options.typed_memory_recall_scope || "").trim();
+    return {
+        schema: "ccm-child-typed-memory-recall-ledger-scope-v1",
+        version: 1,
+        scope: explicitScope || `child-agent:${project}:${identity}:${compactEpoch}`,
+        scopeKind,
+        targetProject: project,
+        taskId,
+        taskAgentSessionId,
+        compactEpoch,
+        sessionBound: !!taskAgentSessionId,
+        dedupeBoundary: "same_task_agent_session_and_compact_epoch_and_document_checksum",
+        crossTaskSessionRecallRequired: true,
+        postCompactRecallRequired: true,
+        changedDocumentRecallRequired: true,
+    };
+}
+const TYPED_MEMORY_DELIVERY_HARD_MAX_DOCUMENTS = 5;
+const TYPED_MEMORY_DELIVERY_HARD_MAX_BYTES_PER_DOCUMENT = 4096;
+const TYPED_MEMORY_DELIVERY_HARD_MAX_LINES_PER_DOCUMENT = 200;
+const TYPED_MEMORY_DELIVERY_HARD_MAX_SESSION_BYTES = 60 * 1024;
+function boundedTypedMemoryDeliveryInteger(value, fallback, min, max) {
+    const parsed = Number(value);
+    return Math.min(max, Math.max(min, Math.floor(Number.isFinite(parsed) ? parsed : fallback)));
+}
+function typedMemoryDeliveryLineCount(value) {
+    const text = String(value || "");
+    return text ? text.split("\n").length : 0;
+}
+function truncateTypedMemoryDeliveryContent(source, limits) {
+    const normalized = String(source || "").replace(/\r/g, "").trim();
+    const sourceLines = typedMemoryDeliveryLineCount(normalized);
+    const lineBounded = normalized.split("\n").slice(0, Math.max(0, limits.maxLines)).join("\n");
+    const reasons = [];
+    if (sourceLines > limits.maxLines)
+        reasons.push("line_limit");
+    const points = Array.from(lineBounded);
+    let low = 0;
+    let high = points.length;
+    while (low < high) {
+        const mid = Math.ceil((low + high) / 2);
+        const candidate = points.slice(0, mid).join("");
+        if (Buffer.byteLength(candidate, "utf8") <= limits.maxBytes && (0, context_budget_1.estimateTextTokens)(candidate) <= limits.maxTokens)
+            low = mid;
+        else
+            high = mid - 1;
+    }
+    const content = points.slice(0, low).join("").trimEnd();
+    if (Buffer.byteLength(lineBounded, "utf8") > limits.maxBytes)
+        reasons.push("byte_limit");
+    if ((0, context_budget_1.estimateTextTokens)(lineBounded) > limits.maxTokens)
+        reasons.push("token_limit");
+    return {
+        content,
+        sourceChars: normalized.length,
+        sourceBytes: Buffer.byteLength(normalized, "utf8"),
+        sourceLines,
+        sourceTokens: (0, context_budget_1.estimateTextTokens)(normalized),
+        deliveredChars: content.length,
+        deliveredBytes: Buffer.byteLength(content, "utf8"),
+        deliveredLines: typedMemoryDeliveryLineCount(content),
+        deliveredTokens: content ? (0, context_budget_1.estimateTextTokens)(content) : 0,
+        truncationReasons: [...new Set(reasons)],
+    };
+}
+function buildChildTypedMemoryDeliveryCapsule(input = {}, options = {}) {
+    const recall = input.recall || input.typedMemoryRecall || input.typed_memory_recall || {};
+    const allDocs = Array.isArray(recall.recalled) ? recall.recalled : [];
+    const maxDocuments = boundedTypedMemoryDeliveryInteger(options.maxDocuments ?? options.max_documents, TYPED_MEMORY_DELIVERY_HARD_MAX_DOCUMENTS, 1, TYPED_MEMORY_DELIVERY_HARD_MAX_DOCUMENTS);
+    const maxBytesPerDocument = boundedTypedMemoryDeliveryInteger(options.maxBytesPerDocument ?? options.max_bytes_per_document, TYPED_MEMORY_DELIVERY_HARD_MAX_BYTES_PER_DOCUMENT, 512, TYPED_MEMORY_DELIVERY_HARD_MAX_BYTES_PER_DOCUMENT);
+    const maxLinesPerDocument = boundedTypedMemoryDeliveryInteger(options.maxLinesPerDocument ?? options.max_lines_per_document, TYPED_MEMORY_DELIVERY_HARD_MAX_LINES_PER_DOCUMENT, 10, TYPED_MEMORY_DELIVERY_HARD_MAX_LINES_PER_DOCUMENT);
+    const maxSessionBytes = boundedTypedMemoryDeliveryInteger(options.maxSessionBytes ?? options.max_session_bytes, TYPED_MEMORY_DELIVERY_HARD_MAX_SESSION_BYTES, 4096, TYPED_MEMORY_DELIVERY_HARD_MAX_SESSION_BYTES);
+    const configuredMaxTokens = boundedTypedMemoryDeliveryInteger(options.maxTokens ?? options.max_tokens, 5000, 500, 20_000);
+    const requestedModelContextWindow = Number(options.modelContextWindow ?? options.model_context_window ?? 0);
+    const modelContextWindow = boundedTypedMemoryDeliveryInteger(requestedModelContextWindow > 0 ? requestedModelContextWindow : 200_000, 200_000, 32_000, 4_000_000);
+    const effectiveMaxTokens = Math.min(configuredMaxTokens, Math.max(1000, Math.floor(modelContextWindow * 0.02)));
+    const sessionDeliveredBytesBefore = Math.max(0, Math.floor(Number(options.sessionDeliveredBytes ?? options.session_delivered_bytes ?? 0) || 0));
+    const sessionRemainingBytesBefore = Math.max(0, maxSessionBytes - sessionDeliveredBytesBefore);
+    const turnMaxBytes = Math.min(maxDocuments * maxBytesPerDocument, sessionRemainingBytesBefore);
+    const docs = allDocs.slice(0, maxDocuments);
+    const rows = [];
+    const skippedRows = allDocs.slice(maxDocuments).map((doc) => ({
+        rel_path: String(doc.relPath || doc.rel_path || ""),
+        reason: "document_limit",
+    }));
+    let deliveredChars = 0;
+    let deliveredBytes = 0;
+    let deliveredLines = 0;
+    let deliveredTokens = 0;
+    for (const doc of docs) {
+        const remainingBytes = turnMaxBytes - deliveredBytes;
+        const remainingTokens = effectiveMaxTokens - deliveredTokens;
+        const relPath = String(doc.relPath || doc.rel_path || "");
+        if (remainingBytes <= 0 || remainingTokens <= 0) {
+            skippedRows.push({ rel_path: relPath, reason: remainingBytes <= 0 ? "session_or_turn_byte_budget_exhausted" : "turn_token_budget_exhausted" });
+            continue;
+        }
+        const sourceContent = String(doc.snippet || doc.description || doc.body || "").trim();
+        const rowByteLimit = Math.min(maxBytesPerDocument, remainingBytes);
+        const truncated = truncateTypedMemoryDeliveryContent(sourceContent, {
+            maxLines: maxLinesPerDocument,
+            maxBytes: rowByteLimit,
+            maxTokens: remainingTokens,
+        });
+        if (rowByteLimit < maxBytesPerDocument && truncated.sourceBytes > rowByteLimit) {
+            truncated.truncationReasons.push("session_byte_limit");
+        }
+        const content = truncated.content;
+        const row = {
+            rel_path: relPath,
+            document_checksum: String(doc.checksum || doc.document_checksum || ""),
+            type: String(doc.type || "project"),
+            name: String(doc.name || ""),
+            description: compactMemoryText(doc.description || "", 260),
+            score: Number(doc.score || 0),
+            stale: doc.freshness?.stale === true,
+            content,
+            content_checksum: crypto.createHash("sha256").update(content).digest("hex").slice(0, 32),
+            source_chars: truncated.sourceChars,
+            source_bytes: truncated.sourceBytes,
+            source_lines: truncated.sourceLines,
+            source_tokens: truncated.sourceTokens,
+            delivered_chars: truncated.deliveredChars,
+            delivered_bytes: truncated.deliveredBytes,
+            delivered_lines: truncated.deliveredLines,
+            delivered_tokens: truncated.deliveredTokens,
+            truncated: truncated.sourceChars !== truncated.deliveredChars,
+            truncation_reasons: [...new Set(truncated.truncationReasons)],
+        };
+        if (!row.rel_path || !row.document_checksum || !row.content) {
+            skippedRows.push({ rel_path: row.rel_path, reason: !row.content ? "empty_after_budget" : "missing_document_identity" });
+            continue;
+        }
+        rows.push(row);
+        deliveredChars += content.length;
+        deliveredBytes += row.delivered_bytes;
+        deliveredLines += row.delivered_lines;
+        deliveredTokens += row.delivered_tokens;
+    }
+    const ledgerScope = input.ledgerScope || input.ledger_scope || {};
+    const requiredRelPaths = rows.map(row => row.rel_path);
+    const budget = {
+        schema: "ccm-child-typed-memory-delivery-budget-v1",
+        max_documents: maxDocuments,
+        max_bytes_per_document: maxBytesPerDocument,
+        max_lines_per_document: maxLinesPerDocument,
+        max_session_bytes: maxSessionBytes,
+        configured_max_tokens: configuredMaxTokens,
+        model_context_window: modelContextWindow,
+        model_window_ratio: 0.02,
+        effective_max_tokens: effectiveMaxTokens,
+        session_delivered_bytes_before: sessionDeliveredBytesBefore,
+        session_remaining_bytes_before: sessionRemainingBytesBefore,
+        turn_max_bytes: turnMaxBytes,
+        token_budget_formula: "min(configured_max_tokens,max(1000,floor(model_context_window*0.02)))",
+    };
+    const capsule = {
+        schema: "ccm-child-typed-memory-delivery-capsule-v1",
+        version: 2,
+        group_id: String(input.groupId || input.group_id || ""),
+        group_session_id: String(input.groupSessionId || input.group_session_id || ""),
+        target_project: normalizeAgentMemoryProject(input.targetProject || input.target_project || "unknown"),
+        task_id: String(input.taskId || input.task_id || ledgerScope.taskId || ledgerScope.task_id || ""),
+        task_agent_session_id: String(input.taskAgentSessionId || input.task_agent_session_id || ledgerScope.taskAgentSessionId || ledgerScope.task_agent_session_id || ""),
+        recall_scope: String(ledgerScope.scope || input.recallScope || input.recall_scope || ""),
+        compact_epoch: String(ledgerScope.compactEpoch || ledgerScope.compact_epoch || input.compactEpoch || input.compact_epoch || "precompact"),
+        budget,
+        max_documents: maxDocuments,
+        max_bytes_per_document: maxBytesPerDocument,
+        max_lines_per_document: maxLinesPerDocument,
+        max_session_bytes: maxSessionBytes,
+        configured_max_tokens: configuredMaxTokens,
+        model_context_window: modelContextWindow,
+        effective_max_tokens: effectiveMaxTokens,
+        candidate_count: allDocs.length,
+        considered_count: docs.length,
+        delivered_count: rows.length,
+        delivered_chars: deliveredChars,
+        delivered_bytes: deliveredBytes,
+        delivered_lines: deliveredLines,
+        delivered_tokens: deliveredTokens,
+        session_delivered_bytes_before: sessionDeliveredBytesBefore,
+        session_delivered_bytes_after: sessionDeliveredBytesBefore + deliveredBytes,
+        session_remaining_bytes_after: Math.max(0, maxSessionBytes - sessionDeliveredBytesBefore - deliveredBytes),
+        required_rel_paths: requiredRelPaths,
+        delivered_rel_paths: requiredRelPaths,
+        skipped_rel_paths: skippedRows.map(row => row.rel_path).filter(Boolean),
+        skipped_rows: skippedRows,
+        truncated_count: rows.filter(row => row.truncated).length,
+        budget_exhausted: sessionRemainingBytesBefore <= 0 || deliveredBytes >= turnMaxBytes || deliveredTokens >= effectiveMaxTokens,
+        delivery_complete: rows.length === requiredRelPaths.length && rows.every(row => row.document_checksum && row.content_checksum),
+        current_source_verification_required: rows.length > 0,
+        rows,
+    };
+    capsule.capsule_checksum = crypto.createHash("sha256").update(JSON.stringify([
+        capsule.version,
+        capsule.group_id,
+        capsule.group_session_id,
+        capsule.target_project,
+        capsule.task_id,
+        capsule.task_agent_session_id,
+        capsule.recall_scope,
+        capsule.compact_epoch,
+        capsule.budget,
+        capsule.candidate_count,
+        capsule.considered_count,
+        capsule.delivered_count,
+        capsule.delivered_chars,
+        capsule.delivered_bytes,
+        capsule.delivered_lines,
+        capsule.delivered_tokens,
+        capsule.session_delivered_bytes_after,
+        capsule.required_rel_paths,
+        capsule.delivered_rel_paths,
+        capsule.skipped_rel_paths,
+        capsule.skipped_rows,
+        capsule.truncated_count,
+        capsule.budget_exhausted,
+        rows.map(row => [
+            row.rel_path,
+            row.document_checksum,
+            row.content_checksum,
+            row.content,
+            row.source_chars,
+            row.source_bytes,
+            row.source_lines,
+            row.source_tokens,
+            row.delivered_chars,
+            row.delivered_bytes,
+            row.delivered_lines,
+            row.delivered_tokens,
+            row.truncated,
+            row.truncation_reasons,
+        ]),
+    ])).digest("hex").slice(0, 32);
+    return capsule;
+}
 function buildAgentMemoryContextBundle(groupId, targetProject, task = "", options = {}) {
     const project = normalizeAgentMemoryProject(targetProject);
+    const groupSessionId = String(options.groupSessionId || options.group_session_id || (0, storage_1.getActiveGroupChatSessionId)(groupId));
+    const typedMemoryScopeId = groupSessionId === "default" ? groupId : `${groupId}--${groupSessionId}`;
     const ignoreMemory = (0, group_memory_index_1.shouldIgnoreGroupMemoryRequest)(task, options);
     const generatedAt = new Date().toISOString();
     const sessionBinding = buildChildAgentSessionBinding(groupId, project, task, { ...options, generatedAt });
+    const compactHead = groupSessionId.startsWith("gcs_") ? (0, group_compact_head_1.readGroupCompactHead)(groupId, groupSessionId) : null;
     if (ignoreMemory) {
         const bundle = {
             schema: "ccm-group-memory-context-v1",
             version: 1,
             group_id: groupId,
+            group_session_id: groupSessionId,
             target_project: project,
             task_query: compactMemoryText(task, 900),
             generated_at: generatedAt,
             session_binding: sessionBinding,
+            compact_head: compactHead,
             memory_policy: {
                 ignored: true,
                 ignore_reason: "user_requested_ignore_memory",
@@ -6625,7 +7736,7 @@ function buildAgentMemoryContextBundle(groupId, targetProject, task = "", option
                         ignored: true,
                         reason: "user_requested_ignore_memory",
                         indexFile: "",
-                        memoryDir: (0, group_memory_index_1.getGroupTypedMemoryDir)(groupId),
+                        memoryDir: (0, group_memory_index_1.getGroupTypedMemoryDir)(typedMemoryScopeId),
                         recalled: [],
                         surfaced: [],
                     },
@@ -6635,9 +7746,9 @@ function buildAgentMemoryContextBundle(groupId, targetProject, task = "", option
             related_work: {},
             relevant_historical_evidence: "",
             raw_sources: {
-                group_memory_file: getGroupMemoryFile(groupId),
-                group_messages_file: getGroupMessagesFileHint(groupId),
-                group_typed_memory_dir: (0, group_memory_index_1.getGroupTypedMemoryDir)(groupId),
+                group_memory_file: getGroupMemoryFile(groupId, groupSessionId),
+                group_messages_file: getGroupMessagesFileHint(groupId, groupSessionId),
+                group_typed_memory_dir: (0, group_memory_index_1.getGroupTypedMemoryDir)(typedMemoryScopeId),
             },
         };
         bundle.dispatch_freshness_gate = buildGroupMemoryDispatchFreshnessGate({
@@ -6652,8 +7763,11 @@ function buildAgentMemoryContextBundle(groupId, targetProject, task = "", option
         bundle.rendered_text = compactPreserveLines(rendered, Number(options.maxRenderedChars || 6000));
         return bundle;
     }
-    const allMessages = (0, storage_1.getGroupMessages)(groupId).filter((message) => !String(message?.content || "").startsWith("📤"));
-    const memory = refreshGroupConversationMemorySnapshot(groupId, allMessages, loadGroupMemory(groupId), {
+    const allMessages = (0, storage_1.getGroupMessages)(groupId, groupSessionId).filter((message) => !String(message?.content || "").startsWith("📤"));
+    const postTurnSummaryBackfill = (0, group_post_turn_summary_1.backfillGroupPostTurnSummaries)(groupId, groupSessionId, allMessages, { maxMessages: 500 });
+    const postTurnSummaryLedger = postTurnSummaryBackfill.ledger || (0, group_post_turn_summary_1.readGroupPostTurnSummaries)(groupId, groupSessionId, { limit: 20 });
+    const resumePreparation = prepareGroupMemoryResumeProjection(groupId, groupSessionId, allMessages, loadGroupMemory(groupId, groupSessionId), {
+        groupSessionId,
         recentLimit: options.recentLimit || options.recent_limit || 12,
         olderLimit: options.olderLimit || options.older_limit || 30,
         minKeepMessages: options.minKeepMessages || options.min_keep_messages,
@@ -6662,13 +7776,56 @@ function buildAgentMemoryContextBundle(groupId, targetProject, task = "", option
         apiMicrocompactTargetInputTokens: options.apiMicrocompactTargetInputTokens || options.api_microcompact_target_input_tokens,
         apiMicrocompactMaxInputTokens: options.apiMicrocompactMaxInputTokens || options.api_microcompact_max_input_tokens,
     });
+    const memory = resumePreparation.memory;
+    const typedMemoryRecallLedgerScope = buildChildTypedMemoryRecallLedgerScope(project, sessionBinding, memory, options);
+    const postTurnSummaryDeliveryCapsule = (0, group_post_turn_summary_1.buildGroupPostTurnSummaryDeliveryCapsule)({
+        groupId,
+        groupSessionId,
+        taskId: sessionBinding.task_id,
+        targetProject: project,
+        taskAgentSessionId: sessionBinding.task_agent_session_id,
+        nativeSessionId: sessionBinding.native_session_id,
+        executionId: sessionBinding.execution_id,
+        attemptSequence: sessionBinding.turn,
+        invocationKind: options.invocationKind || options.invocation_kind || (Number(sessionBinding.turn || 0) > 1 ? "resume" : "spawn"),
+        invocationEdgeId: options.invocationEdgeId || options.invocation_edge_id || "",
+        parentInvocationEdgeId: options.parentInvocationEdgeId || options.parent_invocation_edge_id || "",
+        rootInvocationEdgeId: options.rootInvocationEdgeId || options.root_invocation_edge_id || "",
+        branchId: options.branchId || options.branch_id || "",
+        parentBranchId: options.parentBranchId || options.parent_branch_id || "",
+        branchKind: options.branchKind || options.branch_kind || "main",
+        expectedLineageHeadChecksum: options.expectedLineageHeadChecksum || options.expected_lineage_head_checksum || "",
+        compactEpoch: typedMemoryRecallLedgerScope.compactEpoch,
+        generatedAt,
+        ledger: postTurnSummaryLedger,
+        limit: 6,
+    });
+    const taskAgentInvocationLineage = options.invocationEdgeId || options.invocation_edge_id ? {
+        schema: "ccm-task-agent-invocation-lineage-binding-v1",
+        invocation_edge_id: String(options.invocationEdgeId || options.invocation_edge_id || ""),
+        parent_invocation_edge_id: String(options.parentInvocationEdgeId || options.parent_invocation_edge_id || ""),
+        root_invocation_edge_id: String(options.rootInvocationEdgeId || options.root_invocation_edge_id || ""),
+        branch_id: String(options.branchId || options.branch_id || ""),
+        parent_branch_id: String(options.parentBranchId || options.parent_branch_id || ""),
+        branch_kind: String(options.branchKind || options.branch_kind || "main"),
+        expected_lineage_head_checksum: String(options.expectedLineageHeadChecksum || options.expected_lineage_head_checksum || ""),
+        capsule_checksum: String(postTurnSummaryDeliveryCapsule?.capsule_checksum || ""),
+    } : null;
+    const selectedPostTurnSummaryIds = new Set((postTurnSummaryDeliveryCapsule?.selected_summaries || []).map((row) => String(row.summary_id || "")));
+    const deliveredPostTurnSummaries = (Array.isArray(postTurnSummaryLedger?.latest) ? postTurnSummaryLedger.latest : [])
+        .filter((row) => !postTurnSummaryDeliveryCapsule || selectedPostTurnSummaryIds.has(String(row.summary_id || "")))
+        .slice(postTurnSummaryDeliveryCapsule ? -6 : -8);
+    const resumeProjection = resumePreparation.projection || {};
+    const projectedMessages = resumeProjection.useProjection === true
+        ? (resumeProjection.projectedMessages || [])
+        : allMessages;
     const agentMemory = { ...createEmptyAgentMemory(project), ...((memory.agentMemories || {})[project] || {}) };
     const ownCompleted = (memory.completed || []).filter((item) => item.project === project).slice(-4);
     const otherCompleted = (memory.completed || []).filter((item) => item.project !== project).slice(-4);
     const ownBlocked = (memory.blocked || []).filter((item) => item.project === project).slice(-4);
     const globalBlocked = (memory.blocked || []).filter((item) => item.project !== project).slice(-3);
     const relatedLedger = (memory.workerLedger || []).filter((item) => item.project !== project).slice(-5);
-    const boundaryIndex = getCompactBoundaryIndex(memory, allMessages);
+    const boundaryIndex = resumeProjection.useProjection === true ? -1 : getCompactBoundaryIndex(memory, projectedMessages);
     const postCompactReinjectionGate = buildGroupMemoryPostCompactReinjectionGate({
         groupId,
         targetProject: project,
@@ -6682,6 +7839,7 @@ function buildAgentMemoryContextBundle(groupId, targetProject, task = "", option
         summaryChecksum: memory.compaction?.summaryChecksum || memory.compactBoundary?.summaryChecksum || "",
     });
     const postCompactCandidateUsage = buildGroupPostCompactCandidateUsageSummary(groupId, {
+        groupSessionId,
         targetProject: project,
         candidates: postCompactReinjectionGate?.candidates || [],
     });
@@ -6735,14 +7893,16 @@ function buildAgentMemoryContextBundle(groupId, targetProject, task = "", option
         disablePressureRecallUsageRepairHints: options.disablePressureRecallUsageRepairHints
             || options.disable_pressure_recall_usage_repair_hints,
     };
-    const typedLogDistillation = (0, group_memory_index_1.distillGroupMessagesToTypedMemory)(groupId, allMessages, memory, {
+    const projectMemoryRoot = resolveGroupProjectMemoryRoot(project, options);
+    const typedLogDistillation = (0, group_memory_index_1.distillGroupMessagesToTypedMemory)(typedMemoryScopeId, allMessages, memory, {
         reason: "context_bundle",
         maxMessages: options.distillMaxMessages || options.distill_max_messages,
         postCompactCandidateUsage,
+        projectRoot: projectMemoryRoot,
     });
     const globalClaudeMemoryImport = options.includeGlobalClaudeMemory === false || options.include_global_claude_memory === false
         ? null
-        : (0, group_memory_index_1.importGlobalClaudeMemoryToGroupTypedMemory)(groupId, {
+        : (0, group_memory_index_1.importGlobalClaudeMemoryToGroupTypedMemory)(typedMemoryScopeId, {
             settingSources: options.settingSources ?? options.setting_sources,
             includeUser: options.includeUserClaudeMemory !== false && options.include_user_claude_memory !== false,
             includeManaged: options.includeManagedClaudeMemory !== false && options.include_managed_claude_memory !== false,
@@ -6751,9 +7911,8 @@ function buildAgentMemoryContextBundle(groupId, targetProject, task = "", option
             maxRuleFiles: options.globalClaudeMemoryMaxRuleFiles || options.global_claude_memory_max_rule_files,
             maxImportFiles: options.globalClaudeMemoryMaxImportFiles || options.global_claude_memory_max_import_files,
         });
-    const projectMemoryRoot = resolveGroupProjectMemoryRoot(project, options);
     const projectMemoryImport = projectMemoryRoot
-        ? (0, group_memory_index_1.importProjectMemoryFilesToGroupTypedMemory)(groupId, projectMemoryRoot, {
+        ? (0, group_memory_index_1.importProjectMemoryFilesToGroupTypedMemory)(typedMemoryScopeId, projectMemoryRoot, {
             project,
             settingSources: options.settingSources ?? options.setting_sources,
             includeProject: options.includeProjectMemory !== false && options.include_project_memory !== false,
@@ -6763,7 +7922,7 @@ function buildAgentMemoryContextBundle(groupId, targetProject, task = "", option
             maxImportFiles: options.projectMemoryMaxImportFiles || options.project_memory_max_import_files,
         })
         : null;
-    const typedMemorySync = (0, group_memory_index_1.syncGroupTypedMemoryFromGroupMemory)(groupId, memory);
+    const typedMemorySync = (0, group_memory_index_1.syncGroupTypedMemoryFromGroupMemory)(typedMemoryScopeId, memory);
     const providerRankingCompactRepairReceiptRecall = buildProviderRankingProvenanceCompactRepairReceiptWorkerContextRecall(groupId, task, memory, options);
     const postCompactReinjectionRepairReceiptRecall = buildPostCompactReinjectionRepairReceiptWorkerContextRecall(groupId, task, memory, options);
     const typedMemoryRecallQuery = [
@@ -6779,7 +7938,7 @@ function buildAgentMemoryContextBundle(groupId, targetProject, task = "", option
         ...(providerRankingCompactRepairReceiptRecall.active ? providerRankingCompactRepairReceiptRecall.targetPaths || [] : []),
         ...(postCompactReinjectionRepairReceiptRecall.active ? postCompactReinjectionRepairReceiptRecall.targetPaths || [] : []),
     ]);
-    const typedMemoryLoadPlan = (0, group_memory_index_1.buildGroupTypedMemoryLoadPlan)(groupId, {
+    const typedMemoryLoadPlan = (0, group_memory_index_1.buildGroupTypedMemoryLoadPlan)(typedMemoryScopeId, {
         maxEntries: options.maxTypedMemoryLoadEntries || options.max_typed_memory_load_entries,
         query: typedMemoryRecallQuery,
         targetPaths: typedMemoryTargetPaths,
@@ -6791,7 +7950,7 @@ function buildAgentMemoryContextBundle(groupId, targetProject, task = "", option
             ...(Array.isArray(item.verification) ? item.verification : []),
         ]),
     ].map((item) => String(item || "").replace(/^Skill\s*[:：]\s*/i, "")).filter(Boolean).slice(-12);
-    const ledgerAlreadySurfaced = (0, group_memory_index_1.getAlreadySurfacedGroupTypedMemory)(groupId, project);
+    const ledgerAlreadySurfaced = (0, group_memory_index_1.getAlreadySurfacedGroupTypedMemory)(typedMemoryScopeId, typedMemoryRecallLedgerScope.scope);
     const explicitAlreadySurfaced = options.alreadySurfacedMemory || options.already_surfaced_memory || [];
     const repeatableRecallRelPaths = new Set([
         ...(providerRankingCompactRepairReceiptRecall.repeatableRelPaths || []),
@@ -6808,7 +7967,7 @@ function buildAgentMemoryContextBundle(groupId, targetProject, task = "", option
         disablePressureProvenanceFeedbackRecovery: options.disablePressureProvenanceFeedbackRecovery || options.disable_pressure_provenance_feedback_recovery,
         disabled: options.disablePressureProvenanceFeedbackDispatchPolicy || options.disable_pressure_provenance_feedback_dispatch_policy,
     });
-    const typedMemoryRecall = (0, group_memory_index_1.buildGroupTypedMemoryRecall)(groupId, typedMemoryRecallQuery, {
+    const typedMemoryRecall = (0, group_memory_index_1.buildGroupTypedMemoryRecall)(typedMemoryScopeId, typedMemoryRecallQuery, {
         alreadySurfaced: alreadySurfacedForRecall,
         requiredRelPaths: uniqueProviderRankingCompactRepairRecallStrings([
             ...(providerRankingCompactRepairReceiptRecall.active ? providerRankingCompactRepairReceiptRecall.repeatableRelPaths || [] : []),
@@ -6837,7 +7996,7 @@ function buildAgentMemoryContextBundle(groupId, targetProject, task = "", option
         task,
         globalAgentMemoryRecall,
     });
-    const globalMemoryArbitrationDistillation = distillGroupGlobalMemoryArbitrationToTypedMemory(groupId, {
+    const globalMemoryArbitrationDistillation = distillGroupGlobalMemoryArbitrationToTypedMemory(typedMemoryScopeId, {
         generatedAt,
         threshold: options.globalMemoryArbitrationDistillationThreshold || options.global_memory_arbitration_distillation_threshold || 2,
     });
@@ -6848,14 +8007,14 @@ function buildAgentMemoryContextBundle(groupId, targetProject, task = "", option
         ? { ...typedMemorySync, index: globalMemoryArbitrationDistillation.index }
         : typedMemorySync;
     const effectiveTypedMemoryLoadPlan = globalMemoryArbitrationDistillation?.index?.schema
-        ? (0, group_memory_index_1.buildGroupTypedMemoryLoadPlan)(groupId, {
+        ? (0, group_memory_index_1.buildGroupTypedMemoryLoadPlan)(typedMemoryScopeId, {
             maxEntries: options.maxTypedMemoryLoadEntries || options.max_typed_memory_load_entries,
             query: typedMemoryRecallQuery,
             targetPaths: typedMemoryTargetPaths,
         })
         : typedMemoryLoadPlan;
     const effectiveTypedMemoryRecall = globalMemoryArbitrationDistillation?.index?.schema
-        ? (0, group_memory_index_1.buildGroupTypedMemoryRecall)(groupId, typedMemoryRecallQuery, {
+        ? (0, group_memory_index_1.buildGroupTypedMemoryRecall)(typedMemoryScopeId, typedMemoryRecallQuery, {
             alreadySurfaced: alreadySurfacedForRecall,
             requiredRelPaths: uniqueProviderRankingCompactRepairRecallStrings([
                 ...(providerRankingCompactRepairReceiptRecall.active ? providerRankingCompactRepairReceiptRecall.repeatableRelPaths || [] : []),
@@ -6870,24 +8029,74 @@ function buildAgentMemoryContextBundle(groupId, targetProject, task = "", option
             max: Number(options.maxTypedMemory || options.max_typed_memory || 5),
         })
         : typedMemoryRecall;
+    const typedMemoryDeliveryConfig = loadGroupMemoryCompactionConfig();
+    const typedMemoryRecallScopeStatsBefore = (0, group_memory_index_1.getGroupTypedMemoryRecallScopeStats)(typedMemoryScopeId, typedMemoryRecallLedgerScope.scope);
+    const typedMemoryDeliveryCapsule = buildChildTypedMemoryDeliveryCapsule({
+        groupId,
+        groupSessionId,
+        targetProject: project,
+        taskId: sessionBinding.task_id || options.taskId || options.task_id || "",
+        taskAgentSessionId: sessionBinding.task_agent_session_id || options.taskAgentSessionId || options.task_agent_session_id || "",
+        ledgerScope: typedMemoryRecallLedgerScope,
+        recall: effectiveTypedMemoryRecall,
+    }, {
+        maxDocuments: options.maxTypedMemoryDeliveryDocuments
+            ?? options.max_typed_memory_delivery_documents
+            ?? typedMemoryDeliveryConfig.typedMemoryDeliveryMaxDocuments,
+        maxBytesPerDocument: options.maxTypedMemoryDeliveryBytesPerDocument
+            ?? options.max_typed_memory_delivery_bytes_per_document
+            ?? typedMemoryDeliveryConfig.typedMemoryDeliveryMaxBytesPerDocument,
+        maxLinesPerDocument: options.maxTypedMemoryDeliveryLinesPerDocument
+            ?? options.max_typed_memory_delivery_lines_per_document
+            ?? typedMemoryDeliveryConfig.typedMemoryDeliveryMaxLinesPerDocument,
+        maxSessionBytes: options.maxTypedMemoryDeliverySessionBytes
+            ?? options.max_typed_memory_delivery_session_bytes
+            ?? typedMemoryDeliveryConfig.typedMemoryDeliveryMaxSessionBytes,
+        maxTokens: options.maxTypedMemoryDeliveryTokens
+            ?? options.max_typed_memory_delivery_tokens
+            ?? typedMemoryDeliveryConfig.typedMemoryDeliveryMaxTokens,
+        modelContextWindow: options.modelContextWindow
+            || options.model_context_window
+            || options.workerModelContextWindow
+            || options.worker_model_context_window
+            || options.task?.modelContextWindow
+            || options.task?.model_context_window
+            || typedMemoryDeliveryConfig.modelContextWindow
+            || 200_000,
+        sessionDeliveredBytes: typedMemoryRecallScopeStatsBefore.deliveredBytes,
+    });
+    const typedMemoryDeliveryLease = (0, runtime_kernel_1.buildWorkerTypedMemoryDeliveryLease)(typedMemoryDeliveryCapsule, {
+        query: typedMemoryRecallQuery,
+        attemptSequence: options.taskAgentSessionTurn || options.task_agent_session_turn || 0,
+        generatedAt,
+    });
+    const deliveredTypedMemoryRelPaths = typedMemoryDeliveryCapsule.delivered_rel_paths || [];
+    const deliveredTypedMemoryRelPathSet = new Set(deliveredTypedMemoryRelPaths.map((item) => String(item || "").toLowerCase()));
+    const deliveredEffectiveTypedMemoryRecall = {
+        ...effectiveTypedMemoryRecall,
+        recalled: (effectiveTypedMemoryRecall.recalled || []).filter((doc) => deliveredTypedMemoryRelPathSet.has(String(doc.relPath || doc.rel_path || "").toLowerCase())),
+        surfaced: deliveredTypedMemoryRelPaths,
+        deliveryBudget: typedMemoryDeliveryCapsule.budget,
+        budgetExhausted: typedMemoryDeliveryCapsule.budget_exhausted === true,
+    };
     const effectiveProviderRankingCompactRepairReceiptRecall = {
         ...providerRankingCompactRepairReceiptRecall,
         recalledThisTurn: providerRankingCompactRepairReceiptRecall.active === true
-            && (effectiveTypedMemoryRecall.surfaced || []).some((item) => String(item || "").toLowerCase() === PROVIDER_RANKING_PROVENANCE_COMPACT_REPAIR_RECEIPT_MEMORY_REL_PATH),
-        surfacedRelPaths: (effectiveTypedMemoryRecall.surfaced || []).filter((item) => [
+            && (deliveredEffectiveTypedMemoryRecall.surfaced || []).some((item) => String(item || "").toLowerCase() === PROVIDER_RANKING_PROVENANCE_COMPACT_REPAIR_RECEIPT_MEMORY_REL_PATH),
+        surfacedRelPaths: (deliveredEffectiveTypedMemoryRecall.surfaced || []).filter((item) => [
             PROVIDER_RANKING_PROVENANCE_COMPACT_REPAIR_RECEIPT_MEMORY_REL_PATH,
             PROVIDER_RANKING_MEMORY_USAGE_RECEIPT_DISCIPLINE_REL_PATH,
         ].includes(String(item || "").toLowerCase())),
         memoryUsageReceiptDisciplineRecalledThisTurn: providerRankingCompactRepairReceiptRecall.active === true
-            && (effectiveTypedMemoryRecall.surfaced || []).some((item) => String(item || "").toLowerCase() === PROVIDER_RANKING_MEMORY_USAGE_RECEIPT_DISCIPLINE_REL_PATH),
+            && (deliveredEffectiveTypedMemoryRecall.surfaced || []).some((item) => String(item || "").toLowerCase() === PROVIDER_RANKING_MEMORY_USAGE_RECEIPT_DISCIPLINE_REL_PATH),
     };
     const effectivePostCompactReinjectionRepairReceiptRecall = {
         ...postCompactReinjectionRepairReceiptRecall,
         recalledThisTurn: postCompactReinjectionRepairReceiptRecall.active === true
-            && (postCompactReinjectionRepairReceiptRecall.docRelPaths || []).some((relPath) => (effectiveTypedMemoryRecall.surfaced || []).some((item) => String(item || "").toLowerCase() === String(relPath || "").toLowerCase())),
-        surfacedRelPaths: (effectiveTypedMemoryRecall.surfaced || []).filter((item) => (postCompactReinjectionRepairReceiptRecall.docRelPaths || []).some((relPath) => String(item || "").toLowerCase() === String(relPath || "").toLowerCase())),
+            && (postCompactReinjectionRepairReceiptRecall.docRelPaths || []).some((relPath) => (deliveredEffectiveTypedMemoryRecall.surfaced || []).some((item) => String(item || "").toLowerCase() === String(relPath || "").toLowerCase())),
+        surfacedRelPaths: (deliveredEffectiveTypedMemoryRecall.surfaced || []).filter((item) => (postCompactReinjectionRepairReceiptRecall.docRelPaths || []).some((relPath) => String(item || "").toLowerCase() === String(relPath || "").toLowerCase())),
     };
-    const pressureMemoryProvenanceReceiptDiscipline = buildPressureMemoryProvenanceReceiptDiscipline({ recall: effectiveTypedMemoryRecall }, { targetProject: project, generatedAt });
+    const pressureMemoryProvenanceReceiptDiscipline = buildPressureMemoryProvenanceReceiptDiscipline({ recall: deliveredEffectiveTypedMemoryRecall }, { targetProject: project, generatedAt });
     const pressureProvenanceDispatchFeedbackPolicy = (0, group_memory_index_1.buildPressureProvenancePreDispatchComplianceDispatchPolicy)(groupId, {
         targetProject: project,
         agentType: options.agentType || options.agent_type || "unknown",
@@ -6898,9 +8107,11 @@ function buildAgentMemoryContextBundle(groupId, targetProject, task = "", option
         disablePressureProvenanceFeedbackRecovery: options.disablePressureProvenanceFeedbackRecovery || options.disable_pressure_provenance_feedback_recovery,
         disabled: options.disablePressureProvenanceFeedbackDispatchPolicy || options.disable_pressure_provenance_feedback_dispatch_policy,
     });
-    const typedMemoryLedger = (0, group_memory_index_1.recordGroupTypedMemoryRecall)(groupId, project, effectiveTypedMemoryRecall, typedMemoryRecallQuery);
+    const typedMemoryLedger = (0, group_memory_index_1.readGroupTypedMemoryRecallLedger)(typedMemoryScopeId);
+    const typedMemoryRecallScopeStatsAfter = typedMemoryRecallScopeStatsBefore;
     const sourceManifest = buildGroupMemorySourceManifest(groupId, {
         generatedAt,
+        groupSessionId,
         typedMemorySync: effectiveTypedMemorySync,
         typedLogDistillation,
         typedMemoryLedger,
@@ -6916,6 +8127,7 @@ function buildAgentMemoryContextBundle(groupId, targetProject, task = "", option
                             : "context_bundle");
     const memoryReloadAudit = recordGroupMemoryReloadAudit(groupId, {
         generatedAt,
+        groupSessionId,
         scope: `child:${project}`,
         contextKind: "child_agent",
         reason: memoryReloadReason,
@@ -6938,6 +8150,7 @@ function buildAgentMemoryContextBundle(groupId, targetProject, task = "", option
         reloadAudit: memoryReloadAudit,
     });
     const postCompactDispatchMarker = recordGroupPostCompactFirstDispatchMarker(groupId, {
+        groupSessionId,
         targetProject: project,
         scope: `child:${project}`,
         generatedAt,
@@ -6946,13 +8159,92 @@ function buildAgentMemoryContextBundle(groupId, targetProject, task = "", option
         postCompactReinjectionGate,
         disablePostCompactDispatchLedger: options.disablePostCompactDispatchLedger || options.disable_post_compact_dispatch_ledger,
     });
-    const relevantHistoricalEvidence = (0, group_memory_compaction_1.buildRelevantHistoricalGroupContext)(allMessages, boundaryIndex, [task, memory.goal, project].filter(Boolean).join("\n"), { maxMessages: 6, maxChars: Number(options.maxEvidenceChars || 7000) });
+    const relevantHistoricalEvidence = (0, group_memory_compaction_1.buildRelevantHistoricalGroupContext)(projectedMessages, boundaryIndex, [task, memory.goal, project].filter(Boolean).join("\n"), { maxMessages: 6, maxChars: Number(options.maxEvidenceChars || 7000) });
     const summaryText = memory.messageDigest || (0, group_memory_compaction_1.renderConversationSummary)(memory.conversationSummary || null);
-    const sessionMemorySnapshot = memory.sessionMemory?.schema ? memory.sessionMemory : readGroupSessionMemorySnapshotSummary(groupId);
-    const toolContinuitySnapshot = memory.toolContinuity?.schema ? memory.toolContinuity : readGroupToolContinuitySnapshotSummary(groupId);
-    const replayRepairLedger = readGroupReplayRepairLedgerSummary(groupId);
-    const replayRepairWorkItems = readGroupReplayRepairWorkItemsSummary(groupId);
-    const replayRepairDispatchCandidates = readGroupReplayRepairDispatchCandidatesSummary(groupId);
+    const persistedSessionMemorySnapshot = memory.sessionMemory?.schema ? memory.sessionMemory : readGroupSessionMemorySnapshotSummary(typedMemoryScopeId);
+    const persistedSupersessionGraph = persistedSessionMemorySnapshot?.factSupersessionGraph
+        || persistedSessionMemorySnapshot?.modelExtractionReceipt?.factSupersessionGraph
+        || persistedSessionMemorySnapshot?.modelMergeQuality?.factSupersessionGraph
+        || null;
+    const persistedSupersessionGraphValid = verifyGroupSessionMemoryFactSupersessionGraphForContext(persistedSupersessionGraph);
+    const { factSupersessionGraph: _auditGraph, modelExtractionReceipt: persistedModelReceipt, modelMergeQuality: persistedMergeQuality, modelExtractionReplayEvidence: persistedReplayEvidence, ...sessionMemoryCore } = persistedSessionMemorySnapshot || {};
+    const { factSupersessionGraph: _receiptGraph, mergeQuality: receiptMergeQuality, ...modelReceiptCore } = persistedModelReceipt || {};
+    const { factSupersessionGraph: _receiptMergeGraph, ...receiptMergeCore } = receiptMergeQuality || {};
+    const { factSupersessionGraph: _mergeGraph, ...mergeQualityCore } = persistedMergeQuality || {};
+    const replayEvidenceValid = verifyGroupSessionMemoryModelExtractionDeliveryEvidenceForContext(persistedReplayEvidence);
+    const projectedModelReceipt = persistedModelReceipt ? {
+        schema: String(modelReceiptCore.schema || ""),
+        version: Number(modelReceiptCore.version || 0),
+        status: String(modelReceiptCore.status || ""),
+        executionId: String(modelReceiptCore.executionId || ""),
+        groupId: String(modelReceiptCore.groupId || ""),
+        groupSessionId: String(modelReceiptCore.groupSessionId || ""),
+        scopeId: String(modelReceiptCore.scopeId || ""),
+        completedAt: String(modelReceiptCore.completedAt || ""),
+        model: String(modelReceiptCore.model || ""),
+        markdownChecksum: String(modelReceiptCore.markdownChecksum || ""),
+        sectionEvidenceChecksum: String(modelReceiptCore.sectionEvidenceChecksum || ""),
+        factSupersessionGraphChecksum: String(modelReceiptCore.factSupersessionGraphChecksum || ""),
+        fencingToken: Number(modelReceiptCore.fencingToken || 0),
+        checksum: String(modelReceiptCore.checksum || ""),
+        requestAudit: modelReceiptCore.requestAudit ? {
+            sourceTranscriptChecksum: String(modelReceiptCore.requestAudit.sourceTranscriptChecksum || ""),
+            sourceFirstMessageId: String(modelReceiptCore.requestAudit.sourceFirstMessageId || ""),
+            sourceLastMessageId: String(modelReceiptCore.requestAudit.sourceLastMessageId || ""),
+            sourceMessageCount: Number(modelReceiptCore.requestAudit.sourceMessageCount || 0),
+            sourceMessageIds: Array.isArray(modelReceiptCore.requestAudit.sourceMessageIds) ? modelReceiptCore.requestAudit.sourceMessageIds.slice(0, 240) : [],
+        } : null,
+        mergeQuality: receiptMergeQuality ? {
+            pass: receiptMergeCore.pass === true,
+            outputMarkdownChecksum: String(receiptMergeCore.outputMarkdownChecksum || ""),
+            factSupersessionGraphChecksum: String(receiptMergeCore.factSupersessionGraphChecksum || ""),
+            activeFactCount: Number(receiptMergeCore.activeFactCount || 0),
+            supersededFactCount: Number(receiptMergeCore.supersededFactCount || 0),
+            unjustifiedLostFactCount: Number(receiptMergeCore.unjustifiedLostFactCount || 0),
+        } : null,
+    } : null;
+    const sessionMemorySnapshot = persistedSessionMemorySnapshot?.schema ? {
+        ...sessionMemoryCore,
+        modelExtractionReceipt: projectedModelReceipt,
+        modelExtractionReplayEvidence: persistedReplayEvidence?.schema ? {
+            schema: String(persistedReplayEvidence.schema || ""),
+            version: Number(persistedReplayEvidence.version || 0),
+            scopeId: String(persistedReplayEvidence.scopeId || ""),
+            executionId: String(persistedReplayEvidence.executionId || ""),
+            receiptChecksum: String(persistedReplayEvidence.receiptChecksum || ""),
+            historyHeadChecksum: String(persistedReplayEvidence.historyHeadChecksum || ""),
+            historyIntegrityValid: persistedReplayEvidence.historyIntegrityValid === true,
+            replayExecutionId: String(persistedReplayEvidence.replayExecutionId || ""),
+            replayStatus: String(persistedReplayEvidence.replayStatus || ""),
+            replayPass: persistedReplayEvidence.replayPass === true,
+            factSupersessionGraphChecksum: String(persistedReplayEvidence.factSupersessionGraphChecksum || ""),
+            generatedAt: String(persistedReplayEvidence.generatedAt || ""),
+            checksum: String(persistedReplayEvidence.checksum || ""),
+            checksumValid: replayEvidenceValid,
+        } : null,
+        modelMergeQuality: persistedMergeQuality ? mergeQualityCore : null,
+        factSupersession: persistedSupersessionGraph?.schema ? {
+            schema: "ccm-group-session-memory-active-fact-projection-v1",
+            version: 1,
+            graphChecksum: String(persistedSupersessionGraph.checksum || ""),
+            graphValid: persistedSupersessionGraphValid,
+            activeFactCount: Number(persistedSupersessionGraph.activeFactCount || 0),
+            supersededFactCount: Number(persistedSupersessionGraph.supersededFactCount || 0),
+            unjustifiedLostFactCount: Number(persistedSupersessionGraph.unjustifiedLostFactCount || 0),
+            activeFacts: (persistedSupersessionGraphValid && Array.isArray(persistedSupersessionGraph.activeFacts) ? persistedSupersessionGraph.activeFacts : []).map((fact) => ({
+                factId: String(fact.factId || ""),
+                factChecksum: String(fact.factChecksum || ""),
+                type: String(fact.type || ""),
+                text: String(fact.text || ""),
+                source: String(fact.source || ""),
+                sourceMessageId: String(fact.sourceMessageId || ""),
+            })).slice(0, 120),
+        } : null,
+    } : persistedSessionMemorySnapshot;
+    const toolContinuitySnapshot = memory.toolContinuity?.schema ? memory.toolContinuity : readGroupToolContinuitySnapshotSummary(typedMemoryScopeId);
+    const replayRepairLedger = readGroupReplayRepairLedgerSummary(groupId, groupSessionId);
+    const replayRepairWorkItems = readGroupReplayRepairWorkItemsSummary(groupId, groupSessionId);
+    const replayRepairDispatchCandidates = readGroupReplayRepairDispatchCandidatesSummary(groupId, 12, groupSessionId);
     const boundaryHistory = buildGroupCompactBoundaryHistorySummary(memory);
     const childAgentTypes = buildChildAgentTypeSummary(memory);
     const storedApiMicroCompactEditPlan = memory.compaction?.apiMicroCompactEditPlan
@@ -6990,6 +8282,7 @@ function buildAgentMemoryContextBundle(groupId, targetProject, task = "", option
         now: generatedAt,
     });
     const apiMicrocompactNativeApplyProofLedger = buildGroupApiMicrocompactNativeApplyProofSummary(groupId, {
+        groupSessionId,
         targetProject: project,
         planChecksums: [storedApiMicroCompactEditPlan?.planChecksum || storedApiMicroCompactEditPlan?.plan_checksum || ""].filter(Boolean),
     });
@@ -6997,16 +8290,19 @@ function buildAgentMemoryContextBundle(groupId, targetProject, task = "", option
         schema: "ccm-group-memory-context-v1",
         version: 1,
         group_id: groupId,
+        group_session_id: groupSessionId,
         target_project: project,
         task_query: compactMemoryText(task, 900),
         generated_at: generatedAt,
         session_binding: sessionBinding,
+        compact_head: compactHead,
         pressure_memory_provenance_receipt_discipline: pressureMemoryProvenanceReceiptDiscipline.active ? pressureMemoryProvenanceReceiptDiscipline : null,
         pressure_provenance_dispatch_feedback_policy: pressureProvenanceDispatchFeedbackPolicy.active ? pressureProvenanceDispatchFeedbackPolicy : null,
         memory_policy: {
             priority: "platform_group_memory_over_third_party_cli_session",
             use: "must_consider",
-            boundary: "summary_recent_window_raw_evidence",
+            boundary: "current_group_session_summary_recent_window_raw_evidence",
+            cross_session_memory_allowed: false,
             raw_recovery: "group-messages JSON keeps raw transcript; request message id if more source text is needed",
         },
         compaction: {
@@ -7029,6 +8325,10 @@ function buildAgentMemoryContextBundle(groupId, targetProject, task = "", option
                 || memory.compactBoundary?.compactStrategyDecision
                 || memory.compactBoundary?.post_compact_restore?.strategyDecision
                 || memory.messageCompression?.compactStrategyDecision
+                || null,
+            compactTransactionReceipt: memory.compaction?.compactTransactionReceipt
+                || memory.compactBoundary?.compactTransactionReceipt
+                || memory.compactBoundary?.post_compact_restore?.compactTransactionReceipt
                 || null,
             apiMicroCompactEditPlan: storedApiMicroCompactEditPlan,
             apiMicrocompactNativeApplyPlan,
@@ -7058,6 +8358,24 @@ function buildAgentMemoryContextBundle(groupId, targetProject, task = "", option
             replayRepairWorkItems,
             replayRepairDispatchCandidates,
             childAgentTypes,
+            resumeProjection: {
+                schema: resumeProjection.schema || "",
+                status: resumeProjection.status || "unknown",
+                reason: resumeProjection.reason || "",
+                verified: resumeProjection.verified === true,
+                useProjection: resumeProjection.useProjection === true,
+                recovered: resumePreparation.recovered === true,
+                recoveryReason: resumePreparation.recoveryReason || "",
+                boundary: resumeProjection.boundary || null,
+                journal: resumeProjection.journal || null,
+                proof: resumePreparation.proof || null,
+                rawMessageCount: Number(resumeProjection.rawMessageCount ?? allMessages.length),
+                omittedMessageCount: Number(resumeProjection.omittedMessageCount || 0),
+                preservedMessageCount: Number(resumeProjection.preservedMessageCount || resumeProjection.preservedMessages?.length || 0),
+                messagesAfterBoundaryCount: Number(resumeProjection.messagesAfterBoundaryCount || resumeProjection.messagesAfterBoundary?.length || 0),
+                projectedMessageCount: Number(resumeProjection.projectedMessageCount || projectedMessages.length),
+                projectionChecksum: resumeProjection.projectionChecksum || "",
+            },
         },
         group_state: {
             goal: memory.goal || "",
@@ -7068,6 +8386,41 @@ function buildAgentMemoryContextBundle(groupId, targetProject, task = "", option
             nextActions: (memory.nextActions || []).slice(-4),
             persistentRequirements: (memory.persistentRequirements || []).slice(-8),
             factAnchors: (memory.factAnchors || []).slice(-8),
+            postTurnSummaries: {
+                schema: postTurnSummaryLedger?.schema || "",
+                valid: postTurnSummaryLedger?.valid === true,
+                eventCount: Number(postTurnSummaryLedger?.eventCount || 0),
+                summaryCount: Number(postTurnSummaryLedger?.summaryCount || 0),
+                headChecksum: String(postTurnSummaryLedger?.headChecksum || ""),
+                archiveCount: Number(postTurnSummaryLedger?.archiveCount || 0),
+                deliveryCapsule: postTurnSummaryDeliveryCapsule ? {
+                    schema: "ccm-group-post-turn-summary-delivery-capsule-projection-v1",
+                    capsuleChecksum: postTurnSummaryDeliveryCapsule.capsule_checksum,
+                    taskAgentSessionId: postTurnSummaryDeliveryCapsule.task_agent_session_id,
+                    attemptSequence: postTurnSummaryDeliveryCapsule.attempt_sequence,
+                    invocationKind: postTurnSummaryDeliveryCapsule.invocation_kind,
+                    compactEpoch: postTurnSummaryDeliveryCapsule.compact_epoch,
+                    ledgerHeadChecksum: postTurnSummaryDeliveryCapsule.ledger_head_checksum,
+                    selectedCount: postTurnSummaryDeliveryCapsule.selected_count,
+                } : null,
+                latest: deliveredPostTurnSummaries.map((row) => ({
+                    summaryId: String(row.summary_id || ""),
+                    summarizesMessageId: String(row.summarizes_message_id || ""),
+                    messageChecksum: String(row.message_checksum || ""),
+                    eventChecksum: String(row.event_checksum || ""),
+                    sequence: Number(row.sequence || 0),
+                    taskId: String(row.task_id || ""),
+                    agent: String(row.agent || ""),
+                    statusCategory: String(row.status_category || ""),
+                    isNoteworthy: row.is_noteworthy === true,
+                    title: compactMemoryText(row.title || "", 140),
+                    description: compactMemoryText(row.description || "", 500),
+                    recentAction: compactMemoryText(row.recent_action || "", 300),
+                    needsAction: compactMemoryText(row.needs_action || "", 300),
+                    artifactUrls: Array.isArray(row.artifact_urls) ? row.artifact_urls.slice(0, 8) : [],
+                    generatedAt: String(row.generated_at || ""),
+                })),
+            },
             typedMemory: {
                 distillation: typedLogDistillation,
                 arbitrationDistillation: globalMemoryArbitrationDistillation,
@@ -7082,15 +8435,26 @@ function buildAgentMemoryContextBundle(groupId, targetProject, task = "", option
                 projectMemoryImport,
                 loadPlan: effectiveTypedMemoryLoadPlan,
                 targetPaths: typedMemoryTargetPaths,
-                recall: effectiveTypedMemoryRecall,
+                recall: deliveredEffectiveTypedMemoryRecall,
+                deliveryCapsule: typedMemoryDeliveryCapsule,
+                deliveryLease: typedMemoryDeliveryLease,
                 providerRankingCompactRepairReceiptRecall: effectiveProviderRankingCompactRepairReceiptRecall,
                 postCompactReinjectionRepairReceiptRecall: effectivePostCompactReinjectionRepairReceiptRecall,
                 pressureProvenanceReceiptDiscipline: pressureMemoryProvenanceReceiptDiscipline.active ? pressureMemoryProvenanceReceiptDiscipline : null,
                 pressureProvenanceDispatchFeedbackPolicy: pressureProvenanceDispatchFeedbackPolicy.active ? pressureProvenanceDispatchFeedbackPolicy : null,
                 ledger: {
                     file: typedMemoryLedger.file,
+                    scope: typedMemoryRecallLedgerScope.scope,
+                    scopeKind: typedMemoryRecallLedgerScope.scopeKind,
+                    taskAgentSessionId: typedMemoryRecallLedgerScope.taskAgentSessionId,
+                    taskId: typedMemoryRecallLedgerScope.taskId,
+                    compactEpoch: typedMemoryRecallLedgerScope.compactEpoch,
+                    sessionBound: typedMemoryRecallLedgerScope.sessionBound,
                     alreadySurfaced: ledgerAlreadySurfaced.slice(-20),
-                    recordedThisTurn: effectiveTypedMemoryRecall.surfaced || [],
+                    recordedThisTurn: [],
+                    pendingThisTurn: typedMemoryDeliveryCapsule.delivered_rel_paths || [],
+                    deliveryStatsBefore: typedMemoryRecallScopeStatsBefore,
+                    deliveryStatsAfter: typedMemoryRecallScopeStatsAfter,
                 },
             },
         },
@@ -7118,10 +8482,17 @@ function buildAgentMemoryContextBundle(groupId, targetProject, task = "", option
             globalBlocked,
             relatedLedger,
         },
+        resume_context: {
+            schema: "ccm-group-memory-resume-context-v1",
+            status: resumeProjection.status || "unknown",
+            verified: resumeProjection.verified === true,
+            projectedMessageCount: Number(resumeProjection.projectedMessageCount || projectedMessages.length),
+            text: compactPreserveLines((0, group_memory_compaction_1.buildBoundedRecentGroupContext)(projectedMessages, Math.min(8, Math.max(3, Number(options.fullCount || options.full_count || 6)))), Number(options.maxResumeContextChars || options.max_resume_context_chars || 4200)),
+        },
         relevant_historical_evidence: relevantHistoricalEvidence,
         raw_sources: {
-            group_memory_file: getGroupMemoryFile(groupId),
-            group_messages_file: getGroupMessagesFileHint(groupId),
+            group_memory_file: getGroupMemoryFile(groupId, groupSessionId),
+            group_messages_file: getGroupMessagesFileHint(groupId, groupSessionId),
             group_typed_memory_index_file: effectiveTypedMemorySync.index.file,
             group_typed_memory_dir: effectiveTypedMemorySync.index.dir,
             group_typed_memory_distillation_ledger_file: typedLogDistillation.ledgerFile || "",
@@ -7134,20 +8505,31 @@ function buildAgentMemoryContextBundle(groupId, targetProject, task = "", option
                 ? (globalAgentMemoryRecall?.crossGroupSuppression?.sourceDir || GROUP_GLOBAL_MEMORY_ARBITRATION_DIR)
                 : "",
             group_memory_reload_ledger_file: memoryReloadAudit.ledgerFile || "",
-            group_post_compact_dispatch_ledger_file: postCompactDispatchMarker?.ledger_file || getGroupPostCompactDispatchLedgerFile(groupId),
-            group_post_compact_candidate_usage_ledger_file: postCompactCandidateUsage.ledger_file || getGroupPostCompactCandidateUsageLedgerFile(groupId),
-            group_api_microcompact_native_apply_proof_ledger_file: apiMicrocompactNativeApplyProofLedger.ledger_file || getGroupApiMicrocompactNativeApplyProofLedgerFile(groupId),
-            group_api_microcompact_native_apply_request_telemetry_ledger_file: apiMicrocompactNativeApplyProofLedger.request_telemetry?.ledger_file || getGroupApiMicrocompactNativeApplyRequestTelemetryLedgerFile(groupId),
-            group_replay_repair_ledger_file: replayRepairLedger?.file || getGroupReplayRepairLedgerFile(groupId),
-            group_replay_repair_work_items_file: replayRepairWorkItems?.file || getGroupReplayRepairWorkItemsFile(groupId),
-            group_session_memory_snapshot_file: sessionMemorySnapshot?.snapshotFile || getGroupSessionMemorySnapshotFile(groupId),
-            group_session_memory_summary_file: sessionMemorySnapshot?.summaryFile || getGroupSessionMemoryMarkdownFile(groupId),
-            group_tool_continuity_snapshot_file: toolContinuitySnapshot?.snapshotFile || getGroupToolContinuitySnapshotFile(groupId),
-            group_tool_continuity_summary_file: toolContinuitySnapshot?.summaryFile || getGroupToolContinuityMarkdownFile(groupId),
+            group_post_compact_dispatch_ledger_file: postCompactDispatchMarker?.ledger_file || getGroupPostCompactDispatchLedgerFile(groupId, groupSessionId),
+            group_post_compact_candidate_usage_ledger_file: postCompactCandidateUsage.ledger_file || getGroupPostCompactCandidateUsageLedgerFile(groupId, groupSessionId),
+            group_api_microcompact_native_apply_proof_ledger_file: apiMicrocompactNativeApplyProofLedger.ledger_file || getGroupApiMicrocompactNativeApplyProofLedgerFile(groupId, groupSessionId),
+            group_api_microcompact_native_apply_request_telemetry_ledger_file: apiMicrocompactNativeApplyProofLedger.request_telemetry?.ledger_file || getGroupApiMicrocompactNativeApplyRequestTelemetryLedgerFile(groupId, groupSessionId),
+            group_replay_repair_ledger_file: replayRepairLedger?.file || getGroupReplayRepairLedgerFile(groupId, groupSessionId),
+            group_replay_repair_work_items_file: replayRepairWorkItems?.file || getGroupReplayRepairWorkItemsFile(groupId, groupSessionId),
+            group_session_memory_snapshot_file: sessionMemorySnapshot?.snapshotFile || getGroupSessionMemorySnapshotFile(typedMemoryScopeId),
+            group_session_memory_summary_file: sessionMemorySnapshot?.summaryFile || getGroupSessionMemoryMarkdownFile(typedMemoryScopeId),
+            group_tool_continuity_snapshot_file: toolContinuitySnapshot?.snapshotFile || getGroupToolContinuitySnapshotFile(typedMemoryScopeId),
+            group_tool_continuity_summary_file: toolContinuitySnapshot?.summaryFile || getGroupToolContinuityMarkdownFile(typedMemoryScopeId),
+            group_compact_boundary_journal_file: (0, group_memory_boundary_journal_1.getGroupMemoryBoundaryJournalFile)(groupId, groupSessionId),
+            group_resume_projection_proof_file: (0, group_memory_boundary_journal_1.getGroupMemoryResumeProofFile)(groupId, groupSessionId),
+            group_post_turn_summary_ledger_file: (0, group_post_turn_summary_1.getGroupPostTurnSummaryLedgerFile)(groupId, groupSessionId),
             project_memory_root: projectMemoryRoot,
         },
-        typed_memory_recall: effectiveTypedMemoryRecall,
-        typedMemoryRecall: effectiveTypedMemoryRecall,
+        typed_memory_recall: deliveredEffectiveTypedMemoryRecall,
+        typedMemoryRecall: deliveredEffectiveTypedMemoryRecall,
+        typed_memory_delivery_capsule: typedMemoryDeliveryCapsule,
+        typedMemoryDeliveryCapsule,
+        typed_memory_delivery_lease: typedMemoryDeliveryLease,
+        typedMemoryDeliveryLease,
+        post_turn_summary_delivery_capsule: postTurnSummaryDeliveryCapsule,
+        postTurnSummaryDeliveryCapsule,
+        task_agent_invocation_lineage: taskAgentInvocationLineage,
+        taskAgentInvocationLineage,
         typed_memory_load_plan: effectiveTypedMemoryLoadPlan,
         typedMemoryLoadPlan: effectiveTypedMemoryLoadPlan,
         provider_ranking_compact_repair_receipt_recall: effectiveProviderRankingCompactRepairReceiptRecall,
@@ -7155,7 +8537,8 @@ function buildAgentMemoryContextBundle(groupId, targetProject, task = "", option
         global_agent_memory_recall: globalAgentMemoryRecall,
         globalAgentMemoryRecall,
     };
-    bundle.compact_file_references = buildGroupCompactFileReferences(groupId, {
+    const compactReferenceScopeId = typedMemoryScopeId;
+    bundle.compact_file_references = buildGroupCompactFileReferences(compactReferenceScopeId, {
         generatedAt,
         sourceManifest,
         sessionMemory: sessionMemorySnapshot,
@@ -7163,25 +8546,25 @@ function buildAgentMemoryContextBundle(groupId, targetProject, task = "", option
         typedMemory: bundle.group_state?.typedMemory || {},
         rawSources: bundle.raw_sources || {},
     });
-    bundle.compact_file_reference_read_plan = buildGroupCompactFileReferenceReadPlan(groupId, bundle.compact_file_references, {
+    bundle.compact_file_reference_read_plan = buildGroupCompactFileReferenceReadPlan(compactReferenceScopeId, bundle.compact_file_references, {
         generatedAt,
         maxEntries: 10,
     });
-    const historicalReadPlanRows = latestGroupCompactFileReferenceReadPlanRows(groupId, bundle.compact_file_reference_read_plan);
+    const historicalReadPlanRows = latestGroupCompactFileReferenceReadPlanRows(compactReferenceScopeId, bundle.compact_file_reference_read_plan);
     const compactFileReferenceReadPlanForFreshness = {
         ...bundle.compact_file_reference_read_plan,
         entries: historicalReadPlanRows.rows,
         plannedCount: historicalReadPlanRows.rows.filter((entry) => entry.action !== "skip_missing").length,
         sourceReferenceCount: historicalReadPlanRows.rows.length,
     };
-    bundle.compact_file_reference_read_plan_freshness = summarizeGroupCompactFileReferenceReadPlanFreshness(groupId, compactFileReferenceReadPlanForFreshness);
-    bundle.compact_file_reference_read_plan_revalidation_gate = buildGroupCompactFileReferenceReadPlanRevalidationGate(groupId, bundle.compact_file_reference_read_plan_freshness, {
+    bundle.compact_file_reference_read_plan_freshness = summarizeGroupCompactFileReferenceReadPlanFreshness(compactReferenceScopeId, compactFileReferenceReadPlanForFreshness);
+    bundle.compact_file_reference_read_plan_revalidation_gate = buildGroupCompactFileReferenceReadPlanRevalidationGate(compactReferenceScopeId, bundle.compact_file_reference_read_plan_freshness, {
         generatedAt,
         targetProject: project,
         scope: `child:${project}`,
         sessionBinding,
     });
-    recordGroupCompactFileReferenceSurfacing(groupId, bundle.compact_file_references, {
+    recordGroupCompactFileReferenceSurfacing(compactReferenceScopeId, bundle.compact_file_references, {
         generatedAt,
         scope: `child:${project}`,
         targetProject: project,
@@ -7190,12 +8573,517 @@ function buildAgentMemoryContextBundle(groupId, targetProject, task = "", option
         readPlan: bundle.compact_file_reference_read_plan,
         readPlanRevalidationGate: bundle.compact_file_reference_read_plan_revalidation_gate,
     });
-    bundle.compact_file_reference_read_plan_access = summarizeGroupCompactFileReferenceReadPlanAccess(groupId, bundle.compact_file_reference_read_plan, memory);
-    bundle.compact_file_reference_access = summarizeGroupCompactFileReferenceAccess(groupId, bundle.compact_file_references, memory);
+    bundle.compact_file_reference_read_plan_access = summarizeGroupCompactFileReferenceReadPlanAccess(compactReferenceScopeId, bundle.compact_file_reference_read_plan, memory);
+    bundle.compact_file_reference_access = summarizeGroupCompactFileReferenceAccess(compactReferenceScopeId, bundle.compact_file_references, memory);
     const renderedWithReferences = renderGroupMemoryContextBundle(bundle);
     bundle.context_budget = (0, context_budget_1.buildContextBudget)({ context: renderedWithReferences, maxChars: 36_000, maxTokens: 90_000 });
     bundle.rendered_text = compactPreserveLines(renderedWithReferences, Number(options.maxRenderedChars || 14_000));
     return bundle;
+}
+function findMemoryArtifactBySchema(value, schema, seen = new Set()) {
+    if (!value || typeof value !== "object" || seen.has(value))
+        return null;
+    seen.add(value);
+    if (value.schema === schema)
+        return value;
+    for (const nested of Array.isArray(value) ? value : Object.values(value)) {
+        const found = findMemoryArtifactBySchema(nested, schema, seen);
+        if (found)
+            return found;
+    }
+    return null;
+}
+function admitChildPostTurnSummaryDelivery(memoryBundle, options = {}) {
+    const workerContextPacket = options.workerContextPacket || options.worker_context_packet || null;
+    const renderedPrompt = String(options.renderedPrompt || options.rendered_prompt || "");
+    if (!memoryBundle)
+        return { admitted: true, required: false, reason: "no_group_memory_context" };
+    if (!workerContextPacket || !renderedPrompt)
+        return { admitted: false, required: false, reason: "worker_packet_or_prompt_missing" };
+    const packetMemory = workerContextPacket.memory || memoryBundle;
+    const capsuleInput = workerContextPacket.post_turn_summary_delivery_capsule
+        || workerContextPacket.postTurnSummaryDeliveryCapsule
+        || (0, group_post_turn_summary_1.extractGroupPostTurnSummaryDeliveryCapsule)(packetMemory)
+        || (0, group_post_turn_summary_1.extractGroupPostTurnSummaryDeliveryCapsule)(memoryBundle);
+    if (!capsuleInput?.schema)
+        return { admitted: true, required: false, reason: "no_post_turn_summary_attachment" };
+    const groupMemory = packetMemory?.group_memory || packetMemory?.groupMemory || packetMemory || memoryBundle;
+    const sessionBinding = groupMemory?.session_binding || groupMemory?.sessionBinding || {};
+    const expectedAttemptSequence = Math.max(0, Math.floor(Number(options.attemptSequence || options.attempt_sequence || 0) || 0));
+    const expectedBinding = {
+        group_id: String(workerContextPacket.group?.id || workerContextPacket.group_id || groupMemory.group_id || ""),
+        group_session_id: String(workerContextPacket.group_session_id || groupMemory.group_session_id || ""),
+        task_id: String(workerContextPacket.task_id || sessionBinding.task_id || ""),
+        target_project: String(workerContextPacket.project || groupMemory.target_project || ""),
+        task_agent_session_id: String(workerContextPacket.task_agent_session_id || sessionBinding.task_agent_session_id || ""),
+        native_session_id: String(sessionBinding.native_session_id || ""),
+        execution_id: String(sessionBinding.execution_id || ""),
+        ...(expectedAttemptSequence > 0 ? { attempt_sequence: expectedAttemptSequence, invocation_kind: expectedAttemptSequence > 1 ? "resume" : "spawn" } : {}),
+        ...(workerContextPacket.task_agent_invocation_lineage?.invocation_edge_id ? {
+            invocation_edge_id: workerContextPacket.task_agent_invocation_lineage.invocation_edge_id,
+            parent_invocation_edge_id: workerContextPacket.task_agent_invocation_lineage.parent_invocation_edge_id || "",
+            root_invocation_edge_id: workerContextPacket.task_agent_invocation_lineage.root_invocation_edge_id || "",
+            branch_id: workerContextPacket.task_agent_invocation_lineage.branch_id || "",
+            parent_branch_id: workerContextPacket.task_agent_invocation_lineage.parent_branch_id || "",
+            branch_kind: workerContextPacket.task_agent_invocation_lineage.branch_kind || "main",
+            expected_lineage_head_checksum: workerContextPacket.task_agent_invocation_lineage.expected_lineage_head_checksum || "",
+        } : {}),
+    };
+    const groupId = expectedBinding.group_id;
+    const groupSessionId = expectedBinding.group_session_id;
+    if (options.skipGroupSessionPresenceCheck !== true && options.skip_group_session_presence_check !== true) {
+        const sessionManifest = (0, storage_1.listGroupChatSessions)(groupId);
+        const sessionExists = (sessionManifest.sessions || []).some((session) => String(session.id || "") === groupSessionId);
+        if (!sessionExists || groupSessionId === "default") {
+            return { admitted: false, required: true, reason: groupSessionId === "default" ? "legacy_group_session_not_dispatchable" : "group_session_deleted_before_dispatch" };
+        }
+    }
+    const currentMemory = loadGroupMemory(groupId, groupSessionId);
+    const currentScope = buildChildTypedMemoryRecallLedgerScope(expectedBinding.target_project, {
+        task_id: expectedBinding.task_id,
+        task_agent_session_id: expectedBinding.task_agent_session_id,
+    }, currentMemory, {});
+    expectedBinding.compact_epoch = currentScope.compactEpoch;
+    const ledger = (0, group_post_turn_summary_1.readGroupPostTurnSummaries)(groupId, groupSessionId, { limit: 10_000 });
+    const capsule = (0, group_post_turn_summary_1.validateGroupPostTurnSummaryDeliveryCapsule)(capsuleInput, {
+        expectedBinding,
+        ledger,
+        requireCurrentHead: true,
+        renderedPrompt,
+    });
+    if (capsule?.trusted_for_delivery !== true) {
+        const issues = capsule?.validation_issues || [];
+        const reason = issues.includes("compact_epoch_mismatch")
+            ? "post_turn_summary_compact_epoch_changed_before_dispatch"
+            : issues.includes("ledger_head_changed")
+                ? "post_turn_summary_ledger_changed_before_dispatch"
+                : issues.includes("prompt_missing_capsule_checksum")
+                    ? "prompt_missing_post_turn_summary_capsule_checksum"
+                    : "post_turn_summary_delivery_capsule_not_trusted";
+        return { admitted: false, required: true, reason, validation_issues: issues, capsule };
+    }
+    return { admitted: true, required: true, reason: "post_turn_summary_delivery_admitted", capsule };
+}
+function admitChildTypedMemoryDelivery(memoryBundle, options = {}) {
+    const workerContextPacket = options.workerContextPacket || options.worker_context_packet || null;
+    const renderedPrompt = String(options.renderedPrompt || options.rendered_prompt || "");
+    if (!memoryBundle)
+        return { admitted: true, required: false, reason: "no_group_memory_context" };
+    if (!workerContextPacket || !renderedPrompt)
+        return { admitted: false, required: false, reason: "worker_packet_or_prompt_missing" };
+    const packetMemory = workerContextPacket.memory || memoryBundle;
+    const postTurnSummaryAdmission = admitChildPostTurnSummaryDelivery(memoryBundle, options);
+    if (postTurnSummaryAdmission.admitted !== true)
+        return postTurnSummaryAdmission;
+    const packetCapsuleInput = workerContextPacket.typed_memory_delivery_capsule
+        || workerContextPacket.typedMemoryDeliveryCapsule
+        || findMemoryArtifactBySchema(packetMemory, "ccm-child-typed-memory-delivery-capsule-v1");
+    const leaseInput = findMemoryArtifactBySchema(packetMemory, "ccm-child-typed-memory-delivery-lease-v1")
+        || findMemoryArtifactBySchema(memoryBundle, "ccm-child-typed-memory-delivery-lease-v1");
+    if (!packetCapsuleInput?.schema && !leaseInput?.schema)
+        return postTurnSummaryAdmission.required
+            ? { ...postTurnSummaryAdmission, reason: "post_turn_summary_delivery_admitted_without_typed_memory" }
+            : { admitted: true, required: false, reason: "no_typed_memory_attachment" };
+    if (!packetCapsuleInput?.schema || !leaseInput?.schema)
+        return { admitted: false, required: true, reason: "capsule_or_lease_missing" };
+    const expectedBinding = workerContextPacket.typed_memory_delivery_expected_binding
+        || workerContextPacket.typedMemoryDeliveryExpectedBinding
+        || (0, runtime_kernel_1.buildWorkerTypedMemoryDeliveryExpectedBinding)(workerContextPacket, packetMemory);
+    const packetCapsule = (0, runtime_kernel_1.validateWorkerTypedMemoryDeliveryCapsule)(packetCapsuleInput, { expectedBinding });
+    if (packetCapsule?.trusted_for_delivery !== true) {
+        return { admitted: false, required: true, reason: "delivery_capsule_not_trusted", validation_issues: packetCapsule?.validation_issues || [] };
+    }
+    const lease = (0, runtime_kernel_1.validateWorkerTypedMemoryDeliveryLease)(leaseInput, { capsule: packetCapsule });
+    if (lease?.valid_for_commit !== true) {
+        return { admitted: false, required: true, reason: "delivery_lease_invalid", validation_issues: lease?.validation_issues || [] };
+    }
+    if (!renderedPrompt.includes(String(packetCapsule.capsule_checksum || ""))) {
+        return { admitted: false, required: true, reason: "prompt_missing_capsule_checksum" };
+    }
+    const expectedAttemptSequence = Math.max(0, Math.floor(Number(options.attemptSequence || options.attempt_sequence || 0) || 0));
+    if (expectedAttemptSequence > 0 && Number(lease.attempt_sequence || 0) !== expectedAttemptSequence) {
+        return { admitted: false, required: true, reason: "task_agent_turn_changed", expectedAttemptSequence, leaseAttemptSequence: Number(lease.attempt_sequence || 0) };
+    }
+    const groupId = String(lease.group_id || "");
+    const groupSessionId = String(lease.group_session_id || "");
+    const targetProject = normalizeAgentMemoryProject(lease.target_project || "unknown");
+    if (options.skipGroupSessionPresenceCheck !== true && options.skip_group_session_presence_check !== true) {
+        const sessionManifest = (0, storage_1.listGroupChatSessions)(groupId);
+        const sessionExists = (sessionManifest.sessions || []).some((session) => String(session.id || "") === groupSessionId);
+        if (!sessionExists || groupSessionId === "default") {
+            return { admitted: false, required: true, reason: groupSessionId === "default" ? "legacy_group_session_not_dispatchable" : "group_session_deleted_before_dispatch" };
+        }
+    }
+    const typedMemoryScopeId = groupSessionId === "default" ? groupId : `${groupId}--${groupSessionId}`;
+    const currentMemory = loadGroupMemory(groupId, groupSessionId);
+    const currentScope = buildChildTypedMemoryRecallLedgerScope(targetProject, {
+        task_id: String(lease.task_id || ""),
+        task_agent_session_id: String(lease.task_agent_session_id || ""),
+    }, currentMemory, {});
+    if (String(currentScope.compactEpoch || "precompact") !== String(lease.compact_epoch || "precompact")) {
+        return {
+            admitted: false,
+            required: true,
+            reason: "compact_epoch_changed_before_dispatch",
+            leaseCompactEpoch: String(lease.compact_epoch || "precompact"),
+            currentCompactEpoch: String(currentScope.compactEpoch || "precompact"),
+        };
+    }
+    const ledger = (0, group_memory_index_1.readGroupTypedMemoryRecallLedger)(typedMemoryScopeId);
+    const scoped = ledger.scopes?.[String(lease.recall_scope || "")] || {};
+    const existingCommit = scoped.deliveryLeases?.[String(lease.lease_id || "")] || null;
+    const stats = (0, group_memory_index_1.getGroupTypedMemoryRecallScopeStats)(typedMemoryScopeId, String(lease.recall_scope || ""));
+    const expectedDeliveredBytesBefore = Number(packetCapsule.budget?.session_delivered_bytes_before || packetCapsule.session_delivered_bytes_before || 0);
+    if (existingCommit?.status !== "committed" && stats.deliveredBytes !== expectedDeliveredBytesBefore) {
+        return {
+            admitted: false,
+            required: true,
+            reason: "surfaced_budget_changed_before_dispatch",
+            expectedDeliveredBytesBefore,
+            currentDeliveredBytes: stats.deliveredBytes,
+        };
+    }
+    const admittedAt = String(options.admittedAt || options.admitted_at || new Date().toISOString());
+    const ticket = (0, runtime_kernel_1.buildWorkerTypedMemoryDispatchTicket)({
+        lease,
+        capsule: packetCapsule,
+        workerContextPacket,
+        renderedPrompt,
+    }, {
+        admittedAt,
+        dispatchWindowMs: options.dispatchWindowMs || options.dispatch_window_ms || 30_000,
+    });
+    const validatedTicket = (0, runtime_kernel_1.validateWorkerTypedMemoryDispatchTicket)(ticket, {
+        lease,
+        capsule: packetCapsule,
+        workerContextPacket,
+        renderedPrompt,
+    });
+    if (validatedTicket?.valid_for_dispatch !== true) {
+        return { admitted: false, required: true, reason: "dispatch_ticket_invalid", validation_issues: validatedTicket?.validation_issues || [] };
+    }
+    return {
+        admitted: true,
+        required: true,
+        reason: existingCommit?.status === "committed" ? "lease_already_committed_retry_admitted" : "pending_lease_consumed_at_dispatch_point",
+        idempotentRetry: existingCommit?.status === "committed",
+        ticket: validatedTicket,
+        lease,
+        capsule: packetCapsule,
+        postTurnSummaryCapsule: postTurnSummaryAdmission.capsule || null,
+        stats,
+    };
+}
+function commitChildTypedMemoryDelivery(memoryBundle, options = {}) {
+    const workerContextPacket = options.workerContextPacket || options.worker_context_packet || null;
+    const dispatchEvidence = options.dispatchEvidence || options.dispatch_evidence || {};
+    if (!memoryBundle || !workerContextPacket)
+        return { committed: false, reason: "memory_or_worker_packet_missing" };
+    const packetMemory = workerContextPacket.memory || memoryBundle;
+    const packetCapsuleInput = workerContextPacket.typed_memory_delivery_capsule
+        || workerContextPacket.typedMemoryDeliveryCapsule
+        || findMemoryArtifactBySchema(packetMemory, "ccm-child-typed-memory-delivery-capsule-v1");
+    if (!packetCapsuleInput?.schema)
+        return { committed: false, reason: "delivery_capsule_missing" };
+    const expectedBinding = workerContextPacket.typed_memory_delivery_expected_binding
+        || workerContextPacket.typedMemoryDeliveryExpectedBinding
+        || (0, runtime_kernel_1.buildWorkerTypedMemoryDeliveryExpectedBinding)(workerContextPacket, packetMemory);
+    const packetCapsule = (0, runtime_kernel_1.validateWorkerTypedMemoryDeliveryCapsule)(packetCapsuleInput, { expectedBinding });
+    if (packetCapsule?.trusted_for_delivery !== true) {
+        return { committed: false, reason: "delivery_capsule_not_trusted", validation_issues: packetCapsule?.validation_issues || [] };
+    }
+    const leaseInput = findMemoryArtifactBySchema(packetMemory, "ccm-child-typed-memory-delivery-lease-v1")
+        || findMemoryArtifactBySchema(memoryBundle, "ccm-child-typed-memory-delivery-lease-v1");
+    const lease = (0, runtime_kernel_1.validateWorkerTypedMemoryDeliveryLease)(leaseInput, { capsule: packetCapsule });
+    if (lease?.valid_for_commit !== true) {
+        return { committed: false, reason: "delivery_lease_invalid", validation_issues: lease?.validation_issues || ["lease_missing"] };
+    }
+    const receipt = dispatchEvidence.deliveryReceipt || dispatchEvidence.delivery_receipt || null;
+    const dispatchTicketInput = dispatchEvidence.dispatchTicket || dispatchEvidence.dispatch_ticket || null;
+    const dispatchStartedAt = String(dispatchEvidence.dispatchStartedAt || dispatchEvidence.dispatch_started_at || "");
+    const dispatchTicket = (0, runtime_kernel_1.validateWorkerTypedMemoryDispatchTicket)(dispatchTicketInput, {
+        lease,
+        capsule: packetCapsule,
+        workerContextPacket,
+        renderedPrompt: String(dispatchEvidence.renderedPrompt || dispatchEvidence.rendered_prompt || ""),
+        dispatchStartedAt,
+        requireDispatchStart: true,
+    });
+    if (dispatchTicket?.valid_for_commit !== true) {
+        return { committed: false, reason: "dispatch_ticket_invalid", validation_issues: dispatchTicket?.validation_issues || ["ticket_missing"] };
+    }
+    const dispatched = dispatchEvidence.dispatched === true || receipt?.delivered === true;
+    const executionReturned = dispatchEvidence.executionReturned === true
+        || dispatchEvidence.execution_returned === true
+        || receipt?.delivered === true;
+    const renderedPrompt = String(dispatchEvidence.renderedPrompt || dispatchEvidence.rendered_prompt || "");
+    const promptBindingVerified = dispatchEvidence.promptBindingVerified === true
+        || dispatchEvidence.prompt_binding_verified === true
+        || (!!renderedPrompt && renderedPrompt.includes(String(packetCapsule.capsule_checksum || "")))
+        || receipt?.delivered === true;
+    if (!dispatched || !executionReturned || !promptBindingVerified) {
+        return { committed: false, reason: "dispatch_witness_incomplete", dispatched, executionReturned, promptBindingVerified };
+    }
+    const groupId = String(lease.group_id || "");
+    const groupSessionId = String(lease.group_session_id || "");
+    const targetProject = normalizeAgentMemoryProject(lease.target_project || "unknown");
+    const taskAgentSessionId = String(lease.task_agent_session_id || "");
+    if (!groupId || !groupSessionId || !taskAgentSessionId || !String(taskAgentSessionId).startsWith("tas_")) {
+        return { committed: false, reason: "delivery_identity_incomplete" };
+    }
+    const bundleGroup = String(memoryBundle.group_id || memoryBundle.groupId || groupId);
+    const bundleGroupSession = String(memoryBundle.group_session_id || memoryBundle.groupSessionId || groupSessionId);
+    const bundleProject = normalizeAgentMemoryProject(memoryBundle.target_project || memoryBundle.targetProject || targetProject);
+    if (bundleGroup !== groupId || bundleGroupSession !== groupSessionId || bundleProject !== targetProject) {
+        return { committed: false, reason: "memory_bundle_identity_mismatch" };
+    }
+    const recall = findMemoryArtifactBySchema(packetMemory, "ccm-group-typed-memory-recall-v1")
+        || findMemoryArtifactBySchema(memoryBundle, "ccm-group-typed-memory-recall-v1");
+    if (!recall || recall.ignored === true)
+        return { committed: false, reason: "typed_memory_recall_missing_or_ignored" };
+    const typedMemoryScopeId = groupSessionId === "default" ? groupId : `${groupId}--${groupSessionId}`;
+    const scopeMetadata = {
+        scope: String(lease.recall_scope || ""),
+        scopeKind: "task_agent_session",
+        targetProject,
+        taskId: String(lease.task_id || ""),
+        taskAgentSessionId,
+        compactEpoch: String(lease.compact_epoch || "precompact"),
+    };
+    const ledger = (0, group_memory_index_1.recordGroupTypedMemoryRecall)(typedMemoryScopeId, scopeMetadata.scope, recall, String(lease.query_checksum || ""), { scopeMetadata, deliveryCapsule: packetCapsule, deliveryLease: lease });
+    const committedLease = ledger.scopes?.[scopeMetadata.scope]?.deliveryLeases?.[lease.lease_id] || null;
+    const stats = (0, group_memory_index_1.getGroupTypedMemoryRecallScopeStats)(typedMemoryScopeId, scopeMetadata.scope);
+    return {
+        committed: committedLease?.status === "committed",
+        idempotent: committedLease?.commitCount === 1 && committedLease?.lastCommitDuplicate === true,
+        reason: committedLease?.status === "committed" ? "delivery_lease_committed" : "delivery_lease_not_persisted",
+        lease: committedLease,
+        stats,
+        ledger_file: ledger.file,
+    };
+}
+function createChildTypedMemoryDispatchWal(admission, input = {}) {
+    if (admission?.required !== true || !admission?.ticket) {
+        return { required: false, created: false, reason: "typed_memory_dispatch_wal_not_required", record: null };
+    }
+    return (0, typed_memory_dispatch_wal_1.createTypedMemoryDispatchWal)({
+        memoryBundle: input.memoryBundle || input.memory_bundle || null,
+        workerContextPacket: input.workerContextPacket || input.worker_context_packet || null,
+        renderedPrompt: input.renderedPrompt || input.rendered_prompt || "",
+        snapshotRenderedPrompt: input.snapshotRenderedPrompt || input.snapshot_rendered_prompt || input.renderedPrompt || input.rendered_prompt || "",
+        dispatchTicket: admission.ticket,
+        deliveryLease: admission.lease,
+        deliveryCapsule: admission.capsule,
+        executionId: input.executionId || input.execution_id || "",
+        platformDispatchId: input.platformDispatchId || input.platform_dispatch_id || "",
+        capacityRevalidationProof: input.capacityRevalidationProof || input.capacity_revalidation_proof || null,
+    });
+}
+function markChildTypedMemoryDispatchStarted(wal, input = {}) {
+    if (!wal?.required || !wal?.record)
+        return null;
+    return (0, typed_memory_dispatch_wal_1.transitionTypedMemoryDispatchWal)(wal.record, "dispatch_started", {
+        dispatch_started_at: String(input.dispatchStartedAt || input.dispatch_started_at || new Date().toISOString()),
+        transport: String(input.transport || "third_party_agent"),
+        runner_request_id: String(input.runnerRequestId || input.runner_request_id || wal.record.runner_request_id || ""),
+    });
+}
+function markChildTypedMemoryRunnerReturned(record, input = {}) {
+    if (!record)
+        return null;
+    return (0, typed_memory_dispatch_wal_1.transitionTypedMemoryDispatchWal)(record, "runner_returned", {
+        runner_returned_at: String(input.runnerReturnedAt || input.runner_returned_at || new Date().toISOString()),
+        runner_request_id: String(input.runnerRequestId || input.runner_request_id || ""),
+        runner_succeeded: input.runnerSucceeded !== false && input.runner_succeeded !== false,
+        output_checksum: input.output ? crypto.createHash("sha256").update(String(input.output)).digest("hex") : "",
+        delivery_receipt_id: String(input.deliveryReceipt?.receiptId || input.delivery_receipt?.receiptId || ""),
+        delivery_receipt_checksum: String(input.deliveryReceipt?.checksum || input.delivery_receipt?.checksum || ""),
+        delivery_receipt: input.deliveryReceipt || input.delivery_receipt || null,
+    });
+}
+function markChildTypedMemoryDispatchCommitted(record, commit = {}) {
+    if (!record)
+        return null;
+    if (commit?.committed !== true)
+        return (0, typed_memory_dispatch_wal_1.transitionTypedMemoryDispatchWal)(record, "runner_returned", {
+            last_commit_error: String(commit?.reason || "unknown"),
+            last_commit_attempt_at: new Date().toISOString(),
+        });
+    return (0, typed_memory_dispatch_wal_1.transitionTypedMemoryDispatchWal)(record, "committed", {
+        committed_at: new Date().toISOString(),
+        ledger_file: String(commit.ledger_file || ""),
+        committed_lease_id: String(commit.lease?.leaseId || commit.lease?.lease_id || ""),
+        terminal_reason: commit.idempotent === true ? "delivery_lease_already_committed" : "delivery_lease_committed",
+        recovery_payload: null,
+    });
+}
+function runnerRequestHasDurableReturnEvidence(record) {
+    const runnerRequestId = String(record.runner_request_id || "");
+    if (!runnerRequestId)
+        return true;
+    const requestFile = path.join(utils_1.CCM_DIR, "agent-runner", "requests", `${runnerRequestId}.json`);
+    const resultFile = path.join(utils_1.CCM_DIR, "agent-runner", "results", `${runnerRequestId}.json`);
+    if (!fs.existsSync(requestFile) || !fs.existsSync(resultFile))
+        return false;
+    try {
+        const request = JSON.parse(fs.readFileSync(requestFile, "utf-8"));
+        const result = JSON.parse(fs.readFileSync(resultFile, "utf-8"));
+        if (String(request.id || "") !== runnerRequestId || String(result.id || "") !== runnerRequestId)
+            return false;
+        if (request.schema === direct_dispatch_spool_1.DIRECT_AGENT_DISPATCH_REQUEST_SCHEMA && (0, direct_dispatch_spool_1.validateDirectAgentDispatchPair)(request, result).valid !== true)
+            return false;
+        if (String(request.taskAgentSessionId || "") !== String(record.task_agent_session_id || ""))
+            return false;
+        if (String(request.groupId || "") !== String(record.group_id || ""))
+            return false;
+        const execution = record.execution_id ? (0, execution_kernel_1.loadExecution)(String(record.execution_id)) : null;
+        return !execution || (execution.externalRunnerRequestIds || []).includes(runnerRequestId);
+    }
+    catch {
+        return false;
+    }
+}
+function recoverDeliveryReceiptFromRunnerWal(record) {
+    const runnerRequestId = String(record.runner_request_id || "");
+    if (!runnerRequestId)
+        return null;
+    const requestFile = path.join(utils_1.CCM_DIR, "agent-runner", "requests", `${runnerRequestId}.json`);
+    const resultFile = path.join(utils_1.CCM_DIR, "agent-runner", "results", `${runnerRequestId}.json`);
+    try {
+        const request = JSON.parse(fs.readFileSync(requestFile, "utf-8"));
+        const result = JSON.parse(fs.readFileSync(resultFile, "utf-8"));
+        const prompt = String(record.recovery_payload?.rendered_prompt || "");
+        const promptChecksum = crypto.createHash("sha256").update(prompt).digest("hex").slice(0, 32);
+        if (!request.started_at || String(request.message || "") !== prompt || promptChecksum !== String(record.prompt_checksum || ""))
+            return null;
+        if (String(request.taskAgentSessionId || "") !== String(record.task_agent_session_id || ""))
+            return null;
+        if (String(request.groupId || "") !== String(record.group_id || ""))
+            return null;
+        return (0, agent_sessions_1.recordTaskAgentMemoryContextDelivery)(String(record.task_agent_session_id || ""), {
+            renderedPrompt: prompt,
+            snapshotRenderedPrompt: String(record.recovery_payload?.snapshot_rendered_prompt || prompt),
+            executionId: String(record.execution_id || ""),
+            runtime: String(request.agentType || ""),
+            attempt: Math.max(1, Number(record.attempt_sequence || 1)),
+            nativeSessionId: String(result.nativeSessionId || ""),
+            runnerRequestId,
+            dispatched: true,
+            executionSucceeded: result.success === true,
+            output: String(result.output || result.error || ""),
+        });
+    }
+    catch {
+        return null;
+    }
+}
+function recoverChildTypedMemoryDispatchWal(options = {}) {
+    const nowMs = Date.parse(String(options.now || "")) || Date.now();
+    const ticketIds = new Set((Array.isArray(options.ticketIds || options.ticket_ids) ? (options.ticketIds || options.ticket_ids) : [])
+        .map((item) => String(item || ""))
+        .filter(Boolean));
+    const rows = [];
+    for (const source of (0, typed_memory_dispatch_wal_1.listTypedMemoryDispatchWal)()) {
+        if (ticketIds.size > 0 && !ticketIds.has(String(source.ticket_id || "")))
+            continue;
+        const validation = (0, typed_memory_dispatch_wal_1.verifyTypedMemoryDispatchWal)(source);
+        if (!validation.valid) {
+            rows.push({ ticket_id: source.ticket_id, state: source.state, action: "blocked_invalid_wal", issues: validation.issues });
+            continue;
+        }
+        let record = source;
+        try {
+            const capacityRevalidationProof = record.recovery_payload?.capacity_revalidation_proof || null;
+            if (capacityRevalidationProof && ["dispatch_started", "runner_returned", "committed"].includes(String(record.state || ""))) {
+                (0, agent_sessions_1.commitTaskAgentSessionCapacityRevalidation)(String(record.task_agent_session_id || ""), capacityRevalidationProof, {
+                    typedMemoryDispatchWalRecordChecksum: String(record.record_checksum || ""),
+                    typedMemoryDispatchWalState: String(record.state || ""),
+                    runnerRequestId: String(record.runner_request_id || ""),
+                    runnerStarted: !!record.dispatch_started_at,
+                });
+            }
+            if (record.state === "admitted") {
+                const expiresAt = Date.parse(String(record.dispatch_not_after || ""));
+                if (!Number.isFinite(expiresAt) || nowMs > expiresAt) {
+                    record = (0, typed_memory_dispatch_wal_1.transitionTypedMemoryDispatchWal)(record, "expired", { terminal_reason: "ticket_expired_before_dispatch" });
+                    rows.push({ ticket_id: record.ticket_id, state: record.state, action: "expired" });
+                }
+                else {
+                    rows.push({ ticket_id: record.ticket_id, state: record.state, action: "left_admitted" });
+                }
+                continue;
+            }
+            if (record.state === "dispatch_started") {
+                const recoveredDelivery = recoverDeliveryReceiptFromRunnerWal(record);
+                if (!recoveredDelivery?.receipt) {
+                    record = (0, typed_memory_dispatch_wal_1.transitionTypedMemoryDispatchWal)(record, "uncertain_after_crash", { terminal_reason: "dispatch_started_without_runner_return_evidence" });
+                    rows.push({ ticket_id: record.ticket_id, state: record.state, action: "marked_uncertain" });
+                    continue;
+                }
+                record = markChildTypedMemoryRunnerReturned(record, {
+                    runnerRequestId: record.runner_request_id,
+                    runnerSucceeded: recoveredDelivery.receipt.executionSucceeded === true,
+                    deliveryReceipt: recoveredDelivery.receipt,
+                });
+            }
+            if (record.state !== "runner_returned") {
+                rows.push({ ticket_id: record.ticket_id, state: record.state, action: "terminal_or_noop" });
+                continue;
+            }
+            if (!record.delivery_receipt && record.runner_request_id) {
+                const recoveredDelivery = recoverDeliveryReceiptFromRunnerWal(record);
+                if (recoveredDelivery?.receipt) {
+                    record = markChildTypedMemoryRunnerReturned(record, {
+                        runnerRequestId: record.runner_request_id,
+                        runnerSucceeded: recoveredDelivery.receipt.executionSucceeded === true,
+                        deliveryReceipt: recoveredDelivery.receipt,
+                    });
+                }
+            }
+            const receipt = record.delivery_receipt || null;
+            const receiptValid = receipt?.delivered === true
+                && String(receipt.checksum || "") === String(record.delivery_receipt_checksum || "")
+                && (0, agent_sessions_1.verifyMemoryContextDeliveryReceiptChecksum)(receipt)
+                && String(receipt.taskAgentSessionId || "") === String(record.task_agent_session_id || "")
+                && String(receipt.workerContextPacketId || "") === String(record.worker_context_packet_id || "");
+            if (!receiptValid || !runnerRequestHasDurableReturnEvidence(record)) {
+                record = (0, typed_memory_dispatch_wal_1.transitionTypedMemoryDispatchWal)(record, "uncertain_after_crash", { terminal_reason: receiptValid ? "runner_return_evidence_invalid" : "delivery_receipt_invalid" });
+                rows.push({ ticket_id: record.ticket_id, state: record.state, action: "marked_uncertain" });
+                continue;
+            }
+            const payload = record.recovery_payload || {};
+            const commit = commitChildTypedMemoryDelivery(payload.memory_bundle, {
+                workerContextPacket: payload.worker_context_packet,
+                dispatchEvidence: {
+                    deliveryReceipt: receipt,
+                    renderedPrompt: payload.rendered_prompt,
+                    dispatchTicket: payload.dispatch_ticket,
+                    dispatchStartedAt: record.dispatch_started_at,
+                    dispatched: true,
+                    executionReturned: true,
+                },
+            });
+            record = markChildTypedMemoryDispatchCommitted(record, commit);
+            rows.push({ ticket_id: record.ticket_id, state: record.state, action: commit.committed === true ? "recovered_commit" : "commit_failed", reason: commit.reason });
+        }
+        catch (error) {
+            rows.push({ ticket_id: record.ticket_id, state: record.state, action: "recovery_error", error: String(error?.message || error) });
+        }
+    }
+    const pruned = (0, typed_memory_dispatch_wal_1.pruneTypedMemoryDispatchWal)(options);
+    const directSpoolPruned = (0, direct_dispatch_spool_1.pruneDirectAgentDispatchSpool)(options);
+    return {
+        schema: "ccm-child-typed-memory-dispatch-wal-recovery-v1",
+        checked_at: new Date(nowMs).toISOString(),
+        total: rows.length,
+        recovered: rows.filter(row => row.action === "recovered_commit").length,
+        uncertain: rows.filter(row => row.action === "marked_uncertain").length,
+        expired: rows.filter(row => row.action === "expired").length,
+        invalid: rows.filter(row => row.action === "blocked_invalid_wal").length,
+        pruned: pruned.deleted_count,
+        direct_spool_pruned: directSpoolPruned.deleted_count,
+        rows,
+    };
 }
 function renderGroupMemoryContextBundle(bundle) {
     if (!bundle)
@@ -7204,7 +9092,15 @@ function renderGroupMemoryContextBundle(bundle) {
         return bundle;
     const agentMemory = bundle.target_agent_memory || {};
     const groupState = bundle.group_state || {};
+    const postTurnSummaries = groupState.postTurnSummaries || groupState.post_turn_summaries || {};
+    const postTurnSummaryDeliveryCapsule = bundle.post_turn_summary_delivery_capsule
+        || bundle.postTurnSummaryDeliveryCapsule
+        || (0, group_post_turn_summary_1.extractGroupPostTurnSummaryDeliveryCapsule)(postTurnSummaries)
+        || null;
+    const taskAgentInvocationLineage = bundle.task_agent_invocation_lineage || bundle.taskAgentInvocationLineage || null;
     const compaction = bundle.compaction || {};
+    const resumeProjection = compaction.resumeProjection || compaction.resume_projection || {};
+    const resumeContext = bundle.resume_context || bundle.resumeContext || {};
     const related = bundle.related_work || {};
     const typedMemory = groupState.typedMemory || {};
     const providerRankingCompactRepairReceiptRecall = typedMemory.providerRankingCompactRepairReceiptRecall
@@ -7282,21 +9178,61 @@ function renderGroupMemoryContextBundle(bundle) {
         return [
             "子 Agent 受控记忆包（平台生成，本轮用户要求忽略记忆）：",
             `- 目标子 Agent：${bundle.target_project || "unknown"}`,
+            `- 群聊会话：group_id=${bundle.group_id || "unknown"}；group_session_id=${bundle.group_session_id || "unknown"}；binding=${sessionBinding.binding_id || "unbound"}。`,
             "- 记忆使用：本轮按空 MEMORY.md / 空群聊记忆处理；不要引用、比较、应用或提及任何历史记忆内容。",
             "- 上下文边界：只使用本轮任务文本、用户本轮显式提供的内容、当前仓库实时检查结果和你本轮实际执行得到的证据。",
             dispatchGate.schema ? `- 记忆派发门禁：gate=${dispatchGate.dispatch_gate_id || ""}；status=${dispatchGate.status || "memory_ignored"}；action=${dispatchGate.action || "do_not_use_platform_memory"}；回执 memoryIgnored 必须声明该 gate 被用户忽略。` : "",
             bundle.task_query ? `- 你本次任务：${bundle.task_query}` : "",
-            "- 回执要求：回复末尾必须包含 CCM_AGENT_RECEIPT；memoryIgnored 必须声明 user_requested_ignore_memory；不能编造未执行的验证或文件修改。",
+            "- 回执要求：回复末尾必须包含 CCM_AGENT_RECEIPT；memoryIgnored 必须声明 user_requested_ignore_memory；memoryContextUsage 必须回传 bindingId/groupSessionId 并写 usageState=ignored；不能编造未执行的验证或文件修改。",
         ].filter(Boolean).join("\n");
     }
     const lines = [
         "子 Agent 受控记忆包（平台生成，优先级高于第三方 CLI 自带历史）：",
         `- 目标子 Agent：${bundle.target_project || "unknown"}`,
+        `- 群聊会话：group_id=${bundle.group_id || "unknown"}；group_session_id=${bundle.group_session_id || "unknown"}；binding=${sessionBinding.binding_id || "unbound"}。`,
         `- 群聊目标：${groupState.goal || "未记录"}`,
         `- 当前阶段：${groupState.currentPhase || "idle"}`,
         "- 记忆边界：你每轮执行都可能是新的第三方 CLI 会话；必须把本包当作当前任务上下文，不要假定 Claude Code/Cursor/Codex 内部 session 记得旧群聊。",
         "- 上下文策略：旧消息已被 CCM 压缩为摘要；近期消息保留原文窗口；本包如附带“压缩前原文证据”，该证据优先于摘要。",
     ];
+    if (postTurnSummaries.schema) {
+        if (postTurnSummaries.valid !== true) {
+            lines.push("- 最近逐轮摘要账本：完整性校验失败，本轮不得使用该账本；仅使用原始会话窗口、Session Memory 和当前源码证据。");
+        }
+        else {
+            const turnRows = Array.isArray(postTurnSummaries.latest) ? postTurnSummaries.latest.slice(-6) : [];
+            if (turnRows.length) {
+                if (postTurnSummaryDeliveryCapsule?.capsule_checksum) {
+                    lines.push(`- 逐轮摘要交付凭证：capsule_checksum=${postTurnSummaryDeliveryCapsule.capsule_checksum}；task_agent_session_id=${postTurnSummaryDeliveryCapsule.task_agent_session_id || ""}；attempt=${postTurnSummaryDeliveryCapsule.attempt_sequence || 0}；invocation=${postTurnSummaryDeliveryCapsule.invocation_kind || ""}；invocation_edge=${postTurnSummaryDeliveryCapsule.invocation_edge_id || ""}；parent_edge=${postTurnSummaryDeliveryCapsule.parent_invocation_edge_id || ""}；branch=${postTurnSummaryDeliveryCapsule.branch_id || ""}/${postTurnSummaryDeliveryCapsule.branch_kind || ""}；lineage_head=${postTurnSummaryDeliveryCapsule.expected_lineage_head_checksum || ""}；compact_epoch=${postTurnSummaryDeliveryCapsule.compact_epoch || ""}；ledger_head=${postTurnSummaryDeliveryCapsule.ledger_head_checksum || ""}。`);
+                    lines.push("- 逐轮摘要回执：最终 CCM_AGENT_RECEIPT 必须引用上述 capsule_checksum；不得把该凭证用于其他群聊、gcs_* 会话或 tas_* 会话。");
+                }
+                lines.push("- 最近逐轮摘要（绑定原始 assistant message，不替代当前源码）：");
+                for (const row of turnRows) {
+                    const details = [
+                        row.title ? compactMemoryText(row.title, 140) : "",
+                        row.recentAction ? `recent_action=${compactMemoryText(row.recentAction, 220)}` : "",
+                        row.needsAction ? `needs_action=${compactMemoryText(row.needsAction, 220)}` : "",
+                        Array.isArray(row.artifactUrls) && row.artifactUrls.length ? `artifacts=${row.artifactUrls.slice(0, 4).join(",")}` : "",
+                    ].filter(Boolean).join("；");
+                    lines.push(`  - [${row.statusCategory || "completed"}] ${row.agent || "group-main-agent"} / ${row.summarizesMessageId || "unknown"}：${details || "该轮无额外摘要"}`);
+                }
+            }
+        }
+    }
+    if (taskAgentInvocationLineage?.invocation_edge_id) {
+        lines.push(`- Task Agent invocation lineage：edge=${taskAgentInvocationLineage.invocation_edge_id}；parent=${taskAgentInvocationLineage.parent_invocation_edge_id || "root"}；root=${taskAgentInvocationLineage.root_invocation_edge_id || taskAgentInvocationLineage.invocation_edge_id}；branch=${taskAgentInvocationLineage.branch_id || ""}/${taskAgentInvocationLineage.branch_kind || "main"}；expected_head=${taskAgentInvocationLineage.expected_lineage_head_checksum || "root"}。`);
+        lines.push("- 本轮回执与 runner request 只能提交到上述 invocation edge；不得跨 group、gcs_*、tas_* 或 branch 复用。 ");
+    }
+    if (resumeProjection.schema) {
+        lines.push(`- durable resume projection：status=${resumeProjection.status || "unknown"}；verified=${resumeProjection.verified === true}；recovered=${resumeProjection.recovered === true}；raw=${resumeProjection.rawMessageCount || 0}；omitted=${resumeProjection.omittedMessageCount || 0}；projected=${resumeProjection.projectedMessageCount || 0}；boundary=${resumeProjection.boundary?.boundaryId || "none"}；proof=${resumeProjection.proof?.proofId || "none"}。`);
+        if (resumeProjection.status === "fail_closed_rebuild_required") {
+            lines.push("- 恢复门禁：压缩边界未通过验证，本轮只能使用当前会话完整 raw transcript 重建结果；不得按可疑旧边界剪枝。 ");
+        }
+    }
+    if (bundle.task_query)
+        lines.push(`- 你本次任务：${bundle.task_query}`);
+    if (resumeContext.text)
+        lines.push(`- 已验证的会话恢复原文窗口：\n${resumeContext.text}`);
     if (typedPressureRepairMatches.length) {
         const primary = typedPressureRepairMatches[0];
         lines.push(`- pressure repair ${primary.gapType}:${primary.status}：typed MEMORY.md pressure provenance under repair；docs=${typedPressureRepairMatches.map((item) => item.relPath).filter(Boolean).join(",") || "unknown"}；work_item=${primary.workItemId || "unknown"}；provenance=${primary.provenanceStatus || "under_repair"}。`);
@@ -7364,7 +9300,7 @@ function renderGroupMemoryContextBundle(bundle) {
             }
         }
         lines.push("- freshness boundary：historical repair completion is recovery evidence, not permanent repository truth；future use must reverify the current source before accepting a recovered candidate.");
-        lines.push("- receipt requirement：最终 CCM_AGENT_RECEIPT.memoryUsed 或 memoryIgnored 必须引用每个 surfaced receipt MEMORY.md；used/verified 必须写 currentSourceVerified=true，ignored 必须写 reason。");
+        lines.push("- receipt requirement：最终 CCM_AGENT_RECEIPT.memoryUsed 或 memoryIgnored 必须引用每个 surfaced receipt MEMORY.md；verified 必须同时提交 typedMemoryUsage.currentSourceEvidence（file_read、项目内 sourcePath、当前文件完整 SHA-256），只有平台复算匹配后才成立；无证明的 verified 会降为 used，ignored 必须写 reason。");
         if (gateIds.length || candidateIds.length) {
             lines.push(`  - historical repair identities：reinjection_gate_ids=${gateIds.join("、") || "none"}；candidate_ids=${candidateIds.join("、") || "none"}。`);
         }
@@ -7472,6 +9408,29 @@ function renderGroupMemoryContextBundle(bundle) {
         if (sessionMemory.markdownExcerpt) {
             lines.push(`  - Session Memory 摘要片段：${compactMemoryText(sessionMemory.markdownExcerpt, 620)}`);
         }
+        const activeFactProjection = sessionMemory.factSupersession || sessionMemory.fact_supersession || {};
+        const activeReplacementFacts = (Array.isArray(activeFactProjection.activeFacts) ? activeFactProjection.activeFacts : [])
+            .filter((fact) => fact.source === "explicit_replacement")
+            .slice(0, 12);
+        if (activeFactProjection.schema) {
+            lines.push(`- Session Memory 事实替代图：graph=${activeFactProjection.graphChecksum || ""}；valid=${activeFactProjection.graphValid === true}；active=${activeFactProjection.activeFactCount || 0}；superseded=${activeFactProjection.supersededFactCount || 0}；unjustified_lost=${activeFactProjection.unjustifiedLostFactCount || 0}。子 Agent 只能使用 active facts，不得恢复已替代旧事实。`);
+        }
+        const modelReplayEvidence = sessionMemory.modelExtractionReplayEvidence || sessionMemory.model_extraction_replay_evidence || {};
+        if (modelReplayEvidence.schema) {
+            lines.push(`- Session Memory 模型提取交付证据：execution=${modelReplayEvidence.executionId || ""}；receipt=${modelReplayEvidence.receiptChecksum || ""}；history_head=${modelReplayEvidence.historyHeadChecksum || ""}；replay=${modelReplayEvidence.replayStatus || ""}；replay_execution=${modelReplayEvidence.replayExecutionId || ""}；valid=${modelReplayEvidence.checksumValid === true && modelReplayEvidence.historyIntegrityValid === true && modelReplayEvidence.replayPass === true}。memoryContextUsage 必须原样回传 execution、replay 和 fact graph checksum。`);
+        }
+        if (activeReplacementFacts.length) {
+            lines.push(`  - 当前有效替代事实：${activeReplacementFacts.map((fact) => `${fact.factId}:${fact.factChecksum}:message=${fact.sourceMessageId}:${compactMemoryText(fact.text, 240)}`).join("；")}`);
+        }
+        lines.push(`- Session Memory 回执绑定：memoryContextUsage.bindingId=${sessionBinding.binding_id || ""}；groupSessionId=${bundle.group_session_id || ""}；sessionMemoryChecksum=${sessionMemory.markdownChecksum || ""}；modelExtractionExecutionId=${modelReplayEvidence.executionId || ""}；modelExtractionReplayStatus=${modelReplayEvidence.replayStatus || ""}；factSupersessionGraphChecksum=${activeFactProjection.graphChecksum || ""}；必须由子 Agent 原样回传并声明 used/verified/ignored。`);
+        const sectionEvidence = sessionMemory.sectionEvidence || sessionMemory.section_evidence || {};
+        const evidenceRows = Array.isArray(sectionEvidence.sections) ? sectionEvidence.sections.slice(0, 12) : [];
+        if (evidenceRows.length) {
+            lines.push(`- Session Memory 章节证据（used/verified 时 memoryFactCitations 必须引用）：${evidenceRows.map((item) => `${item.evidenceId || item.evidence_id}:${item.section || "section"}:${item.sectionChecksum || item.section_checksum}:${item.sourceTranscriptChecksum || item.source_transcript_checksum || sectionEvidence.sourceTranscriptChecksum || ""}:messages=${(item.sourceMessageIds || item.source_message_ids || sectionEvidence.sourceMessageIds || []).slice(0, 12).join(",")}`).join("；")}`);
+        }
+    }
+    else {
+        lines.push(`- Session Memory 尚未达到初始化阈值：memoryContextUsage.bindingId=${sessionBinding.binding_id || ""}；groupSessionId=${bundle.group_session_id || ""}；sessionMemoryChecksum 留空；仍需声明近期原文窗口是 used/verified/ignored。`);
     }
     if (toolContinuity.schema) {
         const allowed = toolContinuity.allowedTools || {};
@@ -7800,10 +9759,19 @@ function renderGroupMemoryContextBundle(bundle) {
         lines.push(`- 类型化记忆索引：${typedMemory.sync.docs || 0} 条 Markdown 记忆，入口 ${typedMemory.sync.indexFile}。`);
     }
     if (typedMemory.ledger?.file) {
-        lines.push(`- 类型化记忆召回账本：本轮已记录 ${typedMemory.ledger.recordedThisTurn?.length || 0} 条 surfaced，历史去重候选 ${typedMemory.ledger.alreadySurfaced?.length || 0} 条。`);
+        const ledgerBoundary = typedMemory.ledger.scope
+            ? `；scope=${typedMemory.ledger.scope}；sessionBound=${typedMemory.ledger.sessionBound === true}；compactEpoch=${typedMemory.ledger.compactEpoch || "precompact"}；只在同 task Agent session、同 compact epoch、同文档 checksum 内去重`
+            : "";
+        lines.push(`- 类型化记忆召回账本：本轮已记录 ${typedMemory.ledger.recordedThisTurn?.length || 0} 条 surfaced，历史去重候选 ${typedMemory.ledger.alreadySurfaced?.length || 0} 条${ledgerBoundary}。`);
     }
     if (typedMemory.distillation?.schema) {
-        lines.push(`- 长期日志蒸馏：候选 ${typedMemory.distillation.candidateCount || 0} 条，本轮新增 ${typedMemory.distillation.newFactCount || 0} 条，写入 ${typedMemory.distillation.writeCount || 0} 个 Markdown 记忆；ledger ${typedMemory.distillation.ledgerFile || "未记录"}。`);
+        const admission = typedMemory.distillation.admission || {};
+        lines.push(`- 长期日志蒸馏：原始候选 ${typedMemory.distillation.extractedCandidateCount ?? typedMemory.distillation.candidateCount ?? 0} 条，准入 ${typedMemory.distillation.candidateCount || 0} 条，拒绝 ${typedMemory.distillation.rejectedCandidateCount || 0} 条，清退旧噪声 ${typedMemory.distillation.evictedExistingFactCount || 0} 条；本轮新增 ${typedMemory.distillation.newFactCount || 0} 条，写入 ${typedMemory.distillation.writeCount || 0} 个 Markdown 记忆；ledger ${typedMemory.distillation.ledgerFile || "未记录"}。`);
+        if (admission.schema) {
+            lines.push(`- 长期记忆写入准入：${admission.admittedThisRun || 0}/${admission.evaluatedThisRun || 0} 通过；hard exclusion ${admission.hardExclusionThisRun || 0}；拒绝审计只保存 candidate/message/type/reason 元数据，不注入被拒绝正文。`);
+            lines.push(`  - 正向确认：候选 ${admission.positiveConfirmationCandidateCount || 0}；准入 ${admission.positiveConfirmationAdmittedCount || 0}；拒绝 ${admission.positiveConfirmationRejectedCount || 0}；无效绑定 ${admission.positiveConfirmationInvalidBindingCount || 0}。只有绑定当前群聊会话内非显然 Assistant 做法并通过 checksum 的确认才可写入。`);
+            lines.push(`  - 正向记忆生命周期：active ${admission.positiveFeedbackActiveCount || 0}；revoked ${admission.positiveFeedbackRevokedCount || 0}；superseded ${admission.positiveFeedbackSupersededCount || 0}；当前源证明 ${admission.positiveFeedbackCurrentSourceProofCount || 0}；本轮无效撤回 ${admission.positiveFeedbackLifecycleInvalidBindingThisRun || 0}。已撤回/替代做法不得恢复到子 Agent 上下文。`);
+        }
         const quality = typedMemory.distillation.quality || {};
         if (quality.schema) {
             lines.push(`- 长期日志蒸馏质量：${quality.score ?? "未评分"}/${quality.status || "unknown"}；stale path ${quality.stalePathCount || 0}，状态矛盾 ${quality.contradictionCount || 0}；涉及文件/函数/flag 的记忆使用前必须核验当前仓库。`);
@@ -7855,8 +9823,8 @@ function renderGroupMemoryContextBundle(bundle) {
     lines.push("- 回执要求：回复末尾必须包含 CCM_AGENT_RECEIPT；不能编造未执行的验证或文件修改；必须用 memoryUsed / memoryIgnored 声明本轮是否使用了本记忆包、项目记忆、历史结论、共享文档或知识库；如存在 global_memory_id，必须用 globalMemoryUsage 逐条声明 used / ignored / verified / background / advisory；如存在 API microcompact edit plan，必须用 apiMicrocompactUsage 或 memoryUsed/memoryIgnored 声明 planChecksum 和 native_applied/advisory/ignored/not_supported，并绑定本轮 taskAgentSessionId/nativeSessionId/memoryContextSnapshotId；如存在 compact read plan revalidation gate，必须声明 gate/read_plan_id 以及是否已 re-read/current source verified；如存在压缩重注入候选，必须用 postCompactCandidateUsage 逐条声明 used / ignored / verified。");
     return lines.join("\n");
 }
-function buildAgentMemoryPacket(groupId, targetProject, task = "") {
-    return renderGroupMemoryContextBundle(buildAgentMemoryContextBundle(groupId, targetProject, task));
+function buildAgentMemoryPacket(groupId, targetProject, task = "", options = {}) {
+    return renderGroupMemoryContextBundle(buildAgentMemoryContextBundle(groupId, targetProject, task, options));
 }
 function tokenizeGlobalGroupMemoryQuery(value) {
     const text = String(value || "").toLowerCase();
@@ -10062,12 +12030,12 @@ function runGroupTypedMemoryContextSelfTest() {
             agent: index % 2 ? "api" : undefined,
             target: index % 2 ? undefined : "coordinator",
             content: index === 0
-                ? "必须保留 IDEMPOTENCY_CONTEXT_SENTINEL，支付回调不能跳过验签。"
+                ? "必须长期保留 IDEMPOTENCY_CONTEXT_SENTINEL，以后每次支付回调都不能跳过验签。"
                 : `类型化记忆上下文测试 ${index}，涉及 src/pay.ts 和 npm run check。`,
         })));
         saveGroupMemory(groupId, {
             goal: "支付回调 typed memory 上下文自测",
-            persistentRequirements: [{ messageId: "tm-0", text: "必须保留 IDEMPOTENCY_CONTEXT_SENTINEL，支付回调不能跳过验签。" }],
+            persistentRequirements: [{ messageId: "tm-0", text: "必须长期保留 IDEMPOTENCY_CONTEXT_SENTINEL，以后每次支付回调都不能跳过验签。" }],
             decisions: [{ decision: "使用 webhook idempotency key", reason: "避免重复入账" }],
             blocked: [{ project: "api", reason: "验签测试失败，需要继续修复" }],
             factAnchors: [{ id: "tm-fact", type: "user_requirement", messageId: "tm-0", text: "src/pay.ts 是支付回调核心文件" }],
@@ -10373,16 +12341,24 @@ function buildCompressedGroupMessageDigest(messages, limit = 30) {
     return lines.join("\n");
 }
 function buildGroupContextPacket(groupId, options = {}) {
+    const groupSessionId = String(options.groupSessionId || options.group_session_id || (0, storage_1.getActiveGroupChatSessionId)(groupId));
     const recentLimit = Math.max(4, Number(options.recentLimit || options.recent_limit || 12));
     const olderLimit = Math.max(6, Number(options.olderLimit || options.older_limit || 30));
     const fullCount = Math.max(3, Number(options.fullCount || options.full_count || 5));
-    const allMessages = (0, storage_1.getGroupMessages)(groupId).filter((message) => !String(message?.content || "").startsWith("📤"));
-    const recentMessages = allMessages.slice(-recentLimit);
-    const olderMessages = allMessages.slice(0, Math.max(0, allMessages.length - recentLimit));
-    const snapshotMemory = refreshGroupConversationMemorySnapshot(groupId, allMessages, loadGroupMemory(groupId), {
+    const allMessages = (0, storage_1.getGroupMessages)(groupId, groupSessionId).filter((message) => !String(message?.content || "").startsWith("📤"));
+    const resumePreparation = prepareGroupMemoryResumeProjection(groupId, groupSessionId, allMessages, loadGroupMemory(groupId, groupSessionId), {
+        groupSessionId,
         recentLimit,
         olderLimit,
     });
+    const snapshotMemory = resumePreparation.memory;
+    const resumeProjection = resumePreparation.projection || {};
+    const recentMessages = resumeProjection.useProjection === true
+        ? (resumeProjection.projectedMessages || [])
+        : allMessages.slice(-recentLimit);
+    const olderMessages = resumeProjection.useProjection === true
+        ? allMessages.slice(0, Number(resumeProjection.omittedMessageCount || 0))
+        : allMessages.slice(0, Math.max(0, allMessages.length - recentLimit));
     const fallbackDigest = buildCompressedGroupMessageDigest(olderMessages, olderLimit);
     const digest = snapshotMemory.messageDigest || fallbackDigest;
     const compression = {
@@ -10401,8 +12377,17 @@ function buildGroupContextPacket(groupId, options = {}) {
         ...snapshotMemory,
         messageDigest: digest,
         messageCompression: compression,
+    }, groupSessionId, {
+        sessionMemoryCadenceDecision: snapshotMemory.sessionMemory?.updateCadence || null,
     });
     const sections = [buildGroupMemoryContext(memory)];
+    if (resumeProjection.schema) {
+        sections.push([
+            "会话恢复投影：",
+            `- status=${resumeProjection.status || "unknown"}; verified=${resumeProjection.verified === true}; recovered=${resumePreparation.recovered === true}; raw=${allMessages.length}; omitted=${resumeProjection.omittedMessageCount || 0}; projected=${resumeProjection.projectedMessageCount || recentMessages.length}`,
+            `- boundary=${resumeProjection.boundary?.boundaryId || "none"}; journal=${resumeProjection.journal?.file || "none"}; proof=${resumePreparation.proof?.proofId || "none"}`,
+        ].join("\n"));
+    }
     if (digest) {
         sections.push([
             "群聊旧消息压缩摘要（旧消息不直接塞满上下文；需要回溯时按 message id 查原始记录）：",
@@ -10459,7 +12444,8 @@ function appendWorkerLedger(memory, item) {
     };
 }
 function updateGroupMemory(groupId, patch = {}) {
-    const memory = loadGroupMemory(groupId);
+    const sessionId = String(patch.groupSessionId || patch.group_session_id || (0, storage_1.getActiveGroupChatSessionId)(groupId));
+    const memory = loadGroupMemory(groupId, sessionId);
     const next = { ...memory };
     if (patch.goal && !next.goal)
         next.goal = compactMemoryText(patch.goal, 500);
@@ -10516,6 +12502,6 @@ function updateGroupMemory(groupId, patch = {}) {
                 action: compactMemoryText(patch.nextAction, 260),
             }], (x) => x.action, 20);
     }
-    return saveGroupMemory(groupId, next);
+    return saveGroupMemory(groupId, next, sessionId);
 }
 //# sourceMappingURL=memory.js.map

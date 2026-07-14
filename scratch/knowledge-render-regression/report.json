@@ -1,0 +1,38 @@
+{
+  "pass": true,
+  "generatedAt": "2026-07-14T01:01:45.599Z",
+  "baseUrl": "http://127.0.0.1:3082",
+  "checks": [
+    {
+      "name": "desktop-1440x1000 layout has no overflow and technical details are collapsed",
+      "pass": true
+    },
+    {
+      "name": "desktop-1440x1000 ordinary answer hides scores and keeps sources collapsed",
+      "pass": true
+    },
+    {
+      "name": "desktop-1440x1000 citation opens the referenced document chunk",
+      "pass": true
+    },
+    {
+      "name": "mobile-390x844 layout has no overflow and technical details are collapsed",
+      "pass": true
+    },
+    {
+      "name": "mobile-390x844 ordinary answer hides scores and keeps sources collapsed",
+      "pass": true
+    },
+    {
+      "name": "mobile-390x844 citation opens the referenced document chunk",
+      "pass": true
+    }
+  ],
+  "errors": [],
+  "screenshots": [
+    "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\knowledge-render-regression\\desktop-1440x1000-initial.png",
+    "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\knowledge-render-regression\\desktop-1440x1000.png",
+    "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\knowledge-render-regression\\mobile-390x844-initial.png",
+    "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\knowledge-render-regression\\mobile-390x844.png"
+  ]
+}

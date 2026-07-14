@@ -51,6 +51,7 @@ exports.terminateManagedChildProcess = terminateManagedChildProcess;
 exports.clearTaskCancellation = clearTaskCancellation;
 exports.isTaskCancellationRequested = isTaskCancellationRequested;
 exports.requestTaskCancellation = requestTaskCancellation;
+exports.requestGroupSessionAgentCancellation = requestGroupSessionAgentCancellation;
 exports.runManagedCommand = runManagedCommand;
 exports.persistBoundedOutput = persistBoundedOutput;
 exports.classifyExecutionFailure = classifyExecutionFailure;
@@ -560,6 +561,63 @@ function requestTaskCancellation(taskId, reason = "用户取消任务", actor = 
     }
     return { success: true, taskId, killedProcesses: killed, externalRunnerRequests: runnerRequests, executions: executions.map(item => item.id) };
 }
+function requestGroupSessionAgentCancellation(input = {}) {
+    const groupId = String(input.groupId || input.group_id || "").trim();
+    const groupSessionId = String(input.groupSessionId || input.group_session_id || "").trim();
+    const reason = String(input.reason || "群聊会话生命周期已变化，停止旧会话 Agent").trim();
+    const actor = String(input.actor || "group-session-lifecycle").trim();
+    if (!groupId || !groupSessionId.startsWith("gcs_"))
+        throw new Error("group session cancellation requires groupId + gcs_* identity");
+    const taskIds = new Set((Array.isArray(input.taskIds) ? input.taskIds : [])
+        .map((value) => String(value || "").trim())
+        .filter(Boolean));
+    let matchedRunnerRequests = 0;
+    try {
+        if (fs.existsSync(AGENT_RUNNER_REQUESTS_DIR)) {
+            for (const name of fs.readdirSync(AGENT_RUNNER_REQUESTS_DIR).filter(name => name.endsWith(".json"))) {
+                const file = path.join(AGENT_RUNNER_REQUESTS_DIR, name);
+                const request = readJson(file, null);
+                if (!request
+                    || String(request.groupId || request.group_id || "") !== groupId
+                    || String(request.groupSessionId || request.group_session_id || "") !== groupSessionId
+                    || ["done", "failed", "cancelled", "expired"].includes(String(request.status || "")))
+                    continue;
+                const taskId = String(request.taskId || request.executionId || "").trim();
+                if (taskId)
+                    taskIds.add(taskId);
+                writeJsonAtomic(file, {
+                    ...request,
+                    status: "cancel_requested",
+                    cancel_reason: reason,
+                    cancel_actor: actor,
+                    cancel_requested_at: now(),
+                    session_lifecycle_stale: true,
+                });
+                matchedRunnerRequests++;
+            }
+        }
+    }
+    catch { }
+    const cancellations = Array.from(taskIds).map(taskId => {
+        try {
+            return requestTaskCancellation(taskId, reason, actor);
+        }
+        catch (error) {
+            return { success: false, taskId, error: error?.message || String(error) };
+        }
+    });
+    return {
+        schema: "ccm-group-session-agent-cancellation-v1",
+        groupId,
+        groupSessionId,
+        reason,
+        actor,
+        taskIds: Array.from(taskIds),
+        matchedRunnerRequests,
+        cancellations,
+        requestedAt: now(),
+    };
+}
 async function runManagedCommand(input) {
     const taskId = String(input.taskId || input.executionId || "standalone");
     const executionId = String(input.executionId || input.taskId || "");
@@ -585,6 +643,7 @@ async function runManagedCommand(input) {
         title: input.title,
     });
     registerProcess(taskId, child);
+    child.once("spawn", () => input.onStarted?.({ pid: Number(child.pid || 0), startedAt: new Date().toISOString(), runId }));
     if (executionId) {
         const record = loadExecution(executionId);
         if (record && child.pid) {

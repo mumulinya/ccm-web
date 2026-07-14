@@ -3,6 +3,9 @@ let agentLabel = 'loading';
 let petType = 'yuexinmiao';
 let currentState = 'idle';
 let petSize = 120;
+let petSkin = null;
+let v2FrameTimer = null;
+let v2Frame = 0;
 
 const petGroup = document.getElementById('pet-group');
 const sprite = document.getElementById('pet-sprite');
@@ -453,11 +456,67 @@ function setPetSpriteSizeVar(spriteSize) {
   document.documentElement.style.setProperty('--pet-sprite-size', `${Math.max(40, Math.round(spriteSize || 64))}px`);
 }
 
+const v2Rows = {
+  idle: { row: 0, durations: [280, 110, 110, 140, 140, 320] },
+  'running-right': { row: 1, durations: [120, 120, 120, 120, 120, 120, 120, 220] },
+  'running-left': { row: 2, durations: [120, 120, 120, 120, 120, 120, 120, 220] },
+  waving: { row: 3, durations: [140, 140, 140, 280] },
+  jumping: { row: 4, durations: [140, 140, 140, 140, 280] },
+  failed: { row: 5, durations: [140, 140, 140, 140, 140, 140, 140, 240] },
+  waiting: { row: 6, durations: [150, 150, 150, 150, 150, 260] },
+  running: { row: 7, durations: [120, 120, 120, 120, 120, 220] },
+  review: { row: 8, durations: [150, 150, 150, 150, 150, 280] },
+};
+
+const v2StateRows = {
+  idle: 'idle', sleeping: 'idle', dozing: 'idle', collapsing: 'idle', yawning: 'idle',
+  drag: 'running-right', attention: 'waving', waking: 'waving', notification: 'waving', happy: 'jumping',
+  error: 'failed', debugging: 'failed', waiting: 'waiting',
+  working: 'running', building: 'running', carrying: 'running', sweeping: 'running', juggling: 'running',
+  thinking: 'review', planning: 'review', reviewing: 'review',
+};
+
+function isV2Pet() {
+  return Number(petSkin?.spriteVersionNumber) === 2 && Boolean(petSkin?.spritesheetPath);
+}
+
+function clearV2FrameTimer() {
+  if (v2FrameTimer) clearTimeout(v2FrameTimer);
+  v2FrameTimer = null;
+}
+
+async function loadV2Sprite(state) {
+  clearV2FrameTimer();
+  const key = v2StateRows[normalizeState(state)] || 'idle';
+  const spec = v2Rows[key];
+  const spriteSize = Math.round(petSize * PET_SPRITE_SCALE);
+  setPetSpriteSizeVar(spriteSize);
+  const atlasPath = await window.petBridge.getAssetPath(petSkin.spritesheetPath);
+  if (!atlasPath) return false;
+  const source = `file:///${atlasPath.replace(/\\/g, '/')}`;
+  const spriteWidth = Math.round(spriteSize * 192 / 208);
+  svgContainer.innerHTML = `<div data-pet-visual="true" aria-hidden="true" style="width:${spriteWidth}px;height:${spriteSize}px;margin:0 auto;background-image:url('${source}');background-repeat:no-repeat;background-size:800% 1100%;"></div>`;
+  v2Frame = 0;
+  const renderFrame = () => {
+    if (!isV2Pet()) return;
+    const visual = svgContainer.querySelector('[data-pet-visual]');
+    if (!visual) return;
+    visual.style.backgroundPosition = `${(v2Frame / 7) * 100}% ${(spec.row / 10) * 100}%`;
+    const delay = spec.durations[v2Frame];
+    v2Frame = (v2Frame + 1) % spec.durations.length;
+    v2FrameTimer = setTimeout(renderFrame, delay);
+  };
+  renderFrame();
+  requestAnimationFrame(positionResizeHandle);
+  return true;
+}
+
 // 通过 IPC 接收初始化参数
 window.petBridge.onInitPet((data) => {
   agentName = data.agent || 'unknown';
   agentLabel = '';
   petType = data.type || 'yuexinmiao';
+  petSkin = data.skin || null;
   currentState = normalizeState(data.state || 'idle');
   petSize = data.size || 120;
   document.documentElement.dataset.petType = petType;
@@ -541,8 +600,8 @@ function getWindowHeight(size) {
 }
 
 function getPetBodyRect() {
-  const img = svgContainer.querySelector('img');
-  const rect = (img || sprite).getBoundingClientRect();
+  const visual = svgContainer.querySelector('img, [data-pet-visual]');
+  const rect = (visual || sprite).getBoundingClientRect();
   const hitBox = getTheme().bodyHitBox || { x: 0.1, y: 0.1, w: 0.8, h: 0.8 };
   return {
     left: rect.left + rect.width * hitBox.x,
@@ -553,9 +612,9 @@ function getPetBodyRect() {
 }
 
 function positionResizeHandle() {
-  const img = svgContainer.querySelector('img');
-  if (!img) return;
-  const imgRect = img.getBoundingClientRect();
+  const visual = svgContainer.querySelector('img, [data-pet-visual]');
+  if (!visual) return;
+  const imgRect = visual.getBoundingClientRect();
   const spriteRect = sprite.getBoundingClientRect();
   const theme = getTheme();
   const hitBox = theme.bodyHitBox || { x: 0.1, y: 0.1, w: 0.8, h: 0.8 };
@@ -582,6 +641,10 @@ function isInteractiveTarget(target, clientX, clientY) {
 
 // 加载 SVG（通过 IPC 从主进程获取绝对路径）
 async function loadSVG(type, state) {
+  if (isV2Pet()) {
+    try { if (await loadV2Sprite(state)) return; } catch {}
+  }
+  clearV2FrameTimer();
   const theme = getTheme(type);
   const svgFile = resolveThemeFile(type, state);
   const spriteSize = Math.round(petSize * PET_SPRITE_SCALE);
@@ -749,6 +812,20 @@ async function loadThemeFile(file) {
 
 function showPetReaction(action) {
   const theme = getTheme();
+  if (isV2Pet()) {
+    if (clawdReactionTimer) clearTimeout(clawdReactionTimer);
+    clearAmbientTimer();
+    const reactionState = action === 'drag' ? 'drag' : action === 'double' ? 'happy' : 'attention';
+    const duration = action === 'drag' ? 900 : 1600;
+    reactionActiveUntil = Date.now() + duration;
+    loadV2Sprite(reactionState);
+    clawdReactionTimer = setTimeout(() => {
+      reactionActiveUntil = 0;
+      loadV2Sprite(currentState);
+      scheduleThemeStateTimers(currentState, { force: true });
+    }, duration);
+    return;
+  }
   const reaction = theme.reactions?.[action];
   if (!reaction) return;
   if (clawdReactionTimer) clearTimeout(clawdReactionTimer);
@@ -929,6 +1006,7 @@ document.querySelectorAll('.menu-types button').forEach(btn => {
     const type = btn.dataset.type;
     hideMenu();
     petType = type;
+    petSkin = null;
     document.documentElement.dataset.petType = petType;
     loadSVG(type, currentState);
     scheduledState = null;
@@ -942,10 +1020,10 @@ function applySize(size) {
   petSize = Math.max(MIN_PET_SIZE, Math.min(MAX_PET_SIZE, size));
   const spriteSize = Math.round(petSize * PET_SPRITE_SCALE);
   setPetSpriteSizeVar(spriteSize);
-  const img = svgContainer.querySelector('img');
-  if (img) {
-    img.style.width = spriteSize + 'px';
-    img.style.height = spriteSize + 'px';
+  const visual = svgContainer.querySelector('img, [data-pet-visual]');
+  if (visual) {
+    visual.style.width = (visual.matches('[data-pet-visual]') ? Math.round(spriteSize * 192 / 208) : spriteSize) + 'px';
+    visual.style.height = spriteSize + 'px';
   }
   positionResizeHandle();
   window.petBridge.resizeWindow(getWindowWidth(petSize), getWindowHeight(petSize), petSize);

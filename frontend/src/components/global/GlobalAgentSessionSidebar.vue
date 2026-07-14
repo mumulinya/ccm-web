@@ -1,4 +1,6 @@
 <script setup>
+import { MessageSquare, PanelLeftClose, PanelLeftOpen, Plus, Trash2, X } from '@lucide/vue'
+
 defineProps({
   sessions: {
     type: Array,
@@ -28,11 +30,11 @@ const emit = defineEmits([
   <aside class="assistant-sidebar" :class="{ collapsed: !open }">
     <div class="sidebar-header">
       <button class="new-chat-btn" @click="emit('new-session')">
-        <span class="btn-icon">➕</span>
+        <Plus :size="16" />
         <span>新建会话</span>
       </button>
-      <button class="toggle-sidebar-btn" @click="emit('toggle')" title="折叠侧边栏">
-        ◀
+      <button class="toggle-sidebar-btn" aria-label="折叠会话栏" @click="emit('toggle')" title="折叠会话栏">
+        <PanelLeftClose :size="16" />
       </button>
     </div>
 
@@ -44,21 +46,22 @@ const emit = defineEmits([
         :class="{ active: currentSessionId === session.id }"
         @click="emit('select-session', session.id)"
       >
-        <span class="session-icon">💬</span>
+        <MessageSquare class="session-icon" :size="15" />
         <span class="session-name" :title="session.name">{{ session.name }}</span>
         <button
           class="delete-session-btn"
           title="删除会话"
           @click.stop="emit('delete-session', session.id)"
         >
-          &times;
+          <X :size="14" />
         </button>
       </div>
     </div>
 
     <div class="sidebar-footer">
       <button class="clear-all-btn" @click="emit('clear-all')">
-        <span>🧹 清空所有会话</span>
+        <Trash2 :size="14" />
+        <span>清空所有会话</span>
       </button>
     </div>
   </aside>
@@ -69,53 +72,53 @@ const emit = defineEmits([
     title="展开侧边栏"
     @click="emit('expand')"
   >
-    ▶
+    <PanelLeftOpen :size="16" />
   </button>
 </template>
 
 <style scoped>
 .assistant-sidebar {
-  width: 250px;
-  border-right: 1px solid rgba(99, 102, 241, 0.08);
-  background: rgba(255, 255, 255, 0.45);
-  backdrop-filter: blur(25px);
-  -webkit-backdrop-filter: blur(25px);
+  width: 224px;
+  border-right: 1px solid var(--border-color);
+  background: var(--panel-muted);
   display: flex;
   flex-direction: column;
   z-index: 5;
-  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1), transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), background 0.3s;
+  transition: width 0.2s ease, transform 0.2s ease, background 0.2s ease;
   position: relative;
 }
 
 :global([data-theme="dark"]) .assistant-sidebar {
-  background: rgba(12, 12, 20, 0.65);
-  border-right: 1px solid rgba(255, 255, 255, 0.05);
+  background: var(--panel-muted);
+  border-right-color: var(--border-color);
 }
 
 .assistant-sidebar.collapsed {
   width: 0;
-  transform: translateX(-250px);
+  transform: translateX(-224px);
   overflow: hidden;
   border-right: none;
 }
 
 .sidebar-header {
-  padding: 20px 16px;
+  min-height: 52px;
+  padding: 8px 10px;
   display: flex;
   gap: 10px;
   align-items: center;
-  border-bottom: 1px solid rgba(99, 102, 241, 0.06);
+  border-bottom: 1px solid var(--border-color);
 }
 
 .new-chat-btn {
   flex: 1;
-  background: #4f46e5;
+  min-height: 34px;
+  background: var(--accent-blue);
   color: white;
   border: none;
   border-radius: 8px;
-  padding: 10px 16px;
-  font-size: 14px;
-  font-weight: 500;
+  padding: 0 12px;
+  font-size: 13px;
+  font-weight: 700;
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -125,28 +128,26 @@ const emit = defineEmits([
 }
 
 .new-chat-btn:hover {
-  background: #4338ca;
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(79, 70, 229, 0.2);
+  background: color-mix(in srgb, var(--accent-blue) 86%, #000);
 }
 
 .toggle-sidebar-btn {
   background: transparent;
-  border: 1px solid rgba(99, 102, 241, 0.12);
+  border: 1px solid var(--border-color);
   color: var(--text-secondary);
-  border-radius: 10px;
-  width: 36px;
-  height: 36px;
+  border-radius: 6px;
+  width: 34px;
+  height: 34px;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 10px;
-  transition: all 0.2s;
+  transition: background 0.15s ease, border-color 0.15s ease;
 }
 
 .toggle-sidebar-btn:hover {
-  background: rgba(99, 102, 241, 0.05);
+  background: var(--control-hover);
+  border-color: var(--border-strong);
   color: var(--text-primary);
 }
 
@@ -155,37 +156,34 @@ const emit = defineEmits([
   left: 14px;
   top: 14px;
   z-index: 10;
-  background: rgba(255, 255, 255, 0.75);
-  backdrop-filter: blur(10px);
-  border: 1px solid rgba(99, 102, 241, 0.12);
+  background: var(--surface);
+  border: 1px solid var(--border-color);
   color: var(--text-secondary);
-  border-radius: 10px;
-  width: 36px;
-  height: 36px;
+  border-radius: 6px;
+  width: 34px;
+  height: 34px;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 10px;
-  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.06);
-  transition: all 0.2s;
+  box-shadow: var(--shadow-sm);
+  transition: background 0.15s ease, border-color 0.15s ease;
 }
 
 :global([data-theme="dark"]) .expand-sidebar-btn {
-  background: rgba(15, 15, 25, 0.7);
-  border-color: rgba(255, 255, 255, 0.08);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  background: var(--surface);
+  border-color: var(--border-color);
 }
 
 .expand-sidebar-btn:hover {
-  background: rgba(99, 102, 241, 0.08);
+  background: var(--control-hover);
   color: var(--text-primary);
 }
 
 .session-list {
   flex: 1;
   overflow-y: auto;
-  padding: 16px 10px;
+  padding: 10px 8px;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -195,42 +193,41 @@ const emit = defineEmits([
 .session-item {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 12px 14px;
-  border-radius: 10px;
+  min-height: 38px;
+  gap: 9px;
+  padding: 8px 10px;
+  border-radius: 6px;
   cursor: pointer;
   color: var(--text-secondary);
-  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
   position: relative;
   border: 1px solid transparent;
 }
 
 .session-item:hover {
-  background: rgba(99, 102, 241, 0.04);
+  background: var(--control-hover);
   color: var(--text-primary);
-  transform: translateX(2px);
 }
 
 :global([data-theme="dark"]) .session-item:hover {
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--control-hover);
 }
 
 .session-item.active {
-  background: rgba(99, 102, 241, 0.08);
-  color: #4f46e5;
+  background: var(--accent-soft);
+  color: var(--accent-blue);
   font-weight: 600;
-  border-color: rgba(99, 102, 241, 0.18);
-  box-shadow: inset 0 0 8px rgba(99, 102, 241, 0.02);
+  border-color: color-mix(in srgb, var(--accent-blue) 24%, transparent);
 }
 
 :global([data-theme="dark"]) .session-item.active {
-  background: rgba(99, 102, 241, 0.16);
-  color: #818cf8;
-  border-color: rgba(99, 102, 241, 0.3);
+  background: var(--accent-soft);
+  color: var(--accent-blue);
+  border-color: color-mix(in srgb, var(--accent-blue) 28%, transparent);
 }
 
 .session-icon {
-  font-size: 15px;
+  flex: 0 0 auto;
   opacity: 0.85;
 }
 
@@ -251,12 +248,15 @@ const emit = defineEmits([
   background: transparent;
   border: none;
   color: var(--text-muted);
-  font-size: 16px;
   cursor: pointer;
   opacity: 0;
   transition: opacity 0.2s, color 0.2s;
-  padding: 2px 6px;
-  border-radius: 6px;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border-radius: 5px;
 }
 
 .session-item:hover .delete-session-btn {
@@ -269,17 +269,22 @@ const emit = defineEmits([
 }
 
 .sidebar-footer {
-  padding: 14px;
-  border-top: 1px solid rgba(99, 102, 241, 0.06);
+  padding: 10px;
+  border-top: 1px solid var(--border-color);
 }
 
 .clear-all-btn {
   width: 100%;
   background: transparent;
-  border: 1px dashed rgba(99, 102, 241, 0.15);
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid var(--border-color);
   color: var(--text-muted);
-  padding: 10px;
-  border-radius: 10px;
+  padding: 0 10px;
+  border-radius: 6px;
   font-size: 12px;
   cursor: pointer;
   transition: all 0.2s;

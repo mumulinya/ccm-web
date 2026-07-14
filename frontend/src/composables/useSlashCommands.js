@@ -56,7 +56,8 @@ function buildCommandResult(command, data, args, context, durationMs) {
     title: command.description,
     icon: command.icon || '/',
     success: data?.success !== false && !data?.error,
-    summary: data?.message || '已直接读取 CCM 本地状态，未调用大模型。',
+    summary: data?.summary || data?.message || '已直接读取 CCM 本地状态，未调用大模型。',
+    implementation: command.implementation || 'local-query',
     metrics: [],
     items: [],
     rawPreview: compactJson(data),
@@ -74,6 +75,16 @@ function buildCommandResult(command, data, args, context, durationMs) {
     addMetric('分支', data.branch)
     addMetric('变更文件', data.total || 0)
     ;(data.files || []).slice(0, 30).forEach(file => addItem(file.path, file.statusText || file.status, file.status))
+  } else if (command.name === 'branch') {
+    result.summary = `当前项目位于 ${data.branch || '未知'} 分支，共有 ${data.total || 0} 个未提交文件变更。`
+    addMetric('分支', data.branch)
+    addMetric('变更文件', data.total || 0)
+    ;(data.files || []).slice(0, 30).forEach(file => addItem(file.path, file.statusText || file.status, file.status))
+  } else if (command.name === 'history') {
+    const commits = data.commits || []
+    result.summary = `读取到 ${commits.length} 条 Git 提交记录。`
+    addMetric('提交', commits.length)
+    commits.forEach(commit => addItem(commit.shortHash || commit.hash, commit.message, `${commit.author || ''} ${commit.timestamp || ''}`.trim()))
   } else if (command.name === 'trace') {
     const trace = data.trace || (data.traces || [])[0] || {}
     const events = trace.events || []
@@ -89,7 +100,7 @@ function buildCommandResult(command, data, args, context, durationMs) {
     result.summary = task.title || `任务 ${task.id}`
     addMetric('状态', task.status)
     addMetric('目标项目', task.target_project || task.project)
-    addMetric('Trace', task.trace_id)
+    addMetric('执行记录', task.trace_id ? '已关联' : '')
     addMetric('结果说明', task.receipt?.status || task.delivery_summary?.acceptance_gate_passed)
     ;(task.logs || task.recent_logs || []).slice(-15).reverse().forEach(log => addItem(log.level || '日志', log.message || log.text, log.at || log.timestamp))
     result.rawPreview = compactJson(task)
@@ -145,9 +156,31 @@ function buildCommandResult(command, data, args, context, durationMs) {
     const tools = data.tools || data.capabilities || []
     addMetric('能力项', Array.isArray(tools) ? tools.length : Object.keys(tools || {}).length)
     ;(Array.isArray(tools) ? tools : Object.entries(tools || {}).map(([name, value]) => ({ name, value }))).slice(0, 30).forEach(item => addItem(item.name || item.label || item.id || item.type, item.description || item.operations || item.value || item.type, item.destructive === true ? '破坏性' : item.risk || item.permission || '受控'))
-  } else if (['new', 'clear', 'export'].includes(command.name)) {
+  } else if (command.name === 'mcp') {
+    const tools = data.tools || []
+    result.summary = `当前配置了 ${tools.length} 个 MCP 服务。`
+    addMetric('MCP', tools.length)
+    addMetric('启用', tools.filter(item => item.enabled !== false).length)
+    tools.forEach(item => addItem(item.name || item.id, item.description || item.command || item.url || '', item.enabled === false ? '停用' : '启用'))
+  } else if (command.name === 'skills') {
+    const skills = data.skills || []
+    result.summary = `当前安装了 ${skills.length} 个 Skill。`
+    addMetric('Skill', skills.length)
+    addMetric('启用', skills.filter(item => item.enabled !== false).length)
+    skills.forEach(item => addItem(item.name || item.id, item.description || '', item.enabled === false ? '停用' : '启用'))
+  } else if (command.name === 'hooks') {
+    const hooks = data.hooks || []
+    result.summary = `当前配置了 ${hooks.length} 个运行时钩子。`
+    addMetric('钩子', hooks.length)
+    hooks.forEach(item => addItem(item.id || item.name || item.phase, `${item.phase || ''} · ${item.tool || '*'}`, item.effect || ''))
+  } else if (command.name === 'commit') {
+    result.summary = data.message || 'Git 提交已完成。'
+    addMetric('项目', context.project)
+    addMetric('提交说明', args)
+  } else if (['new', 'clear', 'rename', 'sessions', 'copy', 'usage', 'stats', 'theme', 'status', 'help', 'export'].includes(command.name)) {
     result.summary = data.summary || data.message || command.description
     Object.entries(data.metrics || {}).forEach(([label, value]) => addMetric(label, value))
+    ;(data.items || []).forEach(item => addItem(item.title || item.label, item.detail || item.value, item.status))
   } else {
     Object.entries(data || {}).filter(([, value]) => ['string', 'number', 'boolean'].includes(typeof value)).slice(0, 8).forEach(([label, value]) => addMetric(label, value))
   }
@@ -172,8 +205,7 @@ export function useSlashCommands(options) {
     .map(command => ({ command, score: commandScore(command, query.value, recent.value, options.scope) }))
     .filter(item => item.score >= 0)
     .sort((a, b) => b.score - a.score || a.command.name.localeCompare(b.command.name))
-    .map(item => item.command)
-    .slice(0, 18))
+    .map(item => item.command))
 
   async function load(force = false) {
     if ((!force && commands.value.length) || loading.value) return

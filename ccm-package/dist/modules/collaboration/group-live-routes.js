@@ -51,6 +51,7 @@ const logs_1 = require("./logs");
 const storage_1 = require("./storage");
 const reliability_ledger_1 = require("../../system/reliability-ledger");
 const user_facing_text_1 = require("../../agents/user-facing-text");
+const source_ingestion_1 = require("../requirements/source-ingestion");
 function compactGroupLiveText(value, max = 180) {
     const text = String(value || "").replace(/\s+/g, " ").trim();
     return text.length > max ? `${text.slice(0, max)}...` : text;
@@ -204,10 +205,10 @@ function buildGroupClarificationContinuationMessage(context, answerForAgent) {
         "这是对同一请求的补充回答。请合并原始请求与补充信息继续判断、规划或执行，不要把这条简短回答当成独立新任务。",
     ].filter(Boolean).join("\n\n");
 }
-function resolveStoredGroupClarification(groupId, pending, answerMessageId) {
+function resolveStoredGroupClarification(groupId, pending, answerMessageId, sessionId = "") {
     if (!pending?.message?.id || !pending?.context)
         return;
-    const messages = (0, storage_1.getGroupMessages)(groupId);
+    const messages = (0, storage_1.getGroupMessages)(groupId, sessionId);
     const index = messages.findIndex((item) => item.id === pending.message.id);
     if (index < 0)
         return;
@@ -222,7 +223,7 @@ function resolveStoredGroupClarification(groupId, pending, answerMessageId) {
         clarification_context: { ...context, status: "resolved", resolved_at: resolvedAt, answer_message_id: answerMessageId },
         clarificationContext: { ...context, status: "resolved", resolved_at: resolvedAt, answer_message_id: answerMessageId },
     };
-    (0, storage_1.saveGroupMessages)(groupId, messages);
+    (0, storage_1.saveGroupMessages)(groupId, messages, sessionId);
 }
 function runGroupClarificationContinuationSelfTest() {
     const messages = [
@@ -288,8 +289,15 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
             let reliabilityOperationKey = "";
             try {
                 const { group_id, target_project, message, client_message_id } = payload;
+                let groupSessionId = String(payload.group_session_id || payload.groupSessionId || "").trim();
                 const userMessage = String(message || "").trim();
-                const uploadedFilesContext = ctx.buildUploadedFilesContext(uploadedFiles, "本次群聊消息附件");
+                const sourceIngestion = await (0, source_ingestion_1.ingestRequirementSources)({
+                    files: uploadedFiles,
+                    userText: userMessage,
+                    extractRequirement: uploadedFiles.length > 0 || /https?:\/\//i.test(userMessage),
+                });
+                const uploadedFilesContext = sourceIngestion.agent_context
+                    || ctx.buildUploadedFilesContext(uploadedFiles, "本次群聊消息附件");
                 const attachmentSummary = ctx.summarizeUploadedFiles(uploadedFiles);
                 const incomingMessageForAgent = `${userMessage}${uploadedFilesContext}`.trim();
                 const userMessageForHistory = attachmentSummary
@@ -301,12 +309,21 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                 const group = groups.find(g => g.id === group_id);
                 if (!group)
                     return (0, utils_1.sendJson)(res, { error: "群聊不存在" }, 400);
+                groupSessionId = groupSessionId || (0, storage_1.getActiveGroupChatSessionId)(group_id);
+                const groupSession = (0, storage_1.listGroupChatSessions)(group_id).sessions.find((item) => item.id === groupSessionId);
+                if (!groupSession)
+                    return (0, utils_1.sendJson)(res, { error: "群聊会话不存在" }, 404);
+                if (groupSession.archived === true)
+                    return (0, utils_1.sendJson)(res, { error: "归档会话为只读状态，请恢复或新建会话后继续" }, 409);
                 (0, group_orchestrator_1.normalizeGroupOrchestrator)(group);
                 const explicitContinuationTaskId = String(payload.continuation_task_id || payload.continuationTaskId || "").trim();
                 const explicitContinuationResolution = resolveExplicitGroupContinuationTask((0, db_1.loadTasks)(), group_id, explicitContinuationTaskId);
                 const explicitContinuationTask = explicitContinuationResolution.task;
                 if (explicitContinuationTaskId && !explicitContinuationTask) {
                     return (0, utils_1.sendJson)(res, { error: explicitContinuationResolution.error }, explicitContinuationResolution.status || 404);
+                }
+                if (explicitContinuationTask && String(explicitContinuationTask.group_session_id || explicitContinuationTask.groupSessionId || "default") !== groupSessionId) {
+                    return (0, utils_1.sendJson)(res, { error: "这个任务属于另一个群聊会话，请切换到任务所属会话后继续" }, 409);
                 }
                 const explicitContinuationKind = String(payload.continuation_kind || payload.continuationKind || "supplement").trim().toLowerCase();
                 if (explicitContinuationTaskId && !["supplement", "revise_goal"].includes(explicitContinuationKind)) {
@@ -317,7 +334,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                 if (explicitContinuationTaskId && (clarificationRequestId || clarificationMessageId)) {
                     return (0, utils_1.sendJson)(res, { error: "一次只能继续一个任务或回答一个待确认问题" }, 400);
                 }
-                const pendingClarification = resolvePendingGroupClarification((0, storage_1.getGroupMessages)(group_id), clarificationRequestId, clarificationMessageId);
+                const pendingClarification = resolvePendingGroupClarification((0, storage_1.getGroupMessages)(group_id, groupSessionId), clarificationRequestId, clarificationMessageId);
                 if ((clarificationRequestId || clarificationMessageId) && !pendingClarification.context) {
                     return (0, utils_1.sendJson)(res, { error: pendingClarification.error }, pendingClarification.status || 404);
                 }
@@ -342,7 +359,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                 const statusFollowupRequest = isOrchestrated
                     && !clarificationContext
                     && !forceProjectTask
-                    && uploadedFiles.length === 0
+                    && sourceIngestion.sources.length === 0
                     && (0, group_routes_1.isGroupProgressStatusRequest)(userMessage);
                 const taskIntent = explicitContinuationTask
                     ? { executable: true, kind: "project_task", confidence: 1, reason: "用户正在补充当前任务所需条件", source: "explicit_task_continuation" }
@@ -363,10 +380,11 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                 const continuationTask = explicitContinuationTask || (!clarificationContext && persistentTaskRequest && continuationKind !== "new_task" && looksLikeTaskContinuation(effectiveUserMessage)
                     ? (0, db_1.loadTasks)()
                         .filter((item) => item.group_id === group_id && !item.archived && !item.deleted_at && !["cancelled", "archived"].includes(String(item.status || "")))
+                        .filter((item) => String(item.group_session_id || item.groupSessionId || "default") === groupSessionId)
                         .filter((item) => item.status !== "done" || Date.now() - Date.parse(item.completed_at || item.updated_at || "") < 30 * 60 * 1000)
                         .sort((a, b) => String(b.updated_at || b.created_at || "").localeCompare(String(a.updated_at || a.created_at || "")))[0]
                     : null);
-                const groupOperationKey = persistentTaskRequest && client_message_id ? `${group_id}:${String(client_message_id)}` : "";
+                const groupOperationKey = persistentTaskRequest && client_message_id ? `${group_id}:${groupSessionId || "active"}:${String(client_message_id)}` : "";
                 reliabilityOperationKey = groupOperationKey;
                 const groupOperation = groupOperationKey
                     ? (0, reliability_ledger_1.acquireIdempotency)({ scope: "group-task-message", key: groupOperationKey, traceId: messageTraceId, leaseMs: 10 * 60 * 1000, metadata: { group_id, client_message_id: String(client_message_id) } })
@@ -386,6 +404,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                     content: userMessageForHistory,
                     timestamp: new Date().toISOString(),
                     trace_id: messageTraceId,
+                    ...(groupSessionId ? { group_session_id: groupSessionId } : {}),
                     ...(continuationTask ? { task_id: continuationTask.id } : {}),
                     ...(clarificationContext ? {
                         clarification_request_id: clarificationRequestId || clarificationContext.id || clarificationContext.request_id || "",
@@ -417,10 +436,14 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                 if (statusFollowupRequest) {
                     const coordinator = (0, group_orchestrator_1.getCoordinatorMember)(group);
                     const allTasks = (0, db_1.loadTasks)();
-                    const agentQa = getAgentQaItemsForGroup(group_id, 50);
+                    const sessionTasks = allTasks.filter((task) => String(task?.group_id || "") === String(group_id)
+                        && String(task?.group_session_id || task?.groupSessionId || "default") === groupSessionId);
+                    const sessionTaskIds = new Set(sessionTasks.map((task) => String(task.id || "")));
+                    const agentQa = getAgentQaItemsForGroup(group_id, 50).filter((item) => sessionTaskIds.has(String(item?.task_id || item?.taskId || ""))
+                        || String(item?.group_session_id || item?.groupSessionId || "") === groupSessionId);
                     const mainAgentStatus = (0, group_routes_1.buildGroupMainAgentStatus)({
                         groupId: String(group_id || ""),
-                        tasks: allTasks,
+                        tasks: sessionTasks,
                         agentQa,
                         getRuntime: buildInlineTaskRuntime,
                     });
@@ -434,6 +457,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                         type: "group_status_followup",
                         content: statusSummary.text,
                         timestamp: new Date().toISOString(),
+                        ...(groupSessionId ? { group_session_id: groupSessionId } : {}),
                         workflow,
                         mainAgentStatus,
                         main_agent_status: mainAgentStatus,
@@ -441,6 +465,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                         status_followup_summary: statusSummary,
                     });
                     updateGroupMemory(group_id, {
+                        groupSessionId,
                         currentPhase: "monitoring",
                         decision: "用户询问当前任务进展",
                         reason: mainAgentStatus.latest_task_title || "群聊任务状态追问",
@@ -541,23 +566,23 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                     (0, logs_1.addGroupLog)(group_id, "info", "project_task_preflight", "项目执行成员与工作目录已就绪", {
                         ready_projects: groupReadiness.readyMembers.map((item) => item.project),
                     });
-                    const attachmentRecords = (uploadedFiles || []).map((file) => ({
-                        name: file.filename || file.name || "",
-                        path: file.savedPath || file.path || "",
-                        size: Number(file.size || 0),
-                    })).filter((file) => file.name || file.path);
+                    const attachmentRecords = sourceIngestion.attachments;
+                    const extractedRequirement = sourceIngestion.requirement;
                     const firstDirectiveLine = effectiveUserMessage.split(/\r?\n/).map((line) => line.trim()).find(Boolean) || "";
                     const attachmentTitle = attachmentRecords.map((file) => file.name).filter(Boolean).join("、");
-                    const taskTitle = compactMemoryText(firstDirectiveLine || (attachmentTitle ? `处理需求文档：${attachmentTitle}` : "项目开发任务"), 80);
+                    const taskTitle = compactMemoryText(extractedRequirement?.title || firstDirectiveLine || (attachmentTitle ? `处理需求文档：${attachmentTitle}` : "项目开发任务"), 80);
+                    const businessGoal = extractedRequirement?.business_goal || effectiveUserMessage || taskTitle;
                     const sourceDocuments = [
                         effectiveUserMessage ? `用户原始开发指令：\n${effectiveUserMessage}` : "",
-                        uploadedFilesContext ? `用户提交的开发文档：${uploadedFilesContext}` : "",
+                        sourceIngestion.source_documents ? `用户提交的业务资料：${sourceIngestion.source_documents}` : "",
+                        extractedRequirement ? `结构化需求：\n${JSON.stringify(extractedRequirement, null, 2)}` : "",
                     ].filter(Boolean).join("\n\n");
                     const acceptanceCriteria = [
+                        ...(extractedRequirement?.acceptance_criteria || []),
                         "主 Agent 必须完成需求理解、计划、子 Agent 分派、执行跟踪、必要返工和最终验收。",
                         "涉及代码的任务必须提供实际文件变更和已执行的构建或测试证据。",
                         "最终报告必须说明完成内容、变更文件、验证结果、风险以及仍需用户处理的事项。",
-                    ].join(" ");
+                    ].filter(Boolean).join(" ");
                     const now = new Date().toISOString();
                     const flagEnabled = (value, fallback = true) => {
                         if (value === undefined || value === null || value === "")
@@ -567,7 +592,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                     (0, logs_1.addGroupLog)(group_id, "info", "project_task_preflight", "正在生成执行前计划");
                     const planModePreflight = buildGroupPlanModePreflight({
                         group,
-                        message: effectiveUserMessage || taskTitle,
+                        message: [businessGoal, ...(extractedRequirement?.scope || []).map((item) => `范围：${item}`)].join("\n") || taskTitle,
                         ctx,
                         configs,
                         taskIntent,
@@ -597,8 +622,8 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                         title: taskTitle,
                         description: (0, daily_dev_backlog_1.buildDailyDevTaskDescription)({
                             title: taskTitle,
-                            business_goal: effectiveUserMessage || taskTitle,
-                            scope: "由项目主 Agent 根据用户指令、附件和项目上下文识别影响范围。",
+                            business_goal: businessGoal,
+                            scope: extractedRequirement?.scope?.length ? extractedRequirement.scope.join("；") : "由项目主 Agent 根据用户指令、附件和项目上下文识别影响范围。",
                             documents: sourceDocuments,
                             acceptance: acceptanceCriteria,
                             constraints: "主 Agent 对任务全程负责；验收门禁未通过时不得向用户报告完成。",
@@ -606,6 +631,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                         }),
                         target_project: coordinator.project,
                         group_id,
+                        group_session_id: groupSessionId || undefined,
                         assign_type: "group",
                         priority: payload.priority || "normal",
                         auto_execute: autoExecute,
@@ -614,10 +640,12 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                         requires_verification: flagEnabled(payload.requires_verification ?? payload.requiresVerification, true),
                         requires_independent_review: flagEnabled(payload.requires_independent_review ?? payload.requiresIndependentReview, false),
                         requires_agent_qa: requiresAgentQa,
-                        business_goal: effectiveUserMessage || taskTitle,
+                        business_goal: businessGoal,
                         acceptance_criteria: acceptanceCriteria,
                         source_documents: sourceDocuments,
                         source_attachments: attachmentRecords,
+                        requirement_extraction: extractedRequirement,
+                        source_ingestion: sourceIngestion.technical,
                         intake_state: planModePreflight.requires_confirmation ? "awaiting_confirmation" : "confirmed",
                         intake_draft: planModePreflight,
                         workflow_meta: {
@@ -628,6 +656,9 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                                 client_message_id: client_message_id || null,
                                 accepted_at: now,
                                 attachment_count: attachmentRecords.length,
+                                source_summary: sourceIngestion.user_summary,
+                                source_ingestion: sourceIngestion.technical,
+                                requirement_extraction: extractedRequirement,
                                 task_intent: taskIntent,
                                 ...(clarificationContext ? {
                                     clarification_request_id: clarificationRequestId || clarificationContext.id || clarificationContext.request_id || "",
@@ -751,8 +782,9 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                     };
                     (0, storage_1.appendGroupMessage)(group_id, receiptMessage);
                     if (clarificationContext)
-                        resolveStoredGroupClarification(group_id, pendingClarification, userMsg.id);
+                        resolveStoredGroupClarification(group_id, pendingClarification, userMsg.id, groupSessionId);
                     updateGroupMemory(group_id, {
+                        groupSessionId,
                         goal: effectiveUserMessage || userMessageForHistory,
                         currentPhase: "understanding",
                         decision: `已创建持久任务 ${task.id}`,
@@ -794,11 +826,11 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                     });
                     applyMainAgentDecisionPetState(ctx, mainAgentDecision);
                     try {
-                        const storedMessages = (0, storage_1.getGroupMessages)(group_id);
+                        const storedMessages = (0, storage_1.getGroupMessages)(group_id, groupSessionId);
                         const storedIndex = storedMessages.findIndex((item) => item.id === receiptMessageId);
                         if (storedIndex >= 0) {
                             storedMessages[storedIndex] = { ...storedMessages[storedIndex], mainAgentDecision, main_agent_decision: mainAgentDecision };
-                            (0, storage_1.saveGroupMessages)(group_id, storedMessages);
+                            (0, storage_1.saveGroupMessages)(group_id, storedMessages, groupSessionId);
                         }
                     }
                     catch { }
@@ -863,13 +895,14 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                     ctx.setAgentActivity(coordinator.project, "working", projectAnalysisRequest ? "正在只读分析项目" : conversationalOnly ? "正在回复" : "正在协调群聊", { tab: "groups", groupId: group_id });
                     ctx.broadcastPetSpeech(coordinator.project, { role: "status", text: projectAnalysisRequest ? "正在查看项目上下文..." : conversationalOnly ? "正在回复..." : "正在协调群聊...", source: "group" });
                     updateGroupMemory(group_id, {
+                        groupSessionId,
                         ...(conversationalOnly ? {} : { goal: effectiveUserMessage || userMessageForHistory }),
                         currentPhase: projectAnalysisRequest ? "project_analysis" : conversationalOnly ? "conversation" : "understanding",
                         decision: projectAnalysisRequest ? `只读项目分析：${taskIntent.reason}` : conversationalOnly ? `普通对话：${taskIntent.reason}` : "用户把消息交给我协调",
                         reason: routing.targetLabel,
                         nextAction: projectAnalysisRequest ? "我会基于项目上下文直接回答，不创建任务卡" : conversationalOnly ? "我会直接回复用户，不创建任务卡" : "我会先判断是否需要安排执行成员",
                     });
-                    const context = buildGroupContextPacket(group_id, { recentLimit: 20, olderLimit: 36, fullCount: 6 });
+                    const context = buildGroupContextPacket(group_id, { recentLimit: 20, olderLimit: 36, fullCount: 6, groupSessionId });
                     const sharedFilesContext = buildCoordinatorSharedFilesContext(ctx, group);
                     const projectAnalysisContext = projectAnalysisRequest ? buildGroupProjectAnalysisContext(group, messageForAgent, ctx, configs) : "";
                     const coordinatorResult = await (0, group_orchestrator_1.runGroupOrchestrator)({
@@ -965,6 +998,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                             agent: coordinator.project,
                             content: outputText,
                             timestamp: new Date().toISOString(),
+                            ...(groupSessionId ? { group_session_id: groupSessionId } : {}),
                             assignments: planAssignments,
                             executionOrder: conversationalOnly ? "none" : (coordinatorResult.executionOrder || "parallel"),
                             runtime: coordinatorResult.runtime || "",
@@ -978,8 +1012,9 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                             clarification_context: clarificationContextRecord,
                         });
                         if (clarificationContext)
-                            resolveStoredGroupClarification(group_id, pendingClarification, userMsg.id);
+                            resolveStoredGroupClarification(group_id, pendingClarification, userMsg.id, groupSessionId);
                         updateGroupMemory(group_id, {
+                            groupSessionId,
                             currentPhase: workflowMeta.phase,
                             decision: `${dispatchPolicy?.action || "unknown"}：${dispatchPolicy?.reason || "派发判断已整理"}`,
                             reason: dispatchPolicy?.risk || "",
@@ -1033,7 +1068,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                         ctx.broadcastPetSpeech(member.project, { role: "status", text: "群聊协作中，正在思考...", source: "group" });
                     }
                     const getAgentPrompt = (member) => {
-                        const context = buildGroupContextPacket(group_id, { recentLimit: 10, olderLimit: 24, fullCount: 5 });
+                        const context = buildGroupContextPacket(group_id, { recentLimit: 10, olderLimit: 24, fullCount: 5, groupSessionId });
                         const memberList = group.members.map((m) => m.project).filter((p) => p !== member.project && p !== "coordinator").join(", ");
                         const collaborationInstructions = (0, group_orchestrator_1.buildMemberCollaborationInstructions)(member.project, memberList);
                         const sharedFilesContext = ctx.buildFilesContext(group.shared_files || [], "以下是群聊中的共享文件：");
@@ -1043,6 +1078,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                         const memberAgentType = memberConfig ? ((0, db_1.getConfigInfo)(memberConfig.path)[0]?.agent || member.agent || "claudecode") : (member.agent || "claudecode");
                         const memoryBundle = buildAgentMemoryContextBundle(group_id, member.project, messageForAgent, {
                             workDir: memberWorkDir,
+                            groupSessionId,
                         });
                         const memoryPacket = memoryBundle.rendered_text || buildAgentMemoryPacket(group_id, member.project, messageForAgent);
                         const developmentContract = buildChildAgentDevelopmentContract(member.project, messageForAgent, {
@@ -1103,6 +1139,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                                     role: "assistant", agent: member.project,
                                     content: text,
                                     timestamp: new Date().toISOString(),
+                                    ...(groupSessionId ? { group_session_id: groupSessionId } : {}),
                                     fileChanges: memberFileChanges,
                                     workEvents: memberWorkEvents,
                                 });
@@ -1136,13 +1173,14 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                 if (target_project_actual === coordinatorProject) {
                     const sharedFilesCtx2 = buildCoordinatorSharedFilesContext(ctx, group);
                     updateGroupMemory(group_id, {
+                        groupSessionId,
                         goal: userMessageForHistory,
                         currentPhase: "understanding",
                         decision: "用户直接点名协调处理",
                         reason: target_project_actual,
                         nextAction: "我会判断是否直接答复或安排执行成员",
                     });
-                    const context = buildGroupContextPacket(group_id, { recentLimit: 20, olderLimit: 36, fullCount: 6 });
+                    const context = buildGroupContextPacket(group_id, { recentLimit: 20, olderLimit: 36, fullCount: 6, groupSessionId });
                     const coordinatorResult = await (0, group_orchestrator_1.runGroupOrchestrator)({
                         group,
                         message: messageForAgent,
@@ -1181,6 +1219,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                         agent: coordinatorProject,
                         content: coordinatorResult.content,
                         timestamp: new Date().toISOString(),
+                        ...(groupSessionId ? { group_session_id: groupSessionId } : {}),
                         assignments: planAssignments2,
                         executionOrder: coordinatorResult.executionOrder || "parallel",
                         runtime: coordinatorResult.runtime || "",
@@ -1189,6 +1228,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                         workflow: workflowMeta2,
                     });
                     updateGroupMemory(group_id, {
+                        groupSessionId,
                         currentPhase: workflowMeta2.phase,
                         decision: `${dispatchPolicy2?.action || "unknown"}：${dispatchPolicy2?.reason || "派发判断已整理"}`,
                         reason: dispatchPolicy2?.risk || "",
@@ -1232,7 +1272,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                     return (0, utils_1.sendJson)(res, { error: "项目配置不存在" }, 400);
                 const workDir = runtime.workDir;
                 const agentType = runtime.agentType;
-                const context = buildGroupContextPacket(group_id, { recentLimit: 10, olderLimit: 24, fullCount: 5 });
+                const context = buildGroupContextPacket(group_id, { recentLimit: 10, olderLimit: 24, fullCount: 5, groupSessionId });
                 const memberList = group.members.map((m) => m.project).filter((p) => p !== target_project_actual).join(", ");
                 let atInstructions = "";
                 if (target_project_actual === coordinatorProject) {
@@ -1272,6 +1312,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                 }
                 const memoryBundle = buildAgentMemoryContextBundle(group_id, target_project_actual, messageForAgent, {
                     workDir,
+                    groupSessionId,
                 });
                 const memoryPacket = memoryBundle.rendered_text || buildAgentMemoryPacket(group_id, target_project_actual, messageForAgent);
                 const developmentContract = buildChildAgentDevelopmentContract(target_project_actual, messageForAgent, {
@@ -1285,8 +1326,6 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                 const fullPrompt = `${atInstructions}${buildAgentQaProtocolInstructions(target_project_actual, memberList)}${toolContext.prompt}${runtimeToolContext.prompt}${sharedFilesContext}\n${developmentContract}\n\n${memoryPacket}\n\n以下是群聊最近的消息记录：\n${context}\n\n请回复用户刚才发给你的消息：${messageForAgent}`;
                 if (useStream) {
                     const responseMessageId = "m" + Date.now().toString(36) + "a" + crypto.randomBytes(2).toString("hex");
-                    const startedAt = Date.now();
-                    const changeSnapshot = workDir ? ctx.createFileChangeSnapshot(workDir) : null;
                     res.writeHead(200, {
                         "Content-Type": "text/event-stream",
                         "Cache-Control": "no-cache",
@@ -1314,6 +1353,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                             role: "assistant", agent: target_project_actual,
                             content: outputText.trim(),
                             timestamp: new Date().toISOString(),
+                            ...(groupSessionId ? { group_session_id: groupSessionId } : {}),
                             fileChanges: targetFileChanges,
                             workEvents: targetWorkEvents,
                         });
@@ -1355,11 +1395,6 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                     }
                     catch (err) {
                         writeSse(res, { type: "error", text: err.message });
-                        ctx.recordMetric(target_project_actual, {
-                            success: false,
-                            durationMs: Date.now() - startedAt,
-                            fileChangeCount: 0
-                        });
                         try {
                             res.end();
                         }
@@ -1381,6 +1416,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                     role: "assistant", agent: target_project_actual,
                     content: output,
                     timestamp: new Date().toISOString(),
+                    ...(groupSessionId ? { group_session_id: groupSessionId } : {}),
                 });
                 const validMentions = extractActionableMentions(output, group, target_project_actual);
                 if (validMentions.length > 0) {
@@ -1432,7 +1468,8 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
         req.on("data", (chunk) => body += chunk);
         req.on("end", async () => {
             try {
-                const { group_id, message } = JSON.parse(body);
+                const { group_id, message, group_session_id, groupSessionId: groupSessionIdCamel } = JSON.parse(body);
+                const groupSessionId = String(group_session_id || groupSessionIdCamel || "").trim();
                 const groups = (0, storage_1.loadGroups)();
                 const group = groups.find(g => g.id === group_id);
                 if (!group)
@@ -1441,6 +1478,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                     id: "m" + Date.now().toString(36),
                     role: "user", target: "all", content: message,
                     timestamp: new Date().toISOString(),
+                    ...(groupSessionId ? { group_session_id: groupSessionId } : {}),
                 });
                 const replies = [];
                 const configs = (0, db_1.getConfigs)();
@@ -1451,7 +1489,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                     const info = (0, db_1.getConfigInfo)(config.path);
                     const workDir = info[0]?.workDir;
                     const agentType = info[0]?.agent || "claudecode";
-                    const context = buildGroupContextPacket(group_id, { recentLimit: 10, olderLimit: 24, fullCount: 5 });
+                    const context = buildGroupContextPacket(group_id, { recentLimit: 10, olderLimit: 24, fullCount: 5, groupSessionId });
                     const sharedFilesContext = ctx.buildFilesContext(group.shared_files || [], "以下是群聊中的共享文件：");
                     const toolContext = buildAgentToolContext(ctx, group, member.project);
                     const runtimeToolContext = prepareAgentRuntimeTools(group_id, member.project, workDir, agentType, toolContext.allowedTools, null, {
@@ -1468,6 +1506,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                     const memberInstructions = (0, group_orchestrator_1.buildMemberCollaborationInstructions)(member.project, memberList);
                     const memoryBundle = buildAgentMemoryContextBundle(group_id, member.project, message, {
                         workDir,
+                        groupSessionId,
                     });
                     const memoryPacket = memoryBundle.rendered_text || buildAgentMemoryPacket(group_id, member.project, message);
                     const developmentContract = buildChildAgentDevelopmentContract(member.project, message, {
@@ -1492,6 +1531,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                         id: "m" + Date.now().toString(36) + member.project,
                         role: "assistant", agent: member.project, content: output,
                         timestamp: new Date().toISOString(),
+                        ...(groupSessionId ? { group_session_id: groupSessionId } : {}),
                     });
                     replies.push({ project: member.project, reply: output, receipt: extractAgentReceipt(output, member.project) });
                 }
@@ -1508,7 +1548,8 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
         req.on("data", (chunk) => body += chunk);
         req.on("end", async () => {
             try {
-                const { group_id, requirement } = JSON.parse(body);
+                const { group_id, requirement, group_session_id, groupSessionId: groupSessionIdCamel } = JSON.parse(body);
+                const groupSessionId = String(group_session_id || groupSessionIdCamel || "").trim();
                 const groups = (0, storage_1.loadGroups)();
                 const group = groups.find(g => g.id === group_id);
                 if (!group)
@@ -1523,6 +1564,9 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                     title: t.title,
                     description: t.description || "",
                     target_project: t.target_project || coordinator.project,
+                    group_id,
+                    group_session_id: groupSessionId || undefined,
+                    assign_type: "group",
                     priority: t.priority || "normal"
                 }));
                 (0, storage_1.appendGroupMessage)(group_id, {
@@ -1531,6 +1575,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                     agent: coordinator.project,
                     content: `📋 需求已分解，共 ${createdTasks.length} 个任务：\n${createdTasks.map((t, i) => `${i + 1}. [${t.target_project}] ${t.title}`).join("\n")}`,
                     timestamp: new Date().toISOString(),
+                    ...(groupSessionId ? { group_session_id: groupSessionId } : {}),
                 });
                 (0, utils_1.sendJson)(res, { success: true, tasks: createdTasks, raw_output: output });
             }

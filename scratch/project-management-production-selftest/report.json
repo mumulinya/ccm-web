@@ -1,0 +1,30 @@
+{
+  "pass": true,
+  "generatedAt": "2026-07-14T03:47:14.775Z",
+  "checks": [
+    {
+      "name": "active project is listed from isolated runtime",
+      "pass": true
+    },
+    {
+      "name": "duplicate project overwrite and unsafe project, agent and session input are rejected",
+      "pass": true
+    },
+    {
+      "name": "archive removes project from active list and returns audit receipt",
+      "pass": true
+    },
+    {
+      "name": "archived project can be restored without losing sessions",
+      "pass": true
+    },
+    {
+      "name": "permanent purge requires preview, deletes exact project data and preserves source, tasks and TestAgent evidence",
+      "pass": true
+    },
+    {
+      "name": "lifecycle history records archive, restore and purge operations",
+      "pass": true
+    }
+  ]
+}

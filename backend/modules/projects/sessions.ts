@@ -2,27 +2,43 @@ import * as fs from "fs";
 import * as path from "path";
 import { execSync } from "child_process";
 import { sendJson, CCM_DIR, SESSIONS_DIR, UPLOAD_DIR, GROUP_MESSAGES_DIR } from "../../core/utils";
+import { resolveContainedPath, validateProjectName, validateSessionId } from "./project-validation";
+import { getConfigs, getConfigInfo } from "../../core/db";
 
 export const WEB_SESSIONS_DIR = path.join(CCM_DIR, "web-sessions");
 
 export function getProjectSessionDir(projectName: string): string {
-  return path.join(WEB_SESSIONS_DIR, projectName);
+  return resolveContainedPath(WEB_SESSIONS_DIR, validateProjectName(projectName));
+}
+
+function getSessionFilePath(projectName: string, sessionId: string) {
+  return resolveContainedPath(getProjectSessionDir(projectName), `${validateSessionId(sessionId)}.json`);
+}
+
+function requireActiveProject(projectName: string) {
+  const project = validateProjectName(projectName);
+  const config = getConfigs().find((item) => item.name === project);
+  if (!config) throw new Error("项目不存在或已经归档");
+  return { project, config };
 }
 
 function ensureWebSessionDir(projectName: string) {
-  const dir = path.join(WEB_SESSIONS_DIR, projectName);
+  const dir = getProjectSessionDir(projectName);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   return dir;
 }
 
 // 查找 cc-connect 的 session 文件（带 hash 的）
 export function findCcSessionFile(projectName: string) {
+  const safeProjectName = validateProjectName(projectName);
   if (!fs.existsSync(SESSIONS_DIR)) return null;
+  const escaped = safeProjectName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const matcher = new RegExp(`^${escaped}(?:_[^/\\\\]+)?\\.json$`);
   const files = fs.readdirSync(SESSIONS_DIR).filter(f =>
-    f.startsWith(projectName) && f.endsWith(".json") && !fs.statSync(path.join(SESSIONS_DIR, f)).isDirectory()
+    matcher.test(f) && !fs.statSync(resolveContainedPath(SESSIONS_DIR, f)).isDirectory()
   );
-  const hashed = files.find(f => f !== `${projectName}.json`);
-  return hashed ? path.join(SESSIONS_DIR, hashed) : files[0] ? path.join(SESSIONS_DIR, files[0]) : null;
+  const hashed = files.find(f => f !== `${safeProjectName}.json`);
+  return hashed ? resolveContainedPath(SESSIONS_DIR, hashed) : files[0] ? resolveContainedPath(SESSIONS_DIR, files[0]) : null;
 }
 
 // 从 cc-connect 单文件同步到文件夹格式
@@ -34,7 +50,7 @@ export function syncFromCcToFilesystem(projectName: string) {
     const dir = ensureWebSessionDir(projectName);
     for (const [sid, session] of Object.entries(data.sessions || {})) {
       const sessionData = session as any;
-      const filePath = path.join(dir, `${sid}.json`);
+      const filePath = getSessionFilePath(projectName, validateSessionId(sid));
       // 只更新有变化的
       if (!fs.existsSync(filePath) || JSON.parse(fs.readFileSync(filePath, "utf-8")).updated_at !== sessionData.updated_at) {
         fs.writeFileSync(filePath, JSON.stringify(sessionData, null, 2));
@@ -44,7 +60,7 @@ export function syncFromCcToFilesystem(projectName: string) {
     const ccSids = new Set(Object.keys(data.sessions || {}));
     for (const f of fs.readdirSync(dir).filter(f => f.endsWith(".json"))) {
       const fid = f.replace(".json", "");
-      if (!ccSids.has(fid)) fs.unlinkSync(path.join(dir, f));
+      if (!ccSids.has(fid)) fs.unlinkSync(resolveContainedPath(dir, f));
     }
   } catch {}
 }
@@ -55,11 +71,11 @@ export function syncToFilesystemToCc(projectName: string) {
   if (!ccFile) return;
   try {
     const ccData = JSON.parse(fs.readFileSync(ccFile, "utf-8"));
-    const dir = path.join(WEB_SESSIONS_DIR, projectName);
+    const dir = getProjectSessionDir(projectName);
     if (!fs.existsSync(dir)) return;
     for (const f of fs.readdirSync(dir).filter(f => f.endsWith(".json"))) {
       const sid = f.replace(".json", "");
-      const sessionData = JSON.parse(fs.readFileSync(path.join(dir, f), "utf-8"));
+      const sessionData = JSON.parse(fs.readFileSync(resolveContainedPath(dir, f), "utf-8"));
       ccData.sessions[sid] = sessionData;
     }
     // 更新 counter
@@ -77,13 +93,13 @@ export function syncSessions(projectName: string) {
 // 获取会话列表（从文件夹读取）
 export function getSessions(projectName: string) {
   syncSessions(projectName);
-  const dir = path.join(WEB_SESSIONS_DIR, projectName);
+  const dir = getProjectSessionDir(projectName);
   if (!fs.existsSync(dir)) return [];
   return fs.readdirSync(dir)
     .filter(f => f.endsWith(".json"))
     .map(f => {
       try {
-        const data = JSON.parse(fs.readFileSync(path.join(dir, f), "utf-8"));
+        const data = JSON.parse(fs.readFileSync(resolveContainedPath(dir, f), "utf-8"));
         return {
           id: data.id || f.replace(".json", ""),
           name: data.name || data.id || f.replace(".json", ""),
@@ -101,7 +117,7 @@ export function getSessions(projectName: string) {
 
 // 获取会话详情
 export function getSessionDetail(projectName: string, sessionId: string) {
-  const filePath = path.join(WEB_SESSIONS_DIR, projectName, `${sessionId}.json`);
+  const filePath = getSessionFilePath(projectName, sessionId);
   if (fs.existsSync(filePath)) {
     try { return JSON.parse(fs.readFileSync(filePath, "utf-8")); } catch {}
   }
@@ -155,7 +171,7 @@ function messageMatchesDeleteSelector(message: any, selector: any, index: number
 }
 
 function getNextSessionId(projectName: string) {
-  const dir = path.join(WEB_SESSIONS_DIR, projectName);
+  const dir = getProjectSessionDir(projectName);
   const nums: number[] = [];
   if (fs.existsSync(dir)) {
     fs.readdirSync(dir).filter(f => f.endsWith(".json")).forEach(f => nums.push(parseInt(f.replace("s","").replace(".json","")) || 0));
@@ -216,16 +232,17 @@ export function handleSessionsApi(pathname: string, req: any, res: any, parsed: 
     req.on("end", () => {
       try {
         const { project, name } = JSON.parse(body);
-        const dir = ensureWebSessionDir(project);
-        const sid = getNextSessionId(project);
+        const safeProject = requireActiveProject(project).project;
+        const dir = ensureWebSessionDir(safeProject);
+        const sid = getNextSessionId(safeProject);
         const now = new Date();
         const pad = (n: number) => String(n).padStart(2, "0");
         const timeStr = `${pad(now.getMonth()+1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
         const count = fs.readdirSync(dir).filter(f=>f.endsWith(".json")).length;
         const sessionName = name || `会话 ${count + 1} · ${timeStr}`;
         const sessionData = { id: sid, name: sessionName, agent_type: "claudecode", history: [], created_at: now.toISOString(), updated_at: now.toISOString() };
-        fs.writeFileSync(path.join(dir, `${sid}.json`), JSON.stringify(sessionData, null, 2));
-        syncToFilesystemToCc(project);
+        fs.writeFileSync(getSessionFilePath(safeProject, sid), JSON.stringify(sessionData, null, 2));
+        syncToFilesystemToCc(safeProject);
         sendJson(res, { success: true, sessionId: sid, name: sessionName });
       } catch (e: any) {
         sendJson(res, { error: e.message }, 400);
@@ -241,7 +258,7 @@ export function handleSessionsApi(pathname: string, req: any, res: any, parsed: 
       try {
         const { project, sessionId, message } = JSON.parse(body);
         if (!project || !sessionId || !message) return sendJson(res, { error: "缺少参数" }, 400);
-        const filePath = path.join(WEB_SESSIONS_DIR, project, `${sessionId}.json`);
+        const filePath = getSessionFilePath(project, sessionId);
         if (!fs.existsSync(filePath)) return sendJson(res, { error: "会话不存在" }, 404);
         const data = JSON.parse(fs.readFileSync(filePath, "utf-8"));
         if (!data.history) data.history = [];
@@ -265,7 +282,7 @@ export function handleSessionsApi(pathname: string, req: any, res: any, parsed: 
         const payload = JSON.parse(body || "{}");
         const { project, sessionId } = payload;
         if (!project || !sessionId) return sendJson(res, { error: "缺少参数" }, 400);
-        const filePath = path.join(WEB_SESSIONS_DIR, project, `${sessionId}.json`);
+        const filePath = getSessionFilePath(project, sessionId);
         if (!fs.existsSync(filePath)) return sendJson(res, { error: "会话不存在" }, 404);
         const data = JSON.parse(fs.readFileSync(filePath, "utf-8"));
         const before = Array.isArray(data.history) ? data.history.length : 0;
@@ -290,7 +307,8 @@ export function handleSessionsApi(pathname: string, req: any, res: any, parsed: 
         const payload = JSON.parse(body || "{}");
         const { project, sessionId } = payload;
         if (!project || !sessionId || !Array.isArray(payload.messages)) return sendJson(res, { error: "缺少参数" }, 400);
-        const filePath = path.join(WEB_SESSIONS_DIR, project, `${sessionId}.json`);
+        if (payload.messages.length > 10000) return sendJson(res, { error: "单个会话消息数量不能超过 10000 条" }, 400);
+        const filePath = getSessionFilePath(project, sessionId);
         if (!fs.existsSync(filePath)) return sendJson(res, { error: "会话不存在" }, 404);
         const data = JSON.parse(fs.readFileSync(filePath, "utf-8"));
         const before = Array.isArray(data.history) ? data.history.length : 0;
@@ -313,7 +331,7 @@ export function handleSessionsApi(pathname: string, req: any, res: any, parsed: 
       try {
         const { project, sessionId } = JSON.parse(body || "{}");
         if (!project || !sessionId) return sendJson(res, { error: "缺少参数" }, 400);
-        const filePath = path.join(WEB_SESSIONS_DIR, project, `${sessionId}.json`);
+        const filePath = getSessionFilePath(project, sessionId);
         if (!fs.existsSync(filePath)) return sendJson(res, { error: "会话不存在" }, 404);
         const data = JSON.parse(fs.readFileSync(filePath, "utf-8"));
         const cleared = Array.isArray(data.history) ? data.history.length : 0;
@@ -333,7 +351,7 @@ export function handleSessionsApi(pathname: string, req: any, res: any, parsed: 
     req.on("end", () => {
       try {
         const { project, sessionId } = JSON.parse(body);
-        const filePath = path.join(WEB_SESSIONS_DIR, project, `${sessionId}.json`);
+        const filePath = getSessionFilePath(project, sessionId);
         if (!fs.existsSync(filePath)) return sendJson(res, { error: "会话不存在" }, 404);
         fs.unlinkSync(filePath);
         const ccFile = findCcSessionFile(project);
@@ -361,17 +379,19 @@ export function handleSessionsApi(pathname: string, req: any, res: any, parsed: 
     req.on("end", () => {
       try {
         const { project, sessionId, name } = JSON.parse(body);
-        const filePath = path.join(WEB_SESSIONS_DIR, project, `${sessionId}.json`);
+        const safeName = String(name || "").trim();
+        if (!safeName || safeName.length > 80) return sendJson(res, { error: "会话名称应为 1 到 80 个字符" }, 400);
+        const filePath = getSessionFilePath(project, sessionId);
         if (!fs.existsSync(filePath)) return sendJson(res, { error: "会话不存在" }, 404);
         const data = JSON.parse(fs.readFileSync(filePath, "utf-8"));
-        data.name = name;
+        data.name = safeName;
         fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
         const ccFile = findCcSessionFile(project);
         if (ccFile) {
           try {
             const ccData = JSON.parse(fs.readFileSync(ccFile, "utf-8"));
             if (ccData.sessions[sessionId]) {
-              ccData.sessions[sessionId].name = name;
+              ccData.sessions[sessionId].name = safeName;
               fs.writeFileSync(ccFile, JSON.stringify(ccData, null, 2));
             }
           } catch {}
@@ -389,16 +409,19 @@ export function handleSessionsApi(pathname: string, req: any, res: any, parsed: 
     req.on("data", (chunk) => body += chunk);
     req.on("end", async () => {
       try {
-        const { project, sessionId, message, workDir } = JSON.parse(body);
-        const filePath = path.join(getProjectSessionDir(project), `${sessionId}.json`);
+        const { project, sessionId, message } = JSON.parse(body);
+        const activeProject = requireActiveProject(project);
+        const filePath = getSessionFilePath(project, sessionId);
         if (!fs.existsSync(filePath)) return sendJson(res, { error: "会话不存在" }, 404);
 
         let title = "";
         try {
           const prompt = `根据以下消息生成简短中文标题（不超过15字，无引号无标点）：${message}`;
-          const tmpFile = path.join(UPLOAD_DIR, `_title_${Date.now()}.txt`);
+          fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+          const tmpFile = resolveContainedPath(UPLOAD_DIR, `_title_${Date.now()}.txt`);
           fs.writeFileSync(tmpFile, prompt, "utf-8");
-          const safeCwd = (workDir || process.cwd()).replace(/\\/g, "/");
+          const configuredWorkDir = String(getConfigInfo(activeProject.config.path)[0]?.workDir || "").trim();
+          const safeCwd = configuredWorkDir && path.isAbsolute(configuredWorkDir) && fs.existsSync(configuredWorkDir) ? configuredWorkDir : process.cwd();
           const result = execSync(`type "${tmpFile}" | claude -p`, {
             encoding: "utf-8", timeout: 30000, cwd: safeCwd,
             shell: true as any,
@@ -421,92 +444,6 @@ export function handleSessionsApi(pathname: string, req: any, res: any, parsed: 
         sendJson(res, { error: e.message }, 400);
       }
     });
-    return true;
-  }
-
-  // === 对话历史全局搜索 API ===
-  if (pathname === "/api/search" && req.method === "GET") {
-    const keyword = String(parsed.query?.q || "").trim().toLowerCase();
-    const project = parsed.query?.project || "";
-    const limit = parseInt(parsed.query?.limit) || 50;
-
-    if (!keyword) {
-      sendJson(res, { success: true, results: [] });
-      return true;
-    }
-
-    const results: any[] = [];
-
-    // 1. 搜索 web-sessions 中的单人对话历史
-    if (fs.existsSync(WEB_SESSIONS_DIR)) {
-      const projects = fs.readdirSync(WEB_SESSIONS_DIR).filter(f =>
-        fs.statSync(path.join(WEB_SESSIONS_DIR, f)).isDirectory()
-      );
-      for (const proj of projects) {
-        if (project && proj !== project) continue;
-        const projDir = path.join(WEB_SESSIONS_DIR, proj);
-        const sessionFiles = fs.readdirSync(projDir).filter(f => f.endsWith(".json"));
-        for (const sf of sessionFiles) {
-          try {
-            const session = JSON.parse(fs.readFileSync(path.join(projDir, sf), "utf-8"));
-            const sessionName = session.name || sf.replace(".json", "");
-            for (const msg of (session.history || [])) {
-              const content = (msg.content || "").toLowerCase();
-              if (content.includes(keyword)) {
-                results.push({
-                  project: proj,
-                  sessionId: session.id || sf.replace(".json", ""),
-                  sessionName,
-                  role: msg.role,
-                  agent: msg.agent || null,
-                  content: msg.content || "",
-                  timestamp: msg.timestamp || session.updated_at,
-                  matchIndex: content.indexOf(keyword),
-                });
-                if (results.length >= limit) break;
-              }
-            }
-            if (results.length >= limit) break;
-          } catch {}
-        }
-        if (results.length >= limit) break;
-      }
-    }
-
-    // 2. 搜索群聊对话历史
-    if (fs.existsSync(GROUP_MESSAGES_DIR)) {
-      try {
-        const groupFiles = fs.readdirSync(GROUP_MESSAGES_DIR).filter(f => f.endsWith(".json"));
-        for (const gf of groupFiles) {
-          try {
-            const messages = JSON.parse(fs.readFileSync(path.join(GROUP_MESSAGES_DIR, gf), "utf-8"));
-            const groupId = gf.replace(".json", "");
-            for (const msg of messages) {
-              const content = (msg.content || "").toLowerCase();
-              if (content.includes(keyword)) {
-                results.push({
-                  project: `群聊:${groupId}`,
-                  sessionId: groupId,
-                  sessionName: `群聊 ${groupId}`,
-                  role: msg.role,
-                  agent: msg.agent || null,
-                  content: msg.content || "",
-                  timestamp: msg.timestamp,
-                  matchIndex: content.indexOf(keyword),
-                  isGroup: true,
-                });
-                if (results.length >= limit) break;
-              }
-            }
-            if (results.length >= limit) break;
-          } catch {}
-        }
-      } catch {}
-    }
-
-    // 按时间倒序
-    results.sort((a, b) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime());
-    sendJson(res, { success: true, results: results.slice(0, limit), total: results.length });
     return true;
   }
 

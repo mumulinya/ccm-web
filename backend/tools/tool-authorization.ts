@@ -161,7 +161,8 @@ function inventorySnapshotKey(snapshot: any) {
   const snapshotId = cleanInventoryText(snapshot?.snapshotId || "", 120);
   const projectName = cleanInventoryText(snapshot?.projectName || "", 180);
   const groupId = cleanInventoryText(snapshot?.groupId || "", 180);
-  if (projectName || groupId) return `${runtime}:${projectName}:${groupId}`;
+  if (groupId && projectName) return `group:${groupId}:${projectName}`;
+  if (projectName) return `project:${projectName}`;
   if (runtime || snapshotId) return `${runtime}:${snapshotId}`;
   return [
     projectName,
@@ -180,6 +181,7 @@ function sanitizeInventoryRuntimeSnapshot(snapshot: any) {
     projectName: cleanInventoryText(snapshot?.projectName || "", 240),
     groupId: cleanInventoryText(snapshot?.groupId || "", 180),
     checkedAt: cleanInventoryText(snapshot?.checkedAt || "", 80),
+    snapshotGeneratedAt: cleanInventoryText(snapshot?.snapshotGeneratedAt || snapshot?.generatedAt || "", 80),
     deliveryReady: snapshot?.deliveryReady === true,
     runtimeReady: snapshot?.runtimeReady === true,
     overallReady: snapshot?.overallReady === true,
@@ -222,6 +224,7 @@ function buildInventoryRuntimeCoverage(scope: "project" | "group", id: any, runt
   const snapshots = runtimeReadiness
     .filter(item => runtimeMatchesInventoryScope(scope, id, item))
     .map(sanitizeInventoryRuntimeSnapshot)
+    .sort((left, right) => String(right.snapshotGeneratedAt || right.checkedAt || "").localeCompare(String(left.snapshotGeneratedAt || left.checkedAt || "")))
     .filter(item => {
       const key = inventorySnapshotKey(item);
       if (!key || seen.has(key)) return false;
@@ -313,6 +316,7 @@ export function buildToolAuthorizationInventory(input: any = {}) {
   const runtimeSeen = new Set<string>();
   const uniqueRuntimeSnapshots = runtimeReadiness
     .map(sanitizeInventoryRuntimeSnapshot)
+    .sort((left, right) => String(right.snapshotGeneratedAt || right.checkedAt || "").localeCompare(String(left.snapshotGeneratedAt || left.checkedAt || "")))
     .filter(snapshot => {
       const key = inventorySnapshotKey(snapshot);
       if (!key || runtimeSeen.has(key)) return false;
@@ -374,6 +378,33 @@ export function buildAuthorizationReadiness(toolAudit: any, tools: ToolGrantSet)
   };
 }
 
+export function buildToolConnectionPreflight(toolAudit: any, tools: ToolGrantSet) {
+  const normalized = normalizeToolAuthorization(tools);
+  const mcpChecks = (Array.isArray(toolAudit?.mcp) ? toolAudit.mcp : []).map((row: any) => ({
+    kind: "mcp",
+    name: cleanGrant(row?.tool ? `${row?.server}/${row?.tool}` : (row?.server || row?.raw || "")),
+    state: cleanGrant(row?.state || "unknown"),
+    ready: row?.state === "available",
+  }));
+  const skillChecks = (Array.isArray(toolAudit?.skills) ? toolAudit.skills : []).map((row: any) => ({
+    kind: "skill",
+    name: cleanGrant(row?.name || ""),
+    state: cleanGrant(row?.state || "unknown"),
+    ready: row?.state === "available",
+  }));
+  const checks = [...mcpChecks, ...skillChecks];
+  const configured = normalized.mcp.length + normalized.skill.length;
+  const ready = checks.filter(item => item.ready).length;
+  return {
+    schema: "ccm-tool-connection-preflight-v1",
+    status: configured === 0 ? "not_configured" : (ready === configured ? "ready" : "needs_attention"),
+    ready: configured === 0 || ready === configured,
+    checkedAt: new Date().toISOString(),
+    summary: { configured, ready, needsAttention: Math.max(0, configured - ready) },
+    checks: checks.slice(0, 100),
+  };
+}
+
 export function normalizeToolAuthorization(input: any = {}): ToolGrantSet {
   const source = input && typeof input === "object" ? input : {};
   const mcp = compactMcpGrants(normalizeList(asArray(source.mcp), value => (
@@ -385,10 +416,20 @@ export function normalizeToolAuthorization(input: any = {}): ToolGrantSet {
   return { mcp, skill };
 }
 
-export function buildToolAuthorizationPayload(input: any = {}): { tools: ToolGrantSet; tool_audit: any; authorization_readiness: any } {
+export function buildToolAuthorizationPayload(input: any = {}): { tools: ToolGrantSet; tool_audit: any; authorization_readiness: any; connection_preflight: any } {
   const tools = normalizeToolAuthorization(input);
   const audit = typeof toolManager.buildScopeAudit === "function" ? toolManager.buildScopeAudit(tools) : null;
-  return { tools, tool_audit: audit, authorization_readiness: buildAuthorizationReadiness(audit, tools) };
+  return {
+    tools,
+    tool_audit: audit,
+    authorization_readiness: buildAuthorizationReadiness(audit, tools),
+    connection_preflight: buildToolConnectionPreflight(audit, tools),
+  };
+}
+
+export async function buildFreshToolAuthorizationPayload(input: any = {}) {
+  try { await toolManager.loadTools(); } catch {}
+  return buildToolAuthorizationPayload(input);
 }
 
 export function buildToolAuthorizationChangeRecord(input: {
@@ -557,6 +598,20 @@ export function runToolAuthorizationSelfTest() {
     ],
     runtimeReadiness: [
       {
+        runtime: "cursor",
+        snapshotId: "snap-alpha-old-runtime",
+        projectName: "alpha",
+        groupId: "",
+        checkedAt: "2026-07-06T23:59:59.000Z",
+        deliveryReady: false,
+        runtimeReady: true,
+        overallReady: false,
+        catalogStale: true,
+        dispatchGate: { dispatchReady: true },
+        requested: { mcp: ["payments/createInvoice"], skill: ["release-notes"] },
+        synced: { mcp: ["payments/createInvoice"], skill: [] },
+      },
+      {
         runtime: "claudecode",
         snapshotId: "snap-alpha",
         projectName: "alpha",
@@ -634,6 +689,8 @@ export function runToolAuthorizationSelfTest() {
       && inventory.summary.runtimeCatalogStale === 1
       && inventory.summary.runtimeDispatchBlocked === 1,
     inventoryAttachesProjectRuntimeCoverage: inventory.scopes.find((row: any) => row.scope === "project" && row.id === "alpha")?.runtime?.summary?.total === 1,
+    inventoryUsesLatestSnapshotAfterRuntimeSwitch: inventory.scopes.find((row: any) => row.scope === "project" && row.id === "alpha")?.runtime?.snapshots?.[0]?.runtime === "claudecode"
+      && inventory.scopes.find((row: any) => row.scope === "project" && row.id === "alpha")?.runtime?.summary?.needsResync === 0,
     inventoryAttachesGroupRuntimeCoverage: inventory.scopes.find((row: any) => row.scope === "group" && row.id === "g1")?.runtime?.summary?.catalogStale === 1,
     inventoryHidesRuntimePaths: !JSON.stringify(inventory).includes("snapshotPath"),
   };

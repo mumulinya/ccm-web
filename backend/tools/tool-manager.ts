@@ -453,7 +453,7 @@ export class ToolManager {
       const matchedTools = grant.tool ? serverTools.filter(tool => tool.name === grant.tool) : serverTools;
       const state = !grant.server
         ? "invalid_grant"
-        : status && status.state !== "connected" && serverTools.length === 0
+        : status && status.state !== "connected"
           ? status.state
           : serverTools.length === 0
             ? "missing_server"

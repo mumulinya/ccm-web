@@ -160,6 +160,27 @@ export declare function requestTaskCancellation(taskId: string, reason?: string,
     externalRunnerRequests: number;
     executions: string[];
 };
+export declare function requestGroupSessionAgentCancellation(input?: any): {
+    schema: string;
+    groupId: string;
+    groupSessionId: string;
+    reason: string;
+    actor: string;
+    taskIds: string[];
+    matchedRunnerRequests: number;
+    cancellations: ({
+        success: boolean;
+        taskId: string;
+        killedProcesses: number;
+        externalRunnerRequests: number;
+        executions: string[];
+    } | {
+        success: boolean;
+        taskId: string;
+        error: any;
+    })[];
+    requestedAt: string;
+};
 export declare function runManagedCommand(input: {
     taskId?: string;
     executionId?: string;
@@ -170,6 +191,11 @@ export declare function runManagedCommand(input: {
     maxOutputBytes?: number;
     onStdout?: (text: string) => void;
     onStderr?: (text: string) => void;
+    onStarted?: (input: {
+        pid: number;
+        startedAt: string;
+        runId: string;
+    }) => void;
     project?: string;
     agentType?: string;
     source?: string;

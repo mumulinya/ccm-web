@@ -22,23 +22,37 @@ function notify(method: string, params: any) {
   write({ method, params });
 }
 
-function extractPromptText(params: any) {
+function extractPrompt(params: any) {
   const prompt = params?.prompt || params?.content || params?.messages || [];
-  if (typeof prompt === "string") return prompt.trim();
-  if (!Array.isArray(prompt)) return "";
+  if (typeof prompt === "string") return { text: prompt.trim(), unsupported: [] as string[] };
+  if (!Array.isArray(prompt)) return { text: "", unsupported: [] as string[] };
   const parts: string[] = [];
-  for (const item of prompt) {
-    if (typeof item === "string") parts.push(item);
-    else if (item?.type === "text" && item.text) parts.push(String(item.text));
-    else if (item?.content && typeof item.content === "string") parts.push(item.content);
-    else if (Array.isArray(item?.content)) {
-      for (const block of item.content) {
-        if (typeof block === "string") parts.push(block);
-        else if (block?.type === "text" && block.text) parts.push(String(block.text));
-      }
+  const unsupported: string[] = [];
+  const collect = (block: any) => {
+    if (typeof block === "string") {
+      parts.push(block);
+      return;
     }
+    if (!block || typeof block !== "object") return;
+    if (block.type === "text" && block.text) {
+      parts.push(String(block.text));
+      return;
+    }
+    if (typeof block.content === "string") {
+      parts.push(block.content);
+      return;
+    }
+    if (Array.isArray(block.content)) {
+      for (const nested of block.content) collect(nested);
+      return;
+    }
+    const kind = String(block.type || block.mimeType || "attachment").toLowerCase();
+    if (/image|audio|video|file|resource|attachment/.test(kind) || block.uri || block.data) unsupported.push(kind);
+  };
+  for (const item of prompt) {
+    collect(item);
   }
-  return parts.join("\n").trim();
+  return { text: parts.join("\n").trim(), unsupported: [...new Set(unsupported)] };
 }
 
 async function callGlobalAgent(text: string, sessionId = "default", messageId = "") {
@@ -100,7 +114,13 @@ async function handleRequest(message: any) {
     if (method === "session/prompt") {
       const sessionId = String(params?.sessionId || "default");
       sessions.add(sessionId);
-      const text = extractPromptText(params);
+      const prompt = extractPrompt(params);
+      const text = prompt.text;
+      if (prompt.unsupported.length > 0) {
+        sendTextUpdate(sessionId, "我看到了附件，但当前飞书控制通道还不能可靠读取附件内容。请把任务目标和附件中的关键信息用文字发给我，我会继续处理。附件不会被当作已读取或已验收。");
+        respond(id, { stopReason: "end_turn" });
+        return;
+      }
       if (!text) {
         sendTextUpdate(sessionId, "请发送文字指令。");
         respond(id, { stopReason: "end_turn" });

@@ -798,7 +798,7 @@ export async function runTestAgentArtifactSelfTest() {
     projects: [{
       name: "artifact-self-test",
       workDir: dir,
-      verificationCommands: [`"${process.execPath}" -e "console.log('artifact ok')"`],
+      verificationCommands: [`"${process.execPath}" -e "console.log('Report artifacts are written')"`],
     }],
     options: { artifactDir },
   });
@@ -827,7 +827,7 @@ export async function runTestAgentArtifactSelfTest() {
     && markdownText.includes("Verified commands:")
     && markdownText.includes("## Command Details")
     && markdownText.includes("**Output observed:**")
-    && markdownText.includes("artifact ok")
+    && markdownText.includes("Report artifacts are written")
     && report.evidence.some(item => item.path === jsonPath)
     && report.evidence.some(item => item.path === markdownPath)
     && report.evidence.some(item => item.path === verdictPath);

@@ -1,6 +1,7 @@
 <script setup>
 import { computed } from 'vue'
 import { getDisplayStream, getStreamlinedToolSummary, getStreamlinedUserText, getTechnicalDetailSections, sanitizeUserFacingPlanStructure, sanitizeUserFacingPlanText, sanitizeUserFacingStructure } from '../../utils/agentDisplay.js'
+import { isQuietMainAgentConversationDecision } from '../../composables/useMainAgentDisplay.js'
 
 const props = defineProps({
   decision: { type: Object, default: null },
@@ -8,6 +9,7 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['step-action'])
+const shouldHideDecisionCard = computed(() => isQuietMainAgentConversationDecision(props.decision))
 
 const displayPlanText = (value, fallback = '计划信息已整理。', max = 260) => sanitizeUserFacingPlanText(value, fallback, max)
 const displayPlanStructure = (value, fallback = '计划信息已整理。', max = 260) => sanitizeUserFacingPlanStructure(value, { fallback, max })
@@ -311,7 +313,7 @@ const actionRows = computed(() => selectedActions.value.map(id => {
 </script>
 
 <template>
-  <section v-if="decision" class="main-agent-decision-card" :class="[`tone-${modeInfo.tone}`, { compact }]">
+  <section v-if="decision && !shouldHideDecisionCard" class="main-agent-decision-card" :class="[`tone-${modeInfo.tone}`, { compact }]">
     <header>
       <div class="decision-title">
         <span class="decision-icon">{{ modeInfo.icon }}</span>
@@ -471,7 +473,7 @@ const actionRows = computed(() => selectedActions.value.map(id => {
         </section>
       </div>
 
-      <div class="tech-row"><span>Trace</span><code>{{ decision.trace_id || '无' }}</code></div>
+      <div class="tech-row"><span>执行记录</span><code>{{ decision.trace_id ? '已关联' : '无' }}</code></div>
       <div class="tech-row"><span>动作</span><code>{{ selectedActions.join(', ') }}</code></div>
       <div class="tech-row"><span>观察</span><code>{{ observation.dispatch_action || observation.intent_kind || decision.mode }}</code></div>
       <div class="action-trace-list">

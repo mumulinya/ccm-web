@@ -18,19 +18,83 @@ function projectNeedsAutomaticPageProbe(workOrder, project) {
     return !checks.length || !checks.every(existing_session_1.browserCheckUsesExistingSession);
 }
 async function fetchWithTimeout(url, timeoutMs, init = {}) {
+    const safety = (0, utils_1.validateTestAgentUrl)(url);
+    if (!safety.valid)
+        return { response: null, text: "", durationMs: 0, error: safety.error, finalUrl: url, redirectCount: 0 };
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     const started = Date.now();
+    const redirectMode = init.redirect || "follow";
+    let currentUrl = safety.url;
+    let currentInit = { ...init };
+    let redirectCount = 0;
     try {
-        const response = await fetch(url, { ...init, signal: controller.signal, redirect: init.redirect || "follow" });
-        const contentType = response.headers.get("content-type") || "";
-        const text = contentType.includes("text/html") || contentType.includes("application/json") || contentType.includes("text/")
-            ? await response.text().catch(() => "")
-            : "";
-        return { response, text, durationMs: Date.now() - started, error: "" };
+        while (true) {
+            const response = await fetch(currentUrl, { ...currentInit, signal: controller.signal, redirect: "manual" });
+            const isRedirect = [301, 302, 303, 307, 308].includes(response.status);
+            const location = isRedirect ? response.headers.get("location") || "" : "";
+            if (!isRedirect || !location || redirectMode === "manual") {
+                const contentType = response.headers.get("content-type") || "";
+                const text = contentType.includes("text/html") || contentType.includes("application/json") || contentType.includes("text/")
+                    ? await response.text().catch(() => "")
+                    : "";
+                return { response, text, durationMs: Date.now() - started, error: "", finalUrl: currentUrl, redirectCount };
+            }
+            if (redirectMode === "error") {
+                try {
+                    await response.body?.cancel();
+                }
+                catch { }
+                return { response: null, text: "", durationMs: Date.now() - started, error: "HTTP redirect is not allowed for this request.", finalUrl: currentUrl, redirectCount };
+            }
+            if (redirectCount >= 10) {
+                try {
+                    await response.body?.cancel();
+                }
+                catch { }
+                return { response: null, text: "", durationMs: Date.now() - started, error: "HTTP redirect limit exceeded.", finalUrl: currentUrl, redirectCount };
+            }
+            const nextSafety = (0, utils_1.validateTestAgentUrl)(location, currentUrl);
+            if (!nextSafety.valid) {
+                try {
+                    await response.body?.cancel();
+                }
+                catch { }
+                return {
+                    response: null,
+                    text: "",
+                    durationMs: Date.now() - started,
+                    error: `HTTP redirect target was blocked: ${nextSafety.error}`,
+                    finalUrl: currentUrl,
+                    redirectCount,
+                };
+            }
+            const currentMethod = String(currentInit.method || "GET").toUpperCase();
+            const switchesToGet = response.status === 303 && currentMethod !== "GET" && currentMethod !== "HEAD"
+                || (response.status === 301 || response.status === 302) && currentMethod === "POST";
+            const headers = new Headers(currentInit.headers || {});
+            if (switchesToGet) {
+                currentInit = { ...currentInit, method: "GET", body: undefined, headers };
+                for (const name of ["content-length", "content-type", "transfer-encoding"])
+                    headers.delete(name);
+            }
+            else {
+                currentInit = { ...currentInit, headers };
+            }
+            if (new URL(currentUrl).origin !== new URL(nextSafety.url).origin) {
+                for (const name of ["authorization", "proxy-authorization", "cookie", "cookie2"])
+                    headers.delete(name);
+            }
+            try {
+                await response.body?.cancel();
+            }
+            catch { }
+            currentUrl = nextSafety.url;
+            redirectCount += 1;
+        }
     }
     catch (error) {
-        return { response: null, text: "", durationMs: Date.now() - started, error: error.message || String(error) };
+        return { response: null, text: "", durationMs: Date.now() - started, error: error.message || String(error), finalUrl: currentUrl, redirectCount };
     }
     finally {
         clearTimeout(timer);
@@ -262,7 +326,8 @@ async function verifyProjectPageHttp(workOrder, project) {
         };
     }
     const maxResourceChecks = workOrder.options.maxHttpResourceChecks;
-    const resourceQueue = (0, http_page_resources_1.extractHtmlPageResources)(url, main.text, Math.max(maxResourceChecks * 3, maxResourceChecks));
+    const verifiedPageUrl = main.finalUrl || url;
+    const resourceQueue = (0, http_page_resources_1.extractHtmlPageResources)(verifiedPageUrl, main.text, Math.max(maxResourceChecks * 3, maxResourceChecks));
     const resourceChecks = [];
     const selected = new Set();
     while (resourceQueue.length && resourceChecks.length < maxResourceChecks) {
@@ -270,10 +335,10 @@ async function verifyProjectPageHttp(workOrder, project) {
         if (selected.has(candidate.url))
             continue;
         selected.add(candidate.url);
-        const checked = await checkResource(url, candidate, Math.min(workOrder.options.httpTimeoutMs, 8000));
+        const checked = await checkResource(verifiedPageUrl, candidate, Math.min(workOrder.options.httpTimeoutMs, 8000));
         resourceChecks.push(checked.evidence);
         if (candidate.kind === "stylesheet" && checked.evidence.status === "passed" && checked.text) {
-            const nested = (0, http_page_resources_1.extractCssPageResources)(url, candidate.url, checked.text, maxResourceChecks * 2)
+            const nested = (0, http_page_resources_1.extractCssPageResources)(verifiedPageUrl, candidate.url, checked.text, maxResourceChecks * 2)
                 .filter(item => !selected.has(item.url));
             resourceQueue.unshift(...nested);
         }

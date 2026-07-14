@@ -45,6 +45,33 @@ export interface AgentPermissionRule {
     decision: AgentRuntimeDecision;
     reason: string;
 }
+export declare function buildWorkerTypedMemoryDeliveryExpectedBinding(input?: any, memoryInput?: any): any;
+export declare function buildWorkerTypedMemoryDeliveryLease(capsuleInput?: any, options?: any): any;
+export declare function validateWorkerTypedMemoryDeliveryLease(leaseInput?: any, options?: any): any;
+export declare function buildWorkerTypedMemoryDispatchTicket(input?: any, options?: any): any;
+export declare function validateWorkerTypedMemoryDispatchTicket(ticketInput?: any, options?: any): any;
+export declare function rebuildWorkerTypedMemoryDeliveryForModelContext(memoryInput: any, targetContextWindow: any): {
+    rebuilt: boolean;
+    memory: any;
+    capsule: any;
+    lease: any;
+    reason: string;
+    previous_model_context_window?: undefined;
+    current_model_context_window?: undefined;
+    previous_capsule_checksum?: undefined;
+    current_capsule_checksum?: undefined;
+} | {
+    rebuilt: boolean;
+    memory: any;
+    capsule: any;
+    lease: any;
+    previous_model_context_window: number;
+    current_model_context_window: number;
+    previous_capsule_checksum: string;
+    current_capsule_checksum: any;
+    reason?: undefined;
+};
+export declare function validateWorkerTypedMemoryDeliveryCapsule(input?: any, options?: any): any;
 export declare function compactWorkerContextMemoryForRetry(memory: any, options?: any): {
     compacted: boolean;
     memory: any;
@@ -77,6 +104,15 @@ export declare function buildWorkerContextMemoryReinjectionProof(packet?: any): 
     packet_memory_chars: number;
     rendered_memory_hash: string;
     rendered_memory_chars: any;
+    typed_memory_delivery_capsule_present: boolean;
+    typed_memory_delivery_capsule_checksum: any;
+    typed_memory_delivery_capsule_checksum_valid: boolean;
+    typed_memory_delivery_capsule_binding_checksum: any;
+    typed_memory_delivery_capsule_binding_valid: boolean;
+    typed_memory_delivery_capsule_trusted: boolean;
+    typed_memory_delivery_capsule_complete: boolean;
+    typed_memory_delivery_capsule_required_rel_paths: any;
+    typed_memory_delivery_capsule_delivered_rel_paths: any;
     memory_first: boolean;
     compaction_retry_id: any;
     memory_compaction_schema: any;
@@ -91,6 +127,7 @@ export declare function buildWorkerContextUsage(packet?: any, options?: any): {
     project: any;
     task_id: any;
     model_context_policy: string;
+    capacity_provenance: any;
     max_tokens: number;
     reserved_output_tokens: number;
     autocompact_buffer_tokens: number;
@@ -150,9 +187,15 @@ export declare function buildWorkerContextPacket(input: {
     agent_type?: string;
     traceId?: string;
     taskId?: string;
+    groupSessionId?: string;
+    group_session_id?: string;
+    taskAgentSessionId?: string;
+    task_agent_session_id?: string;
     dependencies?: any[];
     contractInjections?: any[];
     replayRepairDispatchBriefs?: any[];
+    cleanupCommitRepairContext?: any;
+    cleanup_commit_repair_context?: any;
     memory?: any;
     memoryPolicy?: any;
     pressureMemoryProvenanceReceiptDiscipline?: any;
@@ -169,6 +212,8 @@ export declare function buildWorkerContextPacket(input: {
     post_compact_reinjection_repair_receipt_memory_contract?: any;
     providerSwitchDecisionReceipt?: any;
     provider_switch_decision_receipt?: any;
+    modelContextCapacity?: any;
+    model_context_capacity?: any;
     verification?: any;
     contextUsageOptions?: any;
 }): any;

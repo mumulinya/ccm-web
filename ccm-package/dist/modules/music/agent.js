@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.RANDOM_MUSIC_KEYWORD = void 0;
 exports.extractMusicIntent = extractMusicIntent;
 exports.normalizeMusicAgentAction = normalizeMusicAgentAction;
+exports.normalizeMusicAgentMessages = normalizeMusicAgentMessages;
 exports.classifyMusicAgentAction = classifyMusicAgentAction;
 exports.getMusicHelpText = getMusicHelpText;
 exports.writeSse = writeSse;
@@ -106,6 +107,96 @@ function normalizeAnthropicMessagesUrl(apiUrl) {
     if (base.endsWith("/v1"))
         return `${base}/messages`;
     return `${base}/v1/messages`;
+}
+function musicMessageText(content) {
+    if (typeof content === "string")
+        return content.trim();
+    if (Array.isArray(content)) {
+        return content
+            .map((part) => {
+            if (typeof part === "string")
+                return part;
+            if (part?.type === "text" || part?.type === "input_text" || part?.type === "output_text")
+                return part.text || "";
+            return typeof part?.content === "string" ? part.content : "";
+        })
+            .filter(Boolean)
+            .join("\n")
+            .trim();
+    }
+    if (content && typeof content === "object") {
+        if (typeof content.text === "string")
+            return content.text.trim();
+        if (typeof content.content === "string")
+            return content.content.trim();
+    }
+    return "";
+}
+function normalizeMusicAgentMessages(history = [], currentMessage = "", limit = 10) {
+    const normalized = [];
+    for (const item of Array.isArray(history) ? history.slice(-Math.max(limit * 2, limit)) : []) {
+        const role = item?.role === "operator" || item?.role === "user"
+            ? "user"
+            : item?.role === "agent" || item?.role === "assistant"
+                ? "assistant"
+                : null;
+        const content = musicMessageText(item?.content);
+        if (!role || !content)
+            continue;
+        const previous = normalized[normalized.length - 1];
+        if (previous?.role === role)
+            previous.content = `${previous.content}\n\n${content}`;
+        else
+            normalized.push({ role, content });
+    }
+    const current = musicMessageText(currentMessage);
+    while (current && normalized.at(-1)?.role === "user" && normalized.at(-1)?.content === current)
+        normalized.pop();
+    if (current) {
+        const previous = normalized[normalized.length - 1];
+        if (previous?.role === "user")
+            previous.content = `${previous.content}\n\n${current}`;
+        else
+            normalized.push({ role: "user", content: current });
+    }
+    const result = normalized.slice(-Math.max(1, limit));
+    while (result[0]?.role === "assistant")
+        result.shift();
+    return result;
+}
+function normalizeAnthropicAgentMessages(messages = []) {
+    return (Array.isArray(messages) ? messages : []).flatMap((item) => {
+        const role = item?.role === "user" || item?.role === "assistant" ? item.role : null;
+        if (!role)
+            return [];
+        if (!Array.isArray(item.content)) {
+            const content = musicMessageText(item.content);
+            return content ? [{ role, content }] : [];
+        }
+        const content = item.content.flatMap((part) => {
+            if (part?.type === "tool_use" && part.id && part.name)
+                return [{ ...part }];
+            if (part?.type === "tool_result" && part.tool_use_id) {
+                const toolContent = musicMessageText(part.content);
+                return toolContent ? [{ ...part, content: toolContent }] : [];
+            }
+            const text = musicMessageText(part);
+            return text ? [{ type: "text", text }] : [];
+        });
+        return content.length ? [{ role, content }] : [];
+    });
+}
+function formatMusicAgentApiError(status, raw) {
+    if (status === 401 || status === 403)
+        return "统一大模型配置的密钥无效或没有访问权限，请到系统设置检查";
+    if (status === 429)
+        return "模型服务当前请求较多，请稍后再试";
+    if (status === 400 && /content\[\d+\]\.text|content\[0\]\.text|required parameter.*text/i.test(raw)) {
+        return "对话历史中存在无效消息，系统已自动清理，请重新发送一次";
+    }
+    if (status >= 500)
+        return "模型服务暂时不可用，请稍后再试";
+    return `音乐助手暂时无法完成请求（HTTP ${status}）`;
 }
 async function classifyMusicAgentAction(cfg, message, mode, history = []) {
     const system = `你是 CCM 音乐 Agent 的动作识别内核。你只判断用户最新消息是否需要触发播放器副作用。
@@ -270,13 +361,14 @@ async function callOpenAICompat(cfg, system, messages, tools, res) {
         "Content-Type": "application/json",
         "Authorization": `Bearer ${cfg.apiKey}`,
     };
-    const openaiMessages = [{ role: "system", content: enhancedSystem }, ...messages];
+    const openaiMessages = [{ role: "system", content: enhancedSystem }, ...normalizeMusicAgentMessages(messages, "", 20)];
     const body = JSON.stringify({ model, max_tokens: 1024, messages: openaiMessages, stream: true });
     try {
         const apiRes = await fetch(fetchUrl, { method: "POST", headers, body });
         if (!apiRes.ok) {
             const t = await apiRes.text();
-            res.write(`data: ${JSON.stringify({ type: "error", text: `API ${apiRes.status}: ${t.substring(0, 200)}` })}\n\n`);
+            console.error(`[MusicAgent] OpenAI-compatible API ${apiRes.status}: ${t.substring(0, 500)}`);
+            res.write(`data: ${JSON.stringify({ type: "error", text: formatMusicAgentApiError(apiRes.status, t) })}\n\n`);
             res.write(`data: ${JSON.stringify({ type: "done" })}\n\n`);
             res.end();
             return;
@@ -355,12 +447,13 @@ async function callAnthropicNative(cfg, system, messages, tools, res) {
         "anthropic-version": "2023-06-01",
     };
     const toolDefs = tools.length > 0 ? { tools } : {};
-    const body = JSON.stringify({ model, max_tokens: 1024, system, messages, stream: true, ...toolDefs });
+    const body = JSON.stringify({ model, max_tokens: 1024, system, messages: normalizeAnthropicAgentMessages(messages), stream: true, ...toolDefs });
     try {
         const apiRes = await fetch(fetchUrl, { method: "POST", headers, body });
         if (!apiRes.ok) {
             const t = await apiRes.text();
-            res.write(`data: ${JSON.stringify({ type: "error", text: `API ${apiRes.status}: ${t.substring(0, 200)}` })}\n\n`);
+            console.error(`[MusicAgent] Anthropic API ${apiRes.status}: ${t.substring(0, 500)}`);
+            res.write(`data: ${JSON.stringify({ type: "error", text: formatMusicAgentApiError(apiRes.status, t) })}\n\n`);
             res.write(`data: ${JSON.stringify({ type: "done" })}\n\n`);
             res.end();
             return;
@@ -436,13 +529,26 @@ function runMusicAgentIntentSelfTest() {
     const playRandom = normalizeMusicAgentAction({}, "播放音乐", "cloud", "fallback");
     const searchOnly = normalizeMusicAgentAction({ action: "search_music", keyword: "轻音乐", confidence: 0.9 }, "搜索轻音乐", "cloud", "agent");
     const questionOnly = normalizeMusicAgentAction({}, "歌词怎么显示？", "cloud", "fallback");
+    const normalizedHistory = normalizeMusicAgentMessages([
+        { role: "agent", content: "欢迎使用音乐助手" },
+        { role: "operator", content: "播放晴天" },
+        { role: "agent", content: "" },
+    ], "播放晴天");
+    const structuredHistory = normalizeMusicAgentMessages([
+        { role: "operator", content: [{ type: "input_text", text: "搜索轻音乐" }] },
+        { role: "agent", content: [{ type: "output_text", text: "找到一些结果" }] },
+    ], "继续推荐");
     const checks = {
         agentPlayAction: playSpecific.type === "play_music" && playSpecific.keyword === "周杰伦 晴天" && playSpecific.source === "agent",
         genericPlayBecomesRandom: playRandom.type === "play_music" && playRandom.keyword === exports.RANDOM_MUSIC_KEYWORD,
         fallbackPlayRequiresNoAutoplay: playRandom.source === "fallback",
         searchDoesNotAutoplay: searchOnly.type === "search_music" && searchOnly.keyword === "轻音乐",
         questionDoesNotAutoplay: questionOnly.type !== "play_music",
+        emptyPendingMessageRemoved: normalizedHistory.every(item => item.content.trim().length > 0),
+        currentMessageNotDuplicated: normalizedHistory.filter(item => item.content.includes("播放晴天")).length === 1,
+        conversationStartsWithUser: normalizedHistory[0]?.role === "user",
+        structuredTextContentSupported: structuredHistory.map(item => item.content).join("|") === "搜索轻音乐|找到一些结果|继续推荐",
     };
-    return { pass: Object.values(checks).every(Boolean), checks, samples: { playSpecific, playRandom, searchOnly, questionOnly } };
+    return { pass: Object.values(checks).every(Boolean), checks, samples: { playSpecific, playRandom, searchOnly, questionOnly, normalizedHistory, structuredHistory } };
 }
 //# sourceMappingURL=agent.js.map

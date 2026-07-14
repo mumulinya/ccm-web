@@ -7,6 +7,8 @@ const props = defineProps({
   projectTools: { type: Object, required: true },
   toolAudit: { type: Object, default: null },
   authorizationReadiness: { type: Object, default: null },
+  connectionPreflight: { type: Object, default: null },
+  verificationStatus: { type: Object, default: null },
   responsibility: { type: String, default: '' },
   capabilities: { type: String, default: '' },
   writablePaths: { type: String, default: '' },
@@ -24,6 +26,30 @@ const selectedSkills = computed(() => Array.isArray(props.projectTools.skill) ? 
 const availableMcpNames = computed(() => new Set((props.allTools.mcp || []).map(tool => tool.name)))
 const availableSkillNames = computed(() => new Set((props.allTools.skill || []).map(tool => tool.name)))
 const selectedToolCount = computed(() => selectedMcp.value.length + selectedSkills.value.length)
+const runtimeSummary = computed(() => props.verificationStatus?.runtime?.summary || {})
+const statusStages = computed(() => [
+  {
+    label: '授权配置',
+    state: selectedToolCount.value === 0 ? 'empty' : (props.authorizationReadiness?.dispatchReady === false ? 'warning' : 'ready'),
+    text: selectedToolCount.value === 0 ? '尚未配置' : (props.authorizationReadiness?.dispatchReady === false ? '存在不可用项' : '已授权')
+  },
+  {
+    label: '运行时注入',
+    state: Number(runtimeSummary.value.overallReady || 0) > 0 ? 'ready' : 'pending',
+    text: Number(runtimeSummary.value.overallReady || 0) > 0 ? '已注入' : '等待任务运行'
+  },
+  {
+    label: '真实调用',
+    state: props.verificationStatus?.status === 'verified' ? 'ready' : (props.verificationStatus?.status === 'verification_incomplete' ? 'warning' : 'pending'),
+    text: props.verificationStatus?.status === 'verified' ? '已验证' : (props.verificationStatus?.status === 'verification_incomplete' ? '调用未通过' : '尚未验证')
+  }
+])
+const connectionText = computed(() => {
+  const preflight = props.connectionPreflight || {}
+  if (!preflight.schema || selectedToolCount.value === 0) return ''
+  return preflight.ready ? '所选工具当前连接正常' : `有 ${preflight.summary?.needsAttention || 0} 个授权项需要检查连接或认证`
+})
+const mcpStateLabel = (tool) => tool.connected ? '已连接' : (tool.state === 'auth_required' ? '需要认证' : '连接待检查')
 
 const isToolSelected = (type, name) => {
   const selected = type === 'mcp' ? selectedMcp.value : selectedSkills.value
@@ -79,6 +105,13 @@ const updateField = (field, event) => emit('update-field', { field, value: event
       <h3>🔧 项目工具配置 - {{ projectName }}</h3>
       <div class="modal-desc">配置此项目可用的工具，Agent 将能使用这些工具</div>
 
+      <div class="delivery-stages">
+        <div v-for="stage in statusStages" :key="stage.label" :class="stage.state">
+          <small>{{ stage.label }}</small>
+          <strong>{{ stage.text }}</strong>
+        </div>
+      </div>
+
       <div class="tools-body">
         <div class="tool-section">
           <div class="tool-section-title">🔌 MCP 服务器</div>
@@ -96,6 +129,7 @@ const updateField = (field, event) => emit('update-field', { field, value: event
                 <strong>{{ tool.name }}</strong>
                 <small>{{ tool.description || '' }}</small>
               </div>
+              <span class="tool-state" :class="{ ready: tool.connected, warning: !tool.connected }">{{ mcpStateLabel(tool) }}</span>
             </label>
             <div v-if="tool.tools?.length" class="subtool-list">
               <label v-for="subtool in tool.tools" :key="subtool.name" class="subtool-row" :class="{ selected: isMcpToolSelected(tool.name, subtool.name), disabled: isToolSelected('mcp', tool.name) }">
@@ -148,6 +182,7 @@ const updateField = (field, event) => emit('update-field', { field, value: event
             <small>{{ readinessDetail }}</small>
           </div>
         </div>
+        <div v-if="connectionText" class="connection-preflight" :class="{ warning: connectionPreflight && !connectionPreflight.ready }">{{ connectionText }}</div>
 
         <div v-if="auditRows.length" class="audit-box">
           <strong>服务端授权审计</strong>
@@ -220,6 +255,10 @@ const updateField = (field, event) => emit('update-field', { field, value: event
 </template>
 
 <style scoped>
+.modal-overlay {
+  z-index: 10001 !important;
+}
+
 .project-tools-modal {
   min-width: 500px;
   max-height: 80vh;
@@ -232,6 +271,30 @@ const updateField = (field, event) => emit('update-field', { field, value: event
   color: var(--text-muted);
   font-size: 12px;
 }
+
+.delivery-stages {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.delivery-stages > div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+  padding: 8px 9px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.52);
+}
+
+.delivery-stages small { color: var(--text-muted); font-size: 10px; }
+.delivery-stages strong { color: var(--text-secondary); font-size: 11.5px; overflow-wrap: anywhere; }
+.delivery-stages .ready { border-color: rgba(16, 185, 129, 0.24); background: rgba(236, 253, 245, 0.72); }
+.delivery-stages .ready strong { color: #047857; }
+.delivery-stages .warning { border-color: rgba(245, 158, 11, 0.25); background: rgba(255, 251, 235, 0.78); }
+.delivery-stages .warning strong { color: #92400e; }
 
 .tools-body {
   flex: 1;
@@ -314,6 +377,10 @@ const updateField = (field, event) => emit('update-field', { field, value: event
   line-height: 1.35;
   overflow-wrap: anywhere;
 }
+
+.tool-state { margin-left: auto; flex: 0 0 auto; color: var(--text-muted); font-size: 10px; }
+.tool-state.ready { color: #047857; }
+.tool-state.warning { color: #92400e; }
 
 .subtool-list {
   display: grid;
@@ -428,6 +495,24 @@ const updateField = (field, event) => emit('update-field', { field, value: event
 .readiness-box.warning .audit-row small,
 .readiness-box.warning .audit-row code {
   color: #991b1b;
+}
+
+.connection-preflight {
+  margin: -10px 0 20px;
+  padding: 8px 10px;
+  border: 1px solid rgba(16, 185, 129, 0.24);
+  border-radius: 8px;
+  background: rgba(236, 253, 245, 0.78);
+  color: #047857;
+  font-size: 11px;
+}
+
+.connection-preflight.warning { border-color: rgba(245, 158, 11, 0.25); background: rgba(255, 251, 235, 0.78); color: #92400e; }
+
+@media (max-width: 640px) {
+  .project-tools-modal { min-width: 0; width: 94vw; }
+  .delivery-stages { grid-template-columns: 1fr; }
+  .boundary-grid { grid-template-columns: 1fr; }
 }
 
 .audit-row {

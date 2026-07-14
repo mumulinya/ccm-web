@@ -1877,7 +1877,7 @@ const handoffActionPayload = (action) => {
         <div v-for="item in section.items" :key="`${section.id}-${item.label}-${item.value}`">
           <span>{{ item.label }}</span>
           <code>{{ item.value }}</code>
-          <button v-if="item.label === 'Trace' && card.technical.trace_id" type="button" :disabled="busy" @click="emit('action', { kind: 'view_trace', label: 'Trace 回放', trace_id: card.technical.trace_id })">回放</button>
+          <button v-if="item.label === '执行记录' && card.technical.trace_id" type="button" :disabled="busy" @click="emit('action', { kind: 'view_trace', label: '任务回放', task_id: card.task_id, trace_id: card.technical.trace_id })">回放</button>
         </div>
       </section>
       <section v-if="archivedMainAgentDecision" class="technical-section archived-decision-summary">

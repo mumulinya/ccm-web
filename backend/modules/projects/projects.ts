@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
-import { spawn, execSync } from "child_process";
+import { spawn, execFileSync, execSync } from "child_process";
 import { sendJson, CONFIGS_DIR, LOG_DIR, CCM_DIR, UPLOAD_DIR } from "../../core/utils";
 import {
   getConfigs,
@@ -14,9 +14,11 @@ import {
   loadFeishuConfig,
   saveFeishuConfig
 } from "../../core/db";
-import { findCcSessionFile, WEB_SESSIONS_DIR, getSessions, getSessionDetail } from "./sessions";
+import { getSessions, getSessionDetail } from "./sessions";
 import { createPrivateRuntimeConfig, credentialStoreStatus, migrateConfigDirectory, migrateTomlCredentials, protectCredential, redactSensitiveText, resolveCredential, schedulePrivateRuntimeConfigCleanup } from "../../core/credential-store";
-import { buildToolAuthorizationPayload, normalizeToolAuthorization, recordToolAuthorizationChange } from "../../tools/tool-authorization";
+import { buildFreshToolAuthorizationPayload, buildToolAuthorizationPayload, normalizeToolAuthorization, recordToolAuthorizationChange } from "../../tools/tool-authorization";
+import { archiveProject, getProjectLifecycleAudit, listArchivedProjects, previewProjectPurge, purgeArchivedProject, restoreProject } from "./project-lifecycle";
+import { validateAgentType, validateProjectName, validateProjectPlatform, validateSessionId, validateSharedFileName, validateWorkDirectory } from "./project-validation";
 
 function resolveCcConnectLauncher() {
   if (process.platform === "win32") {
@@ -37,7 +39,7 @@ function spawnCcConnect(args: string[], options: any) {
 }
 
 export function getLogs(projectName: string, lines = 100) {
-  const logFile = path.join(LOG_DIR, `${projectName}.log`);
+  const logFile = path.join(LOG_DIR, `${validateProjectName(projectName)}.log`);
   if (!fs.existsSync(logFile)) return "";
   const content = fs.readFileSync(logFile, "utf-8");
   return content.split("\n").slice(-lines).join("\n");
@@ -72,6 +74,119 @@ const CONTROL_BOT_DIR = path.join(CCM_DIR, "control-bot");
 const CONTROL_BOT_CONFIG_FILE = path.join(CONTROL_BOT_DIR, "config.toml");
 const CONTROL_BOT_PID_FILE = path.join(CCM_DIR, "pids", `${CONTROL_BOT_NAME}.pid`);
 const CONTROL_BOT_LOG_FILE = path.join(LOG_DIR, `${CONTROL_BOT_NAME}.log`);
+const projectFeishuSetupTokens = new Map<string, { project: string; expiresAt: number }>();
+
+function issueProjectFeishuSetupToken(project: string) {
+  const token = crypto.randomBytes(24).toString("hex");
+  projectFeishuSetupTokens.set(token, { project, expiresAt: Date.now() + 15 * 60 * 1000 });
+  return token;
+}
+
+function consumeProjectFeishuSetupToken(project: string, token: unknown) {
+  const key = String(token || "");
+  const record = projectFeishuSetupTokens.get(key);
+  if (!record || record.project !== project || record.expiresAt < Date.now()) return false;
+  projectFeishuSetupTokens.delete(key);
+  return true;
+}
+
+function ensureWindowsNoWindowLauncher() {
+  const sourcePath = path.join(CONTROL_BOT_DIR, "ccm-acp-launcher.cs");
+  const executablePath = path.join(CONTROL_BOT_DIR, "ccm-acp-launcher.exe");
+  const source = `using System;
+using System.Diagnostics;
+using System.Text;
+using System.Threading;
+
+internal static class Program {
+  private static string Quote(string value) {
+    if (value.Length > 0 && value.IndexOfAny(new[] { ' ', '\\t', '\\n', '\\v', '\"' }) < 0) return value;
+    var result = new StringBuilder("\\\"");
+    var backslashes = 0;
+    foreach (var ch in value) {
+      if (ch == '\\\\') { backslashes++; continue; }
+      if (ch == '\"') result.Append('\\\\', backslashes * 2 + 1);
+      else result.Append('\\\\', backslashes);
+      result.Append(ch);
+      backslashes = 0;
+    }
+    result.Append('\\\\', backslashes * 2).Append('\\\"');
+    return result.ToString();
+  }
+
+  [STAThread]
+  private static int Main(string[] args) {
+    if (args.Length == 0) return 64;
+    var childArgs = new string[args.Length - 1];
+    Array.Copy(args, 1, childArgs, 0, childArgs.Length);
+    var start = new ProcessStartInfo {
+      FileName = args[0],
+      UseShellExecute = false,
+      CreateNoWindow = true,
+      RedirectStandardInput = true,
+      RedirectStandardOutput = true,
+      RedirectStandardError = true,
+      Arguments = string.Join(" ", Array.ConvertAll(childArgs, Quote))
+    };
+    using (var child = Process.Start(start)) {
+      var input = new Thread(() => {
+        try {
+          string line;
+          while ((line = Console.In.ReadLine()) != null) {
+            child.StandardInput.WriteLine(line);
+            child.StandardInput.Flush();
+          }
+          child.StandardInput.Close();
+        } catch { }
+      });
+      var output = new Thread(() => {
+        try {
+          string line;
+          while ((line = child.StandardOutput.ReadLine()) != null) {
+            Console.Out.WriteLine(line);
+            Console.Out.Flush();
+          }
+        } catch { }
+      });
+      var error = new Thread(() => {
+        try {
+          string line;
+          while ((line = child.StandardError.ReadLine()) != null) {
+            Console.Error.WriteLine(line);
+            Console.Error.Flush();
+          }
+        } catch { }
+      });
+      input.IsBackground = true;
+      output.IsBackground = true;
+      error.IsBackground = true;
+      input.Start();
+      output.Start();
+      error.Start();
+      child.WaitForExit();
+      output.Join(2000);
+      error.Join(2000);
+      return child.ExitCode;
+    }
+  }
+}`;
+  fs.mkdirSync(CONTROL_BOT_DIR, { recursive: true });
+  const sourceChanged = !fs.existsSync(sourcePath) || fs.readFileSync(sourcePath, "utf-8") !== source;
+  if (sourceChanged) fs.writeFileSync(sourcePath, source, "utf-8");
+  if (sourceChanged || !fs.existsSync(executablePath)) {
+    const compilerCandidates = [
+      path.join(process.env.WINDIR || "C:\\Windows", "Microsoft.NET", "Framework64", "v4.0.30319", "csc.exe"),
+      path.join(process.env.WINDIR || "C:\\Windows", "Microsoft.NET", "Framework", "v4.0.30319", "csc.exe"),
+    ];
+    const compiler = compilerCandidates.find(candidate => fs.existsSync(candidate));
+    if (!compiler) throw new Error("未找到 Windows C# 编译器，无法创建无窗口 ACP 启动器");
+    execFileSync(compiler, ["/nologo", "/target:winexe", `/out:${executablePath}`, sourcePath], {
+      windowsHide: true,
+      stdio: "pipe",
+    });
+  }
+  return executablePath;
+}
 
 function escapeTomlString(value: any) {
   return String(value || "").replace(/\\/g, "\\\\").replace(/"/g, "\\\"").replace(/\r?\n/g, "\\n");
@@ -107,9 +222,17 @@ function writeControlBotConfig(port = 3080) {
   fs.mkdirSync(path.dirname(CONTROL_BOT_PID_FILE), { recursive: true });
 
   const workDir = process.cwd();
-  const adapterPath = path.join(__dirname, "..", "control-bot-acp.js");
+  const adapterPath = path.join(__dirname, "..", "..", "integrations", "control-bot-acp.js");
+  if (!fs.existsSync(adapterPath)) {
+    throw new Error(`控制机器人 ACP 适配器不存在：${adapterPath}，请先执行后端构建`);
+  }
+  const adapterCommand = process.platform === "win32" ? ensureWindowsNoWindowLauncher() : process.execPath;
+  const adapterArgs = process.platform === "win32"
+    ? [process.execPath, adapterPath, `--port=${port}`]
+    : [adapterPath, `--port=${port}`];
   const appSecretRef = protectCredential("control-bot", "app_secret", appSecret);
-  const toml = `# Generated by CCM. Do not edit manually.\nlanguage = "zh"\n\n[[projects]]\nname = "${CONTROL_BOT_NAME}"\nadmin_from = "*"\n\n[projects.agent]\ntype = "acp"\n\n[projects.agent.options]\nwork_dir = "${escapeTomlString(workDir)}"\ncommand = "node"\nargs = ["${escapeTomlString(adapterPath)}", "--port=${port}"]\ndisplay_name = "CCM 全局 Agent"\n\n[[projects.platforms]]\ntype = "feishu"\n\n[projects.platforms.options]\napp_id = "${escapeTomlString(appId)}"\napp_secret = "${escapeTomlString(appSecretRef)}"\nallow_from = "*"\nenable_feishu_card = true\nthread_isolation = true\nprogress_style = "compact"\n`;
+  const tomlArgs = adapterArgs.map(arg => `"${escapeTomlString(arg)}"`).join(", ");
+  const toml = `# Generated by CCM. Do not edit manually.\nlanguage = "zh"\n\n[[projects]]\nname = "${CONTROL_BOT_NAME}"\nadmin_from = "*"\n\n[projects.agent]\ntype = "acp"\n\n[projects.agent.options]\nwork_dir = "${escapeTomlString(workDir)}"\ncommand = "${escapeTomlString(adapterCommand)}"\nargs = [${tomlArgs}]\ndisplay_name = "CCM 全局 Agent"\n\n[[projects.platforms]]\ntype = "feishu"\n\n[projects.platforms.options]\napp_id = "${escapeTomlString(appId)}"\napp_secret = "${escapeTomlString(appSecretRef)}"\nallow_from = "*"\nenable_feishu_card = true\nthread_isolation = true\nprogress_style = "compact"\n`;
   fs.writeFileSync(CONTROL_BOT_CONFIG_FILE, toml, "utf-8");
   return CONTROL_BOT_CONFIG_FILE;
 }
@@ -148,6 +271,8 @@ function getControlBotConnectionStatus() {
 }
 
 function startProject(projectName: string, agentType: string, port: number) {
+  projectName = validateProjectName(projectName);
+  agentType = agentType ? validateAgentType(agentType) : "";
   const configs = getConfigs();
   const config = configs.find((c) => c.name === projectName);
   if (!config) return { success: false, error: "项目不存在" };
@@ -184,6 +309,7 @@ function startProject(projectName: string, agentType: string, port: number) {
 }
 
 function stopProject(projectName: string) {
+  projectName = validateProjectName(projectName);
   const pid = getPid(projectName);
   if (!pid) return { success: false, error: "项目未在运行" };
 
@@ -270,6 +396,12 @@ function getProjectWorkDir(projectName: string) {
   if (!config) return "";
   const info = getConfigInfo(config.path);
   return info[0]?.workDir || "";
+}
+
+function requireActiveProjectName(value: unknown) {
+  const project = validateProjectName(value);
+  if (!getConfigs().some((item) => item.name === project)) throw new Error("项目不存在或已经归档");
+  return project;
 }
 
 function applyInferredVerificationCommands(options: { projects?: string[]; overwrite?: boolean } = {}) {
@@ -391,42 +523,38 @@ export function handleProjectsApi(
     req.on("data", (chunk) => body += chunk);
     req.on("end", () => {
       try {
-        const { name, work_dir, agent, platform } = JSON.parse(body);
+        const { name, work_dir, agent, platform, setup_token } = JSON.parse(body);
 
-        if (!name || !work_dir) {
-          return sendJson(res, { success: false, error: "项目名称和目录不能为空" }, 400);
-        }
+        const safeName = validateProjectName(name);
+        const safeWorkDir = validateWorkDirectory(work_dir);
+        const safeAgent = validateAgentType(agent);
+        const safePlatform = validateProjectPlatform(platform);
 
-        const configPath = path.join(CONFIGS_DIR, `config-${name}.toml`);
+        const configPath = path.join(CONFIGS_DIR, `config-${safeName}.toml`);
         let existingAppId = "";
         let existingAppSecret = "";
         if (fs.existsSync(configPath)) {
-          const content = fs.readFileSync(configPath, "utf-8");
-          const appIdMatch = content.match(/app_id\s*=\s*"([^"]+)"/);
-          const appSecretMatch = content.match(/app_secret\s*=\s*"([^"]+)"/);
-          if (appIdMatch?.[1]) {
-            existingAppId = appIdMatch[1];
-            existingAppSecret = appSecretMatch?.[1] || "";
-          } else {
-            return sendJson(res, { success: false, error: "项目已存在" }, 400);
-          }
+          if (!consumeProjectFeishuSetupToken(safeName, setup_token)) return sendJson(res, { success: false, error: "项目已存在" }, 409);
+          const existingContent = fs.readFileSync(configPath, "utf-8");
+          existingAppId = existingContent.match(/app_id\s*=\s*"([^"]+)"/)?.[1] || "";
+          existingAppSecret = existingContent.match(/app_secret\s*=\s*"([^"]+)"/)?.[1] || "";
         }
 
         let platformOptionsToml = "";
-        const finalPlatform = platform || "feishu";
+        const finalPlatform = safePlatform;
         if (finalPlatform === "feishu" || finalPlatform === "lark") {
           platformOptionsToml = `\n[projects.platforms.options]\napp_id = "${escapeTomlString(existingAppId)}"\napp_secret = "${escapeTomlString(existingAppSecret)}"\nenable_feishu_card = true\nthread_isolation = true\nprogress_style = "card"`;
         }
 
-        const template = `# cc-connect - ${name}
+        const template = `# cc-connect - ${escapeTomlString(safeName)}
 language = "zh"
 
 [[projects]]
-name = "${name}"
-work_dir = "${work_dir.replace(/\\\\/g, "\\").replace(/\\/g, "\\\\")}"
+name = "${escapeTomlString(safeName)}"
+work_dir = "${escapeTomlString(safeWorkDir)}"
 
 [projects.agent]
-type = "${agent || "claudecode"}"
+type = "${escapeTomlString(safeAgent)}"
 
 [[projects.platforms]]
 type = "${finalPlatform}"${platformOptionsToml}
@@ -449,11 +577,12 @@ type = "${finalPlatform}"${platformOptionsToml}
       try {
         const { name, work_dir, agent, platform } = JSON.parse(body);
 
-        if (!name) {
-          return sendJson(res, { success: false, error: "项目名称不能为空" }, 400);
-        }
+        const safeName = validateProjectName(name);
+        const safeWorkDir = validateWorkDirectory(work_dir);
+        const safeAgent = validateAgentType(agent);
+        const safePlatform = validateProjectPlatform(platform);
 
-        const configPath = path.join(CONFIGS_DIR, `config-${name}.toml`);
+        const configPath = path.join(CONFIGS_DIR, `config-${safeName}.toml`);
         if (!fs.existsSync(configPath)) {
           return sendJson(res, { success: false, error: "项目不存在" }, 404);
         }
@@ -465,20 +594,20 @@ type = "${finalPlatform}"${platformOptionsToml}
         const existingAppSecret = appSecretMatch?.[1] || "";
 
         let platformOptionsToml = "";
-        const finalPlatform = platform || "feishu";
+        const finalPlatform = safePlatform;
         if (finalPlatform === "feishu" || finalPlatform === "lark") {
           platformOptionsToml = `\n[projects.platforms.options]\napp_id = "${escapeTomlString(existingAppId)}"\napp_secret = "${escapeTomlString(existingAppSecret)}"\nenable_feishu_card = true\nthread_isolation = true\nprogress_style = "card"`;
         }
 
-        const template = `# cc-connect - ${name}
+        const template = `# cc-connect - ${escapeTomlString(safeName)}
 language = "zh"
 
 [[projects]]
-name = "${name}"
-work_dir = "${work_dir.replace(/\\\\/g, "\\").replace(/\\/g, "\\\\")}"
+name = "${escapeTomlString(safeName)}"
+work_dir = "${escapeTomlString(safeWorkDir)}"
 
 [projects.agent]
-type = "${agent || "claudecode"}"
+type = "${escapeTomlString(safeAgent)}"
 
 [[projects.platforms]]
 type = "${finalPlatform}"${platformOptionsToml}
@@ -493,40 +622,18 @@ type = "${finalPlatform}"${platformOptionsToml}
     return true;
   }
 
-  // 7. 删除项目
+  // 7. 兼容旧调用：删除改为可恢复的安全归档
   if (pathname === "/api/projects/delete" && req.method === "POST") {
     let body = "";
     req.on("data", (chunk) => body += chunk);
     req.on("end", () => {
       try {
         const { name } = JSON.parse(body);
-
-        if (!name) {
-          return sendJson(res, { success: false, error: "项目名称不能为空" }, 400);
-        }
-
-        const configPath = path.join(CONFIGS_DIR, `config-${name}.toml`);
-        if (!fs.existsSync(configPath)) {
-          return sendJson(res, { success: false, error: "项目不存在" }, 404);
-        }
-
-        if (isRunning(name)) {
+        const safeName = validateProjectName(name);
+        if (isRunning(safeName)) {
           return sendJson(res, { success: false, error: "项目正在运行，请先停止" }, 400);
         }
-
-        fs.unlinkSync(configPath);
-
-        const sessionFile = findCcSessionFile(name);
-        if (sessionFile && fs.existsSync(sessionFile)) {
-          fs.unlinkSync(sessionFile);
-        }
-
-        const webSessionDir = path.join(WEB_SESSIONS_DIR, name);
-        if (fs.existsSync(webSessionDir)) {
-          fs.rmSync(webSessionDir, { recursive: true });
-        }
-
-        sendJson(res, { success: true, message: "项目已删除" });
+        sendJson(res, archiveProject(safeName));
       } catch (e: any) {
         sendJson(res, { success: false, error: e.message }, 400);
       }
@@ -539,6 +646,62 @@ type = "${finalPlatform}"${platformOptionsToml}
     const configs = getConfigs();
     const plaintextSecrets = configs.reduce((count, item) => count + (fs.readFileSync(item.path, "utf-8").match(/(?:app_secret|api_key|access_token|refresh_token|hook_token)\s*=\s*"(?!ccm-secret:\/\/)[^"]+"/gi) || []).length, 0);
     sendJson(res, { success: true, ...credentialStoreStatus(), config_files: configs.length, plaintext_config_secrets: plaintextSecrets });
+    return true;
+  }
+
+  if (pathname === "/api/projects/archived" && req.method === "GET") {
+    sendJson(res, { success: true, projects: listArchivedProjects() });
+    return true;
+  }
+
+  if (pathname === "/api/projects/archive" && req.method === "POST") {
+    let body = "";
+    req.on("data", (chunk) => body += chunk);
+    req.on("end", () => {
+      try {
+        const { name } = JSON.parse(body || "{}");
+        const safeName = validateProjectName(name);
+        if (isRunning(safeName)) return sendJson(res, { success: false, error: "项目正在运行，请先停止" }, 400);
+        sendJson(res, archiveProject(safeName));
+      } catch (e: any) { sendJson(res, { success: false, error: e.message }, 400); }
+    });
+    return true;
+  }
+
+  if (pathname === "/api/projects/restore" && req.method === "POST") {
+    let body = "";
+    req.on("data", (chunk) => body += chunk);
+    req.on("end", () => {
+      try { sendJson(res, restoreProject(JSON.parse(body || "{}").name)); }
+      catch (e: any) { sendJson(res, { success: false, error: e.message }, 400); }
+    });
+    return true;
+  }
+
+  if (pathname === "/api/projects/purge-preview" && req.method === "POST") {
+    let body = "";
+    req.on("data", (chunk) => body += chunk);
+    req.on("end", () => {
+      try { sendJson(res, previewProjectPurge(JSON.parse(body || "{}").name)); }
+      catch (e: any) { sendJson(res, { success: false, error: e.message }, 400); }
+    });
+    return true;
+  }
+
+  if (pathname === "/api/projects/purge" && req.method === "POST") {
+    let body = "";
+    req.on("data", (chunk) => body += chunk);
+    req.on("end", () => {
+      try {
+        const payload = JSON.parse(body || "{}");
+        sendJson(res, purgeArchivedProject(payload.name, payload.preview_token));
+      } catch (e: any) { sendJson(res, { success: false, error: e.message }, 400); }
+    });
+    return true;
+  }
+
+  if (pathname === "/api/projects/lifecycle-audit" && req.method === "GET") {
+    sendJson(res, { success: true, records: getProjectLifecycleAudit(Number(parsed.query?.limit || 100)) });
     return true;
   }
 
@@ -655,6 +818,7 @@ type = "${finalPlatform}"${platformOptionsToml}
       try {
         const { name } = JSON.parse(body);
         const projectName = sanitizeFeishuSetupName(name);
+        const setupToken = issueProjectFeishuSetupToken(projectName);
         console.log("[飞书配置] 收到请求，项目名称:", projectName);
         const configPath = path.join(CONFIGS_DIR, `config-${projectName}.toml`);
         const qrImagePath = path.join(UPLOAD_DIR, `feishu-qr-${projectName}.png`);
@@ -710,6 +874,7 @@ type = "${finalPlatform}"${platformOptionsToml}
 
             sendJson(res, {
               success: true,
+              setup_token: setupToken,
               scan_url: scanUrl,
               qr_image: qrExists ? `/api/uploads/feishu-qr-${projectName}.png` : null,
               output: redactSensitiveText(cmdOutput).substring(0, 2000),
@@ -727,8 +892,9 @@ type = "${finalPlatform}"${platformOptionsToml}
 
   // 9. 获取项目工具配置
   if (pathname === "/api/projects/tools" && req.method === "GET") {
-    const project = parsed.query.project;
-    if (!project) return sendJson(res, { error: "缺少项目参数" }, 400);
+    let project: string;
+    try { project = requireActiveProjectName(parsed.query.project); }
+    catch (e: any) { sendJson(res, { error: e.message }, 400); return true; }
     const configs = loadProjectConfigs();
     const configuredCommands = normalizeVerificationCommands(configs[project]?.verification_commands || configs[project]?.verificationCommands || []);
     const inferredCommands = inferProjectVerificationCommands(getProjectWorkDir(project));
@@ -738,6 +904,7 @@ type = "${finalPlatform}"${platformOptionsToml}
       tools: toolAuth.tools,
       tool_audit: toolAuth.tool_audit,
       authorization_readiness: toolAuth.authorization_readiness,
+      connection_preflight: toolAuth.connection_preflight,
       verification_commands: configuredCommands,
       inferred_verification_commands: inferredCommands,
       verification_source: configuredCommands.length > 0 ? "configured" : (inferredCommands.length > 0 ? "inferred" : "missing"),
@@ -750,11 +917,11 @@ type = "${finalPlatform}"${platformOptionsToml}
   if (pathname === "/api/projects/tools" && req.method === "POST") {
     let body = "";
     req.on("data", (chunk) => body += chunk);
-    req.on("end", () => {
+    req.on("end", async () => {
       try {
         const payload = JSON.parse(body);
-        const { project, tools, verification_commands, verificationCommands } = payload;
-        if (!project) return sendJson(res, { error: "缺少项目参数" }, 400);
+        const { tools, verification_commands, verificationCommands } = payload;
+        const project = requireActiveProjectName(payload.project);
         const configs = loadProjectConfigs();
         if (!configs[project]) configs[project] = {};
         const previousTools = normalizeToolAuthorization(configs[project].tools || {});
@@ -769,7 +936,7 @@ type = "${finalPlatform}"${platformOptionsToml}
         configs[project].forbidden_paths = profile.forbidden_paths;
         configs[project].delivery_contract = profile.delivery_contract;
         saveProjectConfigs(configs);
-        const toolAuth = buildToolAuthorizationPayload(normalizedTools);
+        const toolAuth = await buildFreshToolAuthorizationPayload(normalizedTools);
         const authorizationChange = recordToolAuthorizationChange({
           scope: "project",
           scopeId: project,
@@ -780,7 +947,7 @@ type = "${finalPlatform}"${platformOptionsToml}
           toolAudit: toolAuth.tool_audit,
           authorizationReadiness: toolAuth.authorization_readiness,
         });
-        sendJson(res, { success: true, tools: toolAuth.tools, tool_audit: toolAuth.tool_audit, authorization_readiness: toolAuth.authorization_readiness, authorization_change: authorizationChange, verification_commands: commands, ...profile });
+        sendJson(res, { success: true, tools: toolAuth.tools, tool_audit: toolAuth.tool_audit, authorization_readiness: toolAuth.authorization_readiness, connection_preflight: toolAuth.connection_preflight, authorization_change: authorizationChange, verification_commands: commands, ...profile });
       } catch (e: any) {
         sendJson(res, { error: e.message }, 400);
       }
@@ -796,7 +963,7 @@ type = "${finalPlatform}"${platformOptionsToml}
       try {
         const payload = body ? JSON.parse(body) : {};
         sendJson(res, applyInferredVerificationCommands({
-          projects: payload.projects,
+          projects: Array.isArray(payload.projects) ? payload.projects.map(validateProjectName) : payload.projects,
           overwrite: payload.overwrite,
         }));
       } catch (e: any) {
@@ -808,8 +975,9 @@ type = "${finalPlatform}"${platformOptionsToml}
 
   // 12. 获取项目共享文件
   if (pathname === "/api/projects/shared" && req.method === "GET") {
-    const project = parsed.query.project;
-    if (!project) return sendJson(res, { error: "缺少项目参数" }, 400);
+    let project: string;
+    try { project = requireActiveProjectName(parsed.query.project); }
+    catch (e: any) { sendJson(res, { error: e.message }, 400); return true; }
     const configs = loadProjectConfigs();
     sendJson(res, { files: configs[project]?.shared_files || [] });
     return true;
@@ -821,8 +989,11 @@ type = "${finalPlatform}"${platformOptionsToml}
     req.on("data", (chunk) => body += chunk);
     req.on("end", () => {
       try {
-        const { project, name, content } = JSON.parse(body);
-        if (!project || !name) return sendJson(res, { error: "缺少参数" }, 400);
+        const payload = JSON.parse(body);
+        const project = requireActiveProjectName(payload.project);
+        const name = validateSharedFileName(payload.name);
+        const content = String(payload.content || "");
+        if (Buffer.byteLength(content, "utf-8") > 1024 * 1024) return sendJson(res, { error: "单个共享文本文件不能超过 1 MB" }, 400);
         const configs = loadProjectConfigs();
         if (!configs[project]) configs[project] = {};
         if (!configs[project].shared_files) configs[project].shared_files = [];
@@ -857,8 +1028,9 @@ type = "${finalPlatform}"${platformOptionsToml}
     req.on("data", (chunk) => body += chunk);
     req.on("end", () => {
       try {
-        const { project, name } = JSON.parse(body);
-        if (!project || !name) return sendJson(res, { error: "缺少参数" }, 400);
+        const payload = JSON.parse(body);
+        const project = requireActiveProjectName(payload.project);
+        const name = validateSharedFileName(payload.name);
         const configs = loadProjectConfigs();
         if (configs[project]?.shared_files) {
           configs[project].shared_files = configs[project].shared_files.filter((f: any) => f.name !== name);
@@ -876,31 +1048,34 @@ type = "${finalPlatform}"${platformOptionsToml}
   // 15. 动态路由: /api/projects/:name/sessions
   const sessionsMatch = pathname.match(/^\/api\/projects\/([^/]+)\/sessions$/);
   if (sessionsMatch && req.method === "GET") {
-    const projectName = decodeURIComponent(sessionsMatch[1]);
-    sendJson(res, { sessions: getSessions(projectName) });
+    try {
+      const projectName = requireActiveProjectName(decodeURIComponent(sessionsMatch[1]));
+      sendJson(res, { sessions: getSessions(projectName) });
+    } catch (e: any) { sendJson(res, { error: e.message }, 400); }
     return true;
   }
 
   // 15. 动态路由: /api/projects/:name/sessions/:id
   const sessionDetailMatch = pathname.match(/^\/api\/projects\/([^/]+)\/sessions\/([^/]+)$/);
   if (sessionDetailMatch && req.method === "GET") {
-    const projectName = decodeURIComponent(sessionDetailMatch[1]);
-    const sessionId = decodeURIComponent(sessionDetailMatch[2]);
-    const detail = getSessionDetail(projectName, sessionId);
-    if (detail) {
-      sendJson(res, detail);
-    } else {
-      sendJson(res, { error: "会话不存在" }, 404);
-    }
+    try {
+      const projectName = requireActiveProjectName(decodeURIComponent(sessionDetailMatch[1]));
+      const sessionId = validateSessionId(decodeURIComponent(sessionDetailMatch[2]));
+      const detail = getSessionDetail(projectName, sessionId);
+      if (detail) sendJson(res, detail);
+      else sendJson(res, { error: "会话不存在" }, 404);
+    } catch (e: any) { sendJson(res, { error: e.message }, 400); }
     return true;
   }
 
   // 16. 动态路由: /api/projects/:name/logs
   const logsMatch = pathname.match(/^\/api\/projects\/([^/]+)\/logs$/);
   if (logsMatch && req.method === "GET") {
-    const projectName = decodeURIComponent(logsMatch[1]);
-    const lines = parseInt(parsed.query?.lines) || 100;
-    sendJson(res, { logs: getLogs(projectName, lines) });
+    try {
+      const projectName = requireActiveProjectName(decodeURIComponent(logsMatch[1]));
+      const lines = Math.max(1, Math.min(2000, parseInt(parsed.query?.lines) || 100));
+      sendJson(res, { logs: getLogs(projectName, lines) });
+    } catch (e: any) { sendJson(res, { error: e.message }, 400); }
     return true;
   }
 

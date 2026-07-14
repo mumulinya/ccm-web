@@ -2,6 +2,9 @@
 import { ref, onMounted, onBeforeUnmount, computed } from 'vue'
 import { projectsApi, groupsApi } from '../../api/index.js'
 import { toast, confirmDialog } from '../../utils/toast.js'
+import CronRunHistoryDrawer from './CronRunHistoryDrawer.vue'
+
+const emit = defineEmits(['navigate'])
 
 const jobs = ref([])
 const projects = ref([])
@@ -13,7 +16,24 @@ const editingId = ref('')
 const showArchived = ref(false)
 const archivedCount = ref(0)
 const runningJobIds = ref(new Set())
+const selectedRunJobId = ref('')
+const searchQuery = ref('')
+const statusFilter = ref('all')
+const targetFilter = ref('all')
+const selectedJobIds = ref(new Set())
+const bulkLoading = ref(false)
 let refreshTimer = null
+
+const selectedRunJob = computed(() => jobs.value.find(job => job.id === selectedRunJobId.value) || null)
+const filteredJobs = computed(() => jobs.value.filter(job => {
+  const query = searchQuery.value.trim().toLowerCase()
+  const matchesQuery = !query || [job.name, job.prompt, targetLabel(job)].some(value => String(value || '').toLowerCase().includes(query))
+  const matchesStatus = statusFilter.value === 'all'
+    || (statusFilter.value === 'enabled' ? job.enabled : statusFilter.value === 'disabled' ? !job.enabled : job.last_status === statusFilter.value)
+  const matchesTarget = targetFilter.value === 'all' || job.target_type === targetFilter.value
+  return matchesQuery && matchesStatus && matchesTarget
+}))
+const allFilteredSelected = computed(() => filteredJobs.value.length > 0 && filteredJobs.value.every(job => selectedJobIds.value.has(job.id)))
 
 const newJob = ref({
   name: '',
@@ -35,6 +55,13 @@ const newJob = ref({
   importSharedDocs: true,
   continueGaps: true,
   gapContinueLimit: 3,
+  timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai',
+  retryLimit: 2,
+  retryIntervalMinutes: 10,
+  misfirePolicy: 'run_once',
+  misfireGraceMinutes: 1440,
+  notificationEnabled: false,
+  notifyOn: ['failed', 'waiting', 'done'],
   prompt: ''
 })
 
@@ -82,6 +109,13 @@ const defaultJob = () => ({
   importSharedDocs: true,
   continueGaps: true,
   gapContinueLimit: 3,
+  timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai',
+  retryLimit: 2,
+  retryIntervalMinutes: 10,
+  misfirePolicy: 'run_once',
+  misfireGraceMinutes: 1440,
+  notificationEnabled: false,
+  notifyOn: ['failed', 'waiting', 'done'],
   prompt: ''
 })
 
@@ -142,6 +176,7 @@ const loadJobs = async () => {
   const res = await fetch(showArchived.value ? '/api/cron?archived=true' : '/api/cron')
   const data = await readResponse(res)
   jobs.value = data.jobs || []
+  selectedJobIds.value = new Set([...selectedJobIds.value].filter(id => jobs.value.some(job => job.id === id)))
   archivedCount.value = Number(data.archived_count || 0)
   scheduler.value = data.scheduler || { running: false, running_job_ids: [] }
 }
@@ -179,6 +214,13 @@ const editJob = (job) => {
     importSharedDocs: job.import_shared_docs !== false,
     continueGaps: job.continue_gaps !== false,
     gapContinueLimit: job.gap_continue_limit || 3,
+    timezone: job.timezone || 'Asia/Shanghai',
+    retryLimit: Number(job.retry_limit ?? 2),
+    retryIntervalMinutes: Number(job.retry_interval_minutes || 10),
+    misfirePolicy: job.misfire_policy || 'run_once',
+    misfireGraceMinutes: Number(job.misfire_grace_minutes || 1440),
+    notificationEnabled: job.notification_enabled === true,
+    notifyOn: Array.isArray(job.notify_on) ? [...job.notify_on] : ['failed', 'waiting', 'done'],
     prompt: job.prompt || '',
     ...scheduleFormFromCron(job.schedule),
   }
@@ -219,10 +261,14 @@ const targetLabel = (job) => {
 
 const statusLabel = (status) => ({
   never: '未执行',
+  triggering: '触发中',
   running: '触发中',
   running_task: '执行中',
   queued: '已入队',
   waiting: '等待执行',
+  retry_waiting: '等待重试',
+  done: '已完成',
+  cancelled: '已取消',
   skipped: '已跳过',
   failed: '失败',
   invalid_schedule: '表达式错误'
@@ -236,6 +282,12 @@ const formatTime = (value) => {
     hour: '2-digit',
     minute: '2-digit'
   })
+}
+
+const formatTimeInZone = (value, timezone) => {
+  if (!value) return '未设置'
+  try { return new Intl.DateTimeFormat('zh-CN', { timeZone: timezone || 'Asia/Shanghai', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(value)) }
+  catch { return formatTime(value) }
 }
 
 const cronRunMetaItems = (job) => {
@@ -261,6 +313,54 @@ const executionBlockReason = () => {
 }
 
 const hasEnabledDailyDevJobs = () => jobs.value.some(job => job.enabled !== false && job.workflow_type === 'daily_dev')
+
+const openRunHistory = (job) => {
+  selectedRunJobId.value = job.id
+}
+
+const handleRunNavigate = (target) => {
+  selectedRunJobId.value = ''
+  emit('navigate', target)
+}
+
+const handleRunControl = async ({ action, run }) => {
+  if (!selectedRunJob.value || !run?.id) return
+  const label = action === 'cancel' ? '取消本轮运行' : action === 'resume' ? '继续本轮运行' : '重试本轮运行'
+  if (action === 'cancel' && !await confirmDialog('确定取消本轮运行及其未完成任务？')) return
+  try {
+    await readResponse(await fetch(`/api/cron/run/${action}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ job_id: selectedRunJob.value.id, run_id: run.id }) }))
+    await loadJobs()
+    toast.success(`${label}请求已处理`)
+  } catch (error) { toast.error(error.message) }
+}
+
+const toggleJobSelection = (id) => {
+  const next = new Set(selectedJobIds.value)
+  next.has(id) ? next.delete(id) : next.add(id)
+  selectedJobIds.value = next
+}
+
+const toggleAllFiltered = () => {
+  const next = new Set(selectedJobIds.value)
+  if (allFilteredSelected.value) filteredJobs.value.forEach(job => next.delete(job.id))
+  else filteredJobs.value.forEach(job => next.add(job.id))
+  selectedJobIds.value = next
+}
+
+const runBulkAction = async (action) => {
+  const ids = [...selectedJobIds.value]
+  if (!ids.length) return
+  if (action === 'archive' && !await confirmDialog(`确定归档选中的 ${ids.length} 个定时任务？`)) return
+  bulkLoading.value = true
+  try {
+    const data = await readResponse(await fetch('/api/cron/bulk', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids, action }) }))
+    const succeeded = (data.results || []).filter(item => item.success).length
+    selectedJobIds.value = new Set()
+    await loadJobs()
+    toast.success(`已处理 ${succeeded} 个定时任务`)
+  } catch (error) { toast.error(error.message) }
+  finally { bulkLoading.value = false }
+}
 
 const refreshJobsAndDiagnostics = async () => {
   await Promise.all([loadJobs(), loadOrchestratorDiagnostics()])
@@ -372,6 +472,13 @@ const submitCreate = async () => {
     gap_continue_limit: newJob.value.targetType === 'group' && newJob.value.workflowType === 'daily_dev'
       ? Math.max(1, Math.min(20, Number(newJob.value.gapContinueLimit || 3)))
       : 0,
+    timezone: newJob.value.timezone,
+    retry_limit: Math.max(0, Math.min(10, Number(newJob.value.retryLimit || 0))),
+    retry_interval_minutes: Math.max(1, Math.min(1440, Number(newJob.value.retryIntervalMinutes || 10))),
+    misfire_policy: newJob.value.misfirePolicy,
+    misfire_grace_minutes: Math.max(1, Math.min(10080, Number(newJob.value.misfireGraceMinutes || 1440))),
+    notification_enabled: newJob.value.notificationEnabled,
+    notify_on: newJob.value.notifyOn,
     prompt: newJob.value.prompt
   }
 
@@ -418,6 +525,21 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
+    <div class="cron-filter-bar">
+      <input v-model="searchQuery" type="search" placeholder="搜索名称、目标或提示词" aria-label="搜索定时任务">
+      <select v-model="statusFilter" aria-label="状态筛选">
+        <option value="all">全部状态</option><option value="enabled">已启用</option><option value="disabled">已禁用</option>
+        <option value="running_task">执行中</option><option value="retry_waiting">等待重试</option><option value="failed">失败</option><option value="done">已完成</option>
+      </select>
+      <select v-model="targetFilter" aria-label="目标筛选"><option value="all">全部目标</option><option value="project">项目 Agent</option><option value="group">群聊协作</option></select>
+      <div v-if="selectedJobIds.size" class="bulk-actions">
+        <span>已选 {{ selectedJobIds.size }}</span>
+        <button :disabled="bulkLoading" @click="runBulkAction('enable')">启用</button>
+        <button :disabled="bulkLoading" @click="runBulkAction('disable')">禁用</button>
+        <button :disabled="bulkLoading" @click="runBulkAction(showArchived ? 'restore' : 'archive')">{{ showArchived ? '恢复' : '归档' }}</button>
+      </div>
+    </div>
+
     <div v-if="hasEnabledDailyDevJobs() && isExecutionBlocked()" class="cron-execution-warning">
       <strong>业务开发定时任务暂不能自动执行</strong>
       <span>{{ executionBlockReason() }}</span>
@@ -431,10 +553,12 @@ onBeforeUnmount(() => {
         <span>暂无定时任务</span>
       </div>
 
+      <div v-else-if="filteredJobs.length === 0" class="empty"><span>没有符合筛选条件的定时任务</span></div>
       <div v-else class="table-wrapper">
         <table class="table">
           <thead>
             <tr>
+              <th class="select-column"><input type="checkbox" :checked="allFilteredSelected" aria-label="选择当前结果" @change="toggleAllFiltered"></th>
               <th>名称</th>
               <th>目标</th>
               <th>调度</th>
@@ -445,8 +569,9 @@ onBeforeUnmount(() => {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="job in jobs" :key="job.id">
-              <td>
+            <tr v-for="job in filteredJobs" :key="job.id">
+              <td class="select-column"><input type="checkbox" :checked="selectedJobIds.has(job.id)" :aria-label="`选择 ${job.name}`" @change="toggleJobSelection(job.id)"></td>
+              <td data-label="名称">
                 <strong>{{ job.name }}</strong>
                 <div class="job-subtitle">已触发 {{ job.run_count || 0 }} 次</div>
                 <div v-if="job.workflow_type === 'daily_dev'" class="job-subtitle dev-flow">业务开发 · {{ job.requires_code_changes === false ? '允许无代码变更' : '必须有代码变更' }}</div>
@@ -454,30 +579,33 @@ onBeforeUnmount(() => {
                 <div v-if="job.workflow_type === 'daily_dev'" class="job-subtitle">每次最多认领 {{ job.backlog_batch_limit || 1 }} 条需求</div>
                 <div v-if="job.workflow_type === 'daily_dev'" class="job-subtitle">{{ job.import_shared_docs === false ? '仅认领已有需求池' : '自动导入共享文档' }}</div>
                 <div v-if="job.workflow_type === 'daily_dev' && isExecutionBlocked()" class="job-runtime-warning">执行通道阻塞，触发后任务会等待复检通过</div>
+                <div class="job-subtitle">{{ job.timezone }} · 失败最多重试 {{ job.retry_limit || 0 }} 次</div>
+                <div v-if="job.notification_enabled" class="job-subtitle">飞书通知 · {{ (job.notify_on || []).map(statusLabel).join('、') }}</div>
               </td>
-              <td><span class="tag" :class="{ group: job.target_type === 'group' }">{{ targetLabel(job) }}</span></td>
-              <td>
+              <td data-label="目标"><span class="tag" :class="{ group: job.target_type === 'group' }">{{ targetLabel(job) }}</span></td>
+              <td data-label="调度">
                 <code>{{ job.schedule }}</code>
                 <div v-if="job.schedule_error" class="error-text">{{ job.schedule_error }}</div>
               </td>
-              <td class="prompt-cell" :title="job.prompt">{{ job.prompt }}</td>
-              <td>
+              <td class="prompt-cell" data-label="提示词" :title="job.prompt">{{ job.prompt }}</td>
+              <td data-label="状态">
                 <label class="toggle">
                   <input type="checkbox" :checked="job.enabled" @change="toggleJob(job.id, $event.target.checked)">
                   <span>{{ job.enabled ? '启用' : '禁用' }}</span>
                 </label>
                 <span class="status" :class="`status-${job.last_status || 'never'}`">{{ statusLabel(job.last_status) }}</span>
               </td>
-              <td class="run-cell">
-                <div>上次 {{ formatTime(job.last_run) }}</div>
-                <div>下次 {{ formatTime(job.next_run) }}</div>
+              <td class="run-cell" data-label="运行记录">
+                <div>上次 {{ formatTimeInZone(job.last_run, job.timezone) }}</div>
+                <div>下次 {{ formatTimeInZone(job.next_run, job.timezone) }}</div>
                 <div v-if="cronRunMetaItems(job).length" class="cron-meta-row">
                   <span v-for="item in cronRunMetaItems(job)" :key="item">{{ item }}</span>
                 </div>
                 <div class="result-text" :title="job.last_result">{{ job.last_result || '暂无结果' }}</div>
               </td>
-              <td>
+              <td data-label="操作">
                 <div class="actions">
+                  <button class="btn btn-outline btn-sm" @click="openRunHistory(job)">运行记录</button>
                   <button v-if="!showArchived" class="btn btn-secondary btn-sm" :disabled="isJobRunning(job.id)" @click="runJob(job.id)">
                     {{ isJobRunning(job.id) ? '运行中' : '立即运行' }}
                   </button>
@@ -492,6 +620,14 @@ onBeforeUnmount(() => {
         </table>
       </div>
     </div>
+
+    <CronRunHistoryDrawer
+      :visible="!!selectedRunJob"
+      :job="selectedRunJob"
+      @close="selectedRunJobId = ''"
+      @navigate="handleRunNavigate"
+      @control="handleRunControl"
+    />
 
     <div v-if="showCreate" class="modal-overlay" @click.self="showCreate = false">
       <div class="modal">
@@ -527,6 +663,36 @@ onBeforeUnmount(() => {
             <option value="high">高</option>
             <option value="low">低</option>
           </select>
+        </div>
+        <div class="form-section-title">可靠运行</div>
+        <div class="schedule-grid">
+          <div class="form-group">
+            <label>执行时区</label>
+            <select v-model="newJob.timezone"><option value="Asia/Shanghai">中国标准时间</option><option value="UTC">UTC</option><option value="Asia/Tokyo">东京</option><option value="Europe/London">伦敦</option><option value="America/Los_Angeles">洛杉矶</option></select>
+          </div>
+          <div class="form-group">
+            <label>失败重试次数</label>
+            <input v-model.number="newJob.retryLimit" type="number" min="0" max="10">
+          </div>
+          <div class="form-group">
+            <label>重试间隔（分钟）</label>
+            <input v-model.number="newJob.retryIntervalMinutes" type="number" min="1" max="1440">
+          </div>
+          <div class="form-group">
+            <label>错过执行时间</label>
+            <select v-model="newJob.misfirePolicy"><option value="run_once">恢复后补跑一次</option><option value="skip">记录并跳过</option></select>
+          </div>
+          <div v-if="newJob.misfirePolicy === 'run_once'" class="form-group">
+            <label>最长补跑窗口（分钟）</label>
+            <input v-model.number="newJob.misfireGraceMinutes" type="number" min="1" max="10080">
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="checkbox-label"><input v-model="newJob.notificationEnabled" type="checkbox">发送飞书运行通知</label>
+          <div v-if="newJob.notificationEnabled" class="notification-events">
+            <label v-for="item in [{ id: 'started', label: '开始' }, { id: 'done', label: '完成' }, { id: 'failed', label: '失败' }, { id: 'waiting', label: '等待处理' }, { id: 'recovered', label: '补跑' }, { id: 'cancelled', label: '取消' }]" :key="item.id"><input v-model="newJob.notifyOn" type="checkbox" :value="item.id">{{ item.label }}</label>
+          </div>
+          <div class="field-hint">使用设置页面已配置的飞书通知机器人，每个定时任务可独立选择通知时机。</div>
         </div>
         <div v-if="newJob.targetType === 'group'" class="form-group">
           <label>工作流类型</label>
@@ -652,6 +818,11 @@ onBeforeUnmount(() => {
   border-bottom: 1px solid var(--border-color);
 }
 
+.cron-filter-bar { display: grid; grid-template-columns: minmax(220px, 1fr) 150px 150px auto; gap: 8px; align-items: center; padding: 10px 20px; border-bottom: 1px solid var(--border-color); background: var(--surface); }
+.cron-filter-bar > input, .cron-filter-bar > select { min-width: 0; min-height: 36px; padding: 7px 10px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-primary); color: var(--text-primary); font: inherit; font-size: 12px; }
+.bulk-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; color: var(--text-muted); font-size: 11.5px; }
+.bulk-actions button { min-height: 32px; padding: 5px 9px; border: 1px solid var(--border-color); border-radius: 5px; background: var(--surface); color: var(--text-secondary); cursor: pointer; }
+
 .stats {
   display: flex;
   align-items: center;
@@ -764,6 +935,8 @@ onBeforeUnmount(() => {
   border-collapse: collapse;
   min-width: 980px;
 }
+.select-column { width: 38px; text-align: center !important; }
+.select-column input { width: 15px; height: 15px; }
 
 .table th, .table td {
   padding: 12px 16px;
@@ -885,7 +1058,7 @@ code {
   background: rgba(16, 185, 129, 0.1);
 }
 
-.status-waiting {
+.status-waiting, .status-retry_waiting {
   color: var(--accent-orange, #d97706);
   background: rgba(245, 158, 11, 0.12);
 }
@@ -937,6 +1110,7 @@ code {
 
 .actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   align-items: center;
 }
@@ -1179,6 +1353,9 @@ code {
   color: var(--text-secondary);
   font-size: 12.5px;
 }
+.form-section-title { margin: 18px 0 8px; padding-top: 14px; border-top: 1px solid var(--border-color); color: var(--text-primary); font-size: 13px; font-weight: 700; }
+.notification-events { display: flex; flex-wrap: wrap; gap: 8px 14px; margin-top: 9px; }
+.notification-events label { display: inline-flex; align-items: center; gap: 5px; color: var(--text-secondary); font-size: 12px; }
 
 .schedule-preview code {
   max-width: 220px;
@@ -1196,6 +1373,21 @@ code {
 }
 
 @media (max-width: 768px) {
+  .cron-filter-bar { grid-template-columns: 1fr 1fr; padding: 10px; }
+  .cron-filter-bar > input { grid-column: 1 / -1; }
+  .bulk-actions { grid-column: 1 / -1; justify-content: flex-start; overflow-x: auto; }
+  .content { padding: 10px; }
+  .table-wrapper { overflow: visible; }
+  .table { min-width: 0; }
+  .table thead { display: none; }
+  .table tbody, .table tr, .table td { display: block; width: 100%; }
+  .table tr { position: relative; padding: 12px 12px 12px 42px; border-bottom: 1px solid var(--border-color); }
+  .table tr:last-child { border-bottom: 0; }
+  .table td { padding: 7px 0; border: 0; }
+  .table td.select-column { position: absolute; top: 12px; left: 13px; width: 18px; padding: 0; }
+  .table td[data-label]::before { display: block; margin-bottom: 4px; color: var(--text-muted); font-size: 10.5px; font-weight: 700; content: attr(data-label); }
+  .table .prompt-cell { max-width: none; white-space: normal; }
+  .table td[data-label="操作"] .actions { justify-content: flex-start; }
   .toolbar { align-items: flex-start; flex-direction: column; }
   .schedule-grid { grid-template-columns: 1fr; gap: 0; }
   .label-row { align-items: flex-start; flex-direction: column; }

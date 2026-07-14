@@ -1,11 +1,12 @@
-import { spawn } from "child_process";
+import { spawn, spawnSync } from "child_process";
 import { CommandRunResult, NormalizedTestAgentProjectTarget, NormalizedTestAgentWorkOrder } from "./types";
-import { appendLimited, compactText, isUnsafeVerificationCommand, nowIso } from "./utils";
+import { appendLimited, buildTestAgentSubprocessEnv, compactText, nowIso, redactTestAgentSensitiveText, verificationCommandInvocation } from "./utils";
 
 function runSingleCommand(project: NormalizedTestAgentProjectTarget, command: string, timeoutMs: number, maxOutputChars: number): Promise<CommandRunResult> {
   const startedAt = nowIso();
   const started = Date.now();
-  const unsafeReason = isUnsafeVerificationCommand(command);
+  const invocation = verificationCommandInvocation(command);
+  const unsafeReason = invocation.error;
   if (unsafeReason) {
     const finishedAt = nowIso();
     return Promise.resolve({
@@ -28,11 +29,11 @@ function runSingleCommand(project: NormalizedTestAgentProjectTarget, command: st
     let stdout = "";
     let stderr = "";
     let settled = false;
-    const child = spawn(command, {
+    const child = spawn(invocation.executable, invocation.args, {
       cwd: project.workDir,
-      shell: true,
+      shell: invocation.requiresShell,
       windowsHide: true,
-      env: { ...process.env, ...project.env },
+      env: buildTestAgentSubprocessEnv(project.env),
     });
 
     const finish = (status: CommandRunResult["status"], exitCode: number | null, signal?: NodeJS.Signals | null, error?: string) => {
@@ -50,17 +51,21 @@ function runSingleCommand(project: NormalizedTestAgentProjectTarget, command: st
         startedAt,
         finishedAt,
         durationMs: Date.now() - started,
-        stdout: compactText(stdout, maxOutputChars),
-        stderr: compactText(stderr, maxOutputChars),
-        output: compactText([stdout, stderr].filter(Boolean).join("\n"), maxOutputChars),
-        error,
+        stdout: compactText(redactTestAgentSensitiveText(stdout, Object.values(project.env)), maxOutputChars),
+        stderr: compactText(redactTestAgentSensitiveText(stderr, Object.values(project.env)), maxOutputChars),
+        output: compactText(redactTestAgentSensitiveText([stdout, stderr].filter(Boolean).join("\n"), Object.values(project.env)), maxOutputChars),
+        error: redactTestAgentSensitiveText(error, Object.values(project.env)),
       });
     };
 
     const timer = setTimeout(() => {
-      try { child.kill("SIGTERM"); } catch {}
+      if (process.platform === "win32" && child.pid) {
+        try { spawnSync("taskkill", ["/pid", String(child.pid), "/t", "/f"], { windowsHide: true, stdio: "ignore" }); } catch {}
+      } else {
+        try { child.kill("SIGTERM"); } catch {}
+      }
       setTimeout(() => {
-        try { child.kill("SIGKILL"); } catch {}
+        if (process.platform !== "win32") try { child.kill("SIGKILL"); } catch {}
       }, 1500).unref?.();
       finish("timed_out", null, null, `Command timed out after ${timeoutMs}ms.`);
     }, timeoutMs);

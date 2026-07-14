@@ -1,6 +1,10 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.DEFAULT_CRON_TIMEZONE = exports.CRON_RUN_HISTORY_LIMIT = void 0;
+exports.normalizeCronRunHistory = normalizeCronRunHistory;
+exports.aggregateCronRunStatus = aggregateCronRunStatus;
 exports.pad2 = pad2;
+exports.normalizeCronTimezone = normalizeCronTimezone;
 exports.minuteKey = minuteKey;
 exports.validateCronExpression = validateCronExpression;
 exports.matchesCron = matchesCron;
@@ -8,6 +12,11 @@ exports.computeNextRun = computeNextRun;
 exports.normalizeTargetType = normalizeTargetType;
 exports.normalizeCronJob = normalizeCronJob;
 exports.patchCronJob = patchCronJob;
+exports.appendCronRun = appendCronRun;
+exports.patchCronRun = patchCronRun;
+exports.findCronRunForTask = findCronRunForTask;
+exports.syncCronRunTask = syncCronRunTask;
+exports.runCronRunHistoryContractSelfTest = runCronRunHistoryContractSelfTest;
 exports.validateCronJobPayload = validateCronJobPayload;
 exports.createCronJob = createCronJob;
 exports.updateCronJob = updateCronJob;
@@ -15,11 +24,108 @@ exports.deleteCronJob = deleteCronJob;
 exports.restoreCronJob = restoreCronJob;
 exports.purgeCronJob = purgeCronJob;
 const db_1 = require("../../core/db");
+exports.CRON_RUN_HISTORY_LIMIT = 40;
+exports.DEFAULT_CRON_TIMEZONE = "Asia/Shanghai";
+const CRON_RUN_TERMINAL_STATUSES = new Set(["done", "failed", "skipped", "cancelled"]);
+function cronRunId() {
+    return `cron-run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+function normalizedTaskIds(value) {
+    return [...new Set((Array.isArray(value) ? value : [value]).map(item => String(item || "").trim()).filter(Boolean))];
+}
+function legacyCronRun(job) {
+    if (!job?.last_run)
+        return null;
+    const taskIds = normalizedTaskIds(job.last_task_ids?.length ? job.last_task_ids : job.last_task_id);
+    const status = String(job.last_status || "done");
+    return {
+        id: `cron-run-legacy-${String(job.id || "job")}-${Date.parse(job.last_run) || 0}`,
+        trigger: "legacy",
+        started_at: job.last_run,
+        dispatched_at: job.last_run,
+        completed_at: CRON_RUN_TERMINAL_STATUSES.has(status) ? job.last_run : null,
+        status,
+        result: String(job.last_result || "历史运行记录"),
+        task_ids: taskIds,
+        primary_task_id: String(job.last_task_id || taskIds[0] || ""),
+        task_states: Object.fromEntries(taskIds.map(taskId => [taskId, { status, result: String(job.last_result || ""), updated_at: job.updated_at || job.last_run }])),
+        meta: job.last_run_meta || {},
+        legacy: true,
+        legacy_summary: true,
+    };
+}
+function normalizeCronRunHistory(job) {
+    const source = Array.isArray(job?.run_history) ? job.run_history : [];
+    const rows = source.length ? source : [legacyCronRun(job)].filter(Boolean);
+    return rows
+        .filter((run) => run && run.id)
+        .map((run) => {
+        const taskIds = normalizedTaskIds(run.task_ids?.length ? run.task_ids : run.primary_task_id);
+        return {
+            ...run,
+            trigger: run.trigger || "schedule",
+            status: run.status || "queued",
+            result: String(run.result || ""),
+            task_ids: taskIds,
+            primary_task_id: String(run.primary_task_id || taskIds[0] || ""),
+            task_states: run.task_states && typeof run.task_states === "object" ? run.task_states : {},
+            meta: run.meta && typeof run.meta === "object" ? run.meta : {},
+            attempt: Math.max(1, Number(run.attempt || 1)),
+            parent_run_id: String(run.parent_run_id || ""),
+            scheduled_for: run.scheduled_for || null,
+            next_retry_at: run.next_retry_at || null,
+            notifications: run.notifications && typeof run.notifications === "object" ? run.notifications : {},
+        };
+    })
+        .sort((left, right) => String(right.started_at || "").localeCompare(String(left.started_at || "")))
+        .slice(0, exports.CRON_RUN_HISTORY_LIMIT);
+}
+function aggregateCronRunStatus(taskStates, fallback = "queued") {
+    const statuses = Object.values(taskStates || {}).map((item) => String(item?.status || "").toLowerCase()).filter(Boolean);
+    if (!statuses.length)
+        return fallback;
+    if (statuses.some(status => ["failed", "error"].includes(status)))
+        return "failed";
+    if (statuses.some(status => ["in_progress", "running", "running_task"].includes(status)))
+        return "running_task";
+    if (statuses.some(status => ["waiting", "blocked", "needs_user", "paused"].includes(status)))
+        return "waiting";
+    if (statuses.some(status => ["pending", "queued"].includes(status)))
+        return "queued";
+    if (statuses.every(status => ["done", "completed", "passed", "skipped", "cancelled"].includes(status))) {
+        if (statuses.some(status => status === "cancelled"))
+            return "cancelled";
+        if (statuses.every(status => status === "skipped"))
+            return "skipped";
+        return "done";
+    }
+    return fallback;
+}
 function pad2(value) {
     return String(value).padStart(2, "0");
 }
-function minuteKey(date) {
-    return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())} ${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+function normalizeCronTimezone(value) {
+    const timezone = String(value || exports.DEFAULT_CRON_TIMEZONE).trim() || exports.DEFAULT_CRON_TIMEZONE;
+    try {
+        new Intl.DateTimeFormat("en-US", { timeZone: timezone }).format(new Date());
+        return timezone;
+    }
+    catch {
+        throw new Error(`无效时区：${timezone}`);
+    }
+}
+function zonedDateParts(date, timezone) {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+        timeZone: normalizeCronTimezone(timezone), year: "numeric", month: "2-digit", day: "2-digit",
+        hour: "2-digit", minute: "2-digit", hourCycle: "h23", weekday: "short",
+    }).formatToParts(date);
+    const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
+    const weekday = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 }[values.weekday] ?? 0;
+    return { year: Number(values.year), month: Number(values.month), day: Number(values.day), hour: Number(values.hour), minute: Number(values.minute), weekday };
+}
+function minuteKey(date, timezone = exports.DEFAULT_CRON_TIMEZONE) {
+    const parts = zonedDateParts(date, timezone);
+    return `${parts.year}-${pad2(parts.month)}-${pad2(parts.day)} ${pad2(parts.hour)}:${pad2(parts.minute)}`;
 }
 function startOfNextMinute(date) {
     const next = new Date(date);
@@ -86,20 +192,21 @@ function parseCronExpression(expression) {
 function validateCronExpression(expression) {
     parseCronExpression(expression);
 }
-function matchesCron(expression, date) {
+function matchesCron(expression, date, timezone = exports.DEFAULT_CRON_TIMEZONE) {
     const cron = parseCronExpression(expression);
-    return cron.minute.has(date.getMinutes())
-        && cron.hour.has(date.getHours())
-        && cron.day.has(date.getDate())
-        && cron.month.has(date.getMonth() + 1)
-        && cron.weekday.has(date.getDay());
+    const parts = zonedDateParts(date, timezone);
+    return cron.minute.has(parts.minute)
+        && cron.hour.has(parts.hour)
+        && cron.day.has(parts.day)
+        && cron.month.has(parts.month)
+        && cron.weekday.has(parts.weekday);
 }
-function computeNextRun(expression, from = new Date()) {
+function computeNextRun(expression, from = new Date(), timezone = exports.DEFAULT_CRON_TIMEZONE) {
     try {
         let cursor = startOfNextMinute(from);
         const maxMinutes = 366 * 24 * 60;
         for (let i = 0; i < maxMinutes; i++) {
-            if (matchesCron(expression, cursor))
+            if (matchesCron(expression, cursor, timezone))
                 return cursor.toISOString();
             cursor.setMinutes(cursor.getMinutes() + 1);
         }
@@ -116,7 +223,9 @@ function normalizeCronJob(job) {
     const targetType = normalizeTargetType(job);
     const workflowType = job.workflow_type || job.workflowType || (job.daily_dev || job.dailyDev ? "daily_dev" : "general");
     let scheduleError = "";
+    let timezone = exports.DEFAULT_CRON_TIMEZONE;
     try {
+        timezone = normalizeCronTimezone(job.timezone);
         validateCronExpression(job.schedule);
     }
     catch (e) {
@@ -142,7 +251,15 @@ function normalizeCronJob(job) {
             ? Math.max(1, Math.min(20, Number(job.gap_continue_limit || job.gapContinueLimit || 3)))
             : 0,
         run_count: Number(job.run_count || 0),
-        next_run: scheduleError || job.enabled === false ? null : computeNextRun(job.schedule),
+        run_history: normalizeCronRunHistory(job),
+        timezone,
+        retry_limit: Math.max(0, Math.min(10, Number(job.retry_limit ?? job.retryLimit ?? 2))),
+        retry_interval_minutes: Math.max(1, Math.min(1440, Number(job.retry_interval_minutes ?? job.retryIntervalMinutes ?? 10))),
+        misfire_policy: ["run_once", "skip"].includes(String(job.misfire_policy || job.misfirePolicy)) ? String(job.misfire_policy || job.misfirePolicy) : "run_once",
+        misfire_grace_minutes: Math.max(1, Math.min(10080, Number(job.misfire_grace_minutes ?? job.misfireGraceMinutes ?? 1440))),
+        notification_enabled: job.notification_enabled === true || job.notificationEnabled === true,
+        notify_on: [...new Set((Array.isArray(job.notify_on) ? job.notify_on : Array.isArray(job.notifyOn) ? job.notifyOn : ["failed", "waiting", "done"]).map(String).filter(value => ["started", "done", "failed", "waiting", "recovered", "cancelled"].includes(value)))],
+        next_run: scheduleError || job.enabled === false ? null : (job.next_run || computeNextRun(job.schedule, new Date(), timezone)),
         schedule_error: scheduleError || null,
     };
 }
@@ -159,6 +276,109 @@ function patchCronJob(id, updates) {
     (0, db_1.saveCronJobs)(jobs);
     return jobs[idx];
 }
+function appendCronRun(jobId, input = {}) {
+    const jobs = (0, db_1.loadCronJobs)();
+    const index = jobs.findIndex(job => job.id === jobId);
+    if (index < 0)
+        return null;
+    const now = String(input.started_at || new Date().toISOString());
+    const run = {
+        id: String(input.id || cronRunId()),
+        trigger: input.trigger || "schedule",
+        started_at: now,
+        dispatched_at: input.dispatched_at || null,
+        completed_at: input.completed_at || null,
+        status: input.status || "triggering",
+        result: String(input.result || "正在创建并派发任务..."),
+        task_ids: normalizedTaskIds(input.task_ids),
+        primary_task_id: String(input.primary_task_id || ""),
+        task_states: input.task_states && typeof input.task_states === "object" ? input.task_states : {},
+        meta: input.meta && typeof input.meta === "object" ? input.meta : {},
+        attempt: Math.max(1, Number(input.attempt || 1)),
+        parent_run_id: String(input.parent_run_id || ""),
+        scheduled_for: input.scheduled_for || null,
+        next_retry_at: input.next_retry_at || null,
+        notifications: input.notifications && typeof input.notifications === "object" ? input.notifications : {},
+    };
+    jobs[index] = {
+        ...jobs[index],
+        run_history: [run, ...normalizeCronRunHistory(jobs[index]).filter((item) => item.id !== run.id)].slice(0, exports.CRON_RUN_HISTORY_LIMIT),
+        updated_at: new Date().toISOString(),
+    };
+    (0, db_1.saveCronJobs)(jobs);
+    return run;
+}
+function patchCronRun(jobId, runId, updates = {}) {
+    const jobs = (0, db_1.loadCronJobs)();
+    const jobIndex = jobs.findIndex(job => job.id === jobId);
+    if (jobIndex < 0)
+        return null;
+    const history = normalizeCronRunHistory(jobs[jobIndex]);
+    const runIndex = history.findIndex((run) => run.id === runId);
+    if (runIndex < 0)
+        return null;
+    const next = {
+        ...history[runIndex],
+        ...updates,
+        task_ids: normalizedTaskIds(updates.task_ids ?? history[runIndex].task_ids),
+        task_states: updates.task_states && typeof updates.task_states === "object" ? updates.task_states : history[runIndex].task_states,
+        meta: updates.meta && typeof updates.meta === "object" ? updates.meta : history[runIndex].meta,
+        updated_at: new Date().toISOString(),
+    };
+    history[runIndex] = next;
+    jobs[jobIndex] = { ...jobs[jobIndex], run_history: history.slice(0, exports.CRON_RUN_HISTORY_LIMIT), updated_at: next.updated_at };
+    (0, db_1.saveCronJobs)(jobs);
+    return next;
+}
+function findCronRunForTask(job, taskId, preferredRunId = "") {
+    const history = normalizeCronRunHistory(job);
+    return history.find((run) => preferredRunId && run.id === preferredRunId)
+        || history.find((run) => run.task_ids.includes(taskId))
+        || null;
+}
+function syncCronRunTask(jobId, runId, taskId, status, result = "", updatedAt = new Date().toISOString()) {
+    const jobs = (0, db_1.loadCronJobs)();
+    const job = jobs.find(item => item.id === jobId);
+    if (!job)
+        return null;
+    const run = findCronRunForTask(job, taskId, runId);
+    if (!run)
+        return null;
+    const taskIds = normalizedTaskIds([...(run.task_ids || []), taskId]);
+    const taskStates = {
+        ...(run.task_states || {}),
+        [taskId]: { status, result: String(result || ""), updated_at: updatedAt },
+    };
+    const aggregateStatus = aggregateCronRunStatus(taskStates, run.status || "queued");
+    const completedAt = CRON_RUN_TERMINAL_STATUSES.has(aggregateStatus) ? updatedAt : null;
+    return patchCronRun(jobId, run.id, {
+        task_ids: taskIds,
+        primary_task_id: run.primary_task_id || taskId,
+        task_states: taskStates,
+        status: aggregateStatus,
+        result: String(result || run.result || ""),
+        completed_at: completedAt,
+    });
+}
+function runCronRunHistoryContractSelfTest() {
+    const taskStates = {
+        first: { status: "done" },
+        second: { status: "in_progress" },
+    };
+    const legacy = normalizeCronRunHistory({ id: "legacy", last_run: "2026-07-13T01:00:00.000Z", last_status: "done", last_task_id: "task-legacy" });
+    const shanghaiMorning = new Date("2026-07-13T01:00:00.000Z");
+    const checks = {
+        batchRunningUntilAllDone: aggregateCronRunStatus(taskStates) === "running_task",
+        batchDoneWhenAllDone: aggregateCronRunStatus({ first: { status: "done" }, second: { status: "completed" } }) === "done",
+        failureWins: aggregateCronRunStatus({ first: { status: "done" }, second: { status: "failed" } }) === "failed",
+        waitingVisible: aggregateCronRunStatus({ first: { status: "done" }, second: { status: "needs_user" } }) === "waiting",
+        legacyBackfill: legacy.length === 1 && legacy[0].task_ids[0] === "task-legacy" && legacy[0].legacy_summary === true,
+        timezoneMatch: matchesCron("0 9 * * *", shanghaiMorning, "Asia/Shanghai") && !matchesCron("0 9 * * *", shanghaiMorning, "UTC"),
+        timezoneMinuteKey: minuteKey(shanghaiMorning, "Asia/Shanghai") === "2026-07-13 09:00",
+        timezoneNextRun: computeNextRun("0 9 * * *", new Date("2026-07-12T23:00:00.000Z"), "Asia/Shanghai") === "2026-07-13T01:00:00.000Z",
+    };
+    return { pass: Object.values(checks).every(Boolean), checks };
+}
 function validateCronJobPayload(job) {
     if (!String(job.name || "").trim())
         throw new Error("请输入定时任务名称");
@@ -167,6 +387,7 @@ function validateCronJobPayload(job) {
     if (!String(job.prompt || "").trim())
         throw new Error("请输入执行提示词");
     validateCronExpression(job.schedule);
+    normalizeCronTimezone(job.timezone);
     const targetType = normalizeTargetType(job);
     if (targetType === "group" && !job.group_id)
         throw new Error("请选择目标群聊");
@@ -178,6 +399,7 @@ function createCronJob(job) {
     const jobs = (0, db_1.loadCronJobs)();
     const now = new Date();
     const targetType = normalizeTargetType(job);
+    const timezone = normalizeCronTimezone(job.timezone);
     const newJob = {
         id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
         name: String(job.name || "").trim(),
@@ -191,6 +413,13 @@ function createCronJob(job) {
         schedule: String(job.schedule || "").trim(),
         prompt: String(job.prompt || "").trim(),
         priority: job.priority || "normal",
+        timezone,
+        retry_limit: Math.max(0, Math.min(10, Number(job.retry_limit ?? job.retryLimit ?? 2))),
+        retry_interval_minutes: Math.max(1, Math.min(1440, Number(job.retry_interval_minutes ?? job.retryIntervalMinutes ?? 10))),
+        misfire_policy: ["run_once", "skip"].includes(String(job.misfire_policy || job.misfirePolicy)) ? String(job.misfire_policy || job.misfirePolicy) : "run_once",
+        misfire_grace_minutes: Math.max(1, Math.min(10080, Number(job.misfire_grace_minutes ?? job.misfireGraceMinutes ?? 1440))),
+        notification_enabled: job.notification_enabled === true || job.notificationEnabled === true,
+        notify_on: [...new Set((Array.isArray(job.notify_on) ? job.notify_on : Array.isArray(job.notifyOn) ? job.notifyOn : ["failed", "waiting", "done"]).map(String).filter(value => ["started", "done", "failed", "waiting", "recovered", "cancelled"].includes(value)))],
         backlog_batch_limit: Math.max(1, Math.min(20, Number(job.backlog_batch_limit || job.backlogBatchLimit || 1))),
         import_shared_docs: targetType === "group"
             && (job.workflow_type === "daily_dev" || job.workflowType === "daily_dev" || job.daily_dev || job.dailyDev)
@@ -212,8 +441,10 @@ function createCronJob(job) {
         last_status: "never",
         last_result: "",
         last_task_id: null,
+        last_task_ids: [],
+        run_history: [],
         run_count: 0,
-        next_run: job.enabled === false ? null : computeNextRun(job.schedule, now),
+        next_run: job.enabled === false ? null : computeNextRun(job.schedule, now, timezone),
     };
     jobs.push(newJob);
     (0, db_1.saveCronJobs)(jobs);
@@ -236,6 +467,13 @@ function updateCronJob(id, updates) {
         : false;
     draft.enabled = draft.enabled !== false;
     draft.priority = draft.priority || "normal";
+    draft.timezone = normalizeCronTimezone(draft.timezone);
+    draft.retry_limit = Math.max(0, Math.min(10, Number(draft.retry_limit ?? draft.retryLimit ?? 2)));
+    draft.retry_interval_minutes = Math.max(1, Math.min(1440, Number(draft.retry_interval_minutes ?? draft.retryIntervalMinutes ?? 10)));
+    draft.misfire_policy = ["run_once", "skip"].includes(String(draft.misfire_policy || draft.misfirePolicy)) ? String(draft.misfire_policy || draft.misfirePolicy) : "run_once";
+    draft.misfire_grace_minutes = Math.max(1, Math.min(10080, Number(draft.misfire_grace_minutes ?? draft.misfireGraceMinutes ?? 1440)));
+    draft.notification_enabled = draft.notification_enabled === true || draft.notificationEnabled === true;
+    draft.notify_on = [...new Set((Array.isArray(draft.notify_on) ? draft.notify_on : Array.isArray(draft.notifyOn) ? draft.notifyOn : ["failed", "waiting", "done"]).map(String).filter(value => ["started", "done", "failed", "waiting", "recovered", "cancelled"].includes(value)))];
     draft.backlog_batch_limit = Math.max(1, Math.min(20, Number(draft.backlog_batch_limit || draft.backlogBatchLimit || 1)));
     draft.import_shared_docs = draft.target_type === "group" && draft.workflow_type === "daily_dev"
         ? (draft.import_shared_docs ?? draft.importSharedDocs ?? true)
@@ -254,7 +492,7 @@ function updateCronJob(id, updates) {
     }
     validateCronJobPayload(draft);
     draft.updated_at = new Date().toISOString();
-    draft.next_run = draft.enabled ? computeNextRun(draft.schedule) : null;
+    draft.next_run = draft.enabled ? computeNextRun(draft.schedule, new Date(), draft.timezone) : null;
     jobs[idx] = draft;
     (0, db_1.saveCronJobs)(jobs);
     return draft;
@@ -276,7 +514,7 @@ function restoreCronJob(id) {
         return null;
     const now = new Date().toISOString();
     const enabled = jobs[index].enabled_before_archive !== false;
-    jobs[index] = { ...jobs[index], archived: false, archived_at: null, deleted_at: null, enabled, restored_at: now, updated_at: now, next_run: enabled ? computeNextRun(jobs[index].schedule) : null };
+    jobs[index] = { ...jobs[index], archived: false, archived_at: null, deleted_at: null, enabled, restored_at: now, updated_at: now, next_run: enabled ? computeNextRun(jobs[index].schedule, new Date(), normalizeCronTimezone(jobs[index].timezone)) : null };
     (0, db_1.saveCronJobs)(jobs);
     return jobs[index];
 }

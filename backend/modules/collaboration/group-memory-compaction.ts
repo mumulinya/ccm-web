@@ -2,10 +2,11 @@ import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
 import { CCM_DIR } from "../../core/utils";
-import { buildContextBudget, estimateTextTokens, getAutoCompactThreshold, microCompactText } from "../../system/context-budget";
+import { buildContextBudget, compactPreserveEdges, estimateTextTokens, getAutoCompactThreshold, microCompactText } from "../../system/context-budget";
+import { resolveTrustedModelContextCapacity } from "./model-capability-cache";
 
 export const GROUP_MEMORY_COMPACTION_VERSION = 3;
-export const GROUP_COMPACT_TRIGGER_TOKENS = 137_000;
+export const GROUP_COMPACT_TRIGGER_TOKENS = 167_000;
 export const GROUP_COMPACT_MIN_KEEP_MESSAGES = 5;
 export const GROUP_COMPACT_MIN_KEEP_TOKENS = 10_000;
 export const GROUP_COMPACT_MAX_KEEP_TOKENS = 40_000;
@@ -13,7 +14,7 @@ export const GROUP_COMPACT_MAX_FAILURES = 3;
 export const GROUP_COMPACT_MODEL_RETRY_MS = 15 * 60 * 1000;
 export const GROUP_FACT_ANCHOR_LIMIT = 500;
 export const GROUP_CONTEXT_WINDOW_DEFAULT = 200_000;
-export const GROUP_CONTEXT_RESERVED_TOKENS = 50_000;
+export const GROUP_CONTEXT_RESERVED_TOKENS = 20_000;
 export const GROUP_AUTOCOMPACT_BUFFER_TOKENS = 13_000;
 export const GROUP_WARNING_BUFFER_TOKENS = 20_000;
 export const GROUP_ERROR_BUFFER_TOKENS = 20_000;
@@ -38,9 +39,12 @@ export const GROUP_PARTIAL_COMPACT_VERSION = 1;
 export const GROUP_PARTIAL_COMPACT_SEGMENT_LIMIT = 12;
 export const GROUP_PTL_EMERGENCY_VERSION = 1;
 export const GROUP_PTL_RECOVERY_VERSION = 1;
-export const GROUP_PRESERVED_SEGMENT_VERSION = 1;
+export const GROUP_PRESERVED_SEGMENT_VERSION = 2;
 export const GROUP_COMPACT_STRATEGY_DECISION_VERSION = 1;
 export const GROUP_COMPACTION_HOOK_LEDGER_VERSION = 1;
+export const GROUP_COMPACT_TRANSACTION_RECEIPT_VERSION = 1;
+export const GROUP_COMPACTION_MODEL_MAX_SUMMARY_TOKENS = 5_000;
+export const GROUP_COMPACTION_MODEL_INPUT_SAFETY_TOKENS = 13_000;
 const GROUP_COMPACTION_HOOK_LEDGER_DIR = path.join(CCM_DIR, "group-memory-compaction-hooks");
 const GROUP_API_MICROCOMPACT_CLEARABLE_RESULTS = ["Bash", "Shell", "PowerShell", "Glob", "Grep", "Read", "FileRead", "WebFetch", "WebSearch"];
 const GROUP_API_MICROCOMPACT_CLEARABLE_USES = ["Edit", "FileEdit", "Write", "FileWrite", "NotebookEdit"];
@@ -100,6 +104,83 @@ const groupMemoryCompactionHooks: Record<GroupMemoryCompactionHookPhase, Set<Gro
   pre: new Set(),
   post: new Set(),
 };
+
+function groupCompactTransactionReceiptChecksum(receipt: any) {
+  const payload = { ...(receipt || {}) };
+  delete payload.receipt_checksum;
+  delete payload.checksum_valid;
+  return crypto.createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+}
+
+export function buildGroupCompactEpoch(boundaryId: string) {
+  const id = String(boundaryId || "").trim();
+  return id ? `cmp_${crypto.createHash("sha256").update(id).digest("hex").slice(0, 16)}` : "precompact";
+}
+
+export function verifyGroupCompactTransactionReceipt(receipt: any, expected: any = {}) {
+  const issues: string[] = [];
+  if (receipt?.schema !== "ccm-group-memory-compact-transaction-receipt-v1"
+    || Number(receipt?.version || 0) !== GROUP_COMPACT_TRANSACTION_RECEIPT_VERSION) issues.push("compact_transaction_receipt_schema_invalid");
+  const expectedReceiptId = `gctr_${crypto.createHash("sha256").update(`${receipt?.group_id || ""}\0${receipt?.boundary_id || ""}\0${receipt?.hook_run_id || ""}\0${receipt?.committed_at || ""}`).digest("hex").slice(0, 24)}`;
+  if (String(receipt?.receipt_id || "") !== expectedReceiptId) issues.push("compact_transaction_receipt_id_invalid");
+  if (!String(receipt?.group_id || "")) issues.push("compact_transaction_group_missing");
+  if (!String(receipt?.boundary_id || "")) issues.push("compact_transaction_boundary_missing");
+  if (!String(receipt?.summary_checksum || "")) issues.push("compact_transaction_summary_missing");
+  if (Number(receipt?.summarized_message_count || 0) < 1) issues.push("compact_transaction_range_empty");
+  if (!String(receipt?.preserved_segment_checksum || "")) issues.push("compact_transaction_preserved_segment_missing");
+  if (Number(receipt?.hook_failure_count || 0) > 0) issues.push("compact_transaction_hook_failure");
+  if (receipt?.recovery_audit_passed !== true) issues.push("compact_transaction_recovery_audit_failed");
+  if (receipt?.cleanup_audit_passed !== true) issues.push("compact_transaction_cleanup_audit_failed");
+  if (!String(receipt?.transcript_path || "")) issues.push("compact_transaction_transcript_missing");
+  if (String(receipt?.compact_epoch || "") !== buildGroupCompactEpoch(String(receipt?.boundary_id || ""))) issues.push("compact_transaction_epoch_invalid");
+  if (String(receipt?.receipt_checksum || "") !== groupCompactTransactionReceiptChecksum(receipt)) issues.push("compact_transaction_receipt_checksum_invalid");
+  if (expected.groupId && String(receipt?.group_id || "") !== String(expected.groupId)) issues.push("compact_transaction_group_mismatch");
+  if (expected.groupSessionId && String(receipt?.group_session_id || "") !== String(expected.groupSessionId)) issues.push("compact_transaction_group_session_mismatch");
+  if (expected.boundaryId && String(receipt?.boundary_id || "") !== String(expected.boundaryId)) issues.push("compact_transaction_boundary_mismatch");
+  if (expected.compactEpoch && String(receipt?.compact_epoch || "") !== String(expected.compactEpoch)) issues.push("compact_transaction_epoch_mismatch");
+  if (expected.summaryChecksum && String(receipt?.summary_checksum || "") !== String(expected.summaryChecksum)) issues.push("compact_transaction_summary_mismatch");
+  return { valid: issues.length === 0, issues };
+}
+
+export function buildGroupCompactTransactionReceipt(input: any = {}) {
+  const boundary = input.boundary || {};
+  const hookRows = [...(input.preHookResults || []), ...(input.postHookResults || [])].map((row: any) => ({
+    phase: String(row?.ledgerEntry?.phase || ""),
+    hook_index: Number(row?.ledgerEntry?.hook_index ?? -1),
+    ok: row?.ok === true,
+    boundary_id: String(row?.ledgerEntry?.boundary_id || ""),
+    summary_checksum: String(row?.ledgerEntry?.summary_checksum || ""),
+  }));
+  const payload: any = {
+    schema: "ccm-group-memory-compact-transaction-receipt-v1",
+    version: GROUP_COMPACT_TRANSACTION_RECEIPT_VERSION,
+    receipt_id: `gctr_${crypto.createHash("sha256").update(`${input.groupId || ""}\0${boundary.id || ""}\0${input.hookRunId || ""}\0${input.createdAt || boundary.createdAt || ""}`).digest("hex").slice(0, 24)}`,
+    group_id: String(input.groupId || ""),
+    group_session_id: String(input.groupSessionId || input.group_session_id || ""),
+    boundary_id: String(boundary.id || ""),
+    boundary_type: String(boundary.type || ""),
+    compact_epoch: buildGroupCompactEpoch(String(boundary.id || "")),
+    summarized_from_message_id: String(boundary.summarizedFromMessageId || ""),
+    summarized_through_message_id: String(boundary.summarizedThroughMessageId || ""),
+    summarized_message_count: Number(boundary.summarizedMessageCount || 0),
+    summary_checksum: String(input.summaryChecksum || boundary.post_compact_restore?.summaryChecksum || ""),
+    pre_compact_token_count: Number(boundary.preCompactTokenCount || 0),
+    post_compact_token_count: Number(boundary.postCompactTokenCount || 0),
+    preserved_segment_checksum: boundary.preservedSegment
+      ? crypto.createHash("sha256").update(JSON.stringify(boundary.preservedSegment)).digest("hex")
+      : "",
+    hook_run_id: String(input.hookRunId || ""),
+    pre_hook_count: hookRows.filter(row => row.phase === "pre").length,
+    post_hook_count: hookRows.filter(row => row.phase === "post").length,
+    hook_failure_count: hookRows.filter(row => !row.ok).length,
+    hook_evidence_checksum: crypto.createHash("sha256").update(JSON.stringify(hookRows)).digest("hex"),
+    recovery_audit_passed: boundary.post_compact_restore?.recoveryAudit?.pass === true,
+    cleanup_audit_passed: boundary.post_compact_restore?.cleanupAudit?.pass === true,
+    transcript_path: String(input.transcriptPath || boundary.post_compact_restore?.transcriptPath || ""),
+    committed_at: String(input.createdAt || boundary.createdAt || new Date().toISOString()),
+  };
+  return { ...payload, receipt_checksum: groupCompactTransactionReceiptChecksum(payload) };
+}
 
 function cleanHookLedgerGroupId(groupId: string) {
   return String(groupId || "unknown").replace(/[^a-zA-Z0-9._:-]+/g, "-");
@@ -762,6 +843,18 @@ export function buildGroupPreservedSegment(messages: any[], keepIndex: number, o
     ? preservedMessages.filter((message: any) => groupMessageTaskId(message) === firstTaskId).length
     : 0;
   const protectedTaskTransaction = !!firstTaskId && firstTaskMessageCount > 1;
+  const summarizedThroughMessageId = safeKeepIndex > 0 ? messageIdentity(messages[safeKeepIndex - 1], safeKeepIndex - 1) : "";
+  const summaryChecksum = String(options.summaryChecksum || options.summary_checksum || "");
+  const summaryMessageId = String(options.summaryMessageId || options.summary_message_id || (
+    summaryChecksum && summarizedThroughMessageId
+      ? `gcsum_${crypto.createHash("sha256")
+        .update(`${options.groupId || options.group_id || options.scopeId || options.scope_id || "unscoped"}\n${summaryChecksum}\n${summarizedThroughMessageId}`)
+        .digest("hex")
+        .slice(0, 24)}`
+      : ""
+  ));
+  const headMessageId = preservedMessageIds[0] || "";
+  const tailMessageId = preservedMessageIds[preservedMessageIds.length - 1] || "";
   return {
     schema: "ccm-group-preserved-segment-v1",
     version: GROUP_PRESERVED_SEGMENT_VERSION,
@@ -772,11 +865,16 @@ export function buildGroupPreservedSegment(messages: any[], keepIndex: number, o
     preservedTokenEstimate: tokenEstimate,
     preservedMessageIds: preservedMessageIds.slice(-80),
     omittedPreservedMessageIds: Math.max(0, preservedMessageIds.length - 80),
-    firstPreservedMessageId: preservedMessageIds[0] || "",
-    lastPreservedMessageId: preservedMessageIds[preservedMessageIds.length - 1] || "",
-    summarizedThroughMessageId: safeKeepIndex > 0 ? messageIdentity(messages[safeKeepIndex - 1], safeKeepIndex - 1) : "",
-    summaryMessageId: options.summaryMessageId || options.summary_message_id || "",
-    summaryChecksum: options.summaryChecksum || options.summary_checksum || "",
+    firstPreservedMessageId: headMessageId,
+    lastPreservedMessageId: tailMessageId,
+    summarizedThroughMessageId,
+    summaryMessageId,
+    summaryChecksum,
+    headMessageId,
+    anchorMessageId: summaryMessageId,
+    tailMessageId,
+    anchorKind: "compact_summary",
+    anchorMode: "suffix_preserving",
     minTokens: Number(options.minTokens || options.min_tokens || GROUP_COMPACT_MIN_KEEP_TOKENS),
     minTextBlockMessages: Number(options.minMessages || options.min_messages || GROUP_COMPACT_MIN_KEEP_MESSAGES),
     maxTokens: Number(options.maxTokens || options.max_tokens || GROUP_COMPACT_MAX_KEEP_TOKENS),
@@ -987,9 +1085,10 @@ export function buildGroupApiMicroCompactEditPlan(messages: any[] = [], options:
         : "no thinking/tool context edit signals detected",
     createdAt: options.now || new Date().toISOString(),
   };
+  const { createdAt: _createdAt, idleMinutes: _idleMinutes, ...planIdentity } = base;
   return {
     ...base,
-    planChecksum: crypto.createHash("sha256").update(JSON.stringify(base)).digest("hex").slice(0, 24),
+    planChecksum: crypto.createHash("sha256").update(JSON.stringify(planIdentity)).digest("hex").slice(0, 24),
   };
 }
 
@@ -1532,22 +1631,64 @@ export function buildGroupPtlRecoveryPlan(input: any = {}) {
 }
 
 export function getGroupAutoCompactThreshold(config: any = {}) {
-  const effectiveWindow = getGroupEffectiveContextWindow(config);
-  return Math.max(18_000, effectiveWindow - GROUP_AUTOCOMPACT_BUFFER_TOKENS);
+  const capacity = resolveGroupModelContextCapacity(config);
+  const configuredThreshold = Number(
+    config?.modelAutoCompactTokenLimit
+      || config?.model_auto_compact_token_limit
+      || config?.memoryAutoCompactTokenLimit
+      || config?.memory_auto_compact_token_limit
+      || 0
+  );
+  if (Number.isFinite(configuredThreshold) && configuredThreshold > 0) {
+    return Math.max(18_000, Math.min(Math.floor(configuredThreshold), capacity.effectiveContextWindow - GROUP_MANUAL_COMPACT_BUFFER_TOKENS));
+  }
+  return Math.max(18_000, capacity.effectiveContextWindow - GROUP_AUTOCOMPACT_BUFFER_TOKENS);
+}
+
+export function resolveGroupModelContextCapacity(config: any = {}) {
+  const capabilities = config?.modelCapabilities || config?.model_capabilities || {};
+  const providerCapability = Number(capabilities?.max_input_tokens || capabilities?.context_window || 0) > 0
+    ? {
+        source: "explicit_provider_capability",
+        contextWindow: Number(capabilities.max_input_tokens || capabilities.context_window),
+        maxOutputTokens: Number(capabilities.max_output_tokens || GROUP_CONTEXT_RESERVED_TOKENS),
+        verified: capabilities.verified === true,
+        checkedAt: capabilities.checked_at || capabilities.checkedAt,
+        expiresAt: capabilities.expires_at || capabilities.expiresAt,
+        evidenceId: capabilities.evidence_id || capabilities.evidenceId,
+      }
+    : null;
+  const capacity = resolveTrustedModelContextCapacity({
+    provider: config?.provider || config?.agentProvider || config?.format || "group-main-agent",
+    model: config?.model || "",
+    modelContextWindow: config?.modelContextWindow
+      || config?.model_context_window
+      || config?.memoryContextWindowTokens
+      || config?.contextWindowTokens
+      || process.env.CCM_GROUP_CONTEXT_WINDOW_TOKENS,
+    modelMaxOutputTokens: config?.modelMaxOutputTokens
+      || config?.model_max_output_tokens
+      || config?.maxOutputTokens,
+    capacityCheckedAt: config?.modelCapacityCheckedAt || config?.model_capacity_checked_at,
+    providerCapability,
+    nativeExecutorReceipt: config?.nativeModelCapabilityReceipt || config?.native_model_capability_receipt,
+  });
+  const legacyReserve = Number(config?.memoryReservedTokens || config?.memory_reserved_tokens || 0);
+  if (!(legacyReserve > 0)) return capacity;
+  const reservedOutputTokens = Math.min(capacity.contextWindow - 16_000, Math.max(0, legacyReserve));
+  const effectiveContextWindow = Math.max(18_000, capacity.contextWindow - reservedOutputTokens);
+  return {
+    ...capacity,
+    reservedOutputTokens,
+    effectiveContextWindow,
+    autoCompactBufferTokens: GROUP_AUTOCOMPACT_BUFFER_TOKENS,
+    autoCompactThreshold: Math.max(18_000, effectiveContextWindow - GROUP_AUTOCOMPACT_BUFFER_TOKENS),
+    reserveSource: "legacy_user_setting",
+  };
 }
 
 export function getGroupEffectiveContextWindow(config: any = {}) {
-  const configuredWindow = Number(
-    config?.memoryContextWindowTokens
-      || config?.contextWindowTokens
-      || process.env.CCM_GROUP_CONTEXT_WINDOW_TOKENS
-      || GROUP_CONTEXT_WINDOW_DEFAULT
-  );
-  const contextWindow = Number.isFinite(configuredWindow) && configuredWindow > 32_000
-    ? configuredWindow
-    : GROUP_CONTEXT_WINDOW_DEFAULT;
-  const reserved = Math.min(contextWindow - 16_000, Math.max(20_000, Number(config?.memoryReservedTokens || GROUP_CONTEXT_RESERVED_TOKENS)));
-  return Math.max(18_000, contextWindow - reserved);
+  return resolveGroupModelContextCapacity(config).effectiveContextWindow;
 }
 
 export function calculateGroupCompactWarningState(input: any = {}) {
@@ -2451,7 +2592,7 @@ function normalizeAnthropicUrl(value: string) {
   return /\/v1\//i.test(base) ? base : `${base}/v1/messages`;
 }
 
-async function callCompactionModel(config: any, system: string, user: string) {
+async function callCompactionModel(config: any, system: string, user: string, maxOutputTokens = GROUP_COMPACTION_MODEL_MAX_SUMMARY_TOKENS) {
   if (!config?.enabled || !config?.apiUrl || !config?.apiKey || !config?.model) return null;
   const anthropic = config.format === "anthropic-compatible"
     || config.format === "auto" && String(config.apiUrl).toLowerCase().includes("anthropic")
@@ -2466,12 +2607,13 @@ async function callCompactionModel(config: any, system: string, user: string) {
         : { "Content-Type": "application/json", "Authorization": `Bearer ${config.apiKey}` },
       body: JSON.stringify(anthropic ? {
         model: config.model,
-        max_tokens: 5000,
+        max_tokens: maxOutputTokens,
         temperature: 0.1,
         system,
         messages: [{ role: "user", content: user }],
       } : {
         model: config.model,
+        max_tokens: maxOutputTokens,
         temperature: 0.1,
         messages: [{ role: "system", content: system }, { role: "user", content: user }],
       }),
@@ -2489,7 +2631,29 @@ async function callCompactionModel(config: any, system: string, user: string) {
   }
 }
 
-async function summarizeWithModel(messages: any[], memory: any, fallback: ConversationSummary, config: any) {
+function fitCompactionPromptToTokenBudget(system: string, user: string, maxInputTokens: number) {
+  const initialTokens = estimateTextTokens(system) + estimateTextTokens(user);
+  if (initialTokens <= maxInputTokens) return { user, initialTokens, finalTokens: initialTokens, clipped: false };
+  let low = 256;
+  let high = Math.max(low, user.length);
+  let best = compactPreserveEdges(user, low, "...[model-budget-clipped; deterministic summary and raw transcript remain recoverable]...");
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2);
+    const candidate = compactPreserveEdges(user, mid, "...[model-budget-clipped; deterministic summary and raw transcript remain recoverable]...");
+    const tokens = estimateTextTokens(system) + estimateTextTokens(candidate);
+    if (tokens <= maxInputTokens) {
+      best = candidate;
+      low = mid + 1;
+    } else {
+      high = mid - 1;
+    }
+  }
+  const finalTokens = estimateTextTokens(system) + estimateTextTokens(best);
+  if (finalTokens > maxInputTokens) throw new Error(`memory compact request cannot fit model input budget: ${finalTokens}/${maxInputTokens}`);
+  return { user: best, initialTokens, finalTokens, clipped: true };
+}
+
+export function buildGroupCompactionModelRequest(messages: any[], memory: any, fallback: ConversationSummary, config: any = {}) {
   const previous = memory?.conversationSummary || createEmptyConversationSummary();
   const timeline = buildCompactionTimeline(messages);
   const system = `你是群聊 Agent 会话压缩器。只生成 JSON，不调用工具，不创建任务，不向任何 Agent 派发。
@@ -2497,7 +2661,7 @@ async function summarizeWithModel(messages: any[], memory: any, fallback: Conver
 参考 Claude Code compaction：保留用户明确要求、意图变化、技术决策、文件/代码、错误与修复、已完成、未完成、当前工作和下一步。
 必须合并旧摘要，不能因为新消息覆盖仍有效的旧约束；已完成与待办冲突时，以时间较新的证据为准。
 不要编造文件变更、测试或完成状态。`;
-  const user = `旧结构化摘要：
+  const candidateUser = `旧结构化摘要：
 ${JSON.stringify(previous)}
 
 平台结构化保底摘要：
@@ -2511,8 +2675,46 @@ ${timeline.timeline.join("\n") || "无"}
 
 返回以下 JSON，不要 Markdown：
 {"primaryRequest":"","userMessages":[],"keyConcepts":[],"filesAndCode":[],"errorsAndFixes":[],"decisions":[],"completedWork":[],"pendingTasks":[],"currentWork":"","nextStep":"","participantState":[],"taskStates":[]}`;
-  const result = await callCompactionModel(config, system, user);
-  return result ? normalizeSummary(result, createEmptyConversationSummary()) : null;
+  const capacity = resolveGroupModelContextCapacity(config);
+  const maxOutputTokens = Math.max(1_000, Math.min(
+    GROUP_COMPACTION_MODEL_MAX_SUMMARY_TOKENS,
+    Number(config?.memoryCompactionMaxOutputTokens || config?.memory_compaction_max_output_tokens || GROUP_COMPACTION_MODEL_MAX_SUMMARY_TOKENS)
+  ));
+  const providerSafeInput = Math.max(8_000, capacity.contextWindow - maxOutputTokens - GROUP_COMPACTION_MODEL_INPUT_SAFETY_TOKENS);
+  const configuredInputLimit = Number(config?.memoryCompactionMaxInputTokens || config?.memory_compaction_max_input_tokens || 0);
+  const maxInputTokens = configuredInputLimit > 0
+    ? Math.max(8_000, Math.min(providerSafeInput, configuredInputLimit))
+    : providerSafeInput;
+  const fitted = fitCompactionPromptToTokenBudget(system, candidateUser, maxInputTokens);
+  return {
+    system,
+    user: fitted.user,
+    maxOutputTokens,
+    audit: {
+      schema: "ccm-group-compaction-model-request-budget-v1",
+      modelCapacity: capacity,
+      maxInputTokens,
+      maxOutputTokens,
+      estimatedInputTokensBefore: fitted.initialTokens,
+      estimatedInputTokens: fitted.finalTokens,
+      withinBudget: fitted.finalTokens <= maxInputTokens,
+      clipped: fitted.clipped,
+      sourceMessageCount: messages.length,
+      recentTimelineMessageLimit: 80,
+      userMessageLimit: 40,
+      sourceStrategy: "deterministic_full_history_aggregate_plus_bounded_recent_evidence",
+      rawTranscriptPreserved: true,
+    },
+  };
+}
+
+async function summarizeWithModel(messages: any[], memory: any, fallback: ConversationSummary, config: any) {
+  const request = buildGroupCompactionModelRequest(messages, memory, fallback, config);
+  const result = await callCompactionModel(config, request.system, request.user, request.maxOutputTokens);
+  return {
+    summary: result ? normalizeSummary(result, createEmptyConversationSummary()) : null,
+    requestAudit: request.audit,
+  };
 }
 
 export function buildBoundedRecentGroupContext(messages: any[], fullCount = 5) {
@@ -2565,6 +2767,7 @@ export function buildRelevantHistoricalGroupContext(messages: any[], boundaryInd
 
 export async function compactGroupConversationMemory(input: {
   groupId: string;
+  groupSessionId?: string;
   messages: any[];
   memory: any;
   config?: any;
@@ -2771,6 +2974,7 @@ export async function compactGroupConversationMemory(input: {
   let conversationSummary = fallback;
   let summarySource = "structured";
   let failure = "";
+  let modelRequestAudit: any = null;
   let validation = validateSummaryPreservesFallback(conversationSummary, fallback);
   let rejectedModelValidation: any = null;
   const lastFailureAtMs = Date.parse(String(previousState.lastFailureAt || "")) || 0;
@@ -2780,7 +2984,9 @@ export async function compactGroupConversationMemory(input: {
   const shouldAttemptModel = modelCompactionEnabled && (failures < GROUP_COMPACT_MAX_FAILURES || retryWindowExpired);
   if (shouldAttemptModel) {
     try {
-      const modelSummary = await summarizeWithModel(messagesToCompact, memory, fallback, input.config);
+      const modelResult = await summarizeWithModel(messagesToCompact, memory, fallback, input.config);
+      const modelSummary = modelResult.summary;
+      modelRequestAudit = modelResult.requestAudit;
       if (modelSummary) {
         conversationSummary = mergeSafeConversationSummary(previousSummary, fallback, modelSummary, messagesToCompact);
         summarySource = "hybrid";
@@ -2936,6 +3142,7 @@ export async function compactGroupConversationMemory(input: {
     ? quality.status === "failed" ? "failed" : "degraded"
     : thrashCount >= 3 ? "thrashing" : "healthy";
   const preservedSegment = buildGroupPreservedSegment(messages, keepIndex, {
+    groupId: input.groupId,
     floorIndex: summarizedThroughIndex + 1,
     minMessages: input.config?.minKeepMessages || input.config?.min_keep_messages || GROUP_COMPACT_MIN_KEEP_MESSAGES,
     minTokens: input.config?.minKeepTokens || input.config?.min_keep_tokens || GROUP_COMPACT_MIN_KEEP_TOKENS,
@@ -2971,7 +3178,7 @@ export async function compactGroupConversationMemory(input: {
     force: input.force,
     now,
   });
-  const boundary = {
+  const boundary: any = {
     id: `compact-${Date.now().toString(36)}`,
     type: primaryPartialCompact ? "partial-up-to" : input.force ? "manual" : "auto",
     summarizedFromMessageId: messageIdentity(messages[summarizedThroughIndex + 1], summarizedThroughIndex + 1),
@@ -3005,6 +3212,7 @@ export async function compactGroupConversationMemory(input: {
     ptlEmergency,
     ptlRecovery,
     summarySource,
+    modelRequestAudit,
     quality: {
       score: quality.score,
       status: quality.status,
@@ -3070,6 +3278,19 @@ export async function compactGroupConversationMemory(input: {
   });
   boundary.post_compact_restore.cleanupAudit = postCompactCleanupAudit;
   const latestHookLedger = readGroupMemoryCompactionHookLedger(String(input.groupId || ""));
+  const compactTransactionReceipt = buildGroupCompactTransactionReceipt({
+    groupId: input.groupId,
+    groupSessionId: input.groupSessionId,
+    boundary,
+    summaryChecksum,
+    hookRunId: compactionHookRunId,
+    preHookResults,
+    postHookResults,
+    transcriptPath: input.transcriptPath,
+    createdAt: now,
+  });
+  boundary.compactTransactionReceipt = compactTransactionReceipt;
+  boundary.post_compact_restore.compactTransactionReceipt = compactTransactionReceipt;
   const totalCompacted = requiresExplicitRebuild
     ? keepIndex
     : Math.max(Number(previousState.compactedMessageCount || 0) + messagesToCompact.length, keepIndex);
@@ -3105,7 +3326,9 @@ export async function compactGroupConversationMemory(input: {
       summarySource,
       modelMode: modelCompactionEnabled ? "hybrid-opt-in" : "session-memory-first",
       modelAttempted: shouldAttemptModel,
+      modelRequestAudit,
       summaryChecksum,
+      compactTransactionReceipt,
       deterministicFactsPreserved: true,
       validation,
       qualityGateVersion: quality.schema,
@@ -3170,11 +3393,12 @@ export async function compactGroupConversationMemory(input: {
       compactStrategyDecision,
       apiMicroCompactEditPlan,
       postCompactCleanupAudit,
+      compactTransactionReceipt,
       contextPressureWarning: postCompactWarning,
       lastCompressedAt: now,
     },
   };
-  return { compacted: true, memory: nextMemory, boundary, keepIndex, contextPressureWarning: postCompactWarning, preCompactWarning, postCompactRecoveryAudit, postCompactCleanupAudit, compactStrategyDecision, apiMicroCompactEditPlan };
+  return { compacted: true, memory: nextMemory, boundary, keepIndex, contextPressureWarning: postCompactWarning, preCompactWarning, postCompactRecoveryAudit, postCompactCleanupAudit, compactStrategyDecision, apiMicroCompactEditPlan, compactTransactionReceipt };
 }
 
 export async function runGroupMemoryPreservedSegmentSelfTest() {
@@ -3363,6 +3587,56 @@ export function runGroupMemoryCompactionSelfTest() {
     adaptiveThresholdMatchesDefaultBudget: getGroupAutoCompactThreshold({}) === GROUP_COMPACT_TRIGGER_TOKENS,
   };
   return { pass: Object.values(checks).every(Boolean), checks, keepIndex, keptMessages: kept.length, compactedMessages: compacted.length };
+}
+
+export function runGroupMemoryModelCapacitySelfTest() {
+  const defaultCapacity = resolveGroupModelContextCapacity({});
+  const preset516 = {
+    modelContextWindow: 516_000,
+    modelAutoCompactTokenLimit: 460_000,
+  };
+  const preset1m = {
+    model_context_window: 1_000_000,
+    model_auto_compact_token_limit: 900_000,
+  };
+  const sentinel = "MODEL_CAPACITY_3MB_SENTINEL";
+  const largeContent = `${sentinel}:${"上下文容量证据".repeat(220_000)}`;
+  const messages: any[] = [
+    { id: "large-3mb", role: "user", content: largeContent },
+    { id: "tail", role: "assistant", content: "继续执行并保留原始记录" },
+  ];
+  const fallback = buildDeterministicConversationSummary(messages, { goal: sentinel });
+  const request = buildGroupCompactionModelRequest(messages, {}, fallback, {
+    model: "small-window-selftest",
+    modelContextWindow: 64_000,
+    modelMaxOutputTokens: 8_000,
+  });
+  const checks = {
+    ccDefaultUsesTwentyKSummaryReserve: defaultCapacity.contextWindow === 200_000
+      && defaultCapacity.reservedOutputTokens === 20_000
+      && defaultCapacity.effectiveContextWindow === 180_000,
+    ccDefaultAutoCompactThresholdIs167k: getGroupAutoCompactThreshold({}) === 167_000,
+    preset516IsApplied: getGroupEffectiveContextWindow(preset516) === 496_000
+      && getGroupAutoCompactThreshold(preset516) === 460_000,
+    preset1mIsApplied: getGroupEffectiveContextWindow(preset1m) === 980_000
+      && getGroupAutoCompactThreshold(preset1m) === 900_000,
+    threeMbSourceIsNeverSentWhole: request.audit.estimatedInputTokensBefore < estimateTextTokens(largeContent)
+      && request.audit.estimatedInputTokens <= request.audit.maxInputTokens,
+    requestCarriesCapacityProof: request.audit.schema === "ccm-group-compaction-model-request-budget-v1"
+      && request.audit.withinBudget === true
+      && request.audit.rawTranscriptPreserved === true,
+    originalMemoryRemainsUntouched: messages[0].content.length === largeContent.length
+      && messages[0].content.startsWith(sentinel),
+  };
+  return {
+    pass: Object.values(checks).every(Boolean),
+    checks,
+    defaultCapacity,
+    preset516Threshold: getGroupAutoCompactThreshold(preset516),
+    preset1mThreshold: getGroupAutoCompactThreshold(preset1m),
+    requestAudit: request.audit,
+    sourceChars: largeContent.length,
+  };
 }
 
 export async function runGroupCompactStrategyDecisionSelfTest() {

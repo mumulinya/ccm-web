@@ -7,6 +7,9 @@ import { useMusicLyrics } from '../../composables/useMusicLyrics.js'
 import { useMusicPetNotifications } from '../../composables/useMusicPetNotifications.js'
 import { findLocalTrackByKeyword as findTrackInList, formatTrackLabel } from '../../utils/musicTrackHelpers.js'
 import MusicAgentSettingsModal from './MusicAgentSettingsModal.vue'
+import MusicDownloadCenter from './MusicDownloadCenter.vue'
+import { useMusicDownloadJobs } from '../../composables/useMusicDownloadJobs.js'
+import { useMusicLibraryState } from '../../composables/useMusicLibraryState.js'
 
 const props = defineProps({
   agentLabel: { type: String, default: '乖乖' }
@@ -29,6 +32,32 @@ const audioEl = ref(null)
 const leftCanvasRef = ref(null)
 const rightCanvasRef = ref(null)
 const headerCanvasRef = ref(null)
+const newPlaylistName = ref('')
+const selectedPlaylistId = ref('')
+
+const {
+  libraryState,
+  activeLibraryView,
+  isFavorite,
+  loadLibraryState,
+  toggleFavorite: persistFavorite,
+  createPlaylist,
+  updatePlaylist,
+  deletePlaylist: persistDeletePlaylist,
+  setPlaybackQueue,
+} = useMusicLibraryState()
+
+const {
+  downloadJobs,
+  downloadCenterOpen,
+  activeDownloadCount,
+  loadDownloadJobs,
+  createDownloadJob,
+  cancelDownloadJob,
+  retryDownloadJob,
+  clearFinishedDownloadJobs,
+  waitForJob,
+} = useMusicDownloadJobs({ onCompleted: async () => loadTracks() })
 
 const {
   notifyMusicPet,
@@ -211,42 +240,9 @@ const startAudioPlayback = async (track = currentTrack.value, options = {}) => {
 let animFrame = null
 let danmakuFrame = null
 
-// === 原版 AuraPlayer 专属时钟状态 ===
-const currentTimeStr = ref('00:00')
-const currentDateStr = ref('FRIDAY May 22, 2026')
-let clockTimer = null
 let companionTimer = null
 let weatherTimer = null
-
-// === 原版 AuraPlayer 专属系统负载 Mock 状态 ===
-const cpuLoad = ref(8)
-const memUsed = ref(12.4)
-const packetLoss = ref(0.0)
-let statsTimer = null
 let remoteCommandTimer = null
-
-const updateClock = () => {
-  const now = new Date()
-  const hh = String(now.getHours()).padStart(2, '0')
-  const mm = String(now.getMinutes()).padStart(2, '0')
-  currentTimeStr.value = `${hh}:${mm}`
-  
-  const weekdays = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY']
-  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-  const weekday = weekdays[now.getDay()]
-  const month = months[now.getMonth()]
-  const day = now.getDate()
-  const year = now.getFullYear()
-  currentDateStr.value = `${weekday}  ${month} ${day}, ${year}`
-}
-
-const updateSystemStats = () => {
-  cpuLoad.value = Math.max(2, Math.min(99, Math.floor(cpuLoad.value + (Math.random() - 0.5) * 4)))
-  memUsed.value = Math.max(8.0, Math.min(24.0, parseFloat((memUsed.value + (Math.random() - 0.5) * 0.1).toFixed(1))))
-  if (Math.random() > 0.95) {
-    packetLoss.value = parseFloat((Math.random() * 0.5).toFixed(2))
-  }
-}
 
 // Agent 对话
 const {
@@ -257,6 +253,8 @@ const {
   pushAgentMessage,
   appendAgentMessageContent,
   setAgentMessageContent,
+  setAgentMessageResults,
+  buildAgentRequestHistory,
   getAgentMessageKey,
   captureAgentChatScroll,
   updateAgentChatScrollState,
@@ -265,6 +263,10 @@ const {
   detachAgentChatResizeObserver,
   loadChatMessages,
   clearChatHistory,
+  beginAgentRequest,
+  finishAgentRequest,
+  stopAgentRequest,
+  lastUserMessage,
 } = useMusicAgentChat({
   confirmClear: () => confirmDialog('确定要清除聊天历史记录吗？'),
   nowLabel: () => formatTimeHHMMSS(),
@@ -276,8 +278,14 @@ const uploading = ref(false)
 
 // 上传音乐文件
 const uploadFiles = async (e) => {
-  const files = e.target.files
+  const files = Array.from(e.target.files || [])
   if (!files || files.length === 0) return
+  const totalBytes = files.reduce((sum, file) => sum + file.size, 0)
+  if (totalBytes > 100 * 1024 * 1024) {
+    toast.error('一次上传的音频不能超过 100 MB')
+    e.target.value = ''
+    return
+  }
   uploading.value = true
   const formData = new FormData()
   for (const file of files) formData.append('file', file)
@@ -285,9 +293,12 @@ const uploadFiles = async (e) => {
     const res = await fetch('/api/music/upload', { method: 'POST', body: formData })
     const data = await res.json()
     if (data.success && data.uploaded?.length > 0) {
-      loadTracks()
+      await loadTracks()
+      toast.success(`已上传 ${data.uploaded.length} 个音频文件`)
+    } else {
+      toast.error(data.error || '上传失败，请检查音频格式')
     }
-  } catch {}
+  } catch (error) { toast.error(error?.message || '上传失败') }
   uploading.value = false
   e.target.value = ''
 }
@@ -339,7 +350,8 @@ const loadTracks = async () => {
     const res = await fetch('/api/music/list')
     const data = await res.json()
     tracks.value = data.tracks || []
-    playlist.value = tracks.value
+    const savedQueue = (libraryState.value.queue || []).map(filename => tracks.value.find(track => track.filename === filename)).filter(Boolean)
+    playlist.value = savedQueue.length ? savedQueue : tracks.value
     updatePreselectedTrack()
     if (playlist.value.length > 0 && currentIndex.value === -1) {
       currentIndex.value = 0
@@ -374,10 +386,74 @@ const deleteTrack = async (track) => {
 }
 
 const filteredTracks = computed(() => {
-  if (!filterText.value) return tracks.value
+  let source = tracks.value
+  if (activeLibraryView.value === 'favorites') {
+    source = source.filter(track => isFavorite(track.filename))
+  } else if (activeLibraryView.value === 'queue') {
+    source = (libraryState.value.queue || []).map(filename => tracks.value.find(track => track.filename === filename)).filter(Boolean)
+  } else if (activeLibraryView.value.startsWith('playlist:')) {
+    const id = activeLibraryView.value.slice('playlist:'.length)
+    const item = (libraryState.value.playlists || []).find(list => list.id === id)
+    source = (item?.tracks || []).map(filename => tracks.value.find(track => track.filename === filename)).filter(Boolean)
+  }
+  if (!filterText.value) return source
   const q = filterText.value.toLowerCase()
-  return tracks.value.filter(t => t.title.toLowerCase().includes(q) || (t.artist && t.artist.toLowerCase().includes(q)))
+  return source.filter(t => t.title.toLowerCase().includes(q) || (t.artist && t.artist.toLowerCase().includes(q)))
 })
+
+const toggleTrackFavorite = async (track) => {
+  try { await persistFavorite(track) }
+  catch (error) { toast.error(error.message || '更新收藏失败') }
+}
+
+const syncPlaybackQueue = async (nextTracks) => {
+  try {
+    const currentFilename = currentTrack.value?.filename
+    await setPlaybackQueue(nextTracks)
+    playlist.value = nextTracks.length ? nextTracks : tracks.value
+    currentIndex.value = currentFilename ? playlist.value.findIndex(track => track.filename === currentFilename) : (playlist.value.length ? 0 : -1)
+    if (currentIndex.value < 0 && playlist.value.length) currentIndex.value = 0
+  } catch (error) { toast.error(error.message || '更新播放队列失败') }
+}
+
+const addTrackToQueue = (track) => {
+  const current = (libraryState.value.queue || []).map(filename => tracks.value.find(item => item.filename === filename)).filter(Boolean)
+  if (!current.some(item => item.filename === track.filename)) current.push(track)
+  return syncPlaybackQueue(current)
+}
+
+const removeTrackFromQueue = (track) => syncPlaybackQueue(
+  (libraryState.value.queue || []).filter(filename => filename !== track.filename).map(filename => tracks.value.find(item => item.filename === filename)).filter(Boolean)
+)
+
+const submitPlaylist = async () => {
+  const name = newPlaylistName.value.trim()
+  if (!name) return
+  try { await createPlaylist(name); newPlaylistName.value = '' }
+  catch (error) { toast.error(error.message || '创建歌单失败') }
+}
+
+const addTrackToSelectedPlaylist = async (track) => {
+  const item = (libraryState.value.playlists || []).find(list => list.id === selectedPlaylistId.value)
+  if (!item) return toast.error('请先选择歌单')
+  try { await updatePlaylist(item.id, { tracks: [...new Set([...(item.tracks || []), track.filename])] }) }
+  catch (error) { toast.error(error.message || '添加到歌单失败') }
+}
+
+const removeTrackFromActivePlaylist = async (track) => {
+  const id = activeLibraryView.value.slice('playlist:'.length)
+  const item = (libraryState.value.playlists || []).find(list => list.id === id)
+  if (!item) return
+  try { await updatePlaylist(id, { tracks: item.tracks.filter(filename => filename !== track.filename) }) }
+  catch (error) { toast.error(error.message || '移出歌单失败') }
+}
+
+const deleteActivePlaylist = async () => {
+  if (!activeLibraryView.value.startsWith('playlist:')) return
+  const id = activeLibraryView.value.slice('playlist:'.length)
+  try { await persistDeletePlaylist(id); activeLibraryView.value = 'all' }
+  catch (error) { toast.error(error.message || '删除歌单失败') }
+}
 
 // === 播放控制 ===
 const play = async (track, options = {}) => {
@@ -828,8 +904,10 @@ const drawDanmaku = () => {
   draw()
 }
 
-onMounted(() => {
-  loadTracks()
+onMounted(async () => {
+  await loadLibraryState().catch(() => {})
+  await loadTracks()
+  loadDownloadJobs()
   loadAgentConfig()
   loadChatMessages()
   
@@ -892,21 +970,14 @@ onMounted(() => {
     } catch {}
   }, 3000)
 
-  // 开启大时钟与系统监控
   // 播放时长：仅在播放状态下计时，每秒存储到 localStorage
   companionTimer = setInterval(() => {
     recordCompanionSecond(isPlaying.value)
   }, 1000)
-  updateClock()
-  clockTimer = setInterval(updateClock, 1000)
-  
   // 初始获取天气
   fetchWeather()
   // 每30分钟刷新一次天气
   weatherTimer = setInterval(fetchWeather, 30 * 60 * 1000)
-  
-  updateSystemStats()
-  statsTimer = setInterval(updateSystemStats, 2000)
   
   drawDanmaku()
   drawSpectrums()
@@ -925,8 +996,6 @@ onUnmounted(() => {
   if (animFrame) cancelAnimationFrame(animFrame)
   if (danmakuFrame) cancelAnimationFrame(danmakuFrame)
   if (spectrumFrameId) cancelAnimationFrame(spectrumFrameId)
-  if (clockTimer) clearInterval(clockTimer)
-  if (statsTimer) clearInterval(statsTimer)
   if (remoteCommandTimer) clearInterval(remoteCommandTimer)
   if (companionTimer) clearInterval(companionTimer)
   if (weatherTimer) clearInterval(weatherTimer)
@@ -963,36 +1032,33 @@ const sendAgentMessage = async () => {
   pushAgentMessage({ role: 'operator', content: msg, time })
   notifyMusicPetSpeech(msg, { role: 'user', mode: 'replace', final: true, source: 'music-chat' })
   
-  // 模拟 Bash 抓取输出以匹配原版终端风格
-  const mockBashCmd = mode.value === 'cloud'
-    ? `{"command":"curl -s -G 'http://localhost:3080/api/music/search?q=${encodeURIComponent(msg)}' --data-urlencode"}`
-    : mode.value === 'netease'
-      ? `{"command":"curl -s 'https://music.163.com/api/search/get/web?s=${encodeURIComponent(msg)}&type=1'"}`
-      : `{"command":"find_local_tracks --query '${msg}' --library '~/.cc-connect/music'"}`;
-  // pushAgentMessage({ role: 'bash', content: mockBashCmd, time })
-  
   agentLoading.value = true
+  const signal = beginAgentRequest()
   notifyMusicPet(isPlaying.value ? 'juggling' : 'thinking', isPlaying.value ? `正在播放：${formatTrackLabel(currentTrack.value)}` : '音乐助手正在找歌', currentTrack.value)
   notifyMusicPetSpeech('音乐助手正在思考...', { role: 'status', mode: 'replace', source: 'music-chat' })
   await nextTick()
   scrollChat({ force: true })
 
   // 检查统一大模型配置是否可用
-  if (agentConfig.value.enabled && agentConfig.value.hasKey && agentConfig.value.model) {
-    await sendToClaudeAgent(msg)
-  } else {
-    await sendToSimpleAgent(msg)
+  try {
+    if (agentConfig.value.enabled && agentConfig.value.hasKey && agentConfig.value.model) {
+      await sendToClaudeAgent(msg, signal)
+    } else {
+      await sendToSimpleAgent(msg, signal)
+    }
+  } finally {
+    finishAgentRequest()
+    agentLoading.value = false
+    if (isPlaying.value) notifyMusicPetPlaying(currentTrack.value)
+    else notifyMusicPetIdle('音乐助手待命', currentTrack.value)
+    await nextTick()
+    scrollChat()
   }
-
-  agentLoading.value = false
-  if (isPlaying.value) notifyMusicPetPlaying(currentTrack.value)
-  else notifyMusicPetIdle('音乐助手待命', currentTrack.value)
-  await nextTick()
-  scrollChat()
 }
 
-const sendToClaudeAgent = async (msg) => {
+const sendToClaudeAgent = async (msg, signal) => {
   const agentMsg = pushAgentMessage({ role: 'agent', content: '', time: formatTimeHHMMSS() })
+  const requestHistory = buildAgentRequestHistory({ exclude: agentMsg })
   scrollChat()
   let petStreamStarted = false
   let petStreamHadError = false
@@ -1001,7 +1067,8 @@ const sendToClaudeAgent = async (msg) => {
     const res = await fetch('/api/music/agent', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: msg, mode: mode.value, history: agentMessages.value.slice(-10) })
+      body: JSON.stringify({ message: msg, mode: mode.value, history: requestHistory }),
+      signal,
     })
     const reader = res.body.getReader()
     const decoder = new TextDecoder()
@@ -1028,6 +1095,8 @@ const sendToClaudeAgent = async (msg) => {
             petStreamStarted = true
           } else if (data.type === 'music_action') {
             musicAction = data.action || null
+          } else if (data.type === 'music_results') {
+            setAgentMessageResults(agentMsg, data.results || [])
           } else if (data.type === 'error') {
             const anchor = captureAgentChatScroll()
             appendAgentMessageContent(agentMsg, `\n❌ ${data.text}`)
@@ -1052,20 +1121,22 @@ const sendToClaudeAgent = async (msg) => {
     //   })
     //   scrollChat()
     // }
-  } catch {
+  } catch (error) {
     const anchor = captureAgentChatScroll()
-    setAgentMessageContent(agentMsg, '❌ 连接失败，请检查系统设置里的统一大模型配置')
+    const stopped = error?.name === 'AbortError'
+    setAgentMessageContent(agentMsg, stopped ? '已停止本次回复。' : '连接失败，请检查系统设置里的统一大模型配置。')
     scrollChat({ anchor })
-    notifyMusicPetSpeech('连接失败，请检查系统设置里的统一大模型配置', { role: 'error', mode: 'replace', final: true, source: 'music-chat' })
+    notifyMusicPetSpeech(stopped ? '已停止回复' : '连接失败，请检查系统设置里的统一大模型配置', { role: stopped ? 'status' : 'error', mode: 'replace', final: true, source: 'music-chat' })
   }
 }
 
-const sendToSimpleAgent = async (msg) => {
+const sendToSimpleAgent = async (msg, signal) => {
   try {
     const res = await fetch('/api/music/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: msg, mode: mode.value, history: agentMessages.value.slice(-10) })
+      body: JSON.stringify({ message: msg, mode: mode.value, history: agentMessages.value.slice(-10) }),
+      signal,
     })
     const data = await res.json()
     if (data.success) {
@@ -1101,103 +1172,57 @@ const sendToSimpleAgent = async (msg) => {
       scrollChat()
       notifyMusicPetSpeech(errorText, { role: 'error', mode: 'replace', final: true, source: 'music-chat' })
     }
-  } catch {
-    const errorText = '请求失败，请稍后再试。'
+  } catch (error) {
+    const errorText = error?.name === 'AbortError' ? '已停止本次回复。' : '请求失败，请稍后再试。'
     pushAgentMessage({ role: 'agent', content: errorText, time: formatTimeHHMMSS() })
     scrollChat()
     notifyMusicPetSpeech(errorText, { role: 'error', mode: 'replace', final: true, source: 'music-chat' })
   }
 }
 
+const stopAgentGeneration = () => {
+  if (stopAgentRequest()) toast.info('已停止音乐助手回复')
+}
+
+const retryLastAgentMessage = async () => {
+  if (agentLoading.value) return
+  const previous = lastUserMessage()
+  if (!previous?.content) return
+  agentInput.value = previous.content
+  await sendAgentMessage()
+}
+
 const playLocalTrack = (track) => { play(track) }
 
-const convertAndPlay = async (item, options = {}) => {
-  converting.value = { ...converting.value, [item.bvid]: true }
-  const time = formatTimeHHMMSS()
+const downloadResult = async (item, options = {}) => {
+  const identifier = item.type === 'netease' ? item.songId : item.bvid
   const title = String(item.title || '').replace(/<[^>]*>/g, '')
-  pushAgentMessage({ role: 'system', content: `⏳ 正在转码: ${title}...`, time })
-  scrollChat()
+  converting.value = { ...converting.value, [identifier]: true }
   try {
-    const res = await fetch('/api/music/convert', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ bvid: item.bvid, title, author: item.author })
-    })
-    const data = await res.json()
-    if (data.success) {
-      await loadTracks()
-      const newTrack = tracks.value.find(t => t.filename === data.filename)
-      if (newTrack) {
-        newTrack.bvid = item.bvid
-        const playResult = await play(newTrack, options)
-        if (!playResult?.success) {
-          const error = playResult?.error || '播放失败'
-          pushAgentMessage({ role: 'agent', content: `⚠️ 转码完成，但未能自动播放：${error}`, time: formatTimeHHMMSS() })
-          scrollChat()
-          return { success: false, source: 'bilibili', title: newTrack.title || title, filename: data.filename, error }
-        }
-        pushAgentMessage({ role: 'agent', content: `✅ 转码完成，开始播放：${title}`, time: formatTimeHHMMSS() })
-        scrollChat()
-        return { success: true, source: 'bilibili', title: newTrack.title || title, filename: data.filename }
-      }
-      return { success: false, source: 'bilibili', title, error: '转码完成但未在本地曲库中找到文件' }
+    const job = await createDownloadJob(item)
+    if (options.wait === false) return { success: true, queued: true, jobId: job.id, source: item.type, title }
+    const completed = await waitForJob(job.id)
+    await loadTracks()
+    const newTrack = tracks.value.find(track => track.filename === completed.filename)
+    if (!newTrack) throw new Error('下载完成，但歌曲没有出现在本地曲库')
+    if (options.play !== false) {
+      const playResult = await play(newTrack, options)
+      if (!playResult?.success) throw new Error(playResult?.error || '播放失败')
     } else {
-      pushAgentMessage({ role: 'agent', content: `❌ 转码失败: ${data.error}`, time: formatTimeHHMMSS() })
-      scrollChat()
-      return { success: false, source: 'bilibili', title, error: data.error || '转码失败' }
+      await addTrackToQueue(newTrack)
     }
-  } catch (err) {
-    const error = err?.message || '转码出错，请确保已安装 yt-dlp 和 ffmpeg'
-    pushAgentMessage({ role: 'agent', content: `❌ ${error}`, time: formatTimeHHMMSS() })
-    scrollChat()
-    return { success: false, source: 'bilibili', title, error }
+    return { success: true, source: item.type, title: newTrack.title || title, filename: completed.filename }
+  } catch (error) {
+    const message = error?.message || '下载失败'
+    if (!options.silent) toast.error(message)
+    return { success: false, source: item.type, title, error: message }
   } finally {
-    converting.value = { ...converting.value, [item.bvid]: false }
+    converting.value = { ...converting.value, [identifier]: false }
   }
 }
 
-const convertNeteaseAndPlay = async (item, options = {}) => {
-  converting.value = { ...converting.value, [item.songId]: true }
-  const time = formatTimeHHMMSS()
-  pushAgentMessage({ role: 'system', content: `⏳ 正在下载: ${item.title} - ${item.artist}...`, time })
-  scrollChat()
-  try {
-    const res = await fetch('/api/music/convert-netease', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ songId: item.songId, title: item.title, artist: item.artist })
-    })
-    const data = await res.json()
-    if (data.success) {
-      await loadTracks()
-      const newTrack = tracks.value.find(t => t.filename === data.filename)
-      if (newTrack) {
-        const playResult = await play(newTrack, options)
-        if (!playResult?.success) {
-          const error = playResult?.error || '播放失败'
-          pushAgentMessage({ role: 'agent', content: `⚠️ 下载完成，但未能自动播放：${error}`, time: formatTimeHHMMSS() })
-          scrollChat()
-          return { success: false, source: 'netease', title: newTrack.title || item.title, filename: data.filename, error }
-        }
-        pushAgentMessage({ role: 'agent', content: `✅ 下载完成，开始播放：${item.title} - ${item.artist}`, time: formatTimeHHMMSS() })
-        scrollChat()
-        return { success: true, source: 'netease', title: newTrack.title || item.title, filename: data.filename }
-      }
-      return { success: false, source: 'netease', title: item.title, error: '下载完成但未在本地曲库中找到文件' }
-    } else {
-      pushAgentMessage({ role: 'agent', content: `❌ 下载失败: ${data.error}`, time: formatTimeHHMMSS() })
-      scrollChat()
-      return { success: false, source: 'netease', title: item.title, error: data.error || '下载失败' }
-    }
-  } catch (err) {
-    const error = err?.message || '下载出错，请确保已安装 ffmpeg'
-    pushAgentMessage({ role: 'agent', content: `❌ ${error}`, time: formatTimeHHMMSS() })
-    scrollChat()
-    return { success: false, source: 'netease', title: item.title, error }
-  } finally {
-    converting.value = { ...converting.value, [item.songId]: false }
-  }
-}
+const convertAndPlay = (item, options = {}) => downloadResult({ type: 'bilibili', ...item }, options)
+const convertNeteaseAndPlay = (item, options = {}) => downloadResult({ type: 'netease', ...item }, options)
 
 const isTrackAdded = (identifier) => {
   return tracks.value.some(t => t.bvid === identifier || t.filename.includes(identifier))
@@ -1208,17 +1233,22 @@ const playAddedTrack = (bvid) => {
   if (track) play(track)
 }
 
-const addAllTracks = (results) => {
+const addAllTracks = async (results) => {
   if (!results || results.length === 0) return
-  results.forEach(r => {
+  let queued = 0
+  for (const r of results) {
     if (r.type === 'bilibili') {
-      convertAndPlay(r)
+      const result = await convertAndPlay(r, { wait: false, play: false, silent: true })
+      if (result.success) queued += 1
     } else if (r.type === 'netease') {
-      convertNeteaseAndPlay(r)
+      const result = await convertNeteaseAndPlay(r, { wait: false, play: false, silent: true })
+      if (result.success) queued += 1
     } else if (r.type === 'local') {
-      playLocalTrack(r.track)
+      await addTrackToQueue(r.track)
+      queued += 1
     }
-  })
+  }
+  if (queued) toast.success(`已加入 ${queued} 首，网络歌曲可在下载中心查看进度`)
 }
 
 // === 工具 ===
@@ -1353,21 +1383,21 @@ const getMessageResults = (msg) => {
               :class="{ active: mode === 'local' }" 
               @click="mode = 'local'"
             >
-              LOCAL
+              本地
             </button>
             <button 
               class="switch-btn" 
               :class="{ active: mode === 'cloud' }" 
               @click="mode = 'cloud'"
             >
-              BILI
+              B站
             </button>
             <button 
               class="switch-btn" 
               :class="{ active: mode === 'netease' }" 
               @click="mode = 'netease'"
             >
-              163
+              网易云
             </button>
             <div class="switch-slider" :class="{ 'slide-bili': mode === 'cloud', 'slide-netease': mode === 'netease' }"></div>
           </div>
@@ -1382,8 +1412,8 @@ const getMessageResults = (msg) => {
           <div class="atmosphere-header">
             <div class="card-header-status">
               <span class="pulse-dot-green"></span>
-              <span class="status-text-green">LIVE FEED</span>
-              <span class="status-subtext-blue">SYNC: OK</span>
+              <span class="status-text-green">播放动态</span>
+              <span class="status-subtext-blue">已连接</span>
             </div>
           </div>
           
@@ -1500,9 +1530,30 @@ const getMessageResults = (msg) => {
                 <input v-model="filterText" class="queue-filter-input" placeholder="搜索歌曲/艺术家/专辑" />
               </div>
               <label class="upload-btn">
-                <span>↑ 上传</span>
+                <span>{{ uploading ? '上传中' : '↑ 上传' }}</span>
                 <input type="file" multiple accept="audio/*" class="hidden-file-input" @change="uploadFiles" :disabled="uploading" />
               </label>
+              <button class="download-center-button" @click="downloadCenterOpen = !downloadCenterOpen" title="打开下载中心">
+                下载<span v-if="activeDownloadCount">{{ activeDownloadCount }}</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="library-toolbar">
+            <div class="library-tabs" aria-label="音乐库视图">
+              <button :class="{ active: activeLibraryView === 'all' }" @click="activeLibraryView = 'all'">全部</button>
+              <button :class="{ active: activeLibraryView === 'favorites' }" @click="activeLibraryView = 'favorites'">收藏</button>
+              <button :class="{ active: activeLibraryView === 'queue' }" @click="activeLibraryView = 'queue'">播放队列</button>
+              <button v-for="item in libraryState.playlists" :key="item.id" :class="{ active: activeLibraryView === `playlist:${item.id}` }" @click="activeLibraryView = `playlist:${item.id}`">{{ item.name }}</button>
+            </div>
+            <div class="playlist-tools">
+              <input v-model="newPlaylistName" maxlength="80" placeholder="新歌单名称" @keydown.enter="submitPlaylist" />
+              <button @click="submitPlaylist" :disabled="!newPlaylistName.trim()">新建</button>
+              <select v-model="selectedPlaylistId" title="选择要添加的歌单">
+                <option value="">添加到歌单</option>
+                <option v-for="item in libraryState.playlists" :key="item.id" :value="item.id">{{ item.name }}</option>
+              </select>
+              <button v-if="activeLibraryView.startsWith('playlist:')" class="danger-text" @click="deleteActivePlaylist">删除当前歌单</button>
             </div>
           </div>
 
@@ -1542,27 +1593,32 @@ const getMessageResults = (msg) => {
               <div class="qi-artist-col" :title="track.artist || '未知'">{{ track.artist || '未知' }}</div>
               <div class="qi-duration-col">{{ track.duration || '--:--' }}</div>
               <div class="qi-actions-group" @click.stop>
-                <button class="qi-like-btn" :class="{ liked: true }" title="喜欢">❤️</button>
+                <button class="qi-like-btn" :class="{ liked: isFavorite(track.filename) }" :title="isFavorite(track.filename) ? '取消收藏' : '收藏'" @click="toggleTrackFavorite(track)">{{ isFavorite(track.filename) ? '♥' : '♡' }}</button>
+                <button v-if="activeLibraryView === 'queue'" class="qi-action" title="移出播放队列" @click="removeTrackFromQueue(track)">−</button>
+                <button v-else class="qi-action" title="加入播放队列" @click="addTrackToQueue(track)">＋</button>
+                <button v-if="selectedPlaylistId" class="qi-action" title="添加到所选歌单" @click="addTrackToSelectedPlaylist(track)">≡</button>
+                <button v-if="activeLibraryView.startsWith('playlist:')" class="qi-action" title="移出当前歌单" @click="removeTrackFromActivePlaylist(track)">×</button>
                 <button class="qi-del" @click="deleteTrack(track)" title="物理删除">🗑️</button>
               </div>
             </div>
           </div>
 
           <div class="queue-footer-action">
-            <button class="view-all-tracks-btn" @click="filterText = ''">查看全部歌曲 &rarr;</button>
+            <button class="view-all-tracks-btn" @click="filterText = ''; activeLibraryView = 'all'">查看全部歌曲 &rarr;</button>
           </div>
         </div>
 
-        <!-- 5. 转码工作台 (右下) -->
+        <!-- 5. 音乐助手 (右下) -->
         <div class="aura-card chat-console-card">
           <div class="agent-header-row">
             <div class="agent-title-area">
               <span class="pulse-dot-cyan"></span>
-              <span class="agent-title-text">转码工作台</span>
+              <span class="agent-title-text">音乐助手</span>
             </div>
             <div class="agent-status-tags">
-              <span class="status-tag standby">STANDBY</span>
-              <span class="status-tag ok">SESSION_OK</span>
+              <span class="status-tag standby">{{ agentLoading ? '思考中' : '待命' }}</span>
+              <span class="status-tag ok">{{ agentConfigLoaded && agentConfig.hasKey ? '模型已连接' : '基础模式' }}</span>
+              <button class="settings-btn-icon" @click="retryLastAgentMessage" :disabled="agentLoading || !lastUserMessage()" title="重试上一条">↻</button>
               <button class="settings-btn-icon" @click="clearChatHistory" title="清除历史">🧹</button>
               <button class="settings-btn-icon" @click="showSettings = true" title="助手设置">⚙️</button>
             </div>
@@ -1571,17 +1627,10 @@ const getMessageResults = (msg) => {
           <div class="agent-chat-messages" id="agent-chat" ref="agentChatEl" @scroll="updateAgentChatScrollState">
             <div v-for="msg in agentMessages" :key="getAgentMessageKey(msg)" class="aura-chat-row" :class="msg.role">
               
-              <!-- BASH 调试框 -->
-              <div v-if="msg.role === 'bash'" class="bash-log-box">
-                <span class="bash-arrow">▶</span>
-                <span class="bash-tag">[BASH]</span>
-                <span class="bash-code">{{ msg.content }}</span>
-              </div>
-
               <!-- 消息气泡 -->
-              <div v-else class="chat-bubble-container">
+              <div class="chat-bubble-container">
                 <div class="chat-meta">
-                  <span class="meta-role">{{ msg.role === 'agent' ? musicAgentLabel : msg.role === 'operator' ? 'OPERATOR' : 'SYS' }}</span>
+                  <span class="meta-role">{{ msg.role === 'agent' ? musicAgentLabel : msg.role === 'operator' ? '我' : '系统' }}</span>
                   <span class="meta-time">{{ msg.time || '00:00:00' }}</span>
                 </div>
                 <div class="chat-body-text">{{ displayMessageContent(msg.content) }}</div>
@@ -1589,8 +1638,8 @@ const getMessageResults = (msg) => {
                 <!-- 推荐歌曲卡片列表 -->
                 <div v-if="getMessageResults(msg)" class="tracks-card-box">
                   <div class="tracks-card-header">
-                    <span class="tracks-count">[{{ getMessageResults(msg).length }} TRACKS]</span>
-                    <button class="tracks-action-btn" @click="addAllTracks(getMessageResults(msg))">ADD_ALL</button>
+                    <span class="tracks-count">{{ getMessageResults(msg).length }} 首歌曲</span>
+                    <button class="tracks-action-btn" @click="addAllTracks(getMessageResults(msg))" :disabled="getMessageResults(msg).some(item => item.type !== 'local' && !item.downloadToken)">全部添加</button>
                   </div>
                   <div class="tracks-list-container">
                     <div v-for="(r, j) in getMessageResults(msg)" :key="j" class="track-list-item">
@@ -1601,17 +1650,17 @@ const getMessageResults = (msg) => {
                         </span>
                       </div>
                       <div class="t-actions">
-                        <button v-if="r.type === 'local'" class="aura-add-btn added" @click="playLocalTrack(r.track)">ADDED</button>
+                        <button v-if="r.type === 'local'" class="aura-add-btn added" @click="playLocalTrack(r.track)">播放</button>
                         <template v-else-if="r.type === 'netease'">
-                          <button v-if="isTrackAdded(String(r.songId))" class="aura-add-btn added" @click="playAddedTrack(String(r.songId))">ADDED</button>
-                          <button v-else class="aura-add-btn" @click="convertNeteaseAndPlay(r)" :disabled="converting[r.songId]">
-                            {{ converting[r.songId] ? '⏳' : '+ ADD' }}
+                          <button v-if="isTrackAdded(String(r.songId))" class="aura-add-btn added" @click="playAddedTrack(String(r.songId))">播放</button>
+                          <button v-else class="aura-add-btn" @click="convertNeteaseAndPlay(r)" :disabled="converting[r.songId] || !r.downloadToken">
+                            {{ !r.downloadToken ? '重新搜索' : converting[r.songId] ? '处理中' : '添加' }}
                           </button>
                         </template>
                         <template v-else>
-                          <button v-if="isTrackAdded(r.bvid)" class="aura-add-btn added" @click="playAddedTrack(r.bvid)">ADDED</button>
-                          <button v-else class="aura-add-btn" @click="convertAndPlay(r)" :disabled="converting[r.bvid]">
-                            {{ converting[r.bvid] ? '⏳' : '+ ADD' }}
+                          <button v-if="isTrackAdded(r.bvid)" class="aura-add-btn added" @click="playAddedTrack(r.bvid)">播放</button>
+                          <button v-else class="aura-add-btn" @click="convertAndPlay(r)" :disabled="converting[r.bvid] || !r.downloadToken">
+                            {{ !r.downloadToken ? '重新搜索' : converting[r.bvid] ? '处理中' : '添加' }}
                           </button>
                         </template>
                       </div>
@@ -1626,7 +1675,7 @@ const getMessageResults = (msg) => {
                 <div class="chat-meta">
                   <span class="meta-role">{{ musicAgentLabel }}</span>
                 </div>
-                <div class="chat-body-text blink-cursor">SEARCHING_NEURAL_DATABASE...</div>
+                <div class="chat-body-text blink-cursor">正在理解你的需求...</div>
               </div>
             </div>
             <div id="agent-chat-end"></div>
@@ -1635,8 +1684,9 @@ const getMessageResults = (msg) => {
           <!-- 输入栏 -->
           <div class="agent-input-container">
             <span class="prompt-arrow">▶</span>
-            <input v-model="agentInput" class="aura-command-input" placeholder="Hi, 告诉我你想听什么..." @keydown.enter="sendAgentMessage" />
-            <button class="aura-send-btn-micro" @click="sendAgentMessage" :disabled="agentLoading">发送</button>
+            <input v-model="agentInput" class="aura-command-input" placeholder="告诉我你想听什么..." @keydown.enter="sendAgentMessage" :disabled="agentLoading" />
+            <button v-if="agentLoading" class="aura-send-btn-micro stop" @click="stopAgentGeneration">停止</button>
+            <button v-else class="aura-send-btn-micro" @click="sendAgentMessage" :disabled="!agentInput.trim()">发送</button>
           </div>
         </div>
 
@@ -1714,6 +1764,15 @@ const getMessageResults = (msg) => {
 
     </div>
 
+    <MusicDownloadCenter
+      :open="downloadCenterOpen"
+      :jobs="downloadJobs"
+      @close="downloadCenterOpen = false"
+      @cancel="job => cancelDownloadJob(job).catch(error => toast.error(error.message))"
+      @retry="job => retryDownloadJob(job).catch(error => toast.error(error.message))"
+      @clear="clearFinishedDownloadJobs().catch(error => toast.error(error.message))"
+    />
+
     <MusicAgentSettingsModal
       v-if="showSettings"
       :config="agentConfig"
@@ -1743,7 +1802,7 @@ const getMessageResults = (msg) => {
   border: 1px solid rgba(165, 139, 255, 0.12) !important;
   background: rgba(20, 16, 38, 0.5) !important;
   backdrop-filter: blur(28px) saturate(160%) !important;
-  border-radius: 24px !important; 
+  border-radius: 8px !important;
   padding: 16px 20px !important; 
   box-sizing: border-box !important;
   box-shadow: 0 12px 48px rgba(10, 5, 20, 0.5) !important;
@@ -1752,7 +1811,6 @@ const getMessageResults = (msg) => {
 
 /* 卡片悬停微交互 */
 .aura-card:hover {
-  transform: translateY(-4px);
   box-shadow: 0 20px 56px rgba(123, 97, 255, 0.2) !important;
   border-color: rgba(165, 139, 255, 0.25) !important;
 }
@@ -2577,6 +2635,8 @@ const getMessageResults = (msg) => {
   justify-content: flex-end;
   max-width: 280px;
 }
+.download-center-button{height:30px;border:1px solid rgba(73,197,182,.45);background:rgba(73,197,182,.08);color:#9be3da;border-radius:4px;padding:0 9px;cursor:pointer;white-space:nowrap}.download-center-button span{display:inline-flex;align-items:center;justify-content:center;min-width:17px;height:17px;margin-left:5px;padding:0 4px;border-radius:9px;background:#49c5b6;color:#101417;font-size:10px}.library-toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;min-height:30px}.library-tabs{display:flex;flex:1 1 0;gap:3px;overflow-x:auto;min-width:0;max-width:100%;padding-bottom:2px}.library-tabs button,.playlist-tools button{height:26px;border:1px solid transparent;background:transparent;color:#aaa0ba;border-radius:4px;padding:0 8px;white-space:nowrap;cursor:pointer}.library-tabs button.active{background:rgba(73,197,182,.12);border-color:rgba(73,197,182,.35);color:#b9f0e9}.playlist-tools{display:flex;align-items:center;gap:4px;flex-shrink:0}.playlist-tools input,.playlist-tools select{height:26px;max-width:120px;border:1px solid #494056;background:#16131f;color:#ddd5e8;border-radius:4px;padding:0 7px;outline:none}.playlist-tools button{border-color:#494056}.playlist-tools .danger-text{color:#ff9da6}.qi-action{width:24px;height:24px;border:0;background:transparent;color:#afa4bd;cursor:pointer;font-size:16px}.qi-action:hover{color:#78d8cb}.aura-send-btn-micro.stop{border-color:#d76a75;color:#ff9da6}
+.library-toolbar{flex-direction:column;align-items:stretch;gap:5px}.library-toolbar .library-tabs{flex:0 0 auto}.playlist-tools{justify-content:flex-end;min-width:0}
 .search-input-wrapper {
   position: relative;
   flex: 1;
@@ -2620,7 +2680,7 @@ const getMessageResults = (msg) => {
 }
 .queue-list-head {
   display: grid;
-  grid-template-columns: 24px 2.5fr 1.5fr 70px 80px;
+  grid-template-columns: 24px 2.5fr 1.5fr 70px 130px;
   gap: 8px;
   font-size: 9px;
   font-weight: 800;
@@ -2643,7 +2703,7 @@ const getMessageResults = (msg) => {
 /* 强力隔离外部样式污染 */
 .queue-item {
   display: grid !important;
-  grid-template-columns: 24px 2.5fr 1.5fr 70px 80px !important;
+  grid-template-columns: 24px 2.5fr 1.5fr 70px 130px !important;
   align-items: center !important;
   gap: 8px !important;
   padding: 4px 10px !important;
@@ -2790,7 +2850,7 @@ const getMessageResults = (msg) => {
   cursor: pointer;
 }
 
-/* 5. 转码工作台 */
+/* 5. 音乐助手 */
 .chat-console-card {
   grid-column: 2;
   grid-row: 2;
@@ -3212,11 +3272,132 @@ const getMessageResults = (msg) => {
     grid-template-rows: auto !important;
     overflow-y: auto;
   }
-  .local-library-card {
-    grid-column: 1 !important;
-  }
+  .atmosphere-card,
+  .lyric-vinyl-assistant-card,
+  .local-library-card,
   .chat-console-card {
     grid-column: 1 !important;
+    grid-row: auto !important;
+    width: 100%;
+    min-width: 0;
+  }
+}
+
+@media (max-width: 760px) {
+  .aura-main-container {
+    padding: 8px;
+    gap: 8px;
+  }
+  .aura-header {
+    height: 56px;
+    padding: 0 10px;
+    border-radius: 8px;
+  }
+  .header-dashboard-widgets,
+  .header-spectrum-section {
+    display: none;
+  }
+  .header-logo-section {
+    gap: 6px;
+  }
+  .header-logo-vinyl {
+    width: 26px;
+    height: 26px;
+  }
+  .header-subtitle {
+    display: none;
+  }
+  .header-switch-section {
+    width: auto;
+  }
+  .switch-btn {
+    padding: 5px 8px;
+    font-size: 9px;
+  }
+  .aura-os-grid {
+    grid-template-rows: 130px 360px 180px 390px !important;
+    gap: 8px;
+    padding-right: 3px;
+  }
+  .atmosphere-card {
+    grid-row: 1 !important;
+  }
+  .chat-console-card {
+    grid-row: 2 !important;
+  }
+  .lyric-vinyl-assistant-card {
+    grid-row: 3 !important;
+    flex-direction: row !important;
+  }
+  .local-library-card {
+    grid-row: 4 !important;
+  }
+  .aura-card {
+    border-radius: 8px !important;
+    padding: 10px 12px !important;
+  }
+  .chat-console-card {
+    padding: 0 !important;
+  }
+  .vinyl-section,
+  .assistant-section {
+    display: none;
+  }
+  .queue-header,
+  .queue-tools {
+    align-items: stretch;
+  }
+  .queue-header {
+    flex-direction: column;
+    gap: 8px;
+  }
+  .queue-tools {
+    max-width: none;
+  }
+  .agent-status-tags {
+    gap: 4px;
+  }
+  .status-tag {
+    font-size: 8px;
+    padding: 2px 5px;
+  }
+  .chat-body-text {
+    font-size: 12px;
+  }
+  .bottom-mega-player {
+    height: 58px;
+    padding: 0 10px;
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .mega-player-content {
+    gap: 8px;
+  }
+  .mega-section.left-section {
+    width: calc(100% - 116px);
+    min-width: 0;
+  }
+  .mega-section.center-section {
+    width: 108px;
+    flex: none;
+  }
+  .mega-section.right-section {
+    display: none;
+  }
+  .mini-play-controls {
+    gap: 8px;
+  }
+  .mega-cover-box {
+    width: 34px;
+    height: 34px;
+    flex: none;
+  }
+  .mega-track-meta {
+    max-width: calc(100% - 42px);
+  }
+  .mega-track-title,
+  .mega-track-artist {
+    max-width: 100%;
   }
 }
 </style>

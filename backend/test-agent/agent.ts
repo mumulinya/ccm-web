@@ -18,6 +18,7 @@ import { buildTestAgentReport } from "./result-builder";
 import { TestAgentReport, TestAgentRuntimeOptions, TestAgentWorkOrder } from "./types";
 import { nowIso } from "./utils";
 import { normalizeTestAgentWorkOrder } from "./work-order";
+import { pruneTestAgentArtifacts } from "./artifact-retention";
 
 export async function runTestAgent(input: TestAgentWorkOrder, options: TestAgentRuntimeOptions = {}): Promise<TestAgentReport> {
   const startedAt = nowIso();
@@ -113,5 +114,7 @@ export async function runTestAgent(input: TestAgentWorkOrder, options: TestAgent
     browserToolCalls,
     browserResourceLifecycleEvents: browserResourceLifecycle?.getEvents() || [],
   });
-  return writeTestAgentArtifacts(report);
+  const written = writeTestAgentArtifacts(report);
+  pruneTestAgentArtifacts({ excludeDirs: [written.artifactDir] });
+  return written;
 }

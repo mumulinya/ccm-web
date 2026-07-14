@@ -1,8 +1,8 @@
 export declare function localDateKey(date?: Date): string;
 export declare function generateAutoDevDailyReport(dateKey?: string): any;
-export declare function upsertAutoDevDailyReport(dateKey?: string): any;
+export declare function upsertAutoDevDailyReport(dateKey?: string, options?: any): any;
 export declare function generateAutoDevWeeklyReport(dateKey?: string): any;
-export declare function upsertAutoDevWeeklyReport(dateKey?: string): any;
+export declare function upsertAutoDevWeeklyReport(dateKey?: string, options?: any): any;
 export declare function normalizeAutoDevNotifyConfig(input?: any): {
     daily_enabled: boolean;
     daily_time: string;

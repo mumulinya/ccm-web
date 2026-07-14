@@ -19,6 +19,12 @@ export const projectsApi = {
   create: (data) => api('/api/projects/create', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
   update: (data) => api('/api/projects/update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
   delete: (name) => api('/api/projects/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) }),
+  archive: (name) => api('/api/projects/archive', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) }),
+  archived: () => api('/api/projects/archived'),
+  restore: (name) => api('/api/projects/restore', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) }),
+  purgePreview: (name) => api('/api/projects/purge-preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) }),
+  purge: (name, previewToken) => api('/api/projects/purge', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, preview_token: previewToken }) }),
+  lifecycleAudit: (limit = 100) => api(`/api/projects/lifecycle-audit?limit=${encodeURIComponent(limit)}`),
   start: (project, agent) => api('/api/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ project, agent }) }),
   stop: (project) => api('/api/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ project }) }),
 };
@@ -41,7 +47,11 @@ export const groupsApi = {
   create: (data) => api('/api/groups/create', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
   delete: (id) => api('/api/groups/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) }),
   rename: (data) => api('/api/groups/rename', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
-  messages: (id, limit = 100) => api(`/api/groups/messages?id=${id}&limit=${limit}`),
+  messages: (id, limit = 100, sessionId = '') => api(`/api/groups/messages?id=${encodeURIComponent(id)}&limit=${limit}${sessionId ? `&session_id=${encodeURIComponent(sessionId)}` : ''}`),
+  sessions: (id) => api(`/api/groups/sessions?id=${encodeURIComponent(id)}`),
+  createSession: (id, title = '') => api('/api/groups/sessions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, action: 'create', title }) }),
+  selectSession: (id, sessionId) => api('/api/groups/sessions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, action: 'select', session_id: sessionId }) }),
+  sessionAction: (id, sessionId, action, extra = {}) => api('/api/groups/sessions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, session_id: sessionId, action, ...extra }) }),
   send: (data) => data instanceof FormData
     ? fetch('/api/groups/send?stream=1', { method: 'POST', body: data })
     : fetch('/api/groups/send?stream=1', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
@@ -93,6 +103,10 @@ export const toolsApi = {
   },
   runtimeReadiness: (deep = false) => api(`/api/tools/runtime-readiness?deep=${deep ? '1' : '0'}`),
   runtimeResync: (data = {}) => api('/api/tools/runtime-resync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
+  realCliMatrix: {
+    status: () => api('/api/tools/runtime-real-cli-matrix'),
+    run: (data = {}) => api('/api/tools/runtime-real-cli-matrix', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
+  },
   mcp: {
     list: () => api('/api/mcp'),
     create: (data) => api('/api/mcp', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),

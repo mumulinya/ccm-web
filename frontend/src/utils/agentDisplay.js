@@ -86,8 +86,16 @@ export const sanitizeUserFacingLegacyTerminology = (value = '') => String(value 
   .replace(/\bverified\b/gi, '已核对')
   .replace(/used\s*\/\s*ignored\s*\/\s*verified/gi, '已使用/未使用/已核对')
 
+const normalizeUserFacingWhitespace = (value = '') => String(value || '')
+  .replace(/\r\n?/g, '\n')
+  .split('\n')
+  .map(line => line.replace(/[\t\f\v ]+/g, ' ').trim())
+  .join('\n')
+  .replace(/\n{3,}/g, '\n\n')
+  .trim()
+
 export const sanitizeUserFacingAgentText = (value, fallback = '我正在处理当前请求。', max = 260) => {
-  let text = String(value || '').replace(/\s+/g, ' ').trim()
+  let text = normalizeUserFacingWhitespace(value)
   if (!text) text = fallback
   if (INTERNAL_TEXT_PATTERN.test(text)) {
     if (/error|失败|权限|denied|invalid|门禁/i.test(text)) text = '我遇到执行保护或权限问题，正在继续排查；详细信息已放入技术详情。'
@@ -252,24 +260,67 @@ export const getStreamlinedToolSummary = (source, fallback = '') => {
 
 export const getTechnicalDetailSections = (source, fallbackTechnical = null) => {
   const stream = getDisplayStream(source)
-  if (Array.isArray(stream?.technical_details) && stream.technical_details.length) return stream.technical_details
-  if (Array.isArray(stream?.workchain?.technical_details) && stream.workchain.technical_details.length) return stream.workchain.technical_details
+  const normalizeSections = (sections) => sections.map(section => ({
+    ...section,
+    items: (section.items || []).map(item => String(item?.label || '').toLowerCase() === 'trace'
+      ? { ...item, label: '执行记录', value: '已关联' }
+      : item),
+  }))
   const technical = fallbackTechnical || source?.technical || {}
+  const sourceIngestion = source?.source_ingestion || source?.sourceIngestion || technical.source_ingestion || technical.sourceIngestion || null
+  const requirementExtraction = source?.requirement_extraction || source?.requirementExtraction || technical.requirement_extraction || technical.requirementExtraction || null
+  const sourceSections = []
+  if (Array.isArray(sourceIngestion?.sources) && sourceIngestion.sources.length) {
+    sourceSections.push({
+      id: 'requirement-sources',
+      title: '需求资料',
+      items: sourceIngestion.sources.slice(0, 12).map(item => ({
+        label: item.name || item.type || '资料',
+        value: [item.status || 'unknown', item.parser || '', item.truncated ? '内容已截断' : '', item.error || ''].filter(Boolean).join(' · '),
+      })),
+    })
+  }
+  if (sourceIngestion && (sourceIngestion.extraction_method || sourceIngestion.extraction_error || sourceIngestion.fallback_used || sourceIngestion.warnings?.length)) {
+    sourceSections.push({
+      id: 'requirement-ingestion-detail',
+      title: '需求资料处理',
+      items: [
+        sourceIngestion.extraction_method ? { label: '提取方式', value: sourceIngestion.extraction_method } : null,
+        sourceIngestion.fallback_used ? { label: '降级状态', value: '已改用本地规则整理' } : null,
+        sourceIngestion.extraction_error ? { label: '提取错误', value: sourceIngestion.extraction_error } : null,
+        sourceIngestion.warnings?.length ? { label: '处理提示', value: sourceIngestion.warnings.join('；') } : null,
+      ].filter(Boolean),
+    })
+  }
+  if (requirementExtraction) {
+    sourceSections.push({
+      id: 'requirement-extraction',
+      title: '需求提取',
+      items: [
+        { label: '方式', value: requirementExtraction.extraction_method || requirementExtraction.extractionMethod || 'unknown' },
+        requirementExtraction.source_evidence?.length ? { label: '依据', value: requirementExtraction.source_evidence.join('、') } : null,
+        requirementExtraction.clarification_questions?.length ? { label: '待确认', value: requirementExtraction.clarification_questions.join('；') } : null,
+      ].filter(Boolean),
+    })
+  }
+  if (Array.isArray(stream?.technical_details) && stream.technical_details.length) return normalizeSections([...stream.technical_details, ...sourceSections])
+  if (Array.isArray(stream?.workchain?.technical_details) && stream.workchain.technical_details.length) return normalizeSections([...stream.workchain.technical_details, ...sourceSections])
   const troubleshooting = []
   const records = []
   if (technical.failed_gates?.length) troubleshooting.push({ label: '未通过验收', value: sanitizeUserFacingAgentText(technical.failed_gates.map(item => item.label || item.id || item).join('、'), '仍有验收检查未通过。', 240) })
   if (technical.blockers?.length) troubleshooting.push({ label: '阻塞', value: technical.blockers.slice(0, 5).join('；') })
-  if (technical.trace_id) records.push({ label: 'Trace', value: technical.trace_id })
+  if (technical.trace_id) records.push({ label: '执行记录', value: '已关联' })
   if (technical.execution_ids?.length) records.push({ label: '执行', value: technical.execution_ids.join('、') })
   if (technical.session_ids?.length) records.push({ label: '会话', value: technical.session_ids.join('、') })
   if (technical.run_id) records.push({ label: 'Run', value: technical.run_id })
   if (technical.parent_run_id) records.push({ label: '上轮', value: technical.parent_run_id })
   if (technical.supervisor_id) records.push({ label: '跟进记录', value: technical.supervisor_id })
   if (technical.gap_fingerprint) records.push({ label: '缺口指纹', value: technical.gap_fingerprint })
-  return [
+  return normalizeSections([
     { id: 'troubleshooting', title: '排障摘要', items: troubleshooting },
     { id: 'records', title: '完整记录', items: records },
-  ].filter(section => section.items.length)
+    ...sourceSections,
+  ].filter(section => section.items.length))
 }
 
 const testAgentArtifactLabel = (value = '') => {

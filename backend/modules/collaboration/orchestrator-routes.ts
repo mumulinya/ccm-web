@@ -6,11 +6,13 @@ import {
   loadOrchestratorConfig,
   publicOrchestratorConfig,
   saveOrchestratorConfig,
+  testUnifiedModelConnection,
 } from "./group-orchestrator";
 import {
   ensureDailyDevAutopilotCronJobs,
   runDailyDevAutopilotOnce,
 } from "./daily-dev-backlog";
+import { recordModelCapabilityEvidence } from "./model-capability-cache";
 
 type OrchestratorRouteDeps = {
   buildCoordinatorSharedFilesContext: (ctx: any, group: any) => string;
@@ -55,10 +57,35 @@ export function handleOrchestratorRoutes(
       try {
         const updates = JSON.parse(body);
         const config = saveOrchestratorConfig(updates);
+        if (Number(config.modelContextWindow || 0) > 0
+          && ["modelContextWindow", "model_context_window", "memoryContextPreset", "memory_context_preset"].some(key => Object.prototype.hasOwnProperty.call(updates, key))) {
+          recordModelCapabilityEvidence({
+            provider: String(config.provider || config.format || "group-main-agent"),
+            model: String(config.model || ""),
+            source: "user_setting",
+            contextWindow: Number(config.modelContextWindow),
+            maxOutputTokens: Number(config.modelMaxOutputTokens || 20_000),
+            checkedAt: new Date().toISOString(),
+            evidenceId: "memory-center-context-setting",
+          });
+        }
+        if (["groupSessionAutoPruneEnabled", "group_session_auto_prune_enabled", "groupSessionRetentionIntervalHours", "group_session_retention_interval_hours"].some(key => Object.prototype.hasOwnProperty.call(updates, key))) {
+          const { startGroupSessionRetentionMaintenanceScheduler } = require("./group-session-maintenance");
+          startGroupSessionRetentionMaintenanceScheduler();
+        }
         sendJson(res, { success: true, config: publicOrchestratorConfig(config) });
       } catch (e: any) {
         sendJson(res, { error: e.message }, 400);
       }
+    });
+    return true;
+  }
+
+  if (pathname === "/api/orchestrator/connection-test" && req.method === "POST") {
+    void testUnifiedModelConnection().then(result => {
+      sendJson(res, result, result.success ? 200 : 422);
+    }).catch((error: any) => {
+      sendJson(res, { success: false, message: error?.message || "模型连接测试失败" }, 500);
     });
     return true;
   }

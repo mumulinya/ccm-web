@@ -46,6 +46,18 @@ function normalizePetType(type) {
   return ALLOWED_BUILTIN_PET_TYPES.has(value) ? value : BUILTIN_FALLBACK_PET_TYPE;
 }
 
+function getPetTypeMetadata(type) {
+  const customTypes = Array.isArray(config.customTypes) ? config.customTypes : [];
+  const skin = customTypes.find(item => item && item.id === type);
+  if (!skin) return null;
+  return {
+    id: skin.id,
+    name: skin.name || skin.id,
+    spriteVersionNumber: Number(skin.spriteVersionNumber || 1),
+    spritesheetPath: String(skin.spritesheetPath || ''),
+  };
+}
+
 function getPetWindowSize(size) {
   return {
     width: Math.max(size, SPEECH_MIN_WIDTH),
@@ -282,6 +294,7 @@ function createPetWindow(agent, petType, label = petLabels.get(agent) || agent) 
       agent,
       label,
       type: petType,
+      skin: getPetTypeMetadata(petType),
       state: agentStates[agent] || 'idle',
       size: savedSize
     });

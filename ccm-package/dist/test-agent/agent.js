@@ -17,6 +17,7 @@ const http_verifier_1 = require("./http-verifier");
 const result_builder_1 = require("./result-builder");
 const utils_1 = require("./utils");
 const work_order_1 = require("./work-order");
+const artifact_retention_1 = require("./artifact-retention");
 async function runTestAgent(input, options = {}) {
     const startedAt = (0, utils_1.nowIso)();
     const normalized = (0, work_order_1.normalizeTestAgentWorkOrder)(input, options);
@@ -105,6 +106,8 @@ async function runTestAgent(input, options = {}) {
         browserToolCalls,
         browserResourceLifecycleEvents: browserResourceLifecycle?.getEvents() || [],
     });
-    return (0, artifacts_1.writeTestAgentArtifacts)(report);
+    const written = (0, artifacts_1.writeTestAgentArtifacts)(report);
+    (0, artifact_retention_1.pruneTestAgentArtifacts)({ excludeDirs: [written.artifactDir] });
+    return written;
 }
 //# sourceMappingURL=agent.js.map

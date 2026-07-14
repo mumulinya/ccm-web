@@ -3,6 +3,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { CCM_DIR } from "../core/utils";
+import { appendTaskReplayJournalEvent } from "./task-replay-journal";
 
 const ROOT = path.join(CCM_DIR, "reliability");
 const TRACE_DIR = path.join(ROOT, "traces");
@@ -87,6 +88,9 @@ export function appendTraceEvent(traceId: string, event: any) {
   if (next.task_id) current.task_id = next.task_id;
   if (next.group_id) current.group_id = next.group_id;
   writeJsonAtomic(file, current);
+  if (next.task_id) {
+    try { appendTaskReplayJournalEvent(next.task_id, { ...next, trace_id: id }); } catch {}
+  }
   return next;
 }
 

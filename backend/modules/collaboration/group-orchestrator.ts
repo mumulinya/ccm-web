@@ -2,7 +2,8 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import * as crypto from "crypto";
-import { getConfigInfo } from "../../core/db";
+import { getConfigInfo, recordMetric } from "../../core/db";
+import { isCredentialReference, protectCredential, resolveCredential } from "../../core/credential-store";
 import {
   buildWorkerContextPacket,
   compactWorkerContextMemoryForRetry,
@@ -16,12 +17,14 @@ import {
   callOpenAiCompatibleJson,
   extractJsonObject,
   shouldUseAnthropic,
+  type LlmTokenUsage,
 } from "./group-orchestrator-llm-client";
 import {
   getCollectedOutputAgent,
   parseTaskNotificationsFromText,
 } from "./agent-notifications";
 import {
+  buildPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairContext,
   buildPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationContext,
   inspectPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryHealth,
   buildGroupTypedMemoryPressureRecallUsageProjectSummary,
@@ -42,6 +45,7 @@ import {
   getGroupTypedMemoryPressureRecallUsageLedgerFile,
   recordGroupTypedMemoryPressureRecallUsageLedger,
 } from "./group-memory-index";
+import { resolveTrustedModelContextCapacity } from "./model-capability-cache";
 
 export const COORDINATOR_PROJECT = "coordinator";
 
@@ -63,6 +67,20 @@ const GROUP_MEMORY_WORKER_CONTEXT_COMPACT_OUTCOMES_DIR = path.join(CCM_DIR, "gro
 const GROUP_MEMORY_WORKER_CONTEXT_COMPACT_STRATEGIES_DIR = path.join(CCM_DIR, "group-memory-worker-context-compact-strategies");
 const GROUP_MEMORY_WORKER_CONTEXT_PTL_EMERGENCIES_DIR = path.join(CCM_DIR, "group-memory-worker-context-ptl-emergencies");
 
+function mergeLlmTokenUsage(...values: any[]): LlmTokenUsage | null {
+  const usages = values.filter(value => value && typeof value === "object");
+  if (!usages.length) return null;
+  const inputTokens = usages.reduce((total, value) => total + Math.max(0, Math.floor(Number(value.inputTokens || value.input_tokens || 0) || 0)), 0);
+  const outputTokens = usages.reduce((total, value) => total + Math.max(0, Math.floor(Number(value.outputTokens || value.output_tokens || 0) || 0)), 0);
+  if (inputTokens <= 0 && outputTokens <= 0) return null;
+  return { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens, reported: true };
+}
+
+function attachLlmTokenUsage(error: any, usage: LlmTokenUsage | null) {
+  if (error && usage) error.usage = mergeLlmTokenUsage(error.usage, usage);
+  return error;
+}
+
 export function defaultOrchestratorConfig() {
   return {
     enabled: true,
@@ -73,38 +91,242 @@ export function defaultOrchestratorConfig() {
     temperature: 0.2,
     timeoutMs: 120000,
     fallbackToRules: true,
+    memoryContextPreset: "default",
+    modelContextWindow: 0,
+    modelAutoCompactTokenLimit: 0,
+    typedMemoryDeliveryMaxDocuments: 5,
+    typedMemoryDeliveryMaxBytesPerDocument: 4096,
+    typedMemoryDeliveryMaxLinesPerDocument: 200,
+    typedMemoryDeliveryMaxSessionBytes: 60 * 1024,
+    typedMemoryDeliveryMaxTokens: 5000,
+    groupSessionRetentionDays: 30,
+    groupSessionMaxArchived: 20,
+    groupSessionAutoPruneEnabled: false,
+    groupSessionRetentionIntervalHours: 24,
+    groupSessionArtifactAutoArchiveEnabled: true,
+    groupSessionArtifactHotExecutions: 50,
+    groupSessionArtifactMaxHotMb: 64,
+    groupSessionArtifactMaxAgeDays: 30,
   };
+}
+
+function writeStoredOrchestratorConfig(stored: any) {
+  fs.mkdirSync(path.dirname(ORCHESTRATOR_CONFIG_FILE), { recursive: true });
+  const temp = `${ORCHESTRATOR_CONFIG_FILE}.${process.pid}.${Date.now()}.tmp`;
+  fs.writeFileSync(temp, JSON.stringify(stored, null, 2), "utf-8");
+  fs.renameSync(temp, ORCHESTRATOR_CONFIG_FILE);
 }
 
 export function loadOrchestratorConfig() {
   try {
     if (!fs.existsSync(ORCHESTRATOR_CONFIG_FILE)) return defaultOrchestratorConfig();
-    return { ...defaultOrchestratorConfig(), ...JSON.parse(fs.readFileSync(ORCHESTRATOR_CONFIG_FILE, "utf-8")) };
+    const stored = JSON.parse(fs.readFileSync(ORCHESTRATOR_CONFIG_FILE, "utf-8"));
+    if (stored.apiKey && !isCredentialReference(stored.apiKey)) {
+      const protectedApiKey = protectCredential("unified-model", "apiKey", stored.apiKey);
+      try { writeStoredOrchestratorConfig({ ...stored, apiKey: protectedApiKey }); } catch {}
+      stored.apiKey = protectedApiKey;
+    }
+    return {
+      ...defaultOrchestratorConfig(),
+      ...stored,
+      apiKey: stored.apiKey ? resolveCredential(stored.apiKey) : "",
+    };
   } catch {
     return defaultOrchestratorConfig();
   }
+}
+
+function persistOrchestratorConfig(config: any) {
+  const stored = {
+    ...config,
+    apiKey: config.apiKey ? protectCredential("unified-model", "apiKey", config.apiKey) : "",
+  };
+  writeStoredOrchestratorConfig(stored);
 }
 
 export function saveOrchestratorConfig(updates: any) {
   const current = loadOrchestratorConfig();
   const next = { ...current };
   if (updates.enabled !== undefined) next.enabled = !!updates.enabled;
-  if (updates.format !== undefined) next.format = String(updates.format || "openai-compatible");
-  if (updates.apiUrl !== undefined) next.apiUrl = String(updates.apiUrl || "").trim();
+  if (updates.format !== undefined) {
+    const format = String(updates.format || "openai-compatible").trim();
+    if (!["auto", "openai-compatible", "anthropic-compatible"].includes(format)) throw new Error("不支持的大模型接口协议");
+    next.format = format;
+  }
+  if (updates.apiUrl !== undefined) {
+    const apiUrl = String(updates.apiUrl || "").trim();
+    if (apiUrl && !/^https?:\/\//i.test(apiUrl)) throw new Error("大模型 API 地址必须以 http:// 或 https:// 开头");
+    next.apiUrl = apiUrl;
+  }
   if (updates.model !== undefined) next.model = String(updates.model || "").trim();
-  if (updates.temperature !== undefined) next.temperature = Number(updates.temperature);
-  if (updates.timeoutMs !== undefined) next.timeoutMs = Number(updates.timeoutMs);
+  if (updates.temperature !== undefined) {
+    const temperature = Number(updates.temperature);
+    if (!Number.isFinite(temperature) || temperature < 0 || temperature > 1) throw new Error("模型温度必须介于 0 和 1");
+    next.temperature = temperature;
+  }
+  if (updates.timeoutMs !== undefined) {
+    const timeoutMs = Number(updates.timeoutMs);
+    if (!Number.isFinite(timeoutMs) || timeoutMs < 5_000 || timeoutMs > 300_000) throw new Error("模型超时必须介于 5,000 和 300,000 毫秒");
+    next.timeoutMs = Math.floor(timeoutMs);
+  }
   if (updates.fallbackToRules !== undefined) next.fallbackToRules = !!updates.fallbackToRules;
+  const memoryContextPreset = updates.memoryContextPreset ?? updates.memory_context_preset;
+  const modelContextWindow = updates.modelContextWindow ?? updates.model_context_window;
+  const modelAutoCompactTokenLimit = updates.modelAutoCompactTokenLimit ?? updates.model_auto_compact_token_limit;
+  const typedMemoryDeliveryLimits = [
+    ["typedMemoryDeliveryMaxDocuments", "typed_memory_delivery_max_documents", 1, 5, "记忆投递文件数必须介于 1 和 5"],
+    ["typedMemoryDeliveryMaxBytesPerDocument", "typed_memory_delivery_max_bytes_per_document", 512, 4096, "单份记忆投递容量必须介于 512 和 4096 bytes"],
+    ["typedMemoryDeliveryMaxLinesPerDocument", "typed_memory_delivery_max_lines_per_document", 10, 200, "单份记忆投递行数必须介于 10 和 200 行"],
+    ["typedMemoryDeliveryMaxSessionBytes", "typed_memory_delivery_max_session_bytes", 4096, 60 * 1024, "任务会话单个压缩周期的记忆投递容量必须介于 4096 和 61440 bytes"],
+    ["typedMemoryDeliveryMaxTokens", "typed_memory_delivery_max_tokens", 500, 20_000, "记忆投递 token 上限必须介于 500 和 20000"],
+  ] as const;
+  if (memoryContextPreset !== undefined) {
+    const preset = String(memoryContextPreset || "default").trim().toLowerCase();
+    if (!["default", "516k", "1m", "custom"].includes(preset)) throw new Error("不支持的上下文容量预设");
+    next.memoryContextPreset = preset;
+  }
+  if (modelContextWindow !== undefined) {
+    const value = Number(modelContextWindow || 0);
+    if (!Number.isFinite(value) || value < 0 || value > 4_000_000) throw new Error("上下文窗口必须介于 0 和 4,000,000 token");
+    next.modelContextWindow = Math.floor(value);
+  }
+  if (modelAutoCompactTokenLimit !== undefined) {
+    const value = Number(modelAutoCompactTokenLimit || 0);
+    if (!Number.isFinite(value) || value < 0 || value > 3_980_000) throw new Error("自动压缩阈值必须介于 0 和 3,980,000 token");
+    next.modelAutoCompactTokenLimit = Math.floor(value);
+  }
+  for (const [camelKey, snakeKey, min, max, errorMessage] of typedMemoryDeliveryLimits) {
+    const raw = updates[camelKey] ?? updates[snakeKey];
+    if (raw === undefined) continue;
+    const value = Number(raw);
+    if (!Number.isFinite(value) || value < min || value > max) throw new Error(errorMessage);
+    next[camelKey] = Math.floor(value);
+  }
+  const groupSessionRetentionDays = updates.groupSessionRetentionDays ?? updates.group_session_retention_days;
+  const groupSessionMaxArchived = updates.groupSessionMaxArchived ?? updates.group_session_max_archived;
+  if (groupSessionRetentionDays !== undefined) {
+    const value = Number(groupSessionRetentionDays);
+    if (!Number.isFinite(value) || value < 1 || value > 3650) throw new Error("会话保留天数必须介于 1 和 3650 天");
+    next.groupSessionRetentionDays = Math.floor(value);
+  }
+  if (groupSessionMaxArchived !== undefined) {
+    const value = Number(groupSessionMaxArchived);
+    if (!Number.isFinite(value) || value < 1 || value > 1000) throw new Error("最大归档会话数必须介于 1 和 1000");
+    next.groupSessionMaxArchived = Math.floor(value);
+  }
+  const groupSessionAutoPruneEnabled = updates.groupSessionAutoPruneEnabled ?? updates.group_session_auto_prune_enabled;
+  const groupSessionRetentionIntervalHours = updates.groupSessionRetentionIntervalHours ?? updates.group_session_retention_interval_hours;
+  const groupSessionArtifactAutoArchiveEnabled = updates.groupSessionArtifactAutoArchiveEnabled ?? updates.group_session_artifact_auto_archive_enabled;
+  const groupSessionArtifactHotExecutions = updates.groupSessionArtifactHotExecutions ?? updates.group_session_artifact_hot_executions;
+  const groupSessionArtifactMaxHotMb = updates.groupSessionArtifactMaxHotMb ?? updates.group_session_artifact_max_hot_mb;
+  const groupSessionArtifactMaxAgeDays = updates.groupSessionArtifactMaxAgeDays ?? updates.group_session_artifact_max_age_days;
+  if (groupSessionAutoPruneEnabled !== undefined) next.groupSessionAutoPruneEnabled = groupSessionAutoPruneEnabled === true;
+  if (groupSessionRetentionIntervalHours !== undefined) {
+    const value = Number(groupSessionRetentionIntervalHours);
+    if (!Number.isFinite(value) || value < 1 || value > 720) throw new Error("会话保留维护周期必须介于 1 和 720 小时");
+    next.groupSessionRetentionIntervalHours = Math.floor(value);
+  }
+  if (groupSessionArtifactAutoArchiveEnabled !== undefined) next.groupSessionArtifactAutoArchiveEnabled = groupSessionArtifactAutoArchiveEnabled === true;
+  if (groupSessionArtifactHotExecutions !== undefined) {
+    const value = Number(groupSessionArtifactHotExecutions);
+    if (!Number.isFinite(value) || value < 2 || value > 1000) throw new Error("热抽取记录数必须介于 2 和 1000");
+    next.groupSessionArtifactHotExecutions = Math.floor(value);
+  }
+  if (groupSessionArtifactMaxHotMb !== undefined) {
+    const value = Number(groupSessionArtifactMaxHotMb);
+    if (!Number.isFinite(value) || value < 1 || value > 10240) throw new Error("抽取制品热存储上限必须介于 1 和 10240 MB");
+    next.groupSessionArtifactMaxHotMb = Math.floor(value);
+  }
+  if (groupSessionArtifactMaxAgeDays !== undefined) {
+    const value = Number(groupSessionArtifactMaxAgeDays);
+    if (!Number.isFinite(value) || value < 1 || value > 3650) throw new Error("抽取制品热存储天数必须介于 1 和 3650 天");
+    next.groupSessionArtifactMaxAgeDays = Math.floor(value);
+  }
+  if (Number(next.modelContextWindow || 0) > 0) {
+    if (Number(next.modelContextWindow) < 32_000) throw new Error("自定义上下文窗口不能小于 32,000 token");
+    if (Number(next.modelAutoCompactTokenLimit || 0) >= Number(next.modelContextWindow) - 3_000) {
+      throw new Error("自动压缩阈值必须至少比上下文窗口低 3,000 token");
+    }
+  }
   if (updates.apiKey !== undefined && String(updates.apiKey || "").trim()) {
     next.apiKey = String(updates.apiKey).trim();
   }
-  fs.writeFileSync(ORCHESTRATOR_CONFIG_FILE, JSON.stringify(next, null, 2));
+  persistOrchestratorConfig(next);
   return next;
 }
 
 export function publicOrchestratorConfig(config = loadOrchestratorConfig()) {
   const { apiKey, ...safe } = config;
-  return { ...safe, hasKey: !!apiKey, boundary: buildGroupMainAgentBoundary("config") };
+  return {
+    ...safe,
+    hasKey: !!apiKey,
+    credentialProtected: !!apiKey,
+    consumers: ["global-agent", "group-main-agent", "music-agent"],
+    boundary: buildGroupMainAgentBoundary("config"),
+  };
+}
+
+function friendlyUnifiedModelError(error: any) {
+  const text = String(error?.message || error || "模型连接失败");
+  if (/HTTP\s+(401|403)/i.test(text)) return "API Key 无效或没有访问权限";
+  if (/HTTP\s+404/i.test(text)) return "接口地址或模型端点不正确";
+  if (/HTTP\s+429/i.test(text)) return "模型服务当前限流，请稍后重试";
+  if (/abort|timeout|timed out/i.test(text)) return "模型连接超时";
+  if (/API URL 未配置/i.test(text)) return "请填写 API 接口地址";
+  if (/API Key 未配置/i.test(text)) return "请填写 API Key";
+  if (/模型未配置/i.test(text)) return "请填写模型名称";
+  return text.replace(/\s+/g, " ").slice(0, 240);
+}
+
+export async function testUnifiedModelConnection() {
+  const config = loadOrchestratorConfig();
+  const startedAt = Date.now();
+  const provider = shouldUseAnthropic(config) ? "anthropic-compatible" : "openai-compatible";
+  const consumers = [
+    { id: "global-agent", label: "全局 Agent" },
+    { id: "group-main-agent", label: "群聊主 Agent" },
+    { id: "music-agent", label: "音乐 Agent" },
+  ];
+  try {
+    if (config.enabled === false) throw new Error("统一大模型已关闭");
+    const testConfig = { ...config, timeoutMs: Math.min(20_000, Math.max(5_000, Number(config.timeoutMs) || 15_000)) };
+    const messages = [{ role: "user", content: "仅回复 OK" }];
+    const content = provider === "anthropic-compatible"
+      ? await callAnthropicCompatibleChat(testConfig, {
+        system: "你正在执行 CCM 统一大模型连通性检查。",
+        messages,
+        maxTokens: 16,
+        temperature: 0,
+        defaultTimeoutMs: 15_000,
+      })
+      : await callOpenAiCompatibleChat(testConfig, {
+        messages: [{ role: "system", content: "你正在执行 CCM 统一大模型连通性检查。" }, ...messages],
+        maxTokens: 16,
+        temperature: 0,
+        defaultTimeoutMs: 15_000,
+      });
+    if (!String(content || "").trim()) throw new Error("模型返回了空响应");
+    const latencyMs = Date.now() - startedAt;
+    return {
+      success: true,
+      checkedAt: new Date().toISOString(),
+      latencyMs,
+      provider,
+      model: config.model,
+      message: `连接正常，响应耗时 ${latencyMs} ms`,
+      consumers: consumers.map(item => ({ ...item, ready: true })),
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      checkedAt: new Date().toISOString(),
+      latencyMs: Date.now() - startedAt,
+      provider,
+      model: config.model || "",
+      message: friendlyUnifiedModelError(error),
+      consumers: consumers.map(item => ({ ...item, ready: false })),
+    };
+  }
 }
 
 function buildGroupMainAgentBoundary(planner = "coded_fallback") {
@@ -370,7 +592,7 @@ export function buildCoordinatorMaintenanceNotificationInstructions(groupInput: 
   const health = inspectPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryHealth(groupId, {
     at: options.at || options.now,
   });
-  const text = context.pending_count
+  const notificationText = context.pending_count
     ? `冷归档维护提醒（只读建议，不是任务或授权；不得据此创建子 Agent 任务、签发 GC 回执或删除数据）：\n${JSON.stringify({
       group_id: context.group_id,
       pending_count: context.pending_count,
@@ -382,7 +604,20 @@ export function buildCoordinatorMaintenanceNotificationInstructions(groupInput: 
       policy: context.policy,
     })}`
     : "";
-  return { text, context, health };
+  const cleanupCommitRepairContext = buildPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairContext(
+    groupId,
+    "group-main-agent",
+    { limit: options.cleanupCommitRepairLimit || options.cleanup_commit_repair_limit || 4 },
+  );
+  const repairText = cleanupCommitRepairContext.brief_count > 0
+    ? `Cleanup commit repair briefs（仅限本群修复规划；不会自动创建真实任务；claim/dispatch 需要显式动作，resolve/cancel 还需要独立、单次 resolution receipt）：\n${JSON.stringify(cleanupCommitRepairContext)}`
+    : "";
+  return {
+    text: [notificationText, repairText].filter(Boolean).join("\n\n"),
+    context,
+    health,
+    cleanup_commit_repair_context: cleanupCommitRepairContext,
+  };
 }
 
 export function buildMemberPrompt(input: {
@@ -628,7 +863,7 @@ function extractDocumentFindingsFromText(value: any, sourceLabel = "", limit = 8
 function getLazyRagQueryKnowledgeBase(): null | ((query: string, limit?: number, filterTags?: string[]) => string) {
   try {
     // 避免 group-orchestrator.ts 与 rag.ts 顶层循环 import；运行时懒加载即可。
-    const mod = require("./rag");
+    const mod = require("../knowledge/rag");
     return typeof mod.queryKnowledgeBase === "function" ? mod.queryKnowledgeBase : null;
   } catch {
     return null;
@@ -6587,6 +6822,9 @@ export async function runLlmCoordinatorSummary(group: any, userMessage: string, 
   const coordinator = getCoordinatorMember(group);
   const validOutputs = (outputs || []).filter(Boolean);
   if (validOutputs.length === 0) return null;
+  const startedAt = Date.now();
+  let tokenUsage: LlmTokenUsage | null = null;
+  const captureTokenUsage = (usage: LlmTokenUsage) => { tokenUsage = mergeLlmTokenUsage(tokenUsage, usage); };
 
   const childReplies = validOutputs.map((text, i) => `--- 子 Agent task-notification ${i + 1} ---\n${String(text).slice(0, 2000)}`).join("\n\n");
 
@@ -6610,17 +6848,22 @@ export async function runLlmCoordinatorSummary(group: any, userMessage: string, 
       { role: "user", content: user },
     ];
     const content = shouldUseAnthropic(config)
-      ? await callAnthropicCompatibleChat(config, { messages, system, maxTokens: 1000, temperature: 0.3, defaultTimeoutMs: 30000 })
-      : await callOpenAiCompatibleChat(config, { messages, temperature: 0.3, defaultTimeoutMs: 30000 });
+      ? await callAnthropicCompatibleChat(config, { messages, system, maxTokens: 1000, temperature: 0.3, defaultTimeoutMs: 30000, onUsage: captureTokenUsage })
+      : await callOpenAiCompatibleChat(config, { messages, temperature: 0.3, defaultTimeoutMs: 30000, onUsage: captureTokenUsage });
 
     const summary = sanitizeCoordinatorUserText(content, "主 Agent 已收到子 Agent 的结果，正在整理下一步。", 1200);
-    if (!summary.trim()) return null;
+    if (!summary.trim()) {
+      recordMetric(coordinator.project, { success: false, durationMs: Date.now() - startedAt, scopeType: "group", groupId: group.id, role: "main_agent", source: "coordinator-summary", runtime: "llm-api", usage: tokenUsage, error: "主 Agent 汇总返回空内容" });
+      return null;
+    }
+    recordMetric(coordinator.project, { success: true, durationMs: Date.now() - startedAt, scopeType: "group", groupId: group.id, role: "main_agent", source: "coordinator-summary", runtime: "llm-api", usage: tokenUsage });
     return {
       agent: coordinator.project,
       content: `📋 **协调汇总**\n\n${summary}`,
     };
   } catch (err: any) {
     console.error("[LLM汇总] 调用失败:", err.message);
+    recordMetric(coordinator.project, { success: false, durationMs: Date.now() - startedAt, scopeType: "group", groupId: group.id, role: "main_agent", source: "coordinator-summary", runtime: "llm-api", usage: tokenUsage, error: err?.message || String(err) });
     return null; // 回退到模板汇总
   }
 }
@@ -6630,7 +6873,7 @@ export async function runLlmCoordinatorReview(
   userMessage: string,
   coordinatorPlan: string,
   outputs: string[],
-  options: { allowFollowUps?: boolean; round?: number; maxRounds?: number; requiresCodeChanges?: boolean; requiresVerification?: boolean } = {}
+  options: { allowFollowUps?: boolean; round?: number; maxRounds?: number; requiresCodeChanges?: boolean; requiresVerification?: boolean; traceId?: string; taskId?: string; executionId?: string } = {}
 ) {
   const config = loadOrchestratorConfig();
   const configIssue = getLlmConfigIssue(config);
@@ -6641,6 +6884,9 @@ export async function runLlmCoordinatorReview(
   const allowed = new Map(getRoutableMembers(normalized).map((m: any) => [m.project, m]));
   const validOutputs = (outputs || []).filter(Boolean);
   if (validOutputs.length === 0) return null;
+  const startedAt = Date.now();
+  let tokenUsage: LlmTokenUsage | null = null;
+  const captureTokenUsage = (usage: LlmTokenUsage) => { tokenUsage = mergeLlmTokenUsage(tokenUsage, usage); };
 
   const allowFollowUps = options.allowFollowUps !== false;
   const round = Math.max(1, Number(options.round || 1));
@@ -6729,8 +6975,8 @@ ${childReplies}
       { role: "user", content: user },
     ];
     const content = shouldUseAnthropic(config)
-      ? await callAnthropicCompatibleChat(config, { messages, system, maxTokens: 1400, temperature: 0.2, defaultTimeoutMs: 30000 })
-      : await callOpenAiCompatibleChat(config, { messages, temperature: 0.2, defaultTimeoutMs: 30000 });
+      ? await callAnthropicCompatibleChat(config, { messages, system, maxTokens: 1400, temperature: 0.2, defaultTimeoutMs: 30000, onUsage: captureTokenUsage })
+      : await callOpenAiCompatibleChat(config, { messages, temperature: 0.2, defaultTimeoutMs: 30000, onUsage: captureTokenUsage });
 
     const parsed = extractJsonObject(content);
     if (!parsed) throw new Error("主 Agent 复盘未返回有效 JSON");
@@ -6822,6 +7068,19 @@ ${childReplies}
       }
     }
 
+    recordMetric(coordinator.project, {
+      success: true,
+      durationMs: Date.now() - startedAt,
+      scopeType: "group",
+      groupId: normalized.id,
+      role: "main_agent",
+      source: "coordinator-review",
+      runtime: "llm-api",
+      traceId: options.traceId || "",
+      taskId: options.taskId || "",
+      executionId: options.executionId || "",
+      usage: tokenUsage,
+    });
     return {
       agent: coordinator.project,
       status,
@@ -6834,6 +7093,20 @@ ${childReplies}
     };
   } catch (err: any) {
     console.error("[LLM复盘] 调用失败:", err.message);
+    recordMetric(coordinator.project, {
+      success: false,
+      durationMs: Date.now() - startedAt,
+      scopeType: "group",
+      groupId: normalized.id,
+      role: "main_agent",
+      source: "coordinator-review",
+      runtime: "llm-api",
+      traceId: options.traceId || "",
+      taskId: options.taskId || "",
+      executionId: options.executionId || "",
+      usage: tokenUsage,
+      error: err?.message || String(err),
+    });
     return null;
   }
 }
@@ -8263,7 +8536,7 @@ function compactWorkerContextMetadataCategoriesForRetry(packet: any = {}, baseOp
   return { compacted, options: compactedOptions, summary, policy };
 }
 
-function buildWorkerContextPacketForAssignment(baseAssignment: any, dependsOn: string, replayRepairDispatchBriefs: any[], options: any = {}) {
+export function buildWorkerContextPacketForAssignment(baseAssignment: any, dependsOn: string, replayRepairDispatchBriefs: any[], options: any = {}) {
   const dependencies = Array.isArray(options.workerContextDependencies || options.worker_context_dependencies)
     ? (options.workerContextDependencies || options.worker_context_dependencies)
     : dependsOn ? [{ project: dependsOn, reason: "前置依赖" }] : [];
@@ -8271,6 +8544,47 @@ function buildWorkerContextPacketForAssignment(baseAssignment: any, dependsOn: s
   const memoryPolicy = options.memoryPolicy || options.memory_policy || (memory && typeof memory === "object" ? (memory.memory_policy || memory.memoryPolicy) : null) || null;
   const groupId = String(baseAssignment.scopeId || options.group?.id || options.groupId || options.group_id || "").trim();
   const agentType = String(baseAssignment.agentType || baseAssignment.agent_type || options.agentType || options.agent_type || "unknown").trim() || "unknown";
+  const model = String(baseAssignment.model || baseAssignment.model_id || options.model || options.modelId || options.model_id || "").trim();
+  const configuredCapabilities = options.workerModelCapabilities || options.worker_model_capabilities || {};
+  const providerCapability = options.providerCapability
+    || options.provider_capability
+    || configuredCapabilities[`${agentType}::${model}`]
+    || configuredCapabilities[agentType]
+    || null;
+  const modelContextCapacity = resolveTrustedModelContextCapacity({
+    provider: agentType,
+    model,
+    providerCapability,
+    nativeExecutorReceipt: options.nativeModelCapabilityReceipt || options.native_model_capability_receipt,
+    userSetting: options.workerModelContextWindow || options.worker_model_context_window
+      ? {
+          source: "user_setting",
+          contextWindow: options.workerModelContextWindow || options.worker_model_context_window,
+          maxOutputTokens: options.workerModelMaxOutputTokens || options.worker_model_max_output_tokens,
+          checkedAt: options.workerModelCapacityCheckedAt || options.worker_model_capacity_checked_at,
+        }
+      : null,
+  });
+  const requestedContextUsageOptions = options.workerContextUsageOptions || options.worker_context_usage_options || {};
+  const workerContextUsageOptions = {
+    maxTokens: modelContextCapacity.effectiveContextWindow,
+    reservedOutputTokens: modelContextCapacity.reservedOutputTokens,
+    autoCompactBufferTokens: modelContextCapacity.autoCompactBufferTokens,
+    capacityProvenance: modelContextCapacity,
+    ...requestedContextUsageOptions,
+  };
+  const cleanupCommitRepairContext = groupId
+    ? buildPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairContext(
+      groupId,
+      "project-child-agent",
+      {
+        assignmentId: baseAssignment.assignmentId || baseAssignment.assignment_id || "",
+        project: baseAssignment.project || "",
+        agentType,
+        childSessionId: baseAssignment.childSessionId || baseAssignment.child_session_id || options.childSessionId || options.child_session_id || "",
+      },
+    )
+    : null;
   const pressureProvenanceDispatchFeedbackPolicy = groupId ? buildPressureProvenancePreDispatchComplianceDispatchPolicy(groupId, {
     targetProject: baseAssignment.project,
     agentType,
@@ -8309,12 +8623,14 @@ function buildWorkerContextPacketForAssignment(baseAssignment: any, dependsOn: s
     dependencies,
     contractInjections: baseAssignment.contractInjections || baseAssignment.contract_injections || options.contractInjections || options.contract_injections || [],
     replayRepairDispatchBriefs,
+    cleanupCommitRepairContext: cleanupCommitRepairContext?.brief_count > 0 ? cleanupCommitRepairContext : null,
     memory,
     memoryPolicy,
     pressureProvenanceDispatchFeedbackPolicy,
     pressureProvenanceProviderDispatchAdvisory,
     providerSwitchDecisionReceipt: options.providerSwitchDecisionReceipt || options.provider_switch_decision_receipt || null,
-    contextUsageOptions: options.workerContextUsageOptions || options.worker_context_usage_options || null,
+    modelContextCapacity,
+    contextUsageOptions: workerContextUsageOptions,
   });
 }
 
@@ -14002,21 +14318,33 @@ async function runLlmGroupOrchestrator(input: {
   const fallbackAnalysis = buildDocumentAwareAnalysis(group, input);
 
   const messages = buildLlmCoordinatorMessages(input);
-  const parsed = shouldUseAnthropic(config)
-    ? await callAnthropicCompatibleJson(config, {
-        messages,
-        maxTokens: 1500,
-        defaultTimeoutMs: 45000,
-        httpErrorPrefix: "主 Agent API 调用失败",
-      })
-    : await callOpenAiCompatibleJson(config, {
-        messages,
-        defaultTimeoutMs: 45000,
-        httpErrorPrefix: "主 Agent API 调用失败",
-      });
+  let tokenUsage: LlmTokenUsage | null = null;
+  const captureTokenUsage = (usage: LlmTokenUsage) => { tokenUsage = mergeLlmTokenUsage(tokenUsage, usage); };
+  let parsed: any;
+  try {
+    parsed = shouldUseAnthropic(config)
+      ? await callAnthropicCompatibleJson(config, {
+          messages,
+          maxTokens: 1500,
+          defaultTimeoutMs: 45000,
+          httpErrorPrefix: "主 Agent API 调用失败",
+          onUsage: captureTokenUsage,
+        })
+      : await callOpenAiCompatibleJson(config, {
+          messages,
+          defaultTimeoutMs: 45000,
+          httpErrorPrefix: "主 Agent API 调用失败",
+          onUsage: captureTokenUsage,
+        });
+  } catch (error: any) {
+    throw attachLlmTokenUsage(error, tokenUsage);
+  }
   const analysis = normalizeLlmAnalysis(parsed, fallbackAnalysis);
   const targets = sanitizeLlmTargets(group, parsed, input.message, analysis, !!config.fallbackToRules && isStructuredCoordinatorFallbackAllowed(input));
-  return buildCoordinatorResultFromAnalysis(group, input.message, analysis, targets, "llm-api", parsed, input);
+  return {
+    ...buildCoordinatorResultFromAnalysis(group, input.message, analysis, targets, "llm-api", parsed, input),
+    usage: tokenUsage,
+  };
 }
 
 export function isStructuredCoordinatorFallbackAllowed(input: { source?: string; message?: string }) {
@@ -14029,7 +14357,7 @@ export function isStructuredCoordinatorFallbackAllowed(input: { source?: string;
   return trustedSource && structuredPacket;
 }
 
-export async function runGroupOrchestrator(input: {
+export type GroupOrchestratorInput = {
   group: any;
   message: string;
   context?: string;
@@ -14045,7 +14373,15 @@ export async function runGroupOrchestrator(input: {
   context_id?: string;
   sessionId?: string;
   session_id?: string;
-}) {
+  traceId?: string;
+  trace_id?: string;
+  taskId?: string;
+  task_id?: string;
+  executionId?: string;
+  execution_id?: string;
+};
+
+async function runGroupOrchestratorCore(input: GroupOrchestratorInput) {
   const raggedInput = withGroupRagContext(input);
   const group = normalizeGroupOrchestrator(raggedInput.group);
   const replayRepairContext = buildCoordinatorReplayRepairDispatchContext(group);
@@ -14113,6 +14449,7 @@ export async function runGroupOrchestrator(input: {
     });
     return await runLlmGroupOrchestrator({ ...enrichedInput, group });
   } catch (error: any) {
+    const firstAttemptUsage = error?.usage || null;
     if (isContextLimitError(error) && enrichedInput.context) {
       try {
         buildCoordinatorMaintenanceNotificationInstructions(group, {
@@ -14128,6 +14465,7 @@ export async function runGroupOrchestrator(input: {
         });
         return {
           ...recovered,
+          usage: mergeLlmTokenUsage(firstAttemptUsage, recovered?.usage),
           contextRecovery: {
             type: "reactive-compact",
             originalChars: String(enrichedInput.context || "").length,
@@ -14135,7 +14473,7 @@ export async function runGroupOrchestrator(input: {
           },
         };
       } catch (recoveryError: any) {
-        error = recoveryError;
+        error = attachLlmTokenUsage(recoveryError, firstAttemptUsage);
       }
     }
     if (config.fallbackToRules && safeCodedFallback) {
@@ -14147,6 +14485,7 @@ export async function runGroupOrchestrator(input: {
       return {
         ...fallback,
         runtime: "coded-fallback",
+        usage: error?.usage || null,
         agentBoundary: buildGroupMainAgentBoundary("coded_fallback"),
         content: informationalFallback ? fallback.content : `${fallback.content}\n\n主 Agent API 回退：${error.message}`,
       };
@@ -14156,6 +14495,7 @@ export async function runGroupOrchestrator(input: {
       delegated: [],
       assignments: [],
       runtime: "llm-error",
+      usage: error?.usage || null,
       agentBoundary: buildGroupMainAgentBoundary("llm-error"),
       content: [
         "主 Agent 大模型调用失败，本轮不分派子 Agent。",
@@ -14165,6 +14505,48 @@ export async function runGroupOrchestrator(input: {
         "请检查主 Agent API 配置、网络、模型名或 Key 是否有效。"
       ].join("\n"),
     };
+  }
+}
+
+export async function runGroupOrchestrator(input: GroupOrchestratorInput) {
+  const startedAt = Date.now();
+  const group = normalizeGroupOrchestrator(input.group);
+  const coordinator = getCoordinatorMember(group);
+  try {
+    const result = await runGroupOrchestratorCore(input);
+    const runtime = String((result as any)?.runtime || "");
+    recordMetric(coordinator.project, {
+      success: !["llm-error", "llm-not-configured"].includes(runtime),
+      durationMs: Date.now() - startedAt,
+      fileChangeCount: 0,
+      scopeType: "group",
+      groupId: group.id,
+      role: "main_agent",
+      source: String(input.source || "group-orchestrator"),
+      runtime,
+      traceId: input.traceId || input.trace_id || "",
+      taskId: input.taskId || input.task_id || "",
+      executionId: input.executionId || input.execution_id || "",
+      usage: (result as any)?.usage || null,
+      error: runtime === "llm-error" ? "群聊主 Agent 大模型调用失败" : runtime === "llm-not-configured" ? "群聊主 Agent 模型未配置" : "",
+    });
+    return result;
+  } catch (error: any) {
+    recordMetric(coordinator.project, {
+      success: false,
+      durationMs: Date.now() - startedAt,
+      fileChangeCount: 0,
+      scopeType: "group",
+      groupId: group.id,
+      role: "main_agent",
+      source: String(input.source || "group-orchestrator"),
+      traceId: input.traceId || input.trace_id || "",
+      taskId: input.taskId || input.task_id || "",
+      executionId: input.executionId || input.execution_id || "",
+      usage: error?.usage || null,
+      error: error?.message || String(error),
+    });
+    throw error;
   }
 }
 

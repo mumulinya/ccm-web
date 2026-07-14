@@ -36,7 +36,30 @@ function writeJsonAtomic(file: string, value: any) {
     try { fs.copyFileSync(file, `${file}.bak`); } catch {}
   }
   fs.writeFileSync(temp, JSON.stringify(value, null, 2), "utf-8");
-  fs.renameSync(temp, file);
+  let lastError: any = null;
+  for (let attempt = 0; attempt < 8; attempt++) {
+    try {
+      fs.renameSync(temp, file);
+      return;
+    } catch (error: any) {
+      lastError = error;
+      if (!["EPERM", "EACCES", "EBUSY", "EEXIST"].includes(String(error?.code || ""))) throw error;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20 * (attempt + 1));
+    }
+  }
+  for (let attempt = 0; attempt < 12; attempt++) {
+    try {
+      if (fs.existsSync(file)) fs.unlinkSync(file);
+      fs.renameSync(temp, file);
+      return;
+    } catch (error: any) {
+      lastError = error;
+      if (!["EPERM", "EACCES", "EBUSY", "EEXIST", "ENOENT"].includes(String(error?.code || ""))) break;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50 * (attempt + 1));
+    }
+  }
+  try { if (fs.existsSync(temp)) fs.unlinkSync(temp); } catch {}
+  throw lastError || new Error(`无法替换 JSON 文件：${file}`);
 }
 
 // === 代理类型定义 ===
@@ -185,79 +208,197 @@ export function deleteSkill(name: string) {
 }
 
 // === Metrics ===
+const METRICS_EVENT_LIMIT = 1200;
+const METRICS_DURATION_SAMPLE_LIMIT = 240;
+
+function emptyMetricsStore() {
+  return { version: 2, agents: {}, daily: {}, scopes: {}, events: [], updatedAt: null };
+}
+
+function localDateKey(value: Date | string | number = new Date()) {
+  const date = value instanceof Date ? value : new Date(value);
+  const pad = (part: number) => String(part).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+function finiteMetricNumber(value: any) {
+  const number = Number(value || 0);
+  return Number.isFinite(number) && number > 0 ? number : 0;
+}
+
+function normalizeMetricsStore(value: any) {
+  const store = value && typeof value === "object" ? value : {};
+  return {
+    ...store,
+    version: 2,
+    agents: store.agents && typeof store.agents === "object" ? store.agents : {},
+    daily: store.daily && typeof store.daily === "object" ? store.daily : {},
+    scopes: store.scopes && typeof store.scopes === "object" ? store.scopes : {},
+    events: Array.isArray(store.events) ? store.events.slice(-METRICS_EVENT_LIMIT) : [],
+    updatedAt: store.updatedAt || store.updated_at || null,
+  };
+}
+
+function createMetricAggregate() {
+  return {
+    calls: 0,
+    successes: 0,
+    failures: 0,
+    totalMs: 0,
+    avgMs: 0,
+    totalFileChanges: 0,
+    lastFileChangeCount: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    totalCostUsd: 0,
+    totalCost: 0,
+    usageReportedCalls: 0,
+    durationsMs: [],
+    lastCall: null,
+  };
+}
+
+function applyMetricAggregate(target: any, data: any, at: string) {
+  const aggregate = target && typeof target === "object" ? target : createMetricAggregate();
+  const durationMs = finiteMetricNumber(data.durationMs ?? data.duration_ms);
+  const fileChangeCount = finiteMetricNumber(data.fileChangeCount ?? data.file_change_count);
+  const usage = data.usage && typeof data.usage === "object" ? data.usage : {};
+  const inputTokens = finiteMetricNumber(data.inputTokens ?? data.input_tokens ?? usage.inputTokens ?? usage.input_tokens);
+  const outputTokens = finiteMetricNumber(data.outputTokens ?? data.output_tokens ?? usage.outputTokens ?? usage.output_tokens);
+  const costUsd = finiteMetricNumber(data.totalCostUsd ?? data.total_cost_usd ?? data.costUsd ?? data.cost_usd ?? usage.totalCostUsd ?? usage.total_cost_usd ?? data.totalCost);
+
+  aggregate.calls = finiteMetricNumber(aggregate.calls) + 1;
+  aggregate.successes = finiteMetricNumber(aggregate.successes) + (data.success === true ? 1 : 0);
+  aggregate.failures = finiteMetricNumber(aggregate.failures) + (data.success === true ? 0 : 1);
+  aggregate.totalMs = finiteMetricNumber(aggregate.totalMs) + durationMs;
+  aggregate.avgMs = aggregate.calls > 0 ? Math.round(aggregate.totalMs / aggregate.calls) : 0;
+  aggregate.totalFileChanges = finiteMetricNumber(aggregate.totalFileChanges) + fileChangeCount;
+  aggregate.lastFileChangeCount = fileChangeCount;
+  aggregate.inputTokens = finiteMetricNumber(aggregate.inputTokens) + inputTokens;
+  aggregate.outputTokens = finiteMetricNumber(aggregate.outputTokens) + outputTokens;
+  aggregate.totalCostUsd = finiteMetricNumber(aggregate.totalCostUsd ?? aggregate.totalCost) + costUsd;
+  aggregate.totalCost = aggregate.totalCostUsd;
+  aggregate.usageReportedCalls = finiteMetricNumber(aggregate.usageReportedCalls) + (inputTokens > 0 || outputTokens > 0 || costUsd > 0 ? 1 : 0);
+  aggregate.durationsMs = Array.isArray(aggregate.durationsMs) ? aggregate.durationsMs : [];
+  if (durationMs > 0) aggregate.durationsMs.push(durationMs);
+  if (aggregate.durationsMs.length > METRICS_DURATION_SAMPLE_LIMIT) {
+    aggregate.durationsMs.splice(0, aggregate.durationsMs.length - METRICS_DURATION_SAMPLE_LIMIT);
+  }
+  aggregate.lastCall = at;
+  return aggregate;
+}
+
+export function applyMetricToStore(value: any, agent: string, data: any = {}, now: Date | string | number = new Date()) {
+  const metrics = normalizeMetricsStore(value);
+  const at = new Date(now).toISOString();
+  const today = localDateKey(now);
+  const cleanAgent = String(agent || "unknown-agent").trim() || "unknown-agent";
+  const groupId = String(data.groupId || data.group_id || "").trim();
+  const requestedScopeType = String(data.scopeType || data.scope_type || data.scope || "").trim().toLowerCase();
+  const scopeType = groupId ? "group" : (requestedScopeType === "global" ? "global" : "project");
+  const scopeId = groupId || String(data.scopeId || data.scope_id || data.projectId || data.project_id || (scopeType === "global" ? "global" : cleanAgent)).trim();
+  const scopeKey = `${scopeType}:${scopeId || "unassigned"}`;
+
+  metrics.agents[cleanAgent] = applyMetricAggregate(metrics.agents[cleanAgent], data, at);
+  if (!metrics.daily[today]) metrics.daily[today] = {};
+  metrics.daily[today][cleanAgent] = applyMetricAggregate(metrics.daily[today][cleanAgent], data, at);
+
+  const existingScope = metrics.scopes[scopeKey] && typeof metrics.scopes[scopeKey] === "object" ? metrics.scopes[scopeKey] : {};
+  const role = String(data.role || data.agentRole || data.agent_role || (scopeType === "group" ? "member_agent" : "project_agent"));
+  const scope = {
+    ...existingScope,
+    key: scopeKey,
+    type: scopeType,
+    id: scopeId || "unassigned",
+    groupId,
+    agents: existingScope.agents && typeof existingScope.agents === "object" ? existingScope.agents : {},
+    daily: existingScope.daily && typeof existingScope.daily === "object" ? existingScope.daily : {},
+    roles: existingScope.roles && typeof existingScope.roles === "object" ? existingScope.roles : {},
+    dailyRoles: existingScope.dailyRoles && typeof existingScope.dailyRoles === "object" ? existingScope.dailyRoles : {},
+    updatedAt: at,
+  };
+  scope.agents[cleanAgent] = applyMetricAggregate(scope.agents[cleanAgent], data, at);
+  if (!scope.daily[today]) scope.daily[today] = {};
+  scope.daily[today][cleanAgent] = applyMetricAggregate(scope.daily[today][cleanAgent], data, at);
+  if (!scope.roles[role]) scope.roles[role] = {};
+  scope.roles[role][cleanAgent] = applyMetricAggregate(scope.roles[role][cleanAgent], data, at);
+  if (!scope.dailyRoles[today]) scope.dailyRoles[today] = {};
+  if (!scope.dailyRoles[today][role]) scope.dailyRoles[today][role] = {};
+  scope.dailyRoles[today][role][cleanAgent] = applyMetricAggregate(scope.dailyRoles[today][role][cleanAgent], data, at);
+  metrics.scopes[scopeKey] = scope;
+
+  const aggregate = scope.agents[cleanAgent];
+  metrics.events.push({
+    id: String(data.eventId || data.event_id || `metric_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`),
+    at,
+    date: today,
+    scopeType,
+    scopeId: scope.id,
+    groupId,
+    agent: cleanAgent,
+    role,
+    source: String(data.source || data.metricSource || data.metric_source || "agent-execution"),
+    runtime: String(data.runtime || data.agentType || data.agent_type || ""),
+    success: data.success === true,
+    durationMs: finiteMetricNumber(data.durationMs ?? data.duration_ms),
+    fileChangeCount: finiteMetricNumber(data.fileChangeCount ?? data.file_change_count),
+    inputTokens: finiteMetricNumber(data.inputTokens ?? data.input_tokens ?? data.usage?.inputTokens ?? data.usage?.input_tokens),
+    outputTokens: finiteMetricNumber(data.outputTokens ?? data.output_tokens ?? data.usage?.outputTokens ?? data.usage?.output_tokens),
+    totalCostUsd: finiteMetricNumber(data.totalCostUsd ?? data.total_cost_usd ?? data.costUsd ?? data.cost_usd ?? data.usage?.totalCostUsd ?? data.usage?.total_cost_usd ?? data.totalCost),
+    traceId: String(data.traceId || data.trace_id || ""),
+    taskId: String(data.taskId || data.task_id || ""),
+    executionId: String(data.executionId || data.execution_id || ""),
+    error: data.success === true ? "" : String(data.error || data.message || "").slice(0, 300),
+    usageReported: aggregate.usageReportedCalls > 0 && (
+      finiteMetricNumber(data.inputTokens ?? data.input_tokens ?? data.usage?.inputTokens ?? data.usage?.input_tokens) > 0
+      || finiteMetricNumber(data.outputTokens ?? data.output_tokens ?? data.usage?.outputTokens ?? data.usage?.output_tokens) > 0
+      || finiteMetricNumber(data.totalCostUsd ?? data.total_cost_usd ?? data.usage?.totalCostUsd ?? data.usage?.total_cost_usd ?? data.totalCost) > 0
+    ),
+  });
+  if (metrics.events.length > METRICS_EVENT_LIMIT) metrics.events.splice(0, metrics.events.length - METRICS_EVENT_LIMIT);
+  metrics.updatedAt = at;
+  return metrics;
+}
+
 export function loadMetrics(): any {
   try {
     if (fs.existsSync(METRICS_FILE)) {
-      return JSON.parse(fs.readFileSync(METRICS_FILE, "utf-8"));
+      return normalizeMetricsStore(JSON.parse(fs.readFileSync(METRICS_FILE, "utf-8")));
     }
   } catch {}
-  return { agents: {}, daily: {} };
+  return emptyMetricsStore();
 }
 
 export function saveMetrics(metrics: any) {
-  try {
-    fs.writeFileSync(METRICS_FILE, JSON.stringify(metrics, null, 2));
-  } catch {}
+  writeJsonAtomic(METRICS_FILE, normalizeMetricsStore(metrics));
 }
 
 export function recordMetric(agent: string, data: any) {
-  const metrics = loadMetrics();
-  const today = new Date().toISOString().slice(0, 10);
-  if (!metrics.agents[agent]) {
-    metrics.agents[agent] = {
-      calls: 0,
-      successes: 0,
-      failures: 0,
-      totalMs: 0,
-      avgMs: 0,
-      totalFileChanges: 0,
-      lastFileChangeCount: 0,
-      inputTokens: 0,
-      outputTokens: 0,
-      totalCost: 0,
-      lastCall: null
-    };
+  try {
+    saveMetrics(applyMetricToStore(loadMetrics(), agent, data));
+    return true;
+  } catch (error: any) {
+    console.warn("[性能指标] 写入失败:", error?.message || error);
+    return false;
   }
-  const a = metrics.agents[agent];
-  a.calls++;
-  if (data.success) a.successes++; else a.failures++;
-  if (data.durationMs) {
-    a.totalMs += data.durationMs;
-    a.avgMs = Math.round(a.totalMs / a.calls);
-  }
-  a.totalFileChanges = (a.totalFileChanges || 0) + (data.fileChangeCount || 0);
-  a.lastFileChangeCount = data.fileChangeCount || 0;
-  
-  if (data.inputTokens) a.inputTokens = (a.inputTokens || 0) + data.inputTokens;
-  if (data.outputTokens) a.outputTokens = (a.outputTokens || 0) + data.outputTokens;
-  if (data.totalCost) a.totalCost = (a.totalCost || 0) + data.totalCost;
-  
-  a.lastCall = new Date().toISOString();
-  
-  if (!metrics.daily[today]) metrics.daily[today] = {};
-  if (!metrics.daily[today][agent]) {
-    metrics.daily[today][agent] = {
-      calls: 0,
-      successes: 0,
-      failures: 0,
-      totalMs: 0,
-      totalFileChanges: 0,
-      inputTokens: 0,
-      outputTokens: 0,
-      totalCost: 0
-    };
-  }
-  const d = metrics.daily[today][agent];
-  d.calls++;
-  if (data.success) d.successes++; else d.failures++;
-  if (data.durationMs) d.totalMs += data.durationMs;
-  d.totalFileChanges = (d.totalFileChanges || 0) + (data.fileChangeCount || 0);
+}
 
-  if (data.inputTokens) d.inputTokens = (d.inputTokens || 0) + data.inputTokens;
-  if (data.outputTokens) d.outputTokens = (d.outputTokens || 0) + data.outputTokens;
-  if (data.totalCost) d.totalCost = (d.totalCost || 0) + data.totalCost;
-
-  saveMetrics(metrics);
+export function runMetricsAggregationSelfTest() {
+  let store: any = emptyMetricsStore();
+  store = applyMetricToStore(store, "coordinator", { groupId: "group-a", role: "main_agent", success: true, durationMs: 100, traceId: "trace-a" }, "2026-07-13T10:00:00.000Z");
+  store = applyMetricToStore(store, "coordinator", { groupId: "group-b", role: "main_agent", success: false, durationMs: 900, traceId: "trace-b" }, "2026-07-13T10:01:00.000Z");
+  store = applyMetricToStore(store, "worker", { groupId: "group-a", role: "member_agent", success: true, durationMs: 300, inputTokens: 20, outputTokens: 5 }, "2026-07-13T10:02:00.000Z");
+  const groupA = store.scopes["group:group-a"];
+  const groupB = store.scopes["group:group-b"];
+  const checks = {
+    separatesGroups: groupA?.agents?.coordinator?.calls === 1 && groupB?.agents?.coordinator?.calls === 1,
+    keepsMainAgentOutcomesSeparate: groupA?.agents?.coordinator?.successes === 1 && groupB?.agents?.coordinator?.failures === 1,
+    separatesRolesInsideGroup: groupA?.roles?.main_agent?.coordinator?.calls === 1 && groupA?.roles?.member_agent?.worker?.calls === 1,
+    retainsMemberMetricsInsideGroup: groupA?.agents?.worker?.calls === 1 && !groupB?.agents?.worker,
+    storesTraceIdentity: store.events.some((item: any) => item.groupId === "group-a" && item.traceId === "trace-a"),
+    recordsUsageCoverage: groupA?.agents?.worker?.usageReportedCalls === 1,
+  };
+  return { pass: Object.values(checks).every(Boolean), checks };
 }
 
 // === Tasks ===

@@ -34,7 +34,9 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.PlaywrightBrowserProvider = void 0;
+exports.launchChromiumWithFallback = launchChromiumWithFallback;
 exports.checkPlaywrightAvailability = checkPlaywrightAvailability;
+exports.installPlaywrightNetworkSafetyBoundary = installPlaywrightNetworkSafetyBoundary;
 const path = __importStar(require("path"));
 const fs = __importStar(require("fs"));
 const zlib = __importStar(require("zlib"));
@@ -1627,6 +1629,50 @@ function requestDetailsLine(request, secretBindings = []) {
     const headersText = JSON.stringify(redactRequestHeaders(headers));
     return (0, authentication_1.redactBrowserSensitiveText)(`request_details ${method} ${requestUrl} headers=${headersText}${body ? ` body=${compactNetworkPayload(body, 2000)}` : ""}`, secretBindings);
 }
+async function installPlaywrightNetworkSafetyBoundary(browserContext, page, onBlocked = () => { }) {
+    if (browserContext?.newCDPSession && page) {
+        const session = await browserContext.newCDPSession(page);
+        session.on("Fetch.requestPaused", (event) => {
+            void (async () => {
+                const requestUrl = String(event?.request?.url || "");
+                const safety = (0, utils_1.validateTestAgentUrl)(requestUrl);
+                if (!safety.valid) {
+                    try {
+                        onBlocked({ url: requestUrl, error: safety.error || "unsafe browser request URL" });
+                    }
+                    catch { }
+                    await session.send("Fetch.failRequest", { requestId: event.requestId, errorReason: "BlockedByClient" });
+                    return;
+                }
+                await session.send("Fetch.continueRequest", { requestId: event.requestId });
+            })().catch(async () => {
+                try {
+                    await session.send("Fetch.failRequest", { requestId: event.requestId, errorReason: "BlockedByClient" });
+                }
+                catch { }
+            });
+        });
+        await session.send("Fetch.enable", { patterns: [{ urlPattern: "*", requestStage: "Request" }] });
+        return true;
+    }
+    if (!browserContext?.route)
+        return false;
+    await browserContext.route("**/*", async (route) => {
+        const requestUrl = String(route.request?.()?.url?.() || "");
+        if (/^(?:about|blob|data):/i.test(requestUrl)) {
+            await route.continue();
+            return;
+        }
+        const safety = (0, utils_1.validateTestAgentUrl)(requestUrl);
+        if (safety.valid) {
+            await route.continue();
+            return;
+        }
+        onBlocked({ url: requestUrl, error: safety.error || "unsafe browser request URL" });
+        await route.abort("blockedbyclient");
+    });
+    return true;
+}
 function shouldCaptureResponseBody(resourceType, headers) {
     const contentType = String(headers["content-type"] || headers["Content-Type"] || "").toLowerCase();
     return resourceType === "fetch"
@@ -2574,6 +2620,15 @@ async function runBrowserCheck(browser, context, project, check, index) {
             catch { }
         }
         page = await browserContext.newPage();
+        const recordUnsafeRequest = (event) => {
+            networkErrors.push((0, authentication_1.redactBrowserSensitiveText)(`blocked_unsafe_url ${event.error}: ${event.url}`, secretBindings));
+        };
+        await installPlaywrightNetworkSafetyBoundary(browserContext, page, recordUnsafeRequest);
+        browserContext.on?.("page", (childPage) => {
+            if (childPage === page)
+                return;
+            void installPlaywrightNetworkSafetyBoundary(browserContext, childPage, recordUnsafeRequest).catch(() => { });
+        });
         page.on("popup", (popup) => {
             const popupRecordIndex = popups.length;
             const pendingRecord = {
@@ -2887,6 +2942,7 @@ async function createPlaywrightMultiSessionRuntime(input) {
     const tracePath = collectBrowserArtifacts ? path.join(evidenceDir, `${artifactBase}.trace.zip`) : "";
     const harPath = collectBrowserArtifacts ? path.join(evidenceDir, `${artifactBase}.har`) : "";
     const monitoredOrigins = new Set([originOf(project.targetUrl), originOf(initialUrl)].filter(Boolean));
+    const networkSafetyErrors = [];
     let browserContext = null;
     let lifecycleResourceId = "";
     try {
@@ -2934,6 +2990,15 @@ async function createPlaywrightMultiSessionRuntime(input) {
             catch { }
         }
         const page = await browserContext.newPage();
+        const recordUnsafeRequest = (event) => {
+            networkSafetyErrors.push((0, authentication_1.redactBrowserSensitiveText)(`blocked_unsafe_url ${event.error}: ${event.url}`, sessionSecretBindings));
+        };
+        await installPlaywrightNetworkSafetyBoundary(browserContext, page, recordUnsafeRequest);
+        browserContext.on?.("page", (childPage) => {
+            if (childPage === page)
+                return;
+            void installPlaywrightNetworkSafetyBoundary(browserContext, childPage, recordUnsafeRequest).catch(() => { });
+        });
         const runtime = {
             name: sessionName,
             initialUrl,
@@ -2952,7 +3017,7 @@ async function createPlaywrightMultiSessionRuntime(input) {
             consoleErrors: [],
             pageErrors: [],
             networkRequests: [],
-            networkErrors: [],
+            networkErrors: networkSafetyErrors,
             downloads: [],
             downloadPromises: [],
             dialogs: [],

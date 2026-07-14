@@ -1,10 +1,11 @@
 <script setup>
-import { ref, onMounted, watch } from 'vue'
+import { computed, ref, onMounted, watch } from 'vue'
 import { tasksApi, groupsApi, projectsApi } from '../../api/index.js'
 import AgentPipeline from '../agents/AgentPipeline.vue'
 import TaskListItem from './TaskListItem.vue'
 import TaskBacklogModal from './TaskBacklogModal.vue'
 import DailyDevTaskModal from './DailyDevTaskModal.vue'
+import TaskDispatchHeader from './TaskDispatchHeader.vue'
 import { toast, confirmDialog } from '../../utils/toast.js'
 import { useTaskBacklog } from '../../composables/useTaskBacklog.js'
 import { useTaskExecutionDashboard } from '../../composables/useTaskExecutionDashboard.js'
@@ -24,6 +25,9 @@ const showArchivedTasks = ref(false)
 const archivedTaskCount = ref(0)
 const selectedTaskIds = ref([])
 const editingTaskId = ref('')
+const activeTaskView = ref('overview')
+const taskSearch = ref('')
+const taskStatusFilter = ref('all')
 
 // 弹窗状态
 const showCreate = ref(false)
@@ -550,9 +554,9 @@ const updateStatus = async (id, status) => {
   }
 }
 
-// 删除任务
+// 归档任务
 const deleteTask = async (id) => {
-  const confirmed = await confirmDialog('确定删除此任务？系统会安全取消执行、清理运行现场并移入归档，可稍后恢复。')
+  const confirmed = await confirmDialog('确定归档此任务？系统会安全取消执行、清理运行现场并移入归档，可稍后恢复。')
   if (!confirmed) return
   await tasksApi.delete(id)
   refreshTaskWork()
@@ -590,7 +594,7 @@ const purgeTask = async (id) => {
 
 const runBulkTaskAction = async (action) => {
   if (!selectedTaskIds.value.length) return toast.warning('请先选择任务')
-  const labels = { archive: '删除归档', restore: '恢复', purge: '永久清除', pause: '暂停', resume: '恢复执行', cancel: '取消' }
+  const labels = { archive: '归档', restore: '恢复', purge: '永久清除', pause: '暂停', resume: '恢复执行', cancel: '取消' }
   if (['archive', 'purge', 'cancel'].includes(action) && !await confirmDialog(`确定批量${labels[action]} ${selectedTaskIds.value.length} 个任务？`)) return
   const res = await fetch('/api/tasks/bulk', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, ids: selectedTaskIds.value }) })
   const data = await res.json()
@@ -638,11 +642,15 @@ const addAllToQueue = async () => {
 // 查看队列状态
 const queueStatus = ref(null)
 const watchdogStatus = ref(null)
-const showQueueStatus = async () => {
+const loadQueueStatus = async () => {
   const res = await fetch('/api/tasks/queue/status')
   queueStatus.value = await res.json()
   const watchdogRes = await fetch('/api/tasks/watchdog')
   watchdogStatus.value = await watchdogRes.json()
+}
+
+const showQueueStatus = async () => {
+  await loadQueueStatus()
   showQueue.value = true
 }
 
@@ -981,6 +989,37 @@ const resendTask = async (task) => {
 
 const priorityLabel = { high: '🔴 高', normal: '🟡 中', low: '⚪ 低' }
 
+const visibleTasks = computed(() => {
+  const query = taskSearch.value.trim().toLowerCase()
+  return tasks.value.filter((task) => {
+    const statusMatches = taskStatusFilter.value === 'all' || String(task.status || 'pending') === taskStatusFilter.value
+    if (!statusMatches) return false
+    if (!query) return true
+    const targetName = groups.value.find(group => group.id === task.group_id)?.name || task.group_id || task.project || task.target_project || ''
+    return [task.title, task.description, targetName].some(value => String(value || '').toLowerCase().includes(query))
+  })
+})
+
+const handleCreateType = (type) => {
+  if (type === 'business') {
+    showDailyDevCreate.value = true
+    return
+  }
+  openCreateTask()
+}
+
+const changeTaskView = async (view) => {
+  activeTaskView.value = view
+  if (view === 'overview') await loadExecutionDashboard()
+  if (view === 'advanced') await Promise.all([loadActiveAgentRuns(), loadQueueStatus()])
+}
+
+const toggleArchivedTasks = async () => {
+  showArchivedTasks.value = !showArchivedTasks.value
+  selectedTaskIds.value = []
+  await loadTasks()
+}
+
 watch(() => props.navigateTo, async (target) => {
   if (!target?.taskId || target.tab !== 'tasks') return
   await loadTasks()
@@ -1001,86 +1040,24 @@ onMounted(() => {
 
 <template>
   <div class="task-manager">
-    <!-- 顶部统计栏 -->
-    <div class="toolbar">
-      <div class="stats">
-        <div class="stat"><span class="stat-label">总计</span><span class="stat-value">{{ stats.total }}</span></div>
-        <div class="stat"><span class="stat-label" style="color:var(--accent-yellow)">待处理</span><span class="stat-value" style="color:var(--accent-yellow)">{{ stats.pending }}</span></div>
-        <div class="stat"><span class="stat-label" style="color:var(--accent-blue)">进行中</span><span class="stat-value" style="color:var(--accent-blue)">{{ stats.inProgress }}</span></div>
-        <div class="stat"><span class="stat-label" style="color:var(--accent-green)">已完成</span><span class="stat-value" style="color:var(--accent-green)">{{ stats.done }}</span></div>
-        <div class="stat"><span class="stat-label" style="color:var(--accent-red)">失败</span><span class="stat-value" style="color:var(--accent-red)">{{ stats.failed }}</span></div>
-      </div>
-      <div style="display:flex;gap:8px">
-        <button class="btn btn-outline btn-sm" @click="showArchivedTasks = !showArchivedTasks; selectedTaskIds = []; loadTasks()">{{ showArchivedTasks ? '返回活动任务' : `归档 (${archivedTaskCount})` }}</button>
-        <button v-if="selectedTaskIds.length && !showArchivedTasks" class="btn btn-outline btn-sm" @click="runBulkTaskAction('pause')">批量暂停</button>
-        <button v-if="selectedTaskIds.length && !showArchivedTasks" class="btn btn-danger btn-sm" @click="runBulkTaskAction('archive')">批量删除</button>
-        <button v-if="selectedTaskIds.length && showArchivedTasks" class="btn btn-primary btn-sm" @click="runBulkTaskAction('restore')">批量恢复</button>
-        <button v-if="selectedTaskIds.length && showArchivedTasks" class="btn btn-danger btn-sm" @click="runBulkTaskAction('purge')">永久清除</button>
-        <button class="btn btn-outline btn-sm" @click="showQueueStatus()">📊 队列状态</button>
-        <button class="btn btn-outline btn-sm" @click="openBacklog()">需求池</button>
-        <button class="btn btn-outline btn-sm" @click="resumeQueue()">▶ 恢复队列</button>
-        <button class="btn btn-outline btn-sm" @click="retryRuntimeFailures()">恢复执行失败</button>
-        <button class="btn btn-outline btn-sm" @click="addAllToQueue()">📥 全部加入队列</button>
-        <button v-if="!showArchivedTasks" class="btn btn-primary" @click="showDailyDevCreate = true">业务开发任务</button>
-        <button v-if="!showArchivedTasks" class="btn btn-primary" @click="openCreateTask">+ 新建任务</button>
-      </div>
-    </div>
+    <TaskDispatchHeader
+      :stats="stats"
+      :archived-count="archivedTaskCount"
+      :active-view="activeTaskView"
+      @change-view="changeTaskView"
+      @create="handleCreateType"
+      @open-backlog="openBacklog"
+    />
 
-    <section class="execution-dashboard">
+    <section v-if="activeTaskView === 'overview'" class="execution-dashboard">
       <div class="dashboard-head">
         <div>
-          <div class="dashboard-kicker">任务执行驾驶舱</div>
-          <h3>主 Agent 计划、子 Agent 执行和接管入口</h3>
+          <div class="dashboard-kicker">执行进度</div>
+          <h3>正在推进和需要你处理的任务</h3>
         </div>
         <div class="dashboard-head-actions">
           <span v-if="executionDashboard?.generated_at" class="dashboard-updated">更新 {{ new Date(executionDashboard.generated_at).toLocaleTimeString('zh-CN') }}</span>
           <button class="btn btn-outline btn-sm" :disabled="executionDashboardLoading" @click="refreshTaskWork">{{ executionDashboardLoading ? '刷新中...' : '刷新' }}</button>
-          <button class="btn btn-outline btn-sm" @click="runDashboardProbe">复检执行通道</button>
-        </div>
-      </div>
-
-      <div class="dashboard-metrics">
-        <div class="dashboard-metric"><span>活跃任务</span><strong>{{ dashboardSummary().active || 0 }}</strong></div>
-        <div class="dashboard-metric"><span>执行中</span><strong>{{ dashboardSummary().running || 0 }}</strong></div>
-        <div class="dashboard-metric"><span>队列中</span><strong>{{ dashboardSummary().queued || dashboardQueue().total_queued || 0 }}</strong></div>
-        <div class="dashboard-metric warn"><span>需接管</span><strong>{{ dashboardSummary().blocked || 0 }}</strong></div>
-        <div class="dashboard-metric"><span>已完成</span><strong>{{ dashboardSummary().done || 0 }}</strong></div>
-      </div>
-
-      <div class="dashboard-queue-row">
-        <span>队列 {{ dashboardQueue().total_queued || 0 }}</span>
-        <span>运行目标 {{ dashboardQueue().running_targets || 0 }}</span>
-        <span>待处理 {{ dashboardQueue().pending_tasks || 0 }}</span>
-        <span>失败 {{ dashboardQueue().failed_tasks || 0 }}</span>
-      </div>
-
-      <div class="runtime-governance-card">
-        <div class="runtime-governance-head">
-          <div>
-            <strong>Agent 运行治理</strong>
-            <span>查看正在运行的底层 Agent CLI，必要时停止进程；清理旧的无租约任务不会删除数据。</span>
-          </div>
-          <div class="runtime-governance-actions">
-            <button class="btn btn-outline btn-sm" :disabled="activeAgentRunsLoading" @click="loadActiveAgentRuns">{{ activeAgentRunsLoading ? '刷新中...' : '刷新运行' }}</button>
-            <button class="btn btn-outline btn-sm" :disabled="runtimeDebtLoading" @click="previewRuntimeDebtCleanup">预览运行债务</button>
-            <button class="btn btn-outline btn-sm" :disabled="runtimeDebtLoading || !(runtimeDebtPreview?.total > 0)" @click="cleanupRuntimeDebt">清理运行债务</button>
-          </div>
-        </div>
-        <div v-if="activeAgentRuns.length" class="runtime-run-list">
-          <div v-for="run in activeAgentRuns" :key="run.id" class="runtime-run-row">
-            <div>
-              <strong>{{ run.project || 'Agent' }} · {{ run.agentType || 'runtime' }}</strong>
-              <span>{{ run.source || 'agent' }} · PID {{ run.pid || '未知' }} · 已运行 {{ formatDuration(run.ageMs) }}</span>
-              <small>{{ run.title || run.cwd || run.id }}</small>
-            </div>
-            <button class="btn btn-outline btn-sm danger" @click="stopAgentRun(run)">停止</button>
-          </div>
-        </div>
-        <div v-else class="runtime-governance-empty">当前没有正在运行的底层 Agent。</div>
-        <div v-if="runtimeDebtPreview" class="runtime-debt-result">
-          <span>可清理 {{ runtimeDebtPreview.total || 0 }}</span>
-          <span>已清理 {{ runtimeDebtPreview.cleaned || 0 }}</span>
-          <span>{{ runtimeDebtPreview.dry_run ? '预览模式' : '已执行清理' }}</span>
         </div>
       </div>
 
@@ -1119,7 +1096,7 @@ onMounted(() => {
 
           <div v-if="!isDashboardItemExpanded(item)" class="dashboard-compact-line" @click="toggleDashboardItem(item)">
             <span>{{ compactDashboardText(item.status_detail || item.headline || '暂无执行摘要', 150) }}</span>
-            <strong>{{ item.workers?.length || item.assignments?.length || 0 }} Agent · 验证 {{ item.evidence?.verification_executed?.length || 0 }} · 实变 {{ item.evidence?.actual_file_change_count || 0 }}</strong>
+            <strong>{{ item.workers?.length || item.assignments?.length || 0 }} 个执行成员 · 验证 {{ item.evidence?.verification_executed?.length || 0 }} · 实变 {{ item.evidence?.actual_file_change_count || 0 }}</strong>
           </div>
 
           <div v-else class="dashboard-detail-body">
@@ -1129,17 +1106,17 @@ onMounted(() => {
 
             <div class="dashboard-work-grid">
             <div class="dashboard-panel">
-              <div class="dashboard-panel-title">主 Agent 计划</div>
+              <div class="dashboard-panel-title">执行计划</div>
               <div class="dashboard-panel-count">{{ item.main_plan?.count || 0 }} 条计划证据</div>
               <ul v-if="item.main_plan?.phases?.length" class="dashboard-list">
                 <li v-for="(phase, index) in item.main_plan.phases.slice(0, 4)" :key="index">{{ compactDashboardText(phase.title || phase.name || phase.phase || phase, 90) }}</li>
               </ul>
-              <div v-else class="dashboard-muted">等待主 Agent 输出计划。</div>
+              <div v-else class="dashboard-muted">等待生成执行计划。</div>
             </div>
 
             <div class="dashboard-panel">
-              <div class="dashboard-panel-title">子 Agent 执行</div>
-              <div class="dashboard-panel-count">{{ item.workers?.length || item.assignments?.length || 0 }} 个 Agent</div>
+              <div class="dashboard-panel-title">协作进展</div>
+              <div class="dashboard-panel-count">{{ item.workers?.length || item.assignments?.length || 0 }} 个执行成员</div>
               <div v-if="item.workers?.length" class="dashboard-agent-stack">
                 <span v-for="worker in item.workers.slice(0, 5)" :key="worker.agent" :class="['dashboard-agent', workflowStatusTone(worker.status)]">
                   {{ worker.agent }} · {{ receiptStatusText(worker.status) }}
@@ -1174,11 +1151,11 @@ onMounted(() => {
             </div>
 
             <div class="dashboard-panel blockers">
-              <div class="dashboard-panel-title">阻塞/接管</div>
+              <div class="dashboard-panel-title">需要关注</div>
               <ul v-if="item.blockers?.length" class="dashboard-list warn">
                 <li v-for="blocker in item.blockers.slice(0, 4)" :key="blocker">{{ compactDashboardText(blocker, 110) }}</li>
               </ul>
-              <div v-else class="dashboard-muted">暂无阻塞项。</div>
+              <div v-else class="dashboard-muted">暂无需要处理的问题。</div>
             </div>
           </div>
 
@@ -1192,6 +1169,61 @@ onMounted(() => {
             </div>
           </div>
         </article>
+      </div>
+    </section>
+
+    <section v-else-if="activeTaskView === 'advanced'" class="task-runtime-management">
+      <div class="runtime-management-head">
+        <div>
+          <span>高级操作</span>
+          <h3>队列与执行通道</h3>
+          <p>这些操作会影响任务调度或底层执行进程，仅在任务卡住或排障时使用。</p>
+        </div>
+        <button class="btn btn-outline btn-sm" @click="showQueueStatus()">查看队列详情</button>
+      </div>
+
+      <div class="runtime-status-strip">
+        <span><small>队列中</small><strong>{{ dashboardQueue().total_queued || 0 }}</strong></span>
+        <span><small>运行目标</small><strong>{{ dashboardQueue().running_targets || 0 }}</strong></span>
+        <span><small>待处理</small><strong>{{ dashboardQueue().pending_tasks || 0 }}</strong></span>
+        <span><small>执行失败</small><strong>{{ dashboardQueue().failed_tasks || 0 }}</strong></span>
+      </div>
+
+      <div class="runtime-command-row">
+        <button class="btn btn-outline" @click="resumeQueue()">恢复队列</button>
+        <button class="btn btn-outline" @click="retryRuntimeFailures()">恢复执行失败</button>
+        <button class="btn btn-outline" @click="addAllToQueue()">全部加入队列</button>
+        <button class="btn btn-outline" @click="runDashboardProbe">复检执行通道</button>
+      </div>
+
+      <div class="runtime-governance-card">
+        <div class="runtime-governance-head">
+          <div>
+            <strong>Agent 运行治理</strong>
+            <span>查看正在运行的底层 Agent CLI，必要时停止进程；清理旧的无租约任务不会删除数据。</span>
+          </div>
+          <div class="runtime-governance-actions">
+            <button class="btn btn-outline btn-sm" :disabled="activeAgentRunsLoading" @click="loadActiveAgentRuns">{{ activeAgentRunsLoading ? '刷新中...' : '刷新运行' }}</button>
+            <button class="btn btn-outline btn-sm" :disabled="runtimeDebtLoading" @click="previewRuntimeDebtCleanup">预览运行债务</button>
+            <button class="btn btn-outline btn-sm" :disabled="runtimeDebtLoading || !(runtimeDebtPreview?.total > 0)" @click="cleanupRuntimeDebt">清理运行债务</button>
+          </div>
+        </div>
+        <div v-if="activeAgentRuns.length" class="runtime-run-list">
+          <div v-for="run in activeAgentRuns" :key="run.id" class="runtime-run-row">
+            <div>
+              <strong>{{ run.project || 'Agent' }} · {{ run.agentType || 'runtime' }}</strong>
+              <span>{{ run.source || 'agent' }} · PID {{ run.pid || '未知' }} · 已运行 {{ formatDuration(run.ageMs) }}</span>
+              <small>{{ run.title || run.cwd || run.id }}</small>
+            </div>
+            <button class="btn btn-outline btn-sm danger" @click="stopAgentRun(run)">停止</button>
+          </div>
+        </div>
+        <div v-else class="runtime-governance-empty">当前没有正在运行的底层 Agent。</div>
+        <div v-if="runtimeDebtPreview" class="runtime-debt-result">
+          <span>可清理 {{ runtimeDebtPreview.total || 0 }}</span>
+          <span>已清理 {{ runtimeDebtPreview.cleaned || 0 }}</span>
+          <span>{{ runtimeDebtPreview.dry_run ? '预览模式' : '已执行清理' }}</span>
+        </div>
       </div>
     </section>
 
@@ -1223,15 +1255,35 @@ onMounted(() => {
     />
 
     <!-- 任务列表 -->
-    <div class="content">
-      <div v-if="tasks.length === 0" class="empty">
+    <div v-if="activeTaskView === 'all'" class="content task-list-view">
+      <div class="task-list-toolbar">
+        <div class="task-list-filters">
+          <input v-model="taskSearch" type="search" placeholder="搜索任务标题、内容或目标" aria-label="搜索任务">
+          <select v-model="taskStatusFilter" aria-label="任务状态">
+            <option value="all">全部状态</option>
+            <option value="pending">待处理</option>
+            <option value="in_progress">进行中</option>
+            <option value="done">已完成</option>
+            <option value="failed">失败</option>
+            <option value="cancelled">已取消</option>
+          </select>
+        </div>
+        <div class="task-list-actions">
+          <button class="btn btn-outline btn-sm" @click="toggleArchivedTasks">{{ showArchivedTasks ? '返回活动任务' : `查看归档 (${archivedTaskCount})` }}</button>
+          <button v-if="selectedTaskIds.length && !showArchivedTasks" class="btn btn-outline btn-sm" @click="runBulkTaskAction('pause')">批量暂停</button>
+          <button v-if="selectedTaskIds.length && !showArchivedTasks" class="btn btn-danger btn-sm" @click="runBulkTaskAction('archive')">批量归档</button>
+          <button v-if="selectedTaskIds.length && showArchivedTasks" class="btn btn-primary btn-sm" @click="runBulkTaskAction('restore')">批量恢复</button>
+          <button v-if="selectedTaskIds.length && showArchivedTasks" class="btn btn-danger btn-sm" @click="runBulkTaskAction('purge')">永久清除</button>
+        </div>
+      </div>
+      <div v-if="visibleTasks.length === 0" class="empty">
         <span class="icon">📋</span>
-        <span>暂无任务</span>
-        <span class="sub">点击右上角创建并派发任务</span>
+        <span>{{ tasks.length ? '没有符合筛选条件的任务' : '暂无任务' }}</span>
+        <span class="sub">可以调整筛选条件，或者从顶部新建任务</span>
       </div>
       <div v-else class="task-list">
         <TaskListItem
-          v-for="task in tasks"
+          v-for="task in visibleTasks"
           :key="task.id"
           :task="task"
           :selected="selectedTaskIds.includes(task.id)"
@@ -1404,8 +1456,8 @@ onMounted(() => {
         <details v-if="currentTaskReport?.trace_id || taskTraceLoading || currentTaskTrace?.events?.length" class="technical-report-details">
           <summary>Trace 技术详情</summary>
           <div v-if="currentTaskReport?.trace_id" class="trace-identity">
-            <span>Trace ID</span>
-            <code>{{ currentTaskReport.trace_id }}</code>
+            <span>执行记录</span>
+            <code>已关联</code>
           </div>
           <div v-if="taskTraceLoading" class="trace-panel muted">正在读取全链路记录…</div>
           <div v-else-if="currentTaskTrace?.events?.length" class="trace-panel">
@@ -1702,13 +1754,22 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.task-manager { display: flex; flex-direction: column; height: 100%; min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; }
+.task-manager { display: flex; flex-direction: column; width: 100%; height: 100%; min-width: 0; min-height: 0; overflow-x: clip; overflow-y: auto; overscroll-behavior: contain; }
+.task-manager > * { min-width: 0; max-width: 100%; }
 .toolbar { display: flex; align-items: center; justify-content: space-between; padding: 12px 20px; background: rgba(255, 255, 255, 0.25); border-bottom: 1px solid rgba(0, 0, 0, 0.05); flex-wrap: wrap; gap: 12px; }
 .stats { display: flex; gap: 20px; }
 .stat { display: flex; align-items: center; gap: 6px; }
 .stat-label { font-size: 11px; color: var(--text-muted); }
 .stat-value { font-size: 14px; font-weight: 600; color: var(--text-primary); }
 .content { flex: 0 0 auto; min-height: auto; overflow: visible; padding: 16px; }
+.task-list-view { display: flex; flex-direction: column; gap: 12px; }
+.task-list-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; }
+.task-list-filters { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1 1 auto; }
+.task-list-filters input,
+.task-list-filters select { min-height: 36px; border: 1px solid var(--border-color); border-radius: 7px; background: var(--surface); color: var(--text-primary); font-size: 12px; }
+.task-list-filters input { width: min(360px, 100%); min-width: 160px; padding: 0 11px; }
+.task-list-filters select { flex: 0 0 auto; padding: 0 28px 0 10px; }
+.task-list-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 7px; }
 .execution-dashboard { flex: 0 0 auto; margin: 14px 16px 0; padding: 14px; border: 1px solid rgba(15, 23, 42, 0.08); border-radius: 10px; background: rgba(255, 255, 255, 0.56); box-shadow: 0 10px 28px rgba(15, 23, 42, 0.05); }
 .dashboard-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin-bottom: 12px; }
 .dashboard-kicker { margin-bottom: 3px; font-size: 11px; font-weight: 700; color: var(--accent-blue); }
@@ -1723,6 +1784,16 @@ onMounted(() => {
 .dashboard-queue-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
 .dashboard-queue-row span { padding: 4px 8px; border-radius: 999px; background: rgba(59, 130, 246, 0.08); color: var(--text-secondary); font-size: 11px; font-weight: 700; }
 .runtime-governance-card { margin-bottom: 12px; padding: 12px; border: 1px solid rgba(59, 130, 246, 0.14); border-radius: 10px; background: rgba(59, 130, 246, 0.05); }
+.task-runtime-management { flex: 0 0 auto; margin: 14px 16px; padding: 16px; border: 1px solid rgba(15, 23, 42, 0.08); border-radius: 8px; background: rgba(255, 255, 255, 0.5); }
+.runtime-management-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.runtime-management-head span { color: var(--accent-blue); font-size: 11px; font-weight: 700; }
+.runtime-management-head h3 { margin: 3px 0 0; color: var(--text-primary); font-size: 15px; }
+.runtime-management-head p { max-width: 620px; margin: 5px 0 0; color: var(--text-muted); font-size: 11.5px; line-height: 1.5; }
+.runtime-status-strip { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 14px 0 10px; }
+.runtime-status-strip > span { min-width: 0; padding: 10px; border: 1px solid rgba(15, 23, 42, 0.06); border-radius: 7px; background: rgba(255, 255, 255, 0.66); }
+.runtime-status-strip small { display: block; color: var(--text-muted); font-size: 10.5px; }
+.runtime-status-strip strong { display: block; margin-top: 4px; color: var(--text-primary); font-size: 17px; }
+.runtime-command-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
 .runtime-governance-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .runtime-governance-head strong { display: block; color: var(--text-primary); font-size: 13px; }
 .runtime-governance-head span { display: block; margin-top: 3px; color: var(--text-muted); font-size: 11px; line-height: 1.5; }
@@ -1896,6 +1967,11 @@ onMounted(() => {
 .watchdog-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; font-size: 11.5px; color: var(--text-secondary); }
 .watchdog-grid span { min-width: 0; padding: 6px 8px; border-radius: 6px; background: rgba(255,255,255,0.64); overflow-wrap: anywhere; }
 @media (max-width: 768px) {
+  .task-manager { overflow-x: clip; }
+  .task-list-view { padding: 10px; }
+  .task-list-toolbar, .task-list-filters { align-items: stretch; flex-direction: column; }
+  .task-list-filters input, .task-list-filters select { width: 100%; min-width: 0; }
+  .task-list-actions { justify-content: flex-start; }
   .table-wrapper { overflow-x: auto; }
   table { min-width: 600px; }
   .delivery-grid { grid-template-columns: 1fr 1fr; }
@@ -1908,6 +1984,19 @@ onMounted(() => {
   .dashboard-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .dashboard-work-grid { grid-template-columns: 1fr; }
   .execution-dashboard { margin: 12px 10px 0; }
+  .dashboard-filter-row { align-items: stretch; flex-direction: column; }
+  .dashboard-filter-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; }
+  .dashboard-filter-tab { justify-content: center; min-width: 0; }
+  .dashboard-filter-count { text-align: left; }
+  .dashboard-compact-line { align-items: flex-start; flex-direction: column; gap: 4px; }
+  .dashboard-compact-line span { width: 100%; white-space: normal; }
+  .task-runtime-management { margin: 12px 10px; padding: 12px; }
+  .runtime-management-head { flex-direction: column; }
+  .runtime-status-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .runtime-command-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .runtime-command-row .btn { min-width: 0; white-space: normal; }
+  .runtime-governance-head { flex-direction: column; }
+  .runtime-governance-actions { justify-content: flex-start; }
   .modal-overlay { padding: 0 !important; align-items: flex-end !important; }
   .modal { min-width: 0 !important; width: 100% !important; max-height: 90vh; border-radius: 16px 16px 0 0 !important; }
 }

@@ -7,6 +7,37 @@ export declare function deriveTaskLifecycle(task: any, executions?: any[]): {
     terminal: boolean;
     keepsSession: boolean;
 };
+export declare function evaluateReceiptTaskAgentMemoryContextSnapshot(task: any, receipt?: any, context?: any): {
+    schema: string;
+    required: boolean;
+    pass: boolean;
+    snapshot_ids: any[];
+    matched_snapshot_ids: any[];
+    missing_snapshot_ids: any[];
+    task_agent_session_ids: any[];
+    receipt_task_agent_session_id: string;
+    receipt_memory_context_snapshot_id: string;
+    receipt_memory_context_snapshot_checksum: string;
+    declared_usage: any;
+    declared_binding_id: string;
+    declared_group_session_id: string;
+    declared_session_memory_checksum: string;
+    declared_model_extraction_execution_id: string;
+    declared_model_extraction_replay_status: string;
+    declared_fact_supersession_graph_checksum: string;
+    declared_usage_state: string;
+    declared_memory_fact_citations: any;
+    memory_fact_citations_required: boolean;
+    memory_fact_citations_passed: boolean;
+    system_delivery_required: boolean;
+    system_delivery_passed: boolean;
+    agent_declaration_required: boolean;
+    agent_declaration_passed: boolean;
+    gate_ids: string[];
+    matched_gate_ids: string[];
+    rows: any[];
+};
+export declare function collectTaskTypedMemoryConsumptionRows(task?: any, receipts?: any[], context?: any): any[];
 export declare function runCollaborationUxSelfTest(): {
     pass: boolean;
     checks: {
@@ -136,6 +167,13 @@ export declare function runCollaborationUxSelfTest(): {
         ackGapBlocksCompletion: boolean;
         ackGapCreatesRewriteDraft: boolean;
         contractGapCreatesInjectionDraft: boolean;
+        recoveredTestAgentFailureDoesNotRemainGap: boolean;
+        coordinatorOwnedReviewNeedDoesNotRemainGap: boolean;
+        coordinatorOwnedReviewNeedIsAdvisory: boolean;
+        coordinatorOwnedDirectReviewNeedIsAdvisory: boolean;
+        genericCoordinatorNeedsUserStateIsNotAConcreteBlocker: boolean;
+        sameSessionReworkInheritsApprovedAck: boolean;
+        differentSessionReworkDoesNotInheritAck: boolean;
         targetedReworkIncludesWorkItemContext: boolean;
         watchdogSeesStalledWorkItem: boolean;
         contractInjectionGateRequiresConsumerReceipt: boolean;
@@ -5754,29 +5792,24 @@ export declare function runCollaborationUxSelfTest(): {
                         receipt_task_agent_session_id: string;
                         receipt_memory_context_snapshot_id: string;
                         receipt_memory_context_snapshot_checksum: string;
+                        declared_usage: any;
+                        declared_binding_id: string;
+                        declared_group_session_id: string;
+                        declared_session_memory_checksum: string;
+                        declared_model_extraction_execution_id: string;
+                        declared_model_extraction_replay_status: string;
+                        declared_fact_supersession_graph_checksum: string;
+                        declared_usage_state: string;
+                        declared_memory_fact_citations: any;
+                        memory_fact_citations_required: boolean;
+                        memory_fact_citations_passed: boolean;
+                        system_delivery_required: boolean;
+                        system_delivery_passed: boolean;
+                        agent_declaration_required: boolean;
+                        agent_declaration_passed: boolean;
                         gate_ids: string[];
                         matched_gate_ids: string[];
-                        rows: {
-                            schema: any;
-                            snapshot_id: any;
-                            snapshot_file: any;
-                            checksum: any;
-                            generated_at: any;
-                            task_agent_session_id: any;
-                            task_id: any;
-                            group_id: any;
-                            project: any;
-                            agent_type: any;
-                            native_session_id: any;
-                            turn: number;
-                            worker_context_packet_id: any;
-                            worker_handoff_id: any;
-                            memory_context_checksum: any;
-                            rendered_prompt_checksum: any;
-                            gate_ids: string[];
-                            replay_repair_dispatch_brief_ids: any[];
-                            replay_repair_dispatch_briefs: any[];
-                        }[];
+                        rows: any[];
                     };
                     memory_gate: {
                         schema: string;
@@ -5784,6 +5817,16 @@ export declare function runCollaborationUxSelfTest(): {
                         pass: boolean;
                         gate_ids: any;
                         missing_gate_ids: any;
+                        declared: boolean;
+                        used: any;
+                        ignored: any;
+                    } | {
+                        pass: boolean;
+                        missing_gate_ids: any[];
+                        proven_by_memory_context_snapshot: boolean;
+                        schema: string;
+                        required: boolean;
+                        gate_ids: any;
                         declared: boolean;
                         used: any;
                         ignored: any;
@@ -5823,6 +5866,22 @@ export declare function runCollaborationUxSelfTest(): {
                         missing_warning_ack_gate_ids: any;
                         blocked_global_memory_used_gate_ids: any;
                         rows: any;
+                        declared: boolean;
+                        used: any;
+                        ignored: any;
+                    } | {
+                        pass: boolean;
+                        missing_gate_ids: any[];
+                        proven_by_memory_context_snapshot: boolean;
+                        rows: any;
+                        schema: string;
+                        required: boolean;
+                        gate_ids: any;
+                        fail_gate_ids: any;
+                        warn_gate_ids: any;
+                        missing_ignore_gate_ids: any;
+                        missing_warning_ack_gate_ids: any;
+                        blocked_global_memory_used_gate_ids: any;
                         declared: boolean;
                         used: any;
                         ignored: any;
@@ -5970,29 +6029,24 @@ export declare function runCollaborationUxSelfTest(): {
                         receipt_task_agent_session_id: string;
                         receipt_memory_context_snapshot_id: string;
                         receipt_memory_context_snapshot_checksum: string;
+                        declared_usage: any;
+                        declared_binding_id: string;
+                        declared_group_session_id: string;
+                        declared_session_memory_checksum: string;
+                        declared_model_extraction_execution_id: string;
+                        declared_model_extraction_replay_status: string;
+                        declared_fact_supersession_graph_checksum: string;
+                        declared_usage_state: string;
+                        declared_memory_fact_citations: any;
+                        memory_fact_citations_required: boolean;
+                        memory_fact_citations_passed: boolean;
+                        system_delivery_required: boolean;
+                        system_delivery_passed: boolean;
+                        agent_declaration_required: boolean;
+                        agent_declaration_passed: boolean;
                         gate_ids: string[];
                         matched_gate_ids: string[];
-                        rows: {
-                            schema: any;
-                            snapshot_id: any;
-                            snapshot_file: any;
-                            checksum: any;
-                            generated_at: any;
-                            task_agent_session_id: any;
-                            task_id: any;
-                            group_id: any;
-                            project: any;
-                            agent_type: any;
-                            native_session_id: any;
-                            turn: number;
-                            worker_context_packet_id: any;
-                            worker_handoff_id: any;
-                            memory_context_checksum: any;
-                            rendered_prompt_checksum: any;
-                            gate_ids: string[];
-                            replay_repair_dispatch_brief_ids: any[];
-                            replay_repair_dispatch_briefs: any[];
-                        }[];
+                        rows: any[];
                     };
                     memory_gate: {
                         schema: string;
@@ -6000,6 +6054,16 @@ export declare function runCollaborationUxSelfTest(): {
                         pass: boolean;
                         gate_ids: any;
                         missing_gate_ids: any;
+                        declared: boolean;
+                        used: any;
+                        ignored: any;
+                    } | {
+                        pass: boolean;
+                        missing_gate_ids: any[];
+                        proven_by_memory_context_snapshot: boolean;
+                        schema: string;
+                        required: boolean;
+                        gate_ids: any;
                         declared: boolean;
                         used: any;
                         ignored: any;
@@ -6039,6 +6103,22 @@ export declare function runCollaborationUxSelfTest(): {
                         missing_warning_ack_gate_ids: any;
                         blocked_global_memory_used_gate_ids: any;
                         rows: any;
+                        declared: boolean;
+                        used: any;
+                        ignored: any;
+                    } | {
+                        pass: boolean;
+                        missing_gate_ids: any[];
+                        proven_by_memory_context_snapshot: boolean;
+                        rows: any;
+                        schema: string;
+                        required: boolean;
+                        gate_ids: any;
+                        fail_gate_ids: any;
+                        warn_gate_ids: any;
+                        missing_ignore_gate_ids: any;
+                        missing_warning_ack_gate_ids: any;
+                        blocked_global_memory_used_gate_ids: any;
                         declared: boolean;
                         used: any;
                         ignored: any;
@@ -6359,29 +6439,24 @@ export declare function runCollaborationUxSelfTest(): {
                         receipt_task_agent_session_id: string;
                         receipt_memory_context_snapshot_id: string;
                         receipt_memory_context_snapshot_checksum: string;
+                        declared_usage: any;
+                        declared_binding_id: string;
+                        declared_group_session_id: string;
+                        declared_session_memory_checksum: string;
+                        declared_model_extraction_execution_id: string;
+                        declared_model_extraction_replay_status: string;
+                        declared_fact_supersession_graph_checksum: string;
+                        declared_usage_state: string;
+                        declared_memory_fact_citations: any;
+                        memory_fact_citations_required: boolean;
+                        memory_fact_citations_passed: boolean;
+                        system_delivery_required: boolean;
+                        system_delivery_passed: boolean;
+                        agent_declaration_required: boolean;
+                        agent_declaration_passed: boolean;
                         gate_ids: string[];
                         matched_gate_ids: string[];
-                        rows: {
-                            schema: any;
-                            snapshot_id: any;
-                            snapshot_file: any;
-                            checksum: any;
-                            generated_at: any;
-                            task_agent_session_id: any;
-                            task_id: any;
-                            group_id: any;
-                            project: any;
-                            agent_type: any;
-                            native_session_id: any;
-                            turn: number;
-                            worker_context_packet_id: any;
-                            worker_handoff_id: any;
-                            memory_context_checksum: any;
-                            rendered_prompt_checksum: any;
-                            gate_ids: string[];
-                            replay_repair_dispatch_brief_ids: any[];
-                            replay_repair_dispatch_briefs: any[];
-                        }[];
+                        rows: any[];
                     };
                     memory_gate: {
                         schema: string;
@@ -6389,6 +6464,16 @@ export declare function runCollaborationUxSelfTest(): {
                         pass: boolean;
                         gate_ids: any;
                         missing_gate_ids: any;
+                        declared: boolean;
+                        used: any;
+                        ignored: any;
+                    } | {
+                        pass: boolean;
+                        missing_gate_ids: any[];
+                        proven_by_memory_context_snapshot: boolean;
+                        schema: string;
+                        required: boolean;
+                        gate_ids: any;
                         declared: boolean;
                         used: any;
                         ignored: any;
@@ -6428,6 +6513,22 @@ export declare function runCollaborationUxSelfTest(): {
                         missing_warning_ack_gate_ids: any;
                         blocked_global_memory_used_gate_ids: any;
                         rows: any;
+                        declared: boolean;
+                        used: any;
+                        ignored: any;
+                    } | {
+                        pass: boolean;
+                        missing_gate_ids: any[];
+                        proven_by_memory_context_snapshot: boolean;
+                        rows: any;
+                        schema: string;
+                        required: boolean;
+                        gate_ids: any;
+                        fail_gate_ids: any;
+                        warn_gate_ids: any;
+                        missing_ignore_gate_ids: any;
+                        missing_warning_ack_gate_ids: any;
+                        blocked_global_memory_used_gate_ids: any;
                         declared: boolean;
                         used: any;
                         ignored: any;
@@ -6575,29 +6676,24 @@ export declare function runCollaborationUxSelfTest(): {
                         receipt_task_agent_session_id: string;
                         receipt_memory_context_snapshot_id: string;
                         receipt_memory_context_snapshot_checksum: string;
+                        declared_usage: any;
+                        declared_binding_id: string;
+                        declared_group_session_id: string;
+                        declared_session_memory_checksum: string;
+                        declared_model_extraction_execution_id: string;
+                        declared_model_extraction_replay_status: string;
+                        declared_fact_supersession_graph_checksum: string;
+                        declared_usage_state: string;
+                        declared_memory_fact_citations: any;
+                        memory_fact_citations_required: boolean;
+                        memory_fact_citations_passed: boolean;
+                        system_delivery_required: boolean;
+                        system_delivery_passed: boolean;
+                        agent_declaration_required: boolean;
+                        agent_declaration_passed: boolean;
                         gate_ids: string[];
                         matched_gate_ids: string[];
-                        rows: {
-                            schema: any;
-                            snapshot_id: any;
-                            snapshot_file: any;
-                            checksum: any;
-                            generated_at: any;
-                            task_agent_session_id: any;
-                            task_id: any;
-                            group_id: any;
-                            project: any;
-                            agent_type: any;
-                            native_session_id: any;
-                            turn: number;
-                            worker_context_packet_id: any;
-                            worker_handoff_id: any;
-                            memory_context_checksum: any;
-                            rendered_prompt_checksum: any;
-                            gate_ids: string[];
-                            replay_repair_dispatch_brief_ids: any[];
-                            replay_repair_dispatch_briefs: any[];
-                        }[];
+                        rows: any[];
                     };
                     memory_gate: {
                         schema: string;
@@ -6605,6 +6701,16 @@ export declare function runCollaborationUxSelfTest(): {
                         pass: boolean;
                         gate_ids: any;
                         missing_gate_ids: any;
+                        declared: boolean;
+                        used: any;
+                        ignored: any;
+                    } | {
+                        pass: boolean;
+                        missing_gate_ids: any[];
+                        proven_by_memory_context_snapshot: boolean;
+                        schema: string;
+                        required: boolean;
+                        gate_ids: any;
                         declared: boolean;
                         used: any;
                         ignored: any;
@@ -6644,6 +6750,22 @@ export declare function runCollaborationUxSelfTest(): {
                         missing_warning_ack_gate_ids: any;
                         blocked_global_memory_used_gate_ids: any;
                         rows: any;
+                        declared: boolean;
+                        used: any;
+                        ignored: any;
+                    } | {
+                        pass: boolean;
+                        missing_gate_ids: any[];
+                        proven_by_memory_context_snapshot: boolean;
+                        rows: any;
+                        schema: string;
+                        required: boolean;
+                        gate_ids: any;
+                        fail_gate_ids: any;
+                        warn_gate_ids: any;
+                        missing_ignore_gate_ids: any;
+                        missing_warning_ack_gate_ids: any;
+                        blocked_global_memory_used_gate_ids: any;
                         declared: boolean;
                         used: any;
                         ignored: any;
@@ -7143,6 +7265,8 @@ export declare function runCollaborationUxSelfTest(): {
             trace_id: any;
             execution_ids: any[];
             session_ids: any[];
+            source_ingestion: any;
+            requirement_extraction: any;
             work_item_ids: any[];
             work_item_summary: {
                 total: number;
@@ -11742,6 +11866,16 @@ export declare function runMemoryDispatchGateReceiptValidationSelfTest(): {
             declared: boolean;
             used: any;
             ignored: any;
+        } | {
+            pass: boolean;
+            missing_gate_ids: any[];
+            proven_by_memory_context_snapshot: boolean;
+            schema: string;
+            required: boolean;
+            gate_ids: any;
+            declared: boolean;
+            used: any;
+            ignored: any;
         };
     };
     missing: {
@@ -11753,6 +11887,16 @@ export declare function runMemoryDispatchGateReceiptValidationSelfTest(): {
             pass: boolean;
             gate_ids: any;
             missing_gate_ids: any;
+            declared: boolean;
+            used: any;
+            ignored: any;
+        } | {
+            pass: boolean;
+            missing_gate_ids: any[];
+            proven_by_memory_context_snapshot: boolean;
+            schema: string;
+            required: boolean;
+            gate_ids: any;
             declared: boolean;
             used: any;
             ignored: any;
@@ -11785,6 +11929,8 @@ export declare function runTaskAgentMemoryContextSnapshotReceiptValidationSelfTe
         goodDeliveryPassesMemoryGate: boolean;
         wrongSessionFailsSnapshotGate: boolean;
         wrongSessionBlocksAcceptance: any;
+        forgedFactCitationBlocksAcceptance: boolean;
+        foreignSourceMessageCitationBlocksAcceptance: boolean;
         runtimeKernelShowsSnapshotMismatch: boolean;
     };
     snapshot: {
@@ -11804,12 +11950,37 @@ export declare function runTaskAgentMemoryContextSnapshotReceiptValidationSelfTe
         worker_handoff_id: any;
         memory_context_checksum: any;
         rendered_prompt_checksum: any;
+        group_session_memory_binding: any;
+        group_session_id: any;
+        group_session_scope_id: any;
+        session_memory_checksum: any;
+        memory_binding_id: any;
+        model_extraction_execution_id: any;
+        model_extraction_receipt_checksum: any;
+        model_extraction_history_head_checksum: any;
+        model_extraction_replay_status: any;
+        model_extraction_replay_execution_id: any;
+        model_extraction_evidence_valid: boolean;
+        fact_supersession_graph_checksum: any;
+        fact_supersession_graph_valid: boolean;
+        session_lifecycle_fence_required: boolean;
+        session_lifecycle_fence_valid: boolean;
+        session_lifecycle_status: any;
+        session_lifecycle_generation: number;
+        session_lifecycle_head_id: any;
+        session_lifecycle_head_checksum: any;
+        active_fact_count: any;
+        delivery_receipt: any;
+        delivery_receipt_checksum_valid: boolean;
+        memory_context_delivered: boolean;
         gate_ids: string[];
         replay_repair_dispatch_brief_ids: any[];
         replay_repair_dispatch_briefs: any[];
     };
     good: any;
     wrong: any;
+    wrongCitation: any;
+    wrongSourceMessage: any;
 };
 export declare function runGlobalMemoryUsageReceiptValidationSelfTest(): {
     pass: boolean;
@@ -11936,6 +12107,22 @@ export declare function runGlobalMemoryHealthGateReceiptValidationSelfTest(): {
             declared: boolean;
             used: any;
             ignored: any;
+        } | {
+            pass: boolean;
+            missing_gate_ids: any[];
+            proven_by_memory_context_snapshot: boolean;
+            rows: any;
+            schema: string;
+            required: boolean;
+            gate_ids: any;
+            fail_gate_ids: any;
+            warn_gate_ids: any;
+            missing_ignore_gate_ids: any;
+            missing_warning_ack_gate_ids: any;
+            blocked_global_memory_used_gate_ids: any;
+            declared: boolean;
+            used: any;
+            ignored: any;
         };
     };
     missing: {
@@ -11953,6 +12140,22 @@ export declare function runGlobalMemoryHealthGateReceiptValidationSelfTest(): {
             missing_warning_ack_gate_ids: any;
             blocked_global_memory_used_gate_ids: any;
             rows: any;
+            declared: boolean;
+            used: any;
+            ignored: any;
+        } | {
+            pass: boolean;
+            missing_gate_ids: any[];
+            proven_by_memory_context_snapshot: boolean;
+            rows: any;
+            schema: string;
+            required: boolean;
+            gate_ids: any;
+            fail_gate_ids: any;
+            warn_gate_ids: any;
+            missing_ignore_gate_ids: any;
+            missing_warning_ack_gate_ids: any;
+            blocked_global_memory_used_gate_ids: any;
             declared: boolean;
             used: any;
             ignored: any;
@@ -11976,6 +12179,22 @@ export declare function runGlobalMemoryHealthGateReceiptValidationSelfTest(): {
             declared: boolean;
             used: any;
             ignored: any;
+        } | {
+            pass: boolean;
+            missing_gate_ids: any[];
+            proven_by_memory_context_snapshot: boolean;
+            rows: any;
+            schema: string;
+            required: boolean;
+            gate_ids: any;
+            fail_gate_ids: any;
+            warn_gate_ids: any;
+            missing_ignore_gate_ids: any;
+            missing_warning_ack_gate_ids: any;
+            blocked_global_memory_used_gate_ids: any;
+            declared: boolean;
+            used: any;
+            ignored: any;
         };
     };
     warn: {
@@ -11996,6 +12215,22 @@ export declare function runGlobalMemoryHealthGateReceiptValidationSelfTest(): {
             declared: boolean;
             used: any;
             ignored: any;
+        } | {
+            pass: boolean;
+            missing_gate_ids: any[];
+            proven_by_memory_context_snapshot: boolean;
+            rows: any;
+            schema: string;
+            required: boolean;
+            gate_ids: any;
+            fail_gate_ids: any;
+            warn_gate_ids: any;
+            missing_ignore_gate_ids: any;
+            missing_warning_ack_gate_ids: any;
+            blocked_global_memory_used_gate_ids: any;
+            declared: boolean;
+            used: any;
+            ignored: any;
         };
     };
 };
@@ -12005,6 +12240,13 @@ export declare function runReadPlanRevalidationGateReceiptValidationSelfTest(): 
         goodReceiptPassesGate: boolean;
         wrongSessionHardFailsQuality: boolean;
         missingCurrentSourceHardFailsQuality: boolean;
+        uniqueGateSessionBoundShorthandPasses: boolean;
+        shorthandStillFailsWrongSession: boolean;
+        uniqueGateSessionBoundCurrentSourceActionPasses: boolean;
+        currentSourceActionStillFailsWrongSession: boolean;
+        boundCurrentDiffEvidencePasses: boolean;
+        currentDiffEvidenceStillFailsWrongSession: boolean;
+        latestSessionTurnSupersedesOlderReadPlanGate: boolean;
         deliverySummaryRecordsGate: boolean;
         acceptanceGateBlocksWrongSession: any;
         runtimeKernelShowsWrongSession: boolean;
@@ -12055,6 +12297,28 @@ export declare function runReadPlanRevalidationGateReceiptValidationSelfTest(): 
         };
     };
     missingCurrentSource: {
+        score: number;
+        grade: string;
+        readPlanRevalidationGate: {
+            schema: string;
+            required: boolean;
+            pass: boolean;
+            gate_ids: any;
+            missing_gate_ids: any;
+            missing_read_plan_ids: string[];
+            session_required: any;
+            session_matched: any;
+            session_mismatch_gate_ids: any;
+            current_source_verified: any;
+            ignored_with_reason: any;
+            rows: any;
+            declared: boolean;
+            structured_usage_rows: any;
+            used: any;
+            ignored: any;
+        };
+    };
+    boundShorthand: {
         score: number;
         grade: string;
         readPlanRevalidationGate: {
@@ -12702,9 +12966,6 @@ export declare function runCoordinatorReworkProtocolSelfTest(): {
         hasReason: boolean;
         hasVerification: boolean;
         hasReceipt: boolean;
-        directProjectBuildsSupervisedCoordinationEvidence: boolean;
-        directProjectReviewRoutesRemainDistinct: boolean;
-        directProjectPassWaitsForFinalSummary: boolean;
         failedRouteKeepsSameWorker: boolean;
         independentRouteUsesFreshVerifier: boolean;
         independentVerifierSelectsTestAgent: boolean;
@@ -12719,6 +12980,7 @@ export declare function runCoordinatorReworkProtocolSelfTest(): {
         needsRecheckCreatesSameTestAgentWorkOrderContinuation: any;
         needsEnvironmentPreparesConditionsBeforeRecheck: any;
         implementationReworkSchedulesTestAgentRecheck: boolean;
+        coordinatorReviewBudgetCoversRepairRecheckAndAcceptance: boolean;
         latestTestAgentReviewSupersedesStaleFailure: any;
         independentReworkDispatchesToVerifier: boolean;
         independentReworkTaskNamesReviewSubject: any;
@@ -12885,6 +13147,34 @@ export declare function runCoordinatorReworkProtocolSelfTest(): {
         };
     };
 };
+export declare function enqueueTask(taskId: string, ctx: CollabCtx): {
+    queued: boolean;
+    message: string;
+    blocked?: undefined;
+    duplicate_block_suppressed?: undefined;
+    reason?: undefined;
+    readiness?: undefined;
+    targetKey?: undefined;
+    position?: undefined;
+} | {
+    queued: boolean;
+    blocked: boolean;
+    duplicate_block_suppressed: boolean;
+    reason: string;
+    message: any;
+    readiness: any;
+    targetKey?: undefined;
+    position?: undefined;
+} | {
+    queued: boolean;
+    message: string;
+    targetKey: string;
+    position: number;
+    blocked?: undefined;
+    duplicate_block_suppressed?: undefined;
+    reason?: undefined;
+    readiness?: undefined;
+};
 export declare function createAndQueueTask(task: any, ctx: CollabCtx): {
     task: any;
     queueResult: {
@@ -12926,6 +13216,18 @@ export declare function resumeTaskQueues(ctx: CollabCtx, options?: any): {
     manual_recovery: boolean;
     mixed_recovery: boolean;
     recovery_policy: string;
+    test_agent_runner_recovery: {
+        schema: string;
+        total: number;
+        running: number;
+        interrupted: number;
+        retention: {
+            schema: string;
+            scanned: number;
+            removedRecords: number;
+            removedFiles: number;
+        };
+    };
     results: any[];
     queue_status: {
         total_queued: number;
@@ -13242,7 +13544,7 @@ export interface CollabCtx {
     PORT: number;
     callAgent: (projectName: string, message: string, workDir: string, agentType: string, timeoutMs: number, workspaceTarget?: any) => Promise<string>;
     callAgentForGroupStream: (projectName: string, message: string, workDir: string, agentType: string, options?: any) => Promise<string>;
-    setAgentActivity: (name: string, state: string, detail?: string, workspaceTarget?: any, durationMs?: number) => void;
+    setAgentActivity: (name: string, state: string, detail?: string, workspaceTarget?: any, durationMs?: number, metadata?: any) => void;
     broadcastPetSpeech: (agent: string, payload: any) => void;
     createFileChangeSnapshot: (workDir: string) => any;
     getFileChanges: (projectName: string, beforeSnapshot?: any) => any;
@@ -13275,9 +13577,6 @@ export declare function runCollaborationProtocolSelfTest(): {
             hasReason: boolean;
             hasVerification: boolean;
             hasReceipt: boolean;
-            directProjectBuildsSupervisedCoordinationEvidence: boolean;
-            directProjectReviewRoutesRemainDistinct: boolean;
-            directProjectPassWaitsForFinalSummary: boolean;
             failedRouteKeepsSameWorker: boolean;
             independentRouteUsesFreshVerifier: boolean;
             independentVerifierSelectsTestAgent: boolean;
@@ -13292,6 +13591,7 @@ export declare function runCollaborationProtocolSelfTest(): {
             needsRecheckCreatesSameTestAgentWorkOrderContinuation: any;
             needsEnvironmentPreparesConditionsBeforeRecheck: any;
             implementationReworkSchedulesTestAgentRecheck: boolean;
+            coordinatorReviewBudgetCoversRepairRecheckAndAcceptance: boolean;
             latestTestAgentReviewSupersedesStaleFailure: any;
             independentReworkDispatchesToVerifier: boolean;
             independentReworkTaskNamesReviewSubject: any;
@@ -13579,6 +13879,11 @@ export declare function runCollaborationProtocolSelfTest(): {
             heldWithOverride: import("./startup-task-recovery").StartupTaskRecoveryDecision;
         };
     };
+    testAgentRunner: {
+        pass: boolean;
+        stableSourceFingerprint: boolean;
+        recordsReconcile: boolean;
+    };
     taskDocumentContextPreview: string;
     taskDocumentChecks: {
         hasBusinessGoal: boolean;
@@ -13685,12 +13990,19 @@ export declare function runCollaborationProtocolSelfTest(): {
         explicitFalseDisablesRequirement: boolean;
         missingQaBlocksAcceptance: boolean;
     };
+    globalMissionRequirementChecks: {
+        codeTaskDefaultsToIndependentReview: boolean;
+        explicitNonCodeTaskCanDisableReview: boolean;
+        targetRequirementOverridesMissionDefault: boolean;
+    };
 };
+export declare function updateTask(id: string, updates: any): any;
 export declare function refreshGlobalDevelopmentMissions(): any[];
 export declare function getGlobalDevelopmentMission(id: string): {
     mission: any;
     children: any[];
 };
+export declare function removeTaskFromQueues(taskId: string): number;
 export declare function superviseGlobalDevelopmentMissionCycle(id: string, ctx: CollabCtx, options?: any): {
     success: boolean;
     error: string;
@@ -13768,4 +14080,57 @@ export declare function continueDailyDevTasksFromGaps(ctx: CollabCtx, options?: 
     max_per_task: number;
     results: any[];
 };
+export declare function retryTask(id: string, ctx: CollabCtx, reason?: string, autoExecute?: boolean): {
+    success: boolean;
+    status: number;
+    error: string;
+    task?: undefined;
+    queued?: undefined;
+    queue_result?: undefined;
+    queue_status?: undefined;
+} | {
+    success: boolean;
+    task: any;
+    queued: boolean;
+    queue_result: {
+        queued: boolean;
+        message: string;
+        blocked?: undefined;
+        duplicate_block_suppressed?: undefined;
+        reason?: undefined;
+        readiness?: undefined;
+        targetKey?: undefined;
+        position?: undefined;
+    } | {
+        queued: boolean;
+        blocked: boolean;
+        duplicate_block_suppressed: boolean;
+        reason: string;
+        message: any;
+        readiness: any;
+        targetKey?: undefined;
+        position?: undefined;
+    } | {
+        queued: boolean;
+        message: string;
+        targetKey: string;
+        position: number;
+        blocked?: undefined;
+        duplicate_block_suppressed?: undefined;
+        reason?: undefined;
+        readiness?: undefined;
+    };
+    queue_status: {
+        total_queued: number;
+        running_targets: number;
+        target_status: any;
+        pending_tasks: number;
+        in_progress_tasks: number;
+        failed_tasks: number;
+        running_task_ids: string[];
+    };
+    status?: undefined;
+    error?: undefined;
+};
+export declare function purgeArchivedTask(id: string): any;
 export declare function handleCollaborationApi(pathname: string, req: any, res: any, parsed: any, ctx: CollabCtx): boolean;

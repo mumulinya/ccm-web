@@ -33,6 +33,13 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.buildWorkerTypedMemoryDeliveryExpectedBinding = buildWorkerTypedMemoryDeliveryExpectedBinding;
+exports.buildWorkerTypedMemoryDeliveryLease = buildWorkerTypedMemoryDeliveryLease;
+exports.validateWorkerTypedMemoryDeliveryLease = validateWorkerTypedMemoryDeliveryLease;
+exports.buildWorkerTypedMemoryDispatchTicket = buildWorkerTypedMemoryDispatchTicket;
+exports.validateWorkerTypedMemoryDispatchTicket = validateWorkerTypedMemoryDispatchTicket;
+exports.rebuildWorkerTypedMemoryDeliveryForModelContext = rebuildWorkerTypedMemoryDeliveryForModelContext;
+exports.validateWorkerTypedMemoryDeliveryCapsule = validateWorkerTypedMemoryDeliveryCapsule;
 exports.compactWorkerContextMemoryForRetry = compactWorkerContextMemoryForRetry;
 exports.buildWorkerContextMemoryReinjectionProof = buildWorkerContextMemoryReinjectionProof;
 exports.buildWorkerContextUsage = buildWorkerContextUsage;
@@ -52,6 +59,7 @@ exports.runWorkerContextProviderDispatchOverrideFollowupReceiptContractSelfTest 
 const crypto = __importStar(require("crypto"));
 const context_budget_1 = require("../system/context-budget");
 const reliability_ledger_1 = require("../system/reliability-ledger");
+const group_post_turn_summary_1 = require("../modules/collaboration/group-post-turn-summary");
 const DEFAULT_PERMISSION_RULES = [
     { id: "read-auto", scope: "all", action: "*", risk: "read", decision: "allow", reason: "只读动作默认允许" },
     { id: "worker-dispatch-ask", scope: "group", action: "dispatch_worker", risk: "agent", decision: "ask", reason: "子 Agent 派发需要当前用户消息授权或任务上下文" },
@@ -106,6 +114,878 @@ function renderWorkerPacketMemory(memory) {
         ].filter(Boolean).join("\n");
     }
     return [`平台记忆：${schema}`, compactMemory(memory)].join("\n");
+}
+function extractWorkerTypedMemoryRecall(memory = null) {
+    if (!memory || typeof memory !== "object")
+        return null;
+    const candidates = [
+        memory.typed_memory_recall,
+        memory.typedMemoryRecall,
+        memory.typed_memory,
+        memory.typedMemory,
+        memory.group_memory?.typed_memory_recall,
+        memory.group_memory?.typedMemoryRecall,
+        memory.groupMemory?.typed_memory_recall,
+        memory.groupMemory?.typedMemoryRecall,
+        memory.group_state?.typedMemory?.recall,
+        memory.group_state?.typed_memory?.recall,
+    ];
+    return candidates.find((candidate) => candidate?.schema === "ccm-group-typed-memory-recall-v1") || null;
+}
+function extractWorkerTypedMemoryDeliveryCapsule(memory = null) {
+    if (!memory || typeof memory !== "object")
+        return null;
+    const candidates = [
+        memory.typed_memory_delivery_capsule,
+        memory.typedMemoryDeliveryCapsule,
+        memory.group_memory?.typed_memory_delivery_capsule,
+        memory.group_memory?.typedMemoryDeliveryCapsule,
+        memory.groupMemory?.typed_memory_delivery_capsule,
+        memory.groupMemory?.typedMemoryDeliveryCapsule,
+        memory.group_state?.typedMemory?.deliveryCapsule,
+        memory.group_state?.typed_memory?.delivery_capsule,
+    ];
+    return candidates.find((candidate) => candidate?.schema === "ccm-child-typed-memory-delivery-capsule-v1") || null;
+}
+function workerGroupMemoryContext(memory = null) {
+    if (!memory || typeof memory !== "object")
+        return {};
+    return memory.group_memory || memory.groupMemory || memory;
+}
+function buildWorkerTypedMemoryDeliveryExpectedBinding(input = {}, memoryInput = null) {
+    const memory = workerGroupMemoryContext(memoryInput || input.memory || null);
+    const sessionBinding = memory.session_binding || memory.sessionBinding || {};
+    const typedMemory = memory.group_state?.typedMemory || memory.group_state?.typed_memory || {};
+    const ledger = typedMemory.ledger || {};
+    const binding = {
+        schema: "ccm-worker-typed-memory-delivery-expected-binding-v1",
+        version: 1,
+        group_id: String(input.group?.id || input.group_id || input.groupId || memory.group_id || memory.groupId || ""),
+        group_session_id: String(input.group_session_id || input.groupSessionId || memory.group_session_id || memory.groupSessionId || ""),
+        target_project: String(input.project || input.target_project || input.targetProject || memory.target_project || memory.targetProject || ""),
+        task_id: String(input.task_id || input.taskId || sessionBinding.task_id || sessionBinding.taskId || ""),
+        task_agent_session_id: String(input.task_agent_session_id || input.taskAgentSessionId || sessionBinding.task_agent_session_id || sessionBinding.taskAgentSessionId || ""),
+        recall_scope: String(input.memory_recall_scope || input.memoryRecallScope || ledger.scope || ""),
+        compact_epoch: String(input.memory_compact_epoch || input.memoryCompactEpoch || ledger.compactEpoch || ledger.compact_epoch || ""),
+    };
+    binding.required_fields = Object.entries(binding)
+        .filter(([key, value]) => !["schema", "version", "required_fields", "binding_checksum"].includes(key) && !!String(value || ""))
+        .map(([key]) => key);
+    binding.binding_checksum = hash([
+        binding.version,
+        binding.group_id,
+        binding.group_session_id,
+        binding.target_project,
+        binding.task_id,
+        binding.task_agent_session_id,
+        binding.recall_scope,
+        binding.compact_epoch,
+    ], 32);
+    return binding;
+}
+function workerTypedMemoryDeliveryCapsuleChecksum(capsule = {}) {
+    const rows = Array.isArray(capsule.rows) ? capsule.rows : [];
+    const version = Number(capsule.version || 1);
+    if (version >= 2) {
+        return hash([
+            version,
+            String(capsule.group_id || capsule.groupId || ""),
+            String(capsule.group_session_id || capsule.groupSessionId || ""),
+            String(capsule.target_project || capsule.targetProject || ""),
+            String(capsule.task_id || capsule.taskId || ""),
+            String(capsule.task_agent_session_id || capsule.taskAgentSessionId || ""),
+            String(capsule.recall_scope || capsule.recallScope || ""),
+            String(capsule.compact_epoch || capsule.compactEpoch || "precompact"),
+            capsule.budget || {},
+            Number(capsule.candidate_count || 0),
+            Number(capsule.considered_count || 0),
+            Number(capsule.delivered_count || 0),
+            Number(capsule.delivered_chars || 0),
+            Number(capsule.delivered_bytes || 0),
+            Number(capsule.delivered_lines || 0),
+            Number(capsule.delivered_tokens || 0),
+            Number(capsule.session_delivered_bytes_after || 0),
+            Array.isArray(capsule.required_rel_paths || capsule.requiredRelPaths) ? (capsule.required_rel_paths || capsule.requiredRelPaths) : [],
+            Array.isArray(capsule.delivered_rel_paths || capsule.deliveredRelPaths) ? (capsule.delivered_rel_paths || capsule.deliveredRelPaths) : [],
+            Array.isArray(capsule.skipped_rel_paths || capsule.skippedRelPaths) ? (capsule.skipped_rel_paths || capsule.skippedRelPaths) : [],
+            Array.isArray(capsule.skipped_rows || capsule.skippedRows) ? (capsule.skipped_rows || capsule.skippedRows) : [],
+            Number(capsule.truncated_count || 0),
+            capsule.budget_exhausted === true,
+            rows.map((row) => [
+                String(row.rel_path || row.relPath || ""),
+                String(row.document_checksum || row.documentChecksum || ""),
+                String(row.content_checksum || row.contentChecksum || ""),
+                String(row.content || ""),
+                Number(row.source_chars || 0),
+                Number(row.source_bytes || 0),
+                Number(row.source_lines || 0),
+                Number(row.source_tokens || 0),
+                Number(row.delivered_chars || 0),
+                Number(row.delivered_bytes || 0),
+                Number(row.delivered_lines || 0),
+                Number(row.delivered_tokens || 0),
+                row.truncated === true,
+                Array.isArray(row.truncation_reasons || row.truncationReasons) ? (row.truncation_reasons || row.truncationReasons) : [],
+            ]),
+        ], 32);
+    }
+    return hash([
+        version,
+        String(capsule.group_id || capsule.groupId || ""),
+        String(capsule.group_session_id || capsule.groupSessionId || ""),
+        String(capsule.target_project || capsule.targetProject || ""),
+        String(capsule.task_id || capsule.taskId || ""),
+        String(capsule.task_agent_session_id || capsule.taskAgentSessionId || ""),
+        String(capsule.recall_scope || capsule.recallScope || ""),
+        String(capsule.compact_epoch || capsule.compactEpoch || "precompact"),
+        Array.isArray(capsule.required_rel_paths || capsule.requiredRelPaths) ? (capsule.required_rel_paths || capsule.requiredRelPaths) : [],
+        rows.map((row) => [
+            String(row.rel_path || row.relPath || ""),
+            String(row.document_checksum || row.documentChecksum || ""),
+            String(row.content_checksum || row.contentChecksum || ""),
+            String(row.content || ""),
+            row.truncated === true,
+        ]),
+    ], 32);
+}
+function workerTypedMemoryDeliveryLeaseChecksum(lease = {}) {
+    return hash([
+        Number(lease.version || 0),
+        String(lease.lease_id || lease.leaseId || ""),
+        String(lease.status || ""),
+        String(lease.group_id || lease.groupId || ""),
+        String(lease.group_session_id || lease.groupSessionId || ""),
+        String(lease.target_project || lease.targetProject || ""),
+        String(lease.task_id || lease.taskId || ""),
+        String(lease.task_agent_session_id || lease.taskAgentSessionId || ""),
+        String(lease.recall_scope || lease.recallScope || ""),
+        String(lease.compact_epoch || lease.compactEpoch || "precompact"),
+        String(lease.capsule_checksum || lease.capsuleChecksum || ""),
+        Array.isArray(lease.delivered_rel_paths || lease.deliveredRelPaths) ? (lease.delivered_rel_paths || lease.deliveredRelPaths) : [],
+        Number(lease.delivered_bytes || lease.deliveredBytes || 0),
+        Number(lease.delivered_tokens || lease.deliveredTokens || 0),
+        String(lease.query_checksum || lease.queryChecksum || ""),
+        Number(lease.attempt_sequence || lease.attemptSequence || 0),
+    ], 32);
+}
+function buildWorkerTypedMemoryDeliveryLease(capsuleInput = null, options = {}) {
+    if (capsuleInput?.schema !== "ccm-child-typed-memory-delivery-capsule-v1")
+        return null;
+    const deliveredRelPaths = Array.isArray(capsuleInput.delivered_rel_paths || capsuleInput.deliveredRelPaths)
+        ? (capsuleInput.delivered_rel_paths || capsuleInput.deliveredRelPaths).map(String).filter(Boolean)
+        : [];
+    if (!deliveredRelPaths.length)
+        return null;
+    const queryChecksum = String(options.queryChecksum || options.query_checksum || "")
+        || hash(String(options.query || ""), 32);
+    const attemptSequence = Math.max(0, Math.floor(Number(options.attemptSequence || options.attempt_sequence || 0) || 0));
+    const identity = [
+        String(capsuleInput.group_id || capsuleInput.groupId || ""),
+        String(capsuleInput.group_session_id || capsuleInput.groupSessionId || ""),
+        String(capsuleInput.target_project || capsuleInput.targetProject || ""),
+        String(capsuleInput.task_id || capsuleInput.taskId || ""),
+        String(capsuleInput.task_agent_session_id || capsuleInput.taskAgentSessionId || ""),
+        String(capsuleInput.recall_scope || capsuleInput.recallScope || ""),
+        String(capsuleInput.compact_epoch || capsuleInput.compactEpoch || "precompact"),
+        String(capsuleInput.capsule_checksum || capsuleInput.capsuleChecksum || ""),
+        queryChecksum,
+        attemptSequence,
+    ];
+    const lease = {
+        schema: "ccm-child-typed-memory-delivery-lease-v1",
+        version: 1,
+        lease_id: `tmdl_${hash(identity, 24)}`,
+        status: "pending",
+        group_id: identity[0],
+        group_session_id: identity[1],
+        target_project: identity[2],
+        task_id: identity[3],
+        task_agent_session_id: identity[4],
+        recall_scope: identity[5],
+        compact_epoch: identity[6],
+        capsule_checksum: identity[7],
+        delivered_rel_paths: deliveredRelPaths,
+        delivered_bytes: Math.max(0, Number(capsuleInput.delivered_bytes || capsuleInput.deliveredBytes || 0)),
+        delivered_tokens: Math.max(0, Number(capsuleInput.delivered_tokens || capsuleInput.deliveredTokens || 0)),
+        query_checksum: queryChecksum,
+        attempt_sequence: attemptSequence,
+        created_at: String(options.generatedAt || options.generated_at || new Date().toISOString()),
+    };
+    lease.lease_checksum = workerTypedMemoryDeliveryLeaseChecksum(lease);
+    return lease;
+}
+function validateWorkerTypedMemoryDeliveryLease(leaseInput = null, options = {}) {
+    if (!leaseInput?.schema)
+        return null;
+    const issues = [];
+    if (leaseInput.schema !== "ccm-child-typed-memory-delivery-lease-v1")
+        issues.push("unsupported_schema");
+    if (Number(leaseInput.version || 0) !== 1)
+        issues.push("unsupported_version");
+    if (String(leaseInput.status || "") !== "pending")
+        issues.push("lease_not_pending");
+    if (!String(leaseInput.lease_id || leaseInput.leaseId || ""))
+        issues.push("missing_lease_id");
+    for (const field of ["group_id", "group_session_id", "target_project", "task_id", "task_agent_session_id", "recall_scope", "compact_epoch", "capsule_checksum", "query_checksum"]) {
+        if (!String(leaseInput[field] || ""))
+            issues.push(`missing_${field}`);
+    }
+    const relPaths = Array.isArray(leaseInput.delivered_rel_paths || leaseInput.deliveredRelPaths)
+        ? (leaseInput.delivered_rel_paths || leaseInput.deliveredRelPaths).map(String).filter(Boolean)
+        : [];
+    if (!relPaths.length)
+        issues.push("missing_delivered_rel_paths");
+    const declaredChecksum = String(leaseInput.lease_checksum || leaseInput.leaseChecksum || "");
+    const computedChecksum = workerTypedMemoryDeliveryLeaseChecksum(leaseInput);
+    if (!declaredChecksum || declaredChecksum !== computedChecksum)
+        issues.push("lease_checksum_mismatch");
+    const capsule = options.capsule || options.deliveryCapsule || options.delivery_capsule || null;
+    if (capsule?.schema) {
+        if (String(capsule.capsule_checksum || capsule.capsuleChecksum || "") !== String(leaseInput.capsule_checksum || leaseInput.capsuleChecksum || ""))
+            issues.push("capsule_checksum_binding_mismatch");
+        const capsuleRelPaths = Array.isArray(capsule.delivered_rel_paths || capsule.deliveredRelPaths)
+            ? (capsule.delivered_rel_paths || capsule.deliveredRelPaths).map(String).filter(Boolean)
+            : [];
+        if (JSON.stringify(capsuleRelPaths) !== JSON.stringify(relPaths))
+            issues.push("capsule_rel_paths_binding_mismatch");
+        if (Number(capsule.delivered_bytes || capsule.deliveredBytes || 0) !== Number(leaseInput.delivered_bytes || leaseInput.deliveredBytes || 0))
+            issues.push("capsule_bytes_binding_mismatch");
+        if (Number(capsule.delivered_tokens || capsule.deliveredTokens || 0) !== Number(leaseInput.delivered_tokens || leaseInput.deliveredTokens || 0))
+            issues.push("capsule_tokens_binding_mismatch");
+        for (const field of ["group_id", "group_session_id", "target_project", "task_id", "task_agent_session_id", "recall_scope", "compact_epoch"]) {
+            if (String(capsule[field] || "") !== String(leaseInput[field] || ""))
+                issues.push(`${field}_binding_mismatch`);
+        }
+    }
+    return {
+        ...leaseInput,
+        delivered_rel_paths: relPaths,
+        computed_lease_checksum: computedChecksum,
+        checksum_valid: declaredChecksum === computedChecksum,
+        validation_issues: [...new Set(issues)],
+        valid_for_commit: issues.length === 0,
+    };
+}
+function workerTypedMemoryDispatchTicketChecksum(ticket = {}) {
+    return hash([
+        Number(ticket.version || 0),
+        String(ticket.ticket_id || ticket.ticketId || ""),
+        String(ticket.status || ""),
+        String(ticket.lease_id || ticket.leaseId || ""),
+        String(ticket.lease_checksum || ticket.leaseChecksum || ""),
+        String(ticket.capsule_checksum || ticket.capsuleChecksum || ""),
+        String(ticket.worker_context_packet_id || ticket.workerContextPacketId || ""),
+        String(ticket.prompt_checksum || ticket.promptChecksum || ""),
+        Number(ticket.attempt_sequence || ticket.attemptSequence || 0),
+        String(ticket.compact_epoch || ticket.compactEpoch || "precompact"),
+        String(ticket.admitted_at || ticket.admittedAt || ""),
+        String(ticket.dispatch_not_after || ticket.dispatchNotAfter || ""),
+        String(ticket.consume_point || ticket.consumePoint || ""),
+        ticket.single_use === true,
+    ], 32);
+}
+function buildWorkerTypedMemoryDispatchTicket(input = {}, options = {}) {
+    const lease = input.lease || input.deliveryLease || input.delivery_lease || null;
+    const capsule = input.capsule || input.deliveryCapsule || input.delivery_capsule || null;
+    const packet = input.workerContextPacket || input.worker_context_packet || input.packet || null;
+    const renderedPrompt = String(input.renderedPrompt || input.rendered_prompt || "");
+    if (!lease?.schema || !capsule?.schema || !packet?.packet_id || !renderedPrompt)
+        return null;
+    const admittedAt = String(options.admittedAt || options.admitted_at || new Date().toISOString());
+    const admittedAtMs = Date.parse(admittedAt);
+    if (!Number.isFinite(admittedAtMs))
+        return null;
+    const dispatchWindowMs = Math.min(60_000, Math.max(1000, Math.floor(Number(options.dispatchWindowMs || options.dispatch_window_ms || 30_000))));
+    const stable = [
+        String(lease.lease_id || lease.leaseId || ""),
+        String(lease.lease_checksum || lease.leaseChecksum || ""),
+        String(capsule.capsule_checksum || capsule.capsuleChecksum || ""),
+        String(packet.packet_id || ""),
+        hash(renderedPrompt, 32),
+        Number(lease.attempt_sequence || lease.attemptSequence || 0),
+        String(lease.compact_epoch || lease.compactEpoch || "precompact"),
+        admittedAt,
+        new Date(admittedAtMs + dispatchWindowMs).toISOString(),
+    ];
+    const ticket = {
+        schema: "ccm-child-typed-memory-dispatch-ticket-v1",
+        version: 1,
+        ticket_id: `tmdt_${hash(stable, 24)}`,
+        status: "admitted",
+        lease_id: stable[0],
+        lease_checksum: stable[1],
+        capsule_checksum: stable[2],
+        worker_context_packet_id: stable[3],
+        prompt_checksum: stable[4],
+        attempt_sequence: stable[5],
+        compact_epoch: stable[6],
+        admitted_at: stable[7],
+        dispatch_not_after: stable[8],
+        consume_point: "immediately_before_runner_call",
+        single_use: true,
+    };
+    ticket.ticket_checksum = workerTypedMemoryDispatchTicketChecksum(ticket);
+    return ticket;
+}
+function validateWorkerTypedMemoryDispatchTicket(ticketInput = null, options = {}) {
+    if (!ticketInput?.schema)
+        return null;
+    const issues = [];
+    if (ticketInput.schema !== "ccm-child-typed-memory-dispatch-ticket-v1")
+        issues.push("unsupported_schema");
+    if (Number(ticketInput.version || 0) !== 1)
+        issues.push("unsupported_version");
+    if (String(ticketInput.status || "") !== "admitted")
+        issues.push("ticket_not_admitted");
+    if (ticketInput.single_use !== true)
+        issues.push("ticket_not_single_use");
+    if (String(ticketInput.consume_point || ticketInput.consumePoint || "") !== "immediately_before_runner_call")
+        issues.push("consume_point_mismatch");
+    const declaredChecksum = String(ticketInput.ticket_checksum || ticketInput.ticketChecksum || "");
+    const computedChecksum = workerTypedMemoryDispatchTicketChecksum(ticketInput);
+    if (!declaredChecksum || declaredChecksum !== computedChecksum)
+        issues.push("ticket_checksum_mismatch");
+    const lease = options.lease || options.deliveryLease || options.delivery_lease || null;
+    const capsule = options.capsule || options.deliveryCapsule || options.delivery_capsule || null;
+    const packet = options.workerContextPacket || options.worker_context_packet || options.packet || null;
+    const renderedPrompt = String(options.renderedPrompt || options.rendered_prompt || "");
+    if (lease?.schema) {
+        if (String(ticketInput.lease_id || ticketInput.leaseId || "") !== String(lease.lease_id || lease.leaseId || ""))
+            issues.push("lease_id_binding_mismatch");
+        if (String(ticketInput.lease_checksum || ticketInput.leaseChecksum || "") !== String(lease.lease_checksum || lease.leaseChecksum || ""))
+            issues.push("lease_checksum_binding_mismatch");
+        if (Number(ticketInput.attempt_sequence || ticketInput.attemptSequence || 0) !== Number(lease.attempt_sequence || lease.attemptSequence || 0))
+            issues.push("attempt_sequence_binding_mismatch");
+        if (String(ticketInput.compact_epoch || ticketInput.compactEpoch || "") !== String(lease.compact_epoch || lease.compactEpoch || ""))
+            issues.push("compact_epoch_binding_mismatch");
+    }
+    if (capsule?.schema && String(ticketInput.capsule_checksum || ticketInput.capsuleChecksum || "") !== String(capsule.capsule_checksum || capsule.capsuleChecksum || ""))
+        issues.push("capsule_checksum_binding_mismatch");
+    if (packet?.packet_id && String(ticketInput.worker_context_packet_id || ticketInput.workerContextPacketId || "") !== String(packet.packet_id || ""))
+        issues.push("worker_packet_binding_mismatch");
+    if (renderedPrompt && String(ticketInput.prompt_checksum || ticketInput.promptChecksum || "") !== hash(renderedPrompt, 32))
+        issues.push("prompt_checksum_binding_mismatch");
+    const admittedAtMs = Date.parse(String(ticketInput.admitted_at || ticketInput.admittedAt || ""));
+    const dispatchNotAfterMs = Date.parse(String(ticketInput.dispatch_not_after || ticketInput.dispatchNotAfter || ""));
+    if (!Number.isFinite(admittedAtMs) || !Number.isFinite(dispatchNotAfterMs) || dispatchNotAfterMs <= admittedAtMs)
+        issues.push("dispatch_window_invalid");
+    const dispatchStartedAt = String(options.dispatchStartedAt || options.dispatch_started_at || "");
+    if (options.requireDispatchStart === true || options.require_dispatch_start === true) {
+        const dispatchStartedAtMs = Date.parse(dispatchStartedAt);
+        if (!Number.isFinite(dispatchStartedAtMs))
+            issues.push("dispatch_started_at_missing");
+        else {
+            if (Number.isFinite(admittedAtMs) && dispatchStartedAtMs < admittedAtMs - 2000)
+                issues.push("dispatch_started_before_admission");
+            if (Number.isFinite(dispatchNotAfterMs) && dispatchStartedAtMs > dispatchNotAfterMs)
+                issues.push("dispatch_started_after_ticket_expiry");
+        }
+    }
+    return {
+        ...ticketInput,
+        computed_ticket_checksum: computedChecksum,
+        checksum_valid: declaredChecksum === computedChecksum,
+        validation_issues: [...new Set(issues)],
+        valid_for_dispatch: issues.length === 0,
+        valid_for_commit: issues.length === 0 && (!!dispatchStartedAt || options.requireDispatchStart !== true),
+    };
+}
+function truncateWorkerTypedMemoryContent(source, maxLines, maxBytes, maxTokens) {
+    const lineBounded = String(source || "").replace(/\r/g, "").split("\n").slice(0, Math.max(0, maxLines)).join("\n");
+    const points = Array.from(lineBounded);
+    let low = 0;
+    let high = points.length;
+    while (low < high) {
+        const mid = Math.ceil((low + high) / 2);
+        const candidate = points.slice(0, mid).join("");
+        if (Buffer.byteLength(candidate, "utf8") <= maxBytes && (0, context_budget_1.estimateTextTokens)(candidate) <= maxTokens)
+            low = mid;
+        else
+            high = mid - 1;
+    }
+    return points.slice(0, low).join("").trimEnd();
+}
+function replaceWorkerTypedMemoryDeliveryArtifacts(value, oldCapsuleChecksum, capsule, lease, deliveredRelPaths) {
+    if (Array.isArray(value))
+        return value.map(item => replaceWorkerTypedMemoryDeliveryArtifacts(item, oldCapsuleChecksum, capsule, lease, deliveredRelPaths));
+    if (!value || typeof value !== "object")
+        return value;
+    if (value.schema === "ccm-child-typed-memory-delivery-capsule-v1" && String(value.capsule_checksum || value.capsuleChecksum || "") === oldCapsuleChecksum)
+        return { ...capsule };
+    if (value.schema === "ccm-child-typed-memory-delivery-lease-v1" && String(value.capsule_checksum || value.capsuleChecksum || "") === oldCapsuleChecksum)
+        return lease ? { ...lease } : null;
+    const clone = {};
+    for (const [key, nested] of Object.entries(value))
+        clone[key] = replaceWorkerTypedMemoryDeliveryArtifacts(nested, oldCapsuleChecksum, capsule, lease, deliveredRelPaths);
+    if (clone.schema === "ccm-group-typed-memory-recall-v1") {
+        clone.surfaced = Array.from(deliveredRelPaths);
+        if (Array.isArray(clone.recalled))
+            clone.recalled = clone.recalled.filter((doc) => deliveredRelPaths.has(String(doc.relPath || doc.rel_path || "").toLowerCase()));
+        clone.deliveryBudget = capsule.budget;
+        clone.budgetExhausted = capsule.budget_exhausted === true;
+    }
+    if (clone.ledger && typeof clone.ledger === "object") {
+        clone.ledger = { ...clone.ledger, recordedThisTurn: [], pendingThisTurn: capsule.delivered_rel_paths || [] };
+    }
+    return clone;
+}
+function rebuildWorkerTypedMemoryDeliveryForModelContext(memoryInput, targetContextWindow) {
+    const sourceCapsule = extractWorkerTypedMemoryDeliveryCapsule(memoryInput);
+    const requestedTargetWindow = Number(targetContextWindow || 0);
+    if (!sourceCapsule?.schema || !Number.isFinite(requestedTargetWindow) || requestedTargetWindow <= 0) {
+        return { rebuilt: false, memory: memoryInput, capsule: sourceCapsule, lease: null, reason: "capsule_or_target_missing" };
+    }
+    const targetWindow = Math.min(4_000_000, Math.max(32_000, Math.floor(requestedTargetWindow)));
+    const oldWindow = Number(sourceCapsule.budget?.model_context_window || sourceCapsule.model_context_window || 0);
+    if (oldWindow > 0 && oldWindow <= targetWindow)
+        return { rebuilt: false, memory: memoryInput, capsule: sourceCapsule, lease: null, reason: "capsule_already_within_model_capacity" };
+    const budget = sourceCapsule.budget || {};
+    const maxDocuments = Math.min(5, Math.max(1, Number(budget.max_documents || 5)));
+    const maxBytesPerDocument = Math.min(4096, Math.max(512, Number(budget.max_bytes_per_document || 4096)));
+    const maxLinesPerDocument = Math.min(200, Math.max(10, Number(budget.max_lines_per_document || 200)));
+    const maxSessionBytes = Math.min(60 * 1024, Math.max(4096, Number(budget.max_session_bytes || 60 * 1024)));
+    const configuredMaxTokens = Math.min(20_000, Math.max(500, Number(budget.configured_max_tokens || 5000)));
+    const effectiveMaxTokens = Math.min(configuredMaxTokens, Math.max(1000, Math.floor(targetWindow * 0.02)));
+    const sessionDeliveredBytesBefore = Math.max(0, Math.min(maxSessionBytes, Number(budget.session_delivered_bytes_before || 0)));
+    const sessionRemainingBytesBefore = Math.max(0, maxSessionBytes - sessionDeliveredBytesBefore);
+    const turnMaxBytes = Math.min(maxDocuments * maxBytesPerDocument, sessionRemainingBytesBefore);
+    const rows = [];
+    const skippedRows = Array.isArray(sourceCapsule.skipped_rows) ? sourceCapsule.skipped_rows.map((row) => ({ ...row })) : [];
+    let deliveredChars = 0;
+    let deliveredBytes = 0;
+    let deliveredLines = 0;
+    let deliveredTokens = 0;
+    for (const sourceRow of (Array.isArray(sourceCapsule.rows) ? sourceCapsule.rows : []).slice(0, maxDocuments)) {
+        const remainingBytes = turnMaxBytes - deliveredBytes;
+        const remainingTokens = effectiveMaxTokens - deliveredTokens;
+        const relPath = String(sourceRow.rel_path || sourceRow.relPath || "");
+        if (remainingBytes <= 0 || remainingTokens <= 0) {
+            skippedRows.push({ rel_path: relPath, reason: remainingBytes <= 0 ? "capacity_rebudget_byte_exhausted" : "capacity_rebudget_token_exhausted" });
+            continue;
+        }
+        const content = truncateWorkerTypedMemoryContent(sourceRow.content, maxLinesPerDocument, Math.min(maxBytesPerDocument, remainingBytes), remainingTokens);
+        if (!content) {
+            skippedRows.push({ rel_path: relPath, reason: "capacity_rebudget_empty" });
+            continue;
+        }
+        const rowDeliveredBytes = Buffer.byteLength(content, "utf8");
+        const rowDeliveredLines = workerTypedMemoryDeliveryLineCount(content);
+        const rowDeliveredTokens = (0, context_budget_1.estimateTextTokens)(content);
+        const truncationReasons = Array.isArray(sourceRow.truncation_reasons || sourceRow.truncationReasons) ? [...(sourceRow.truncation_reasons || sourceRow.truncationReasons)] : [];
+        if (content !== String(sourceRow.content || ""))
+            truncationReasons.push("model_context_rebudget");
+        const row = {
+            ...sourceRow,
+            content,
+            content_checksum: hash(content, 32),
+            delivered_chars: content.length,
+            delivered_bytes: rowDeliveredBytes,
+            delivered_lines: rowDeliveredLines,
+            delivered_tokens: rowDeliveredTokens,
+            truncated: Number(sourceRow.source_chars || String(sourceRow.content || "").length) !== content.length,
+            truncation_reasons: [...new Set(truncationReasons)],
+        };
+        rows.push(row);
+        deliveredChars += content.length;
+        deliveredBytes += rowDeliveredBytes;
+        deliveredLines += rowDeliveredLines;
+        deliveredTokens += rowDeliveredTokens;
+    }
+    const requiredRelPaths = rows.map(row => String(row.rel_path || "")).filter(Boolean);
+    const rebuiltBudget = {
+        ...budget,
+        schema: "ccm-child-typed-memory-delivery-budget-v1",
+        max_documents: maxDocuments,
+        max_bytes_per_document: maxBytesPerDocument,
+        max_lines_per_document: maxLinesPerDocument,
+        max_session_bytes: maxSessionBytes,
+        configured_max_tokens: configuredMaxTokens,
+        model_context_window: targetWindow,
+        model_window_ratio: 0.02,
+        effective_max_tokens: effectiveMaxTokens,
+        session_delivered_bytes_before: sessionDeliveredBytesBefore,
+        session_remaining_bytes_before: sessionRemainingBytesBefore,
+        turn_max_bytes: turnMaxBytes,
+        token_budget_formula: "min(configured_max_tokens,max(1000,floor(model_context_window*0.02)))",
+    };
+    const capsule = {
+        ...sourceCapsule,
+        budget: rebuiltBudget,
+        max_documents: maxDocuments,
+        max_bytes_per_document: maxBytesPerDocument,
+        max_lines_per_document: maxLinesPerDocument,
+        max_session_bytes: maxSessionBytes,
+        configured_max_tokens: configuredMaxTokens,
+        model_context_window: targetWindow,
+        effective_max_tokens: effectiveMaxTokens,
+        delivered_count: rows.length,
+        delivered_chars: deliveredChars,
+        delivered_bytes: deliveredBytes,
+        delivered_lines: deliveredLines,
+        delivered_tokens: deliveredTokens,
+        session_delivered_bytes_before: sessionDeliveredBytesBefore,
+        session_delivered_bytes_after: sessionDeliveredBytesBefore + deliveredBytes,
+        session_remaining_bytes_after: Math.max(0, maxSessionBytes - sessionDeliveredBytesBefore - deliveredBytes),
+        required_rel_paths: requiredRelPaths,
+        delivered_rel_paths: requiredRelPaths,
+        skipped_rel_paths: skippedRows.map((row) => String(row.rel_path || "")).filter(Boolean),
+        skipped_rows: skippedRows,
+        truncated_count: rows.filter(row => row.truncated === true).length,
+        budget_exhausted: sessionRemainingBytesBefore <= 0 || deliveredBytes >= turnMaxBytes || deliveredTokens >= effectiveMaxTokens,
+        delivery_complete: rows.length === requiredRelPaths.length && rows.every(row => row.document_checksum && row.content_checksum),
+        rows,
+    };
+    capsule.capsule_checksum = workerTypedMemoryDeliveryCapsuleChecksum(capsule);
+    const oldLease = (() => {
+        const seen = new Set();
+        const walk = (value) => {
+            if (!value || typeof value !== "object" || seen.has(value))
+                return null;
+            seen.add(value);
+            if (value.schema === "ccm-child-typed-memory-delivery-lease-v1" && String(value.capsule_checksum || value.capsuleChecksum || "") === String(sourceCapsule.capsule_checksum || ""))
+                return value;
+            for (const nested of Array.isArray(value) ? value : Object.values(value)) {
+                const found = walk(nested);
+                if (found)
+                    return found;
+            }
+            return null;
+        };
+        return walk(memoryInput);
+    })();
+    const lease = buildWorkerTypedMemoryDeliveryLease(capsule, {
+        queryChecksum: oldLease?.query_checksum || oldLease?.queryChecksum || "",
+        attemptSequence: oldLease?.attempt_sequence || oldLease?.attemptSequence || 0,
+        generatedAt: oldLease?.created_at || oldLease?.createdAt || new Date().toISOString(),
+    });
+    const deliveredSet = new Set(requiredRelPaths.map((item) => item.toLowerCase()));
+    const memory = replaceWorkerTypedMemoryDeliveryArtifacts(memoryInput, String(sourceCapsule.capsule_checksum || ""), capsule, lease, deliveredSet);
+    return {
+        rebuilt: true,
+        memory,
+        capsule,
+        lease,
+        previous_model_context_window: oldWindow,
+        current_model_context_window: targetWindow,
+        previous_capsule_checksum: String(sourceCapsule.capsule_checksum || ""),
+        current_capsule_checksum: capsule.capsule_checksum,
+    };
+}
+function workerTypedMemoryDeliveryLineCount(value) {
+    const text = String(value || "");
+    return text ? text.split("\n").length : 0;
+}
+function hasUnpairedUtf16Surrogate(value) {
+    const text = String(value || "");
+    for (let index = 0; index < text.length; index += 1) {
+        const code = text.charCodeAt(index);
+        if (code >= 0xd800 && code <= 0xdbff) {
+            const next = text.charCodeAt(index + 1);
+            if (!(next >= 0xdc00 && next <= 0xdfff))
+                return true;
+            index += 1;
+        }
+        else if (code >= 0xdc00 && code <= 0xdfff) {
+            return true;
+        }
+    }
+    return false;
+}
+function validateWorkerTypedMemoryDeliveryCapsule(input = null, options = {}) {
+    if (!input?.schema)
+        return null;
+    const rows = Array.isArray(input.rows) ? input.rows : [];
+    const integrityIssues = [];
+    if (input.schema !== "ccm-child-typed-memory-delivery-capsule-v1")
+        integrityIssues.push("unsupported_schema");
+    if (Number(input.version || 0) !== 2)
+        integrityIssues.push("unsupported_capsule_version");
+    const budget = input.budget || {};
+    const maxDocuments = Number(budget.max_documents || 0);
+    const maxBytesPerDocument = Number(budget.max_bytes_per_document || 0);
+    const maxLinesPerDocument = Number(budget.max_lines_per_document || 0);
+    const maxSessionBytes = Number(budget.max_session_bytes || 0);
+    const configuredMaxTokens = Number(budget.configured_max_tokens || 0);
+    const modelContextWindow = Number(budget.model_context_window || 0);
+    const effectiveMaxTokens = Number(budget.effective_max_tokens || 0);
+    const sessionDeliveredBytesBefore = Number(budget.session_delivered_bytes_before || 0);
+    const sessionRemainingBytesBefore = Number(budget.session_remaining_bytes_before || 0);
+    const turnMaxBytes = Number(budget.turn_max_bytes || 0);
+    const validInteger = (value, min, max) => Number.isInteger(value) && value >= min && value <= max;
+    if (!validInteger(maxDocuments, 1, 5))
+        integrityIssues.push("budget_max_documents_invalid");
+    if (!validInteger(maxBytesPerDocument, 512, 4096))
+        integrityIssues.push("budget_max_bytes_per_document_invalid");
+    if (!validInteger(maxLinesPerDocument, 10, 200))
+        integrityIssues.push("budget_max_lines_per_document_invalid");
+    if (!validInteger(maxSessionBytes, 4096, 60 * 1024))
+        integrityIssues.push("budget_max_session_bytes_invalid");
+    if (!validInteger(configuredMaxTokens, 500, 20_000))
+        integrityIssues.push("budget_configured_max_tokens_invalid");
+    if (!validInteger(modelContextWindow, 32_000, 4_000_000))
+        integrityIssues.push("budget_model_context_window_invalid");
+    const expectedEffectiveMaxTokens = Math.min(configuredMaxTokens, Math.max(1000, Math.floor(modelContextWindow * 0.02)));
+    if (effectiveMaxTokens !== expectedEffectiveMaxTokens)
+        integrityIssues.push("budget_effective_max_tokens_mismatch");
+    if (Number(budget.model_window_ratio) !== 0.02)
+        integrityIssues.push("budget_model_window_ratio_mismatch");
+    if (!Number.isInteger(sessionDeliveredBytesBefore) || sessionDeliveredBytesBefore < 0 || sessionDeliveredBytesBefore > maxSessionBytes)
+        integrityIssues.push("budget_session_delivered_bytes_before_invalid");
+    const expectedSessionRemainingBytesBefore = Math.max(0, maxSessionBytes - sessionDeliveredBytesBefore);
+    if (sessionRemainingBytesBefore !== expectedSessionRemainingBytesBefore)
+        integrityIssues.push("budget_session_remaining_bytes_before_mismatch");
+    const expectedTurnMaxBytes = Math.min(maxDocuments * maxBytesPerDocument, expectedSessionRemainingBytesBefore);
+    if (turnMaxBytes !== expectedTurnMaxBytes)
+        integrityIssues.push("budget_turn_max_bytes_mismatch");
+    const mirroredBudgetFields = [
+        ["max_documents", maxDocuments],
+        ["max_bytes_per_document", maxBytesPerDocument],
+        ["max_lines_per_document", maxLinesPerDocument],
+        ["max_session_bytes", maxSessionBytes],
+        ["configured_max_tokens", configuredMaxTokens],
+        ["model_context_window", modelContextWindow],
+        ["effective_max_tokens", effectiveMaxTokens],
+        ["session_delivered_bytes_before", sessionDeliveredBytesBefore],
+    ];
+    for (const [field, expected] of mirroredBudgetFields) {
+        if (Number(input[field] || 0) !== expected)
+            integrityIssues.push(`${field}_mismatch`);
+    }
+    let computedDeliveredChars = 0;
+    let computedDeliveredBytes = 0;
+    let computedDeliveredLines = 0;
+    let computedDeliveredTokens = 0;
+    for (const row of rows) {
+        const content = String(row.content || "");
+        const declaredContentChecksum = String(row.content_checksum || row.contentChecksum || "");
+        if (!String(row.rel_path || row.relPath || ""))
+            integrityIssues.push("missing_rel_path");
+        if (!String(row.document_checksum || row.documentChecksum || ""))
+            integrityIssues.push("missing_document_checksum");
+        if (!content)
+            integrityIssues.push("missing_content");
+        if (!declaredContentChecksum || declaredContentChecksum !== hash(content, 32))
+            integrityIssues.push("content_checksum_mismatch");
+        if (hasUnpairedUtf16Surrogate(content))
+            integrityIssues.push("content_unpaired_unicode_surrogate");
+        const deliveredChars = content.length;
+        const deliveredBytes = Buffer.byteLength(content, "utf8");
+        const deliveredLines = workerTypedMemoryDeliveryLineCount(content);
+        const deliveredTokens = (0, context_budget_1.estimateTextTokens)(content);
+        if (Number(row.delivered_chars || 0) !== deliveredChars)
+            integrityIssues.push("row_delivered_chars_mismatch");
+        if (Number(row.delivered_bytes || 0) !== deliveredBytes)
+            integrityIssues.push("row_delivered_bytes_mismatch");
+        if (Number(row.delivered_lines || 0) !== deliveredLines)
+            integrityIssues.push("row_delivered_lines_mismatch");
+        if (Number(row.delivered_tokens || 0) !== deliveredTokens)
+            integrityIssues.push("row_delivered_tokens_mismatch");
+        if (deliveredBytes > maxBytesPerDocument)
+            integrityIssues.push("row_byte_budget_exceeded");
+        if (deliveredLines > maxLinesPerDocument)
+            integrityIssues.push("row_line_budget_exceeded");
+        const sourceChars = Number(row.source_chars || 0);
+        const sourceBytes = Number(row.source_bytes || 0);
+        const sourceLines = Number(row.source_lines || 0);
+        const sourceTokens = Number(row.source_tokens || 0);
+        if (sourceChars < deliveredChars || sourceBytes < deliveredBytes || sourceLines < deliveredLines || sourceTokens < deliveredTokens)
+            integrityIssues.push("row_source_stats_invalid");
+        const shouldBeTruncated = sourceChars !== deliveredChars;
+        if ((row.truncated === true) !== shouldBeTruncated)
+            integrityIssues.push("row_truncated_state_mismatch");
+        if (row.truncated === true && !Array.isArray(row.truncation_reasons || row.truncationReasons))
+            integrityIssues.push("row_truncation_reasons_missing");
+        computedDeliveredChars += deliveredChars;
+        computedDeliveredBytes += deliveredBytes;
+        computedDeliveredLines += deliveredLines;
+        computedDeliveredTokens += deliveredTokens;
+    }
+    const declaredChecksum = String(input.capsule_checksum || input.capsuleChecksum || "");
+    const computedChecksum = workerTypedMemoryDeliveryCapsuleChecksum(input);
+    if (!declaredChecksum || declaredChecksum !== computedChecksum)
+        integrityIssues.push("capsule_checksum_mismatch");
+    const requiredRelPaths = Array.isArray(input.required_rel_paths || input.requiredRelPaths) ? (input.required_rel_paths || input.requiredRelPaths).map(String) : [];
+    const deliveredRelPaths = rows.map((row) => String(row.rel_path || row.relPath || "")).filter(Boolean);
+    if (requiredRelPaths.some((relPath) => !deliveredRelPaths.includes(relPath)))
+        integrityIssues.push("required_rel_path_missing");
+    const declaredDeliveredRelPaths = Array.isArray(input.delivered_rel_paths || input.deliveredRelPaths) ? (input.delivered_rel_paths || input.deliveredRelPaths).map(String) : [];
+    if (JSON.stringify(requiredRelPaths) !== JSON.stringify(deliveredRelPaths))
+        integrityIssues.push("required_rel_paths_mismatch");
+    if (JSON.stringify(declaredDeliveredRelPaths) !== JSON.stringify(deliveredRelPaths))
+        integrityIssues.push("delivered_rel_paths_mismatch");
+    if (Number(input.delivered_count || 0) !== rows.length)
+        integrityIssues.push("delivered_count_mismatch");
+    if (Number(input.delivered_chars || 0) !== computedDeliveredChars)
+        integrityIssues.push("delivered_chars_mismatch");
+    if (Number(input.delivered_bytes || 0) !== computedDeliveredBytes)
+        integrityIssues.push("delivered_bytes_mismatch");
+    if (Number(input.delivered_lines || 0) !== computedDeliveredLines)
+        integrityIssues.push("delivered_lines_mismatch");
+    if (Number(input.delivered_tokens || 0) !== computedDeliveredTokens)
+        integrityIssues.push("delivered_tokens_mismatch");
+    if (Number(input.truncated_count || 0) !== rows.filter((row) => row.truncated === true).length)
+        integrityIssues.push("truncated_count_mismatch");
+    if (!Number.isInteger(Number(input.candidate_count || 0)) || Number(input.candidate_count || 0) < Number(input.considered_count || 0))
+        integrityIssues.push("candidate_count_invalid");
+    if (!Number.isInteger(Number(input.considered_count || 0)) || Number(input.considered_count || 0) < rows.length || Number(input.considered_count || 0) > maxDocuments)
+        integrityIssues.push("considered_count_invalid");
+    if (computedDeliveredBytes > turnMaxBytes)
+        integrityIssues.push("turn_byte_budget_exceeded");
+    if (computedDeliveredTokens > effectiveMaxTokens)
+        integrityIssues.push("turn_token_budget_exceeded");
+    const expectedSessionDeliveredBytesAfter = sessionDeliveredBytesBefore + computedDeliveredBytes;
+    if (Number(input.session_delivered_bytes_after || 0) !== expectedSessionDeliveredBytesAfter)
+        integrityIssues.push("session_delivered_bytes_after_mismatch");
+    if (expectedSessionDeliveredBytesAfter > maxSessionBytes)
+        integrityIssues.push("session_byte_budget_exceeded");
+    if (Number(input.session_remaining_bytes_after || 0) !== Math.max(0, maxSessionBytes - expectedSessionDeliveredBytesAfter))
+        integrityIssues.push("session_remaining_bytes_after_mismatch");
+    const expectedBudgetExhausted = sessionRemainingBytesBefore <= 0 || computedDeliveredBytes >= turnMaxBytes || computedDeliveredTokens >= effectiveMaxTokens;
+    if ((input.budget_exhausted === true) !== expectedBudgetExhausted)
+        integrityIssues.push("budget_exhausted_state_mismatch");
+    const expectedBinding = options.expectedBinding || options.expected_binding || null;
+    const bindingIssues = [];
+    const bindingFields = [
+        ["group_id", "groupId"],
+        ["group_session_id", "groupSessionId"],
+        ["target_project", "targetProject"],
+        ["task_id", "taskId"],
+        ["task_agent_session_id", "taskAgentSessionId"],
+        ["recall_scope", "recallScope"],
+        ["compact_epoch", "compactEpoch"],
+    ];
+    if (expectedBinding) {
+        for (const [snake, camel] of bindingFields) {
+            const expected = String(expectedBinding[snake] || expectedBinding[camel] || "");
+            if (!expected)
+                continue;
+            const actual = String(input[snake] || input[camel] || "");
+            if (actual !== expected)
+                bindingIssues.push(`binding_${snake}_mismatch`);
+        }
+    }
+    const checksumValid = integrityIssues.length === 0;
+    const bindingValid = bindingIssues.length === 0;
+    const issues = [...new Set([...integrityIssues, ...bindingIssues])];
+    return {
+        ...input,
+        rows,
+        required_rel_paths: requiredRelPaths,
+        delivered_rel_paths: deliveredRelPaths,
+        computed_capsule_checksum: computedChecksum,
+        checksum_valid: checksumValid,
+        budget_valid: !integrityIssues.some(issue => issue.includes("budget") || issue.includes("bytes") || issue.includes("lines") || issue.includes("tokens") || issue.includes("unicode") || issue.includes("truncated")),
+        binding_required: !!expectedBinding && Number(expectedBinding.required_fields?.length || 0) > 0,
+        binding_valid: bindingValid,
+        expected_binding: expectedBinding,
+        integrity_issues: [...new Set(integrityIssues)],
+        binding_issues: [...new Set(bindingIssues)],
+        delivery_complete: input.delivery_complete === true && checksumValid && bindingValid,
+        trusted_for_delivery: input.delivery_complete === true && checksumValid && bindingValid,
+        validation_issues: issues,
+    };
+}
+function renderWorkerTypedMemoryDeliveryCapsule(capsuleInput = null, expectedBinding = null) {
+    const capsule = validateWorkerTypedMemoryDeliveryCapsule(capsuleInput, { expectedBinding });
+    if (!capsule?.schema || !Array.isArray(capsule.rows) || !capsule.rows.length)
+        return "";
+    if (capsule.trusted_for_delivery !== true) {
+        return [
+            "## Typed memory delivery capsule",
+            `INVALID delivery capsule：declared=${capsule.capsule_checksum || "missing"}；computed=${capsule.computed_capsule_checksum || "missing"}；issues=${(capsule.validation_issues || []).join(",") || "unknown"}.`,
+            "- Fail closed: do not use capsule memory content; report it in memoryIgnored and rely on current source only.",
+        ].join("\n");
+    }
+    const lines = [
+        "## Typed memory delivery capsule",
+        `capsule_checksum=${capsule.capsule_checksum}；scope=${capsule.recall_scope || ""}；task_agent_session=${capsule.task_agent_session_id || ""}；compact_epoch=${capsule.compact_epoch || "precompact"}；documents=${capsule.rows.length}.`,
+        `delivery_budget=${capsule.delivered_bytes || 0}/${capsule.budget?.turn_max_bytes || 0} bytes；tokens=${capsule.delivered_tokens || 0}/${capsule.budget?.effective_max_tokens || 0}；session=${capsule.session_delivered_bytes_after || 0}/${capsule.budget?.max_session_bytes || 0} bytes.`,
+        "- These are bounded task-relevant excerpts from this group chat session. Current repository/resource state wins on conflict.",
+    ];
+    for (const row of capsule.rows) {
+        lines.push(`- [${row.type || "project"}] ${row.rel_path}；document_checksum=${row.document_checksum}；content_checksum=${row.content_checksum}；stale=${row.stale === true}；truncated=${row.truncated === true}`);
+        lines.push(`  ${String(row.content || "").replace(/\n/g, "\n  ")}`);
+    }
+    return lines.join("\n");
+}
+function buildWorkerMemoryRecallTrustContract(memory = null, memoryPolicy = {}, deliveryCapsuleInput = null, expectedBinding = null) {
+    if (memoryPolicy?.ignored === true)
+        return null;
+    const recall = extractWorkerTypedMemoryRecall(memory);
+    const docs = Array.isArray(recall?.recalled) ? recall.recalled : [];
+    if (!recall?.schema || recall.ignored === true || !docs.length)
+        return null;
+    const rows = docs.map((doc) => {
+        const freshness = doc.freshness || {};
+        return {
+            rel_path: String(doc.relPath || doc.rel_path || ""),
+            document_checksum: String(doc.checksum || doc.document_checksum || ""),
+            age_days: Math.max(0, Number(freshness.age_days || freshness.ageDays || 0)),
+            age_label: String(freshness.age_label || freshness.ageLabel || "today"),
+            stale: freshness.stale === true,
+            current_source_verification_required: true,
+        };
+    }).filter((row) => row.rel_path);
+    if (!rows.length)
+        return null;
+    const groupId = String(memory?.group_id || memory?.groupId || "");
+    const groupSessionId = String(memory?.group_session_id || memory?.groupSessionId || "");
+    const scopeId = groupId && groupSessionId && groupSessionId !== "default" ? `${groupId}--${groupSessionId}` : groupId;
+    const deliveryCapsule = validateWorkerTypedMemoryDeliveryCapsule(deliveryCapsuleInput || extractWorkerTypedMemoryDeliveryCapsule(memory), { expectedBinding });
+    const contract = {
+        schema: "ccm-worker-memory-recall-trust-contract-v1",
+        version: 1,
+        group_id: groupId,
+        group_session_id: groupSessionId,
+        scope_id: scopeId,
+        recalled_count: rows.length,
+        stale_count: rows.filter((row) => row.stale).length,
+        fresh_count: rows.filter((row) => !row.stale).length,
+        stale_after_days: 1,
+        required_rel_paths: rows.map((row) => row.rel_path),
+        stale_rel_paths: rows.filter((row) => row.stale).map((row) => row.rel_path),
+        verification_required_before_recommendation: true,
+        current_source_wins_on_conflict: true,
+        stale_memory_must_be_updated_or_removed: true,
+        receipt_required: true,
+        required_receipt_field: "CCM_AGENT_RECEIPT.typedMemoryUsage",
+        required_receipt_fields: ["relPath", "usageState", "currentSourceVerified", "currentSourceEvidence", "reason"],
+        conflict_receipt_fields: ["conflictDetected", "conflictKind", "recommendedMemoryAction", "conflictReason", "replacementMemory"],
+        delivery_capsule_required: rows.length > 0,
+        delivery_capsule_checksum: deliveryCapsule?.capsule_checksum || "",
+        delivery_capsule_checksum_valid: deliveryCapsule?.checksum_valid === true,
+        delivery_capsule_binding_checksum: expectedBinding?.binding_checksum || "",
+        delivery_capsule_binding_valid: deliveryCapsule?.binding_valid === true,
+        delivery_capsule_complete: deliveryCapsule?.delivery_complete === true,
+        rows,
+    };
+    contract.contract_checksum = hash([
+        contract.schema,
+        contract.scope_id,
+        contract.delivery_capsule_checksum,
+        contract.delivery_capsule_checksum_valid,
+        contract.delivery_capsule_binding_checksum,
+        contract.delivery_capsule_binding_valid,
+        contract.delivery_capsule_complete,
+        rows.map((row) => [row.rel_path, row.document_checksum, row.age_days, row.stale]),
+    ], 32);
+    return contract;
+}
+function renderWorkerMemoryRecallTrustContract(contract = null) {
+    if (!contract?.schema || !Array.isArray(contract.rows) || !contract.rows.length)
+        return "";
+    return [
+        "## Before recommending from memory",
+        `Memory recall trust contract：scope=${contract.scope_id || ""}；recalled=${contract.recalled_count || 0}；stale=${contract.stale_count || 0}；checksum=${contract.contract_checksum || ""}`,
+        contract.delivery_capsule_required === true
+            ? `- Delivery capsule：checksum=${contract.delivery_capsule_checksum || "missing"}；valid=${contract.delivery_capsule_checksum_valid === true}；binding=${contract.delivery_capsule_binding_valid === true}；complete=${contract.delivery_capsule_complete === true}。无效、身份不匹配或不完整时必须 fail closed，不得使用 capsule 正文。`
+            : "",
+        "- A recalled memory is a point-in-time claim, not live repository or resource state. Current files and resources win on conflict.",
+        "- Before recommending a recalled file path, check it exists. Before recommending a function or flag, search current source. Before the user acts on a recommendation, verify it first.",
+        contract.stale_count > 0 ? `- Stale recalled memories: ${(contract.stale_rel_paths || []).join(", ")}. Their code behavior and file:line claims require fresh verification.` : "- Recalled memories are at most one day old, but specific code and resource claims still require current-source verification.",
+        "- Final CCM_AGENT_RECEIPT.typedMemoryUsage must cover every relPath. used/verified claims require currentSourceEvidence that CCM can recompute; ignored claims require a reason.",
+        "- If current evidence conflicts with memory, do not act on the stale claim. Set conflictDetected=true with conflictKind, recommendedMemoryAction, and conflictReason; update also requires replacementMemory. This creates a user-confirmed candidate and never authorizes the worker to mutate long-term memory directly.",
+    ].filter(Boolean).join("\n");
 }
 function extractPressureMemoryProvenanceReceiptDiscipline(memory = {}, fallback = null) {
     const candidate = fallback
@@ -875,6 +1755,10 @@ function buildWorkerContextMemoryReinjectionProof(packet = {}) {
     const retry = packet?.context_compaction_retry || packet?.contextCompactionRetry || null;
     const memoryCompaction = retry?.memory_compaction || retry?.memoryCompaction || null;
     const memoryText = renderWorkerPacketMemory(memory);
+    const expectedDeliveryBinding = buildWorkerTypedMemoryDeliveryExpectedBinding(packet, memory);
+    const typedMemoryDeliveryCapsule = validateWorkerTypedMemoryDeliveryCapsule(packet?.typed_memory_delivery_capsule
+        || packet?.typedMemoryDeliveryCapsule
+        || extractWorkerTypedMemoryDeliveryCapsule(memory), { expectedBinding: expectedDeliveryBinding });
     const memoryRawText = memory == null ? "" : (typeof memory === "string" ? memory : JSON.stringify(memory || {}));
     const packetMemoryHash = memoryRawText ? hash(memoryRawText, 24) : "";
     const expectedCompactedMemoryHash = String(memoryCompaction?.compacted_memory_hash || memoryCompaction?.compactedMemoryHash || "");
@@ -904,6 +1788,15 @@ function buildWorkerContextMemoryReinjectionProof(packet = {}) {
         packet_memory_chars: memoryRawText.length,
         rendered_memory_hash: memoryText ? hash(memoryText, 24) : "",
         rendered_memory_chars: memoryText.length,
+        typed_memory_delivery_capsule_present: !!typedMemoryDeliveryCapsule?.schema,
+        typed_memory_delivery_capsule_checksum: typedMemoryDeliveryCapsule?.capsule_checksum || "",
+        typed_memory_delivery_capsule_checksum_valid: typedMemoryDeliveryCapsule?.checksum_valid === true,
+        typed_memory_delivery_capsule_binding_checksum: expectedDeliveryBinding.binding_checksum || "",
+        typed_memory_delivery_capsule_binding_valid: typedMemoryDeliveryCapsule?.binding_valid === true,
+        typed_memory_delivery_capsule_trusted: typedMemoryDeliveryCapsule?.trusted_for_delivery === true,
+        typed_memory_delivery_capsule_complete: typedMemoryDeliveryCapsule?.delivery_complete === true,
+        typed_memory_delivery_capsule_required_rel_paths: typedMemoryDeliveryCapsule?.required_rel_paths || [],
+        typed_memory_delivery_capsule_delivered_rel_paths: typedMemoryDeliveryCapsule?.delivered_rel_paths || [],
         memory_first: memoryFirst,
         compaction_retry_id: retry?.retry_id || retry?.retryId || "",
         memory_compaction_schema: memoryCompaction?.schema || "",
@@ -964,6 +1857,10 @@ function buildWorkerContextUsage(packet = {}, options = {}) {
     const memory = packet?.memory || null;
     const memoryPolicy = packet?.memory_policy || packet?.memoryPolicy || normalizeWorkerMemoryPolicy({}, memory);
     const memoryRendered = renderWorkerPacketMemory(memory);
+    const expectedDeliveryBinding = buildWorkerTypedMemoryDeliveryExpectedBinding(packet, memory);
+    const typedMemoryDeliveryCapsule = validateWorkerTypedMemoryDeliveryCapsule(packet?.typed_memory_delivery_capsule
+        || packet?.typedMemoryDeliveryCapsule
+        || extractWorkerTypedMemoryDeliveryCapsule(memory), { expectedBinding: expectedDeliveryBinding });
     const pressureMemoryProvenanceReceiptDiscipline = extractPressureMemoryProvenanceReceiptDiscipline(memory, packet?.pressure_memory_provenance_receipt_discipline || packet?.pressureMemoryProvenanceReceiptDiscipline || null);
     const pressureProvenanceDispatchFeedbackPolicy = extractPressureProvenanceDispatchFeedbackPolicy(memory, packet?.pressure_provenance_dispatch_feedback_policy || packet?.pressureProvenanceDispatchFeedbackPolicy || null);
     const pressureProvenanceProviderDispatchAdvisory = extractPressureProvenanceProviderDispatchAdvisory(memory, packet?.pressure_provenance_provider_dispatch_advisory || packet?.pressureProvenanceProviderDispatchAdvisory || null);
@@ -973,6 +1870,9 @@ function buildWorkerContextUsage(packet = {}, options = {}) {
     const providerSwitchDecisionReceipt = packet?.provider_switch_decision_receipt
         || packet?.providerSwitchDecisionReceipt
         || null;
+    const memoryRecallTrustContract = packet?.memory_recall_trust_contract
+        || packet?.memoryRecallTrustContract
+        || buildWorkerMemoryRecallTrustContract(memory, memoryPolicy);
     const categories = [
         workerContextUsageCategory("worker_packet_envelope", "Worker packet envelope", {
             packet_id: packet?.packet_id || "",
@@ -987,6 +1887,8 @@ function buildWorkerContextUsage(packet = {}, options = {}) {
             ...(Array.isArray(packet?.document_findings) ? packet.document_findings : []),
         ], { source: "coordinator-analysis" }),
         workerContextUsageCategory("memory_policy", "Memory policy", memoryPolicy, { source: "memory-policy", required: memoryPolicy.ignored === true }),
+        workerContextUsageCategory("memory_recall_trust_contract", "Memory recall trust contract", memoryRecallTrustContract || "", { source: "typed-memory-freshness", required: memoryRecallTrustContract?.receipt_required === true }),
+        workerContextUsageCategory("typed_memory_delivery_capsule", "Typed memory delivery capsule", typedMemoryDeliveryCapsule || "", { source: "typed-memory-delivery", required: memoryRecallTrustContract?.delivery_capsule_required === true }),
         workerContextUsageCategory("group_memory_rendered", "Group memory rendered context", memoryRendered, { source: memory?.schema || "memory-context", required: !!memory }),
         workerContextUsageCategory("typed_memory_recall", "Typed MEMORY.md recall", memory?.typedMemoryRecall || memory?.typed_memory_recall || memory?.typed_memory || memory?.typedMemory || "", { source: "typed-memory" }),
         workerContextUsageCategory("pressure_memory_provenance_receipt_discipline", "Pressure memory provenance receipt discipline", pressureMemoryProvenanceReceiptDiscipline || "", { source: "typed-memory-pressure-provenance", required: pressureMemoryProvenanceReceiptDiscipline?.active === true }),
@@ -998,6 +1900,7 @@ function buildWorkerContextUsage(packet = {}, options = {}) {
         workerContextUsageCategory("provider_switch_decision_receipt", "Provider switch decision receipt", providerSwitchDecisionReceipt || "", { source: "group-main-agent-provider-decision", required: providerSwitchDecisionReceipt?.valid === true }),
         workerContextUsageCategory("global_memory", "Global memory recall", memory?.globalAgentMemoryRecall || memory?.global_agent_memory_recall || memory?.global_memory || memory?.globalMemory || "", { source: "global-agent-memory" }),
         workerContextUsageCategory("replay_repair_dispatch_briefs", "Replay repair dispatch briefs", packet?.replay_repair_dispatch_briefs || [], { source: "replay-repair", required: Array.isArray(packet?.replay_repair_dispatch_briefs) && packet.replay_repair_dispatch_briefs.length > 0 }),
+        workerContextUsageCategory("cleanup_commit_repair_context", "Cleanup commit repair context", packet?.cleanup_commit_repair_context || "", { source: "cleanup-commit-repair", required: Number(packet?.cleanup_commit_repair_context?.brief_count || 0) > 0 }),
         workerContextUsageCategory("contract_injections", "Contract injections", packet?.contract_injections || [], { source: "contract-injection" }),
         workerContextUsageCategory("dependencies", "Dependencies", packet?.dependencies || [], { source: "coordinator-plan" }),
         workerContextUsageCategory("context_compaction_retry", "Context compaction retry", packet?.context_compaction_retry || packet?.contextCompactionRetry || "", { source: "worker-context-gate", required: !!(packet?.context_compaction_retry || packet?.contextCompactionRetry) }),
@@ -1045,6 +1948,7 @@ function buildWorkerContextUsage(packet = {}, options = {}) {
         project: packet?.project || "",
         task_id: packet?.task_id || "",
         model_context_policy: "cc-style-api-view-after-memory-render",
+        capacity_provenance: options.capacityProvenance || options.capacity_provenance || packet?.model_context_capacity || null,
         max_tokens: maxTokens,
         reserved_output_tokens: reservedOutputTokens,
         autocompact_buffer_tokens: autocompactBufferTokens,
@@ -1179,7 +2083,31 @@ function buildWorkerContextPacket(input) {
     const groupMembers = Array.isArray(input.group?.members) ? input.group.members.map((m) => m.project).filter(Boolean) : [];
     const contractInjections = Array.isArray(input.contractInjections) ? input.contractInjections : [];
     const replayRepairDispatchBriefs = Array.isArray(input.replayRepairDispatchBriefs) ? input.replayRepairDispatchBriefs : [];
+    const cleanupCommitRepairContext = input.cleanupCommitRepairContext || input.cleanup_commit_repair_context || null;
     const memoryPolicy = normalizeWorkerMemoryPolicy(input, input.memory || null);
+    const groupMemoryContext = workerGroupMemoryContext(input.memory || null);
+    const groupMemorySessionBinding = groupMemoryContext.session_binding || groupMemoryContext.sessionBinding || {};
+    const postTurnSummaryDeliveryCapsule = (0, group_post_turn_summary_1.validateGroupPostTurnSummaryDeliveryCapsule)((0, group_post_turn_summary_1.extractGroupPostTurnSummaryDeliveryCapsule)(input.memory || null), {
+        expectedBinding: {
+            group_id: String(input.group?.id || groupMemoryContext.group_id || ""),
+            group_session_id: String(input.groupSessionId || input.group_session_id || groupMemoryContext.group_session_id || ""),
+            task_id: String(input.taskId || groupMemorySessionBinding.task_id || ""),
+            target_project: String(input.project || groupMemoryContext.target_project || ""),
+            task_agent_session_id: String(input.taskAgentSessionId || input.task_agent_session_id || groupMemorySessionBinding.task_agent_session_id || ""),
+            native_session_id: String(groupMemorySessionBinding.native_session_id || ""),
+            execution_id: String(groupMemorySessionBinding.execution_id || ""),
+            ...(Number(groupMemorySessionBinding.turn || 0) > 0 ? {
+                attempt_sequence: Number(groupMemorySessionBinding.turn || 0),
+                invocation_kind: Number(groupMemorySessionBinding.turn || 0) > 1 ? "resume" : "spawn",
+            } : {}),
+        },
+    });
+    const taskAgentInvocationLineage = groupMemoryContext.task_agent_invocation_lineage
+        || groupMemoryContext.taskAgentInvocationLineage
+        || null;
+    const typedMemoryDeliveryExpectedBinding = buildWorkerTypedMemoryDeliveryExpectedBinding(input, input.memory || null);
+    const typedMemoryDeliveryCapsule = validateWorkerTypedMemoryDeliveryCapsule(extractWorkerTypedMemoryDeliveryCapsule(input.memory || null), { expectedBinding: typedMemoryDeliveryExpectedBinding });
+    const memoryRecallTrustContract = buildWorkerMemoryRecallTrustContract(input.memory || null, memoryPolicy, typedMemoryDeliveryCapsule, typedMemoryDeliveryExpectedBinding);
     const pressureMemoryProvenanceReceiptDiscipline = extractPressureMemoryProvenanceReceiptDiscipline(input.memory || null, input.pressureMemoryProvenanceReceiptDiscipline || input.pressure_memory_provenance_receipt_discipline || null);
     const pressureProvenanceDispatchFeedbackPolicy = extractPressureProvenanceDispatchFeedbackPolicy(input.memory || null, input.pressureProvenanceDispatchFeedbackPolicy || input.pressure_provenance_dispatch_feedback_policy || null);
     const pressureProvenanceProviderDispatchAdvisory = extractPressureProvenanceProviderDispatchAdvisory(input.memory || null, input.pressureProvenanceProviderDispatchAdvisory || input.pressure_provenance_provider_dispatch_advisory || null);
@@ -1200,12 +2128,15 @@ function buildWorkerContextPacket(input) {
         || input.provider_switch_decision_receipt
         || null;
     const packet = {
-        packet_id: `wcp_${hash([input.project, input.task, input.traceId, agentType, contractInjections, replayRepairDispatchBriefs, pressureProvenanceDispatchFeedbackPolicy?.active ? pressureProvenanceDispatchFeedbackPolicy : null, pressureProvenanceProviderDispatchAdvisory?.schema ? pressureProvenanceProviderDispatchAdvisory : null, pressureProvenanceProviderDispatchOverrideFollowupReceiptContract?.active ? pressureProvenanceProviderDispatchOverrideFollowupReceiptContract : null, providerRankingCompactRepairReceiptMemoryContract?.active ? providerRankingCompactRepairReceiptMemoryContract : null, postCompactReinjectionRepairReceiptMemoryContract?.active ? postCompactReinjectionRepairReceiptMemoryContract : null, providerSwitchDecisionReceipt?.valid ? providerSwitchDecisionReceipt : null], 14)}`,
+        packet_id: `wcp_${hash([input.project, input.task, input.traceId, agentType, contractInjections, replayRepairDispatchBriefs, cleanupCommitRepairContext?.brief_count ? cleanupCommitRepairContext : null, memoryRecallTrustContract?.contract_checksum || "", postTurnSummaryDeliveryCapsule?.capsule_checksum || "", taskAgentInvocationLineage, pressureProvenanceDispatchFeedbackPolicy?.active ? pressureProvenanceDispatchFeedbackPolicy : null, pressureProvenanceProviderDispatchAdvisory?.schema ? pressureProvenanceProviderDispatchAdvisory : null, pressureProvenanceProviderDispatchOverrideFollowupReceiptContract?.active ? pressureProvenanceProviderDispatchOverrideFollowupReceiptContract : null, providerRankingCompactRepairReceiptMemoryContract?.active ? providerRankingCompactRepairReceiptMemoryContract : null, postCompactReinjectionRepairReceiptMemoryContract?.active ? postCompactReinjectionRepairReceiptMemoryContract : null, providerSwitchDecisionReceipt?.valid ? providerSwitchDecisionReceipt : null, input.modelContextCapacity || input.model_context_capacity || null], 14)}`,
         version: 1,
         project: input.project,
         agent_type: agentType,
         agentType,
+        model_context_capacity: input.modelContextCapacity || input.model_context_capacity || null,
         task_id: input.taskId || "",
+        group_session_id: typedMemoryDeliveryExpectedBinding.group_session_id || "",
+        task_agent_session_id: typedMemoryDeliveryExpectedBinding.task_agent_session_id || "",
         trace_id: input.traceId || "",
         group: { id: input.group?.id || "", name: input.group?.name || "", members: groupMembers },
         goal: input.analysis?.summary || input.task,
@@ -1252,8 +2183,24 @@ function buildWorkerContextPacket(input) {
             required_receipt_reference: true,
             should_create_real_task: false,
         })),
+        cleanup_commit_repair_context: cleanupCommitRepairContext?.brief_count > 0 ? cleanupCommitRepairContext : null,
         memory: input.memory || null,
         memory_policy: memoryPolicy,
+        memory_recall_trust_contract: memoryRecallTrustContract,
+        typed_memory_delivery_expected_binding: typedMemoryDeliveryExpectedBinding,
+        typed_memory_delivery_capsule: typedMemoryDeliveryCapsule,
+        post_turn_summary_delivery_capsule: postTurnSummaryDeliveryCapsule,
+        task_agent_invocation_lineage: taskAgentInvocationLineage?.invocation_edge_id ? {
+            schema: "ccm-task-agent-invocation-lineage-binding-v1",
+            invocation_edge_id: taskAgentInvocationLineage.invocation_edge_id,
+            parent_invocation_edge_id: taskAgentInvocationLineage.parent_invocation_edge_id || "",
+            root_invocation_edge_id: taskAgentInvocationLineage.root_invocation_edge_id || taskAgentInvocationLineage.invocation_edge_id,
+            branch_id: taskAgentInvocationLineage.branch_id || "",
+            parent_branch_id: taskAgentInvocationLineage.parent_branch_id || "",
+            branch_kind: taskAgentInvocationLineage.branch_kind || "main",
+            expected_lineage_head_checksum: taskAgentInvocationLineage.expected_lineage_head_checksum || "",
+            capsule_checksum: postTurnSummaryDeliveryCapsule?.capsule_checksum || "",
+        } : null,
         pressure_memory_provenance_receipt_discipline: pressureMemoryProvenanceReceiptDiscipline?.active ? pressureMemoryProvenanceReceiptDiscipline : null,
         pressure_provenance_dispatch_feedback_policy: pressureProvenanceDispatchFeedbackPolicy?.active ? pressureProvenanceDispatchFeedbackPolicy : null,
         pressure_provenance_provider_dispatch_advisory: pressureProvenanceProviderDispatchAdvisory?.schema ? pressureProvenanceProviderDispatchAdvisory : null,
@@ -1268,8 +2215,22 @@ function buildWorkerContextPacket(input) {
             actual_diff_required: true,
             verification_required: true,
             memory_ignored_receipt_required: memoryPolicy.ignored === true,
+            typed_memory_usage_receipt_required: memoryRecallTrustContract?.receipt_required === true,
+            typed_memory_current_source_verification_required: memoryRecallTrustContract?.verification_required_before_recommendation === true,
+            typed_memory_stale_recall_present: Number(memoryRecallTrustContract?.stale_count || 0) > 0,
+            typed_memory_required_rel_paths: memoryRecallTrustContract?.required_rel_paths || [],
+            typed_memory_delivery_capsule_required: memoryRecallTrustContract?.delivery_capsule_required === true,
+            typed_memory_delivery_capsule_checksum_valid: typedMemoryDeliveryCapsule?.checksum_valid === true,
+            typed_memory_delivery_capsule_binding_valid: typedMemoryDeliveryCapsule?.binding_valid === true,
+            typed_memory_delivery_capsule_trusted: typedMemoryDeliveryCapsule?.trusted_for_delivery === true,
+            typed_memory_delivery_capsule_complete: typedMemoryDeliveryCapsule?.delivery_complete === true,
+            post_turn_summary_delivery_capsule_required: postTurnSummaryDeliveryCapsule?.schema ? true : false,
+            post_turn_summary_delivery_capsule_checksum_valid: postTurnSummaryDeliveryCapsule?.checksum_valid === true,
+            post_turn_summary_delivery_capsule_binding_valid: postTurnSummaryDeliveryCapsule?.binding_valid === true,
+            post_turn_summary_delivery_capsule_receipt_required: postTurnSummaryDeliveryCapsule?.trusted_for_delivery === true,
             contract_injection_receipt_required: contractInjections.length > 0,
             replay_repair_dispatch_brief_receipt_required: replayRepairDispatchBriefs.length > 0,
+            cleanup_commit_repair_brief_receipt_required: cleanupCommitRepairContext?.brief_count > 0,
             memory_provenance_usage_required: pressureMemoryProvenanceReceiptDiscipline?.active === true
                 || pressureProvenanceProviderDispatchOverrideFollowupReceiptContract?.active === true,
             pressure_memory_provenance_receipt_required: pressureMemoryProvenanceReceiptDiscipline?.active === true,
@@ -1362,8 +2323,38 @@ function renderWorkerContextPacket(packet) {
             "- 回执 replayRepairDispatchBriefUsage 必须引用 brief_id/work_item_id，并声明 used/verified/ignored/blocked/strong；post-compact reinjection 修复还必须提交 postCompactCandidateUsage、memoryUsed/memoryIgnored、task_agent_session_id、native_session_id；provider re-proof 的 strong 仍需 native provider proof ledger 证明；ignore-memory receipt 修复必须同时更正 CCM_AGENT_RECEIPT.memoryIgnored。",
         ]
         : [];
+    const cleanupCommitRepairContext = packet?.cleanup_commit_repair_context || null;
+    const cleanupCommitRepairLines = cleanupCommitRepairContext?.brief_count > 0
+        ? [
+            "Cleanup commit repair brief (exact assignment binding):",
+            ...cleanupCommitRepairContext.briefs.map((item) => [
+                `- brief_id=${item.brief_id || ""}`,
+                `work_item_id=${item.work_item_id || ""}`,
+                `transaction_id=${item.transaction_id || ""}`,
+                item.title ? `title=${item.title}` : "",
+                "shouldCreateRealTask=false",
+            ].filter(Boolean).join("；")),
+            `- assignment_binding_id=${cleanupCommitRepairContext.assignment_binding_id || ""}`,
+            "- 只能按简报收集和复核证据；不得删除 quarantine/WAL，不得自行 claim、resolve 或扩大到其他群聊。",
+        ]
+        : [];
     const memoryText = renderWorkerPacketMemory(packet?.memory || null);
     const memoryPolicyText = renderWorkerMemoryPolicy(packet?.memory_policy || packet?.memoryPolicy || null);
+    const typedMemoryDeliveryExpectedBinding = buildWorkerTypedMemoryDeliveryExpectedBinding(packet, packet?.memory || null);
+    const typedMemoryDeliveryCapsuleText = renderWorkerTypedMemoryDeliveryCapsule(packet?.typed_memory_delivery_capsule
+        || packet?.typedMemoryDeliveryCapsule
+        || extractWorkerTypedMemoryDeliveryCapsule(packet?.memory || null), typedMemoryDeliveryExpectedBinding);
+    const postTurnSummaryDeliveryCapsule = packet?.post_turn_summary_delivery_capsule
+        || packet?.postTurnSummaryDeliveryCapsule
+        || (0, group_post_turn_summary_1.extractGroupPostTurnSummaryDeliveryCapsule)(packet?.memory || null);
+    const postTurnSummaryDeliveryCapsuleText = postTurnSummaryDeliveryCapsule?.capsule_checksum
+        ? [
+            "Post-turn summary delivery capsule:",
+            `- capsule_checksum=${postTurnSummaryDeliveryCapsule.capsule_checksum}; task_agent_session_id=${postTurnSummaryDeliveryCapsule.task_agent_session_id || ""}; attempt=${postTurnSummaryDeliveryCapsule.attempt_sequence || 0}; invocation=${postTurnSummaryDeliveryCapsule.invocation_kind || ""}; compact_epoch=${postTurnSummaryDeliveryCapsule.compact_epoch || ""}.`,
+            "- Final CCM_AGENT_RECEIPT must cite capsule_checksum when these summaries are delivered.",
+        ].join("\n")
+        : "";
+    const memoryRecallTrustContractText = renderWorkerMemoryRecallTrustContract(packet?.memory_recall_trust_contract || packet?.memoryRecallTrustContract || null);
     const pressureMemoryProvenanceReceiptDisciplineText = renderPressureMemoryProvenanceReceiptDiscipline(extractPressureMemoryProvenanceReceiptDiscipline(packet?.memory || null, packet?.pressure_memory_provenance_receipt_discipline || packet?.pressureMemoryProvenanceReceiptDiscipline || null));
     const pressureProvenanceDispatchFeedbackPolicyText = renderPressureProvenanceDispatchFeedbackPolicy(extractPressureProvenanceDispatchFeedbackPolicy(packet?.memory || null, packet?.pressure_provenance_dispatch_feedback_policy || packet?.pressureProvenanceDispatchFeedbackPolicy || null));
     const pressureProvenanceProviderDispatchAdvisoryText = renderPressureProvenanceProviderDispatchAdvisory(extractPressureProvenanceProviderDispatchAdvisory(packet?.memory || null, packet?.pressure_provenance_provider_dispatch_advisory || packet?.pressureProvenanceProviderDispatchAdvisory || null));
@@ -1389,6 +2380,9 @@ function renderWorkerContextPacket(packet) {
         || null;
     const memoryProofText = memoryProof?.schema ? [
         `Memory reinjection proof：${memoryProof.status || "unknown"}；memory_hash=${memoryProof.packet_memory_hash || ""}；rendered_hash=${memoryProof.rendered_memory_hash || ""}`,
+        memoryProof.typed_memory_delivery_capsule_present === true
+            ? `- typed_memory_delivery_capsule=${memoryProof.typed_memory_delivery_capsule_checksum || "missing"}；valid=${memoryProof.typed_memory_delivery_capsule_checksum_valid === true}；binding=${memoryProof.typed_memory_delivery_capsule_binding_valid === true}；trusted=${memoryProof.typed_memory_delivery_capsule_trusted === true}；complete=${memoryProof.typed_memory_delivery_capsule_complete === true}`
+            : "",
         memoryProof.memory_first ? `- memory_first=true；compaction=${memoryProof.memory_compaction_schema || ""}；hash_match=${memoryProof.hash_matches_compaction === true}` : "",
     ].filter(Boolean).join("\n") : "";
     const retryText = retry?.schema ? [
@@ -1419,6 +2413,9 @@ function renderWorkerContextPacket(packet) {
         Array.isArray(packet?.document_findings) && packet.document_findings.length ? `文档/验收依据：\n- ${packet.document_findings.slice(0, 8).join("\n- ")}` : "",
         Array.isArray(packet?.constraints) && packet.constraints.length ? `用户约束：\n- ${packet.constraints.join("\n- ")}` : "",
         memoryPolicyText,
+        postTurnSummaryDeliveryCapsuleText,
+        typedMemoryDeliveryCapsuleText,
+        memoryRecallTrustContractText,
         memoryText,
         pressureMemoryProvenanceReceiptDisciplineText,
         pressureProvenanceDispatchFeedbackPolicyText,
@@ -1432,6 +2429,7 @@ function renderWorkerContextPacket(packet) {
         renderWorkerContextUsage(packet?.context_usage || null),
         contractLines.join("\n"),
         replayRepairBriefLines.join("\n"),
+        cleanupCommitRepairLines.join("\n"),
         "",
         "ACK gate：实现前先给接单 ACK，必须包含 understoodGoal、plannedScope、forbiddenScope、verificationPlan、unclear；ACK 不合格时只重写 ACK，不得继续实现。",
     ].filter(Boolean).join("\n");

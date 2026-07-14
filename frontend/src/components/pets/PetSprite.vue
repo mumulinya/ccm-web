@@ -1,11 +1,13 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import PetV2Sprite from './PetV2Sprite.vue'
 
 const props = defineProps({
   type: { type: String, default: 'yuexinmiao' },
   state: { type: String, default: 'idle' },
   size: { type: Number, default: 64 },
-  name: { type: String, default: 'Pet' }
+  name: { type: String, default: 'Pet' },
+  skin: { type: Object, default: null }
 })
 
 const frame = ref(0)
@@ -197,6 +199,11 @@ const stateStyles = computed(() => {
 
 const animClass = computed(() => `pet-anim-${props.state}`)
 const imageRendering = computed(() => normalizePetType(props.type) === 'clawd' ? 'pixelated' : 'auto')
+const isV2 = computed(() => Number(props.skin?.spriteVersionNumber) === 2)
+const v2Source = computed(() => {
+  const source = String(props.skin?.spritesheetPath || '').replace(/^\/+/, '')
+  return source ? `/pets/${source}` : `/pets/generated/${props.type}/spritesheet.webp`
+})
 
 onMounted(() => {
   animTimer = setInterval(() => { frame.value++ }, 500)
@@ -206,7 +213,8 @@ onUnmounted(() => { if (animTimer) clearInterval(animTimer) })
 
 <template>
   <div class="pet-sprite" :class="animClass" :style="{ width: size + 'px', height: size + 'px', ...stateStyles }">
-    <img :src="getSvgUrl" alt="" aria-hidden="true" :width="size" :height="size" draggable="false" :style="{ imageRendering }" @error="$event.target.src = '/pets/yuexinmiao.svg'" />
+    <PetV2Sprite v-if="isV2" :src="v2Source" :state="state" :size="size" />
+    <img v-else :src="getSvgUrl" alt="" aria-hidden="true" :width="size" :height="size" draggable="false" :style="{ imageRendering }" @error="$event.target.src = '/pets/yuexinmiao.svg'" />
     <!-- 状态指示器 -->
     <div class="state-badge" v-if="state !== 'idle'">
       <span v-if="state === 'working'">⚡</span>

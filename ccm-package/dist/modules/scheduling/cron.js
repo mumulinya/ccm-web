@@ -36,6 +36,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.runConflictResolutionMemoryMaintenanceSchedulerTick = runConflictResolutionMemoryMaintenanceSchedulerTick;
 exports.runCronDailyDevProtocolSelfTest = runCronDailyDevProtocolSelfTest;
 exports.syncCronTaskStatus = syncCronTaskStatus;
+exports.reconcileCronRunsOnStartup = reconcileCronRunsOnStartup;
 exports.startCronScheduler = startCronScheduler;
 exports.stopCronScheduler = stopCronScheduler;
 exports.getConflictResolutionMemoryMaintenanceSchedulerStatus = getConflictResolutionMemoryMaintenanceSchedulerStatus;
@@ -45,34 +46,39 @@ const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const db_1 = require("../../core/db");
 const utils_2 = require("../../core/utils");
+const atomic_json_file_1 = require("../../core/atomic-json-file");
 const collaboration_1 = require("../collaboration/collaboration");
 const reliability_ledger_1 = require("../../system/reliability-ledger");
 const cron_job_store_1 = require("./cron-job-store");
 const cron_dev_reports_1 = require("./cron-dev-reports");
+const work_journal_1 = require("./work-journal");
 const storage_1 = require("../collaboration/storage");
+const feishu_channel_1 = require("../collaboration/feishu-channel");
+const feishu_1 = require("../collaboration/feishu");
+const test_agent_runner_1 = require("../collaboration/test-agent-runner");
+const execution_kernel_1 = require("../../agents/execution-kernel");
+const artifact_retention_1 = require("../../test-agent/artifact-retention");
 const group_memory_index_1 = require("../collaboration/group-memory-index");
 const runningCronJobs = new Set();
 let schedulerTimer = null;
 const CONFLICT_RESOLUTION_MAINTENANCE_SCHEDULER_STATE_FILE = path.join(utils_2.CCM_DIR, "memory-control", "conflict-resolution-maintenance-scheduler.json");
 let latestConflictResolutionMaintenanceTick = null;
 function readConflictResolutionMaintenanceSchedulerState(file = CONFLICT_RESOLUTION_MAINTENANCE_SCHEDULER_STATE_FILE) {
-    try {
-        return JSON.parse(fs.readFileSync(file, "utf-8"));
-    }
-    catch {
-        return { schema: "ccm-conflict-resolution-maintenance-scheduler-state-v1", version: 1, groups: {}, updated_at: "" };
-    }
+    return (0, atomic_json_file_1.readJsonWithBackup)(file, { schema: "ccm-conflict-resolution-maintenance-scheduler-state-v1", version: 1, groups: {}, updated_at: "" });
 }
 function writeConflictResolutionMaintenanceSchedulerState(value, file = CONFLICT_RESOLUTION_MAINTENANCE_SCHEDULER_STATE_FILE) {
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    const temp = `${file}.${process.pid}.${Date.now()}.tmp`;
-    fs.writeFileSync(temp, JSON.stringify(value, null, 2), "utf-8");
-    fs.renameSync(temp, file);
+    (0, atomic_json_file_1.writeJsonAtomic)(file, value);
 }
 function runConflictResolutionMemoryMaintenanceSchedulerTick(options = {}) {
+    const stateFile = String(options.stateFile || options.state_file || CONFLICT_RESOLUTION_MAINTENANCE_SCHEDULER_STATE_FILE);
+    if (options.persist !== false && options.stateLockHeld !== true) {
+        return (0, atomic_json_file_1.withFileLock)(stateFile, () => runConflictResolutionMemoryMaintenanceSchedulerTick({ ...options, stateFile, stateLockHeld: true }), {
+            timeoutMs: options.stateLockTimeoutMs || options.state_lock_timeout_ms,
+            staleMs: options.stateLockStaleMs || options.state_lock_stale_ms,
+        });
+    }
     const at = String(options.at || options.now || new Date().toISOString());
     const atMs = Date.parse(at);
-    const stateFile = String(options.stateFile || options.state_file || CONFLICT_RESOLUTION_MAINTENANCE_SCHEDULER_STATE_FILE);
     const state = readConflictResolutionMaintenanceSchedulerState(stateFile);
     const explicitGroupIds = Array.isArray(options.groupIds || options.group_ids) ? (options.groupIds || options.group_ids) : [];
     const groupIds = [...new Set((explicitGroupIds.length ? explicitGroupIds : (0, storage_1.loadGroups)().map((group) => group.id || group.groupId))
@@ -96,6 +102,15 @@ function runConflictResolutionMemoryMaintenanceSchedulerTick(options = {}) {
     const telemetryQuarantineRetentionRunner = typeof options.runTelemetryQuarantineRetention === "function"
         ? options.runTelemetryQuarantineRetention
         : (groupId, runOptions) => (0, group_memory_index_1.runPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryQuarantineRetention)(groupId, runOptions);
+    const telemetryCleanupJournalRunner = typeof options.runTelemetryCleanupJournalReconciliation === "function"
+        ? options.runTelemetryCleanupJournalReconciliation
+        : (groupId, runOptions) => (0, group_memory_index_1.reconcilePostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupJournals)(groupId, runOptions);
+    const telemetryCleanupCommitDiscoveryRunner = typeof options.runTelemetryCleanupCommitDiscovery === "function"
+        ? options.runTelemetryCleanupCommitDiscovery
+        : (groupId, runOptions) => (0, group_memory_index_1.discoverPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommits)(groupId, runOptions);
+    const telemetryCleanupCommitRepairResolutionRunner = typeof options.runTelemetryCleanupCommitRepairResolutionReconciliation === "function"
+        ? options.runTelemetryCleanupCommitRepairResolutionReconciliation
+        : (groupId, runOptions) => (0, group_memory_index_1.discoverPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionTransactions)(groupId, { ...runOptions, persist: true, recover: true });
     const rows = [];
     for (const groupId of groupIds) {
         const groupState = state.groups?.[groupId] || {};
@@ -139,14 +154,31 @@ function runConflictResolutionMemoryMaintenanceSchedulerTick(options = {}) {
             }
             const telemetryRecovery = telemetryRecoveryRunner(groupId, { at, apply: true, trigger: "background" });
             const telemetryOrphans = telemetryOrphanRunner(groupId, { at, persist: true, trigger: "background" });
+            const telemetryCleanupCommitRepairResolutionTransactions = telemetryCleanupCommitRepairResolutionRunner(groupId, { at, persist: true, trigger: "startup-scheduler" });
+            const telemetryCleanupCommitDiscovery = telemetryCleanupCommitDiscoveryRunner(groupId, { at, persist: true, recover: true, trigger: "startup-scheduler" });
+            const telemetryCleanupJournals = telemetryCleanupJournalRunner(groupId, { at, persist: true, trigger: "background" });
             const telemetryQuarantineRetention = telemetryQuarantineRetentionRunner(groupId, { at, trigger: "background" });
-            for (const telemetryResult of [telemetryRecovery, telemetryOrphans, telemetryQuarantineRetention]) {
+            for (const telemetryResult of [telemetryRecovery, telemetryOrphans, telemetryCleanupCommitDiscovery, telemetryCleanupCommitRepairResolutionTransactions, telemetryCleanupJournals, telemetryQuarantineRetention]) {
                 if (telemetryResult?.destructive_action_authorized !== false
                     || Number(telemetryResult?.created_task_count || 0) !== 0
                     || Number(telemetryResult?.created_approval_receipt_count || 0) !== 0
                     || Number(telemetryResult?.deleted_count || 0) !== 0) {
                     throw new Error("background delivery telemetry recovery violated non-destructive scheduler boundary");
                 }
+            }
+            if (telemetryCleanupJournals?.ledger_checksum_valid === false
+                || telemetryCleanupJournals?.commit_ledger_checksum_valid === false
+                || Number(telemetryCleanupJournals?.invalid_commit_transaction_count || 0) !== 0
+                || telemetryCleanupJournals?.group_ledger_lock_valid === false
+                || Number(telemetryCleanupJournals?.candidate_claim_conflict_count || 0) !== 0) {
+                throw new Error("background delivery cleanup ledger CAS integrity check failed");
+            }
+            if (telemetryCleanupCommitRepairResolutionTransactions?.ledger_checksum_valid === false
+                && Number(telemetryCleanupCommitRepairResolutionTransactions?.contained_invalid_transaction_count || 0) === 0
+                || Number(telemetryCleanupCommitRepairResolutionTransactions?.uncontained_invalid_transaction_count || 0) !== 0
+                || Number(telemetryCleanupCommitRepairResolutionTransactions?.recoverable_transaction_count || 0) !== 0
+                || telemetryCleanupCommitRepairResolutionTransactions?.status === "blocked") {
+                throw new Error("background cleanup commit repair resolution transaction recovery failed");
             }
             const telemetryRetention = telemetryRetentionRunner(groupId, {
                 at,
@@ -172,6 +204,28 @@ function runConflictResolutionMemoryMaintenanceSchedulerTick(options = {}) {
                 delivery_recovery_status: telemetryRecovery?.status || "",
                 delivery_orphan_candidate_count: Number(telemetryOrphans?.candidate_count || 0),
                 delivery_quarantine_retention_status: telemetryQuarantineRetention?.status || "",
+                delivery_cleanup_open_journal_count: Number(telemetryCleanupJournals?.open_journal_count || 0),
+                delivery_cleanup_leased_journal_count: Number(telemetryCleanupJournals?.leased_journal_count || 0),
+                delivery_cleanup_abandoned_journal_count: Number(telemetryCleanupJournals?.abandoned_journal_count || 0),
+                delivery_cleanup_reconciled_journal_count: Number(telemetryCleanupJournals?.reconciled_journal_count || 0),
+                delivery_cleanup_recovered_executor_count: Number(telemetryCleanupJournals?.recovered_executor_count || 0),
+                delivery_cleanup_journal_ledger_revision: Number(telemetryCleanupJournals?.ledger_revision || 0),
+                delivery_cleanup_journal_ledger_checksum_valid: telemetryCleanupJournals?.ledger_checksum_valid !== false,
+                delivery_cleanup_candidate_claim_conflict_count: Number(telemetryCleanupJournals?.candidate_claim_conflict_count || 0),
+                delivery_cleanup_commit_ledger_revision: Number(telemetryCleanupJournals?.commit_ledger_revision || 0),
+                delivery_cleanup_open_commit_transaction_count: Number(telemetryCleanupJournals?.open_commit_transaction_count || 0),
+                delivery_cleanup_invalid_commit_transaction_count: Number(telemetryCleanupJournals?.invalid_commit_transaction_count || 0),
+                delivery_cleanup_recovered_commit_transaction_count: Number(telemetryCleanupJournals?.recovered_commit_transaction_count || 0),
+                delivery_cleanup_discovered_commit_transaction_count: Number(telemetryCleanupCommitDiscovery?.transaction_count || 0),
+                delivery_cleanup_invalid_discovered_commit_transaction_count: Number(telemetryCleanupCommitDiscovery?.invalid_transaction_count || 0),
+                delivery_cleanup_commit_repair_work_item_count: Number(telemetryCleanupCommitDiscovery?.repair_work_item_count || 0),
+                delivery_cleanup_commit_repair_dispatch_brief_count: Number(telemetryCleanupCommitDiscovery?.repair_dispatch_brief_count || 0),
+                delivery_cleanup_commit_repair_resolution_transaction_count: Number(telemetryCleanupCommitRepairResolutionTransactions?.transaction_count || 0),
+                delivery_cleanup_commit_repair_resolution_recovered_now_count: Number(telemetryCleanupCommitRepairResolutionTransactions?.recovered_now_count || 0),
+                delivery_cleanup_commit_repair_resolution_open_transaction_count: Number(telemetryCleanupCommitRepairResolutionTransactions?.open_transaction_count || 0),
+                delivery_cleanup_commit_repair_resolution_invalid_transaction_count: Number(telemetryCleanupCommitRepairResolutionTransactions?.invalid_transaction_count || 0),
+                delivery_cleanup_commit_repair_resolution_contained_invalid_transaction_count: Number(telemetryCleanupCommitRepairResolutionTransactions?.contained_invalid_transaction_count || 0),
+                delivery_cleanup_commit_repair_resolution_compacted_transaction_count: Number(telemetryCleanupCommitRepairResolutionTransactions?.compacted_transaction_count || 0),
             });
             state.groups = { ...(state.groups || {}), [groupId]: {
                     failure_count: 0,
@@ -180,7 +234,7 @@ function runConflictResolutionMemoryMaintenanceSchedulerTick(options = {}) {
                     last_operation_key: operationKey,
                     last_status: Number(result?.dueCount || 0) > 0 ? "completed" : "not_due",
                 } };
-            rows.push({ groupId, status: Number(result?.dueCount || 0) > 0 ? "completed" : "not_due", skipped: Number(result?.dueCount || 0) === 0, operationKey, result, telemetryRecovery, telemetryOrphans, telemetryQuarantineRetention, telemetryRetention, destructiveActionAuthorized: false, deletedCount: 0 });
+            rows.push({ groupId, status: Number(result?.dueCount || 0) > 0 ? "completed" : "not_due", skipped: Number(result?.dueCount || 0) === 0, operationKey, result, telemetryRecovery, telemetryOrphans, telemetryCleanupCommitDiscovery, telemetryCleanupCommitRepairResolutionTransactions, telemetryCleanupJournals, telemetryQuarantineRetention, telemetryRetention, destructiveActionAuthorized: false, deletedCount: 0 });
         }
         catch (error) {
             (0, reliability_ledger_1.failIdempotency)("conflict-resolution-memory-maintenance", operationKey, error);
@@ -227,6 +281,27 @@ function runConflictResolutionMemoryMaintenanceSchedulerTick(options = {}) {
         deliveryOrphanCandidateCount: rows.reduce((sum, row) => sum + Number(row.telemetryOrphans?.candidate_count || 0), 0),
         deliveryQuarantineRetentionCount: rows.filter(row => row.telemetryQuarantineRetention && row.telemetryQuarantineRetention.status !== "empty").length,
         deliveryQuarantineRetentionBlockedCount: rows.filter(row => row.telemetryQuarantineRetention?.status === "blocked").length,
+        deliveryCleanupOpenJournalCount: rows.reduce((sum, row) => sum + Number(row.telemetryCleanupJournals?.open_journal_count || 0), 0),
+        deliveryCleanupLeasedJournalCount: rows.reduce((sum, row) => sum + Number(row.telemetryCleanupJournals?.leased_journal_count || 0), 0),
+        deliveryCleanupAbandonedJournalCount: rows.reduce((sum, row) => sum + Number(row.telemetryCleanupJournals?.abandoned_journal_count || 0), 0),
+        deliveryCleanupReconciledJournalCount: rows.reduce((sum, row) => sum + Number(row.telemetryCleanupJournals?.reconciled_journal_count || 0), 0),
+        deliveryCleanupRecoveredExecutorCount: rows.reduce((sum, row) => sum + Number(row.telemetryCleanupJournals?.recovered_executor_count || 0), 0),
+        deliveryCleanupCandidateClaimConflictCount: rows.reduce((sum, row) => sum + Number(row.telemetryCleanupJournals?.candidate_claim_conflict_count || 0), 0),
+        deliveryCleanupInvalidLedgerCount: rows.filter(row => row.telemetryCleanupJournals?.ledger_checksum_valid === false || row.telemetryCleanupJournals?.group_ledger_lock_valid === false).length,
+        deliveryCleanupOpenCommitTransactionCount: rows.reduce((sum, row) => sum + Number(row.telemetryCleanupJournals?.open_commit_transaction_count || 0), 0),
+        deliveryCleanupInvalidCommitTransactionCount: rows.reduce((sum, row) => sum + Number(row.telemetryCleanupJournals?.invalid_commit_transaction_count || 0), 0),
+        deliveryCleanupRecoveredCommitTransactionCount: rows.reduce((sum, row) => sum + Number(row.telemetryCleanupJournals?.recovered_commit_transaction_count || 0), 0),
+        deliveryCleanupDiscoveredCommitTransactionCount: rows.reduce((sum, row) => sum + Number(row.telemetryCleanupCommitDiscovery?.transaction_count || 0), 0),
+        deliveryCleanupInvalidDiscoveredCommitTransactionCount: rows.reduce((sum, row) => sum + Number(row.telemetryCleanupCommitDiscovery?.invalid_transaction_count || 0), 0),
+        deliveryCleanupCommitRepairWorkItemCount: rows.reduce((sum, row) => sum + Number(row.telemetryCleanupCommitDiscovery?.repair_work_item_count || 0), 0),
+        deliveryCleanupCommitRepairDispatchBriefCount: rows.reduce((sum, row) => sum + Number(row.telemetryCleanupCommitDiscovery?.repair_dispatch_brief_count || 0), 0),
+        deliveryCleanupCommitRepairResolutionTransactionCount: rows.reduce((sum, row) => sum + Number(row.telemetryCleanupCommitRepairResolutionTransactions?.transaction_count || 0), 0),
+        deliveryCleanupCommitRepairResolutionRecoveredNowCount: rows.reduce((sum, row) => sum + Number(row.telemetryCleanupCommitRepairResolutionTransactions?.recovered_now_count || 0), 0),
+        deliveryCleanupCommitRepairResolutionOpenTransactionCount: rows.reduce((sum, row) => sum + Number(row.telemetryCleanupCommitRepairResolutionTransactions?.open_transaction_count || 0), 0),
+        deliveryCleanupCommitRepairResolutionInvalidTransactionCount: rows.reduce((sum, row) => sum + Number(row.telemetryCleanupCommitRepairResolutionTransactions?.invalid_transaction_count || 0), 0),
+        deliveryCleanupCommitRepairResolutionContainedInvalidTransactionCount: rows.reduce((sum, row) => sum + Number(row.telemetryCleanupCommitRepairResolutionTransactions?.contained_invalid_transaction_count || 0), 0),
+        deliveryCleanupCommitRepairResolutionCompactedTransactionCount: rows.reduce((sum, row) => sum + Number(row.telemetryCleanupCommitRepairResolutionTransactions?.compacted_transaction_count || 0), 0),
+        deliveryCleanupDeletedCount: 0,
         rows,
         stateFile,
     };
@@ -415,6 +490,265 @@ function formatCronMetaSummary(meta = {}) {
         parts.push(`认领需求 ${meta.claimed_backlogs.length} 条`);
     return parts.length ? `；${parts.join("，")}` : "";
 }
+function attachCronRunToTasks(taskIds, cronJobId, cronRunId) {
+    const wanted = new Set((taskIds || []).map(item => String(item || "").trim()).filter(Boolean));
+    if (!wanted.size)
+        return;
+    const tasks = (0, db_1.loadTasks)();
+    let changed = false;
+    for (const task of tasks) {
+        if (!wanted.has(String(task.id || "")))
+            continue;
+        task.cron_job_id = cronJobId;
+        task.cron_run_id = cronRunId;
+        task.workflow_meta = {
+            ...(task.workflow_meta || {}),
+            cron_run_id: cronRunId,
+        };
+        changed = true;
+    }
+    if (changed)
+        (0, db_1.saveTasks)(tasks);
+}
+function cronFriendlyText(value, fallback = "", limit = 220) {
+    const text = String(value || "")
+        .replace(/<task-notification>[\s\S]*?<\/task-notification>/gi, "")
+        .replace(/CCM_AGENT_(?:RECEIPT|REQUESTS)[\s\S]*/gi, "")
+        .replace(/主\s*Agent\s*计划[:：][\s\S]*/gi, "")
+        .replace(/用户本地执行[:：][\s\S]*/gi, "仍有一项本地操作需要用户处理，详情请在任务中查看。")
+        .replace(/[A-Za-z]:[\\/][^\r\n；;，。)]*/g, "技术详情里的证据文件")
+        .replace(/\b(?:trace_id|session_id|run_id)\s*[:=]\s*[^\s,;]+/gi, "")
+        .replace(/\s+/g, " ")
+        .trim();
+    if (!text)
+        return fallback;
+    return text.length > limit ? `${text.slice(0, Math.max(1, limit - 1))}…` : text;
+}
+function taskTodoSummary(task) {
+    const plans = [
+        task?.live_todo_plan,
+        task?.todo_plan,
+        task?.mainAgentDecision?.todo_plan,
+        task?.main_agent_decision?.todo_plan,
+    ].filter(Boolean);
+    const candidateSteps = [
+        task?.user_plan_steps,
+        task?.mainAgentDecision?.user_plan_steps,
+        task?.main_agent_decision?.user_plan_steps,
+        ...plans.map(plan => plan?.steps || plan?.items),
+    ].find(value => Array.isArray(value) && value.length > 0) || [];
+    const steps = candidateSteps.slice(0, 12).map((step, index) => ({
+        id: String(step?.id || index + 1),
+        label: cronFriendlyText(step?.label || step?.title || step?.text || step?.description, `步骤 ${index + 1}`, 100),
+        status: String(step?.status || "pending"),
+    }));
+    if (!steps.length)
+        return null;
+    const completed = steps.filter((step) => ["completed", "done", "passed", "skipped"].includes(step.status)).length;
+    const current = steps.find((step) => !["completed", "done", "passed", "skipped", "cancelled"].includes(step.status)) || steps.at(-1);
+    return { total: steps.length, completed, current, steps };
+}
+function taskTestAgentSummary(task, artifactRuns) {
+    const runs = [...(artifactRuns || [])].sort((left, right) => String(right.finished_at || right.started_at || "").localeCompare(String(left.finished_at || left.started_at || "")));
+    const latest = runs[0];
+    const direct = task?.test_agent_report || task?.testAgentReport || task?.receipt?.test_agent_report || task?.receipt?.testAgentReport || null;
+    const verdict = task?.test_agent_verdict || task?.testAgentVerdict || direct?.verdict || null;
+    if (!latest && !direct && !verdict)
+        return null;
+    const artifacts = runs.flatMap(run => Array.isArray(run.artifacts) ? run.artifacts : []);
+    return {
+        status: String(latest?.status || verdict?.status || direct?.status || "recorded"),
+        recommendation: String(latest?.recommendation || verdict?.recommendation || direct?.recommendation || ""),
+        summary: cronFriendlyText(latest?.summary || direct?.summary || verdict?.reason, "TestAgent 已保存验收记录", 180),
+        run_count: runs.length || 1,
+        evidence_count: artifacts.length,
+        screenshot_count: artifacts.filter(item => item.preview_kind === "image" || /screenshot/i.test(String(item.type || ""))).length,
+        evidence_available: artifacts.some(item => item.available === true),
+    };
+}
+function synthesizedTaskTodo(task, testAgent) {
+    const status = String(task?.status || "pending");
+    const done = ["done", "completed", "passed"].includes(status);
+    const failed = ["failed", "cancelled"].includes(status);
+    const active = ["in_progress", "running", "reviewing"].includes(status);
+    const waiting = ["waiting", "needs_user", "paused", "blocked"].includes(status);
+    const testPassed = ["passed", "done", "completed"].includes(String(testAgent?.status || "")) || testAgent?.recommendation === "accept";
+    const steps = [
+        { id: "intake", label: "理解本次任务要求", status: "completed" },
+        { id: "plan", label: "群聊主 Agent 制定并派发计划", status: active || waiting || done || failed ? "completed" : "in_progress" },
+        { id: "execution", label: "项目子 Agent 完成任务", status: done || testAgent ? "completed" : failed ? "failed" : active ? "in_progress" : waiting ? "needs_confirmation" : "pending" },
+        { id: "test", label: "TestAgent 独立验收", status: testPassed ? "completed" : testAgent ? "reviewing" : failed ? "failed" : "pending" },
+        { id: "delivery", label: "群聊主 Agent 复盘并交付总结", status: done ? "completed" : failed ? "failed" : waiting ? "needs_confirmation" : "pending" },
+    ];
+    const completed = steps.filter(step => ["completed", "done", "passed", "skipped"].includes(step.status)).length;
+    const current = steps.find(step => !["completed", "done", "passed", "skipped", "cancelled"].includes(step.status)) || steps.at(-1);
+    return { total: steps.length, completed, current, steps, synthesized: true };
+}
+function publicCronTaskSummary(task, artifactRuns) {
+    const delivery = task?.delivery_summary || task?.deliverySummary || {};
+    const testAgent = taskTestAgentSummary(task, artifactRuns);
+    const todo = taskTodoSummary(task) || synthesizedTaskTodo(task, testAgent);
+    return {
+        id: String(task?.id || ""),
+        title: cronFriendlyText(task?.title, "定时任务", 120),
+        status: String(task?.status || "pending"),
+        phase: String(task?.collaboration_state?.phase || task?.phase || ""),
+        status_detail: cronFriendlyText(task?.status_detail || delivery?.detail || delivery?.headline || task?.result, "等待主 Agent 更新进度", 180),
+        trace_id: String(task?.trace_id || ""),
+        group_id: String(task?.group_id || ""),
+        todo,
+        main_agent: {
+            headline: cronFriendlyText(delivery?.headline || task?.status_detail, "主 Agent 正在跟进", 120),
+            summary: cronFriendlyText(delivery?.detail || task?.final_report || task?.result, "等待主 Agent 汇总", 200),
+            acceptance_passed: delivery?.acceptance_gate_passed === true || task?.status === "done",
+        },
+        test_agent: testAgent,
+        replay_available: !!task?.id,
+    };
+}
+function publicCronJobs(rawJobs) {
+    const jobs = rawJobs.map(cron_job_store_1.normalizeCronJob);
+    const taskIds = [...new Set(jobs.flatMap(job => job.run_history || []).flatMap((run) => run.task_ids || []).map((id) => String(id || "")).filter(Boolean))];
+    const taskMap = new Map((0, db_1.loadTasks)().filter(task => taskIds.includes(String(task.id || ""))).map(task => [String(task.id), task]));
+    const artifacts = taskIds.length ? (0, artifact_retention_1.listTestAgentArtifactCatalogForTasks)(taskIds) : [];
+    const artifactsByTask = new Map();
+    for (const run of artifacts)
+        artifactsByTask.set(run.task_id, [...(artifactsByTask.get(run.task_id) || []), run]);
+    return jobs.map(job => ({
+        ...job,
+        last_result: cronFriendlyText(job.last_result, "暂无结果", 220),
+        run_history: (job.run_history || []).map((run) => ({
+            ...run,
+            result: cronFriendlyText(run.result, "等待执行结果", 220),
+            task_states: Object.fromEntries(Object.entries(run.task_states || {}).map(([taskId, state]) => [taskId, {
+                    status: String(state?.status || ""),
+                    result: cronFriendlyText(state?.result, "", 160),
+                    updated_at: state?.updated_at || "",
+                }])),
+            tasks: (run.task_ids || []).map((taskId) => taskMap.get(taskId)).filter(Boolean).map((task) => publicCronTaskSummary(task, artifactsByTask.get(String(task.id)) || [])),
+        })),
+    }));
+}
+const CRON_RUN_ACTIVE_STATUSES = new Set(["triggering", "running", "queued", "running_task", "waiting", "retry_waiting"]);
+function cronRetryPatch(job, run, now = new Date()) {
+    const retryLimit = Math.max(0, Number(job?.retry_limit ?? 2));
+    const attempt = Math.max(1, Number(run?.attempt || 1));
+    if (attempt > retryLimit || run?.retry_child_run_id)
+        return { next_retry_at: null };
+    const interval = Math.max(1, Number(job?.retry_interval_minutes || 10));
+    return {
+        next_retry_at: new Date(now.getTime() + interval * 60_000).toISOString(),
+        retry_reason: String(run?.result || "本轮执行失败"),
+    };
+}
+async function sendCronRunNotification(jobId, runId, event) {
+    const job = (0, db_1.loadCronJobs)().find(item => item.id === jobId);
+    const run = job?.run_history?.find((item) => item.id === runId);
+    const normalized = job ? (0, cron_job_store_1.normalizeCronJob)(job) : null;
+    if (!job || !run || !normalized?.notification_enabled || !normalized.notify_on.includes(event))
+        return { skipped: true };
+    const previous = run.notifications?.[event];
+    if (["sending", "sent"].includes(String(previous?.status || "")))
+        return { skipped: true, duplicate: true };
+    (0, cron_job_store_1.patchCronRun)(jobId, runId, { notifications: { ...(run.notifications || {}), [event]: { status: "sending", at: new Date().toISOString() } } });
+    const eventLabel = { started: "已开始", done: "已完成", failed: "执行失败", waiting: "等待处理", recovered: "已补跑", cancelled: "已取消" };
+    const result = await (0, feishu_1.sendFeishuReportMessage)({
+        title: `定时任务${eventLabel[event] || event}：${job.name}`,
+        markdown: [`**${job.name}** ${eventLabel[event] || event}`, `- 状态：${String(run.status || event)}`, `- 结果：${String(run.result || "暂无结果").slice(0, 500)}`, `- 目标：${job.target_type === "group" ? "群聊协作" : "项目 Agent"}`, `- 时区：${normalized.timezone}`].join("\n"),
+    });
+    const latest = (0, db_1.loadCronJobs)().find(item => item.id === jobId)?.run_history?.find((item) => item.id === runId);
+    (0, cron_job_store_1.patchCronRun)(jobId, runId, { notifications: { ...(latest?.notifications || {}), [event]: { status: result?.success ? "sent" : "failed", at: new Date().toISOString(), error: result?.success ? "" : String(result?.error || "通知发送失败") } } });
+    return result;
+}
+function notifyCronRun(jobId, runId, event) {
+    void sendCronRunNotification(jobId, runId, event).catch(error => console.error("[Cron] 飞书通知失败", error?.message || error));
+}
+function scheduleFailedCronRunRetry(job, run, now = new Date()) {
+    if (!job || !run || run.status !== "failed")
+        return run;
+    const retry = cronRetryPatch(job, run, now);
+    const updated = (0, cron_job_store_1.patchCronRun)(job.id, run.id, retry.next_retry_at ? { ...retry, status: "retry_waiting" } : retry);
+    if (retry.next_retry_at)
+        (0, cron_job_store_1.patchCronJob)(job.id, { last_status: "retry_waiting", last_result: `执行失败，将在 ${retry.next_retry_at} 自动重试` });
+    return updated;
+}
+async function retryCronRun(jobId, runId, ctx, trigger = "retry") {
+    const job = (0, db_1.loadCronJobs)().find(item => item.id === jobId);
+    if (!job)
+        throw new Error("定时任务不存在");
+    const parent = (0, cron_job_store_1.normalizeCronJob)(job).run_history.find((item) => item.id === runId);
+    if (!parent)
+        throw new Error("运行记录不存在");
+    if (parent.retry_child_run_id) {
+        const existing = (0, cron_job_store_1.normalizeCronJob)((0, db_1.loadCronJobs)().find(item => item.id === jobId)).run_history.find((item) => item.id === parent.retry_child_run_id);
+        if (existing && CRON_RUN_ACTIVE_STATUSES.has(existing.status))
+            return { success: true, duplicate: true, run: existing };
+    }
+    const tasks = (0, db_1.loadTasks)().filter(task => (parent.task_ids || []).includes(String(task.id || "")));
+    const retryable = tasks.filter(task => !["done", "completed"].includes(String(task.status || "").toLowerCase()));
+    if (!retryable.length) {
+        return runCronJob(jobId, ctx, trigger, { parentRunId: parent.id, attempt: Number(parent.attempt || 1) + 1 });
+    }
+    const child = (0, cron_job_store_1.appendCronRun)(jobId, {
+        trigger,
+        parent_run_id: parent.id,
+        attempt: Number(parent.attempt || 1) + 1,
+        scheduled_for: parent.scheduled_for,
+        status: "triggering",
+        result: trigger === "resume" ? "正在从未完成任务继续" : "正在重新执行失败任务",
+        task_ids: retryable.map(task => task.id),
+    });
+    if (!child)
+        throw new Error("重试运行记录创建失败");
+    attachCronRunToTasks(retryable.map(task => task.id), jobId, child.id);
+    const results = retryable.map(task => ({ taskId: task.id, ...(0, collaboration_1.retryTask)(task.id, ctx, trigger === "resume" ? "从定时任务运行记录继续" : "定时任务自动重试", true) }));
+    const taskIds = results.filter(item => item.success).map(item => item.taskId);
+    const queued = results.filter(item => item.queued).length;
+    const failed = results.filter(item => !item.success).length;
+    const status = failed === results.length ? "failed" : queued > 0 ? "queued" : "waiting";
+    const result = failed ? `${taskIds.length}/${results.length} 个任务已重新执行` : `${taskIds.length} 个任务已重新执行`;
+    const updated = (0, cron_job_store_1.patchCronRun)(jobId, child.id, {
+        status,
+        result,
+        task_ids: taskIds,
+        primary_task_id: taskIds[0] || "",
+        task_states: Object.fromEntries(results.map(item => [item.taskId, { status: item.success ? (item.queued ? "queued" : "waiting") : "failed", result: item.error || result, updated_at: new Date().toISOString() }])),
+        dispatched_at: new Date().toISOString(),
+        completed_at: status === "failed" ? new Date().toISOString() : null,
+    });
+    (0, cron_job_store_1.patchCronRun)(jobId, parent.id, { retry_child_run_id: child.id, next_retry_at: null });
+    (0, cron_job_store_1.patchCronJob)(jobId, { last_status: status, last_result: result, last_task_ids: taskIds, last_task_id: taskIds[0] || null });
+    notifyCronRun(jobId, child.id, trigger === "resume" ? "recovered" : "started");
+    if (status === "failed")
+        scheduleFailedCronRunRetry((0, db_1.loadCronJobs)().find(item => item.id === jobId), updated);
+    return { success: status !== "failed", run: updated, results };
+}
+function cancelCronRun(jobId, runId, reason = "用户取消本轮定时任务") {
+    const job = (0, db_1.loadCronJobs)().find(item => item.id === jobId);
+    const run = (0, cron_job_store_1.normalizeCronJob)(job || {}).run_history.find((item) => item.id === runId);
+    if (!job || !run)
+        throw new Error("运行记录不存在");
+    const tasks = (0, db_1.loadTasks)().filter(task => (run.task_ids || []).includes(String(task.id || "")));
+    const results = tasks.map(task => {
+        if (["done", "completed", "cancelled"].includes(String(task.status || "").toLowerCase()))
+            return { task_id: task.id, skipped: true };
+        (0, collaboration_1.removeTaskFromQueues)(task.id);
+        try {
+            (0, execution_kernel_1.requestTaskCancellation)(task.id, reason, "cron-run");
+        }
+        catch { }
+        try {
+            (0, test_agent_runner_1.cancelTestAgentRunsForTask)(task.id, reason);
+        }
+        catch { }
+        (0, collaboration_1.updateTask)(task.id, { status: "cancelled", auto_execute: false, is_paused: true, paused: true, cancelled_at: new Date().toISOString(), status_detail: reason });
+        return { task_id: task.id, cancelled: true };
+    });
+    const updated = (0, cron_job_store_1.patchCronRun)(jobId, runId, { status: "cancelled", result: reason, completed_at: new Date().toISOString(), next_retry_at: null, cancellation_requested_at: new Date().toISOString() });
+    (0, cron_job_store_1.patchCronJob)(jobId, { last_status: "cancelled", last_result: reason });
+    notifyCronRun(jobId, runId, "cancelled");
+    return { success: true, run: updated, results };
+}
 function syncCronTaskStatus(task, status, result = "") {
     const cronJobId = task?.cron_job_id;
     if (!cronJobId)
@@ -424,11 +758,21 @@ function syncCronTaskStatus(task, status, result = "") {
     if (!job)
         return;
     const resultText = String(result || task.result || "").trim();
+    const preferredRunId = String(task?.cron_run_id || task?.workflow_meta?.cron_run_id || "");
+    const matchedRun = (0, cron_job_store_1.findCronRunForTask)(job, String(task?.id || ""), preferredRunId);
+    const syncedRun = matchedRun
+        ? (0, cron_job_store_1.syncCronRunTask)(cronJobId, matchedRun.id, String(task?.id || ""), status, resultText, task?.updated_at || new Date().toISOString())
+        : null;
     const patch = {
         last_task_id: task.id || job.last_task_id || null,
-        next_run: job.enabled === false ? null : (0, cron_job_store_1.computeNextRun)(job.schedule),
+        last_task_ids: syncedRun?.task_ids || job.last_task_ids || [],
+        next_run: job.enabled === false ? null : (0, cron_job_store_1.computeNextRun)(job.schedule, new Date(), (0, cron_job_store_1.normalizeCronJob)(job).timezone),
     };
-    if (status === "in_progress") {
+    if (syncedRun) {
+        patch.last_status = syncedRun.status;
+        patch.last_result = syncedRun.result || resultText || job.last_result || "任务状态已更新";
+    }
+    else if (status === "in_progress") {
         patch.last_status = "running_task";
         patch.last_result = "任务已进入执行阶段";
     }
@@ -449,6 +793,21 @@ function syncCronTaskStatus(task, status, result = "") {
         patch.last_result = resultText || patch.last_result || "";
     }
     (0, cron_job_store_1.patchCronJob)(cronJobId, patch);
+    if (syncedRun?.status === "failed") {
+        const retried = scheduleFailedCronRunRetry((0, db_1.loadCronJobs)().find(item => item.id === cronJobId), syncedRun);
+        notifyCronRun(cronJobId, syncedRun.id, "failed");
+        if (!retried?.next_retry_at)
+            (0, cron_job_store_1.patchCronJob)(cronJobId, { last_status: "failed", last_result: resultText || "任务执行失败" });
+    }
+    else if (syncedRun?.status === "done") {
+        notifyCronRun(cronJobId, syncedRun.id, "done");
+    }
+    else if (syncedRun?.status === "waiting") {
+        notifyCronRun(cronJobId, syncedRun.id, "waiting");
+    }
+    else if (syncedRun?.status === "cancelled") {
+        notifyCronRun(cronJobId, syncedRun.id, "cancelled");
+    }
     const backlogFile = task?.workflow_meta?.intake?.backlog_file;
     if (task?.group_id && backlogFile) {
         const backlogStatus = status === "done"
@@ -466,7 +825,7 @@ function syncCronTaskStatus(task, status, result = "") {
         });
     }
 }
-async function runCronJobCore(id, ctx, trigger, reliability = null) {
+async function runCronJobCore(id, ctx, trigger, reliability = null, options = {}) {
     const jobs = (0, db_1.loadCronJobs)();
     const job = jobs.find(j => j.id === id);
     if (!job)
@@ -477,14 +836,32 @@ async function runCronJobCore(id, ctx, trigger, reliability = null) {
         return { success: false, message: "定时任务正在触发中，请稍后再试" };
     }
     const now = new Date();
-    const nextRun = (0, cron_job_store_1.computeNextRun)(job.schedule, now);
+    const normalizedJob = (0, cron_job_store_1.normalizeCronJob)(job);
+    const scheduledFor = options.scheduledFor || (trigger === "schedule" || trigger === "recovery" ? job.next_run : null);
+    const nextRun = (0, cron_job_store_1.computeNextRun)(job.schedule, now, normalizedJob.timezone);
     runningCronJobs.add(id);
+    const cronRun = (0, cron_job_store_1.appendCronRun)(id, {
+        trigger,
+        started_at: now.toISOString(),
+        status: "triggering",
+        result: "正在创建并派发任务...",
+        parent_run_id: options.parentRunId || "",
+        attempt: options.attempt || 1,
+        scheduled_for: scheduledFor,
+        meta: { reliability_trace_id: reliability?.traceId || "", recovered_misfire: trigger === "recovery" },
+    });
+    if (!cronRun) {
+        runningCronJobs.delete(id);
+        throw new Error("定时任务运行记录创建失败");
+    }
     (0, cron_job_store_1.patchCronJob)(id, {
         last_run: now.toISOString(),
-        last_run_key: (0, cron_job_store_1.minuteKey)(now),
+        last_run_key: (0, cron_job_store_1.minuteKey)(scheduledFor ? new Date(scheduledFor) : now, normalizedJob.timezone),
+        last_scheduled_at: scheduledFor || null,
         last_status: "running",
         last_result: "正在创建并派发任务...",
     });
+    notifyCronRun(id, cronRun.id, trigger === "recovery" ? "recovered" : "started");
     let taskDraft = null;
     let taskDrafts = [];
     let cronMeta = {};
@@ -518,6 +895,14 @@ async function runCronJobCore(id, ctx, trigger, reliability = null) {
         taskDrafts = Array.isArray(taskDraft?.drafts)
             ? taskDraft.drafts
             : (Array.isArray(taskDraft) ? taskDraft : [taskDraft].filter(Boolean));
+        taskDrafts = taskDrafts.map((draft) => ({
+            ...draft,
+            cron_run_id: cronRun.id,
+            workflow_meta: {
+                ...(draft?.workflow_meta || {}),
+                cron_run_id: cronRun.id,
+            },
+        }));
         if (reliability?.operationKey) {
             taskDrafts = taskDrafts.map((draft, index) => ({
                 ...draft,
@@ -529,6 +914,8 @@ async function runCronJobCore(id, ctx, trigger, reliability = null) {
             const continuedCount = Number(gapContinueResult?.continued || 0);
             const queuedCount = Number(gapContinueResult?.queued || 0);
             const blockedCount = Number(gapContinueResult?.blocked || 0);
+            const continuedTaskIds = cronMeta.continued_gap_tasks?.task_ids || [];
+            attachCronRunToTasks(continuedTaskIds, id, cronRun.id);
             const result = continuedCount > 0
                 ? `本次定时任务续跑 ${continuedCount} 个交付缺口任务，入队 ${queuedCount} 个；没有 ready 状态的新需求池文件${formatCronMetaSummary(cronMeta)}`
                 : `没有 ready 状态的业务需求池文件，本次定时任务跳过且未创建空任务${formatCronMetaSummary(cronMeta)}`;
@@ -540,7 +927,20 @@ async function runCronJobCore(id, ctx, trigger, reliability = null) {
                 run_count: Number(job.run_count || 0) + 1,
                 next_run: nextRun,
             });
-            return { success: true, queued: queuedCount > 0, skipped: continuedCount === 0, continued: continuedCount, message: result, job: updated, gap_continue_result: gapContinueResult };
+            const runStatus = continuedCount > 0 ? (queuedCount > 0 ? "queued" : (blockedCount > 0 ? "waiting" : "done")) : "skipped";
+            const run = (0, cron_job_store_1.patchCronRun)(id, cronRun.id, {
+                status: runStatus,
+                result,
+                task_ids: continuedTaskIds,
+                primary_task_id: continuedTaskIds[0] || "",
+                task_states: Object.fromEntries(continuedTaskIds.map((taskId) => [taskId, { status: queuedCount > 0 ? "queued" : "waiting", result, updated_at: new Date().toISOString() }])),
+                dispatched_at: continuedCount > 0 ? new Date().toISOString() : null,
+                completed_at: runStatus === "skipped" || runStatus === "done" ? new Date().toISOString() : null,
+                meta: cronMeta,
+            });
+            if (runStatus === "done" || runStatus === "skipped")
+                notifyCronRun(id, cronRun.id, "done");
+            return { success: true, queued: queuedCount > 0, skipped: continuedCount === 0, continued: continuedCount, message: result, job: updated, run, gap_continue_result: gapContinueResult };
         }
         const created = taskDrafts.map((draft) => {
             const { task, queueResult } = (0, collaboration_1.createAndQueueTask)(draft, ctx);
@@ -553,6 +953,9 @@ async function runCronJobCore(id, ctx, trigger, reliability = null) {
             }
             return { task, queueResult, queued: !!queueResult?.queued };
         });
+        const continuedTaskIds = (cronMeta.continued_gap_tasks?.task_ids || []).map((taskId) => String(taskId));
+        const createdTaskIds = [...new Set([...continuedTaskIds, ...created.map(item => String(item.task.id))])];
+        attachCronRunToTasks(createdTaskIds, id, cronRun.id);
         const queuedCount = created.filter(item => item.queued).length;
         if (created.length > 1) {
             const status = queuedCount > 0 ? "queued" : (created.some(item => item.queueResult?.blocked) ? "waiting" : "skipped");
@@ -566,6 +969,19 @@ async function runCronJobCore(id, ctx, trigger, reliability = null) {
                 run_count: Number(job.run_count || 0) + 1,
                 next_run: nextRun,
             });
+            const run = (0, cron_job_store_1.patchCronRun)(id, cronRun.id, {
+                status,
+                result,
+                task_ids: createdTaskIds,
+                primary_task_id: createdTaskIds[0] || "",
+                task_states: Object.fromEntries([
+                    ...continuedTaskIds.map((taskId) => [taskId, { status: "queued", result: "交付缺口任务已重新入队", updated_at: new Date().toISOString() }]),
+                    ...created.map(item => [String(item.task.id), { status: item.queued ? "queued" : (item.queueResult?.blocked ? "waiting" : "skipped"), result: item.queueResult?.message || result, updated_at: new Date().toISOString() }]),
+                ]),
+                dispatched_at: new Date().toISOString(),
+                completed_at: status === "skipped" ? new Date().toISOString() : null,
+                meta: cronMeta,
+            });
             return {
                 success: true,
                 queued: queuedCount > 0,
@@ -574,6 +990,7 @@ async function runCronJobCore(id, ctx, trigger, reliability = null) {
                 tasks: created.map(item => item.task),
                 results: created,
                 job: updated,
+                run,
             };
         }
         const { task, queueResult, queued } = created[0];
@@ -587,7 +1004,20 @@ async function runCronJobCore(id, ctx, trigger, reliability = null) {
             run_count: Number(job.run_count || 0) + 1,
             next_run: nextRun,
         });
-        return { success: true, queued, task, queue_result: queueResult, job: updated };
+        const run = (0, cron_job_store_1.patchCronRun)(id, cronRun.id, {
+            status,
+            result,
+            task_ids: createdTaskIds,
+            primary_task_id: String(task.id),
+            task_states: Object.fromEntries([
+                ...continuedTaskIds.map((taskId) => [taskId, { status: "queued", result: "交付缺口任务已重新入队", updated_at: new Date().toISOString() }]),
+                [String(task.id), { status: queued ? "queued" : (queueResult?.blocked ? "waiting" : "skipped"), result: queueResult?.message || result, updated_at: new Date().toISOString() }],
+            ]),
+            dispatched_at: new Date().toISOString(),
+            completed_at: status === "skipped" ? new Date().toISOString() : null,
+            meta: cronMeta,
+        });
+        return { success: true, queued, task, queue_result: queueResult, job: updated, run };
     }
     catch (e) {
         const drafts = taskDrafts.length ? taskDrafts : (Array.isArray(taskDraft?.drafts) ? taskDraft.drafts : (Array.isArray(taskDraft) ? taskDraft : [taskDraft].filter(Boolean)));
@@ -606,7 +1036,15 @@ async function runCronJobCore(id, ctx, trigger, reliability = null) {
             run_count: Number(job.run_count || 0) + 1,
             next_run: nextRun,
         });
-        return { success: false, error: e.message, job: updated };
+        let run = (0, cron_job_store_1.patchCronRun)(id, cronRun.id, {
+            status: "failed",
+            result: e.message,
+            completed_at: new Date().toISOString(),
+            meta: cronMeta,
+        });
+        run = scheduleFailedCronRunRetry(updated, run);
+        notifyCronRun(id, cronRun.id, "failed");
+        return { success: false, error: e.message, job: updated, run };
     }
     finally {
         try {
@@ -618,16 +1056,18 @@ async function runCronJobCore(id, ctx, trigger, reliability = null) {
         runningCronJobs.delete(id);
     }
 }
-async function runCronJob(id, ctx, trigger) {
-    if (trigger !== "schedule")
-        return runCronJobCore(id, ctx, trigger);
-    const operationKey = `${id}:${(0, cron_job_store_1.minuteKey)(new Date())}`;
+async function runCronJob(id, ctx, trigger, options = {}) {
+    if (trigger !== "schedule" && trigger !== "recovery")
+        return runCronJobCore(id, ctx, trigger, null, options);
+    const job = (0, cron_job_store_1.normalizeCronJob)((0, db_1.loadCronJobs)().find(item => item.id === id) || {});
+    const scheduledFor = options.scheduledFor || job.next_run || new Date().toISOString();
+    const operationKey = `${id}:${(0, cron_job_store_1.minuteKey)(new Date(scheduledFor), job.timezone)}`;
     const operation = (0, reliability_ledger_1.acquireIdempotency)({ scope: "cron-schedule", key: operationKey, leaseMs: 10 * 60 * 1000, metadata: { cron_job_id: id, minute_key: operationKey.split(":").slice(1).join(":") } });
     if (!operation.acquired) {
         return operation.record?.result || { success: true, duplicate: true, skipped: true, message: operation.inProgress ? "相同定时周期正在执行" : "相同定时周期已执行" };
     }
     try {
-        const result = await runCronJobCore(id, ctx, trigger, { operationKey, traceId: operation.traceId });
+        const result = await runCronJobCore(id, ctx, trigger, { operationKey, traceId: operation.traceId }, { ...options, scheduledFor });
         if (result?.success === false) {
             (0, reliability_ledger_1.failIdempotency)("cron-schedule", operationKey, result.error || result.message || "定时任务执行失败");
             return result;
@@ -646,9 +1086,61 @@ async function runCronJob(id, ctx, trigger) {
         throw error;
     }
 }
+function reconcileCronRunsOnStartup(now = new Date()) {
+    const jobs = (0, db_1.loadCronJobs)();
+    const tasks = (0, db_1.loadTasks)();
+    const summary = { jobs: jobs.length, recovered_runs: 0, failed_stale_runs: 0, schedules_initialized: 0 };
+    for (const rawJob of jobs) {
+        const job = (0, cron_job_store_1.normalizeCronJob)(rawJob);
+        if (job.enabled && !rawJob.next_run && !job.schedule_error) {
+            (0, cron_job_store_1.patchCronJob)(job.id, { next_run: (0, cron_job_store_1.computeNextRun)(job.schedule, now, job.timezone) });
+            summary.schedules_initialized++;
+        }
+        for (const run of job.run_history || []) {
+            if (!CRON_RUN_ACTIVE_STATUSES.has(run.status) || run.status === "retry_waiting" || run.status === "waiting")
+                continue;
+            const boundTasks = tasks.filter(task => (run.task_ids || []).includes(String(task.id || "")));
+            if (boundTasks.length) {
+                let updated = run;
+                for (const task of boundTasks)
+                    updated = (0, cron_job_store_1.syncCronRunTask)(job.id, run.id, task.id, task.status, task.result || task.status_detail || "", task.updated_at || now.toISOString()) || updated;
+                if (updated?.status !== run.status)
+                    summary.recovered_runs++;
+                continue;
+            }
+            const age = now.getTime() - Date.parse(run.started_at || "");
+            if (Number.isFinite(age) && age >= 5 * 60_000) {
+                const failed = (0, cron_job_store_1.patchCronRun)(job.id, run.id, { status: "failed", result: "服务重启时发现本轮未完成派发，已转入恢复流程", completed_at: now.toISOString(), recovered_after_restart: true });
+                scheduleFailedCronRunRetry(rawJob, failed, now);
+                notifyCronRun(job.id, run.id, "failed");
+                summary.failed_stale_runs++;
+            }
+        }
+    }
+    return summary;
+}
+async function processDueCronRetries(ctx, now) {
+    for (const rawJob of (0, db_1.loadCronJobs)()) {
+        const job = (0, cron_job_store_1.normalizeCronJob)(rawJob);
+        if (!job.enabled || rawJob.archived || rawJob.deleted_at)
+            continue;
+        for (const run of job.run_history || []) {
+            if (run.status !== "retry_waiting" || !run.next_retry_at || run.retry_child_run_id)
+                continue;
+            if (Date.parse(run.next_retry_at) > now.getTime() || runningCronJobs.has(job.id))
+                continue;
+            try {
+                await retryCronRun(job.id, run.id, ctx, "retry");
+            }
+            catch (error) {
+                console.error("[Cron][Retry]", job.name, error?.message || error);
+            }
+        }
+    }
+}
 async function tickCronScheduler(ctx) {
     const now = new Date();
-    const key = (0, cron_job_store_1.minuteKey)(now);
+    await processDueCronRetries(ctx, now);
     const jobs = (0, db_1.loadCronJobs)();
     for (const rawJob of jobs) {
         if (rawJob.archived || rawJob.deleted_at)
@@ -668,18 +1160,31 @@ async function tickCronScheduler(ctx) {
         }
         if (runningCronJobs.has(job.id))
             continue;
-        if (job.last_run_key === key && (0, reliability_ledger_1.getIdempotencyRecord)("cron-schedule", `${job.id}:${key}`)?.status === "completed")
+        const scheduledFor = job.next_run;
+        if (!scheduledFor) {
+            (0, cron_job_store_1.patchCronJob)(job.id, { next_run: (0, cron_job_store_1.computeNextRun)(job.schedule, now, job.timezone) });
             continue;
-        if (!(0, cron_job_store_1.matchesCron)(job.schedule, now))
+        }
+        const dueAt = Date.parse(scheduledFor);
+        if (!Number.isFinite(dueAt) || dueAt > now.getTime())
             continue;
-        runCronJob(job.id, ctx, "schedule")
-            .then(result => {
-            if (!result.success)
-                console.error("[Cron]", job.name, result.error || result.message);
-        })
-            .catch((e) => console.error("[Cron]", job.name, e.message));
+        const lateMinutes = Math.max(0, (now.getTime() - dueAt) / 60_000);
+        const shouldRecover = lateMinutes > 1.5;
+        const withinGrace = lateMinutes <= Number(job.misfire_grace_minutes || 1440);
+        if (shouldRecover && (job.misfire_policy === "skip" || !withinGrace)) {
+            const reason = withinGrace ? "服务停机期间错过执行，已按任务策略跳过" : "错过执行时间已超过补跑窗口，已跳过";
+            const run = (0, cron_job_store_1.appendCronRun)(job.id, { trigger: "recovery", scheduled_for: scheduledFor, started_at: now.toISOString(), completed_at: now.toISOString(), status: "skipped", result: reason, meta: { missed_by_minutes: Math.round(lateMinutes), misfire_policy: job.misfire_policy } });
+            (0, cron_job_store_1.patchCronJob)(job.id, { last_run: now.toISOString(), last_scheduled_at: scheduledFor, last_status: "skipped", last_result: reason, next_run: (0, cron_job_store_1.computeNextRun)(job.schedule, now, job.timezone), run_count: Number(job.run_count || 0) + 1 });
+            if (run)
+                notifyCronRun(job.id, run.id, "done");
+            continue;
+        }
+        const result = await runCronJob(job.id, ctx, shouldRecover ? "recovery" : "schedule", { scheduledFor });
+        if (!result?.success)
+            console.error("[Cron]", job.name, result?.error || result?.message);
     }
     await (0, cron_dev_reports_1.tickAutoDevReportNotifications)(now);
+    await (0, feishu_channel_1.tickFeishuNotificationOutbox)(now);
     try {
         runConflictResolutionMemoryMaintenanceSchedulerTick({ at: now.toISOString() });
     }
@@ -690,10 +1195,11 @@ async function tickCronScheduler(ctx) {
 function startCronScheduler(ctx) {
     if (schedulerTimer)
         clearInterval(schedulerTimer);
+    const recovery = reconcileCronRunsOnStartup();
     const tick = () => tickCronScheduler(ctx).catch((e) => console.error("[Cron]", e.message));
     tick();
     schedulerTimer = setInterval(tick, 30 * 1000);
-    console.log("[Cron] 定时任务调度器已启动");
+    console.log(`[Cron] 定时任务调度器已启动，恢复 ${recovery.recovered_runs} 条运行，修复 ${recovery.failed_stale_runs} 条中断记录`);
 }
 function stopCronScheduler() {
     if (schedulerTimer)
@@ -749,7 +1255,7 @@ function handleCronApi(pathname, req, res, parsed, ctx) {
         const onlyArchived = String(parsed.query.archived || "") === "true";
         const allJobs = (0, db_1.loadCronJobs)();
         const jobs = onlyArchived ? allJobs.filter(job => job.archived || job.deleted_at) : includeArchived ? allJobs : allJobs.filter(job => !job.archived && !job.deleted_at);
-        (0, utils_1.sendJson)(res, { jobs: jobs.map(cron_job_store_1.normalizeCronJob), archived_count: allJobs.filter(job => job.archived || job.deleted_at).length, scheduler: schedulerStatus() });
+        (0, utils_1.sendJson)(res, { jobs: publicCronJobs(jobs), archived_count: allJobs.filter(job => job.archived || job.deleted_at).length, scheduler: schedulerStatus() });
         return true;
     }
     if (pathname === "/api/cron/status" && req.method === "GET") {
@@ -870,6 +1376,7 @@ function handleCronApi(pathname, req, res, parsed, ctx) {
         const report = (0, cron_dev_reports_1.upsertAutoDevDailyReport)(today);
         const reports = (0, db_1.loadDevReports)().slice(0, 30);
         const jobs = (0, db_1.loadCronJobs)().map(cron_job_store_1.normalizeCronJob).filter((job) => job.workflow_type === "daily_dev");
+        const journalAudit = (0, work_journal_1.getWorkJournalAudit)({ sync: false });
         (0, utils_1.sendJson)(res, {
             success: true,
             scheduler: schedulerStatus(),
@@ -879,7 +1386,52 @@ function handleCronApi(pathname, req, res, parsed, ctx) {
             notification: (0, cron_dev_reports_1.normalizeAutoDevNotifyConfig)((0, db_1.loadAutoDevNotifyConfig)()),
             daily_dev_jobs: jobs,
             backlog: report.backlog,
+            journal: {
+                schema: journalAudit.schema,
+                append_only: journalAudit.append_only,
+                total: journalAudit.total,
+                source_counts: journalAudit.source_counts,
+                actor_counts: journalAudit.actor_counts,
+                earliest_at: journalAudit.earliest_at,
+                latest_at: journalAudit.latest_at,
+            },
         });
+        return true;
+    }
+    if (["/api/cron/run/retry", "/api/cron/run/resume", "/api/cron/run/cancel"].includes(pathname) && req.method === "POST") {
+        readJsonBody(req, (payload) => {
+            const jobId = String(payload.job_id || payload.jobId || payload.id || "");
+            const runId = String(payload.run_id || payload.runId || "");
+            if (!jobId || !runId)
+                return (0, utils_1.sendJson)(res, { error: "缺少定时任务或运行标识" }, 400);
+            if (pathname.endsWith("/cancel")) {
+                try {
+                    (0, utils_1.sendJson)(res, cancelCronRun(jobId, runId, String(payload.reason || "用户取消本轮定时任务")));
+                }
+                catch (error) {
+                    (0, utils_1.sendJson)(res, { error: error.message }, 409);
+                }
+                return;
+            }
+            retryCronRun(jobId, runId, ctx, pathname.endsWith("/resume") ? "resume" : "retry")
+                .then(result => (0, utils_1.sendJson)(res, result, result?.success === false ? 409 : 200))
+                .catch((error) => (0, utils_1.sendJson)(res, { error: error.message }, 409));
+        }, (e) => (0, utils_1.sendJson)(res, { error: e.message }, 400));
+        return true;
+    }
+    if (pathname === "/api/auto-dev/work-journal/audit" && req.method === "GET") {
+        (0, utils_1.sendJson)(res, (0, work_journal_1.getWorkJournalAudit)());
+        return true;
+    }
+    if (pathname === "/api/auto-dev/work-journal/events" && req.method === "GET") {
+        const events = (0, work_journal_1.listWorkJournalEvents)({
+            start: parsed.query.start,
+            end: parsed.query.end,
+            task_id: parsed.query.task_id,
+            source: parsed.query.source,
+            limit: parsed.query.limit,
+        });
+        (0, utils_1.sendJson)(res, { success: true, count: events.length, events });
         return true;
     }
     if (pathname === "/api/auto-dev/reports" && req.method === "GET") {
@@ -895,7 +1447,7 @@ function handleCronApi(pathname, req, res, parsed, ctx) {
     if (pathname === "/api/auto-dev/weekly-report/generate" && req.method === "POST") {
         readJsonBody(req, (payload) => {
             try {
-                const report = (0, cron_dev_reports_1.upsertAutoDevWeeklyReport)(payload.date || (0, cron_dev_reports_1.localDateKey)());
+                const report = (0, cron_dev_reports_1.upsertAutoDevWeeklyReport)(payload.date || (0, cron_dev_reports_1.localDateKey)(), { force: payload.force === true });
                 (0, utils_1.sendJson)(res, { success: true, report, reports: (0, db_1.loadDevWeeklyReports)().slice(0, 20) });
             }
             catch (e) {
@@ -944,7 +1496,7 @@ function handleCronApi(pathname, req, res, parsed, ctx) {
     if (pathname === "/api/auto-dev/report/generate" && req.method === "POST") {
         readJsonBody(req, (payload) => {
             try {
-                const report = (0, cron_dev_reports_1.upsertAutoDevDailyReport)(payload.date || (0, cron_dev_reports_1.localDateKey)());
+                const report = (0, cron_dev_reports_1.upsertAutoDevDailyReport)(payload.date || (0, cron_dev_reports_1.localDateKey)(), { force: payload.force === true });
                 (0, utils_1.sendJson)(res, { success: true, report, reports: (0, db_1.loadDevReports)().slice(0, 30) });
             }
             catch (e) {

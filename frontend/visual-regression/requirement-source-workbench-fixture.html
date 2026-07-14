@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Requirement Source Workbench Regression</title>
+  <style>
+    :root {
+      --text-primary: #172033;
+      --text-secondary: #667085;
+      --bg-card: #fff;
+      --bg-secondary: #f5f7fb;
+      --border-color: #e5e9f2;
+    }
+    * { box-sizing: border-box; }
+    html, body, #app { min-height: 100%; margin: 0; }
+    body { background: #f4f6fa; font-family: Inter, "Microsoft YaHei", sans-serif; }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <script type="module">
+    import { createApp, nextTick } from 'vue/dist/vue.esm-bundler.js'
+    import Workbench from '../src/components/common/UsabilityWorkbench.vue'
+
+    const workbench = {
+      attention: [],
+      active: [],
+      completed: [],
+      resources: {
+        projects: [{ name: 'cc-connect-test', running: false, agent: 'codex' }],
+        groups: [{ id: 'fixture-group', name: '需求资料测试群', members: 2 }],
+        cron: [],
+      },
+      archive: { retention_days: 30 },
+    }
+
+    const intake = {
+      requirement: '根据需求资料实现退款审批流程',
+      project: 'cc-connect-test',
+      group_id: '',
+      group_name: '',
+      scope: ['前端页面与交互', '后端接口与数据', '测试与验收'],
+      acceptance: ['审批结果必须持久化', '完成浏览器和接口回归'],
+      dependencies: [],
+      risks: ['需要兼容现有退款状态'],
+      clarification_questions: [],
+      source_evidence: ['refund-requirement.md'],
+      extraction_method: 'model',
+      source_summary: '已读取 1 份资料，并整理为可执行需求。',
+      source_ingestion: {
+        schema: 'ccm-requirement-source-ingestion-v1',
+        source_count: 1,
+        readable_count: 1,
+        warning_count: 0,
+        parsers: ['utf8-text'],
+        sources: [{ id: 'file-refund', name: 'refund-requirement.md', status: 'parsed', parser: 'utf8-text', readable: true }],
+      },
+    }
+
+    window.fetch = async (url, options = {}) => {
+      const pathname = new URL(url, location.href).pathname
+      if (pathname === '/api/usability/workbench') return Response.json(workbench)
+      if (pathname === '/api/usability/intake/preview') {
+        const body = options.body
+        document.body.dataset.multipart = body instanceof FormData ? 'true' : 'false'
+        document.body.dataset.filename = body instanceof FormData && body.get('files')?.name === 'refund-requirement.md' ? 'true' : 'false'
+        return Response.json({ success: true, task: { id: 'task-source-fixture', title: '实现退款审批业务', intake_draft: intake }, confirmation: intake })
+      }
+      return Response.json({ success: true })
+    }
+
+    createApp(Workbench).mount('#app')
+    await nextTick()
+
+    const waitForTarget = () => new Promise((resolve, reject) => {
+      const started = Date.now()
+      const timer = setInterval(() => {
+        const select = document.querySelector('.intake-card select')
+        if (select?.value) {
+          clearInterval(timer)
+          resolve()
+        } else if (Date.now() - started > 5000) {
+          clearInterval(timer)
+          reject(new Error('Workbench target did not load'))
+        }
+      }, 30)
+    })
+    await waitForTarget()
+
+    const input = document.querySelector('.intake-card input[type="file"]')
+    const transfer = new DataTransfer()
+    transfer.items.add(new File(['# 退款审批需求\n- 增加审批页面和接口\n- 审批结果必须持久化'], 'refund-requirement.md', { type: 'text/markdown' }))
+    input.files = transfer.files
+    input.dispatchEvent(new Event('change', { bubbles: true }))
+
+    const textarea = document.querySelector('.intake-card textarea')
+    textarea.value = '请根据资料实现退款审批业务'
+    textarea.dispatchEvent(new Event('input', { bubbles: true }))
+    await nextTick()
+    document.querySelector('.intake-card .primary').click()
+
+    const waitUntilReady = () => new Promise((resolve, reject) => {
+      const started = Date.now()
+      const timer = setInterval(() => {
+        if (document.querySelector('.confirm-card')) {
+          clearInterval(timer)
+          document.body.dataset.fixtureReady = 'true'
+          resolve()
+        } else if (Date.now() - started > 5000) {
+          clearInterval(timer)
+          reject(new Error('Confirmation card did not render'))
+        }
+      }, 30)
+    })
+    await waitUntilReady()
+  </script>
+</body>
+</html>

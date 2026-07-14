@@ -11,6 +11,10 @@ export declare function normalizeMusicAgentAction(value: any, message: string, m
     confidence: number;
     reason: string;
 };
+export declare function normalizeMusicAgentMessages(history?: any[], currentMessage?: string, limit?: number): {
+    role: "user" | "assistant";
+    content: string;
+}[];
 export declare function classifyMusicAgentAction(cfg: any, message: string, mode: string, history?: any[]): Promise<{
     type: string;
     keyword: string;
@@ -38,6 +42,10 @@ export declare function runMusicAgentIntentSelfTest(): {
         fallbackPlayRequiresNoAutoplay: boolean;
         searchDoesNotAutoplay: boolean;
         questionDoesNotAutoplay: boolean;
+        emptyPendingMessageRemoved: boolean;
+        currentMessageNotDuplicated: boolean;
+        conversationStartsWithUser: boolean;
+        structuredTextContentSupported: boolean;
     };
     samples: {
         playSpecific: {
@@ -72,5 +80,13 @@ export declare function runMusicAgentIntentSelfTest(): {
             confidence: number;
             reason: string;
         };
+        normalizedHistory: {
+            role: "user" | "assistant";
+            content: string;
+        }[];
+        structuredHistory: {
+            role: "user" | "assistant";
+            content: string;
+        }[];
     };
 };

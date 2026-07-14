@@ -559,27 +559,31 @@ export function createUnifiedDiff(oldText: string, newText: string, filePath: st
     }
   }
 
-  const keep = new Set<number>();
-  ops.forEach((op, idx) => {
-    if (op.type !== "context") {
-      for (let k = Math.max(0, idx - contextSize); k <= Math.min(ops.length - 1, idx + contextSize); k++) keep.add(k);
-    }
-  });
+  const changeIndexes = ops.flatMap((op, idx) => op.type === "context" ? [] : [idx]);
+  const ranges: Array<{ start: number; end: number }> = [];
+  for (const idx of changeIndexes) {
+    const start = Math.max(0, idx - contextSize);
+    const end = Math.min(ops.length - 1, idx + contextSize);
+    const previous = ranges[ranges.length - 1];
+    if (previous && start <= previous.end + 1) previous.end = Math.max(previous.end, end);
+    else ranges.push({ start, end });
+  }
 
-  const lines = [`--- a/${filePath}`, `+++ b/${filePath}`, `@@ -1,${Math.max(n, 1)} +1,${Math.max(m, 1)} @@`];
-  let skipped = false;
-  for (let idx = 0; idx < ops.length; idx++) {
-    if (!keep.has(idx)) {
-      if (!skipped) {
-        lines.push("@@ ... @@");
-        skipped = true;
-      }
-      continue;
+  const lines = [`--- a/${filePath}`, `+++ b/${filePath}`];
+  for (const range of ranges) {
+    const before = ops.slice(0, range.start);
+    const hunk = ops.slice(range.start, range.end + 1);
+    const oldConsumed = before.filter(op => op.type !== "add").length;
+    const newConsumed = before.filter(op => op.type !== "remove").length;
+    const oldCount = hunk.filter(op => op.type !== "add").length;
+    const newCount = hunk.filter(op => op.type !== "remove").length;
+    const oldStart = oldCount ? oldConsumed + 1 : oldConsumed;
+    const newStart = newCount ? newConsumed + 1 : newConsumed;
+    lines.push(`@@ -${oldStart},${oldCount} +${newStart},${newCount} @@`);
+    for (const op of hunk) {
+      const prefix = op.type === "add" ? "+" : op.type === "remove" ? "-" : " ";
+      lines.push(`${prefix}${op.text}`);
     }
-    skipped = false;
-    const op = ops[idx];
-    const prefix = op.type === "add" ? "+" : op.type === "remove" ? "-" : " ";
-    lines.push(`${prefix}${op.text}`);
   }
 
   let diff = lines.join("\n");

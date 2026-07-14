@@ -10,6 +10,17 @@ import {
   getMultipartBoundary,
   parseMultipart
 } from "../../core/utils";
+import {
+  cancelPetGenerationJob,
+  createPetGenerationJob,
+  getPetGenerationJob,
+  listPetGenerationJobs,
+  retryPetGenerationJob,
+  runPetGenerationContractSelfTest,
+  setPetGenerationConfigChangedNotifier,
+  toPublicPetGenerationJob,
+} from "./pet-generation";
+import { runPetActivityCoordinatorSelfTest } from "./pet-activity-coordinator";
 
 const PET_WEB_ASSETS_DIR = path.join(PUBLIC_DIR, "pets");
 const PET_DESKTOP_ASSETS_DIR = path.resolve(__dirname, "..", "..", "..", "pet", "assets");
@@ -105,7 +116,7 @@ function writePetAsset(assetPath: string, sourcePath: string) {
     }
   }
 
-  const devWebAssetsDir = path.resolve(PUBLIC_DIR, "..", "..", "ccm-web-vue", "public", "pets");
+  const devWebAssetsDir = path.resolve(PUBLIC_DIR, "..", "..", "frontend", "public", "pets");
   const targets = [
     { root: PET_WEB_ASSETS_DIR, file: path.join(PET_WEB_ASSETS_DIR, safePath) },
     { root: PET_DESKTOP_ASSETS_DIR, file: path.join(PET_DESKTOP_ASSETS_DIR, safePath) },
@@ -141,8 +152,70 @@ export function handlePetsApi(
     petWorkspaceClientsSize: number;
   }
 ): boolean {
+  setPetGenerationConfigChangedNotifier(() => ctx.broadcastPetConfigChanged());
   if (pathname === "/api/pets/agents" && req.method === "GET") {
     sendJson(res, { success: true, agents: ctx.getPetAgents() });
+    return true;
+  }
+
+  if (pathname === "/api/pets/generation-jobs" && req.method === "GET") {
+    const id = String(parsed.query.id || "").trim();
+    if (id) {
+      sendJson(res, { success: true, job: toPublicPetGenerationJob(getPetGenerationJob(id)) });
+      return true;
+    }
+    sendJson(res, { success: true, jobs: listPetGenerationJobs().map(toPublicPetGenerationJob) });
+    return true;
+  }
+
+  if (pathname === "/api/pets/generation-jobs" && req.method === "POST") {
+    (async () => {
+      let upload: any = null;
+      try {
+        const contentType = String(req.headers["content-type"] || "");
+        const boundary = getMultipartBoundary(contentType);
+        if (!boundary) return sendJson(res, { success: false, error: "请上传一张参考图片" }, 400);
+        const buffer = await collectRequestBuffer(req);
+        const { files, fields } = parseMultipart(buffer, boundary);
+        upload = files.find(file => file.field === "reference" || file.field === "file") || files[0];
+        if (!upload?.savedPath) return sendJson(res, { success: false, error: "缺少参考图片" }, 400);
+        const job = createPetGenerationJob({
+          referencePath: upload.savedPath,
+          name: fields.name,
+          description: fields.description,
+          style: fields.style,
+          targetAgent: fields.targetAgent,
+        });
+        ctx.broadcastPetConfigChanged();
+        sendJson(res, { success: true, job: toPublicPetGenerationJob(job) }, 202);
+      } catch (error: any) {
+        sendJson(res, { success: false, error: error?.message || String(error) }, 400);
+      } finally {
+        if (upload?.savedPath) try { fs.unlinkSync(upload.savedPath); } catch {}
+      }
+    })();
+    return true;
+  }
+
+  if (["/api/pets/generation-jobs/cancel", "/api/pets/generation-jobs/retry"].includes(pathname) && req.method === "POST") {
+    let body = "";
+    req.on("data", chunk => body += chunk);
+    req.on("end", () => {
+      try {
+        const data = JSON.parse(body || "{}");
+        const job = pathname.endsWith("/cancel") ? cancelPetGenerationJob(String(data.id || "")) : retryPetGenerationJob(String(data.id || ""));
+        sendJson(res, { success: true, job: toPublicPetGenerationJob(job) });
+      } catch (error: any) {
+        sendJson(res, { success: false, error: error?.message || String(error) }, 400);
+      }
+    });
+    return true;
+  }
+
+  if (pathname === "/api/pets/self-test" && req.method === "GET") {
+    const activity = runPetActivityCoordinatorSelfTest();
+    const generation = runPetGenerationContractSelfTest();
+    sendJson(res, { success: true, pass: activity.pass && generation.pass, activity, generation });
     return true;
   }
 

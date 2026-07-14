@@ -1,14 +1,81 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.normalizeLlmTokenUsage = normalizeLlmTokenUsage;
 exports.normalizeChatCompletionsUrl = normalizeChatCompletionsUrl;
 exports.normalizeAnthropicMessagesUrl = normalizeAnthropicMessagesUrl;
 exports.shouldUseAnthropic = shouldUseAnthropic;
 exports.extractJsonObject = extractJsonObject;
+exports.fetchWithNodeHttpFallback = fetchWithNodeHttpFallback;
 exports.callOpenAiCompatibleChat = callOpenAiCompatibleChat;
 exports.callAnthropicCompatibleChat = callAnthropicCompatibleChat;
 exports.callOpenAiCompatibleJson = callOpenAiCompatibleJson;
 exports.callAnthropicCompatibleJson = callAnthropicCompatibleJson;
+exports.runLlmTokenUsageSelfTest = runLlmTokenUsageSelfTest;
 exports.runGroupOrchestratorApiMicrocompactNativeAdapterTelemetrySelfTest = runGroupOrchestratorApiMicrocompactNativeAdapterTelemetrySelfTest;
+const http = __importStar(require("http"));
+const https = __importStar(require("https"));
+function finiteTokenCount(value) {
+    const number = Number(value);
+    return Number.isFinite(number) && number > 0 ? Math.floor(number) : 0;
+}
+function normalizeLlmTokenUsage(value, provider = "openai") {
+    const usage = value && typeof value === "object" ? value : {};
+    const outputTokens = Math.max(finiteTokenCount(usage.output_tokens), finiteTokenCount(usage.outputTokens), finiteTokenCount(usage.completion_tokens), finiteTokenCount(usage.completionTokens));
+    const directInputTokens = Math.max(finiteTokenCount(usage.input_tokens), finiteTokenCount(usage.inputTokens), finiteTokenCount(usage.prompt_tokens), finiteTokenCount(usage.promptTokens));
+    const cacheCreationTokens = provider === "anthropic"
+        ? Math.max(finiteTokenCount(usage.cache_creation_input_tokens), finiteTokenCount(usage.cacheCreationInputTokens))
+        : 0;
+    const cacheReadTokens = provider === "anthropic"
+        ? Math.max(finiteTokenCount(usage.cache_read_input_tokens), finiteTokenCount(usage.cacheReadInputTokens))
+        : 0;
+    const inputTokens = directInputTokens + cacheCreationTokens + cacheReadTokens;
+    const reported = inputTokens > 0 || outputTokens > 0;
+    return {
+        inputTokens,
+        outputTokens,
+        totalTokens: inputTokens + outputTokens,
+        reported,
+    };
+}
+function reportTokenUsage(options, usage) {
+    try {
+        options.onUsage?.(usage);
+    }
+    catch { }
+}
 function normalizeChatCompletionsUrl(apiUrl) {
     const base = String(apiUrl || "").trim().replace(/\/+$/, "");
     if (!base)
@@ -80,6 +147,69 @@ function assertLlmConfig(config, endpoint) {
 function formatHttpError(prefix, status, text) {
     const detail = String(text || "").slice(0, 300);
     return detail ? `${prefix} HTTP ${status}: ${detail}` : `${prefix} HTTP ${status}`;
+}
+function nativeHttpRequest(endpoint, init = {}, redirectCount = 0) {
+    return new Promise((resolve, reject) => {
+        const url = endpoint instanceof URL ? endpoint : new URL(String(endpoint));
+        const transport = url.protocol === "https:" ? https : http;
+        const request = transport.request(url, {
+            method: init.method || "GET",
+            headers: init.headers || {},
+            signal: init.signal,
+        }, response => {
+            const status = Number(response.statusCode || 0);
+            const location = String(response.headers.location || "");
+            if (location && [301, 302, 303, 307, 308].includes(status) && init.redirect !== "manual" && redirectCount < 5) {
+                response.resume();
+                const redirected = new URL(location, url);
+                const nextInit = [301, 302, 303].includes(status) && String(init.method || "GET").toUpperCase() !== "GET"
+                    ? { ...init, method: "GET", body: undefined }
+                    : init;
+                nativeHttpRequest(redirected, nextInit, redirectCount + 1).then(resolve, reject);
+                return;
+            }
+            const chunks = [];
+            response.on("data", chunk => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+            response.on("error", reject);
+            response.on("end", () => {
+                const body = Buffer.concat(chunks);
+                resolve({
+                    ok: status >= 200 && status < 300,
+                    status,
+                    url: url.toString(),
+                    headers: {
+                        get(name) {
+                            const value = response.headers[String(name || "").toLowerCase()];
+                            return Array.isArray(value) ? value.join(", ") : String(value || "");
+                        },
+                    },
+                    async text() { return body.toString("utf-8"); },
+                    async arrayBuffer() { return body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength); },
+                });
+            });
+        });
+        request.on("error", reject);
+        if (init.body !== undefined && init.body !== null)
+            request.write(init.body);
+        request.end();
+    });
+}
+async function fetchWithNodeHttpFallback(endpoint, init = {}) {
+    try {
+        return await fetch(endpoint, init);
+    }
+    catch (fetchError) {
+        if (init.signal?.aborted)
+            throw fetchError;
+        try {
+            return await nativeHttpRequest(endpoint, init);
+        }
+        catch (nativeError) {
+            const fetchCause = fetchError?.cause?.message || fetchError?.cause?.code || fetchError?.message || String(fetchError);
+            const nativeCause = nativeError?.message || String(nativeError);
+            throw new Error(`网络请求失败：${fetchCause}；原生 HTTP/HTTPS 重试失败：${nativeCause}`);
+        }
+    }
 }
 function getApiMicrocompactNativeApplyPlan(options) {
     return options.apiMicrocompactNativeApplyPlan || options.api_microcompact_native_apply_plan || null;
@@ -163,7 +293,7 @@ async function callOpenAiCompatibleChat(config, options) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), resolveTimeoutMs(config, options.defaultTimeoutMs || 30000));
     try {
-        const response = await fetch(endpoint, {
+        const response = await fetchWithNodeHttpFallback(endpoint, {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
@@ -172,6 +302,7 @@ async function callOpenAiCompatibleChat(config, options) {
             body: JSON.stringify({
                 model: config.model,
                 temperature: options.temperature ?? resolveTemperature(config, 0.2),
+                ...(options.maxTokens ? { max_tokens: options.maxTokens } : {}),
                 messages: options.messages,
             }),
             signal: controller.signal,
@@ -181,6 +312,7 @@ async function callOpenAiCompatibleChat(config, options) {
             throw new Error(formatHttpError(options.httpErrorPrefix || "HTTP", response.status, text));
         }
         const data = JSON.parse(text);
+        reportTokenUsage(options, normalizeLlmTokenUsage(data?.usage, "openai"));
         return String(data?.choices?.[0]?.message?.content || "");
     }
     finally {
@@ -212,7 +344,7 @@ async function callAnthropicCompatibleChat(config, options) {
         const sentAt = new Date().toISOString();
         let response = null;
         try {
-            response = await fetch(endpoint, {
+            response = await fetchWithNodeHttpFallback(endpoint, {
                 method: "POST",
                 headers: patched.headers,
                 body: JSON.stringify(patched.body),
@@ -253,6 +385,7 @@ async function callAnthropicCompatibleChat(config, options) {
             throw new Error(formatHttpError(options.httpErrorPrefix || "HTTP", response.status, text));
         }
         const data = JSON.parse(text);
+        reportTokenUsage(options, normalizeLlmTokenUsage(data?.usage, "anthropic"));
         return (data?.content || [])
             .map((part) => part?.type === "text" ? part.text : "")
             .join("")
@@ -275,6 +408,68 @@ async function callAnthropicCompatibleJson(config, options) {
     if (!parsed)
         throw new Error(options.invalidJsonMessage || "主 Agent API 未返回有效 JSON");
     return parsed;
+}
+async function runLlmTokenUsageSelfTest() {
+    const originalFetch = globalThis.fetch;
+    let openAiUsage = null;
+    let anthropicUsage = null;
+    try {
+        globalThis.fetch = async () => ({
+            ok: true,
+            status: 200,
+            headers: { get: () => "" },
+            async text() {
+                return JSON.stringify({
+                    choices: [{ message: { content: "openai ok" } }],
+                    usage: { prompt_tokens: 120, completion_tokens: 30, total_tokens: 150 },
+                });
+            },
+        });
+        const openAiContent = await callOpenAiCompatibleChat({
+            apiUrl: "https://example.com/v1",
+            apiKey: "selftest-key",
+            model: "selftest-model",
+        }, {
+            messages: [{ role: "user", content: "selftest" }],
+            onUsage: usage => { openAiUsage = usage; },
+        });
+        globalThis.fetch = async () => ({
+            ok: true,
+            status: 200,
+            headers: { get: () => "" },
+            async text() {
+                return JSON.stringify({
+                    content: [{ type: "text", text: "anthropic ok" }],
+                    usage: {
+                        input_tokens: 100,
+                        cache_creation_input_tokens: 20,
+                        cache_read_input_tokens: 300,
+                        output_tokens: 40,
+                    },
+                });
+            },
+        });
+        const anthropicContent = await callAnthropicCompatibleChat({
+            apiUrl: "https://example.com/v1",
+            apiKey: "selftest-key",
+            model: "selftest-model",
+        }, {
+            messages: [{ role: "user", content: "selftest" }],
+            onUsage: usage => { anthropicUsage = usage; },
+        });
+        const checks = {
+            openAiContentPreserved: openAiContent === "openai ok",
+            openAiInputTokensCaptured: openAiUsage?.inputTokens === 120,
+            openAiOutputTokensCaptured: openAiUsage?.outputTokens === 30,
+            anthropicContentPreserved: anthropicContent === "anthropic ok",
+            anthropicInputIncludesCacheTokens: anthropicUsage?.inputTokens === 420,
+            anthropicOutputTokensCaptured: anthropicUsage?.outputTokens === 40,
+        };
+        return { pass: Object.values(checks).every(Boolean), checks, openAiUsage, anthropicUsage };
+    }
+    finally {
+        globalThis.fetch = originalFetch;
+    }
 }
 async function runGroupOrchestratorApiMicrocompactNativeAdapterTelemetrySelfTest() {
     const groupId = `group-orchestrator-api-microcompact-native-adapter-selftest-${process.pid}-${Date.now()}`;

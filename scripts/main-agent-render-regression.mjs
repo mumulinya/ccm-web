@@ -77,11 +77,20 @@ async function run() {
     }
 
     const simple = page.locator('#case-simple-conversation')
-    await expectVisible(simple.locator('.main-agent-decision-card'), 'simple conversation card')
+    await expectHidden(simple.locator('.main-agent-decision-card'), 'simple conversation decision card')
     await expectHidden(simple.locator('.decision-plan'), 'simple conversation todo plan')
     await expectHidden(simple.locator('.dispatch-launch-summary'), 'simple conversation dispatch summary')
     if (await simple.getByText('我准备这样处理').isVisible().catch(() => false)) throw new Error('simple conversation should not show todo title')
     await simple.screenshot({ path: path.join(outputDir, '01-simple-conversation-no-todo.png') })
+
+    const ordinaryMultiline = page.locator('#case-ordinary-multiline-reply')
+    const ordinaryMultilineContent = ordinaryMultiline.locator('.agent-message-content')
+    await expectVisible(ordinaryMultilineContent, 'ordinary multiline reply')
+    const multilineText = await ordinaryMultilineContent.textContent()
+    if (multilineText !== '你好啊！我在呢。\n\n你可以直接问我：\n- 查系统信息\n- 听歌\n- 处理项目任务') throw new Error(`ordinary multiline reply should preserve text breaks: ${JSON.stringify(multilineText)}`)
+    const multilineWhiteSpace = await ordinaryMultilineContent.evaluate(element => getComputedStyle(element).whiteSpace)
+    if (multilineWhiteSpace !== 'pre-wrap') throw new Error(`ordinary multiline reply should render with pre-wrap, got ${multilineWhiteSpace}`)
+    await ordinaryMultiline.screenshot({ path: path.join(outputDir, '01b-ordinary-multiline-reply.png') })
 
     const task = page.locator('#case-task-plan')
     await expectVisible(task.locator('.dispatch-launch-summary'), 'task dispatch launch summary')
@@ -621,7 +630,7 @@ async function run() {
     if (!globalFoldedDetails) throw new Error('global history technical details should be folded by default')
     const terminalDetailsOpen = await globalTerminal.locator('details.task-card-technical').evaluateAll(items => items.some(el => el.open))
     if (terminalDetailsOpen) throw new Error('global terminal technical details should be folded by default')
-    await taskCard.screenshot({ path: path.join(outputDir, '03-technical-details-folded.png') })
+    await groupTaskExperience.locator('details.task-card-technical').first().screenshot({ path: path.join(outputDir, '03-technical-details-folded.png') })
 
     const groupCurrentTodo = page.locator('#case-group-main-current-todo')
     const activeGroupCurrentTodo = groupCurrentTodo.locator('.main-agent-status-card').first()
@@ -853,9 +862,11 @@ async function run() {
     const globalStreamCards = globalStream.locator('.global-stream-card')
     const globalStreamCardCount = await globalStreamCards.count()
     if (globalStreamCardCount < 7) throw new Error(`Expected at least 7 global stream cards, got ${globalStreamCardCount}`)
-    await expectHidden(globalStreamCards.nth(0).locator('.global-stream-dispatch'), 'ordinary global stream dispatch panel')
-    await expectHidden(globalStreamCards.nth(0).locator('.global-stream-current-todo'), 'ordinary global stream current todo summary')
-    await expectHidden(globalStreamCards.nth(0).locator('.global-stream-tool-summary'), 'ordinary global stream tool summary')
+    const historicalOrdinaryReply = globalStream.locator('.global-stream-replying').filter({ hasText: '回复已完成' }).first()
+    await expectVisible(historicalOrdinaryReply, 'historical ordinary global stream quiet completion state')
+    await expectHidden(historicalOrdinaryReply.locator('.global-stream-dispatch'), 'ordinary global stream dispatch panel')
+    await expectHidden(historicalOrdinaryReply.locator('.global-stream-current-todo'), 'ordinary global stream current todo summary')
+    await expectHidden(historicalOrdinaryReply.locator('.global-stream-tool-summary'), 'ordinary global stream tool summary')
     const livePlanCard = globalStreamCards.filter({ hasText: '等待授权确认' }).first()
     const livePlanTodo = livePlanCard.locator('.global-stream-current-todo')
     await expectVisible(livePlanTodo, 'live global current todo summary')
@@ -1055,6 +1066,24 @@ async function run() {
 
     const globalInput = globalStream.locator('.chat-footer .input-wrapper input[type="text"]')
     const globalAttachButton = globalStream.locator('.chat-footer .attach-btn')
+    await globalInput.fill('你好')
+    await globalStream.getByRole('button', { name: '发送', exact: true }).click()
+    const globalOrdinaryReplying = globalStream.locator('.global-stream-replying[data-run-id="global-ordinary-conversation-run"]')
+    await expectVisible(globalOrdinaryReplying, 'global ordinary conversation lightweight replying state')
+    await expectVisible(globalOrdinaryReplying.getByText('正在回复...', { exact: true }), 'global ordinary conversation replying copy')
+    if (await globalStream.locator('.global-stream-card[data-run-id="global-ordinary-conversation-run"]').count()) {
+      throw new Error('global ordinary conversation must not render the task stream card')
+    }
+    await expectVisible(globalStream.getByRole('button', { name: '回复中', exact: true }), 'global ordinary conversation quiet send state')
+    if (await globalStream.getByRole('button', { name: '回复中', exact: true }).isEnabled()) throw new Error('global ordinary conversation must not accept task supplements before execution intent')
+    if ((await globalInput.getAttribute('placeholder')) !== '正在回复...') throw new Error('global ordinary conversation input should stay in replying mode')
+    await expectHidden(globalStream.getByRole('button', { name: '补充要求', exact: true }), 'global ordinary conversation supplement action')
+    await globalOrdinaryReplying.screenshot({ path: path.join(outputDir, '07m-global-ordinary-replying.png') })
+    await page.evaluate(() => window.__ccmFinishGlobalOrdinaryFixtureRun?.())
+    await expectVisible(globalStream.getByText('你好！有什么我可以帮你的吗？', { exact: true }).last(), 'global ordinary conversation final plain text')
+    await expectHidden(globalOrdinaryReplying, 'global ordinary conversation replying state after completion')
+    await expectVisible(globalStream.getByRole('button', { name: '发送', exact: true }), 'global ordinary conversation input returns to normal send')
+
     await globalInput.fill('请处理一个需要多步执行和验证的任务')
     await globalStream.getByRole('button', { name: '发送', exact: true }).click()
     await expectVisible(globalStream.getByRole('button', { name: '补充要求', exact: true }), 'global running input supplement action')
@@ -1172,7 +1201,7 @@ async function run() {
     await child.screenshot({ path: path.join(outputDir, '09-child-agent-summary-expanded.png') })
 
     const screenshots = (await fs.readdir(outputDir)).filter(name => name.endsWith('.png')).sort()
-    if (screenshots.length !== 36) throw new Error(`Expected 36 screenshots, got ${screenshots.length}`)
+    if (screenshots.length !== 38) throw new Error(`Expected 38 screenshots, got ${screenshots.length}`)
     console.log(JSON.stringify({ pass: true, fixtureUrl, screenshots: screenshots.map(name => path.join(outputDir, name)) }, null, 2))
   } catch (error) {
     console.error(JSON.stringify({ pass: false, error: error.message }, null, 2))

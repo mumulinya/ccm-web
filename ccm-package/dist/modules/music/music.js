@@ -37,7 +37,6 @@ exports.runMusicAgentIntentSelfTest = void 0;
 exports.handleMusicApi = handleMusicApi;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
-const child_process_1 = require("child_process");
 const utils_1 = require("../../core/utils");
 const db_1 = require("../../core/db");
 const group_orchestrator_1 = require("../collaboration/group-orchestrator");
@@ -47,11 +46,168 @@ const library_1 = require("./library");
 const state_1 = require("./state");
 const agent_1 = require("./agent");
 const cover_1 = require("./cover");
+const llm_client_1 = require("./llm-client");
+const search_results_1 = require("./search-results");
+const download_jobs_1 = require("./download-jobs");
+const library_state_1 = require("./library-state");
 var agent_2 = require("./agent");
 Object.defineProperty(exports, "runMusicAgentIntentSelfTest", { enumerable: true, get: function () { return agent_2.runMusicAgentIntentSelfTest; } });
+function readMusicJsonBody(req, maxBytes = 64 * 1024) {
+    return new Promise((resolve, reject) => {
+        const chunks = [];
+        let size = 0;
+        req.on("data", (chunk) => {
+            size += chunk.length;
+            if (size > maxBytes) {
+                reject(new Error("请求内容过大"));
+                req.destroy();
+                return;
+            }
+            chunks.push(Buffer.from(chunk));
+        });
+        req.on("end", () => {
+            try {
+                resolve(JSON.parse(Buffer.concat(chunks).toString("utf-8") || "{}"));
+            }
+            catch {
+                reject(new Error("请求内容不是有效 JSON"));
+            }
+        });
+        req.on("error", reject);
+    });
+}
+const MUSIC_UPLOAD_MAX_BYTES = 100 * 1024 * 1024;
+const MUSIC_EXTENSIONS = new Set([".mp3", ".wav", ".ogg", ".m4a", ".flac", ".aac"]);
+function isSafeMusicFilename(filename) {
+    const value = String(filename || "");
+    return !!value && value === path.basename(value) && !value.includes("\0");
+}
+function isSupportedAudioBuffer(buffer, ext) {
+    if (buffer.length < 12 || !MUSIC_EXTENSIONS.has(ext))
+        return false;
+    const ascii = buffer.subarray(0, 12).toString("ascii");
+    if (ext === ".mp3" || ext === ".aac")
+        return ascii.startsWith("ID3") || buffer[0] === 0xff;
+    if (ext === ".wav")
+        return ascii.startsWith("RIFF") && ascii.slice(8, 12) === "WAVE";
+    if (ext === ".ogg")
+        return ascii.startsWith("OggS");
+    if (ext === ".flac")
+        return ascii.startsWith("fLaC");
+    if (ext === ".m4a")
+        return ascii.slice(4, 8) === "ftyp";
+    return false;
+}
 function handleMusicApi(pathname, req, res, parsed, ctx) {
     if (!pathname.startsWith("/api/music"))
         return false;
+    if (pathname === "/api/music/download-jobs" && req.method === "GET") {
+        (0, utils_1.sendJson)(res, { success: true, jobs: download_jobs_1.musicDownloadJobs.list() });
+        return true;
+    }
+    if (pathname === "/api/music/download-jobs" && req.method === "DELETE") {
+        (0, utils_1.sendJson)(res, { success: true, jobs: download_jobs_1.musicDownloadJobs.clearFinished() });
+        return true;
+    }
+    if (pathname === "/api/music/library-state" && req.method === "GET") {
+        (0, utils_1.sendJson)(res, { success: true, state: library_state_1.musicLibraryState.get() });
+        return true;
+    }
+    if (pathname === "/api/music/library-state/favorite" && req.method === "POST") {
+        readMusicJsonBody(req).then(body => {
+            try {
+                (0, utils_1.sendJson)(res, { success: true, state: library_state_1.musicLibraryState.toggleFavorite(body.filename, body.favorite) });
+            }
+            catch (error) {
+                (0, utils_1.sendJson)(res, { success: false, error: error?.message || "更新收藏失败" }, 400);
+            }
+        }).catch((error) => (0, utils_1.sendJson)(res, { success: false, error: error?.message }, 400));
+        return true;
+    }
+    if (pathname === "/api/music/library-state/queue" && req.method === "PUT") {
+        readMusicJsonBody(req).then(body => {
+            try {
+                (0, utils_1.sendJson)(res, { success: true, state: library_state_1.musicLibraryState.setQueue(body.tracks) });
+            }
+            catch (error) {
+                (0, utils_1.sendJson)(res, { success: false, error: error?.message || "更新播放队列失败" }, 400);
+            }
+        }).catch((error) => (0, utils_1.sendJson)(res, { success: false, error: error?.message }, 400));
+        return true;
+    }
+    if (pathname === "/api/music/library-state/playlists" && req.method === "POST") {
+        readMusicJsonBody(req).then(body => {
+            try {
+                (0, utils_1.sendJson)(res, { success: true, state: library_state_1.musicLibraryState.createPlaylist(body.name) });
+            }
+            catch (error) {
+                (0, utils_1.sendJson)(res, { success: false, error: error?.message || "创建歌单失败" }, 400);
+            }
+        }).catch((error) => (0, utils_1.sendJson)(res, { success: false, error: error?.message }, 400));
+        return true;
+    }
+    const playlistMatch = pathname.match(/^\/api\/music\/library-state\/playlists\/([^/]+)$/);
+    if (playlistMatch && ["PUT", "DELETE"].includes(req.method)) {
+        const id = decodeURIComponent(playlistMatch[1]);
+        if (req.method === "DELETE") {
+            try {
+                (0, utils_1.sendJson)(res, { success: true, state: library_state_1.musicLibraryState.deletePlaylist(id) });
+            }
+            catch (error) {
+                (0, utils_1.sendJson)(res, { success: false, error: error?.message || "删除歌单失败" }, 400);
+            }
+        }
+        else {
+            readMusicJsonBody(req).then(body => {
+                try {
+                    (0, utils_1.sendJson)(res, { success: true, state: library_state_1.musicLibraryState.updatePlaylist(id, body) });
+                }
+                catch (error) {
+                    (0, utils_1.sendJson)(res, { success: false, error: error?.message || "更新歌单失败" }, 400);
+                }
+            }).catch((error) => (0, utils_1.sendJson)(res, { success: false, error: error?.message }, 400));
+        }
+        return true;
+    }
+    const downloadJobMatch = pathname.match(/^\/api\/music\/download-jobs\/([^/]+)(?:\/(cancel|retry))?$/);
+    if (downloadJobMatch && req.method === "GET" && !downloadJobMatch[2]) {
+        const job = download_jobs_1.musicDownloadJobs.get(decodeURIComponent(downloadJobMatch[1]));
+        (0, utils_1.sendJson)(res, job ? { success: true, job } : { success: false, error: "下载任务不存在" }, job ? 200 : 404);
+        return true;
+    }
+    if (downloadJobMatch && req.method === "DELETE" && !downloadJobMatch[2]) {
+        try {
+            (0, utils_1.sendJson)(res, { success: true, jobs: download_jobs_1.musicDownloadJobs.removeFinished(decodeURIComponent(downloadJobMatch[1])) });
+        }
+        catch (error) {
+            (0, utils_1.sendJson)(res, { success: false, error: error?.message || "清理下载任务失败" }, 400);
+        }
+        return true;
+    }
+    if (downloadJobMatch && req.method === "POST" && downloadJobMatch[2]) {
+        try {
+            const id = decodeURIComponent(downloadJobMatch[1]);
+            const job = downloadJobMatch[2] === "cancel" ? download_jobs_1.musicDownloadJobs.cancel(id) : download_jobs_1.musicDownloadJobs.retry(id);
+            (0, utils_1.sendJson)(res, { success: true, job });
+        }
+        catch (error) {
+            (0, utils_1.sendJson)(res, { success: false, error: error?.message || "更新下载任务失败" }, 400);
+        }
+        return true;
+    }
+    if ((pathname === "/api/music/download-jobs" || pathname === "/api/music/download" || pathname === "/api/music/convert" || pathname === "/api/music/convert-netease") && req.method === "POST") {
+        readMusicJsonBody(req).then(body => {
+            try {
+                const source = pathname === "/api/music/convert-netease" || body.source === "netease" || body.songId ? "netease" : "bilibili";
+                const job = download_jobs_1.musicDownloadJobs.create(source, String(body.downloadToken || ""));
+                (0, utils_1.sendJson)(res, { success: true, job, jobId: job.id }, 202);
+            }
+            catch (error) {
+                (0, utils_1.sendJson)(res, { success: false, error: error?.message || "创建下载任务失败" }, 400);
+            }
+        }).catch((error) => (0, utils_1.sendJson)(res, { success: false, error: error?.message || "读取请求失败" }, 400));
+        return true;
+    }
     if (pathname === "/api/music/remote-command" && req.method === "POST") {
         let body = "";
         req.on("data", (chunk) => body += chunk);
@@ -144,7 +300,7 @@ function handleMusicApi(pathname, req, res, parsed, ctx) {
     }
     if (pathname === "/api/music/stream" && req.method === "GET") {
         const filename = parsed.query.file;
-        if (!filename || filename.includes(".."))
+        if (!isSafeMusicFilename(filename))
             return (0, utils_1.sendJson)(res, { error: "无效文件名" }, 400);
         const filePath = path.join(library_1.MUSIC_DIR, filename);
         if (!fs.existsSync(filePath))
@@ -157,9 +313,33 @@ function handleMusicApi(pathname, req, res, parsed, ctx) {
         };
         const range = req.headers.range;
         if (range) {
-            const parts = range.replace(/bytes=/, "").split("-");
-            const start = parseInt(parts[0], 10);
-            const end = parts[1] ? parseInt(parts[1], 10) : stat.size - 1;
+            const match = String(range).match(/^bytes=(\d*)-(\d*)$/);
+            let start = 0;
+            let end = stat.size - 1;
+            if (!match || (!match[1] && !match[2])) {
+                res.writeHead(416, { "Content-Range": `bytes */${stat.size}`, "Accept-Ranges": "bytes", "Access-Control-Allow-Origin": "*" });
+                res.end();
+                return true;
+            }
+            if (!match[1]) {
+                const suffixLength = Number(match[2]);
+                if (!Number.isSafeInteger(suffixLength) || suffixLength <= 0) {
+                    res.writeHead(416, { "Content-Range": `bytes */${stat.size}`, "Accept-Ranges": "bytes", "Access-Control-Allow-Origin": "*" });
+                    res.end();
+                    return true;
+                }
+                start = Math.max(0, stat.size - suffixLength);
+            }
+            else {
+                start = Number(match[1]);
+                end = match[2] ? Number(match[2]) : stat.size - 1;
+            }
+            if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end < start || start >= stat.size) {
+                res.writeHead(416, { "Content-Range": `bytes */${stat.size}`, "Accept-Ranges": "bytes", "Access-Control-Allow-Origin": "*" });
+                res.end();
+                return true;
+            }
+            end = Math.min(end, stat.size - 1);
             res.writeHead(206, {
                 "Content-Range": `bytes ${start}-${end}/${stat.size}`,
                 "Accept-Ranges": "bytes",
@@ -186,7 +366,7 @@ function handleMusicApi(pathname, req, res, parsed, ctx) {
             return true;
         }
         (0, netease_1.neteaseSearch)(query).then(results => {
-            (0, utils_1.sendJson)(res, { success: true, results });
+            (0, utils_1.sendJson)(res, { success: true, results: (0, search_results_1.signSearchResults)("netease", String(query), results) });
         }).catch((e) => {
             (0, utils_1.sendJson)(res, { success: false, error: e.message });
         });
@@ -199,54 +379,9 @@ function handleMusicApi(pathname, req, res, parsed, ctx) {
             return true;
         }
         (0, bilibili_1.biliSearch)(query).then(results => {
-            (0, utils_1.sendJson)(res, { success: true, results });
+            (0, utils_1.sendJson)(res, { success: true, results: (0, search_results_1.signSearchResults)("bilibili", String(query), results) });
         }).catch((e) => {
             (0, utils_1.sendJson)(res, { success: false, error: e.message });
-        });
-        return true;
-    }
-    if (pathname === "/api/music/download" && req.method === "POST") {
-        let body = "";
-        req.on("data", (chunk) => body += chunk);
-        req.on("end", async () => {
-            try {
-                const { bvid, title, author } = JSON.parse(body);
-                if (!bvid)
-                    return (0, utils_1.sendJson)(res, { error: "缺少 bvid" }, 400);
-                const safeName = `${author || "unknown"} - ${title || bvid} [${bvid}]`.replace(/[<>:"/\\|?*]/g, "_").substring(0, 100);
-                const outputFile = path.join(library_1.MUSIC_DIR, `${safeName}.mp3`);
-                if (fs.existsSync(outputFile))
-                    return (0, utils_1.sendJson)(res, { success: true, message: "文件已存在" });
-                let audioUrl;
-                try {
-                    audioUrl = await (0, bilibili_1.getBiliAudioUrl)(bvid);
-                }
-                catch (e) {
-                    return (0, utils_1.sendJson)(res, { success: false, error: `解析失败: ${e.message}` });
-                }
-                const headers = `User-Agent: ${bilibili_1.BILI_UA}\r\nReferer: https://www.bilibili.com/\r\n`;
-                const child = (0, child_process_1.spawn)("ffmpeg", [
-                    "-headers", headers,
-                    "-i", audioUrl,
-                    "-y",
-                    "-q:a", "0",
-                    outputFile
-                ], { stdio: "ignore", windowsHide: true });
-                child.on("close", (code) => {
-                    if (code === 0 && fs.existsSync(outputFile)) {
-                        (0, utils_1.sendJson)(res, { success: true, filename: path.basename(outputFile) });
-                    }
-                    else {
-                        (0, utils_1.sendJson)(res, { success: false, error: "下载转码失败，请确保安装了 ffmpeg" });
-                    }
-                });
-                child.on("error", () => {
-                    (0, utils_1.sendJson)(res, { success: false, error: "ffmpeg 未安装或未加入环境变量" });
-                });
-            }
-            catch (e) {
-                (0, utils_1.sendJson)(res, { error: e.message }, 400);
-            }
         });
         return true;
     }
@@ -298,7 +433,7 @@ function handleMusicApi(pathname, req, res, parsed, ctx) {
 2. search_local(keyword) - 搜索本地音乐库
 3. search_netease(keyword) - 搜索网易云音乐
 
-当前模式: \${chatMode === "local" ? "本地模式（搜索本地曲库）" : chatMode === "netease" ? "网易云模式（搜索网易云音乐）" : "B站模式（搜索B站并转码）"}
+当前模式: ${chatMode === "local" ? "本地模式（搜索本地曲库）" : chatMode === "netease" ? "网易云模式（搜索网易云音乐）" : "B站模式（搜索B站并转码）"}
 
 ## 推荐输出格式（严格遵守）
 当你向用户推荐歌曲时，先用自然语言简要介绍，然后 **必须** 将曲目放在独立的 \`\`\`tracks 代码块中。格式如下：
@@ -329,14 +464,7 @@ function handleMusicApi(pathname, req, res, parsed, ctx) {
 2. 数据必须是合法 JSON 数组，必须从工具返回的结果中提取字段（不要编造或修改 uri、bvid、filename、songId 等核心标识）。
 3. 如果用户只是闲聊、提问，不需要输出 tracks 代码块。
 4. 回复使用中文，简洁友好。`;
-                const messages = [];
-                for (const msg of (history || []).slice(-10)) {
-                    if (msg.role === "operator")
-                        messages.push({ role: "user", content: msg.content });
-                    else if (msg.role === "agent")
-                        messages.push({ role: "assistant", content: msg.content });
-                }
-                messages.push({ role: "user", content: message });
+                const messages = (0, agent_1.normalizeMusicAgentMessages)(history || [], message, 10);
                 res.writeHead(200, {
                     "Content-Type": "text/event-stream",
                     "Cache-Control": "no-cache",
@@ -358,12 +486,15 @@ function handleMusicApi(pathname, req, res, parsed, ctx) {
                 if (intent.type === "search" || intent.type === "play") {
                     if (chatMode === "local") {
                         const localResults = (0, library_1.searchLocalMusic)(intent.keyword);
+                        (0, agent_1.writeSse)(res, { type: "music_results", mode: "local", results: localResults.slice(0, 8).map(track => ({ type: "local", track })) });
                         toolContext = `\n\n[工具结果] 本地搜索 "${intent.keyword}" 找到 ${localResults.length} 首：\n${localResults.slice(0, 5).map((t, i) => `${i + 1}. ${t.title} - ${t.artist} (文件: ${t.filename})`).join("\n")}`;
                         messages[messages.length - 1].content += toolContext;
                         await (0, agent_1.callClaudeAgent)(cfg, systemPrompt, messages, res, chatMode);
                     }
                     else if (chatMode === "netease") {
-                        (0, netease_1.neteaseSearch)(intent.keyword).then((neteaseResults) => {
+                        (0, netease_1.neteaseSearch)(intent.keyword).then((rawResults) => {
+                            const neteaseResults = (0, search_results_1.signSearchResults)("netease", intent.keyword, rawResults);
+                            (0, agent_1.writeSse)(res, { type: "music_results", mode: "netease", results: neteaseResults });
                             toolContext = `\n\n[工具结果] 网易云搜索 "${intent.keyword}" 找到 ${neteaseResults.length} 个结果：\n${neteaseResults.slice(0, 8).map((r, i) => `${i + 1}. ${r.title} - ${(r.artist && r.artist !== "undefined" && r.artist !== "null" ? r.artist : "") || "未知歌手"} (${r.duration}) [ID: ${r.songId}]`).join("\n")}`;
                             messages[messages.length - 1].content += toolContext;
                             (0, agent_1.callClaudeAgent)(cfg, systemPrompt, messages, res, chatMode);
@@ -374,7 +505,9 @@ function handleMusicApi(pathname, req, res, parsed, ctx) {
                         return;
                     }
                     else {
-                        (0, bilibili_1.biliSearch)(intent.keyword).then((biliResults) => {
+                        (0, bilibili_1.biliSearch)(intent.keyword).then((rawResults) => {
+                            const biliResults = (0, search_results_1.signSearchResults)("bilibili", intent.keyword, rawResults);
+                            (0, agent_1.writeSse)(res, { type: "music_results", mode: "bilibili", results: biliResults });
                             toolContext = `\n\n[工具结果] B站搜索 "${intent.keyword}" 找到 ${biliResults.length} 个结果：\n${biliResults.slice(0, 5).map((r, i) => `${i + 1}. ${r.title} - ${r.author} (${r.duration}) [BV: ${r.bvid}]`).join("\n")}`;
                             messages[messages.length - 1].content += toolContext;
                             (0, agent_1.callClaudeAgent)(cfg, systemPrompt, messages, res, chatMode);
@@ -405,23 +538,16 @@ function handleMusicApi(pathname, req, res, parsed, ctx) {
                 if (!title) {
                     return (0, utils_1.sendJson)(res, { success: false, error: "Missing title" }, 400);
                 }
-                const cleanTitle = String(title).toLowerCase();
                 const cfg = (0, group_orchestrator_1.loadOrchestratorConfig)();
                 if (cfg.enabled && cfg.apiKey && cfg.model) {
                     try {
-                        const prompt = `你是一个音乐感悟助手。请根据歌曲"${title}"（歌手：${artist || "未知"}），用一句话写出听这首歌时的心情感悟，要有诗意，20字以内，不要引号。`;
-                        const llmRes = await fetch(cfg.apiUrl + "/chat/completions", {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json", Authorization: `Bearer ${cfg.apiKey}` },
-                            body: JSON.stringify({ model: cfg.model, messages: [{ role: "user", content: prompt }], max_tokens: 60, temperature: 0.9 }),
-                            signal: AbortSignal.timeout(8000)
-                        });
-                        const llmData = await llmRes.json();
-                        const quote = llmData?.choices?.[0]?.message?.content?.trim();
+                        const quote = await (0, llm_client_1.generateSongQuote)(cfg, String(title), String(artist || "未知"));
                         if (quote)
                             return (0, utils_1.sendJson)(res, { success: true, quote });
                     }
-                    catch (_) { }
+                    catch (error) {
+                        console.warn("[MusicQuote] model fallback:", error?.message);
+                    }
                 }
                 // Fallback
                 const GENERAL_QUOTES = [
@@ -611,118 +737,13 @@ function handleMusicApi(pathname, req, res, parsed, ctx) {
                 const cfg = (0, group_orchestrator_1.loadOrchestratorConfig)();
                 if (cfg.enabled && cfg.apiKey && cfg.model) {
                     try {
-                        const prompt = `你是一个音乐情绪分析助手。根据歌曲名"${title}"（歌手：${artist || "未知"}），从以下标签选一个最符合的情绪，只输出标签本身：${emotionLabels.join("、")}`;
-                        const llmRes = await fetch(cfg.apiUrl + "/chat/completions", {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json", Authorization: `Bearer ${cfg.apiKey}` },
-                            body: JSON.stringify({ model: cfg.model, messages: [{ role: "user", content: prompt }], max_tokens: 20, temperature: 0.7 }),
-                            signal: AbortSignal.timeout(8000)
-                        });
-                        const llmData = await llmRes.json();
-                        const raw = llmData?.choices?.[0]?.message?.content?.trim() || "";
-                        const matched = emotionLabels.find(e => raw.includes(e));
+                        const matched = await (0, llm_client_1.classifySongEmotion)(cfg, String(title), String(artist || "未知"), emotionLabels);
                         if (matched)
                             return (0, utils_1.sendJson)(res, { success: true, emotion: matched });
                     }
-                    catch (_) { }
-                }
-                const t = String(title).toLowerCase();
-                let fallback = "惬意";
-                if (t.includes("晚安") || t.includes("夜"))
-                    fallback = "舒缓";
-                else if (t.includes("思念") || t.includes("想你"))
-                    fallback = "思念";
-                else if (t.includes("再见") || t.includes("离别"))
-                    fallback = "怀念";
-                else if (t.includes("治愈") || t.includes("温暖"))
-                    fallback = "治愈";
-                else if (t.includes("快乐") || t.includes("开心"))
-                    fallback = "动感";
-                else
-                    fallback = emotionLabels[Math.floor(Math.random() * emotionLabels.length)];
-                (0, utils_1.sendJson)(res, { success: true, emotion: fallback });
-            }
-            catch (e) {
-                (0, utils_1.sendJson)(res, { success: false, error: e.message }, 500);
-            }
-        });
-        return true;
-    }
-    // === AI 歌曲金句接口 ===
-    if (pathname === "/api/music/song-quote" && req.method === "POST") {
-        let body = "";
-        req.on("data", (chunk) => body += chunk);
-        req.on("end", async () => {
-            try {
-                const { title, artist } = JSON.parse(body);
-                if (!title) {
-                    return (0, utils_1.sendJson)(res, { success: false, error: "Missing title" }, 400);
-                }
-                const cfg = (0, group_orchestrator_1.loadOrchestratorConfig)();
-                if (cfg.enabled && cfg.apiKey && cfg.model) {
-                    try {
-                        const prompt = `你是一个音乐感悟助手。根据歌曲"${title}"（歌手：${artist || "未知"}），用一句话写出听这首歌的心情感悟，要有诗意，20字以内，不要引号。`;
-                        const llmRes = await fetch(cfg.apiUrl + "/chat/completions", {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json", Authorization: `Bearer ${cfg.apiKey}` },
-                            body: JSON.stringify({ model: cfg.model, messages: [{ role: "user", content: prompt }], max_tokens: 60, temperature: 0.9 }),
-                            signal: AbortSignal.timeout(8000)
-                        });
-                        const llmData = await llmRes.json();
-                        const quote = llmData?.choices?.[0]?.message?.content?.trim();
-                        if (quote)
-                            return (0, utils_1.sendJson)(res, { success: true, quote });
+                    catch (error) {
+                        console.warn("[MusicEmotion] model fallback:", error?.message);
                     }
-                    catch (_) { }
-                }
-                const QUOTES = [
-                    "音符流淌的瞬间，世界突然变得温柔了起来。",
-                    "愿这首歌的旋律，能轻轻抚平你心底所有的褶皱。",
-                    "有些话说不出，但音乐已帮你唱完了所有的思绪。",
-                    "在旋律的缝隙里，藏着对生活最真挚的热爱与期待。",
-                    "音乐是心灵的避难所，今晚就在这旋律中安心放空吧。",
-                    "每一个跃动的音符，都是时间写给你的无声情书。",
-                    "任凭窗外风雨飘摇，耳机里永远有属于你的晴空。",
-                    "生活虽有颠簸，但音乐总会在合适的角落给你拥抱。",
-                    "沉浸在旋律里，让那些疲惫在温柔的歌声中渐渐消散。",
-                    "每一首歌都是一个漂流瓶，恰好在这个瞬间被你拾起。"
-                ];
-                (0, utils_1.sendJson)(res, { success: true, quote: QUOTES[Math.floor(Math.random() * QUOTES.length)] });
-            }
-            catch (e) {
-                (0, utils_1.sendJson)(res, { success: false, error: e.message }, 500);
-            }
-        });
-        return true;
-    }
-    // === 歌曲情绪分析接口 ===
-    if (pathname === "/api/music/song-emotion" && req.method === "POST") {
-        let body = "";
-        req.on("data", (chunk) => body += chunk);
-        req.on("end", async () => {
-            try {
-                const { title, artist } = JSON.parse(body);
-                if (!title) {
-                    return (0, utils_1.sendJson)(res, { success: false, error: "Missing title" }, 400);
-                }
-                const emotionLabels = ["惬意", "治愈", "温柔", "怀念", "放空", "舒缓", "思念", "平静", "动感", "感动"];
-                const cfg = (0, group_orchestrator_1.loadOrchestratorConfig)();
-                if (cfg.enabled && cfg.apiKey && cfg.model) {
-                    try {
-                        const prompt = `你是音乐情绪分析助手。根据歌曲名"${title}"（歌手：${artist || "未知"}），从以下标签选一个最符合的情绪，只输出标签本身，不要解释：${emotionLabels.join("、")}`;
-                        const llmRes = await fetch(cfg.apiUrl + "/chat/completions", {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json", Authorization: `Bearer ${cfg.apiKey}` },
-                            body: JSON.stringify({ model: cfg.model, messages: [{ role: "user", content: prompt }], max_tokens: 20, temperature: 0.7 }),
-                            signal: AbortSignal.timeout(8000)
-                        });
-                        const llmData = await llmRes.json();
-                        const raw = llmData?.choices?.[0]?.message?.content?.trim() || "";
-                        const matched = emotionLabels.find(e => raw.includes(e));
-                        if (matched)
-                            return (0, utils_1.sendJson)(res, { success: true, emotion: matched });
-                    }
-                    catch (_) { }
                 }
                 const t = String(title).toLowerCase();
                 let fallback = "惬意";
@@ -765,7 +786,8 @@ function handleMusicApi(pathname, req, res, parsed, ctx) {
                         (0, utils_1.sendJson)(res, { success: true, ...result });
                     }
                     else if (chatMode === "netease") {
-                        (0, netease_1.neteaseSearch)(intent.keyword).then((neteaseResults) => {
+                        (0, netease_1.neteaseSearch)(intent.keyword).then((rawResults) => {
+                            const neteaseResults = (0, search_results_1.signSearchResults)("netease", intent.keyword, rawResults);
                             result.neteaseResults = neteaseResults;
                             result.reply = neteaseResults.length > 0
                                 ? `在网易云找到 ${neteaseResults.length} 个相关结果：`
@@ -777,7 +799,8 @@ function handleMusicApi(pathname, req, res, parsed, ctx) {
                         });
                     }
                     else {
-                        (0, bilibili_1.biliSearch)(intent.keyword).then((biliResults) => {
+                        (0, bilibili_1.biliSearch)(intent.keyword).then((rawResults) => {
+                            const biliResults = (0, search_results_1.signSearchResults)("bilibili", intent.keyword, rawResults);
                             result.biliResults = biliResults;
                             result.reply = biliResults.length > 0
                                 ? `在B站找到 ${biliResults.length} 个相关结果：`
@@ -804,7 +827,8 @@ function handleMusicApi(pathname, req, res, parsed, ctx) {
                         (0, utils_1.sendJson)(res, { success: true, ...result });
                     }
                     else if (chatMode === "netease") {
-                        (0, netease_1.neteaseSearch)(intent.keyword).then((neteaseResults) => {
+                        (0, netease_1.neteaseSearch)(intent.keyword).then((rawResults) => {
+                            const neteaseResults = (0, search_results_1.signSearchResults)("netease", intent.keyword, rawResults, 5);
                             result.neteaseResults = neteaseResults.slice(0, 5);
                             result.reply = neteaseResults.length > 0
                                 ? `找到以下结果，点击下载播放：`
@@ -816,7 +840,8 @@ function handleMusicApi(pathname, req, res, parsed, ctx) {
                         });
                     }
                     else {
-                        (0, bilibili_1.biliSearch)(intent.keyword).then((biliResults) => {
+                        (0, bilibili_1.biliSearch)(intent.keyword).then((rawResults) => {
+                            const biliResults = (0, search_results_1.signSearchResults)("bilibili", intent.keyword, rawResults, 3);
                             result.biliResults = biliResults.slice(0, 3);
                             result.reply = biliResults.length > 0
                                 ? `找到以下结果，点击转码播放：`
@@ -1067,111 +1092,30 @@ function handleMusicApi(pathname, req, res, parsed, ctx) {
         })();
         return true;
     }
-    if (pathname === "/api/music/convert-netease" && req.method === "POST") {
-        let body = "";
-        req.on("data", (chunk) => body += chunk);
-        req.on("end", async () => {
-            try {
-                const { songId, title, artist } = JSON.parse(body);
-                if (!songId)
-                    return (0, utils_1.sendJson)(res, { error: "缺少 songId" }, 400);
-                const safeName = `${artist || "unknown"} - ${title || songId}`.replace(/[<>:"/\\|?*]/g, "_").substring(0, 100);
-                const outputFile = path.join(library_1.MUSIC_DIR, `${safeName}.mp3`);
-                if (fs.existsSync(outputFile))
-                    return (0, utils_1.sendJson)(res, { success: true, filename: path.basename(outputFile), message: "文件已存在" });
-                const audioUrl = `https://music.163.com/song/media/outer/url?id=${songId}.mp3`;
-                const child = (0, child_process_1.spawn)("ffmpeg", [
-                    "-headers", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36\r\nReferer: https://music.163.com/\r\n",
-                    "-i", audioUrl,
-                    "-y",
-                    "-q:a", "0",
-                    "-loglevel", "error",
-                    outputFile
-                ], { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
-                let stderr = "";
-                child.stderr?.on("data", (d) => { stderr += d.toString(); });
-                child.on("close", (code) => {
-                    if (code === 0 && fs.existsSync(outputFile)) {
-                        const stat = fs.statSync(outputFile);
-                        if (stat.size > 1024) {
-                            (0, utils_1.sendJson)(res, { success: true, filename: path.basename(outputFile) });
-                        }
-                        else {
-                            try {
-                                fs.unlinkSync(outputFile);
-                            }
-                            catch { }
-                            (0, utils_1.sendJson)(res, { success: false, error: "该歌曲可能需要VIP或已下架，无法获取音频" });
-                        }
-                    }
-                    else {
-                        (0, utils_1.sendJson)(res, { success: false, error: stderr.substring(0, 200) || "下载转码失败" });
-                    }
-                });
-                child.on("error", () => {
-                    (0, utils_1.sendJson)(res, { success: false, error: "ffmpeg 未安装或未加入环境变量" });
-                });
-            }
-            catch (e) {
-                (0, utils_1.sendJson)(res, { error: e.message }, 400);
-            }
-        });
-        return true;
-    }
-    if (pathname === "/api/music/convert" && req.method === "POST") {
-        let body = "";
-        req.on("data", (chunk) => body += chunk);
-        req.on("end", async () => {
-            try {
-                const { bvid, title, author } = JSON.parse(body);
-                if (!bvid)
-                    return (0, utils_1.sendJson)(res, { error: "缺少 bvid" }, 400);
-                const safeName = `${author || "unknown"} - ${title || bvid} [${bvid}]`.replace(/[<>:"/\\|?*]/g, "_").substring(0, 100);
-                const outputFile = path.join(library_1.MUSIC_DIR, `${safeName}.mp3`);
-                if (fs.existsSync(outputFile))
-                    return (0, utils_1.sendJson)(res, { success: true, filename: path.basename(outputFile), message: "文件已存在" });
-                let audioUrl;
-                try {
-                    audioUrl = await (0, bilibili_1.getBiliAudioUrl)(bvid);
-                }
-                catch (e) {
-                    return (0, utils_1.sendJson)(res, { success: false, error: `解析失败: ${e.message}` });
-                }
-                const headers = `User-Agent: ${bilibili_1.BILI_UA}\r\nReferer: https://www.bilibili.com/\r\n`;
-                const child = (0, child_process_1.spawn)("ffmpeg", [
-                    "-headers", headers,
-                    "-i", audioUrl,
-                    "-y",
-                    "-q:a", "0",
-                    outputFile
-                ], { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
-                let stderr = "";
-                child.stderr?.on("data", (d) => { stderr += d.toString(); });
-                child.on("close", (code) => {
-                    if (code === 0 && fs.existsSync(outputFile)) {
-                        (0, utils_1.sendJson)(res, { success: true, filename: path.basename(outputFile) });
-                    }
-                    else {
-                        (0, utils_1.sendJson)(res, { success: false, error: stderr.substring(0, 200) || "下载转码失败" });
-                    }
-                });
-                child.on("error", () => {
-                    (0, utils_1.sendJson)(res, { success: false, error: "ffmpeg 未安装或未加入环境变量" });
-                });
-            }
-            catch (e) {
-                (0, utils_1.sendJson)(res, { error: e.message }, 400);
-            }
-        });
-        return true;
-    }
     if (pathname === "/api/music/upload" && req.method === "POST") {
         const ct = req.headers["content-type"] || "";
         if (!ct.includes("multipart/form-data"))
             return (0, utils_1.sendJson)(res, { error: "需要 multipart/form-data" }, 400);
+        const declaredLength = Number(req.headers["content-length"] || 0);
+        if (declaredLength > MUSIC_UPLOAD_MAX_BYTES)
+            return (0, utils_1.sendJson)(res, { error: "上传文件不能超过 100 MB" }, 413);
         const chunks = [];
-        req.on("data", (chunk) => chunks.push(chunk));
+        let received = 0;
+        let rejected = false;
+        req.on("data", (chunk) => {
+            if (rejected)
+                return;
+            received += chunk.length;
+            if (received > MUSIC_UPLOAD_MAX_BYTES) {
+                rejected = true;
+                (0, utils_1.sendJson)(res, { error: "上传文件不能超过 100 MB" }, 413);
+                return;
+            }
+            chunks.push(Buffer.from(chunk));
+        });
         req.on("end", () => {
+            if (rejected)
+                return;
             try {
                 const buffer = Buffer.concat(chunks);
                 const boundaryMatch = ct.match(/boundary=(.+)/);
@@ -1197,15 +1141,17 @@ function handleMusicApi(pathname, req, res, parsed, ctx) {
                     const body = part.slice(headerEnd + 4);
                     const filenameMatch = headerStr.match(/filename="([^"]+)"/);
                     if (filenameMatch && filenameMatch[1]) {
-                        const filename = filenameMatch[1].replace(/[<>:"/\\|?*]/g, "_");
+                        const filename = path.basename(filenameMatch[1]).replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").slice(0, 180);
                         const ext = path.extname(filename).toLowerCase();
-                        if ([".mp3", ".wav", ".ogg", ".m4a", ".flac", ".aac"].includes(ext)) {
+                        if (isSafeMusicFilename(filename) && isSupportedAudioBuffer(body, ext)) {
                             const filePath = path.join(library_1.MUSIC_DIR, filename);
                             fs.writeFileSync(filePath, body);
                             uploaded.push(filename);
                         }
                     }
                 }
+                if (!uploaded.length)
+                    return (0, utils_1.sendJson)(res, { success: false, error: "没有检测到有效音频文件，请检查格式和文件内容" }, 400);
                 (0, utils_1.sendJson)(res, { success: true, uploaded });
             }
             catch (e) {
@@ -1220,12 +1166,13 @@ function handleMusicApi(pathname, req, res, parsed, ctx) {
         req.on("end", () => {
             try {
                 const { filename } = JSON.parse(body);
-                if (!filename || filename.includes(".."))
+                if (!isSafeMusicFilename(filename))
                     return (0, utils_1.sendJson)(res, { error: "无效文件名" }, 400);
                 const filePath = path.join(library_1.MUSIC_DIR, filename);
                 if (!fs.existsSync(filePath))
                     return (0, utils_1.sendJson)(res, { error: "文件不存在" }, 404);
                 fs.unlinkSync(filePath);
+                library_state_1.musicLibraryState.removeTrack(filename);
                 (0, utils_1.sendJson)(res, { success: true });
             }
             catch (e) {

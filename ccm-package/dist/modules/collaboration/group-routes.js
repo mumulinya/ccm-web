@@ -47,7 +47,143 @@ const logs_1 = require("./logs");
 const group_orchestrator_1 = require("./group-orchestrator");
 const tool_authorization_1 = require("../../tools/tool-authorization");
 const delivery_report_1 = require("../../agents/delivery-report");
+const group_memory_compaction_1 = require("./group-memory-compaction");
+const model_capability_cache_1 = require("./model-capability-cache");
+const group_session_maintenance_1 = require("./group-session-maintenance");
 const GROUP_MAIN_AGENT_PROGRESS_REFRESH_STALE_MS = 15 * 60 * 1000;
+const GROUP_MESSAGE_RUNTIME_MAX_BYTES = 4 * 1024 * 1024;
+const GROUP_MESSAGE_RUNTIME_OMIT_KEYS = new Set([
+    "task_card",
+    "displayStream",
+    "planAlignment",
+    "agentCoordination",
+    "agentProgressSummary",
+    "changeSummary",
+    "receiptReworkSummary",
+    "userHandoff",
+    "runtimeKernel",
+    "recoverySummary",
+    "continuationStatus",
+    "workItemClaimSummary",
+    "workItemUnlockSummary",
+    "completionReadinessSummary",
+    "progressCheckpoints",
+    "deliveryReport",
+    "postReviewSpotCheckSummary",
+    "completionCard",
+    "pickupSummary",
+    "technical",
+    "runtime_kernel",
+    "raw",
+    "rawEvents",
+    "raw_events",
+    "payload",
+    "metadata",
+    "previousLedger",
+    "previous_ledger",
+    "coordinatorOutputPreview",
+    "coordinator_output_preview",
+    "testAgentHandoff",
+    "test_agent_handoff",
+    "testAgentReport",
+    "test_agent_report",
+    "workerContextPacket",
+    "worker_context_packet",
+    "workerHandoff",
+    "worker_handoff",
+    "runtimeToolSnapshot",
+    "runtime_tool_snapshot",
+    "receipts",
+    "receipt",
+    "executions",
+]);
+function compactGroupMessageRuntimeValue(value, depth = 0) {
+    if (value === null || value === undefined)
+        return value;
+    if (typeof value === "string")
+        return value.length > 4000 ? `${value.slice(0, 4000)}...` : value;
+    if (typeof value !== "object")
+        return value;
+    if (depth >= 8)
+        return Array.isArray(value) ? [] : {};
+    if (Array.isArray(value))
+        return value.slice(0, 40).map(item => compactGroupMessageRuntimeValue(item, depth + 1));
+    const result = {};
+    for (const [key, item] of Object.entries(value)) {
+        if (GROUP_MESSAGE_RUNTIME_OMIT_KEYS.has(key))
+            continue;
+        if (key === "summary" && depth >= 2 && item && typeof item === "object")
+            continue;
+        result[key] = compactGroupMessageRuntimeValue(item, depth + 1);
+    }
+    return result;
+}
+function compactGroupMessageTaskRuntime(runtime) {
+    if (!runtime || typeof runtime !== "object")
+        return runtime;
+    const sourceCard = runtime.taskCard || runtime.task_card || null;
+    const card = compactGroupMessageRuntimeValue(sourceCard);
+    if (card && sourceCard?.technical) {
+        const technical = sourceCard.technical;
+        card.technical = {
+            trace_id: technical.trace_id || "",
+            execution_ids: Array.isArray(technical.execution_ids) ? technical.execution_ids.slice(0, 40) : [],
+            session_ids: Array.isArray(technical.session_ids) ? technical.session_ids.slice(0, 40) : [],
+            work_item_ids: Array.isArray(technical.work_item_ids) ? technical.work_item_ids.slice(0, 40) : [],
+            entity_chain_endpoint: technical.entity_chain_endpoint || "",
+            details_compacted: true,
+        };
+    }
+    const compact = {
+        taskId: runtime.taskId || runtime.task_id || "",
+        status: runtime.status || "",
+        statusText: compactGroupStatusText(runtime.statusText || runtime.status_text || "", 500),
+        updatedAt: runtime.updatedAt || runtime.updated_at || "",
+        lifecycle: compactGroupMessageRuntimeValue(runtime.lifecycle),
+        reasoning: compactGroupMessageRuntimeValue(runtime.reasoning),
+        counts: compactGroupMessageRuntimeValue(runtime.counts),
+        agents: compactGroupMessageRuntimeValue(runtime.agents),
+        sessions: compactGroupMessageRuntimeValue(runtime.sessions),
+        taskCard: card,
+    };
+    const bytes = Buffer.byteLength(JSON.stringify(compact));
+    if (bytes <= GROUP_MESSAGE_RUNTIME_MAX_BYTES)
+        return compact;
+    return {
+        ...compact,
+        taskCard: card ? {
+            version: card.version,
+            visible: card.visible,
+            task_id: card.task_id,
+            title: card.title,
+            goal: card.goal,
+            phase: card.phase,
+            phase_label: card.phase_label,
+            status: card.status,
+            progress: card.progress,
+            active_agents: card.active_agents,
+            agents: card.agents,
+            live_todo_plan: card.live_todo_plan,
+            work_items: card.work_items,
+            work_item_summary: card.work_item_summary,
+            completion_readiness_summary: card.completion_readiness_summary,
+            progress_checkpoints: card.progress_checkpoints,
+            acceptance_review: card.acceptance_review,
+            change_summary: card.change_summary,
+            user_handoff: card.user_handoff,
+            completed: card.completed,
+            blockers: card.blockers,
+            next_action: card.next_action,
+            post_review_spot_check_summary: card.post_review_spot_check_summary,
+            completion_card: card.completion_card,
+            pickup_summary: card.pickup_summary,
+            delivery: card.delivery,
+            actions: card.actions,
+            technical: card.technical,
+            updated_at: card.updated_at,
+        } : null,
+    };
+}
 function compactGroupStatusText(value, max = 180) {
     const text = String(value || "").replace(/\s+/g, " ").trim();
     return text.length > max ? `${text.slice(0, max)}...` : text;
@@ -2091,13 +2227,13 @@ function handleBasicGroupRoutes(req, res, parsed, ctx, deps) {
         if (!group)
             return (0, utils_1.sendJson)(res, { error: "群聊不存在" }, 404);
         const toolAuth = (0, tool_authorization_1.buildToolAuthorizationPayload)(group.tools || {});
-        (0, utils_1.sendJson)(res, { tools: toolAuth.tools, tool_audit: toolAuth.tool_audit, authorization_readiness: toolAuth.authorization_readiness });
+        (0, utils_1.sendJson)(res, { tools: toolAuth.tools, tool_audit: toolAuth.tool_audit, authorization_readiness: toolAuth.authorization_readiness, connection_preflight: toolAuth.connection_preflight });
         return true;
     }
     if (pathname === "/api/groups/tools" && req.method === "POST") {
         let body = "";
         req.on("data", (chunk) => body += chunk);
-        req.on("end", () => {
+        req.on("end", async () => {
             try {
                 const { group_id, tools } = JSON.parse(body);
                 const groups = (0, storage_1.loadGroups)();
@@ -2107,7 +2243,7 @@ function handleBasicGroupRoutes(req, res, parsed, ctx, deps) {
                 const previousTools = (0, tool_authorization_1.normalizeToolAuthorization)(group.tools || {});
                 group.tools = (0, tool_authorization_1.normalizeToolAuthorization)(tools);
                 (0, storage_1.saveGroups)(groups);
-                const toolAuth = (0, tool_authorization_1.buildToolAuthorizationPayload)(group.tools);
+                const toolAuth = await (0, tool_authorization_1.buildFreshToolAuthorizationPayload)(group.tools);
                 const authorizationChange = (0, tool_authorization_1.recordToolAuthorizationChange)({
                     scope: "group",
                     scopeId: group_id,
@@ -2118,7 +2254,7 @@ function handleBasicGroupRoutes(req, res, parsed, ctx, deps) {
                     toolAudit: toolAuth.tool_audit,
                     authorizationReadiness: toolAuth.authorization_readiness,
                 });
-                (0, utils_1.sendJson)(res, { success: true, tools: toolAuth.tools, tool_audit: toolAuth.tool_audit, authorization_readiness: toolAuth.authorization_readiness, authorization_change: authorizationChange });
+                (0, utils_1.sendJson)(res, { success: true, tools: toolAuth.tools, tool_audit: toolAuth.tool_audit, authorization_readiness: toolAuth.authorization_readiness, connection_preflight: toolAuth.connection_preflight, authorization_change: authorizationChange });
             }
             catch (e) {
                 (0, utils_1.sendJson)(res, { error: e.message }, 400);
@@ -2248,24 +2384,205 @@ function handleBasicGroupRoutes(req, res, parsed, ctx, deps) {
         });
         return true;
     }
+    if (pathname === "/api/groups/memory/capacity" && req.method === "GET") {
+        const config = (0, group_orchestrator_1.loadOrchestratorConfig)();
+        const capacity = (0, group_memory_compaction_1.resolveGroupModelContextCapacity)(config);
+        (0, utils_1.sendJson)(res, {
+            success: true,
+            schema: "ccm-group-memory-capacity-status-v1",
+            capacity,
+            capabilityCache: (0, model_capability_cache_1.summarizeModelCapabilityCache)((0, model_capability_cache_1.readModelCapabilityCache)()),
+            configuredAutoCompactThreshold: Number(config.modelAutoCompactTokenLimit || 0),
+            effectiveAutoCompactThreshold: (0, group_memory_compaction_1.getGroupAutoCompactThreshold)(config),
+            preset: String(config.memoryContextPreset || "default"),
+            model: String(config.model || ""),
+            generatedAt: new Date().toISOString(),
+        });
+        return true;
+    }
+    if (pathname === "/api/groups/memory/capabilities" && req.method === "GET") {
+        const cache = (0, model_capability_cache_1.readModelCapabilityCache)();
+        (0, utils_1.sendJson)(res, { success: true, cache: (0, model_capability_cache_1.summarizeModelCapabilityCache)(cache), entries: cache.entries, refreshPlan: (0, model_capability_cache_1.buildModelCapabilityRefreshPlan)(), refreshStatus: (0, model_capability_cache_1.readModelCapabilityRefreshStatus)(), refreshOutcomeLedger: (0, model_capability_cache_1.readModelCapabilityRefreshOutcomeLedger)(), invalidRefreshOutcomes: (0, model_capability_cache_1.readInvalidPendingModelCapabilityRefreshOutcomes)(), downgradeAlerts: (0, model_capability_cache_1.readModelCapabilityDowngradeAlerts)(20), generatedAt: new Date().toISOString() });
+        return true;
+    }
+    if (pathname === "/api/groups/memory/capabilities/invalid-outcomes" && req.method === "GET") {
+        (0, utils_1.sendJson)(res, { success: true, ...(0, model_capability_cache_1.readInvalidPendingModelCapabilityRefreshOutcomes)(), generatedAt: new Date().toISOString() });
+        return true;
+    }
+    if (pathname === "/api/groups/memory/capabilities/invalid-outcomes/acknowledge" && req.method === "POST") {
+        let body = "";
+        req.on("data", (chunk) => body += chunk);
+        req.on("end", () => {
+            try {
+                const payload = JSON.parse(body || "{}");
+                const result = (0, model_capability_cache_1.acknowledgeInvalidPendingModelCapabilityRefreshOutcome)({ ...payload, acknowledgedBy: "memory-center" });
+                if (!result.acknowledged)
+                    return (0, utils_1.sendJson)(res, { success: false, error: result.reason || "确认失败", result }, 409);
+                (0, utils_1.sendJson)(res, { success: true, result, invalidRefreshOutcomes: (0, model_capability_cache_1.readInvalidPendingModelCapabilityRefreshOutcomes)() });
+            }
+            catch (error) {
+                (0, utils_1.sendJson)(res, { success: false, error: error.message }, 400);
+            }
+        });
+        return true;
+    }
+    if (pathname === "/api/groups/memory/capabilities" && req.method === "POST") {
+        let body = "";
+        req.on("data", (chunk) => body += chunk);
+        req.on("end", () => {
+            try {
+                const payload = JSON.parse(body || "{}");
+                if (String(payload.source || "") !== "user_setting") {
+                    return (0, utils_1.sendJson)(res, { error: "Memory Center 只能写入 user_setting；provider 与 native receipt 由可信执行链写入" }, 400);
+                }
+                const result = (0, model_capability_cache_1.recordModelCapabilityEvidence)({ ...payload, source: "user_setting" });
+                (0, utils_1.sendJson)(res, { success: true, ...result });
+            }
+            catch (error) {
+                (0, utils_1.sendJson)(res, { error: error.message }, 400);
+            }
+        });
+        return true;
+    }
+    if (pathname === "/api/groups/memory/capabilities/revoke" && req.method === "POST") {
+        let body = "";
+        req.on("data", (chunk) => body += chunk);
+        req.on("end", () => {
+            try {
+                const payload = JSON.parse(body || "{}");
+                const result = (0, model_capability_cache_1.revokeModelCapabilityEvidence)({ ...payload, actor: "memory-center" });
+                (0, utils_1.sendJson)(res, { success: true, result });
+            }
+            catch (error) {
+                (0, utils_1.sendJson)(res, { error: error.message }, 400);
+            }
+        });
+        return true;
+    }
+    if (pathname === "/api/groups/memory/capabilities/maintenance" && req.method === "POST") {
+        let body = "";
+        req.on("data", (chunk) => body += chunk);
+        req.on("end", () => {
+            try {
+                const payload = JSON.parse(body || "{}");
+                const dryRun = payload.dryRun !== false && payload.dry_run !== false;
+                if (!dryRun && payload.explicitExecution !== true && payload.explicit_execution !== true) {
+                    return (0, utils_1.sendJson)(res, { error: "实际清理需要 explicitExecution=true" }, 400);
+                }
+                const result = (0, model_capability_cache_1.runModelCapabilityCacheMaintenance)({ ...payload, dryRun });
+                (0, utils_1.sendJson)(res, { success: true, result, cache: (0, model_capability_cache_1.summarizeModelCapabilityCache)((0, model_capability_cache_1.readModelCapabilityCache)()) });
+            }
+            catch (error) {
+                (0, utils_1.sendJson)(res, { error: error.message }, 400);
+            }
+        });
+        return true;
+    }
+    if (pathname === "/api/groups/sessions/maintenance" && req.method === "GET") {
+        (0, utils_1.sendJson)(res, { success: true, status: (0, group_session_maintenance_1.readGroupSessionRetentionMaintenanceStatus)() });
+        return true;
+    }
+    if (pathname === "/api/groups/sessions/maintenance" && req.method === "POST") {
+        let body = "";
+        req.on("data", (chunk) => body += chunk);
+        req.on("end", () => {
+            try {
+                const payload = JSON.parse(body || "{}");
+                const dryRun = payload.dryRun !== false && payload.dry_run !== false;
+                if (!dryRun && payload.explicitExecution !== true && payload.explicit_execution !== true) {
+                    return (0, utils_1.sendJson)(res, { error: "实际清理需要 explicitExecution=true" }, 400);
+                }
+                const status = (0, group_session_maintenance_1.runGroupSessionRetentionMaintenance)({ ...payload, dryRun, force: true, trigger: "manual-api" });
+                (0, utils_1.sendJson)(res, { success: true, status });
+            }
+            catch (e) {
+                (0, utils_1.sendJson)(res, { error: e.message }, 400);
+            }
+        });
+        return true;
+    }
+    if (pathname === "/api/groups/sessions" && req.method === "GET") {
+        const groupId = String(parsed.query.id || parsed.query.group_id || "").trim();
+        if (!groupId)
+            return (0, utils_1.sendJson)(res, { error: "缺少群聊 ID" }, 400);
+        (0, utils_1.sendJson)(res, { success: true, ...(0, storage_1.listGroupChatSessions)(groupId) });
+        return true;
+    }
+    if (pathname === "/api/groups/sessions" && req.method === "POST") {
+        let body = "";
+        req.on("data", (chunk) => body += chunk);
+        req.on("end", () => {
+            try {
+                const payload = JSON.parse(body || "{}");
+                const groupId = String(payload.id || payload.group_id || "").trim();
+                if (!groupId)
+                    return (0, utils_1.sendJson)(res, { error: "缺少群聊 ID" }, 400);
+                const action = String(payload.action || "create").trim().toLowerCase();
+                const sessionId = String(payload.session_id || payload.sessionId || "");
+                let session = null;
+                let result = null;
+                if (action === "select")
+                    session = (0, storage_1.selectGroupChatSession)(groupId, sessionId);
+                else if (action === "rename")
+                    session = (0, storage_1.renameGroupChatSession)(groupId, sessionId, String(payload.title || ""));
+                else if (action === "archive" || action === "restore")
+                    session = (0, storage_1.archiveGroupChatSession)(groupId, sessionId, action === "archive");
+                else if (action === "delete") {
+                    result = (0, storage_1.deleteGroupChatSession)(groupId, sessionId, { force: payload.force === true });
+                    result.memoryArtifacts = deps.deleteGroupSessionMemoryArtifacts?.(groupId, sessionId) || null;
+                }
+                else if (action === "purge_legacy") {
+                    result = (0, storage_1.purgeLegacyDefaultGroupChatSession)(groupId, { force: payload.force === true });
+                    if (result.purged)
+                        result.memoryArtifacts = deps.deleteGroupSessionMemoryArtifacts?.(groupId, "default") || null;
+                }
+                else if (action === "prune") {
+                    const retentionConfig = (0, group_orchestrator_1.loadOrchestratorConfig)();
+                    result = (0, storage_1.pruneArchivedGroupChatSessions)(groupId, {
+                        retentionDays: retentionConfig.groupSessionRetentionDays,
+                        maxArchived: retentionConfig.groupSessionMaxArchived,
+                        ...payload,
+                    });
+                    if (result.dryRun === false) {
+                        for (const row of result.results || []) {
+                            if (row.deleted)
+                                row.memoryArtifacts = deps.deleteGroupSessionMemoryArtifacts?.(groupId, row.id) || null;
+                        }
+                    }
+                }
+                else
+                    session = (0, storage_1.createGroupChatSession)(groupId, String(payload.title || ""));
+                (0, utils_1.sendJson)(res, { success: true, session, result, ...(0, storage_1.listGroupChatSessions)(groupId) });
+            }
+            catch (e) {
+                (0, utils_1.sendJson)(res, { error: e.message }, 400);
+            }
+        });
+        return true;
+    }
     if (pathname === "/api/groups/messages" && req.method === "GET") {
         const groupId = parsed.query.id;
         if (!groupId)
             return (0, utils_1.sendJson)(res, { error: "缺少群聊 ID" }, 400);
-        const limit = parseInt(String(parsed.query.limit || "")) || 100;
+        const requestedLimit = parseInt(String(parsed.query.limit || "")) || 100;
+        const limit = Math.max(1, Math.min(2000, requestedLimit));
         const groupIdText = String(groupId);
-        const rawMessages = (0, storage_1.getGroupMessages)(groupIdText).slice(-limit);
+        const sessionId = String(parsed.query.session_id || parsed.query.sessionId || (0, storage_1.getActiveGroupChatSessionId)(groupIdText));
+        const rawMessages = (0, storage_1.getGroupMessages)(groupIdText, sessionId).slice(-limit);
         const allTasks = (0, db_1.loadTasks)();
+        const sessionTasks = allTasks.filter((task) => String(task?.group_id || "") === groupIdText
+            && String(task?.group_session_id || task?.groupSessionId || "default") === sessionId);
         const taskIds = new Set(rawMessages.map((message) => String(message?.task_id || message?.task?.id || "")).filter(Boolean));
-        const taskMap = new Map(allTasks.filter((task) => taskIds.has(String(task.id))).map((task) => [String(task.id), task]));
+        const taskMap = new Map(sessionTasks.filter((task) => taskIds.has(String(task.id))).map((task) => [String(task.id), task]));
         const runtimeMap = new Map();
         const runtimeAttachedTaskIds = new Set();
         const getRuntime = (task) => {
             const taskId = String(task?.id || "");
             if (!taskId)
                 return null;
-            if (!runtimeMap.has(taskId))
-                runtimeMap.set(taskId, deps.buildInlineTaskRuntime(task));
+            if (!runtimeMap.has(taskId)) {
+                runtimeMap.set(taskId, compactGroupMessageTaskRuntime(deps.buildInlineTaskRuntime(task)));
+            }
             return runtimeMap.get(taskId);
         };
         const messages = rawMessages.map((message) => {
@@ -2278,10 +2595,12 @@ function handleBasicGroupRoutes(req, res, parsed, ctx, deps) {
             const runtime = getRuntime(task);
             return { ...messageWithoutStoredRuntime, taskRuntime: runtime };
         });
-        const memory = deps.loadGroupMemory(groupIdText);
-        const agentQa = deps.getAgentQaItemsForGroup(groupIdText, 100);
-        const mainAgentStatus = buildGroupMainAgentStatus({ groupId: groupIdText, tasks: allTasks, agentQa, getRuntime });
-        (0, utils_1.sendJson)(res, { messages, memory, agentQa, mainAgentStatus });
+        const memory = deps.loadGroupMemory(groupIdText, sessionId);
+        const sessionTaskIds = new Set(sessionTasks.map((task) => String(task.id || "")));
+        const agentQa = deps.getAgentQaItemsForGroup(groupIdText, 100).filter((item) => sessionTaskIds.has(String(item?.task_id || item?.taskId || ""))
+            || String(item?.group_session_id || item?.groupSessionId || "") === sessionId);
+        const mainAgentStatus = buildGroupMainAgentStatus({ groupId: groupIdText, tasks: sessionTasks, agentQa, getRuntime });
+        (0, utils_1.sendJson)(res, { messages, memory, agentQa, mainAgentStatus, sessionId, sessions: (0, storage_1.listGroupChatSessions)(groupIdText).sessions });
         return true;
     }
     if (pathname === "/api/groups/messages/clear" && req.method === "POST") {
@@ -2296,15 +2615,16 @@ function handleBasicGroupRoutes(req, res, parsed, ctx, deps) {
                 const group = (0, storage_1.loadGroups)().find((item) => item.id === groupId);
                 if (!group)
                     return (0, utils_1.sendJson)(res, { error: "群聊不存在" }, 404);
-                const before = (0, storage_1.getGroupMessages)(groupId).length;
-                (0, storage_1.saveGroupMessages)(groupId, []);
+                const sessionId = String(payload.session_id || payload.sessionId || (0, storage_1.getActiveGroupChatSessionId)(groupId));
+                const before = (0, storage_1.getGroupMessages)(groupId, sessionId).length;
+                (0, storage_1.saveGroupMessages)(groupId, [], sessionId);
                 if (payload.clear_memory === true || payload.clearMemory === true) {
                     try {
-                        fs.unlinkSync(deps.getGroupMemoryFile(groupId));
+                        fs.unlinkSync(deps.getGroupMemoryFile(groupId, sessionId));
                     }
                     catch { }
                 }
-                (0, utils_1.sendJson)(res, { success: true, cleared: before, memory_cleared: payload.clear_memory === true || payload.clearMemory === true });
+                (0, utils_1.sendJson)(res, { success: true, cleared: before, session_id: sessionId, memory_cleared: payload.clear_memory === true || payload.clearMemory === true });
             }
             catch (e) {
                 (0, utils_1.sendJson)(res, { error: e.message }, 400);
@@ -2316,13 +2636,14 @@ function handleBasicGroupRoutes(req, res, parsed, ctx, deps) {
         const groupId = parsed.query.id;
         if (!groupId)
             return (0, utils_1.sendJson)(res, { error: "缺少群聊 ID" }, 400);
+        const sessionId = String(parsed.query.session_id || parsed.query.sessionId || (0, storage_1.getActiveGroupChatSessionId)(String(groupId)));
         const project = parsed.query.project ? String(parsed.query.project) : "";
-        const memory = deps.saveGroupMemory(String(groupId), deps.loadGroupMemory(String(groupId)));
+        const memory = deps.saveGroupMemory(String(groupId), deps.loadGroupMemory(String(groupId), sessionId), sessionId);
         (0, utils_1.sendJson)(res, {
             success: true,
             memory,
             context: deps.buildGroupMemoryContext(memory),
-            agentPacket: project ? deps.buildAgentMemoryPacket(String(groupId), project) : "",
+            agentPacket: project ? deps.buildAgentMemoryPacket(String(groupId), project, "", { groupSessionId: sessionId }) : "",
         });
         return true;
     }

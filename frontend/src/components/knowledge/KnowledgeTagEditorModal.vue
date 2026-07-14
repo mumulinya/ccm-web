@@ -3,151 +3,39 @@ defineProps({
   visible: { type: Boolean, default: false },
   doc: { type: Object, default: null },
   tags: { type: Array, default: () => [] },
-  newTag: { type: String, default: '' }
+  newTag: { type: String, default: '' },
+  scopeType: { type: String, default: 'global' },
+  scopeId: { type: String, default: '' },
+  visibility: { type: String, default: 'shared' },
+  saving: { type: Boolean, default: false }
 })
 
-const emit = defineEmits(['close', 'update:newTag', 'add-tag', 'remove-tag', 'save'])
+const emit = defineEmits(['close', 'update:newTag', 'update:scopeType', 'update:scopeId', 'update:visibility', 'add-tag', 'remove-tag', 'save'])
 </script>
 
 <template>
-  <div v-if="visible" class="tag-editor-overlay" @click.self="emit('close')">
-    <div class="tag-editor-modal aura-card">
-      <div class="modal-header">
-        <h4>🏷️ 编辑文档分类标签</h4>
-        <span class="file-label">{{ doc?.name }}</span>
-      </div>
-      <div class="modal-body">
-        <p class="modal-hint">标签将用作垂直归类和范围过滤。输入内容并按<strong>回车</strong>添加，以 # 开头。</p>
-
-        <div class="editor-tags-list">
-          <span v-for="tag in tags" :key="tag" class="editor-tag-pill">
-            {{ tag }}
-            <button class="btn-remove-tag-pill" @click="emit('remove-tag', tag)">&times;</button>
-          </span>
+  <teleport to="body">
+    <div v-if="visible" class="modal-layer" @click.self="emit('close')">
+      <section class="metadata-modal" role="dialog" aria-modal="true" aria-labelledby="document-metadata-title">
+        <header><div><h2 id="document-metadata-title">文档范围与标签</h2><p :title="doc?.name">{{ doc?.name }}</p></div><button type="button" title="关闭" @click="emit('close')">×</button></header>
+        <div class="modal-body">
+          <div class="scope-grid">
+            <label><span>知识范围</span><select :value="scopeType" @change="emit('update:scopeType', $event.target.value)"><option value="global">全局</option><option value="group">群聊</option><option value="project">项目</option><option value="agent">Agent</option></select></label>
+            <label v-if="scopeType !== 'global'"><span>范围标识</span><input :value="scopeId" type="text" placeholder="填写群聊 ID、项目或 Agent 名称" @input="emit('update:scopeId', $event.target.value)"></label>
+            <label><span>可见性</span><select :value="visibility" @change="emit('update:visibility', $event.target.value)"><option value="shared">范围内共享</option><option value="restricted">仅限定范围</option></select></label>
+          </div>
+          <div class="tag-section">
+            <span class="field-label">标签</span>
+            <div class="tag-list"><span v-for="tag in tags.filter(item => !item.startsWith('#scope:'))" :key="tag">{{ tag }}<button type="button" title="移除标签" @click="emit('remove-tag', tag)">×</button></span><i v-if="!tags.filter(item => !item.startsWith('#scope:')).length">暂无自定义标签</i></div>
+            <div class="tag-input"><input :value="newTag" type="text" placeholder="新增标签" @input="emit('update:newTag', $event.target.value)" @keyup.enter="emit('add-tag')"><button type="button" @click="emit('add-tag')">添加</button></div>
+          </div>
         </div>
-
-        <div class="tag-input-group">
-          <input
-            :value="newTag"
-            type="text"
-            placeholder="新增标签，例如 #feishu"
-            class="tech-input"
-            @input="emit('update:newTag', $event.target.value)"
-            @keyup.enter="emit('add-tag')"
-          >
-          <button class="btn btn-primary" @click="emit('add-tag')">添加</button>
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-outline" @click="emit('close')">取消</button>
-        <button class="btn btn-primary" @click="emit('save')">保存更改</button>
-      </div>
+        <footer><button type="button" class="secondary" @click="emit('close')">取消</button><button type="button" class="primary" :disabled="saving || (scopeType !== 'global' && !scopeId.trim())" @click="emit('save')">{{ saving ? '保存中' : '保存' }}</button></footer>
+      </section>
     </div>
-  </div>
+  </teleport>
 </template>
 
 <style scoped>
-.tag-editor-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.4);
-  backdrop-filter: blur(4px);
-  z-index: 1010;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.aura-card {
-  border-radius: 12px;
-  background: rgba(255,255,255,0.68);
-  border: 1px solid var(--border-color);
-}
-.tag-editor-modal {
-  width: 440px;
-  background: var(--surface, #ffffff) !important;
-  box-shadow: 0 12px 48px rgba(0,0,0,0.15);
-  border: 1px solid var(--border-color);
-  padding: 22px;
-}
-.modal-header {
-  border-bottom: 1px solid var(--border-color);
-  padding-bottom: 12px;
-  margin-bottom: 16px;
-}
-.modal-header h4 {
-  margin: 0;
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-.file-label {
-  font-size: 11px;
-  color: var(--text-secondary);
-  display: block;
-  margin-top: 4px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.modal-hint {
-  font-size: 11.5px;
-  color: var(--text-secondary);
-  margin: 0 0 12px 0;
-  line-height: 1.5;
-}
-.editor-tags-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  background: var(--bg-primary, #f8fafc);
-  border: 1px solid var(--border-color);
-  padding: 10px;
-  border-radius: 8px;
-  min-height: 60px;
-  margin-bottom: 16px;
-  align-content: flex-start;
-}
-.editor-tag-pill {
-  background: rgba(0, 114, 255, 0.08);
-  color: var(--accent-blue, #0072ff);
-  border: 1px solid rgba(0, 114, 255, 0.15);
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 4px;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-.btn-remove-tag-pill {
-  background: transparent;
-  border: none;
-  color: var(--text-secondary);
-  font-size: 14px;
-  cursor: pointer;
-  line-height: 1;
-  padding: 0;
-}
-.btn-remove-tag-pill:hover { color: #ef4444; }
-.tag-input-group { display: flex; gap: 8px; }
-.tech-input {
-  flex: 1;
-  background: var(--surface, #fff);
-  border: 1px solid var(--border-color, rgba(0,0,0,0.08));
-  border-radius: 8px;
-  padding: 8px 10px;
-  color: var(--text-primary);
-  outline: none;
-}
-.modal-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-  margin-top: 20px;
-  border-top: 1px solid var(--border-color);
-  padding-top: 14px;
-}
-.btn { padding: 8px 16px; border-radius: 8px; border: none; cursor: pointer; font-size: 13px; transition: all 0.2s; }
-.btn-primary { background: var(--gradient-blue); color: white; }
-.btn-outline { background: transparent; border: 1px solid rgba(0,0,0,0.08); color: var(--text-secondary); }
-:global([data-theme='dark']) .editor-tags-list { background: rgba(0,0,0,0.15); }
+.modal-layer { position: fixed; inset: 0; z-index: 1210; display: grid; place-items: center; padding: 20px; background: rgba(15,23,42,.55); }.metadata-modal { width: min(500px, 100%); border: 1px solid var(--border-color, #dbe2ea); border-radius: 8px; background: var(--surface, #fff); box-shadow: 0 24px 60px rgba(15,23,42,.24); }header { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding: 17px 19px; border-bottom: 1px solid var(--border-color, #e2e8f0); }h2 { margin: 0; color: var(--text-primary, #0f172a); font-size: 15px; letter-spacing: 0; }header p { max-width: 410px; overflow: hidden; margin: 4px 0 0; color: var(--text-secondary, #64748b); font-size: 10.5px; text-overflow: ellipsis; white-space: nowrap; }header > button { width: 28px; height: 28px; border: none; background: transparent; color: var(--text-secondary, #64748b); font-size: 20px; cursor: pointer; }.modal-body { display: grid; gap: 18px; padding: 19px; }.scope-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }.scope-grid label { display: grid; gap: 5px; }.scope-grid label > span, .field-label { color: var(--text-secondary, #64748b); font-size: 10.5px; font-weight: 600; }input, select { width: 100%; height: 34px; box-sizing: border-box; padding: 0 9px; border: 1px solid var(--border-color, #dbe2ea); border-radius: 6px; background: var(--bg-primary, #f8fafc); color: var(--text-primary, #0f172a); font: inherit; font-size: 11.5px; outline: none; }input:focus, select:focus { border-color: #2563eb; box-shadow: 0 0 0 2px rgba(37,99,235,.1); }.tag-section { display: grid; gap: 7px; }.tag-list { min-height: 54px; display: flex; align-content: flex-start; flex-wrap: wrap; gap: 5px; padding: 8px; border: 1px solid var(--border-color, #dbe2ea); border-radius: 6px; background: var(--bg-primary, #f8fafc); }.tag-list > span { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 6px; border: 1px solid #bfdbfe; border-radius: 4px; background: #eff6ff; color: #1d4ed8; font-size: 9.5px; }.tag-list button { padding: 0; border: none; background: transparent; color: #64748b; cursor: pointer; }.tag-list i { color: var(--text-secondary, #94a3b8); font-size: 10px; font-style: normal; }.tag-input { display: grid; grid-template-columns: 1fr auto; gap: 7px; }.tag-input button { padding: 0 12px; border: 1px solid var(--border-color, #dbe2ea); border-radius: 6px; background: var(--surface, #fff); color: var(--text-primary, #334155); font-size: 11px; cursor: pointer; }footer { display: flex; justify-content: flex-end; gap: 8px; padding: 13px 19px; border-top: 1px solid var(--border-color, #e2e8f0); }footer button { height: 34px; padding: 0 14px; border-radius: 6px; font: inherit; font-size: 11.5px; cursor: pointer; }.secondary { border: 1px solid var(--border-color, #dbe2ea); background: transparent; color: var(--text-primary, #334155); }.primary { border: 1px solid #1d4ed8; background: #1d4ed8; color: #fff; font-weight: 600; }.primary:disabled { opacity: .5; cursor: not-allowed; }@media (max-width: 480px) { .scope-grid { grid-template-columns: 1fr; } }
 </style>

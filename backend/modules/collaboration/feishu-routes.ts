@@ -8,8 +8,15 @@ import {
   getFeishuUserInfo,
   getFeishuUserToken,
   getValidFeishuToken,
+  probeFeishuControlBotApi,
   sendFeishuReportMessage,
 } from "./feishu";
+import {
+  getFeishuChannelDeliverySnapshot,
+  getFeishuChannelHealth,
+  runFeishuChannelSelfTest,
+  tickFeishuNotificationOutbox,
+} from "./feishu-channel";
 
 export function handleFeishuRoutes(
   req: IncomingMessage,
@@ -26,7 +33,7 @@ export function handleFeishuRoutes(
         notification_channel: "webhook",
         app_id: config.app_id || "",
         app_secret: config.app_secret ? "******" : "",
-        webhook_url: config.webhook_url || "",
+        webhook_url: config.webhook_url ? "******" : "",
         sign_key: config.sign_key ? "******" : "",
         webhook_ready: !!config.webhook_url,
         notification_ready: !!config.webhook_url,
@@ -52,7 +59,7 @@ export function handleFeishuRoutes(
         const config = loadFeishuConfig();
 
         config.notification_channel = "webhook";
-        if (updates.webhook_url !== undefined) config.webhook_url = String(updates.webhook_url || "").trim();
+        if (updates.webhook_url !== undefined && updates.webhook_url !== "******") config.webhook_url = String(updates.webhook_url || "").trim();
         if (updates.sign_key !== undefined && updates.sign_key !== "******") config.sign_key = String(updates.sign_key || "").trim();
         if (updates.enabled !== undefined) config.enabled = updates.enabled;
         if (updates.control_bot_enabled !== undefined) config.control_bot_enabled = updates.control_bot_enabled === true;
@@ -189,6 +196,36 @@ export function handleFeishuRoutes(
       if (result.success) sendJson(res, { success: true, message: "测试通知已发送，请检查飞书", result });
       else sendJson(res, { error: result.error || "发送失败", result }, 400);
     }).catch((error: any) => sendJson(res, { error: error?.message || "发送失败" }, 500));
+    return true;
+  }
+
+  if (pathname === "/api/feishu/health" && req.method === "GET") {
+    sendJson(res, getFeishuChannelHealth());
+    return true;
+  }
+
+  if (pathname === "/api/feishu/health/probe" && req.method === "POST") {
+    probeFeishuControlBotApi().then((probe) => {
+      const health = getFeishuChannelHealth();
+      sendJson(res, { ...health, healthy: health.healthy && probe.success === true, api_probe: probe }, probe.success ? 200 : 503);
+    }).catch((error: any) => sendJson(res, { success: false, error: error?.message || "飞书健康探针失败" }, 503));
+    return true;
+  }
+
+  if (pathname === "/api/feishu/channel/self-test" && ["GET", "POST"].includes(req.method || "")) {
+    const result = runFeishuChannelSelfTest();
+    sendJson(res, result, result.pass ? 200 : 500);
+    return true;
+  }
+
+  if (pathname === "/api/feishu/channel/deliveries" && req.method === "GET") {
+    sendJson(res, { success: true, ...getFeishuChannelDeliverySnapshot(Number(parsed.query.limit || 50)) });
+    return true;
+  }
+
+  if (pathname === "/api/feishu/channel/outbox/retry" && req.method === "POST") {
+    tickFeishuNotificationOutbox(new Date()).then((result) => sendJson(res, { success: true, ...result }))
+      .catch((error: any) => sendJson(res, { success: false, error: error?.message || "飞书通知重试失败" }, 500));
     return true;
   }
 

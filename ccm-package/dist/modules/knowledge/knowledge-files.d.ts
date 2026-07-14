@@ -1,0 +1,72 @@
+export declare const KNOWLEDGE_DIR: string;
+export declare const KNOWLEDGE_VERSIONS_DIR: string;
+export declare const RAG_EMBEDDING_CONFIG_FILE: string;
+export declare const RAG_INDEX_CACHE_FILE: string;
+export declare const MAX_KNOWLEDGE_FILE_BYTES: number;
+export declare const MAX_KNOWLEDGE_UPLOAD_BYTES: number;
+export declare const MAX_KNOWLEDGE_UPLOAD_FILES = 20;
+export declare const SUPPORTED_KNOWLEDGE_EXTENSIONS: Set<string>;
+export type KnowledgeScopeType = "global" | "group" | "project" | "agent";
+export type KnowledgeScope = {
+    type: KnowledgeScopeType;
+    id: string;
+};
+export type KnowledgeDocumentMetadata = {
+    tags: string[];
+    domain: string;
+    scope: KnowledgeScope;
+    visibility: "shared" | "restricted";
+    version: number;
+    content_hash: string;
+    created_at: string;
+    updated_at: string;
+    indexed_at?: string;
+    parser?: string;
+    parse_status?: "ready" | "partial" | "failed";
+    parse_error?: string;
+    source?: Record<string, any>;
+    history?: Array<Record<string, any>>;
+};
+export type ParsedKnowledgeDocument = {
+    content: string;
+    parser: string;
+    status: "ready" | "partial" | "failed";
+    error: string;
+};
+export declare function sha256(value: Buffer | string): string;
+export declare function normalizeKnowledgeTags(tags?: any[]): string[];
+export declare function normalizeKnowledgeScope(input?: any): KnowledgeScope;
+export declare function scopeTags(scope: KnowledgeScope): string[];
+export declare function safeKnowledgeSlug(value: string, fallback?: string): string;
+export declare function sanitizeKnowledgeFilename(value: string): string;
+export declare function isSupportedKnowledgeFilename(name: string): boolean;
+export declare function resolveKnowledgeFile(name: string, mustExist?: boolean): string;
+export declare function loadKnowledgeMetadata(): Record<string, KnowledgeDocumentMetadata>;
+export declare function loadRagEmbeddingConfig(): any;
+export declare function saveRagEmbeddingConfig(updates?: any): any;
+export declare function publicRagEmbeddingConfig(config?: any): any;
+export declare function updateKnowledgeMetadata(name: string, updates?: any): KnowledgeDocumentMetadata;
+export declare function storeKnowledgeBuffer(name: string, buffer: Buffer, options?: any): {
+    name: string;
+    path: string;
+    metadata: KnowledgeDocumentMetadata;
+    duplicate: boolean;
+};
+export declare function deleteKnowledgeDocument(name: string): void;
+export declare function listKnowledgeVersions(name: string): any;
+export declare function readKnowledgeVersion(name: string, versionFile: string): NonSharedBuffer;
+export declare function parseKnowledgeVersion(name: string, versionFile: string): Promise<ParsedKnowledgeDocument>;
+export declare function restoreKnowledgeVersion(name: string, versionFile: string): {
+    name: string;
+    path: string;
+    metadata: KnowledgeDocumentMetadata;
+    duplicate: boolean;
+};
+export declare function parseKnowledgeDocument(filePath: string, name: string): Promise<ParsedKnowledgeDocument>;
+export declare function importOnlineKnowledgeDocument(input?: any): Promise<{
+    name: string;
+    path: string;
+    metadata: KnowledgeDocumentMetadata;
+    duplicate: boolean;
+}>;
+export declare function watchedKnowledgeFilename(rootPath: string, relativePath: string): string;

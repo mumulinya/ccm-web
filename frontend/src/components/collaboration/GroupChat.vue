@@ -12,6 +12,7 @@ import AgentCodeChangeDrawer from '../agents/AgentCodeChangeDrawer.vue'
 import AgentExecutionMessage from '../agents/AgentExecutionMessage.vue'
 import AgentQaMessage from '../agents/AgentQaMessage.vue'
 import GroupMainAgentStatusCard from './GroupMainAgentStatusCard.vue'
+import { shouldShowGroupMainAgentStatus } from '../../utils/groupStatusVisibility.js'
 import MainAgentDecisionCard from '../agents/MainAgentDecisionCard.vue'
 import GroupChatHeader from './GroupChatHeader.vue'
 import GroupLogsModal from './GroupLogsModal.vue'
@@ -24,12 +25,12 @@ import UnifiedDiffModal from '../common/UnifiedDiffModal.vue'
 import TemplateVariablesModal from '../common/TemplateVariablesModal.vue'
 import AgentPipelineModal from '../agents/AgentPipelineModal.vue'
 import { useSlashCommands } from '../../composables/useSlashCommands.js'
+import { createSlashCommandClientActions } from '../../composables/useSlashCommandClientActions.js'
 import { buildGroupClarificationResponseFields, buildWaitingUserTaskContinuationFields, createGroupTaskCardActionHandler } from '../../composables/useGroupTaskCardActions.js'
 import { useChatTemplates } from '../../composables/useChatTemplates.js'
 import { useCodeChangeDrawer } from '../../composables/useCodeChangeDrawer.js'
 import { useMessageNavigation } from '../../composables/useMessageNavigation.js'
 import { usePinnedScroll } from '../../composables/usePinnedScroll.js'
-import { downloadCommandJson } from '../../utils/commandExport.js'
 import { buildGroupConversationKnowledgePayload, postKnowledgeCapture } from '../../utils/knowledgeCapture.js'
 import { normalizeTestAgentExecutionPlanSummary, sanitizeUserFacingAgentText, sanitizeUserFacingLegacyTerminology, sanitizeUserFacingPlanText, sanitizeUserFacingStructure } from '../../utils/agentDisplay.js'
 
@@ -63,16 +64,22 @@ const handleGroupNavigation = async () => {
   await nextTick()
   if (target.groupId) {
     await selectGroup(target.groupId)
+    if (target.groupSessionId && target.groupSessionId !== currentGroupSessionId.value) {
+      await selectGroupSession(target.groupSessionId)
+    }
+    if (target.messageId || Number.isInteger(target.messageIndex)) await loadMessages(1000)
     
     if (target.autoMessage) {
       await nextTick()
       newMessage.value = target.autoMessage
       await nextTick()
       sendMessage()
-    } else if (target.keyword) {
+    } else if (target.messageId || Number.isInteger(target.messageIndex) || target.keyword) {
       await nextTick()
-      const kw = target.keyword.toLowerCase()
-      const idx = messages.value.findIndex(m => (m.content || '').toLowerCase().includes(kw))
+      const kw = String(target.keyword || '').toLowerCase()
+      let idx = target.messageId ? messages.value.findIndex(m => String(m.id || m.message_id || m.messageId || '') === String(target.messageId)) : -1
+      if (idx < 0 && Number.isInteger(target.messageIndex) && target.messageIndex >= 0 && target.messageIndex < messages.value.length) idx = target.messageIndex
+      if (idx < 0 && kw) idx = messages.value.findIndex(m => (m.content || '').toLowerCase().includes(kw))
       if (idx !== -1) {
         highlightMsgIndex.value = idx
         const el = document.getElementById(`gc-msg-${idx}`)
@@ -95,6 +102,8 @@ const groups = ref([])
 const projects = ref([])
 const currentGroup = ref(null)
 const messages = ref([])
+const groupSessions = ref([])
+const currentGroupSessionId = ref('')
 const groupMemory = ref(null)
 const mainAgentStatus = ref(null)
 const groupAgentQa = ref([])
@@ -118,22 +127,39 @@ const scrollToMessage = (originalIndex) => {
 }
 const newMessage = ref('')
 const slashNavigate = inject('slashNavigate', () => {})
-const runGroupClientCommand = async (action) => {
-  if (action === 'context') {
-    const chars = messages.value.reduce((sum, item) => sum + String(item.content || '').length, 0)
-    return {
-      success: true,
-      summary: `群聊“${currentGroup.value?.name || '未选择'}”当前加载了 ${messages.value.length} 条消息。`,
-      metrics: { 群聊: currentGroup.value?.name, 群聊ID: currentGroup.value?.id, 消息: messages.value.length, 成员: currentGroup.value?.members?.length || 0, 估算Token: Math.ceil(chars / 4) },
-      items: messages.value.slice(-8).reverse().map(item => ({ title: item.agent || item.role || '消息', detail: String(item.content || item.type || '').slice(0, 180), status: item.timestamp || '' }))
-    }
-  }
-  if (action === 'export_context') {
-    downloadCommandJson(`ccm-group-${currentGroup.value?.id || 'context'}`, { group: currentGroup.value, messages: messages.value })
-    return { success: true, summary: '当前群聊上下文已导出为 JSON。', metrics: { 消息: messages.value.length } }
-  }
-  throw new Error(`当前群聊不支持客户端命令：${action}`)
-}
+const runGroupClientCommand = createSlashCommandClientActions({
+  scope: 'group',
+  messages: () => messages.value,
+  sessions: () => groupSessions.value,
+  currentSessionId: () => currentGroupSessionId.value,
+  context: () => ({ group: currentGroup.value?.name || '', groupId: currentGroup.value?.id || '', sessionId: currentGroupSessionId.value || '' }),
+  statusSummary: () => `群聊“${currentGroup.value?.name || '未选择'}”当前加载了 ${messages.value.length} 条消息。`,
+  contextMetrics: () => ({ 群聊: currentGroup.value?.name || '未选择', 群聊ID: currentGroup.value?.id || '', 成员: currentGroup.value?.members?.length || 0 }),
+  exportFilename: () => `ccm-group-${currentGroup.value?.id || 'context'}`,
+  newSession: async () => {
+    if (!currentGroup.value) throw new Error('请先选择群聊')
+    await createGroupSession()
+    return { success: true, summary: '已新建独立群聊会话。', metrics: { 群聊: currentGroup.value.name, 会话: currentGroupSessionId.value } }
+  },
+  clearSession: async () => {
+    if (!currentGroup.value || !currentGroupSessionId.value) throw new Error('请先选择群聊会话')
+    const response = await fetch('/api/groups/messages/clear', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ group_id: currentGroup.value.id, session_id: currentGroupSessionId.value, clear_memory: false }),
+    })
+    const data = await response.json()
+    if (!response.ok || !data.success) throw new Error(data.error || '清空群聊会话失败')
+    messages.value = []
+    return { success: true, summary: `已清空当前群聊会话的 ${data.cleared || 0} 条消息，群聊记忆保持不变。`, metrics: { 已清空: data.cleared || 0 } }
+  },
+  renameSession: async (name) => {
+    if (!currentGroup.value || !currentGroupSessionId.value) throw new Error('请先选择群聊会话')
+    const data = await groupsApi.sessionAction(currentGroup.value.id, currentGroupSessionId.value, 'rename', { title: name })
+    groupSessions.value = data.sessions || groupSessions.value
+    return { success: true, summary: `当前群聊会话已重命名为“${name}”。`, metrics: { 群聊: currentGroup.value.name, 会话: currentGroupSessionId.value } }
+  },
+})
 const slash = useSlashCommands({
   scope: 'group',
   input: newMessage,
@@ -300,16 +326,12 @@ const openMainAgentPipeline = () => {
   })
 }
 const hasMainAgentStatusDetail = computed(() => {
-  const status = mainAgentStatus.value || {}
-  return !!currentGroup.value && (
-    latestMainAgentDecision.value ||
-    status.phase ||
-    status.running_child_agents?.length ||
-    status.open_qa_count ||
-    status.failed_gates?.length ||
-    status.blockers?.length ||
-    status.needs?.length
-  )
+  return shouldShowGroupMainAgentStatus({
+    hasGroup: !!currentGroup.value,
+    status: mainAgentStatus.value,
+    latestDecision: latestMainAgentDecision.value,
+    groupAgentQa: groupAgentQa.value,
+  })
 })
 const latestMainAgentDecisionEntry = computed(() => {
   for (let i = messages.value.length - 1; i >= 0; i--) {
@@ -443,9 +465,9 @@ const handleTaskCardAction = createGroupTaskCardActionHandler({
   openCodeChangeDrawer: (...args) => openCodeChangeDrawer(...args),
   openPipelineViewer,
   openTraceReplay: (target = {}) => {
-    localStorage.setItem('trace-replay-target', JSON.stringify({ scope: target.scope || 'orchestrator', trace_id: target.trace_id || '', at: Date.now() }))
+    localStorage.setItem('trace-replay-target', JSON.stringify({ scope: target.scope || 'orchestrator', task_id: target.task_id || target.taskId || '', trace_id: target.trace_id || '', at: Date.now() }))
     slashNavigate?.('trace-replay')
-    window.dispatchEvent(new CustomEvent('trace-replay-target', { detail: { scope: target.scope || 'orchestrator', trace_id: target.trace_id || '' } }))
+    window.dispatchEvent(new CustomEvent('trace-replay-target', { detail: { scope: target.scope || 'orchestrator', task_id: target.task_id || target.taskId || '', trace_id: target.trace_id || '' } }))
   },
   beginTaskInput: beginTaskSupplementInput,
   loadMessages: () => loadMessages(),
@@ -888,6 +910,8 @@ const groupTools = ref({ mcp: [], skill: [] })
 const groupAllTools = ref({ mcp: [], skill: [] })
 const groupToolAudit = ref(null)
 const groupAuthorizationReadiness = ref(null)
+const groupConnectionPreflight = ref(null)
+const groupToolVerification = ref(null)
 
 // 表单
 const newGroupName = ref('')
@@ -923,7 +947,12 @@ let selectGroup = async (id) => {
     newMessage.value = ''
     messageFiles.value = []
   }
+  const changedGroup = currentGroup.value?.id !== id
   currentGroup.value = groups.value.find(g => g.id === id)
+  if (changedGroup) {
+    currentGroupSessionId.value = ''
+    groupSessions.value = []
+  }
   isGroupMessagesPinnedToBottom.value = true
   await loadMessages()
   // 如果有挂起的待使用模板，在此应用
@@ -937,9 +966,11 @@ let selectGroup = async (id) => {
 }
 
 // 加载消息
-const loadMessages = async () => {
+const loadMessages = async (limit = 100) => {
   if (!currentGroup.value) return
-  const data = await groupsApi.messages(currentGroup.value.id)
+  const data = await groupsApi.messages(currentGroup.value.id, limit, currentGroupSessionId.value)
+  groupSessions.value = data.sessions || groupSessions.value
+  currentGroupSessionId.value = data.sessionId || currentGroupSessionId.value || groupSessions.value[0]?.id || ''
   try {
     const protocolRes = await fetch(`/api/agent-collaboration/protocol?group_id=${encodeURIComponent(currentGroup.value.id)}&limit=100`)
     collaborationProtocol.value = protocolRes.ok ? await protocolRes.json() : null
@@ -955,6 +986,74 @@ const loadMessages = async () => {
   // 延迟多次滚动，防范 Markdown/Diff 渲染等重排引起的高度时差
   setTimeout(() => scrollToBottom({ force: true }), 60)
   setTimeout(() => scrollToBottom({ force: true }), 220)
+}
+
+const selectGroupSession = async sessionId => {
+  if (!currentGroup.value || !sessionId || sessionId === currentGroupSessionId.value) return
+  await groupsApi.selectSession(currentGroup.value.id, sessionId)
+  currentGroupSessionId.value = sessionId
+  messages.value = []
+  await loadMessages()
+}
+
+const createGroupSession = async () => {
+  if (!currentGroup.value) return
+  try {
+    const data = await groupsApi.createSession(currentGroup.value.id)
+    groupSessions.value = data.sessions || []
+    currentGroupSessionId.value = data.session?.id || data.activeSessionId || ''
+    messages.value = []
+    groupMemory.value = null
+    await loadMessages()
+    toast.success('已新建独立群聊会话')
+  } catch (error) {
+    toast.error(error.message || '新建会话失败')
+  }
+}
+
+const renameGroupSession = async () => {
+  if (!currentGroup.value || !currentGroupSessionId.value) return
+  const current = groupSessions.value.find(item => item.id === currentGroupSessionId.value)
+  const title = window.prompt('会话名称', current?.title || '新会话')
+  if (!title?.trim()) return
+  try {
+    const data = await groupsApi.sessionAction(currentGroup.value.id, currentGroupSessionId.value, 'rename', { title: title.trim() })
+    groupSessions.value = data.sessions || groupSessions.value
+    toast.success('会话已重命名')
+  } catch (error) {
+    toast.error(error.message || '重命名会话失败')
+  }
+}
+
+const archiveGroupSession = async () => {
+  if (!currentGroup.value || !currentGroupSessionId.value) return
+  if (!await confirmDialog('归档当前会话？归档后会切换到其他可用会话。')) return
+  try {
+    const data = await groupsApi.sessionAction(currentGroup.value.id, currentGroupSessionId.value, 'archive')
+    groupSessions.value = data.sessions || []
+    currentGroupSessionId.value = data.activeSessionId || groupSessions.value.find(item => !item.archived)?.id || ''
+    messages.value = []
+    await loadMessages()
+    toast.success('会话已归档')
+  } catch (error) {
+    toast.error(error.message || '归档会话失败')
+  }
+}
+
+const deleteGroupSession = async () => {
+  if (!currentGroup.value || !currentGroupSessionId.value) return
+  const current = groupSessions.value.find(item => item.id === currentGroupSessionId.value)
+  if (!await confirmDialog(`确定删除会话“${current?.title || '当前会话'}”？消息、压缩状态和会话记忆将一起删除。`)) return
+  try {
+    const data = await groupsApi.sessionAction(currentGroup.value.id, currentGroupSessionId.value, 'delete')
+    groupSessions.value = data.sessions || []
+    currentGroupSessionId.value = data.activeSessionId || groupSessions.value.find(item => !item.archived)?.id || groupSessions.value[0]?.id || ''
+    messages.value = []
+    await loadMessages()
+    toast.success('会话及其记忆已删除')
+  } catch (error) {
+    toast.error(error.message || '删除会话失败')
+  }
 }
 
 const createLocalMessageId = () => `client-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
@@ -1038,7 +1137,13 @@ const formatFileSize = (size) => {
 }
 
 const onMessageFilesSelected = (files) => {
-  messageFiles.value = [...messageFiles.value, ...files]
+  for (const file of files) {
+    if (file.size > 25 * 1024 * 1024) {
+      toast.warning(`${file.name} 超过 25 MB，未添加`)
+      continue
+    }
+    if (!messageFiles.value.some(item => item.name === file.name && item.size === file.size)) messageFiles.value.push(file)
+  }
 }
 
 const removeMessageFile = (index) => {
@@ -1394,7 +1499,7 @@ const clearGroupMessages = async () => {
   const res = await fetch('/api/groups/messages/clear', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ group_id: currentGroup.value.id, clear_memory: clearMemory })
+    body: JSON.stringify({ group_id: currentGroup.value.id, session_id: currentGroupSessionId.value, clear_memory: clearMemory })
   })
   const data = await res.json()
   if (!res.ok || !data.success) {
@@ -1520,6 +1625,7 @@ ${filesToSend.map(f => `- ${f.name}（${formatFileSize(f.size)}）`).join('\n')}
   if (filesToSend.length > 0) {
     payload = new FormData()
     payload.append('group_id', currentGroup.value.id)
+    payload.append('group_session_id', currentGroupSessionId.value)
     payload.append('target_project', targetAgent.value === 'all' ? 'all' : targetAgent.value)
     payload.append('message', msg)
     payload.append('client_message_id', clientMessageId)
@@ -1533,6 +1639,7 @@ ${filesToSend.map(f => `- ${f.name}（${formatFileSize(f.size)}）`).join('\n')}
   } else {
     payload = {
       group_id: currentGroup.value.id,
+      group_session_id: currentGroupSessionId.value,
       target_project: targetAgent.value === 'all' ? undefined : targetAgent.value,
       message: msg,
       client_message_id: clientMessageId,
@@ -1855,7 +1962,7 @@ ${filesToSend.map(f => `- ${f.name}（${formatFileSize(f.size)}）`).join('\n')}
   // 更新轮询基准计数
   if (currentGroup.value) {
     try {
-      const res = await fetch(`/api/groups/messages?id=${currentGroup.value.id}&limit=100`)
+      const res = await fetch(`/api/groups/messages?id=${currentGroup.value.id}&limit=100&session_id=${encodeURIComponent(currentGroupSessionId.value)}`)
       const data = await res.json()
       mainAgentStatus.value = data.mainAgentStatus || mainAgentStatus.value
       groupAgentQa.value = data.agentQa || groupAgentQa.value
@@ -1887,7 +1994,7 @@ const waitingCrossReply = ref(false)
 const pullNewMessages = async () => {
   if (!currentGroup.value) return
   try {
-    const res = await fetch(`/api/groups/messages?id=${currentGroup.value.id}&limit=100`)
+    const res = await fetch(`/api/groups/messages?id=${currentGroup.value.id}&limit=100&session_id=${encodeURIComponent(currentGroupSessionId.value)}`)
     const data = await res.json()
     mainAgentStatus.value = data.mainAgentStatus || mainAgentStatus.value
     groupAgentQa.value = data.agentQa || groupAgentQa.value
@@ -2034,6 +2141,9 @@ const loadGroupTools = async () => {
   groupTools.value = normalizeGroupTools(data.tools)
   groupToolAudit.value = data.tool_audit || null
   groupAuthorizationReadiness.value = data.authorization_readiness || null
+  groupConnectionPreflight.value = data.connection_preflight || null
+  const verification = await fetch(`/api/tools/chain-verification?groupId=${encodeURIComponent(currentGroup.value.id)}`).then(r => r.json()).catch(() => ({ rows: [] }))
+  groupToolVerification.value = verification.rows?.[0] || null
   showTools.value = true
 }
 
@@ -2067,6 +2177,7 @@ const saveGroupTools = async () => {
   groupTools.value = normalizeGroupTools(data.tools)
   groupToolAudit.value = data.tool_audit || null
   groupAuthorizationReadiness.value = data.authorization_readiness || null
+  groupConnectionPreflight.value = data.connection_preflight || null
   showTools.value = false
   if (data.authorization_readiness && data.authorization_readiness.dispatchReady === false) {
     toast.warning('工具配置已保存，但有授权项当前不可用')
@@ -2253,6 +2364,8 @@ if (activeSelectedTemplate) {
     <GroupChatHeader
       :groups="groups"
       :current-group="currentGroup"
+      :sessions="groupSessions"
+      :current-session-id="currentGroupSessionId"
       :collaboration-protocol="collaborationProtocol"
       :memory-active="hasCompressedMemory()"
       :memory-label="getMemoryCompressionLabel()"
@@ -2260,6 +2373,11 @@ if (activeSelectedTemplate) {
       :memory-title="getMemoryCompressionTitle()"
       :get-member-count-label="getMemberCountLabel"
       @select-group="selectGroup"
+      @select-session="selectGroupSession"
+      @create-session="createGroupSession"
+      @rename-session="renameGroupSession"
+      @archive-session="archiveGroupSession"
+      @delete-session="deleteGroupSession"
       @create-group="showCreate = true"
       @load-tools="loadGroupTools"
       @load-files="loadGroupFiles"
@@ -2283,7 +2401,7 @@ if (activeSelectedTemplate) {
               <span>开始群聊协作</span>
               <span class="sub">创建群聊并添加 Agent 成员</span>
             </div>
-            <div v-else class="messages-flow" :key="currentGroup?.id" style="width: 100%; display: flex; flex-direction: column;">
+            <div v-else class="messages-flow" :key="`${currentGroup?.id}:${currentGroupSessionId}`" style="width: 100%; display: flex; flex-direction: column;">
               <GroupMainAgentStatusCard
                 v-if="hasMainAgentStatusDetail"
                 :status="mainAgentStatus"
@@ -2365,7 +2483,12 @@ if (activeSelectedTemplate) {
           </div>
         </div>
         <!-- 消息锚点导航条 (Codex 风格) -->
-        <MessageNavigator :items="navMessages" @navigate="scrollToMessage" />
+        <MessageNavigator
+          :items="navMessages"
+          :scroll-container="groupMessagesEl"
+          target-id-prefix="gc-msg-"
+          @navigate="scrollToMessage"
+        />
 
         <!-- 等待跨 Agent 回复提示 -->
         <div v-if="waitingCrossReply" style="padding:6px 16px;display:flex;align-items:center;gap:8px;font-size:12px;color:var(--accent-purple);background:rgba(167,139,250,0.05);border-top:1px solid rgba(167,139,250,0.15)">
@@ -2491,6 +2614,8 @@ if (activeSelectedTemplate) {
       :all-tools="groupAllTools"
       :tool-audit="groupToolAudit"
       :authorization-readiness="groupAuthorizationReadiness"
+      :connection-preflight="groupConnectionPreflight"
+      :verification-status="groupToolVerification"
       @close="showTools = false"
       @toggle-tool="toggleGroupTool"
       @save="saveGroupTools"

@@ -241,8 +241,12 @@ export function buildGroupProjectAnalysisContext(
     if (workDir) lines.push(deps.compactPreserveLines(buildProjectCodeReadOnlySnapshot(member.project, workDir, message, deps), 18_000));
   }
   try {
-    const { queryKnowledgeBase } = require("./rag");
-    const rag = queryKnowledgeBase(message, 3);
+    const { queryKnowledgeBase } = require("../knowledge/rag");
+    const projectTags = members.flatMap((member: any) => [
+      `#project:${member.project}`,
+      `#${member.project}`,
+    ]).filter(Boolean);
+    const rag = queryKnowledgeBase(message, 3, projectTags) || queryKnowledgeBase(message, 3);
     if (rag) {
       lines.push("");
       lines.push("## 本地知识库召回");

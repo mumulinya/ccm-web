@@ -1,0 +1,15 @@
+{
+  "pass": true,
+  "checks": {
+    "exactlyTwoPets": true,
+    "actorDetailVisible": true,
+    "v2AtlasVisible": true,
+    "generationJobsVisible": true,
+    "mobileResponsive": true
+  },
+  "screenshots": [
+    "01-two-system-pets-desktop.png",
+    "02-generation-jobs-desktop.png",
+    "03-generation-mobile.png"
+  ]
+}

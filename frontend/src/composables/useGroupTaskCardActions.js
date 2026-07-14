@@ -74,7 +74,7 @@ export function createGroupTaskCardActionHandler(options = {}) {
       }
       if (action.kind === 'view_pipeline' || action.kind === 'view_report') return openPipelineViewer?.(msg)
       if (action.kind === 'view_trace') {
-        openTraceReplay?.({ trace_id: action.trace_id || card?.technical?.trace_id || '', scope: action.scope || 'orchestrator' })
+        openTraceReplay?.({ task_id: action.task_id || card?.task_id || id, trace_id: action.trace_id || card?.technical?.trace_id || '', scope: action.scope || 'orchestrator' })
         return
       }
       if (action.kind === 'cancel') {

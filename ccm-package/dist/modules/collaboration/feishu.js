@@ -39,6 +39,8 @@ exports.getFeishuUserInfo = getFeishuUserInfo;
 exports.getFeishuChatList = getFeishuChatList;
 exports.getValidFeishuToken = getValidFeishuToken;
 exports.sendFeishuMessageToUser = sendFeishuMessageToUser;
+exports.sendFeishuMessageToTarget = sendFeishuMessageToTarget;
+exports.probeFeishuControlBotApi = probeFeishuControlBotApi;
 exports.sendFeishuReportMessage = sendFeishuReportMessage;
 const crypto = __importStar(require("crypto"));
 const db_1 = require("../../core/db");
@@ -63,6 +65,14 @@ async function getFeishuTenantToken(appId, appSecret) {
         console.error("获取飞书 tenant_access_token 失败:", e.message);
         return null;
     }
+}
+async function getControlBotTenantToken() {
+    const config = (0, db_1.loadFeishuConfig)();
+    const appId = String(config.control_bot_app_id || config.app_id || "").trim();
+    const appSecret = String(config.control_bot_app_secret || config.app_secret || "").trim();
+    if (!appId || !appSecret)
+        return null;
+    return getFeishuTenantToken(appId, appSecret);
 }
 async function getFeishuUserToken(appId, appSecret, code) {
     try {
@@ -208,6 +218,58 @@ async function sendFeishuMessageToUser(userId, content, msgType = "interactive")
     catch (e) {
         console.error("[飞书通知] 发送失败:", e.message);
         return false;
+    }
+}
+async function sendFeishuMessageToTarget(options) {
+    const receiveId = String(options.receiveId || "").trim();
+    const receiveIdType = options.receiveIdType || "chat_id";
+    if (!receiveId)
+        return { success: false, error: "缺少飞书接收目标" };
+    if (!["chat_id", "open_id", "user_id"].includes(receiveIdType))
+        return { success: false, error: "飞书接收目标类型无效" };
+    const token = await getControlBotTenantToken();
+    if (!token)
+        return { success: false, error: "无法获取飞书控制机器人 Token" };
+    const title = String(options.title || "任务进度").slice(0, 80);
+    const markdown = String(options.markdown || options.text || "暂无内容").slice(0, 12000);
+    const card = buildFeishuReportCard(title, markdown);
+    try {
+        const response = await fetch(`https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=${encodeURIComponent(receiveIdType)}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ receive_id: receiveId, msg_type: "interactive", content: JSON.stringify(card) }),
+            signal: AbortSignal.timeout(15000),
+        });
+        const result = await response.json();
+        if (response.ok && result.code === 0) {
+            return { success: true, target_type: receiveIdType, target_id: receiveId, message_id: result.data?.message_id || "" };
+        }
+        return { success: false, error: result.msg || `飞书消息接口错误 ${result.code ?? response.status}`, code: result.code ?? response.status };
+    }
+    catch (error) {
+        return { success: false, error: error?.message || "飞书定向消息发送失败" };
+    }
+}
+async function probeFeishuControlBotApi() {
+    const startedAt = Date.now();
+    const token = await getControlBotTenantToken();
+    if (!token)
+        return { success: false, latency_ms: Date.now() - startedAt, error: "无法获取飞书控制机器人 Token" };
+    try {
+        const response = await fetch("https://open.feishu.cn/open-apis/bot/v3/info", {
+            headers: { Authorization: `Bearer ${token}` },
+            signal: AbortSignal.timeout(10000),
+        });
+        const result = await response.json();
+        return {
+            success: response.ok && result.code === 0,
+            latency_ms: Date.now() - startedAt,
+            bot_name: result.bot?.app_name || result.data?.bot?.app_name || "",
+            error: response.ok && result.code === 0 ? "" : result.msg || `飞书探测失败 (${response.status})`,
+        };
+    }
+    catch (error) {
+        return { success: false, latency_ms: Date.now() - startedAt, error: error?.message || "飞书探测失败" };
     }
 }
 function buildFeishuReportCard(title, markdown) {

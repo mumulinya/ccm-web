@@ -1,6 +1,6 @@
 # Agent 运行治理中心 20.0
 
-> 现行行为更新（2026-07-10）：启动恢复已从“所有未完成任务默认人工恢复”升级为风险分层恢复。已经确认并真实入队/开始执行的任务会自动接上；待确认计划、用户暂停、人工接管、运行债务和授权缺失仍保持等待。详见 `docs/main-agent-workchain/2026-07-10-authorization-preserving-startup-recovery-v1.md`。
+> 现行行为更新（2026-07-10）：启动恢复已从“所有未完成任务默认人工恢复”升级为风险分层恢复。已经确认并真实入队/开始执行的任务会自动接上；待确认计划、用户暂停、人工接管、运行债务和授权缺失仍保持等待。详见 `docs/main-agent-workchain/shared-workchain/task-execution/2026-07-10-authorization-preserving-startup-recovery-v1.md`。
 
 目标：让用户能清楚看到“哪个 Agent 正在跑、能不能停、停止后会怎样”，并避免服务启动或健康检查把历史任务悄悄续跑起来。
 

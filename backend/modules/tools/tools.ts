@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
+import { performance } from "perf_hooks";
 import { spawnSync, execSync } from "child_process";
 import {
   sendJson,
@@ -29,6 +30,7 @@ import {
 import { loadGroups } from "../collaboration/storage";
 import { listRecentRuntimeToolAudits, probeRuntimeToolReadiness, resyncMissingRuntimeToolSnapshots, resyncRecentRuntimeToolSnapshots } from "../../tools/runtime-tool-sync";
 import { buildToolAuthorizationInventory, buildToolAuthorizationOptions } from "../../tools/tool-authorization";
+import { getRuntimeToolRealCliMatrixStatus, startRuntimeToolRealCliMatrix } from "../../tools/runtime-tool-real-cli-matrix";
 const { toolManager } = require("../../tools/tool-manager");
 const TOOL_CATALOG_AUDIT_FILE = path.join(os.homedir(), ".cc-connect", "tools", "catalog-operations.jsonl");
 const TOOL_INVOCATION_AUDIT_FILES = {
@@ -40,7 +42,39 @@ const MARKETPLACE_OPERATIONS_AUDIT_FILE = path.join(os.homedir(), ".cc-connect",
 const AGENT_RUNNER_DIR = path.join(os.homedir(), ".cc-connect", "agent-runner");
 const AGENT_PROBE_STATUS_FILE = path.join(AGENT_RUNNER_DIR, "probe-status.json");
 const AGENT_PROBE_TARGET_STATUS_DIR = path.join(AGENT_RUNNER_DIR, "probe-targets");
-const REAL_CLI_PROBE_SUCCESS_FRESH_MS = 30 * 60 * 1000;
+const REAL_CLI_PROBE_SUCCESS_FRESH_MS = 24 * 60 * 60 * 1000;
+let previousMetricsCpuUsage = process.cpuUsage();
+let previousMetricsCpuAt = process.hrtime.bigint();
+let previousEventLoopUtilization = performance.eventLoopUtilization();
+
+function buildLivePerformanceSnapshot() {
+  const now = process.hrtime.bigint();
+  const cpuUsage = process.cpuUsage(previousMetricsCpuUsage);
+  const elapsedMicros = Math.max(1, Number(now - previousMetricsCpuAt) / 1000);
+  const cpuPercent = Math.max(0, Math.min(100, (((cpuUsage.user + cpuUsage.system) / elapsedMicros) * 100) / Math.max(1, os.cpus().length)));
+  const eventLoop = performance.eventLoopUtilization(previousEventLoopUtilization);
+  previousMetricsCpuUsage = process.cpuUsage();
+  previousMetricsCpuAt = now;
+  previousEventLoopUtilization = performance.eventLoopUtilization();
+  const memory = process.memoryUsage();
+  return {
+    collectedAt: new Date().toISOString(),
+    process: {
+      pid: process.pid,
+      uptimeSeconds: Math.round(process.uptime()),
+      cpuPercent: Number(cpuPercent.toFixed(1)),
+      rssBytes: memory.rss,
+      heapUsedBytes: memory.heapUsed,
+      heapTotalBytes: memory.heapTotal,
+      externalBytes: memory.external,
+    },
+    eventLoop: {
+      utilization: Number((Math.max(0, Math.min(1, eventLoop.utilization || 0)) * 100).toFixed(1)),
+      activeMs: Number((eventLoop.active || 0).toFixed(1)),
+      idleMs: Number((eventLoop.idle || 0).toFixed(1)),
+    },
+  };
+}
 
 function appendJsonlBounded(file: string, entry: any) {
   try {
@@ -110,6 +144,27 @@ function readJsonFileSafe(file: string) {
   }
 }
 
+function runtimeAuditTargetKey(audit: any) {
+  const project = cleanAuditText(audit?.projectName || "", 180).toLowerCase();
+  const group = cleanAuditText(audit?.groupId || "", 180).toLowerCase();
+  if (group && project) return `group:${group}:${project}`;
+  if (project) return `project:${project}`;
+  return `snapshot:${cleanAuditText(audit?.runtime || "", 80)}:${cleanAuditText(audit?.snapshotId || audit?.mcpConfigPath || "", 180)}`;
+}
+
+function selectLatestRuntimeToolAudits(audits: any[]) {
+  const seen = new Set<string>();
+  return audits
+    .slice()
+    .sort((left, right) => String(right?.timestamp || right?.generatedAt || "").localeCompare(String(left?.timestamp || left?.generatedAt || "")))
+    .filter((audit: any) => {
+      const key = runtimeAuditTargetKey(audit);
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
 function scopeSummary(scope: any = {}) {
   return {
     mcp: Array.isArray(scope?.mcp) ? scope.mcp.length : 0,
@@ -143,12 +198,13 @@ function sanitizeToolInvocationAuditEntry(entry: any, source: "tool_loop" | "ski
     invocationSource: cleanAuditText(context.invocationSource, 120),
   };
   if (source === "skill_invocation") {
+    const invoked = entry?.type === "skill_invoked";
     return {
       ...common,
       category: entry?.type === "skill_unauthorized" ? "unauthorized" : "skill",
       skill: cleanAuditText(entry?.skill || "", 180),
       contentHash: cleanAuditText(entry?.contentHash || "", 80),
-      ok: entry?.type !== "skill_unauthorized" && entry?.ok !== false,
+      ok: invoked && entry?.ok !== false,
       inputBytes: safeAuditNumber(entry?.inputBytes),
       scope: scopeSummary(entry?.scope || {}),
     };
@@ -265,6 +321,7 @@ function chainVerificationStatus(row: any, invocationSummary: any) {
   if (Number(runtimeSummary.needsResync || 0) > 0) return "runtime_needs_resync";
   if (Number(invocationSummary.unauthorized || 0) > 0) return "unauthorized_attempts";
   if (Number(invocationSummary.totalObserved || 0) === 0) return "ready_not_observed";
+  if (invocationSummary.evidenceComplete !== true) return "verification_incomplete";
   return "verified";
 }
 
@@ -276,7 +333,8 @@ function chainVerificationStatusLabel(status: string) {
     runtime_needs_resync: "运行时需重同步",
     unauthorized_attempts: "存在越权尝试",
     ready_not_observed: "就绪但未观察到调用",
-    verified: "已观察到调用",
+    verification_incomplete: "调用验证未通过",
+    verified: "已验证可用",
   };
   return labels[status] || status || "unknown";
 }
@@ -296,19 +354,35 @@ function buildScopeInvocationEvidence(row: any, auditItems: any[]) {
   const skillItems = items.filter(item => item.category === "skill");
   const authorizedSkillItems = skillItems.filter(item => grantedSkills.has(cleanAuditText(item.skill).toLowerCase()));
   const toolItems = items.filter(item => item.category === "tool");
+  const successfulToolItems = toolItems.filter(item => item.ok === true);
+  const successfulSkillItems = authorizedSkillItems.filter(item => item.ok === true);
   const unauthorizedItems = items.filter(item => item.category === "unauthorized");
   const loopItems = items.filter(item => item.type === "tool_loop_finished");
+  const requiresMcp = Number(row?.counts?.mcp || 0) > 0;
+  const requiresSkill = Number(row?.counts?.skill || 0) > 0;
+  const mcpVerified = !requiresMcp || successfulToolItems.length > 0;
+  const skillVerified = !requiresSkill || successfulSkillItems.length > 0;
   return {
     summary: {
       totalObserved: toolItems.length + skillItems.length,
       toolCalls: toolItems.length,
-      successfulToolCalls: toolItems.filter(item => item.ok === true).length,
+      successfulToolCalls: successfulToolItems.length,
       failedToolCalls: toolItems.filter(item => item.ok === false).length,
       skillInvocations: skillItems.length,
       authorizedSkillInvocations: authorizedSkillItems.length,
+      successfulSkillInvocations: successfulSkillItems.length,
       unauthorized: unauthorizedItems.length,
       loopsFinished: loopItems.length,
       lastObservedAt: items[0]?.at || "",
+      requiresMcp,
+      requiresSkill,
+      mcpVerified,
+      skillVerified,
+      evidenceComplete: mcpVerified && skillVerified,
+      missingEvidence: [
+        ...(!mcpVerified ? ["mcp_success"] : []),
+        ...(!skillVerified ? ["skill_success"] : []),
+      ],
     },
     recent: items.slice(0, 8),
   };
@@ -377,6 +451,15 @@ function buildChainVerificationNextActions(row: any, status: string) {
     actions.push({ ...base, kind: "open_runtime", label: "查看运行时" });
     return actions;
   }
+  if (status === "verification_incomplete") {
+    actions.push({
+      ...base,
+      kind: "open_scope_real_task",
+      label: row?.scope === "group" ? "前往群聊执行真实任务" : "前往项目执行真实任务",
+    });
+    actions.push({ ...base, kind: "open_invocation_audit", label: "查看失败记录", filters: buildChainVerificationAuditFilter(row) });
+    return actions;
+  }
   actions.push({ ...base, kind: "open_invocation_audit", label: "查看审计", filters: buildChainVerificationAuditFilter(row) });
   return actions;
 }
@@ -413,7 +496,7 @@ function compactChainVerificationScope(row: any) {
 function buildChainVerificationGate(rows: any[]) {
   const configuredRows = rows.filter(chainVerificationRowIsConfigured);
   const blockingRows = configuredRows.filter(row => CHAIN_VERIFICATION_BLOCKING_STATUSES.has(row.status));
-  const pendingObservationRows = configuredRows.filter(row => row.status === "ready_not_observed");
+  const pendingObservationRows = configuredRows.filter(row => ["ready_not_observed", "verification_incomplete"].includes(row.status));
   const verifiedRows = configuredRows.filter(row => row.status === "verified");
   const status = configuredRows.length === 0
     ? "not_configured"
@@ -532,6 +615,7 @@ function buildToolChainVerification(input: any = {}) {
       configuredScopes: rows.filter((row: any) => Number(row.counts?.mcp || 0) + Number(row.counts?.skill || 0) > 0).length,
       verified: Number(statusCounts.verified || 0),
       readyNotObserved: Number(statusCounts.ready_not_observed || 0),
+      verificationIncomplete: Number(statusCounts.verification_incomplete || 0),
       needsAttention: rows.filter((row: any) => ["authorization_blocked", "runtime_missing", "runtime_needs_resync", "unauthorized_attempts"].includes(row.status)).length,
       authorizationBlocked: Number(statusCounts.authorization_blocked || 0),
       runtimeMissing: Number(statusCounts.runtime_missing || 0),
@@ -586,6 +670,7 @@ function buildRuntimeGoalEvidence(chain: any = {}) {
     configuredScopes: Number(summary.configuredScopes || 0),
     verifiedScopes: Number(summary.verified || 0),
     readyNotObserved: Number(summary.readyNotObserved || 0),
+    verificationIncomplete: Number(summary.verificationIncomplete || 0),
     needsAttention: Number(summary.needsAttention || 0),
     authorizationBlocked: Number(summary.authorizationBlocked || 0),
     runtimeMissing: Number(summary.runtimeMissing || 0),
@@ -643,6 +728,10 @@ function listRealCliProbeStatusInputs(input: any = {}) {
   if (single) return [{ probe: single, sourceFile: "", source: "input" }];
 
   const entries: any[] = [];
+  const matrix = getRuntimeToolRealCliMatrixStatus();
+  if (matrix?.schema === "ccm-runtime-tool-real-cli-matrix-v1" && Array.isArray(matrix.results)) {
+    for (const probe of matrix.results) entries.push({ probe, sourceFile: "runtime-tool-real-cli-matrix.json", source: "runtime_tool_real_cli_matrix" });
+  }
   const latest = readJsonFileSafe(AGENT_PROBE_STATUS_FILE);
   if (latest) entries.push({ probe: latest, sourceFile: path.basename(AGENT_PROBE_STATUS_FILE), source: "persisted_agent_probe" });
   try {
@@ -666,7 +755,12 @@ function normalizeRealCliProbeStatus(entry: any) {
   const checkedAt = cleanAuditText(probe.checked_at || probe.checkedAt || probe.at || "", 80);
   const checkedAtMs = checkedAt ? Date.parse(checkedAt) : NaN;
   const ageMs = Number.isFinite(checkedAtMs) ? Math.max(0, Date.now() - checkedAtMs) : null;
-  const success = probe.success === true;
+  const nativeToolEvidence = probe.schema === "ccm-runtime-tool-real-cli-e2e-v1"
+    && probe.mcpInvocationObserved === true
+    && probe.skillInvocationObserved === true
+    && probe.snapshotValidated === true
+    && probe.versionMatches !== false;
+  const success = probe.success === true && nativeToolEvidence;
   const fresh = success && ageMs !== null && ageMs <= REAL_CLI_PROBE_SUCCESS_FRESH_MS;
   const expectedMarker = cleanAuditText(probe.expected_marker || probe.expectedMarker || "", 120);
   return {
@@ -682,6 +776,10 @@ function normalizeRealCliProbeStatus(entry: any) {
     executionPath: cleanAuditText(probe.execution_path || probe.executionPath || "", 120),
     expectedMarker,
     markerObserved: expectedMarker ? String(probe.output_preview || probe.outputPreview || "").includes(expectedMarker) : null,
+    nativeToolEvidence,
+    mcpInvocationObserved: probe.mcpInvocationObserved === true,
+    skillInvocationObserved: probe.skillInvocationObserved === true,
+    snapshotValidated: probe.snapshotValidated === true,
     durationMs: safeAuditNumber(probe.duration_ms || probe.durationMs),
   };
 }
@@ -794,7 +892,7 @@ function buildMcpSkillGoalCompletionAudit(input: any = {}) {
       runtime.verifiedScopes > 0 && runtime.verifiedScopes === runtime.configuredScopes ? "proven" : (runtime.observedInvocations > 0 ? "partial" : "missing"),
       { verifiedScopes: runtime.verifiedScopes, configuredScopes: runtime.configuredScopes, observedInvocations: runtime.observedInvocations, readyNotObserved: runtime.readyNotObserved },
       runtime.verifiedScopes === runtime.configuredScopes && runtime.configuredScopes > 0 ? [] : [{ id: "observation_gap", detail: "Not every configured scope has observed authorized MCP/Skill invocation evidence" }],
-      [{ kind: "run_child_agent_e2e", label: "Run real child-agent MCP/Skill invocation E2E" }],
+      [{ kind: "run_scope_real_tasks", label: "Run real tool-using tasks in each pending project or group" }],
     ),
     goalRequirement(
       "unauthorized_use_blocked",
@@ -893,6 +991,36 @@ export function runToolChainVerificationSelfTest() {
         project: "Alpha App",
         tool: "payments/createInvoice",
         ok: true,
+      }, {
+        at: "2026-07-07T00:00:01.000Z",
+        category: "skill",
+        type: "skill_invoked",
+        project: "Alpha App",
+        skill: "release-notes",
+        ok: true,
+      }],
+    },
+  });
+
+  const failedInvocationReport = buildToolChainVerification({
+    inventory: {
+      scopes: [buildToolChainVerificationSelfTestRow({ id: "project-failed", name: "Failed App" })],
+    },
+    invocationAudit: {
+      items: [{
+        at: "2026-07-07T00:00:00.000Z",
+        category: "tool",
+        type: "tool_call",
+        project: "Failed App",
+        tool: "payments/createInvoice",
+        ok: false,
+      }, {
+        at: "2026-07-07T00:00:01.000Z",
+        category: "skill",
+        type: "skill_missing",
+        project: "Failed App",
+        skill: "release-notes",
+        ok: false,
       }],
     },
   });
@@ -975,6 +1103,7 @@ export function runToolChainVerificationSelfTest() {
   const freshProbeCheckedAt = new Date().toISOString();
   const staleProbeCheckedAt = new Date(Date.now() - REAL_CLI_PROBE_SUCCESS_FRESH_MS - 1000).toISOString();
   const buildRealCliProbe = (runtime: string, checkedAt: string, success = true) => ({
+    schema: "ccm-runtime-tool-real-cli-e2e-v1",
     success,
     checked_at: checkedAt,
     target: {
@@ -986,6 +1115,9 @@ export function runToolChainVerificationSelfTest() {
     expected_marker: "CCM_AGENT_PROBE_OK",
     output_preview: success ? "CCM_AGENT_PROBE_OK" : "probe failed",
     duration_ms: 123,
+    mcpInvocationObserved: success,
+    skillInvocationObserved: success,
+    snapshotValidated: success,
   });
   const completionReadyAudit = buildMcpSkillGoalCompletionAudit({
     chainVerification: verifiedReport,
@@ -1031,6 +1163,19 @@ export function runToolChainVerificationSelfTest() {
       && readyUnverifiedReport.gate.verified === false
       && readyUnverifiedReport.gate.requiresObservation === true
       && readyUnverifiedReport.gate.counts.pendingObservationScopes === 1,
+    failedInvocationDoesNotVerifyScope: failedInvocationReport.gate.status === "ready_unverified"
+      && failedInvocationReport.gate.verified === false
+      && failedInvocationReport.rows[0]?.status === "verification_incomplete"
+      && failedInvocationReport.rows[0]?.invocation?.summary?.evidenceComplete === false
+      && failedInvocationReport.rows[0]?.invocation?.summary?.missingEvidence?.includes("mcp_success")
+      && failedInvocationReport.rows[0]?.invocation?.summary?.missingEvidence?.includes("skill_success"),
+    incompleteScopeRoutesToRealBusinessTask: failedInvocationReport.rows[0]?.nextActions?.some((action: any) => (
+      action.kind === "open_scope_real_task"
+      && action.scope === "project"
+      && action.scopeId === "project-failed"
+      && action.label === "前往项目执行真实任务"
+    )) === true
+      && failedInvocationReport.rows[0]?.nextActions?.every((action: any) => action.kind !== "run_child_agent_e2e") === true,
     blockedGateBlocksDispatch: blockedReport.gate.status === "blocked"
       && blockedReport.gate.dispatchReady === false
       && blockedReport.gate.counts.blockingScopes === 4
@@ -1048,7 +1193,8 @@ export function runToolChainVerificationSelfTest() {
       && filteredGroupReport.rows[0]?.id === "group-1"
       && filteredGroupReport.gate.counts.configuredScopes === 1
       && filteredGroupReport.gate.status === "blocked",
-    projectAliasInvocationEvidence: verifiedReport.rows[0]?.invocation?.summary?.totalObserved === 1,
+    projectAliasInvocationEvidence: verifiedReport.rows[0]?.invocation?.summary?.totalObserved === 2
+      && verifiedReport.rows[0]?.invocation?.summary?.evidenceComplete === true,
     completionAuditCanReachCompleteWithFullEvidence: completionReadyAudit.schema === "ccm-mcp-skill-goal-completion-audit-v1"
       && completionReadyAudit.complete === true
       && completionReadyAudit.status === "complete"
@@ -1295,11 +1441,15 @@ export function handleToolsAndMetricsApi(pathname: string, req: any, res: any, p
 
   if (pathname === "/api/tools/runtime-readiness" && req.method === "GET") {
     const deep = ["1", "true", "yes"].includes(String(parsed?.query?.deep || "").toLowerCase());
-    const audits = listRecentRuntimeToolAudits(40);
+    const includeHistory = ["1", "true", "yes"].includes(String(parsed?.query?.history || "").toLowerCase());
+    const historicalAudits = listRecentRuntimeToolAudits(80);
+    const audits = includeHistory ? historicalAudits : selectLatestRuntimeToolAudits(historicalAudits);
     const readiness = audits.map(audit => probeRuntimeToolReadiness(audit, { deep }));
     sendJson(res, {
       success: true,
       deep,
+      includeHistory,
+      historicalTotal: historicalAudits.length,
       readiness,
       summary: {
         total: readiness.length,
@@ -1307,6 +1457,26 @@ export function handleToolsAndMetricsApi(pathname: string, req: any, res: any, p
         deliveryReady: readiness.filter(item => item.deliveryReady).length,
         runtimeReady: readiness.filter(item => item.runtimeReady).length,
       },
+    });
+    return true;
+  }
+
+  if (pathname === "/api/tools/runtime-real-cli-matrix" && req.method === "GET") {
+    sendJson(res, { success: true, ...getRuntimeToolRealCliMatrixStatus() });
+    return true;
+  }
+
+  if (pathname === "/api/tools/runtime-real-cli-matrix" && req.method === "POST") {
+    let body = "";
+    req.on("data", (chunk) => body += chunk);
+    req.on("end", () => {
+      try {
+        const payload = body ? JSON.parse(body) : {};
+        const started = startRuntimeToolRealCliMatrix(payload);
+        sendJson(res, { success: true, ...started }, started.accepted ? 202 : 200);
+      } catch (e: any) {
+        sendJson(res, { success: false, error: e.message }, 400);
+      }
     });
     return true;
   }
@@ -1479,12 +1649,39 @@ export function handleToolsAndMetricsApi(pathname: string, req: any, res: any, p
 
   // === 性能监控指标 ===
   if (pathname === "/api/metrics" && req.method === "GET") {
-    sendJson(res, loadMetrics());
+    const metrics = loadMetrics();
+    const groups = loadGroups().map((group: any) => {
+      const members = Array.isArray(group.members) ? group.members : [];
+      const coordinator = members.find((member: any) => member.role === "coordinator") || members[0] || {};
+      return {
+        id: String(group.id || ""),
+        name: String(group.name || group.id || "未命名群聊"),
+        coordinator: String(coordinator.project || "coordinator"),
+        members: members.map((member: any) => ({
+          project: String(member.project || ""),
+          role: String(member.role || (member.project === coordinator.project ? "coordinator" : "member")),
+        })).filter((member: any) => member.project),
+      };
+    });
+    sendJson(res, {
+      metrics,
+      catalog: {
+        groups,
+        legacyUnscoped: {
+          agentCount: Object.keys(metrics.agents || {}).length,
+          latestAt: Object.values(metrics.agents || {}).reduce((latest: string, item: any) => {
+            const at = String(item?.lastCall || "");
+            return at > latest ? at : latest;
+          }, ""),
+        },
+      },
+      system: buildLivePerformanceSnapshot(),
+    });
     return true;
   }
 
   if (pathname === "/api/metrics/reset" && req.method === "POST") {
-    saveMetrics({ agents: {}, daily: {} });
+    saveMetrics({ version: 2, agents: {}, daily: {}, scopes: {}, events: [], updatedAt: null });
     sendJson(res, { success: true });
     return true;
   }

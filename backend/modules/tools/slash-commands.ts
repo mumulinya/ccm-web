@@ -5,6 +5,7 @@ import { loadSkills } from "../../core/db";
 
 export type SlashCommandScope = "global" | "project" | "group";
 type SlashRisk = "safe" | "guarded" | "high";
+type SlashImplementation = "local-query" | "local-mutation" | "client" | "navigation" | "agent-workflow";
 
 type SlashCommand = {
   name: string;
@@ -17,6 +18,8 @@ type SlashCommand = {
   requiresArgs?: boolean;
   risk?: SlashRisk;
   hidden?: boolean;
+  requiresContext?: boolean;
+  implementation?: SlashImplementation;
   keywords?: string[];
   source?: "builtin" | "ccm" | "custom" | "skill";
   action: {
@@ -35,8 +38,8 @@ const CUSTOM_COMMANDS_FILE = path.join(CCM_DIR, "configs", "slash-commands.json"
 const AUDIT_FILE = path.join(CCM_DIR, "logs", "slash-command-audit.jsonl");
 
 const COMMANDS: SlashCommand[] = [
-  { name: "help", aliases: ["commands", "?", "帮助"], description: "查看当前入口可用的命令和使用方式", category: "基础", icon: "⌘", scopes: ["global", "project", "group"], risk: "safe", source: "builtin", action: { type: "prompt", prompt: "请结合当前上下文，简要说明我现在可以让你做什么，以及最适合使用的 CCM 斜杠命令。" } },
-  { name: "status", aliases: ["状态"], description: "检查当前 Agent、会话或协作任务状态", category: "基础", icon: "◉", scopes: ["global", "project", "group"], risk: "safe", source: "builtin", action: { type: "prompt", prompt: "请读取真实状态并汇报当前上下文的运行状态、正在执行的工作、阻塞项和下一步；不要仅凭对话猜测。" } },
+  { name: "help", aliases: ["commands", "?", "帮助"], description: "列出当前入口全部可用命令和执行方式", category: "基础", icon: "⌘", scopes: ["global", "project", "group"], risk: "safe", source: "builtin", action: { type: "client", clientAction: "command_inventory" } },
+  { name: "status", aliases: ["状态"], description: "查看当前会话、选择对象和消息状态", category: "基础", icon: "◉", scopes: ["global", "project", "group"], risk: "safe", source: "builtin", action: { type: "client", clientAction: "status" } },
   { name: "plan", aliases: ["规划"], description: "先分析需求并给出可执行计划，不立即修改", category: "开发", icon: "◇", scopes: ["global", "project", "group"], argumentHint: "<目标>", requiresArgs: true, risk: "safe", source: "builtin", action: { type: "prompt", prompt: "请先分析并制定可执行计划，暂时不要修改项目。目标：$ARGS" } },
   { name: "review", aliases: ["审查"], description: "审查代码或当前交付，给出证据和风险", category: "开发", icon: "⌕", scopes: ["project", "group"], argumentHint: "[文件或范围]", risk: "safe", source: "builtin", action: { type: "prompt", prompt: "请对当前项目交付做严格审查，范围：$ARGS。请给出证据、风险等级和可操作建议，不要直接修改。" } },
   { name: "verify", aliases: ["test", "验证"], description: "运行适合当前项目的真实验证并汇报证据", category: "开发", icon: "✓", scopes: ["project", "group"], argumentHint: "[验证范围]", risk: "guarded", source: "ccm", action: { type: "prompt", prompt: "请针对当前项目执行真实验证，范围：$ARGS。记录实际运行的命令、输出摘要、失败原因和仍需人工确认的风险。" } },
@@ -45,9 +48,18 @@ const COMMANDS: SlashCommand[] = [
   { name: "tasks", aliases: ["任务"], description: "打开任务中心查看执行状态和结果说明", category: "导航", icon: "☷", scopes: ["global", "project", "group"], risk: "safe", source: "ccm", action: { type: "navigate", tab: "tasks" } },
   { name: "memory", aliases: ["记忆"], description: "打开记忆控制中心", category: "导航", icon: "◈", scopes: ["global", "project", "group"], risk: "safe", source: "ccm", action: { type: "navigate", tab: "memory-center" } },
   { name: "quality", aliases: ["metrics", "质量"], description: "打开 Agent 质量与评测指标", category: "导航", icon: "◒", scopes: ["global", "group"], risk: "safe", source: "ccm", action: { type: "navigate", tab: "metrics" } },
-  { name: "doctor", aliases: ["health", "诊断"], description: "打开系统诊断与稳定性检查", category: "导航", icon: "✚", scopes: ["global", "project", "group"], risk: "safe", source: "ccm", action: { type: "navigate", tab: "diagnostics" } },
-  { name: "templates", aliases: ["模板"], description: "打开对话模板中心", category: "导航", icon: "▤", scopes: ["global", "project", "group"], risk: "safe", source: "ccm", action: { type: "navigate", tab: "templates" } },
+  { name: "doctor", aliases: ["health", "诊断"], description: "读取系统就绪状态和故障详情", category: "运维", icon: "✚", scopes: ["global", "project", "group"], risk: "safe", source: "ccm", action: { type: "query", endpoint: "/api/orchestrator/diagnostics" } },
   { name: "tools", aliases: ["工具"], description: "打开 MCP、Skill 与工具配置", category: "导航", icon: "⚙", scopes: ["global", "project"], risk: "safe", source: "ccm", action: { type: "navigate", tab: "tools" } },
+  { name: "dashboard", aliases: ["workbench", "工作台"], description: "打开我的工作台", category: "导航", icon: "⌂", scopes: ["global", "project", "group"], risk: "safe", source: "ccm", action: { type: "navigate", tab: "dashboard" } },
+  { name: "config", aliases: ["配置"], description: "打开系统设置和 Agent 配置", category: "导航", icon: "⚙", scopes: ["global", "project", "group"], risk: "safe", source: "builtin", action: { type: "navigate", tab: "settings" } },
+  { name: "settings", aliases: ["设置"], description: "打开系统设置", category: "导航", icon: "⚙", scopes: ["global", "project", "group"], risk: "safe", source: "ccm", action: { type: "navigate", tab: "settings" } },
+  { name: "search", aliases: ["对话搜索"], description: "打开跨会话搜索", category: "导航", icon: "⌕", scopes: ["global", "project", "group"], risk: "safe", source: "ccm", action: { type: "navigate", tab: "search" } },
+  { name: "replay", aliases: ["任务回放"], description: "打开任务全过程回放", category: "导航", icon: "↻", scopes: ["global", "project", "group"], risk: "safe", source: "ccm", action: { type: "navigate", tab: "trace-replay" } },
+  { name: "changes", aliases: ["代码变更"], description: "打开逐行代码变更页面", category: "导航", icon: "±", scopes: ["global", "project", "group"], risk: "safe", source: "ccm", action: { type: "navigate", tab: "changes" } },
+  { name: "terminal", aliases: ["终端"], description: "打开内置终端", category: "导航", icon: ">_", scopes: ["global", "project"], risk: "safe", source: "ccm", action: { type: "navigate", tab: "terminal" } },
+  { name: "cleanup", aliases: ["清理中心"], description: "打开受控清理中心", category: "导航", icon: "⌫", scopes: ["global", "project"], risk: "safe", source: "ccm", action: { type: "navigate", tab: "cleanup-center" } },
+  { name: "autodev", aliases: ["自动开发"], description: "打开自动开发工作流", category: "导航", icon: "▶", scopes: ["global", "project", "group"], risk: "safe", source: "ccm", action: { type: "navigate", tab: "autodev" } },
+  { name: "music", aliases: ["音乐"], description: "打开音乐 Agent", category: "导航", icon: "♪", scopes: ["global", "project", "group"], risk: "safe", source: "ccm", action: { type: "navigate", tab: "music" } },
   { name: "compact", aliases: ["压缩"], description: "检查并压缩当前作用域记忆，保留事实与决策", category: "记忆", icon: "⇲", scopes: ["global", "project", "group"], risk: "guarded", source: "ccm", action: { type: "prompt", prompt: "请检查当前上下文的记忆占用；仅在达到压缩条件时执行记忆压缩，并保留目标、事实、决策、未完成任务和证据引用。完成后汇报压缩前后变化。" } },
   { name: "remember", aliases: ["记住"], description: "把明确事实或偏好写入正确的记忆作用域", category: "记忆", icon: "+", scopes: ["global", "project", "group"], argumentHint: "<要记住的内容>", requiresArgs: true, risk: "guarded", source: "ccm", action: { type: "prompt", prompt: "请判断以下内容应属于全局、项目还是群聊记忆，说明作用域后写入；若含临时信息或敏感信息则不要长期保存：$ARGS" } },
   { name: "resume", aliases: ["continue", "续跑"], description: "从可靠的原生会话或任务检查点继续", category: "执行", icon: "▶", scopes: ["project", "group"], argumentHint: "[任务ID或说明]", risk: "guarded", source: "ccm", action: { type: "prompt", prompt: "请从当前上下文中查找可靠的原生会话、任务结果说明或检查点，并继续未完成工作：$ARGS。禁止无依据地宣称恢复成功。" } },
@@ -57,9 +69,15 @@ const COMMANDS: SlashCommand[] = [
   { name: "recover", aliases: ["恢复"], description: "诊断阻塞任务并按证据执行恢复", category: "治理", icon: "⟳", scopes: ["global", "project", "group"], argumentHint: "[任务ID或范围]", risk: "guarded", source: "ccm", action: { type: "prompt", prompt: "请诊断并恢复指定范围：$ARGS。先读取 Trace、结果说明和检查点，区分业务失败与基础设施失败，再选择原会话恢复、切换执行器或按缺口返工。" } },
   { name: "project-start", aliases: ["启动项目"], description: "请求启动指定项目（需经过确认）", category: "项目操作", icon: "▶", scopes: ["global"], argumentHint: "<项目名>", requiresArgs: true, risk: "high", source: "ccm", action: { type: "prompt", prompt: "请启动项目 $ARGS。执行前必须核对项目身份、启动命令、当前运行状态，并走现有高风险确认流程。" } },
   { name: "project-stop", aliases: ["停止项目"], description: "请求停止指定项目（需经过确认）", category: "项目操作", icon: "■", scopes: ["global"], argumentHint: "<项目名>", requiresArgs: true, risk: "high", source: "ccm", action: { type: "prompt", prompt: "请停止项目 $ARGS。执行前必须核对项目身份与进程归属，并走现有高风险确认流程，不得按模糊名称误停其他进程。" } },
-  { name: "new", aliases: ["new-session", "新会话"], description: "新建当前 Agent 会话", category: "会话", icon: "+", scopes: ["global", "project"], risk: "safe", source: "ccm", action: { type: "client", clientAction: "new_session" } },
-  { name: "clear", aliases: ["清空会话"], description: "清空当前会话消息（需确认）", category: "会话", icon: "⌫", scopes: ["global", "project"], risk: "high", source: "ccm", action: { type: "client", clientAction: "clear_session" } },
-  { name: "context", aliases: ["上下文"], description: "查看当前会话上下文和消息占用", category: "会话", icon: "◎", scopes: ["global", "project", "group"], risk: "safe", source: "ccm", action: { type: "client", clientAction: "context" } },
+  { name: "new", aliases: ["new-session", "新会话"], description: "新建当前 Agent 会话", category: "会话", icon: "+", scopes: ["global", "project", "group"], requiresContext: true, risk: "safe", source: "ccm", action: { type: "client", clientAction: "new_session" } },
+  { name: "clear", aliases: ["清空会话"], description: "清空当前会话消息（需确认）", category: "会话", icon: "⌫", scopes: ["global", "project", "group"], requiresContext: true, risk: "high", source: "ccm", action: { type: "client", clientAction: "clear_session" } },
+  { name: "context", aliases: ["上下文"], description: "查看当前会话上下文和消息占用", category: "会话", icon: "◎", scopes: ["global", "project", "group"], requiresContext: true, risk: "safe", source: "ccm", action: { type: "client", clientAction: "context" } },
+  { name: "sessions", aliases: ["session", "会话列表"], description: "列出当前入口的真实会话", category: "会话", icon: "☷", scopes: ["global", "project", "group"], requiresContext: true, risk: "safe", source: "builtin", action: { type: "client", clientAction: "list_sessions" } },
+  { name: "rename", aliases: ["重命名会话"], description: "重命名当前会话", category: "会话", icon: "✎", scopes: ["global", "project", "group"], argumentHint: "<新名称>", requiresArgs: true, requiresContext: true, risk: "guarded", source: "builtin", action: { type: "client", clientAction: "rename_session" } },
+  { name: "copy", aliases: ["复制回复"], description: "复制最近一条 Agent 可见回复", category: "会话", icon: "⧉", scopes: ["global", "project", "group"], requiresContext: true, risk: "safe", source: "builtin", action: { type: "client", clientAction: "copy_last_response" } },
+  { name: "usage", aliases: ["用量"], description: "统计当前会话消息和估算上下文占用", category: "会话", icon: "◔", scopes: ["global", "project", "group"], requiresContext: true, risk: "safe", source: "builtin", action: { type: "client", clientAction: "usage_stats" } },
+  { name: "stats", aliases: ["统计"], description: "查看当前会话角色、附件和内容统计", category: "会话", icon: "▥", scopes: ["global", "project", "group"], requiresContext: true, risk: "safe", source: "builtin", action: { type: "client", clientAction: "usage_stats" } },
+  { name: "theme", aliases: ["主题"], description: "查看或切换 light/dark 主题", category: "界面", icon: "◐", scopes: ["global", "project", "group"], argumentHint: "[light|dark]", risk: "safe", source: "builtin", action: { type: "client", clientAction: "theme" } },
   { name: "diff", aliases: ["changes", "变更"], description: "直接读取当前项目 Git 文件变更", category: "开发现场", icon: "±", scopes: ["project"], risk: "safe", source: "ccm", action: { type: "query", endpoint: "/api/git/status?project=$PROJECT" } },
   { name: "trace", aliases: ["链路"], description: "直接读取指定执行 Trace", category: "任务追踪", icon: "⌁", scopes: ["global", "project", "group"], argumentHint: "<Trace ID>", requiresArgs: true, risk: "safe", source: "ccm", action: { type: "query", endpoint: "/api/reliability/traces?id=$ARGS" } },
   { name: "task", aliases: ["任务详情"], description: "直接读取任务状态、结果说明和验收结论", category: "任务追踪", icon: "☑", scopes: ["global", "project", "group"], argumentHint: "<任务 ID>", requiresArgs: true, risk: "safe", source: "ccm", action: { type: "query", endpoint: "/api/tasks" } },
@@ -73,7 +91,14 @@ const COMMANDS: SlashCommand[] = [
   { name: "soak", aliases: ["稳定性"], description: "读取 24 小时稳定性运行状态和报告", category: "运维", icon: "≈", scopes: ["global", "group"], risk: "safe", source: "ccm", action: { type: "query", endpoint: "/api/reliability/soak/status" } },
   { name: "permissions", aliases: ["权限"], description: "读取全局 Agent 能力与授权边界", category: "治理", icon: "⚿", scopes: ["global", "project", "group"], risk: "safe", source: "ccm", action: { type: "query", endpoint: "/api/global-agent/capabilities" } },
   { name: "model", aliases: ["模型"], description: "读取可用模型执行器及原生续跑能力", category: "执行", icon: "◇", scopes: ["global", "project", "group"], risk: "safe", source: "ccm", action: { type: "query", endpoint: "/api/orchestrator/resilience" } },
-  { name: "export", aliases: ["导出"], description: "导出当前会话或群聊上下文为 JSON", category: "会话", icon: "⇩", scopes: ["global", "project", "group"], risk: "safe", source: "ccm", action: { type: "client", clientAction: "export_context" } },
+  { name: "mcp", aliases: ["MCP服务"], description: "直接读取已配置的 MCP 服务", category: "工具", icon: "◇", scopes: ["global", "project", "group"], risk: "safe", source: "builtin", action: { type: "query", endpoint: "/api/mcp" } },
+  { name: "skills", aliases: ["技能"], description: "直接读取已安装的 Skill", category: "工具", icon: "✦", scopes: ["global", "project", "group"], risk: "safe", source: "builtin", action: { type: "query", endpoint: "/api/skills" } },
+  { name: "hooks", aliases: ["钩子"], description: "直接读取全局 Agent 运行时钩子", category: "治理", icon: "⌁", scopes: ["global", "project", "group"], risk: "safe", source: "builtin", action: { type: "query", endpoint: "/api/global-agent/runtime/hooks" } },
+  { name: "branch", aliases: ["分支"], description: "直接读取当前项目 Git 分支和变更数", category: "开发现场", icon: "⑂", scopes: ["project"], risk: "safe", source: "builtin", action: { type: "query", endpoint: "/api/git/status?project=$PROJECT" } },
+  { name: "history", aliases: ["git-log", "提交历史"], description: "直接读取当前项目 Git 提交历史", category: "开发现场", icon: "≡", scopes: ["project"], risk: "safe", source: "builtin", action: { type: "query", endpoint: "/api/git/log?project=$PROJECT&limit=30" } },
+  { name: "commit", aliases: ["提交代码"], description: "提交当前项目全部变更（需确认）", category: "开发现场", icon: "✓", scopes: ["project"], argumentHint: "<提交说明>", requiresArgs: true, risk: "high", source: "builtin", action: { type: "mutation", endpoint: "/api/git/commit", method: "POST", body: { project: "$PROJECT", message: "$ARGS" } } },
+  { name: "security-review", aliases: ["安全审查"], description: "让项目 Agent 执行真实安全审查并给出证据", category: "开发", icon: "⚿", scopes: ["project", "group"], argumentHint: "[范围]", risk: "guarded", source: "builtin", action: { type: "prompt", prompt: "请对当前项目执行安全审查，范围：$ARGS。检查依赖、密钥泄露、输入验证、权限边界和高风险代码路径，运行可用的真实检查，并把证据与修复建议分级汇报；不要在未经确认时修改。" } },
+  { name: "export", aliases: ["导出"], description: "导出当前会话或群聊上下文为 JSON", category: "会话", icon: "⇩", scopes: ["global", "project", "group"], requiresContext: true, risk: "safe", source: "ccm", action: { type: "client", clientAction: "export_context" } },
 ];
 
 function normalizeScope(value: any): SlashCommandScope {
@@ -181,9 +206,18 @@ function commandAvailability(command: SlashCommand, scope: SlashCommandScope, co
   const endpoint = command.action.endpoint || command.action.endpointByScope?.[scope] || "";
   if (scope === "project" && endpoint.includes("$PROJECT") && !String(context.project || "").trim()) return { enabled: false, reason: "请先选择项目" };
   if (scope === "group" && endpoint.includes("$GROUP_ID") && !String(context.groupId || "").trim()) return { enabled: false, reason: "请先选择群聊" };
-  if (scope === "project" && command.action.type === "client" && !String(context.project || "").trim()) return { enabled: false, reason: "请先选择项目" };
-  if (scope === "group" && command.action.type === "client" && !String(context.group || context.groupId || "").trim()) return { enabled: false, reason: "请先选择群聊" };
+  if (scope === "project" && command.requiresContext && !String(context.project || "").trim()) return { enabled: false, reason: "请先选择项目" };
+  if (scope === "group" && command.requiresContext && !String(context.group || context.groupId || "").trim()) return { enabled: false, reason: "请先选择群聊" };
   return { enabled: true, reason: "" };
+}
+
+function commandImplementation(command: SlashCommand): SlashImplementation {
+  if (command.implementation) return command.implementation;
+  if (command.action.type === "query") return "local-query";
+  if (command.action.type === "mutation") return "local-mutation";
+  if (command.action.type === "client") return "client";
+  if (command.action.type === "navigate") return "navigation";
+  return "agent-workflow";
 }
 
 function publicCommand(command: SlashCommand, scope: SlashCommandScope = "global", context: any = {}) {
@@ -202,6 +236,7 @@ function publicCommand(command: SlashCommand, scope: SlashCommandScope = "global
     source: command.source || "ccm",
     keywords: command.keywords || [],
     actionType: command.action.type,
+    implementation: commandImplementation(command),
     parameterSchema: command.argumentHint ? [{ name: "args", type: "string", required: !!command.requiresArgs, hint: command.argumentHint }] : [],
     availability: commandAvailability(command, scope, context),
   };
@@ -215,6 +250,26 @@ export function getSlashCommandSummary() {
     skills: loadSkillCommands().length,
     customFile: CUSTOM_COMMANDS_FILE,
     auditFile: AUDIT_FILE,
+  };
+}
+
+export function getSlashCommandContractSnapshot() {
+  return {
+    commands: COMMANDS.map(command => ({
+      name: command.name,
+      aliases: command.aliases || [],
+      scopes: command.scopes,
+      risk: command.risk || "safe",
+      requiresArgs: !!command.requiresArgs,
+      requiresContext: !!command.requiresContext,
+      implementation: commandImplementation(command),
+      action: command.action,
+    })),
+    counts: {
+      global: commandsForScope("global").length,
+      project: commandsForScope("project").length,
+      group: commandsForScope("group").length,
+    },
   };
 }
 
@@ -242,6 +297,18 @@ export function runSlashCommandSelfTest() {
     localMutationNeedsManagePermission: publicCommand(projectCommands.find(command => command.name === "checkpoint")!, "project", { project: "demo" }).permission === "manage",
     endpointArgumentsAreEncoded: expandedEndpoint.includes("%E9%A1%B9%E7%9B%AE%20A") && expandedEndpoint.includes("trace%20a%2Fb"),
     longestContextPlaceholderWins: expandedGroupEndpoint.includes("id=group-1") && !expandedGroupEndpoint.includes("_ID"),
+    allCommandsDeclareExecutableActions: [globalCommands, projectCommands, commandsForScope("group")].flat().every(command => {
+      if (command.action.type === "prompt") return !!command.action.prompt?.trim();
+      if (command.action.type === "navigate") return !!command.action.tab?.trim();
+      if (command.action.type === "client") return !!command.action.clientAction?.trim();
+      return !!(command.action.endpoint || command.action.endpointByScope);
+    }),
+    implementationMetadataPublished: ["client", "navigation", "local-query", "local-mutation", "agent-workflow"].every(implementation =>
+      [globalCommands, projectCommands, commandsForScope("group")].flat().some(command => publicCommand(command).implementation === implementation)
+    ),
+    ccParityCommandsPresent: ["help", "status", "config", "context", "copy", "diff", "doctor", "export", "hooks", "mcp", "memory", "model", "permissions", "plan", "rename", "review", "security-review", "sessions", "skills", "stats", "tasks", "theme", "usage"].every(name =>
+      [globalCommands, projectCommands, commandsForScope("group")].flat().some(command => command.name === name)
+    ),
   };
   return { pass: Object.values(checks).every(Boolean), checks, endpointPreview: expandedEndpoint, counts: { global: globalCommands.length, project: projectCommands.length, group: commandsForScope("group").length } };
 }

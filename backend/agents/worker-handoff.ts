@@ -1,8 +1,12 @@
 import * as crypto from "crypto";
 import {
   buildWorkerContextPacket,
+  compactWorkerContextMemoryForRetry,
+  rebuildWorkerTypedMemoryDeliveryForModelContext,
+  refreshWorkerContextPacketUsage,
   renderWorkerContextPacket,
 } from "./runtime-kernel";
+import { resolveTrustedModelContextCapacity } from "../modules/collaboration/model-capability-cache";
 
 function compact(value: any, max = 900) {
   const text = typeof value === "string" ? value : JSON.stringify(value || "");
@@ -282,6 +286,7 @@ export interface SelfContainedWorkerHandoffInput {
   reason?: string;
   workDir?: string;
   agentType?: string;
+  model?: string;
   traceId?: string;
   taskId?: string;
   analysis?: any;
@@ -314,14 +319,35 @@ export function buildSelfContainedWorkerHandoff(input: SelfContainedWorkerHandof
   const documentFindings = stringList(analysis.documentFindings || analysis.document_findings, 10);
   const constraints = stringList(analysis.constraints, 10);
   const doneCriteria = stringList(input.doneCriteria, 10);
-  const memoryContext = normalizeMemoryContext(input.memory);
+  let memoryContext = normalizeMemoryContext(input.memory);
   const memoryFreshnessGate = extractMemoryFreshnessGate(memoryContext);
   const postCompactReinjectionGate = extractPostCompactReinjectionGate(memoryContext);
   const postCompactDispatchMarker = extractPostCompactDispatchMarker(memoryContext);
   const readPlanRevalidationGate = extractReadPlanRevalidationGate(memoryContext);
   const globalMemoryHealthGate = extractGlobalMemoryHealthGate(memoryContext);
   const apiMicrocompactNativeApplyPlan = extractApiMicrocompactNativeApplyPlan(memoryContext);
-  const workerContextPacket = input.workerContextPacket || buildWorkerContextPacket({
+  const modelContextCapacity = resolveTrustedModelContextCapacity({ provider: input.agentType || "unknown", model: input.model || "" });
+  const typedMemoryCapacityRebudget = rebuildWorkerTypedMemoryDeliveryForModelContext(memoryContext, modelContextCapacity.contextWindow);
+  if (typedMemoryCapacityRebudget.rebuilt === true) memoryContext = typedMemoryCapacityRebudget.memory;
+  const contextUsageOptions = {
+    maxTokens: modelContextCapacity.effectiveContextWindow,
+    reservedOutputTokens: modelContextCapacity.reservedOutputTokens,
+    autoCompactBufferTokens: modelContextCapacity.autoCompactBufferTokens,
+    capacityProvenance: modelContextCapacity,
+  };
+  const previousCapacity = input.workerContextPacket?.model_context_capacity || input.workerContextPacket?.context_usage?.capacity_provenance || null;
+  const capacityDowngrade = Number(previousCapacity?.contextWindow || 0) > Number(modelContextCapacity.contextWindow || 0);
+  const capacityDowngradeGate = capacityDowngrade ? {
+    schema: "ccm-worker-context-capacity-downgrade-gate-v1",
+    previous_context_window: Number(previousCapacity.contextWindow || 0),
+    current_context_window: Number(modelContextCapacity.contextWindow || 0),
+    previous_evidence_checksum: String(previousCapacity.evidenceChecksum || ""),
+    current_evidence_checksum: String(modelContextCapacity.evidenceChecksum || ""),
+    action: "recompact_before_dispatch",
+    generated_at: new Date().toISOString(),
+  } : null;
+  const previousPacket = input.workerContextPacket || null;
+  const rebuiltPacket = !previousPacket || memoryContext ? buildWorkerContextPacket({
     group: input.group,
     project,
     task,
@@ -334,15 +360,86 @@ export function buildSelfContainedWorkerHandoff(input: SelfContainedWorkerHandof
     },
     traceId: input.traceId,
     taskId: input.taskId,
-    dependencies,
-    contractInjections: input.contractInjections,
+    dependencies: dependencies.length ? dependencies : previousPacket?.dependencies,
+    contractInjections: input.contractInjections?.length ? input.contractInjections : previousPacket?.contract_injections,
+    replayRepairDispatchBriefs: previousPacket?.replay_repair_dispatch_briefs,
+    cleanupCommitRepairContext: previousPacket?.cleanup_commit_repair_context,
     memory: memoryContext,
+    pressureMemoryProvenanceReceiptDiscipline: previousPacket?.pressure_memory_provenance_receipt_discipline,
+    pressureProvenanceDispatchFeedbackPolicy: previousPacket?.pressure_provenance_dispatch_feedback_policy,
+    pressureProvenanceProviderDispatchAdvisory: previousPacket?.pressure_provenance_provider_dispatch_advisory,
+    pressureProvenanceProviderDispatchOverrideFollowupReceiptContract: previousPacket?.pressure_provenance_provider_dispatch_override_followup_receipt_contract,
+    providerRankingCompactRepairReceiptMemoryContract: previousPacket?.provider_ranking_compact_repair_receipt_memory_contract,
+    postCompactReinjectionRepairReceiptMemoryContract: previousPacket?.post_compact_reinjection_repair_receipt_memory_contract,
+    providerSwitchDecisionReceipt: previousPacket?.provider_switch_decision_receipt,
+    modelContextCapacity,
+    contextUsageOptions,
     verification: {
+      ...(previousPacket?.verification || {}),
       hints: verificationHints,
       acceptance,
       requires_code_changes: input.requiresCodeChanges !== false,
     },
-  });
+  }) : null;
+  let workerContextPacket = previousPacket && rebuiltPacket ? {
+    ...previousPacket,
+    ...rebuiltPacket,
+    packet_id: `wcp_${hash([previousPacket.packet_id || "", rebuiltPacket.packet_id || "", "current-memory-rebound"], 14)}`,
+    capacity_downgrade_gate: capacityDowngradeGate,
+    memory_context_rebound: {
+      schema: "ccm-worker-context-current-memory-rebound-v1",
+      previous_packet_id: String(previousPacket.packet_id || ""),
+      rebuilt_packet_id: String(rebuiltPacket.packet_id || ""),
+      group_id: String(rebuiltPacket.group?.id || ""),
+      group_session_id: String(rebuiltPacket.group_session_id || ""),
+      task_id: String(rebuiltPacket.task_id || ""),
+      task_agent_session_id: String(rebuiltPacket.task_agent_session_id || ""),
+      reason: "current_assignment_memory_must_rebind_prebuilt_packet",
+    },
+  } : previousPacket ? {
+    ...input.workerContextPacket,
+    packet_id: `wcp_${hash([input.workerContextPacket.packet_id || "", modelContextCapacity.evidenceChecksum || modelContextCapacity.source, modelContextCapacity.contextWindow], 14)}`,
+    model_context_capacity: modelContextCapacity,
+    capacity_downgrade_gate: capacityDowngradeGate,
+  } : rebuiltPacket;
+  workerContextPacket = refreshWorkerContextPacketUsage(workerContextPacket, contextUsageOptions);
+  if (typedMemoryCapacityRebudget.rebuilt === true) {
+    workerContextPacket = refreshWorkerContextPacketUsage({
+      ...workerContextPacket,
+      typed_memory_capacity_rebudget: {
+        schema: "ccm-worker-typed-memory-capacity-rebudget-v1",
+        previous_model_context_window: typedMemoryCapacityRebudget.previous_model_context_window,
+        current_model_context_window: typedMemoryCapacityRebudget.current_model_context_window,
+        previous_capsule_checksum: typedMemoryCapacityRebudget.previous_capsule_checksum,
+        current_capsule_checksum: typedMemoryCapacityRebudget.current_capsule_checksum,
+        delivery_lease_id: typedMemoryCapacityRebudget.lease?.lease_id || "",
+      },
+    }, contextUsageOptions);
+  }
+  const overNewBudget = ["critical", "over_budget"].includes(String(workerContextPacket.context_usage?.status || ""));
+  if ((capacityDowngrade || overNewBudget) && workerContextPacket.memory) {
+    const compacted = compactWorkerContextMemoryForRetry(workerContextPacket.memory, {
+      maxRenderedChars: capacityDowngrade ? 2200 : 3000,
+      maxRecallItems: capacityDowngrade ? 5 : 8,
+    });
+    if (compacted.compacted) {
+      workerContextPacket = refreshWorkerContextPacketUsage({
+        ...workerContextPacket,
+        memory: compacted.memory,
+        context_compaction_retry: {
+          schema: "ccm-worker-context-capacity-downgrade-recompact-v1",
+          retry_id: `capacity-recompact:${workerContextPacket.packet_id}`,
+          method: "memory_first_capacity_revalidation",
+          memory_first: true,
+          reason: capacityDowngrade ? "trusted_model_capacity_decreased" : "worker_packet_exceeds_current_model_capacity",
+          previous_context_window: Number(previousCapacity?.contextWindow || 0),
+          current_context_window: Number(modelContextCapacity.contextWindow || 0),
+          memory_compaction: compacted.summary,
+          generated_at: new Date().toISOString(),
+        },
+      }, contextUsageOptions);
+    }
+  }
   const handoff = {
     schema: "ccm-self-contained-worker-handoff-v1",
     handoff_id: `wh_${hash([project, task, input.traceId, input.taskId, workerContextPacket?.packet_id], 16)}`,
@@ -399,7 +496,7 @@ export function buildSelfContainedWorkerHandoff(input: SelfContainedWorkerHandof
     },
     receipt_schema: {
       marker: "CCM_AGENT_RECEIPT",
-      required_fields: ["status", "summary", "actions", "filesChanged", "verification", "blockers", "needs", "ack", "contractChanges", "consumedInjectionIds", "memoryUsed", "memoryIgnored", "replayRepairDispatchBriefUsage", "apiMicrocompactUsage", "apiMicrocompactNativeApplyRequestTelemetry", "postCompactCandidateUsage"],
+      required_fields: ["status", "summary", "actions", "filesChanged", "verification", "blockers", "needs", "ack", "contractChanges", "consumedInjectionIds", "memoryUsed", "memoryIgnored", "typedMemoryUsage", "memoryContextUsage", "memoryFactCitations", "replayRepairDispatchBriefUsage", "apiMicrocompactUsage", "apiMicrocompactNativeApplyRequestTelemetry", "postCompactCandidateUsage"],
       status_values: ["done", "partial", "blocked", "failed", "needs_info"],
     },
     user_summary: {
@@ -431,6 +528,9 @@ export function renderReceiptSchemaForWorker(handoff: any) {
   const postCompactReinjectionRepairReceiptMemoryContract = handoff?.worker_context_packet?.post_compact_reinjection_repair_receipt_memory_contract
     || handoff?.worker_context_packet?.postCompactReinjectionRepairReceiptMemoryContract
     || null;
+  const memoryRecallTrustContract = handoff?.worker_context_packet?.memory_recall_trust_contract
+    || handoff?.worker_context_packet?.memoryRecallTrustContract
+    || null;
   return [
     "CCM_AGENT_RECEIPT JSON：",
     "```json",
@@ -454,6 +554,42 @@ export function renderReceiptSchemaForWorker(handoff: any) {
       consumedInjectionIds: ["消费的 injection_id；没有填空数组"],
       memoryUsed: ["实际使用的记忆/文档/知识库；未使用填空数组"],
       memoryIgnored: ["没有使用或无法使用记忆的原因；没有填空数组"],
+      typedMemoryUsage: [{
+        relPath: "本轮 WorkerContextPacket 中 surfaced MEMORY.md 的相对路径；每个 relPath 都要覆盖",
+        usageState: "used | verified | ignored",
+        currentSourceVerified: false,
+        currentSourceEvidence: {
+          evidenceType: "file_read",
+          sourcePath: "本轮实际重读的项目内文件路径",
+          sourceChecksum: "当前文件完整 SHA-256；CCM 会重新读取并复算",
+        },
+        conflictDetected: false,
+        conflictKind: "removed | renamed | behavior_changed | resource_changed；没有冲突填空字符串",
+        recommendedMemoryAction: "update | remove；没有冲突填空字符串",
+        conflictReason: "当前源码与该记忆冲突的具体原因；没有冲突填空字符串",
+        replacementMemory: "recommendedMemoryAction=update 时填写候选新规则；否则填空字符串",
+        reason: "说明采用、核验或忽略原因；ignored 必须写原因",
+      }],
+      memoryContextUsage: {
+        bindingId: "上下文中的 session_binding.binding_id；没有则填空字符串",
+        groupSessionId: "上下文中的 group_session_id；没有则填空字符串",
+        sessionMemoryChecksum: "CC 风格 Session Memory markdown checksum；尚未初始化则填空字符串",
+        modelExtractionExecutionId: "Session Memory 模型提取 execution id；没有则填空字符串",
+        modelExtractionReplayStatus: "Session Memory 模型提取 replay status；没有则填空字符串",
+        factSupersessionGraphChecksum: "Session Memory 事实替代图 checksum；没有则填空字符串",
+        usageState: "used | verified | ignored",
+        reason: "说明本轮如何使用或为什么忽略所属群聊会话记忆",
+      },
+      memoryFactCitations: [{
+        evidenceId: "sessionMemorySectionEvidence 中的 evidenceId；未使用 Session Memory 时填空数组",
+        section: "所使用的 Session Memory 章节名",
+        sectionChecksum: "该章节的 sectionChecksum",
+        sourceTranscriptChecksum: "该章节证据绑定的 sourceTranscriptChecksum",
+        sourceMessageIds: ["实际支持本条使用判断的 source message id；必须来自该章节允许列表"],
+        factId: "引用 active fact 时填写交付投影中的 factId；未引用 active fact 填空字符串",
+        factChecksum: "引用 active fact 时填写交付投影中的 factChecksum；未引用 active fact 填空字符串",
+        usage: "这条章节记忆具体影响了哪个判断、修改或验证",
+      }],
       providerSwitchExecution: {
         decisionReceiptId: "Provider switch decision receipt id；没有 approved switch 填空字符串",
         expectedProvider: "approved new provider；没有填空字符串",
@@ -545,6 +681,9 @@ export function renderReceiptSchemaForWorker(handoff: any) {
     "```",
     fields.length ? `必须包含字段：${fields.join("、")}` : "",
     "如果工作包包含 global_memory_id、semantic_risk 或 cross_group_suppression，回执 globalMemoryUsage 必须逐条声明该全局记忆是 used / ignored / verified / background / advisory；风险记忆若被使用必须声明 currentSourceVerified=true。",
+    memoryRecallTrustContract?.receipt_required === true
+      ? `本工作包包含 Memory recall trust contract；CCM_AGENT_RECEIPT.typedMemoryUsage 必须逐条覆盖 ${(memoryRecallTrustContract.required_rel_paths || []).join("、") || "所有 surfaced MEMORY.md"}。used/verified 必须提交可由平台复算的 currentSourceEvidence；ignored 必须写 reason。陈旧记忆 ${(memoryRecallTrustContract.stale_rel_paths || []).join("、") || "无"} 不得直接当作当前事实。若当前源码与记忆冲突，必须填写 conflictDetected/conflictKind/recommendedMemoryAction/conflictReason；update 还必须填写 replacementMemory。子 Agent 只能提交候选，不能直接改写或删除长期记忆。`
+      : "",
     "如果工作包包含 global_memory_health_gate，回执 memoryUsed/memoryIgnored 必须引用 gate_id；当 gate status=fail 或 action=block_global_agent_memory_recall 时，必须在 memoryIgnored 说明未使用全局记忆，且不得在 globalMemoryUsage 声明 used。",
     "如果工作包或平台记忆出现 pressure repair / provenance / disputed_under_repair / stale_evidence_under_repair，回执 memoryProvenanceUsage 必须逐条声明 relPath、usageState、provenanceStatus、repairWorkItemId；若使用 disputed 记忆，必须 currentSourceVerified=true。",
     "如果工作包包含 Replay repair dispatch brief，回执 replayRepairDispatchBriefUsage 必须逐条引用 briefId/workItemId，并声明 used/verified/ignored/blocked/strong；provider re-proof 不能只靠口头 strong，仍需 native provider proof ledger 证明。",
@@ -559,6 +698,8 @@ export function renderReceiptSchemaForWorker(handoff: any) {
       : "",
     "如果存在 read_plan_revalidation_gate，memoryUsed/memoryIgnored 或 readPlanRevalidationUsage 必须同时引用 gateId、readPlanId，并声明 currentSourceVerified=true；回执 session id 必须匹配工作包 session_binding。",
     "如果存在 API microcompact edit plan，回执 apiMicrocompactUsage 或 memoryUsed/memoryIgnored 必须引用 planChecksum，并声明 usageState=native_applied/advisory/ignored/not_supported；apiMicrocompactUsage 应绑定本轮 taskAgentSessionId/nativeSessionId/memoryContextSnapshotId；第三方 CLI 未实际调用 native API context-management 时不得声明 native_applied。",
+    "回执 memoryContextUsage 必须由子 Agent 自己填写：原样回传上下文里的 session_binding.binding_id、group_session_id、Session Memory checksum、model extraction execution/replay status 和 fact supersession graph checksum，并声明 used/verified/ignored；这些字段不能由 CCM 在执行后代填，ignored 也必须绑定同一份交付证据。",
+    "当 memoryContextUsage.usageState=used 或 verified 且上下文提供 sessionMemorySectionEvidence 时，memoryFactCitations 必须至少逐条引用一个真实 evidenceId，并原样回传 sectionChecksum/sourceTranscriptChecksum；证据含 sourceMessageIds 时还必须选择至少一个真实消息 ID，说明该章节如何影响本轮工作；引用 active fact 时还必须原样回传 factId/factChecksum，已被替代事实不会被接受；ignored 时必须为空数组。",
     "如果工作包包含 Provider switch decision receipt，回执 providerSwitchExecution 必须引用 decisionReceiptId，并声明 expectedProvider、executedProvider、taskAgentSessionId、nativeSessionId、executionId；CCM 会用实际 runner/session 做系统见证，字段不一致时该切换不能视为已执行。",
   ].filter(Boolean).join("\n");
 }

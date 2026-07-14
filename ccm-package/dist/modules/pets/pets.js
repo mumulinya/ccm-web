@@ -41,6 +41,8 @@ const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const child_process_1 = require("child_process");
 const utils_1 = require("../../core/utils");
+const pet_generation_1 = require("./pet-generation");
+const pet_activity_coordinator_1 = require("./pet-activity-coordinator");
 const PET_WEB_ASSETS_DIR = path.join(utils_1.PUBLIC_DIR, "pets");
 const PET_DESKTOP_ASSETS_DIR = path.resolve(__dirname, "..", "..", "..", "pet", "assets");
 const MAX_PET_ASSET_BYTES = 2 * 1024 * 1024;
@@ -150,7 +152,7 @@ function writePetAsset(assetPath, sourcePath) {
             throw new Error("SVG 不能包含脚本或内联事件");
         }
     }
-    const devWebAssetsDir = path.resolve(utils_1.PUBLIC_DIR, "..", "..", "ccm-web-vue", "public", "pets");
+    const devWebAssetsDir = path.resolve(utils_1.PUBLIC_DIR, "..", "..", "frontend", "public", "pets");
     const targets = [
         { root: PET_WEB_ASSETS_DIR, file: path.join(PET_WEB_ASSETS_DIR, safePath) },
         { root: PET_DESKTOP_ASSETS_DIR, file: path.join(PET_DESKTOP_ASSETS_DIR, safePath) },
@@ -168,8 +170,75 @@ function writePetAsset(assetPath, sourcePath) {
     return safePath;
 }
 function handlePetsApi(pathname, req, res, parsed, ctx) {
+    (0, pet_generation_1.setPetGenerationConfigChangedNotifier)(() => ctx.broadcastPetConfigChanged());
     if (pathname === "/api/pets/agents" && req.method === "GET") {
         (0, utils_1.sendJson)(res, { success: true, agents: ctx.getPetAgents() });
+        return true;
+    }
+    if (pathname === "/api/pets/generation-jobs" && req.method === "GET") {
+        const id = String(parsed.query.id || "").trim();
+        if (id) {
+            (0, utils_1.sendJson)(res, { success: true, job: (0, pet_generation_1.toPublicPetGenerationJob)((0, pet_generation_1.getPetGenerationJob)(id)) });
+            return true;
+        }
+        (0, utils_1.sendJson)(res, { success: true, jobs: (0, pet_generation_1.listPetGenerationJobs)().map(pet_generation_1.toPublicPetGenerationJob) });
+        return true;
+    }
+    if (pathname === "/api/pets/generation-jobs" && req.method === "POST") {
+        (async () => {
+            let upload = null;
+            try {
+                const contentType = String(req.headers["content-type"] || "");
+                const boundary = (0, utils_1.getMultipartBoundary)(contentType);
+                if (!boundary)
+                    return (0, utils_1.sendJson)(res, { success: false, error: "请上传一张参考图片" }, 400);
+                const buffer = await (0, utils_1.collectRequestBuffer)(req);
+                const { files, fields } = (0, utils_1.parseMultipart)(buffer, boundary);
+                upload = files.find(file => file.field === "reference" || file.field === "file") || files[0];
+                if (!upload?.savedPath)
+                    return (0, utils_1.sendJson)(res, { success: false, error: "缺少参考图片" }, 400);
+                const job = (0, pet_generation_1.createPetGenerationJob)({
+                    referencePath: upload.savedPath,
+                    name: fields.name,
+                    description: fields.description,
+                    style: fields.style,
+                    targetAgent: fields.targetAgent,
+                });
+                ctx.broadcastPetConfigChanged();
+                (0, utils_1.sendJson)(res, { success: true, job: (0, pet_generation_1.toPublicPetGenerationJob)(job) }, 202);
+            }
+            catch (error) {
+                (0, utils_1.sendJson)(res, { success: false, error: error?.message || String(error) }, 400);
+            }
+            finally {
+                if (upload?.savedPath)
+                    try {
+                        fs.unlinkSync(upload.savedPath);
+                    }
+                    catch { }
+            }
+        })();
+        return true;
+    }
+    if (["/api/pets/generation-jobs/cancel", "/api/pets/generation-jobs/retry"].includes(pathname) && req.method === "POST") {
+        let body = "";
+        req.on("data", chunk => body += chunk);
+        req.on("end", () => {
+            try {
+                const data = JSON.parse(body || "{}");
+                const job = pathname.endsWith("/cancel") ? (0, pet_generation_1.cancelPetGenerationJob)(String(data.id || "")) : (0, pet_generation_1.retryPetGenerationJob)(String(data.id || ""));
+                (0, utils_1.sendJson)(res, { success: true, job: (0, pet_generation_1.toPublicPetGenerationJob)(job) });
+            }
+            catch (error) {
+                (0, utils_1.sendJson)(res, { success: false, error: error?.message || String(error) }, 400);
+            }
+        });
+        return true;
+    }
+    if (pathname === "/api/pets/self-test" && req.method === "GET") {
+        const activity = (0, pet_activity_coordinator_1.runPetActivityCoordinatorSelfTest)();
+        const generation = (0, pet_generation_1.runPetGenerationContractSelfTest)();
+        (0, utils_1.sendJson)(res, { success: true, pass: activity.pass && generation.pass, activity, generation });
         return true;
     }
     if (pathname === "/api/pets/navigate" && req.method === "POST") {

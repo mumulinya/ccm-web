@@ -1,0 +1,29 @@
+{
+  "pass": true,
+  "generatedAt": "2026-07-14T03:44:00.207Z",
+  "checks": [
+    {
+      "name": "desktop project workspace has no overflow and keeps technical details folded",
+      "pass": true
+    },
+    {
+      "name": "desktop keeps readable session and conversation columns, hides internal session id and preserves line breaks",
+      "pass": true
+    },
+    {
+      "name": "mobile project workspace has no overflow and keeps technical details folded",
+      "pass": true
+    },
+    {
+      "name": "mobile session list is a working drawer and conversation keeps full width",
+      "pass": true
+    }
+  ],
+  "screenshots": [
+    "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\project-management-render-regression\\desktop-project-workspace.png",
+    "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\project-management-render-regression\\desktop-archive-manager.png",
+    "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\project-management-render-regression\\mobile-project-workspace.png",
+    "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\project-management-render-regression\\mobile-session-drawer.png"
+  ],
+  "errors": []
+}

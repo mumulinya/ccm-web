@@ -1186,7 +1186,7 @@ export const globalMissionTaskCard = (message = {}) => {
     delivery_report: deliveryReport,
     delivery: { headline: deliveryReport?.headline || finalReport.summary || missionDelivery.headline || mission.status_detail || notificationText || '', files, changes: files, verification, risks, acceptance_passed: deliveryAccepted },
     actions,
-    technical: { trace_id: mission.trace_id || '', execution_ids: children.map(row => row.task?.id).filter(Boolean), session_ids: [], supervisor_id: supervisor.id || mission.supervisor_id || '', agent_progress_summary: agentProgressSummary, change_summary: changeSummary, plan_alignment: planAlignment, user_handoff: userHandoff, post_review_spot_check: mission.post_review_spot_check || mission.postReviewSpotCheck || missionDelivery.post_review_spot_check || missionDelivery.postReviewSpotCheck || null },
+    technical: { trace_id: mission.trace_id || '', execution_ids: children.map(row => row.task?.id).filter(Boolean), session_ids: [], supervisor_id: supervisor.id || mission.supervisor_id || '', source_ingestion: mission.source_ingestion || mission.sourceIngestion || null, requirement_extraction: mission.requirement_extraction || mission.requirementExtraction || null, agent_progress_summary: agentProgressSummary, change_summary: changeSummary, plan_alignment: planAlignment, user_handoff: userHandoff, post_review_spot_check: mission.post_review_spot_check || mission.postReviewSpotCheck || missionDelivery.post_review_spot_check || missionDelivery.postReviewSpotCheck || null },
   }
 }
 
@@ -1360,7 +1360,7 @@ export const globalAgentRunTaskCard = (message = {}) => {
     delivery_report: deliveryReport,
     delivery: { headline: deliveryReport?.headline || report.summary || (presentation.phase === 'completed' ? compact(message.content, 240) : ''), files, changes: files, verification, risks, acceptance_passed: deliveryAccepted },
     actions,
-    technical: { trace_id: run.trace_id || '', execution_ids: [], session_ids: [], run_id: run.id, supervisor_id: run.supervisor_id || '', recovery_summary: recoverySummary, agent_progress_summary: agentProgressSummary, change_summary: changeSummary, plan_alignment: planAlignment, user_handoff: userHandoff, post_review_spot_check: run.post_review_spot_check || run.postReviewSpotCheck || report.post_review_spot_check || report.postReviewSpotCheck || null },
+    technical: { trace_id: run.trace_id || '', execution_ids: [], session_ids: [], run_id: run.id, supervisor_id: run.supervisor_id || '', source_ingestion: run.source_ingestion || run.sourceIngestion || null, requirement_extraction: run.requirement_extraction || run.requirementExtraction || null, recovery_summary: recoverySummary, agent_progress_summary: agentProgressSummary, change_summary: changeSummary, plan_alignment: planAlignment, user_handoff: userHandoff, post_review_spot_check: run.post_review_spot_check || run.postReviewSpotCheck || report.post_review_spot_check || report.postReviewSpotCheck || null },
   }
 }
 
@@ -1414,6 +1414,6 @@ export const projectExecutionTaskCard = (message = {}, project = '') => {
         { id: 'purge', kind: 'purge', label: '永久清除', tone: 'danger' },
       ] : []),
     ],
-    technical: taskId ? { trace_id: task.trace_id || message.projectRun?.trace_id || '', execution_ids: task.execution_ids || [], session_ids: task.session_ids || [], run_id: message.projectRun?.id || taskId, parent_run_id: message.projectRun?.parent_run_id || task.parent_run_id || '', plan_alignment: projectPlanAlignment, user_handoff: projectUserHandoff } : null,
+    technical: taskId ? { trace_id: task.trace_id || message.projectRun?.trace_id || '', execution_ids: task.execution_ids || [], session_ids: task.session_ids || [], run_id: message.projectRun?.id || taskId, parent_run_id: message.projectRun?.parent_run_id || task.parent_run_id || '', source_ingestion: task.source_ingestion || task.sourceIngestion || null, requirement_extraction: task.requirement_extraction || task.requirementExtraction || null, plan_alignment: projectPlanAlignment, user_handoff: projectUserHandoff } : null,
   }
 }

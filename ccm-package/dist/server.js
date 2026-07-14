@@ -43,25 +43,37 @@ const child_process_1 = require("child_process");
 const tool_manager_1 = require("./tools/tool-manager");
 const tool_call_loop_1 = require("./tools/tool-call-loop");
 const runtime_1 = require("./agents/runtime");
+const native_continuation_1 = require("./agents/native-continuation");
+const model_capability_cache_1 = require("./modules/collaboration/model-capability-cache");
 const agent_sessions_1 = require("./tasks/agent-sessions");
 const runtime_tool_sync_1 = require("./tools/runtime-tool-sync");
 const tool_authorization_1 = require("./tools/tool-authorization");
+const runtime_tool_real_cli_matrix_1 = require("./tools/runtime-tool-real-cli-matrix");
 const execution_kernel_1 = require("./agents/execution-kernel");
 const memory_1 = require("./projects/memory");
+const direct_dispatch_spool_1 = require("./agents/direct-dispatch-spool");
 // 导入底座与持久层
 const utils_1 = require("./core/utils");
 const db_1 = require("./core/db");
 // 导入子模块控制器
 const projects_1 = require("./modules/projects/projects");
 const sessions_1 = require("./modules/projects/sessions");
+const conversation_search_1 = require("./modules/search/conversation-search");
 const git_1 = require("./modules/tools/git");
 const marketplace_1 = require("./modules/tools/marketplace");
 const templates_1 = require("./modules/templates/templates");
 const cron_1 = require("./modules/scheduling/cron");
 const tools_1 = require("./modules/tools/tools");
 const pets_1 = require("./modules/pets/pets");
+const pet_activity_coordinator_1 = require("./modules/pets/pet-activity-coordinator");
+const pet_generation_1 = require("./modules/pets/pet-generation");
 const music_1 = require("./modules/music/music");
 const collaboration_1 = require("./modules/collaboration/collaboration");
+const feishu_channel_1 = require("./modules/collaboration/feishu-channel");
+const group_session_maintenance_1 = require("./modules/collaboration/group-session-maintenance");
+const memory_2 = require("./modules/collaboration/memory");
+const task_agent_invocation_lineage_1 = require("./tasks/task-agent-invocation-lineage");
+const task_agent_continuation_soak_1 = require("./tasks/task-agent-continuation-soak");
 const reliability_drills_1 = require("./system/reliability-drills");
 const soak_test_1 = require("./system/soak-test");
 const process_lifecycle_1 = require("./system/process-lifecycle");
@@ -70,6 +82,7 @@ const rag_1 = require("./modules/knowledge/rag");
 const slash_commands_1 = require("./modules/tools/slash-commands");
 const credential_store_1 = require("./core/credential-store");
 const usability_1 = require("./modules/system/usability");
+const settings_1 = require("./modules/system/settings");
 const chat_runs_1 = require("./projects/chat-runs");
 const cleanup_center_1 = require("./system/cleanup-center");
 const sessions_2 = require("./modules/projects/sessions");
@@ -79,6 +92,7 @@ const petWorkspaceClients = new Set();
 const stateCache = new Map();
 const agentActivity = new Map();
 const petWorkspaceTargets = new Map();
+const globalPetActivityCoordinator = new pet_activity_coordinator_1.GlobalPetActivityCoordinator();
 const MUSIC_PET_AGENT_NAME = "music-agent";
 const GLOBAL_PET_AGENT_NAME = "global-agent";
 const MUSIC_PET_AGENT_DEFAULT_LABEL = "乖乖";
@@ -136,11 +150,21 @@ function broadcastPetSpeech(agent, payload = {}) {
     if (!agent || (!text.trim() && !payload.final))
         return;
     const source = payload.source || "project";
+    const isMusic = agent === MUSIC_PET_AGENT_NAME;
+    const isGlobal = agent === GLOBAL_PET_AGENT_NAME;
+    const resolved = !isMusic && !isGlobal ? globalPetActivityCoordinator.resolve() : null;
+    const actorDisplayName = isMusic ? getMusicPetAgentLabel() : isGlobal ? getPetConfigLabel(GLOBAL_PET_AGENT_NAME, "全局 Agent") : (resolved?.displayName || agent);
+    const visibleText = isMusic || isGlobal || !text.trim() || text.trim().startsWith(`${actorDisplayName}：`)
+        ? text
+        : `${actorDisplayName}：${text}`;
     const event = {
         type: "speech",
-        agent,
+        agent: isMusic ? MUSIC_PET_AGENT_NAME : GLOBAL_PET_AGENT_NAME,
+        actor: isMusic || isGlobal ? agent : (resolved?.actor || agent),
+        actorKind: isMusic ? "music" : isGlobal ? "global" : (resolved?.actorKind || "project"),
+        displayName: actorDisplayName,
         role: payload.role || "assistant",
-        text,
+        text: visibleText,
         mode: payload.mode || "replace",
         final: !!payload.final,
         source,
@@ -148,19 +172,6 @@ function broadcastPetSpeech(agent, payload = {}) {
     };
     for (const client of petStatusClients)
         writeSse(client, event);
-    if (agent !== GLOBAL_PET_AGENT_NAME && agent !== MUSIC_PET_AGENT_NAME && ["project", "group", "task"].includes(String(source))) {
-        if (shouldKeepGlobalPetPrimaryActivity())
-            return;
-        const mirrorText = text.trim() ? `${agent}：${text}` : "";
-        const mirror = {
-            ...event,
-            agent: GLOBAL_PET_AGENT_NAME,
-            text: mirrorText,
-            source: `workspace-${source}`,
-        };
-        for (const client of petStatusClients)
-            writeSse(client, mirror);
-    }
 }
 function broadcastPetConfigChanged() {
     const event = {
@@ -323,20 +334,34 @@ function broadcastAgentActivityState(name, state, detail = "", timestamp = Date.
         lastActivity: new Date(timestamp).toISOString(),
         detail,
     };
-    for (const client of petStatusClients)
-        writeSse(client, event);
-    if (name !== GLOBAL_PET_AGENT_NAME && name !== MUSIC_PET_AGENT_NAME) {
-        if (shouldKeepGlobalPetPrimaryActivity())
-            return;
-        const mirror = {
-            ...event,
-            agent: GLOBAL_PET_AGENT_NAME,
-            displayName: getPetConfigLabel(GLOBAL_PET_AGENT_NAME, "全局 Agent"),
-            detail: detail ? `${name}：${detail}` : `${name} 状态更新`,
-        };
+    if (name === MUSIC_PET_AGENT_NAME) {
         for (const client of petStatusClients)
-            writeSse(client, mirror);
+            writeSse(client, event);
+        return;
     }
+    const resolved = globalPetActivityCoordinator.resolve(timestamp);
+    const coordinated = resolved ? {
+        ...event,
+        agent: GLOBAL_PET_AGENT_NAME,
+        actor: resolved.actor,
+        actorKind: resolved.actorKind,
+        runtime: resolved.runtime,
+        displayName: getPetConfigLabel(GLOBAL_PET_AGENT_NAME, "全局 Agent"),
+        state: resolved.state,
+        detail: resolved.detail,
+        lastActivity: new Date(resolved.timestamp).toISOString(),
+        source: resolved.source,
+    } : {
+        ...event,
+        agent: GLOBAL_PET_AGENT_NAME,
+        actor: GLOBAL_PET_AGENT_NAME,
+        actorKind: "global",
+        displayName: getPetConfigLabel(GLOBAL_PET_AGENT_NAME, "全局 Agent"),
+        state: "idle",
+        detail: "等待全局指令",
+    };
+    for (const client of petStatusClients)
+        writeSse(client, coordinated);
 }
 function shouldKeepGlobalPetPrimaryActivity(now = Date.now()) {
     const activity = agentActivity.get(GLOBAL_PET_AGENT_NAME);
@@ -354,7 +379,7 @@ function shouldKeepGlobalPetPrimaryActivity(now = Date.now()) {
         "waiting",
     ]).has(normalizePetState(activity.state));
 }
-function setAgentActivity(name, state, detail = "", workspaceTarget = null, durationMs) {
+function setAgentActivity(name, state, detail = "", workspaceTarget = null, durationMs, metadata = null) {
     if (workspaceTarget)
         setAgentWorkspaceTarget(name, workspaceTarget);
     const timestamp = Date.now();
@@ -365,6 +390,33 @@ function setAgentActivity(name, state, detail = "", workspaceTarget = null, dura
         detail,
         expiresAt: timestamp + (durationMs || getActivityDurationMs(normalizedState)),
     });
+    if (name !== MUSIC_PET_AGENT_NAME) {
+        const coordinated = globalPetActivityCoordinator.update({
+            actor: name,
+            displayName: metadata?.displayName || (name === GLOBAL_PET_AGENT_NAME ? getPetConfigLabel(GLOBAL_PET_AGENT_NAME, "全局 Agent") : name),
+            actorKind: metadata?.actorKind,
+            runtime: metadata?.runtime,
+            state: normalizedState,
+            detail,
+            workspaceTarget,
+            source: metadata?.source || (workspaceTarget?.tab === "groups" ? "group" : workspaceTarget?.tab === "projects" ? "project" : "global"),
+            timestamp,
+            durationMs: durationMs || getActivityDurationMs(normalizedState),
+        });
+        if (coordinated) {
+            agentActivity.set(GLOBAL_PET_AGENT_NAME, {
+                state: coordinated.state,
+                timestamp: coordinated.timestamp,
+                detail: coordinated.detail,
+                expiresAt: coordinated.expiresAt,
+            });
+            if (coordinated.workspaceTarget)
+                setAgentWorkspaceTarget(GLOBAL_PET_AGENT_NAME, coordinated.workspaceTarget);
+        }
+        else {
+            agentActivity.delete(GLOBAL_PET_AGENT_NAME);
+        }
+    }
     stateCache.delete(name);
     broadcastAgentActivityState(name, normalizedState, detail, timestamp);
 }
@@ -445,7 +497,12 @@ function getPetConfigLabel(agentName, fallback) {
 }
 function getGlobalPetAgent() {
     const displayName = getPetConfigLabel(GLOBAL_PET_AGENT_NAME, "全局 Agent");
-    const current = getSystemPetActivity(GLOBAL_PET_AGENT_NAME, "等待全局指令");
+    const coordinated = globalPetActivityCoordinator.resolve();
+    const current = coordinated ? {
+        state: coordinated.state,
+        lastActivity: new Date(coordinated.timestamp).toISOString(),
+        detail: coordinated.detail,
+    } : getSystemPetActivity(GLOBAL_PET_AGENT_NAME, "等待全局指令");
     return {
         name: GLOBAL_PET_AGENT_NAME,
         displayName,
@@ -457,39 +514,26 @@ function getGlobalPetAgent() {
         state: current.state,
         lastActivity: current.lastActivity,
         stateDetail: current.detail,
+        actor: coordinated?.actor || GLOBAL_PET_AGENT_NAME,
+        actorKind: coordinated?.actorKind || "global",
+        runtime: coordinated?.runtime || "",
     };
 }
+(0, pet_generation_1.setPetGenerationLifecycleNotifier)(job => {
+    const terminal = new Set(["completed", "failed", "cancelled"]);
+    const state = job.status === "completed"
+        ? "happy"
+        : job.status === "failed"
+            ? "error"
+            : job.status === "validating" || job.status === "installing"
+                ? "reviewing"
+                : job.status === "cancelled"
+                    ? "idle"
+                    : "building";
+    setAgentActivity(GLOBAL_PET_AGENT_NAME, state, job.stageLabel, { tab: "pets" }, terminal.has(job.status) ? (job.status === "cancelled" ? 1000 : 12000) : 30 * 60 * 1000, { actorKind: "global", source: "pet-generation", displayName: "宠物生成" });
+});
 function getPetAgents() {
-    const configs = (0, db_1.getConfigs)();
-    const projectNames = new Set(configs.map(c => c.name));
-    const customAgents = [];
-    try {
-        if (fs.existsSync(utils_1.PETS_FILE)) {
-            const data = JSON.parse(fs.readFileSync(utils_1.PETS_FILE, "utf-8"));
-            const petConfigs = data.configs || {};
-            for (const name of Object.keys(petConfigs)) {
-                if (name !== MUSIC_PET_AGENT_NAME && name !== GLOBAL_PET_AGENT_NAME && !projectNames.has(name)) {
-                    const cfg = petConfigs[name];
-                    customAgents.push({
-                        name: name,
-                        displayName: cfg.label || name,
-                        petLabel: cfg.label || name,
-                        virtual: true,
-                        type: "custom",
-                        agent: "custom",
-                        running: true,
-                        state: "idle",
-                        lastActivity: new Date().toISOString(),
-                        stateDetail: "自定义挂件",
-                    });
-                }
-            }
-        }
-    }
-    catch (e) {
-        console.error("[pet] 读取自定义宠物配置失败", e);
-    }
-    return [getGlobalPetAgent(), getMusicPetAgent(), ...customAgents];
+    return [getGlobalPetAgent(), getMusicPetAgent()];
 }
 function getAgentState(name) {
     const now = Date.now();
@@ -788,10 +832,32 @@ function isSpawnPermissionError(error) {
     const text = `${error?.code || ""} ${error?.message || ""} ${error?.stderr || ""}`;
     return /\bEPERM\b|spawnSync .* EPERM|spawn .* EPERM/i.test(text);
 }
+function nativeContinuationDoneFields(evidence) {
+    return {
+        requestedNativeSessionId: String(evidence?.requestedNativeSessionId || ""),
+        returnedNativeSessionId: String(evidence?.returnedNativeSessionId || ""),
+        effectiveNativeSessionId: String(evidence?.effectiveNativeSessionId || ""),
+        nativeSessionEvidenceSource: String(evidence?.evidenceSource || "missing"),
+        nativeResumeRequested: evidence?.nativeResumeRequested === true,
+        nativeContinuationAcknowledged: evidence?.nativeContinuationAcknowledged === true,
+        nativeSessionReusable: evidence?.nativeSessionReusable === true,
+        providerOutputContractStatus: String(evidence?.providerOutputContractStatus || ""),
+        providerOutputFormatFingerprint: String(evidence?.providerOutputFormatFingerprint || ""),
+        providerRuntimeVersion: String(evidence?.providerRuntimeVersion || ""),
+        providerRuntimeVersionStatus: String(evidence?.providerRuntimeVersionStatus || ""),
+        providerContractId: String(evidence?.providerContractId || ""),
+        expectedProviderContractId: String(evidence?.expectedProviderContractId || ""),
+        providerContractTransition: evidence?.providerContractTransition === true,
+        providerContractContinuityVerified: evidence?.providerContractContinuityVerified === true,
+        nativeContinuationEvidence: evidence || null,
+    };
+}
 function createAgentRunnerRequest(projectName, message, workDir, agentType, timeoutMs, allowedTools = null, mcpConfigPath = "", agentSession = null, executionInfo = null) {
     ensureAgentRunnerDirs();
     const id = `ar_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
     const groupId = String(executionInfo?.groupId || executionInfo?.group_id || executionInfo?.toolScope?.groupId || executionInfo?.tool_scope?.group_id || "");
+    const groupSessionId = String(executionInfo?.groupSessionId || executionInfo?.group_session_id || "");
+    const sessionLifecycleFence = executionInfo?.sessionLifecycleFence || executionInfo?.session_lifecycle_fence || null;
     const runtimeToolPayload = buildAgentRunnerRuntimeToolPayload(allowedTools, mcpConfigPath, executionInfo);
     const request = {
         id,
@@ -804,7 +870,10 @@ function createAgentRunnerRequest(projectName, message, workDir, agentType, time
         agentSession: agentSession || null,
         taskId: String(executionInfo?.taskId || ""),
         executionId: String(executionInfo?.executionId || executionInfo?.taskId || ""),
+        taskAgentSessionId: String(executionInfo?.taskAgentSessionId || executionInfo?.task_agent_session_id || ""),
         groupId,
+        groupSessionId,
+        sessionLifecycleFence,
         toolScope: {
             schema: "ccm-agent-runner-tool-scope-v1",
             scope: groupId ? "group-project" : "project",
@@ -841,17 +910,91 @@ async function waitForAgentRunnerResult(resultFile, timeoutMs) {
     }
     throw new Error("外部 Agent Runner 等待超时；请运行 npm run agent-runner:ps 或 npm run agent-runner 启用外部执行通道");
 }
+function recordNativeCapacityRefreshOutcome(agentType, model, capabilityRecord, binding = {}) {
+    const provider = (0, runtime_1.normalizeAgentRuntimeId)(agentType);
+    const refreshed = capabilityRecord?.recorded === true;
+    const supportsNativeMetadata = ["codex", "cursor"].includes(provider);
+    return (0, model_capability_cache_1.recordModelCapabilityRefreshOutcome)({
+        provider,
+        model: capabilityRecord?.entry?.model || model || "",
+        outcome: refreshed ? "refreshed" : supportsNativeMetadata ? "metadata_absent" : "unsupported",
+        receiptEvidenceChecksum: capabilityRecord?.entry?.checksum || "",
+        refreshRequest: capabilityRecord?.refreshRequest || null,
+        reason: refreshed ? "verified_native_capability_receipt_recorded" : supportsNativeMetadata ? "native_execution_completed_without_model_capacity_metadata" : "runtime_has_no_supported_native_capacity_metadata_adapter",
+        ...binding,
+    });
+}
 async function callAgentViaExternalRunnerRaw(projectName, message, workDir, agentType, timeoutMs, allowedTools = null, mcpConfigPath = "", agentSession = null, executionInfo = null) {
     const request = createAgentRunnerRequest(projectName, message, workDir, agentType, timeoutMs, allowedTools, mcpConfigPath, agentSession, executionInfo);
     if (executionInfo?.executionId)
         (0, execution_kernel_1.registerExternalRunnerRequest)(executionInfo.executionId, request.id);
+    executionInfo?.onRunnerRequestCreated?.(request.id);
     const result = await waitForAgentRunnerResult(request.resultFile, timeoutMs);
     if (!result?.success) {
         const label = result?.command || (0, runtime_1.getAgentCommandLabel)(agentType);
         const exitText = result?.exitCode === undefined || result?.exitCode === null ? "" : `，exitCode=${result.exitCode}`;
-        throw new Error(`[${projectName}] 外部 Agent Runner 执行 ${label} 失败${exitText}：${result?.error || result?.output || "未知错误"}`);
+        let persistedRequest = null;
+        try {
+            persistedRequest = JSON.parse(fs.readFileSync(request.requestFile, "utf-8"));
+        }
+        catch { }
+        throw Object.assign(new Error(`[${projectName}] 外部 Agent Runner 执行 ${label} 失败${exitText}：${result?.error || result?.output || "未知错误"}`), {
+            runnerRequestId: request.id,
+            runnerStarted: !!persistedRequest?.started_at && result?.runtimeToolDispatchBlocked !== true,
+        });
     }
-    return { output: String(result.output || "").trim(), fileChanges: result.fileChanges || null, runnerRequestId: request.id, nativeSessionId: result.nativeSessionId || "" };
+    const persistedContinuationEvidence = result.nativeContinuationEvidence || null;
+    const persistedContinuationValidation = persistedContinuationEvidence
+        ? (0, native_continuation_1.verifyNativeSessionContinuationEvidence)(persistedContinuationEvidence, {
+            provider: (0, runtime_1.normalizeAgentRuntimeId)(agentType),
+            runnerRequestId: request.id,
+            requestedNativeSessionId: agentSession?.sessionId || "",
+            expectedProviderContractId: agentSession?.expectedProviderContractId || agentSession?.providerContractId || "",
+        })
+        : { valid: false, issues: ["evidence_missing"] };
+    const nativeContinuationEvidence = persistedContinuationValidation.valid
+        ? persistedContinuationEvidence
+        : (0, native_continuation_1.buildNativeSessionContinuationEvidence)({
+            provider: (0, runtime_1.normalizeAgentRuntimeId)(agentType),
+            runnerRequestId: request.id,
+            requestedNativeSessionId: agentSession?.sessionId || "",
+            returnedNativeSessionId: result.returnedNativeSessionId
+                || (result.nativeSessionEvidenceSource === "provider_output" ? result.nativeSessionId : ""),
+            providerOutputContractEvidence: result.providerOutputContractEvidence || null,
+            providerRuntimeVersionSnapshot: result.providerRuntimeVersionSnapshot || null,
+            expectedProviderContractId: agentSession?.expectedProviderContractId || agentSession?.providerContractId || "",
+            nativeResumeRequested: agentSession?.resumeSession === true,
+            runnerSuccess: true,
+        });
+    const nativeModelCapabilityRecord = result.nativeModelCapabilityReceipt
+        ? (0, model_capability_cache_1.recordVerifiedNativeModelCapabilityReceipt)(result.nativeModelCapabilityReceipt, {
+            provider: (0, runtime_1.normalizeAgentRuntimeId)(agentType),
+            runnerRequestId: request.id,
+            groupId: executionInfo?.groupId || executionInfo?.group_id || "",
+            taskId: executionInfo?.taskId || "",
+            executionId: executionInfo?.executionId || executionInfo?.taskId || "",
+            taskAgentSessionId: executionInfo?.taskAgentSessionId || executionInfo?.task_agent_session_id || "",
+            nativeSessionId: nativeContinuationEvidence.effectiveNativeSessionId,
+        })
+        : null;
+    const modelCapabilityRefreshOutcome = recordNativeCapacityRefreshOutcome(agentType, executionInfo?.model || executionInfo?.modelId || "", nativeModelCapabilityRecord, {
+        runnerRequestId: request.id,
+        taskId: executionInfo?.taskId || "",
+        executionId: executionInfo?.executionId || executionInfo?.taskId || "",
+        taskAgentSessionId: executionInfo?.taskAgentSessionId || executionInfo?.task_agent_session_id || "",
+        nativeSessionId: nativeContinuationEvidence.nativeSessionReusable ? nativeContinuationEvidence.effectiveNativeSessionId : "",
+    });
+    return {
+        output: String(result.output || "").trim(),
+        fileChanges: result.fileChanges || null,
+        usage: result.usage || null,
+        runnerRequestId: request.id,
+        nativeSessionId: nativeContinuationEvidence.nativeSessionReusable ? nativeContinuationEvidence.effectiveNativeSessionId : "",
+        ...nativeContinuationDoneFields(nativeContinuationEvidence),
+        nativeModelCapabilityReceipt: result.nativeModelCapabilityReceipt || null,
+        nativeModelCapabilityRecord,
+        modelCapabilityRefreshOutcome,
+    };
 }
 async function runManagedAgentContinuation(input) {
     const tmpMsg = path.join(utils_1.UPLOAD_DIR, `_tool_continue_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.txt`);
@@ -967,7 +1110,9 @@ async function callAgentViaExternalRunner(projectName, message, workDir, agentTy
     return { ...initial, output: loop.output, nativeSessionId: loop.nativeSessionId || initial.nativeSessionId };
 }
 async function callAgent(projectName, message, workDir, agentType, timeoutMs, workspaceTarget = null) {
-    setAgentActivity(projectName, "working", "Agent 调用中", workspaceTarget || { tab: "projects", project: projectName }, getAgentRunActivityDuration(timeoutMs));
+    const background = workspaceTarget?.background === true || workspaceTarget?.silent === true;
+    if (!background)
+        setAgentActivity(projectName, workspaceTarget?.taskId || workspaceTarget?.executionId || workspaceTarget?.tab === "groups" ? "building" : "working", `${(0, runtime_1.getAgentRuntime)(agentType).label} 正在${workspaceTarget?.taskId || workspaceTarget?.executionId ? "执行任务" : "处理消息"}`, workspaceTarget || { tab: "projects", project: projectName }, getAgentRunActivityDuration(timeoutMs), { runtime: agentType, actorKind: "third-party", displayName: `${projectName} · ${(0, runtime_1.getAgentRuntime)(agentType).label}` });
     const startedAt = Date.now();
     const changeSnapshot = workDir ? (0, utils_1.createFileChangeSnapshot)(workDir) : null;
     const safeCwd = (workDir || process.cwd()).replace(/\\/g, "/");
@@ -979,6 +1124,40 @@ async function callAgent(projectName, message, workDir, agentType, timeoutMs, wo
     const cmd = (0, runtime_1.buildAgentCommand)(agentType, tmpMsg, { mcpConfigPath: workspaceTarget?.mcpConfigPath, ...(workspaceTarget?.agentSession || {}) });
     const taskId = String(workspaceTarget?.taskId || workspaceTarget?.executionId || `standalone-${projectName}-${Date.now()}`);
     const executionId = String(workspaceTarget?.executionId || workspaceTarget?.taskId || "");
+    const metricGroupId = String(workspaceTarget?.groupId || workspaceTarget?.group_id || "");
+    const metricContext = {
+        scopeType: metricGroupId ? "group" : "project",
+        scopeId: metricGroupId || projectName,
+        groupId: metricGroupId,
+        role: String(workspaceTarget?.role || workspaceTarget?.agentRole || (metricGroupId ? "member_agent" : "project_agent")),
+        source: String(workspaceTarget?.metricSource || workspaceTarget?.source || (metricGroupId ? "group-agent" : "project-agent")),
+        runtime: agentType,
+        traceId: workspaceTarget?.traceId || workspaceTarget?.trace_id || "",
+        taskId,
+        executionId,
+    };
+    const durableDirectDispatch = workspaceTarget?.durableDispatch === true
+        ? (0, direct_dispatch_spool_1.createDirectAgentDispatchRequest)({
+            projectName,
+            message,
+            workDir,
+            agentType,
+            timeoutMs,
+            taskId,
+            executionId,
+            taskAgentSessionId: workspaceTarget?.taskAgentSessionId || workspaceTarget?.task_agent_session_id || "",
+            groupId: metricGroupId,
+            requestedNativeSessionId: workspaceTarget?.agentSession?.sessionId || "",
+            nativeResumeRequested: workspaceTarget?.agentSession?.resumeSession === true,
+        })
+        : null;
+    let durableDirectDispatchStarted = false;
+    let durableDirectDispatchCompleted = false;
+    if (durableDirectDispatch) {
+        if (executionId)
+            (0, execution_kernel_1.registerExternalRunnerRequest)(executionId, durableDirectDispatch.id);
+        workspaceTarget?.onRunnerRequestCreated?.(durableDirectDispatch.id);
+    }
     try {
         const managed = await (0, execution_kernel_1.runManagedCommand)({
             taskId,
@@ -993,16 +1172,72 @@ async function callAgent(projectName, message, workDir, agentType, timeoutMs, wo
             source: workspaceTarget?.probe ? "agent-probe" : "project-agent",
             commandLabel: (0, runtime_1.getAgentCommandLabel)(agentType),
             title: String(workspaceTarget?.title || message || "").slice(0, 120),
+            onStarted: ({ pid, startedAt }) => {
+                durableDirectDispatchStarted = true;
+                if (durableDirectDispatch)
+                    (0, direct_dispatch_spool_1.markDirectAgentDispatchStarted)(durableDirectDispatch.id, { runnerPid: pid, startedAt });
+            },
+            onStdout: (text) => {
+                if (durableDirectDispatch)
+                    (0, direct_dispatch_spool_1.appendDirectAgentDispatchTranscript)(durableDirectDispatch.id, "stdout", { text });
+            },
+            onStderr: (text) => {
+                if (durableDirectDispatch)
+                    (0, direct_dispatch_spool_1.appendDirectAgentDispatchTranscript)(durableDirectDispatch.id, "stderr", { text });
+            },
         });
         try {
             fs.unlinkSync(tmpMsg);
         }
         catch { }
-        const normalized = (0, runtime_1.normalizeAgentCommandOutput)(agentType, managed.stdout);
+        const runtimeVersionSnapshot = (0, runtime_1.captureAgentRuntimeVersionSnapshot)(agentType);
+        const normalized = (0, runtime_1.normalizeAgentCommandOutput)(agentType, managed.stdout, { runtimeVersionSnapshot });
+        const nativeContinuationEvidence = (0, native_continuation_1.buildNativeSessionContinuationEvidence)({
+            provider: (0, runtime_1.normalizeAgentRuntimeId)(agentType),
+            runnerRequestId: durableDirectDispatch?.id || "",
+            requestedNativeSessionId: workspaceTarget?.agentSession?.sessionId || "",
+            returnedNativeSessionId: normalized.rawSessionId || normalized.sessionId || "",
+            providerOutputContractEvidence: normalized.providerOutputContractEvidence || null,
+            providerRuntimeVersionSnapshot: runtimeVersionSnapshot,
+            expectedProviderContractId: workspaceTarget?.agentSession?.expectedProviderContractId || workspaceTarget?.agentSession?.providerContractId || "",
+            nativeResumeRequested: workspaceTarget?.agentSession?.resumeSession === true,
+            runnerSuccess: true,
+        });
+        const nativeModelCapabilityReceipt = (0, runtime_1.extractNativeModelCapabilityReceipt)(agentType, managed.stdout, {
+            runner: "direct-cli",
+            runnerRequestId: durableDirectDispatch?.id || "",
+            groupId: workspaceTarget?.groupId || workspaceTarget?.group_id || "",
+            taskId,
+            executionId,
+            taskAgentSessionId: workspaceTarget?.taskAgentSessionId || workspaceTarget?.task_agent_session_id || "",
+            nativeSessionId: nativeContinuationEvidence.nativeSessionReusable ? nativeContinuationEvidence.effectiveNativeSessionId : "",
+        });
+        const nativeModelCapabilityRecord = nativeModelCapabilityReceipt
+            ? (0, model_capability_cache_1.recordVerifiedNativeModelCapabilityReceipt)(nativeModelCapabilityReceipt, {
+                provider: (0, runtime_1.normalizeAgentRuntimeId)(agentType),
+                runnerRequestId: durableDirectDispatch?.id || "",
+                groupId: workspaceTarget?.groupId || workspaceTarget?.group_id || "",
+                taskId,
+                executionId,
+                model: workspaceTarget?.model || workspaceTarget?.modelId || "",
+                taskAgentSessionId: workspaceTarget?.taskAgentSessionId || workspaceTarget?.task_agent_session_id || "",
+                nativeSessionId: nativeContinuationEvidence.effectiveNativeSessionId,
+            })
+            : null;
+        const modelCapabilityRefreshOutcome = recordNativeCapacityRefreshOutcome(agentType, workspaceTarget?.model || workspaceTarget?.modelId || "", nativeModelCapabilityRecord, {
+            taskId,
+            executionId,
+            taskAgentSessionId: workspaceTarget?.taskAgentSessionId || workspaceTarget?.task_agent_session_id || "",
+            nativeSessionId: nativeContinuationEvidence.effectiveNativeSessionId,
+        });
         const bounded = (0, execution_kernel_1.persistBoundedOutput)(taskId, normalized.output, Number(workspaceTarget?.maxContextOutputBytes || 256 * 1024));
+        if (durableDirectDispatch)
+            (0, direct_dispatch_spool_1.appendDirectAgentDispatchTranscript)(durableDirectDispatch.id, "tool_loop_started", { nativeSessionId: normalized.sessionId || "" });
         const toolLoop = await continueAgentToolCalls({
             output: bounded.content,
-            nativeSessionId: normalized.sessionId || workspaceTarget?.agentSession?.sessionId || "",
+            nativeSessionId: nativeContinuationEvidence.nativeSessionReusable
+                ? normalized.sessionId || workspaceTarget?.agentSession?.sessionId || ""
+                : "",
             projectName,
             workDir,
             agentType,
@@ -1016,19 +1251,56 @@ async function callAgent(projectName, message, workDir, agentType, timeoutMs, wo
             maxOutputBytes: workspaceTarget?.maxOutputBytes,
             maxContextOutputBytes: workspaceTarget?.maxContextOutputBytes,
         });
+        if (durableDirectDispatch)
+            (0, direct_dispatch_spool_1.appendDirectAgentDispatchTranscript)(durableDirectDispatch.id, "tool_loop_completed", { nativeSessionId: toolLoop.nativeSessionId || normalized.sessionId || "" });
         let output = toolLoop.output;
-        if (!/CCM_AGENT_PROBE_OK|执行通道健康探针/i.test(message)) {
+        if (!workspaceTarget?.skipIndependentVerification && !background && !/CCM_AGENT_PROBE_OK|执行通道健康探针/i.test(message)) {
+            if (durableDirectDispatch)
+                (0, direct_dispatch_spool_1.appendDirectAgentDispatchTranscript)(durableDirectDispatch.id, "verification_started", { projectName });
             output += await runIndependentProjectVerification(projectName, workDir, timeoutMs, taskId, executionId, agentType);
+            if (durableDirectDispatch)
+                (0, direct_dispatch_spool_1.appendDirectAgentDispatchTranscript)(durableDirectDispatch.id, "verification_completed", { projectName });
         }
         const fileChanges = (0, utils_1.getFileChanges)(projectName, changeSnapshot);
+        const durableNativeSessionId = nativeContinuationEvidence.nativeSessionReusable
+            ? toolLoop.nativeSessionId || normalized.sessionId || workspaceTarget?.agentSession?.sessionId || ""
+            : "";
+        if (durableDirectDispatch) {
+            (0, direct_dispatch_spool_1.completeDirectAgentDispatch)(durableDirectDispatch.id, {
+                success: true,
+                output,
+                nativeSessionId: durableNativeSessionId,
+                nativeContinuationEvidence,
+                nativeModelCapabilityReceipt,
+                nativeModelCapabilityRecord,
+                exitCode: managed.exitCode,
+                signal: managed.signal,
+            });
+            durableDirectDispatchCompleted = true;
+        }
+        workspaceTarget?.onDone?.({
+            runnerRequestId: durableDirectDispatch?.id || "",
+            nativeSessionId: durableNativeSessionId,
+            ...nativeContinuationDoneFields(nativeContinuationEvidence),
+            nativeModelCapabilityReceipt,
+            nativeModelCapabilityRecord,
+            modelCapabilityRefreshOutcome,
+            isError: false,
+            runnerStarted: durableDirectDispatch ? durableDirectDispatchStarted : true,
+            fileChanges,
+        });
         (0, db_1.recordMetric)(projectName, {
+            ...metricContext,
             success: true,
             durationMs: Date.now() - startedAt,
-            fileChangeCount: fileChanges?.count || 0
+            fileChangeCount: fileChanges?.count || 0,
+            usage: normalized.usage || null,
         });
-        broadcastPetSpeech(projectName, { role: "assistant", text: output, final: true, source: "project" });
-        setAgentActivity(projectName, "happy", "任务完成");
-        setTimeout(() => setAgentActivity(projectName, "idle", "空闲"), 10000);
+        if (!background) {
+            broadcastPetSpeech(projectName, { role: "assistant", text: output, final: true, source: "project" });
+            setAgentActivity(projectName, "happy", "任务完成");
+            setTimeout(() => setAgentActivity(projectName, "idle", "空闲"), 10000);
+        }
         return output;
     }
     catch (e) {
@@ -1036,54 +1308,109 @@ async function callAgent(projectName, message, workDir, agentType, timeoutMs, wo
             fs.unlinkSync(tmpMsg);
         }
         catch { }
+        const failedDirectContinuationEvidence = (0, native_continuation_1.buildNativeSessionContinuationEvidence)({
+            provider: (0, runtime_1.normalizeAgentRuntimeId)(agentType),
+            runnerRequestId: durableDirectDispatch?.id || "",
+            requestedNativeSessionId: workspaceTarget?.agentSession?.sessionId || "",
+            nativeResumeRequested: workspaceTarget?.agentSession?.resumeSession === true,
+            runnerSuccess: false,
+        });
+        if (durableDirectDispatch && durableDirectDispatchStarted && !durableDirectDispatchCompleted) {
+            (0, direct_dispatch_spool_1.completeDirectAgentDispatch)(durableDirectDispatch.id, {
+                success: false,
+                error: String(e?.message || e),
+                output: String(e?.stdout || e?.stderr || e?.message || ""),
+                exitCode: e?.exitCode,
+                signal: e?.signal,
+                nativeContinuationEvidence: failedDirectContinuationEvidence,
+            });
+            durableDirectDispatchCompleted = true;
+        }
         if (isSpawnPermissionError(e)) {
             try {
                 const runner = await callAgentViaExternalRunner(projectName, message, workDir, agentType, timeoutMs, workspaceTarget?.allowedTools, workspaceTarget?.mcpConfigPath, workspaceTarget?.agentSession, {
                     taskId,
                     executionId,
+                    taskAgentSessionId: workspaceTarget?.taskAgentSessionId || workspaceTarget?.task_agent_session_id || "",
                     groupId: workspaceTarget?.groupId || workspaceTarget?.group_id || "",
+                    groupSessionId: workspaceTarget?.groupSessionId || workspaceTarget?.group_session_id || "",
+                    sessionLifecycleFence: workspaceTarget?.sessionLifecycleFence || workspaceTarget?.session_lifecycle_fence || null,
+                    model: workspaceTarget?.model || workspaceTarget?.modelId || "",
                     runtimeToolSnapshot: workspaceTarget?.runtimeToolSnapshot || workspaceTarget?.runtime_tool_snapshot || null,
                     runtimeToolDispatchGate: workspaceTarget?.runtimeToolDispatchGate || workspaceTarget?.runtime_tool_dispatch_gate || workspaceTarget?.dispatchGate || null,
+                    onRunnerRequestCreated: workspaceTarget?.onRunnerRequestCreated,
                 });
                 const fileChanges = runner.fileChanges || (0, utils_1.getFileChanges)(projectName, changeSnapshot);
+                workspaceTarget?.onDone?.({
+                    runnerRequestId: runner.runnerRequestId || "",
+                    nativeSessionId: runner.nativeSessionId || "",
+                    ...nativeContinuationDoneFields(runner.nativeContinuationEvidence),
+                    nativeModelCapabilityReceipt: runner.nativeModelCapabilityReceipt || null,
+                    nativeModelCapabilityRecord: runner.nativeModelCapabilityRecord || null,
+                    modelCapabilityRefreshOutcome: runner.modelCapabilityRefreshOutcome || null,
+                    isError: false,
+                    runnerStarted: true,
+                    fileChanges,
+                });
                 (0, db_1.recordMetric)(projectName, {
+                    ...metricContext,
                     success: true,
                     durationMs: Date.now() - startedAt,
-                    fileChangeCount: fileChanges?.count || 0
+                    fileChangeCount: fileChanges?.count || 0,
+                    usage: runner.usage || null,
                 });
-                broadcastPetSpeech(projectName, { role: "assistant", text: runner.output, final: true, source: "project" });
-                setAgentActivity(projectName, "happy", "外部 Runner 任务完成");
-                setTimeout(() => setAgentActivity(projectName, "idle", "空闲"), 10000);
+                if (!background) {
+                    broadcastPetSpeech(projectName, { role: "assistant", text: runner.output, final: true, source: "project" });
+                    setAgentActivity(projectName, "happy", "外部 Runner 任务完成");
+                    setTimeout(() => setAgentActivity(projectName, "idle", "空闲"), 10000);
+                }
                 return runner.output;
             }
             catch (runnerError) {
+                const failedContinuationEvidence = (0, native_continuation_1.buildNativeSessionContinuationEvidence)({
+                    provider: (0, runtime_1.normalizeAgentRuntimeId)(agentType),
+                    runnerRequestId: runnerError?.runnerRequestId || "",
+                    requestedNativeSessionId: workspaceTarget?.agentSession?.sessionId || "",
+                    nativeResumeRequested: workspaceTarget?.agentSession?.resumeSession === true,
+                    runnerSuccess: false,
+                });
+                workspaceTarget?.onDone?.({ runnerRequestId: runnerError?.runnerRequestId || "", runnerStarted: runnerError?.runnerStarted === true, nativeSessionId: failedContinuationEvidence.effectiveNativeSessionId, ...nativeContinuationDoneFields(failedContinuationEvidence), isError: true, error: runnerError?.message || String(runnerError) });
                 const output = `[${projectName}] Agent Runner 错误: ${runnerError.message || runnerError}`;
                 (0, db_1.recordMetric)(projectName, {
+                    ...metricContext,
                     success: false,
                     durationMs: Date.now() - startedAt,
-                    fileChangeCount: (0, utils_1.getFileChanges)(projectName, changeSnapshot)?.count || 0
+                    fileChangeCount: (0, utils_1.getFileChanges)(projectName, changeSnapshot)?.count || 0,
+                    error: runnerError?.message || String(runnerError),
                 });
-                broadcastPetSpeech(projectName, { role: "error", text: output, final: true, source: "project" });
-                setAgentActivity(projectName, "error", "外部 Runner 错误");
+                if (!background) {
+                    broadcastPetSpeech(projectName, { role: "error", text: output, final: true, source: "project" });
+                    setAgentActivity(projectName, "error", "外部 Runner 错误");
+                }
                 return output;
             }
         }
         const output = e.killed || e.signal === "SIGTERM"
             ? `[${projectName}] Agent 响应超时，请稍后重试`
             : `[${projectName}] Agent 错误: ${(e.stderr || e.message || "").substring(0, 200)}`;
+        workspaceTarget?.onDone?.({ runnerRequestId: durableDirectDispatch?.id || "", runnerStarted: durableDirectDispatchStarted, nativeSessionId: failedDirectContinuationEvidence.effectiveNativeSessionId, ...nativeContinuationDoneFields(failedDirectContinuationEvidence), isError: true, error: e?.message || String(e) });
         (0, db_1.recordMetric)(projectName, {
+            ...metricContext,
             success: false,
             durationMs: Date.now() - startedAt,
-            fileChangeCount: (0, utils_1.getFileChanges)(projectName, changeSnapshot)?.count || 0
+            fileChangeCount: (0, utils_1.getFileChanges)(projectName, changeSnapshot)?.count || 0,
+            error: e?.message || String(e),
         });
-        broadcastPetSpeech(projectName, { role: "error", text: output, final: true, source: "project" });
-        setAgentActivity(projectName, "error", "错误");
+        if (!background) {
+            broadcastPetSpeech(projectName, { role: "error", text: output, final: true, source: "project" });
+            setAgentActivity(projectName, "error", "错误");
+        }
         return output;
     }
 }
 function callAgentForGroupStream(projectName, message, workDir, agentType, options = {}) {
     const groupId = options.groupId;
-    setAgentActivity(projectName, "working", options.detail || "群聊协作中", groupId ? { tab: "groups", groupId } : { tab: "groups" }, getAgentRunActivityDuration(options.timeoutMs));
+    setAgentActivity(projectName, options.petState || "building", options.detail || `${(0, runtime_1.getAgentRuntime)(agentType).label} 正在执行协作任务`, groupId ? { tab: "groups", groupId } : { tab: "groups" }, getAgentRunActivityDuration(options.timeoutMs), { runtime: agentType, actorKind: options.actorKind || "third-party", displayName: options.petDisplayName || `${projectName} · ${(0, runtime_1.getAgentRuntime)(agentType).label}`, source: "group" });
     const startedAt = Date.now();
     const changeSnapshot = workDir ? (0, utils_1.createFileChangeSnapshot)(workDir) : null;
     const safeCwd = (workDir || process.cwd()).replace(/\\/g, "/");
@@ -1095,6 +1422,39 @@ function callAgentForGroupStream(projectName, message, workDir, agentType, optio
     const cmd = (0, runtime_1.buildAgentCommand)(agentType, tmpMsg, { mcpConfigPath: options.mcpConfigPath, ...(options.agentSession || {}) });
     const taskId = String(options.taskId || options.executionId || `standalone-${projectName}-${Date.now()}`);
     const executionId = String(options.executionId || options.taskId || "");
+    const metricContext = {
+        scopeType: groupId ? "group" : "project",
+        scopeId: groupId || projectName,
+        groupId: String(groupId || ""),
+        role: String(options.role || options.agentRole || "member_agent"),
+        source: String(options.metricSource || options.source || "group-agent"),
+        runtime: agentType,
+        traceId: options.traceId || options.trace_id || "",
+        taskId,
+        executionId,
+    };
+    const durableGroupDispatch = options.durableDispatch === true
+        ? (0, direct_dispatch_spool_1.createDirectAgentDispatchRequest)({
+            projectName,
+            message,
+            workDir,
+            agentType,
+            timeoutMs: options.timeoutMs || 300_000,
+            taskId,
+            executionId,
+            taskAgentSessionId: options.taskAgentSessionId || options.task_agent_session_id || "",
+            groupId: String(groupId || ""),
+            requestedNativeSessionId: options.agentSession?.sessionId || "",
+            nativeResumeRequested: options.agentSession?.resumeSession === true,
+        })
+        : null;
+    let durableGroupDispatchStarted = false;
+    let durableGroupDispatchCompleted = false;
+    if (durableGroupDispatch) {
+        if (executionId)
+            (0, execution_kernel_1.registerExternalRunnerRequest)(executionId, durableGroupDispatch.id);
+        options.onRunnerRequestCreated?.(durableGroupDispatch.id);
+    }
     const streamRes = options.res;
     const workEvents = Array.isArray(options.initialWorkEvents) ? options.initialWorkEvents.slice(-20) : [];
     const pushWorkEvent = (kind, text, extra = {}) => {
@@ -1121,6 +1481,11 @@ function callAgentForGroupStream(projectName, message, workDir, agentType, optio
         let stopTracking = () => { };
         try {
             child = (0, child_process_1.spawn)(cmd, [], { shell: true, cwd: safeCwd, stdio: ["pipe", "pipe", "pipe"], windowsHide: true, env: (0, execution_kernel_1.sanitizeExecutionEnv)((0, runtime_tool_sync_1.getRuntimeExecutionEnv)(agentType), options.envAllowlist || []) });
+            child.once("spawn", () => {
+                durableGroupDispatchStarted = true;
+                if (durableGroupDispatch)
+                    (0, direct_dispatch_spool_1.markDirectAgentDispatchStarted)(durableGroupDispatch.id, { runnerPid: child.pid, startedAt: new Date().toISOString() });
+            });
             stopTracking = (0, execution_kernel_1.trackManagedChildProcess)(taskId, executionId, child, {
                 project: projectName,
                 agentType,
@@ -1132,8 +1497,13 @@ function callAgentForGroupStream(projectName, message, workDir, agentType, optio
             });
         }
         catch (spawnError) {
+            if (durableGroupDispatch && !durableGroupDispatchCompleted) {
+                (0, direct_dispatch_spool_1.completeDirectAgentDispatch)(durableGroupDispatch.id, { success: false, error: String(spawnError?.message || spawnError) });
+                durableGroupDispatchCompleted = true;
+            }
             if (!isSpawnPermissionError(spawnError)) {
                 const text = `❌ 错误: ${spawnError.message || spawnError}`;
+                (0, db_1.recordMetric)(projectName, { ...metricContext, success: false, durationMs: Date.now() - startedAt, fileChangeCount: 0, error: spawnError?.message || String(spawnError) });
                 writeSse(streamRes, { type: "agent_done", agent: projectName, text, messageId: options.messageId, workEvents });
                 resolve(text);
                 return;
@@ -1144,22 +1514,29 @@ function callAgentForGroupStream(projectName, message, workDir, agentType, optio
             callAgentViaExternalRunner(projectName, message, workDir, agentType, options.timeoutMs || 300000, options.allowedTools, options.mcpConfigPath, options.agentSession, {
                 taskId,
                 executionId,
+                model: options.model || options.modelId || "",
+                taskAgentSessionId: options.taskAgentSessionId || options.task_agent_session_id || "",
                 groupId: options.groupId || options.group_id || "",
+                groupSessionId: options.groupSessionId || options.group_session_id || "",
+                sessionLifecycleFence: options.sessionLifecycleFence || options.session_lifecycle_fence || null,
                 runtimeToolSnapshot: options.runtimeToolSnapshot || options.runtime_tool_snapshot || null,
                 runtimeToolDispatchGate: options.runtimeToolDispatchGate || options.runtime_tool_dispatch_gate || options.dispatchGate || null,
+                onRunnerRequestCreated: options.onRunnerRequestCreated,
                 onToolEvent: (event) => pushWorkEvent(event.type === "tool_result" ? "tool_result" : "status", event.text, { tool: event.tool || "", round: event.round, ok: event.ok }),
             })
                 .then((runner) => {
                 const fileChanges = runner.fileChanges || (0, utils_1.getFileChanges)(projectName, changeSnapshot);
                 (0, db_1.recordMetric)(projectName, {
+                    ...metricContext,
                     success: true,
                     durationMs: Date.now() - startedAt,
-                    fileChangeCount: fileChanges?.count || 0
+                    fileChangeCount: fileChanges?.count || 0,
+                    usage: runner.usage || null,
                 });
                 try {
                     if (typeof options.onDone === "function") {
                         pushWorkEvent("done", "外部 Runner 执行完成", { final: true, fileChanges });
-                        options.onDone({ text: runner.output, fileChanges, isError: false, runnerRequestId: runner.runnerRequestId, nativeSessionId: runner.nativeSessionId || "", workEvents });
+                        options.onDone({ text: runner.output, fileChanges, isError: false, runnerStarted: true, runnerRequestId: runner.runnerRequestId, nativeSessionId: runner.nativeSessionId || "", ...nativeContinuationDoneFields(runner.nativeContinuationEvidence), nativeModelCapabilityReceipt: runner.nativeModelCapabilityReceipt || null, nativeModelCapabilityRecord: runner.nativeModelCapabilityRecord || null, modelCapabilityRefreshOutcome: runner.modelCapabilityRefreshOutcome || null, workEvents });
                     }
                 }
                 catch { }
@@ -1172,14 +1549,23 @@ function callAgentForGroupStream(projectName, message, workDir, agentType, optio
                 .catch((runnerError) => {
                 const text = `❌ Agent Runner 错误: ${runnerError.message || runnerError}`;
                 (0, db_1.recordMetric)(projectName, {
+                    ...metricContext,
                     success: false,
                     durationMs: Date.now() - startedAt,
-                    fileChangeCount: (0, utils_1.getFileChanges)(projectName, changeSnapshot)?.count || 0
+                    fileChangeCount: (0, utils_1.getFileChanges)(projectName, changeSnapshot)?.count || 0,
+                    error: runnerError?.message || String(runnerError),
                 });
                 try {
                     if (typeof options.onDone === "function") {
                         pushWorkEvent("error", text, { final: true });
-                        options.onDone({ text, fileChanges: null, isError: true, workEvents });
+                        const failedContinuationEvidence = (0, native_continuation_1.buildNativeSessionContinuationEvidence)({
+                            provider: (0, runtime_1.normalizeAgentRuntimeId)(agentType),
+                            runnerRequestId: runnerError?.runnerRequestId || "",
+                            requestedNativeSessionId: options.agentSession?.sessionId || "",
+                            nativeResumeRequested: options.agentSession?.resumeSession === true,
+                            runnerSuccess: false,
+                        });
+                        options.onDone({ text, fileChanges: null, isError: true, runnerRequestId: runnerError?.runnerRequestId || "", runnerStarted: runnerError?.runnerStarted === true, nativeSessionId: failedContinuationEvidence.effectiveNativeSessionId, ...nativeContinuationDoneFields(failedContinuationEvidence), workEvents });
                     }
                 }
                 catch { }
@@ -1218,13 +1604,56 @@ function callAgentForGroupStream(projectName, message, workDir, agentType, optio
             }
             catch { }
             let finalText = text || output.trim();
-            const normalized = isError ? { output: finalText, sessionId: "" } : (0, runtime_1.normalizeAgentCommandOutput)(agentType, finalText);
+            const normalized = isError
+                ? { output: finalText, sessionId: "", rawSessionId: "", providerOutputContractEvidence: null }
+                : (0, runtime_1.normalizeAgentCommandOutput)(agentType, finalText, { runtimeVersionSnapshot: (0, runtime_1.captureAgentRuntimeVersionSnapshot)(agentType) });
+            const nativeContinuationEvidence = (0, native_continuation_1.buildNativeSessionContinuationEvidence)({
+                provider: (0, runtime_1.normalizeAgentRuntimeId)(agentType),
+                runnerRequestId: durableGroupDispatch?.id || "",
+                requestedNativeSessionId: options.agentSession?.sessionId || "",
+                returnedNativeSessionId: normalized.rawSessionId || normalized.sessionId || "",
+                providerOutputContractEvidence: normalized.providerOutputContractEvidence || null,
+                providerRuntimeVersionSnapshot: normalized.providerOutputContractEvidence?.runtimeVersionSnapshot || null,
+                expectedProviderContractId: options.agentSession?.expectedProviderContractId || options.agentSession?.providerContractId || "",
+                nativeResumeRequested: options.agentSession?.resumeSession === true,
+                runnerSuccess: !isError,
+            });
+            const nativeModelCapabilityReceipt = isError ? null : (0, runtime_1.extractNativeModelCapabilityReceipt)(agentType, output, {
+                runner: "direct-cli",
+                runnerRequestId: durableGroupDispatch?.id || "",
+                groupId: options.groupId || options.group_id || "",
+                taskId,
+                executionId,
+                taskAgentSessionId: options.taskAgentSessionId || options.task_agent_session_id || "",
+                nativeSessionId: nativeContinuationEvidence.effectiveNativeSessionId,
+            });
+            const nativeModelCapabilityRecord = nativeModelCapabilityReceipt
+                ? (0, model_capability_cache_1.recordVerifiedNativeModelCapabilityReceipt)(nativeModelCapabilityReceipt, {
+                    provider: (0, runtime_1.normalizeAgentRuntimeId)(agentType),
+                    runnerRequestId: durableGroupDispatch?.id || "",
+                    groupId: options.groupId || options.group_id || "",
+                    taskId,
+                    executionId,
+                    taskAgentSessionId: options.taskAgentSessionId || options.task_agent_session_id || "",
+                    nativeSessionId: nativeContinuationEvidence.effectiveNativeSessionId,
+                })
+                : null;
+            const modelCapabilityRefreshOutcome = isError ? null : recordNativeCapacityRefreshOutcome(agentType, options.model || options.modelId || "", nativeModelCapabilityRecord, {
+                taskId,
+                executionId,
+                taskAgentSessionId: options.taskAgentSessionId || options.task_agent_session_id || "",
+                nativeSessionId: nativeContinuationEvidence.effectiveNativeSessionId,
+            });
             finalText = normalized.output;
             finalText = (0, execution_kernel_1.persistBoundedOutput)(taskId, finalText, Number(options.maxContextOutputBytes || 256 * 1024)).content;
             if (!isError) {
+                if (durableGroupDispatch)
+                    (0, direct_dispatch_spool_1.appendDirectAgentDispatchTranscript)(durableGroupDispatch.id, "tool_loop_started", { nativeSessionId: normalized.sessionId || "" });
                 const toolLoop = await continueAgentToolCalls({
                     output: finalText,
-                    nativeSessionId: normalized.sessionId || options.agentSession?.sessionId || "",
+                    nativeSessionId: nativeContinuationEvidence.nativeSessionReusable
+                        ? normalized.sessionId || options.agentSession?.sessionId || ""
+                        : "",
                     projectName,
                     workDir,
                     agentType,
@@ -1242,20 +1671,44 @@ function callAgentForGroupStream(projectName, message, workDir, agentType, optio
                 });
                 finalText = toolLoop.output;
                 normalized.sessionId = toolLoop.nativeSessionId || normalized.sessionId;
+                if (durableGroupDispatch)
+                    (0, direct_dispatch_spool_1.appendDirectAgentDispatchTranscript)(durableGroupDispatch.id, "tool_loop_completed", { nativeSessionId: normalized.sessionId || "" });
                 if (!/CCM_AGENT_PROBE_OK|执行通道健康探针/i.test(message)) {
+                    if (durableGroupDispatch)
+                        (0, direct_dispatch_spool_1.appendDirectAgentDispatchTranscript)(durableGroupDispatch.id, "verification_started", { projectName });
                     finalText += await runIndependentProjectVerification(projectName, workDir, options.timeoutMs || 300000, taskId, executionId, agentType);
+                    if (durableGroupDispatch)
+                        (0, direct_dispatch_spool_1.appendDirectAgentDispatchTranscript)(durableGroupDispatch.id, "verification_completed", { projectName });
                 }
             }
             const fileChanges = (0, utils_1.getFileChanges)(projectName, changeSnapshot);
+            const durableNativeSessionId = nativeContinuationEvidence.nativeSessionReusable
+                ? normalized.sessionId || options.agentSession?.sessionId || ""
+                : "";
+            if (durableGroupDispatch && durableGroupDispatchStarted && !durableGroupDispatchCompleted) {
+                (0, direct_dispatch_spool_1.completeDirectAgentDispatch)(durableGroupDispatch.id, {
+                    success: !isError,
+                    output: finalText,
+                    error: isError ? finalText : "",
+                    nativeSessionId: durableNativeSessionId,
+                    nativeContinuationEvidence,
+                    nativeModelCapabilityReceipt,
+                    nativeModelCapabilityRecord,
+                });
+                durableGroupDispatchCompleted = true;
+            }
             (0, db_1.recordMetric)(projectName, {
+                ...metricContext,
                 success: !isError,
                 durationMs: Date.now() - startedAt,
-                fileChangeCount: fileChanges?.count || 0
+                fileChangeCount: fileChanges?.count || 0,
+                usage: normalized.usage || null,
+                error: isError ? finalText : "",
             });
             try {
                 if (typeof options.onDone === "function") {
                     pushWorkEvent(isError ? "error" : "done", isError ? finalText : "执行完成", { final: true, fileChanges });
-                    options.onDone({ text: finalText, fileChanges, isError, nativeSessionId: normalized.sessionId || options.agentSession?.sessionId || "", workEvents });
+                    options.onDone({ text: finalText, fileChanges, isError, runnerRequestId: durableGroupDispatch?.id || "", runnerStarted: durableGroupDispatch ? durableGroupDispatchStarted : true, nativeSessionId: durableNativeSessionId, ...nativeContinuationDoneFields(nativeContinuationEvidence), nativeModelCapabilityReceipt, nativeModelCapabilityRecord, modelCapabilityRefreshOutcome, workEvents });
                 }
             }
             catch { }
@@ -1270,6 +1723,8 @@ function callAgentForGroupStream(projectName, message, workDir, agentType, optio
             if (!text)
                 return;
             output += text;
+            if (durableGroupDispatch)
+                (0, direct_dispatch_spool_1.appendDirectAgentDispatchTranscript)(durableGroupDispatch.id, "stdout", { text });
             const jsonSessionStream = ["codex", "cursor"].includes((0, runtime_1.normalizeAgentRuntimeId)(agentType)) && !!options.agentSession?.persistSession;
             if (!jsonSessionStream) {
                 pushWorkEvent("output", text);
@@ -1279,6 +1734,8 @@ function callAgentForGroupStream(projectName, message, workDir, agentType, optio
         });
         child.stderr.on("data", (chunk) => {
             const text = chunk.toString("utf-8");
+            if (durableGroupDispatch)
+                (0, direct_dispatch_spool_1.appendDirectAgentDispatchTranscript)(durableGroupDispatch.id, "stderr", { text });
             stderrOutput = (stderrOutput + text).slice(-12000);
             if (text.trim() && !output.trim()) {
                 const runningText = `🧠 ${projectName} 运行中...`;
@@ -1355,7 +1812,13 @@ function callAgentStream(projectName, message, workDir, agentType, res, options 
     send({ type: "status", text: "Agent 正在思考..." });
     broadcastPetSpeech(projectName, { role: "status", text: "Agent 正在思考...", source: "project" });
     setAgentActivity(projectName, "working", "正在处理消息", null, getAgentRunActivityDuration(300000));
-    const child = (0, child_process_1.spawn)(cmd, [], { shell: true, cwd: safeCwd, stdio: ["pipe", "pipe", "pipe"] });
+    const child = (0, child_process_1.spawn)(cmd, [], {
+        shell: true,
+        cwd: safeCwd,
+        stdio: ["pipe", "pipe", "pipe"],
+        windowsHide: true,
+        env: (0, execution_kernel_1.sanitizeExecutionEnv)((0, runtime_tool_sync_1.getRuntimeExecutionEnv)(agentType), options.envAllowlist || []),
+    });
     const stopProjectChatTracking = (0, execution_kernel_1.trackManagedChildProcess)(projectRun.id, projectRun.id, child, {
         project: projectName,
         agentType,
@@ -1419,7 +1882,18 @@ function callAgentStream(projectName, message, workDir, agentType, res, options 
                 fs.unlinkSync(tmpMsg);
             }
             catch { }
-            const normalized = (0, runtime_1.normalizeAgentCommandOutput)(agentType, fullOutput.trim());
+            const runtimeVersionSnapshot = (0, runtime_1.captureAgentRuntimeVersionSnapshot)(agentType);
+            const normalized = (0, runtime_1.normalizeAgentCommandOutput)(agentType, fullOutput.trim(), { runtimeVersionSnapshot });
+            const nativeContinuationEvidence = (0, native_continuation_1.buildNativeSessionContinuationEvidence)({
+                provider: (0, runtime_1.normalizeAgentRuntimeId)(agentType),
+                requestedNativeSessionId: taskAgentSessionOptions.sessionId || "",
+                returnedNativeSessionId: normalized.rawSessionId || normalized.sessionId || "",
+                providerOutputContractEvidence: normalized.providerOutputContractEvidence || null,
+                providerRuntimeVersionSnapshot: runtimeVersionSnapshot,
+                expectedProviderContractId: taskAgentSessionOptions.expectedProviderContractId || taskAgentSessionOptions.providerContractId || "",
+                nativeResumeRequested: taskAgentSessionOptions.resumeSession === true,
+                runnerSuccess: code === 0,
+            });
             const nativeFailure = (0, runtime_1.detectAgentCommandFailure)(agentType, fullOutput.trim(), code, stderrOutput);
             let displayOutput = normalized.output || fullOutput.trim();
             if (nativeFailure.failed) {
@@ -1457,8 +1931,14 @@ function callAgentStream(projectName, message, workDir, agentType, res, options 
                 res.end();
                 return;
             }
-            let updatedSession = (0, agent_sessions_1.recordTaskAgentSessionTurn)(taskAgentSession.id, { nativeSessionId: normalized.sessionId, success: true }) || taskAgentSession;
-            projectRun.native_session_id = updatedSession.nativeSessionId || normalized.sessionId || projectRun.native_session_id || "";
+            let updatedSession = (0, agent_sessions_1.recordTaskAgentSessionTurn)(taskAgentSession.id, {
+                nativeSessionId: nativeContinuationEvidence.nativeSessionReusable ? nativeContinuationEvidence.effectiveNativeSessionId : "",
+                nativeContinuationEvidence,
+                success: true,
+                nativeContinuationUnverified: taskAgentSessionOptions.resumeSession === true
+                    && nativeContinuationEvidence.nativeContinuationAcknowledged !== true,
+            }) || taskAgentSession;
+            projectRun.native_session_id = updatedSession.nativeSessionId || "";
             projectRun.resume_mode = updatedSession.resumeMode || projectRun.resume_mode || "";
             if (jsonSessionStream && displayOutput) {
                 pushProjectWorkEvent("output", displayOutput);
@@ -1664,7 +2144,15 @@ function createCollabCtx() {
         getSharedFilePath: utils_1.getSharedFilePath,
         createSharedFileRecord: utils_1.createSharedFileRecord,
         normalizeSharedFileList: utils_1.normalizeSharedFileList,
-        onTaskStatusChange: cron_1.syncCronTaskStatus,
+        onTaskStatusChange: async (task, status, result = "") => {
+            (0, cron_1.syncCronTaskStatus)(task, status, result);
+            try {
+                await (0, feishu_channel_1.notifyFeishuTaskStatus)(task, status, result);
+            }
+            catch (error) {
+                console.warn("[飞书进度通知]", error?.message || error);
+            }
+        },
     };
 }
 // === 主生命周期请求拦截与模块化分流 ===
@@ -1981,7 +2469,9 @@ function handleRequest(req, res) {
         req.on("end", () => {
             try {
                 const payload = body ? JSON.parse(body) : {};
-                const result = (0, cleanup_center_1.previewCleanupAction)(String(payload.action || ""));
+                const result = (0, cleanup_center_1.previewCleanupAction)(String(payload.action || ""), {
+                    retention_days: payload.retention_days,
+                });
                 (0, utils_1.sendJson)(res, result, result.success === false ? 400 : 200);
             }
             catch (error) {
@@ -1998,7 +2488,10 @@ function handleRequest(req, res) {
                 const payload = body ? JSON.parse(body) : {};
                 if (payload.confirm !== true)
                     return (0, utils_1.sendJson)(res, { success: false, error: "缺少确认参数 confirm=true" }, 400);
-                const result = (0, cleanup_center_1.runCleanupAction)(String(payload.action || ""));
+                const result = (0, cleanup_center_1.runCleanupAction)(String(payload.action || ""), {
+                    preview_token: payload.preview_token,
+                    selected_ids: payload.selected_ids,
+                });
                 (0, utils_1.sendJson)(res, result, result.success === false ? 400 : 200);
             }
             catch (error) {
@@ -2146,6 +2639,8 @@ function handleRequest(req, res) {
     // 4. API 子模块分流拦截
     if ((0, projects_1.handleProjectsApi)(pathname, req, res, parsed, projectsCtx))
         return;
+    if ((0, conversation_search_1.handleConversationSearchApi)(pathname, req, res, parsed))
+        return;
     if ((0, sessions_1.handleSessionsApi)(pathname, req, res, parsed))
         return;
     if ((0, git_1.handleGitApi)(pathname, req, res, parsed))
@@ -2172,6 +2667,8 @@ function handleRequest(req, res) {
         return;
     if ((0, usability_1.handleUsabilityApi)(pathname, req, res))
         return;
+    if ((0, settings_1.handleSystemSettingsApi)(pathname, req, res))
+        return;
     const { handleMemoryCenterApi } = require("./modules/knowledge/memory-control-center");
     if (handleMemoryCenterApi(pathname, req, res, parsed))
         return;
@@ -2180,6 +2677,9 @@ function handleRequest(req, res) {
 }
 // === 启动服务器 ===
 function bootstrapServerRuntime(startupCollabCtx, port) {
+    const petGenerationRecovery = (0, pet_generation_1.recoverPetGenerationJobs)();
+    if (petGenerationRecovery.recovered > 0)
+        console.log(`[宠物生成] 标记 ${petGenerationRecovery.recovered} 个中断任务等待重试`);
     (0, utils_1.refreshEnvPath)();
     const credentialMigration = (0, credential_store_1.migrateConfigDirectory)(utils_1.CONFIGS_DIR);
     const controlBotMigration = (0, credential_store_1.migrateTomlCredentials)(path.join(utils_1.CCM_DIR, "control-bot", "config.toml"));
@@ -2207,6 +2707,22 @@ function bootstrapServerRuntime(startupCollabCtx, port) {
         console.log(`[全局任务监工] 启动恢复 ${missionSupervisor.resumed} 个异步监督任务`);
     (0, reliability_drills_1.startReliabilityDrillScheduler)();
     (0, usability_1.startUsabilityArchiveScheduler)();
+    (0, group_session_maintenance_1.startGroupSessionRetentionMaintenanceScheduler)();
+    const typedMemoryDispatchRecovery = (0, memory_2.recoverChildTypedMemoryDispatchWal)();
+    if (typedMemoryDispatchRecovery.total > 0) {
+        console.log(`[记忆派发 WAL] 检查 ${typedMemoryDispatchRecovery.total} 条：恢复提交 ${typedMemoryDispatchRecovery.recovered}，不确定 ${typedMemoryDispatchRecovery.uncertain}，过期 ${typedMemoryDispatchRecovery.expired}`);
+    }
+    const invocationRecovery = (0, task_agent_invocation_lineage_1.reconcileTaskAgentInvocationRecovery)();
+    if (invocationRecovery.checked > 0) {
+        console.log(`[子 Agent 调用谱系] 检查 ${invocationRecovery.checked} 条：恢复 ${invocationRecovery.recovered}，不确定 ${invocationRecovery.uncertain}，活跃 ${invocationRecovery.active}，待定 ${invocationRecovery.pending}，重连 ${invocationRecovery.relinked}，隔离 ${invocationRecovery.quarantined}`);
+    }
+    const continuationSoakRecovery = (0, task_agent_continuation_soak_1.reconcileTaskAgentContinuationSoak)({
+        invocationEdges: (0, task_agent_invocation_lineage_1.listTaskAgentInvocationEdges)({}).edges,
+        taskAgentSessions: (0, agent_sessions_1.listTaskAgentSessions)(),
+    });
+    if (continuationSoakRecovery.checked > 0) {
+        console.log(`[续接 Soak] 检查 ${continuationSoakRecovery.checked} 条：补录 ${continuationSoakRecovery.recorded}，幂等 ${continuationSoakRecovery.idempotent}，失败 ${continuationSoakRecovery.failed}`);
+    }
     const soakResume = (0, soak_test_1.resumeSoakTest)();
     if (soakResume.resumed)
         console.log("[Soak Test] 已恢复未完成的稳定性浸泡测试");
@@ -2229,12 +2745,17 @@ function startServer(port) {
         (0, global_agent_1.stopGlobalMissionSupervisionForServer)();
         (0, reliability_drills_1.stopReliabilityDrillScheduler)();
         (0, usability_1.stopUsabilityArchiveScheduler)();
+        (0, group_session_maintenance_1.stopGroupSessionRetentionMaintenanceScheduler)();
+        (0, model_capability_cache_1.stopModelCapabilityRefreshScheduler)();
+        (0, runtime_tool_real_cli_matrix_1.stopRuntimeToolRealCliMatrixScheduler)();
         (0, soak_test_1.shutdownSoakMonitor)();
     });
     server.listen(port, () => {
         // Port ownership is the fail-closed singleton gate. No schedulers, queue
         // recovery, soak resume, or mutable startup work may run before it succeeds.
         bootstrapServerRuntime(startupCollabCtx, port);
+        (0, model_capability_cache_1.startModelCapabilityRefreshScheduler)();
+        (0, runtime_tool_real_cli_matrix_1.startRuntimeToolRealCliMatrixScheduler)();
         console.log(`\n╔══════════════════════════════════════╗`);
         console.log(`║     ccm Web 控制台                    ║`);
         console.log(`╚══════════════════════════════════════╝\n`);

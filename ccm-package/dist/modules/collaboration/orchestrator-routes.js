@@ -5,6 +5,7 @@ const utils_1 = require("../../core/utils");
 const storage_1 = require("./storage");
 const group_orchestrator_1 = require("./group-orchestrator");
 const daily_dev_backlog_1 = require("./daily-dev-backlog");
+const model_capability_cache_1 = require("./model-capability-cache");
 function handleOrchestratorRoutes(req, res, parsed, ctx, deps) {
     const pathname = parsed.pathname;
     if (pathname === "/api/orchestrator/config" && req.method === "GET") {
@@ -18,11 +19,35 @@ function handleOrchestratorRoutes(req, res, parsed, ctx, deps) {
             try {
                 const updates = JSON.parse(body);
                 const config = (0, group_orchestrator_1.saveOrchestratorConfig)(updates);
+                if (Number(config.modelContextWindow || 0) > 0
+                    && ["modelContextWindow", "model_context_window", "memoryContextPreset", "memory_context_preset"].some(key => Object.prototype.hasOwnProperty.call(updates, key))) {
+                    (0, model_capability_cache_1.recordModelCapabilityEvidence)({
+                        provider: String(config.provider || config.format || "group-main-agent"),
+                        model: String(config.model || ""),
+                        source: "user_setting",
+                        contextWindow: Number(config.modelContextWindow),
+                        maxOutputTokens: Number(config.modelMaxOutputTokens || 20_000),
+                        checkedAt: new Date().toISOString(),
+                        evidenceId: "memory-center-context-setting",
+                    });
+                }
+                if (["groupSessionAutoPruneEnabled", "group_session_auto_prune_enabled", "groupSessionRetentionIntervalHours", "group_session_retention_interval_hours"].some(key => Object.prototype.hasOwnProperty.call(updates, key))) {
+                    const { startGroupSessionRetentionMaintenanceScheduler } = require("./group-session-maintenance");
+                    startGroupSessionRetentionMaintenanceScheduler();
+                }
                 (0, utils_1.sendJson)(res, { success: true, config: (0, group_orchestrator_1.publicOrchestratorConfig)(config) });
             }
             catch (e) {
                 (0, utils_1.sendJson)(res, { error: e.message }, 400);
             }
+        });
+        return true;
+    }
+    if (pathname === "/api/orchestrator/connection-test" && req.method === "POST") {
+        void (0, group_orchestrator_1.testUnifiedModelConnection)().then(result => {
+            (0, utils_1.sendJson)(res, result, result.success ? 200 : 422);
+        }).catch((error) => {
+            (0, utils_1.sendJson)(res, { success: false, message: error?.message || "模型连接测试失败" }, 500);
         });
         return true;
     }

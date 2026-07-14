@@ -41,6 +41,7 @@ exports.getGlobalMissionSupervisor = getGlobalMissionSupervisor;
 exports.listGlobalMissionSupervisors = listGlobalMissionSupervisors;
 exports.startGlobalMissionSupervisor = startGlobalMissionSupervisor;
 exports.checkGlobalMissionSupervisorNow = checkGlobalMissionSupervisorNow;
+exports.normalizeGlobalMissionSupervisorOperation = normalizeGlobalMissionSupervisorOperation;
 exports.controlGlobalMissionSupervisor = controlGlobalMissionSupervisor;
 exports.startGlobalMissionSupervisorScheduler = startGlobalMissionSupervisorScheduler;
 exports.stopGlobalMissionSupervisorScheduler = stopGlobalMissionSupervisorScheduler;
@@ -382,11 +383,33 @@ async function checkGlobalMissionSupervisorNow(id, runtime) {
         activeChecks.delete(record.id);
     }
 }
+function normalizeGlobalMissionSupervisorOperation(operation) {
+    const value = String(operation || "").trim().toLowerCase();
+    const aliases = {
+        "立即检查": "check_now",
+        "立即刷新": "check_now",
+        "检查": "check_now",
+        "刷新": "check_now",
+        "check": "check_now",
+        "check_now": "check_now",
+        "暂停": "pause",
+        "恢复": "resume",
+        "继续": "resume",
+        "取消": "cancel",
+        "停止": "cancel",
+        "人工接管": "takeover",
+        "接管": "takeover",
+        "修改目标": "update_goal",
+        "更新目标": "update_goal",
+        "归档": "archive",
+    };
+    return aliases[value] || value;
+}
 async function controlGlobalMissionSupervisor(id, operation, runtime, payload = {}) {
     const record = getGlobalMissionSupervisor(id);
     if (!record)
         throw new Error("全局任务跟进记录不存在");
-    const op = String(operation || "").toLowerCase();
+    const op = normalizeGlobalMissionSupervisorOperation(operation);
     const now = nowIso(runtime);
     if (op === "check_now")
         return checkGlobalMissionSupervisorNow(record.id, runtime);
@@ -662,6 +685,10 @@ async function runGlobalMissionSupervisorAsyncSelfTest() {
         phase = "done";
         const completed = await checkGlobalMissionSupervisorNow(record.id, runtime);
         const checks = {
+            localizedControlOperationsNormalize: normalizeGlobalMissionSupervisorOperation("立即检查") === "check_now"
+                && normalizeGlobalMissionSupervisorOperation("立即刷新") === "check_now"
+                && normalizeGlobalMissionSupervisorOperation("修改目标") === "update_goal"
+                && normalizeGlobalMissionSupervisorOperation("人工接管") === "takeover",
             asyncRecoveryActionPersisted: recovery.actions.some((item) => item.type === "runtime_recovery"),
             restartReloadKeepsIdentity: reloaded?.id === record.id && reloaded?.mission_id === missionId,
             waitingUserIsRestoredWithoutAutomaticAdvance: shouldScheduleGlobalMissionSupervisor({ status: "waiting_user", source: "global-agent", next_check_at: "2000-01-01T00:00:00.000Z" }) === false,

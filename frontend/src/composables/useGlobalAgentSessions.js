@@ -218,12 +218,26 @@ const normalizeSession = (session) => {
   }
 }
 
+const isDisposableDefaultSession = (session, welcome) => {
+  const messages = Array.isArray(session?.messages) ? session.messages : []
+  const message = messages[0]
+  const expected = String(welcome?.content || '').replace(/\s+/g, '')
+  const actual = String(message?.content || '').replace(/\s+/g, '')
+  return String(session?.name || '') === '默认会话'
+    && messages.length === 1
+    && String(message?.role || '') === 'assistant'
+    && !messageStableIdentity(message)
+    && !!expected
+    && actual === expected
+}
+
 export const __globalAgentSessionTestHooks = {
   normalizeMessage,
   messageKey,
   messageRevisionAt,
   mergeHistoryMessages,
   messagesChanged,
+  isDisposableDefaultSession,
   globalMissionConversationState,
   globalMissionNotificationId,
   upsertGlobalMissionConversationNotification,
@@ -297,6 +311,16 @@ export function useGlobalAgentSessions(options = {}) {
       if (!res.ok || data.success === false) return false
       const incoming = Array.isArray(data.sessions) ? data.sessions.map(normalizeSession).filter(Boolean) : []
       if (!incoming.length) return false
+
+      const incomingIds = new Set(incoming.map(session => session.id))
+      if (
+        sessions.value.length === 1
+        && !incomingIds.has(sessions.value[0].id)
+        && isDisposableDefaultSession(sessions.value[0], options.defaultWelcome)
+      ) {
+        sessions.value = []
+        currentSessionId.value = ''
+      }
 
       const byId = new Map(sessions.value.map(session => [session.id, session]))
       let changed = false

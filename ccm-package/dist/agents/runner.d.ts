@@ -1,4 +1,29 @@
 #!/usr/bin/env node
+export declare function validateAgentRunnerSessionLifecycleFence(request?: any): {
+    schema: string;
+    valid: boolean;
+    required: boolean;
+    status: string;
+    issues: string[];
+    fence: {
+        schema: string;
+        required: boolean;
+        groupId: string;
+        groupSessionId: string;
+        lifecycleGeneration: number;
+        lifecycleStatus: string;
+        lifecycleHeadId: string;
+        lifecycleHeadChecksum: string;
+        memoryContextSnapshotId: string;
+        memoryContextSnapshotChecksum: string;
+    };
+    expected: {
+        lifecycleHeadId: string;
+        generation: number;
+        status: string;
+        lifecycleHeadChecksum: string;
+    };
+};
 export declare function validateExternalRunnerRuntimeToolGate(request: any, options?: any): {
     ok: boolean;
     runtimeToolSnapshot: any;

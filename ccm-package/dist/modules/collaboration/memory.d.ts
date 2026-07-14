@@ -8,24 +8,33 @@ export declare const GROUP_MEMORY_POST_COMPACT_CANDIDATE_USAGE_LEDGER_VERSION = 
 export declare const GROUP_API_MICROCOMPACT_NATIVE_APPLY_PROOF_LEDGER_VERSION = 1;
 export declare const GROUP_API_MICROCOMPACT_NATIVE_APPLY_REQUEST_TELEMETRY_LEDGER_VERSION = 1;
 export declare const GROUP_API_MICROCOMPACT_NATIVE_APPLY_TELEMETRY_MAX_AGE_MS: number;
-export declare const GROUP_SESSION_MEMORY_SNAPSHOT_VERSION = 1;
+export declare const GROUP_SESSION_MEMORY_SNAPSHOT_VERSION = 3;
+export declare const GROUP_SESSION_MEMORY_MAX_SECTION_TOKENS = 2000;
+export declare const GROUP_SESSION_MEMORY_MAX_TOTAL_TOKENS = 12000;
+export declare const GROUP_SESSION_MEMORY_MIN_TOKENS_TO_INIT = 10000;
+export declare const GROUP_SESSION_MEMORY_MIN_TOKENS_BETWEEN_UPDATES = 5000;
+export declare const GROUP_SESSION_MEMORY_TOOL_CALLS_BETWEEN_UPDATES = 3;
 export declare const GROUP_TOOL_CONTINUITY_SNAPSHOT_VERSION = 1;
 export declare const GROUP_COMPACT_FILE_REFERENCE_LEDGER_VERSION = 1;
 export declare const GROUP_COMPACT_FILE_REFERENCE_READ_PLAN_REVALIDATION_GATE_VERSION = 1;
 export declare const GROUP_GLOBAL_MEMORY_ARBITRATION_LEDGER_VERSION = 1;
 export declare const GROUP_GLOBAL_MEMORY_HEALTH_GATE_VERSION = 1;
-export declare function getGroupMemoryFile(groupId: string): string;
-export declare function getGroupPostCompactDispatchLedgerFile(groupId: string): string;
-export declare function getGroupPostCompactCandidateUsageLedgerFile(groupId: string): string;
-export declare function getGroupApiMicrocompactNativeApplyProofLedgerFile(groupId: string): string;
-export declare function getGroupApiMicrocompactNativeApplyRequestTelemetryLedgerFile(groupId: string): string;
+export declare function getGroupSessionMemoryScopeId(groupId: string, sessionId?: string): string;
+export declare function getGroupMemoryFile(groupId: string, sessionId?: string): string;
+export declare function getGroupMemoryReloadLedgerFile(groupId: string, sessionId?: string): string;
+export declare function getGroupPostCompactDispatchLedgerFile(groupId: string, sessionId?: string): string;
+export declare function getGroupPostCompactCandidateUsageLedgerFile(groupId: string, sessionId?: string): string;
+export declare function getGroupApiMicrocompactNativeApplyProofLedgerFile(groupId: string, sessionId?: string): string;
+export declare function getGroupApiMicrocompactNativeApplyRequestTelemetryLedgerFile(groupId: string, sessionId?: string): string;
+export declare function getGroupReplayRepairLedgerFile(groupId: string, sessionId?: string): string;
+export declare function getGroupReplayRepairWorkItemsFile(groupId: string, sessionId?: string): string;
 export declare function getGroupSessionMemorySnapshotFile(groupId: string): string;
 export declare function getGroupSessionMemoryMarkdownFile(groupId: string): string;
 export declare function getGroupToolContinuitySnapshotFile(groupId: string): string;
 export declare function getGroupToolContinuityMarkdownFile(groupId: string): string;
 export declare function getGroupCompactFileReferenceLedgerFile(groupId: string): string;
 export declare function getGroupGlobalMemoryArbitrationLedgerFile(groupId: string): string;
-export declare function readGroupReplayRepairDispatchCandidatesSummary(groupId: string, limit?: number): {
+export declare function readGroupReplayRepairDispatchCandidatesSummary(groupId: string, limit?: number, sessionId?: string): {
     schema: string;
     groupId: string;
     file: string;
@@ -39,8 +48,9 @@ export declare function readGroupReplayRepairDispatchCandidatesSummary(groupId: 
     shouldCreateRealTask: boolean;
     candidates: any;
 };
-export declare function createEmptyGroupMemory(groupId: string): {
+export declare function createEmptyGroupMemory(groupId: string, sessionId?: string): {
     groupId: string;
+    groupSessionId: string;
     goal: string;
     summary: string;
     currentPhase: string;
@@ -75,8 +85,8 @@ export declare function createEmptyGroupMemory(groupId: string): {
     nextActions: any[];
     updated_at: string;
 };
-export declare function loadGroupMemory(groupId: string): any;
-export declare function saveGroupMemory(groupId: string, memory: any): any;
+export declare function loadGroupMemory(groupId: string, sessionId?: string): any;
+export declare function saveGroupMemory(groupId: string, memory: any, sessionId?: string, options?: any): any;
 export declare function runGroupMemoryStorageRecoverySelfTest(): {
     pass: boolean;
     checks: {
@@ -180,7 +190,254 @@ export declare function distillGroupGlobalMemoryArbitrationToTypedMemory(groupId
     };
     distilledAt: string;
 };
+export declare function analyzeGroupSessionMemoryBudget(markdown: string): {
+    schema: string;
+    version: number;
+    status: string;
+    estimator: string;
+    ccParitySource: string;
+    totalTokens: number;
+    maxTotalTokens: number;
+    totalUtilizationPercent: number;
+    maxSectionTokens: number;
+    maxSectionUtilizationPercent: number;
+    sectionCount: number;
+    oversizedSectionCount: number;
+    oversizedSections: {
+        header: string;
+        tokens: number;
+        maxTokens: number;
+        overBudget: boolean;
+    }[];
+    sections: {
+        header: string;
+        tokens: number;
+        maxTokens: number;
+        overBudget: boolean;
+    }[];
+};
+export declare function evaluateGroupSessionMemoryUpdateCadence(messages: any[], previousSnapshot?: any, options?: any): {
+    schema: string;
+    version: number;
+    ccParitySource: string;
+    minimumMessageTokensToInit: number;
+    minimumTokensBetweenUpdate: number;
+    toolCallsBetweenUpdates: number;
+    initialized: boolean;
+    status: string;
+    shouldExtract: boolean;
+    currentContextTokens: number;
+    tokensAtLastExtraction: number;
+    tokensSinceLastExtraction: number;
+    toolCallsSinceLastExtraction: any;
+    lastAssistantTurnHasToolCalls: boolean;
+    tokenThresholdMet: boolean;
+    toolCallThresholdMet: boolean;
+    naturalBreak: boolean;
+    lastObservedMessageId: string;
+    lastExtractionMessageId: string;
+    extractionCount: number;
+    lastExtractedAt: string;
+    observedAt: string;
+};
+export declare function enforceGroupSessionMemoryBudget(markdown: string): {
+    markdown: string;
+    wasTruncated: boolean;
+    truncatedSections: string[];
+    before: {
+        schema: string;
+        version: number;
+        status: string;
+        estimator: string;
+        ccParitySource: string;
+        totalTokens: number;
+        maxTotalTokens: number;
+        totalUtilizationPercent: number;
+        maxSectionTokens: number;
+        maxSectionUtilizationPercent: number;
+        sectionCount: number;
+        oversizedSectionCount: number;
+        oversizedSections: {
+            header: string;
+            tokens: number;
+            maxTokens: number;
+            overBudget: boolean;
+        }[];
+        sections: {
+            header: string;
+            tokens: number;
+            maxTokens: number;
+            overBudget: boolean;
+        }[];
+    };
+    after: {
+        schema: string;
+        version: number;
+        status: string;
+        estimator: string;
+        ccParitySource: string;
+        totalTokens: number;
+        maxTotalTokens: number;
+        totalUtilizationPercent: number;
+        maxSectionTokens: number;
+        maxSectionUtilizationPercent: number;
+        sectionCount: number;
+        oversizedSectionCount: number;
+        oversizedSections: {
+            header: string;
+            tokens: number;
+            maxTokens: number;
+            overBudget: boolean;
+        }[];
+        sections: {
+            header: string;
+            tokens: number;
+            maxTokens: number;
+            overBudget: boolean;
+        }[];
+    };
+};
+export declare function buildGroupSessionMemorySectionEvidence(markdown: string, source?: any): {
+    checksum: string;
+    schema: string;
+    version: number;
+    sourceType: string;
+    markdownChecksum: string;
+    sourceTranscriptChecksum: string;
+    sourceFirstMessageId: string;
+    sourceLastMessageId: string;
+    sourceMessageCount: number;
+    sourceMessageIds: unknown[];
+    sections: {
+        evidenceId: string;
+        section: string;
+        sectionIndex: number;
+        sectionChecksum: string;
+        sourceTranscriptChecksum: string;
+        sourceFirstMessageId: string;
+        sourceLastMessageId: string;
+        sourceMessageCount: number;
+        sourceMessageIds: unknown[];
+    }[];
+};
+export declare function buildGroupSessionMemorySnapshot(groupId: string, memory?: any, options?: any): {
+    schema: string;
+    version: number;
+    groupId: string;
+    generatedAt: string;
+    reason: string;
+    strategy: string;
+    extractionMethod: string;
+    modelExtracted: boolean;
+    deterministicFallback: boolean;
+    modelExtractionReceipt: any;
+    modelMergeQuality: any;
+    factSupersessionGraph: any;
+    sectionEvidence: any;
+    budgetEnforcement: {
+        wasTruncated: boolean;
+        truncatedSections: string[];
+        before: {
+            schema: string;
+            version: number;
+            status: string;
+            estimator: string;
+            ccParitySource: string;
+            totalTokens: number;
+            maxTotalTokens: number;
+            totalUtilizationPercent: number;
+            maxSectionTokens: number;
+            maxSectionUtilizationPercent: number;
+            sectionCount: number;
+            oversizedSectionCount: number;
+            oversizedSections: {
+                header: string;
+                tokens: number;
+                maxTokens: number;
+                overBudget: boolean;
+            }[];
+            sections: {
+                header: string;
+                tokens: number;
+                maxTokens: number;
+                overBudget: boolean;
+            }[];
+        };
+        after: {
+            schema: string;
+            version: number;
+            status: string;
+            estimator: string;
+            ccParitySource: string;
+            totalTokens: number;
+            maxTotalTokens: number;
+            totalUtilizationPercent: number;
+            maxSectionTokens: number;
+            maxSectionUtilizationPercent: number;
+            sectionCount: number;
+            oversizedSectionCount: number;
+            oversizedSections: {
+                header: string;
+                tokens: number;
+                maxTokens: number;
+                overBudget: boolean;
+            }[];
+            sections: {
+                header: string;
+                tokens: number;
+                maxTokens: number;
+                overBudget: boolean;
+            }[];
+        };
+    };
+    summaryFile: string;
+    snapshotFile: string;
+    lastSummarizedMessageId: string;
+    summaryChecksum: string;
+    markdownChecksum: string;
+    markdownChars: number;
+    markdownTokens: number;
+    memoryBudget: {
+        schema: string;
+        version: number;
+        status: string;
+        estimator: string;
+        ccParitySource: string;
+        totalTokens: number;
+        maxTotalTokens: number;
+        totalUtilizationPercent: number;
+        maxSectionTokens: number;
+        maxSectionUtilizationPercent: number;
+        sectionCount: number;
+        oversizedSectionCount: number;
+        oversizedSections: {
+            header: string;
+            tokens: number;
+            maxTokens: number;
+            overBudget: boolean;
+        }[];
+        sections: {
+            header: string;
+            tokens: number;
+            maxTokens: number;
+            overBudget: boolean;
+        }[];
+    };
+    updateCadence: any;
+    extractionTransaction: any;
+    hasSummary: boolean;
+    compactedMessageCount: number;
+    preservedRecentMessages: number;
+    preCompactTokenCount: number;
+    postCompactTokenCount: number;
+    health: string;
+    contextPressureWarning: any;
+    markdownExcerpt: string;
+    markdown: string;
+};
 export declare function persistGroupSessionMemorySnapshot(groupId: string, memory?: any, options?: any): any;
+export declare function commitGroupSessionMemorySnapshot(snapshot?: any): any;
+export declare function persistGroupSessionMemoryCadenceObservation(groupId: string, cadenceDecision?: any): any;
 export declare function readGroupSessionMemorySnapshotSummary(groupId: string): any;
 export declare function persistGroupToolContinuitySnapshot(groupId: string, memory?: any, options?: any): any;
 export declare function readGroupToolContinuitySnapshotSummary(groupId: string): any;
@@ -333,10 +590,65 @@ export declare function buildGroupCompactFileReferenceReadPlanRevalidationGate(g
     prompt_patch: string;
 };
 export declare function buildGroupMemoryContext(memory: any): string;
+export declare function deleteGroupSessionMemoryArtifacts(groupId: string, sessionId: string): {
+    schema: string;
+    groupId: string;
+    sessionId: string;
+    scopeId: string;
+    deletedFiles: number;
+    boundaryArtifacts: {
+        schema: string;
+        groupId: string;
+        sessionId: string;
+        deletedFiles: number;
+        files: string[];
+        deletedAt: string;
+    };
+    typedMemoryDispatchWalArtifacts: {
+        deletedFiles: number;
+    };
+    invocationLineageArtifacts: {
+        deleted: number;
+        recoveryDeleted: number;
+        recoveryLeaseDeleted: number;
+    } | {
+        deleted: number;
+        recoveryDeleted: number;
+    };
+    continuationSoakArtifacts: {
+        deleted: number;
+        groupId: string;
+        groupSessionId: string;
+        taskAgentSessionId: string;
+    } | {
+        deleted: number;
+    };
+    compactHeadArtifacts: {
+        deleted: number;
+        groupId: string;
+        groupSessionId: string;
+        file: string;
+    } | {
+        deleted: number;
+    };
+    deletedAt: string;
+};
+export declare function prepareGroupMemoryResumeProjection(groupId: string, groupSessionId: string, allMessages: any[], storedMemory: any, options?: any): {
+    schema: string;
+    groupId: string;
+    groupSessionId: string;
+    memory: any;
+    projection: any;
+    proof: any;
+    recovered: boolean;
+    recoveryReason: any;
+    recoveryRotation: any;
+};
 export declare function buildGroupMemorySourceManifest(groupId: string, input?: any): {
     schema: string;
     version: number;
     groupId: string;
+    groupSessionId: string;
     generatedAt: string;
     status: string;
     pass: boolean;
@@ -352,13 +664,14 @@ export declare function buildGroupMemorySourceManifest(groupId: string, input?: 
     manifestChecksum: string;
     entries: any[];
 };
-export declare function readGroupPostCompactDispatchLedger(groupId: string): any;
-export declare function readGroupPostCompactCandidateUsageLedger(groupId: string): any;
-export declare function readGroupApiMicrocompactNativeApplyProofLedger(groupId: string): any;
-export declare function readGroupApiMicrocompactNativeApplyRequestTelemetryLedger(groupId: string): any;
+export declare function readGroupPostCompactDispatchLedger(groupId: string, sessionId?: string): any;
+export declare function readGroupPostCompactCandidateUsageLedger(groupId: string, sessionId?: string): any;
+export declare function readGroupApiMicrocompactNativeApplyProofLedger(groupId: string, sessionId?: string): any;
+export declare function readGroupApiMicrocompactNativeApplyRequestTelemetryLedger(groupId: string, sessionId?: string): any;
 export declare function recordGroupPostCompactCandidateUsageLedger(groupId: string, input?: any): {
     schema: string;
     groupId: string;
+    groupSessionId: string;
     file: string;
     skipped: boolean;
     reason: string;
@@ -369,6 +682,7 @@ export declare function recordGroupPostCompactCandidateUsageLedger(groupId: stri
 } | {
     schema: string;
     groupId: string;
+    groupSessionId: string;
     file: string;
     recorded_count: any;
     duplicate_count: number;
@@ -381,6 +695,7 @@ export declare function buildGroupPostCompactCandidateUsageSummary(groupId: stri
     schema: string;
     version: number;
     groupId: string;
+    groupSessionId: string;
     target_project: string;
     ledger_file: any;
     has_history: boolean;
@@ -425,6 +740,7 @@ export declare function buildGroupApiMicrocompactNativeApplyAdapterTelemetryRow(
 export declare function recordGroupApiMicrocompactNativeApplyAdapterTelemetry(input?: any): {
     schema: string;
     groupId: string;
+    groupSessionId: string;
     file: string;
     skipped: boolean;
     reason: string;
@@ -435,6 +751,7 @@ export declare function recordGroupApiMicrocompactNativeApplyAdapterTelemetry(in
 } | {
     schema: string;
     groupId: string;
+    groupSessionId: string;
     file: string;
     recorded_count: number;
     updated_count: number;
@@ -458,6 +775,7 @@ export declare function recordGroupApiMicrocompactNativeApplyAdapterTelemetry(in
 export declare function recordGroupApiMicrocompactNativeApplyRequestTelemetryLedger(groupId: string, input?: any): {
     schema: string;
     groupId: string;
+    groupSessionId: string;
     file: string;
     skipped: boolean;
     reason: string;
@@ -468,6 +786,7 @@ export declare function recordGroupApiMicrocompactNativeApplyRequestTelemetryLed
 } | {
     schema: string;
     groupId: string;
+    groupSessionId: string;
     file: string;
     recorded_count: number;
     updated_count: number;
@@ -480,6 +799,7 @@ export declare function buildGroupApiMicrocompactNativeApplyRequestTelemetrySumm
     schema: string;
     version: number;
     groupId: string;
+    groupSessionId: string;
     target_project: string;
     ledger_file: any;
     has_history: boolean;
@@ -495,6 +815,7 @@ export declare function buildGroupApiMicrocompactNativeApplyRequestTelemetrySumm
 export declare function recordGroupApiMicrocompactNativeApplyProofLedger(groupId: string, input?: any): {
     schema: string;
     groupId: string;
+    groupSessionId: string;
     file: string;
     skipped: boolean;
     reason: string;
@@ -505,6 +826,7 @@ export declare function recordGroupApiMicrocompactNativeApplyProofLedger(groupId
 } | {
     schema: string;
     groupId: string;
+    groupSessionId: string;
     file: string;
     recorded_count: number;
     updated_count: number;
@@ -517,6 +839,7 @@ export declare function buildGroupApiMicrocompactNativeApplyProofSummary(groupId
     schema: string;
     version: number;
     groupId: string;
+    groupSessionId: string;
     target_project: string;
     ledger_file: any;
     has_history: boolean;
@@ -535,6 +858,7 @@ export declare function buildGroupApiMicrocompactNativeApplyProofSummary(groupId
         schema: string;
         version: number;
         groupId: string;
+        groupSessionId: string;
         target_project: string;
         ledger_file: any;
         has_history: boolean;
@@ -559,6 +883,7 @@ export declare function recordGroupMemoryReloadAudit(groupId: string, input?: an
     schema: string;
     version: number;
     groupId: string;
+    groupSessionId: string;
     scope: string;
     contextKind: any;
     reason: string;
@@ -615,10 +940,12 @@ export declare function scheduleGroupMemoryAutoCompaction(groupId: string, optio
     scheduled: boolean;
     reason: string;
     groupId?: undefined;
+    sessionId?: undefined;
     delayMs?: undefined;
 } | {
     scheduled: boolean;
     groupId: string;
+    sessionId: string;
     delayMs: number;
     reason?: undefined;
 };
@@ -631,6 +958,7 @@ export declare function runGroupMemoryAutoCompactionNow(groupId: string, options
     keepIndex?: undefined;
     background?: undefined;
     memory?: undefined;
+    compactHead?: undefined;
     error?: undefined;
 } | {
     success: boolean;
@@ -641,6 +969,7 @@ export declare function runGroupMemoryAutoCompactionNow(groupId: string, options
     keepIndex?: undefined;
     background?: undefined;
     memory?: undefined;
+    compactHead?: undefined;
     error?: undefined;
 } | {
     success: boolean;
@@ -664,6 +993,12 @@ export declare function runGroupMemoryAutoCompactionNow(groupId: string, options
         completedAt: string;
     };
     memory: any;
+    compactHead: {
+        committed: boolean;
+        idempotent: boolean;
+        head: any;
+        file: any;
+    };
     reason?: undefined;
     scheduled?: undefined;
     error?: undefined;
@@ -692,6 +1027,7 @@ export declare function runGroupMemoryAutoCompactionNow(groupId: string, options
     boundary?: undefined;
     keepIndex?: undefined;
     memory?: undefined;
+    compactHead?: undefined;
 }>;
 export declare function ensureGroupMemoryAutoCompactionHook(): {
     registered: boolean;
@@ -715,9 +1051,124 @@ export declare function runGroupMemoryAutoCompactionSelfTest(): Promise<{
     };
     background: any;
 }>;
+export declare function buildChildTypedMemoryRecallLedgerScope(targetProject: string, sessionBinding?: any, memory?: any, options?: any): {
+    schema: string;
+    version: number;
+    scope: string;
+    scopeKind: string;
+    targetProject: string;
+    taskId: string;
+    taskAgentSessionId: string;
+    compactEpoch: string;
+    sessionBound: boolean;
+    dedupeBoundary: string;
+    crossTaskSessionRecallRequired: boolean;
+    postCompactRecallRequired: boolean;
+    changedDocumentRecallRequired: boolean;
+};
+export declare function buildChildTypedMemoryDeliveryCapsule(input?: any, options?: any): any;
 export declare function buildAgentMemoryContextBundle(groupId: string, targetProject: string, task?: string, options?: any): any;
+export declare function admitChildPostTurnSummaryDelivery(memoryBundle: any, options?: any): any;
+export declare function admitChildTypedMemoryDelivery(memoryBundle: any, options?: any): any;
+export declare function commitChildTypedMemoryDelivery(memoryBundle: any, options?: any): {
+    committed: boolean;
+    reason: string;
+    validation_issues?: undefined;
+    dispatched?: undefined;
+    executionReturned?: undefined;
+    promptBindingVerified?: undefined;
+    idempotent?: undefined;
+    lease?: undefined;
+    stats?: undefined;
+    ledger_file?: undefined;
+} | {
+    committed: boolean;
+    reason: string;
+    validation_issues: any;
+    dispatched?: undefined;
+    executionReturned?: undefined;
+    promptBindingVerified?: undefined;
+    idempotent?: undefined;
+    lease?: undefined;
+    stats?: undefined;
+    ledger_file?: undefined;
+} | {
+    committed: boolean;
+    reason: string;
+    dispatched: boolean;
+    executionReturned: boolean;
+    promptBindingVerified: boolean;
+    validation_issues?: undefined;
+    idempotent?: undefined;
+    lease?: undefined;
+    stats?: undefined;
+    ledger_file?: undefined;
+} | {
+    committed: boolean;
+    idempotent: boolean;
+    reason: string;
+    lease: any;
+    stats: {
+        schema: string;
+        version: number;
+        groupId: string;
+        scope: string;
+        deliveredBytes: number;
+        deliveredTokens: number;
+        deliveryCount: number;
+        deliveredDocumentCount: number;
+        compactEpoch: string;
+        taskAgentSessionId: string;
+        updatedAt: string;
+        file: any;
+    };
+    ledger_file: any;
+    validation_issues?: undefined;
+    dispatched?: undefined;
+    executionReturned?: undefined;
+    promptBindingVerified?: undefined;
+};
+export declare function createChildTypedMemoryDispatchWal(admission: any, input?: any): {
+    required: boolean;
+    created: boolean;
+    reason: string;
+    idempotent?: undefined;
+    record?: undefined;
+} | {
+    required: boolean;
+    created: boolean;
+    idempotent: boolean;
+    record: any;
+    reason?: undefined;
+} | {
+    required: boolean;
+    created: boolean;
+    record: any;
+    reason?: undefined;
+    idempotent?: undefined;
+} | {
+    required: boolean;
+    created: boolean;
+    reason: string;
+    record: any;
+};
+export declare function markChildTypedMemoryDispatchStarted(wal: any, input?: any): any;
+export declare function markChildTypedMemoryRunnerReturned(record: any, input?: any): any;
+export declare function markChildTypedMemoryDispatchCommitted(record: any, commit?: any): any;
+export declare function recoverChildTypedMemoryDispatchWal(options?: any): {
+    schema: string;
+    checked_at: string;
+    total: number;
+    recovered: number;
+    uncertain: number;
+    expired: number;
+    invalid: number;
+    pruned: number;
+    direct_spool_pruned: number;
+    rows: any[];
+};
 export declare function renderGroupMemoryContextBundle(bundle: any): string;
-export declare function buildAgentMemoryPacket(groupId: string, targetProject: string, task?: string): string;
+export declare function buildAgentMemoryPacket(groupId: string, targetProject: string, task?: string, options?: any): string;
 export declare function buildGlobalGroupMemoryContext(query?: string, options?: any): any;
 export declare function renderGlobalGroupMemoryContextBundle(bundle: any): string;
 export declare function runGlobalGroupMemoryContextSelfTest(): {
@@ -881,6 +1332,7 @@ export declare function runGroupPostCompactCandidateUsageLedgerSelfTest(): {
     record: {
         schema: string;
         groupId: string;
+        groupSessionId: string;
         file: string;
         skipped: boolean;
         reason: string;
@@ -891,6 +1343,7 @@ export declare function runGroupPostCompactCandidateUsageLedgerSelfTest(): {
     } | {
         schema: string;
         groupId: string;
+        groupSessionId: string;
         file: string;
         recorded_count: any;
         duplicate_count: number;

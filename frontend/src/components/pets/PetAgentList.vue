@@ -1,4 +1,6 @@
 <script setup>
+import PetSprite from './PetSprite.vue'
+
 defineProps({
   agents: { type: Array, default: () => [] },
   selectedAgent: { type: String, default: '' },
@@ -15,6 +17,7 @@ defineProps({
 const emit = defineEmits(['select-agent', 'toggle-agent', 'toggle-all', 'create-pet'])
 
 const getPetTypeName = (petTypes, type) => petTypes.find(pet => pet.id === type)?.name || '月薪喵'
+const getPetType = (petTypes, type) => petTypes.find(pet => pet.id === type) || null
 </script>
 
 <template>
@@ -26,7 +29,7 @@ const getPetTypeName = (petTypes, type) => petTypes.find(pet => pet.id === type)
           {{ allEnabled ? '全部隐藏' : '全部显示' }}
         </button>
         <button class="btn btn-primary btn-sm" @click="emit('create-pet')">
-          ➕ 创建宠物
+          从图片创建
         </button>
       </div>
     </div>
@@ -40,7 +43,14 @@ const getPetTypeName = (petTypes, type) => petTypes.find(pet => pet.id === type)
         @click="emit('select-agent', agent.name)"
       >
         <div class="pet-preview-wrap">
-          <img :src="getPetIconPath(getConfig(agent.name).type)" width="42" height="42">
+          <PetSprite
+            v-if="Number(getPetType(petTypes, getConfig(agent.name).type)?.spriteVersionNumber) === 2"
+            :type="getConfig(agent.name).type"
+            :skin="getPetType(petTypes, getConfig(agent.name).type)"
+            :state="agent.state || 'idle'"
+            :size="42"
+          />
+          <img v-else :src="getPetIconPath(getConfig(agent.name).type)" width="42" height="42" alt="">
         </div>
         <div class="pet-text-info">
           <div class="agent-label-name">{{ getAgentLabel(agent) }}</div>
@@ -60,8 +70,8 @@ const getPetTypeName = (petTypes, type) => petTypes.find(pet => pet.id === type)
       </div>
       <div v-if="agents.length === 0" class="empty-state-text">
         <span>🎵</span>
-        <p>暂无独立宠物</p>
-        <p class="sub">全局 Agent 和音乐 Agent 会保留为独立宠物，也可以创建自定义挂件</p>
+        <p>系统宠物尚未连接</p>
+        <p class="sub">这里只展示全局 Agent 和音乐 Agent</p>
       </div>
     </div>
   </div>

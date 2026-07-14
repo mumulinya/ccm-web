@@ -944,7 +944,9 @@ function recallGlobalAgentMemory(query, options = {}) {
         .sort((a, b) => b.score - a.score)
         .slice(0, limit);
     const session = options.sessionId ? memory.sessions.find((item) => item.sessionId === options.sessionId) : null;
-    (0, memory_control_center_1.recordMemoryMetric)(all.length > 0 ? "recall_hit" : "recall_miss", { scope: "global", scopeId: "global-agent", sessionId: options.sessionId || "", queryHash: sha(query, 16), selected: all.map((item) => item.id) });
+    if (options.recordMetric !== false) {
+        (0, memory_control_center_1.recordMemoryMetric)(all.length > 0 ? "recall_hit" : "recall_miss", { scope: "global", scopeId: "global-agent", sessionId: options.sessionId || "", queryHash: sha(query, 16), selected: all.map((item) => item.id) });
+    }
     return {
         ignored: false,
         items: all,

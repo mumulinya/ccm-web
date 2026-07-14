@@ -49,6 +49,8 @@ const GLOBAL_AGENT_CURRENT_ID_KEY = 'cc_global_assistant_current_id_v2'
 let globalAgentFixtureSessions = []
 let globalSteerStreamController = null
 let globalSteerFixtureRun = null
+let globalOrdinaryStreamController = null
+let globalOrdinaryFixtureRun = null
 let globalSupervisingFixtureRun = null
 let globalSupervisingFixtureMission = null
 
@@ -72,6 +74,44 @@ window.__ccmFinishGlobalSteerFixtureRun = () => {
   globalSteerStreamController.close()
   globalSteerStreamController = null
   globalSteerFixtureRun = null
+}
+
+window.__ccmFinishGlobalOrdinaryFixtureRun = () => {
+  if (!globalOrdinaryStreamController || !globalOrdinaryFixtureRun) return
+  const completedRun = {
+    ...globalOrdinaryFixtureRun,
+    status: 'completed',
+    phase: 'complete',
+    final_reply: '你好！有什么我可以帮你的吗？',
+    decision_summary: {
+      intent: {
+        category: 'conversation',
+        goal: '普通问候',
+        action_required: false,
+        confidence: 1,
+        authorization_basis: 'none',
+        reason: '普通问候',
+      },
+    },
+    updated_at: new Date().toISOString(),
+    completed_at: new Date().toISOString(),
+  }
+  globalOrdinaryStreamController.enqueue(encodeSseEvent({
+    type: 'decision',
+    run_id: completedRun.id,
+    status: 'running',
+    phase: 'answer',
+    step: {
+      state: 'answer',
+      message: completedRun.final_reply,
+      decision: completedRun.decision_summary,
+    },
+  }))
+  globalOrdinaryStreamController.enqueue(encodeSseEvent({ type: 'result', run: completedRun }))
+  globalOrdinaryStreamController.enqueue(encodeSseEvent({ type: 'done' }))
+  globalOrdinaryStreamController.close()
+  globalOrdinaryStreamController = null
+  globalOrdinaryFixtureRun = null
 }
 
 const jsonResponse = (body, status = 200) => new Response(JSON.stringify(body), {
@@ -363,6 +403,49 @@ window.fetch = async (input, init = {}) => {
   }
   if (url.includes('/api/global-agent/run')) {
     const payload = JSON.parse(String(init?.body || '{}'))
+    if (String(payload.message || '').trim() === '你好') {
+      globalOrdinaryFixtureRun = {
+        id: 'global-ordinary-conversation-run',
+        trace_id: 'trace-global-ordinary-conversation',
+        session_id: payload.session_id || 'global-stream-fixture',
+        source: 'web',
+        status: 'running',
+        phase: 'plan',
+        explicit_write_authorization: false,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        deadline_at: new Date(Date.now() + 60_000).toISOString(),
+        max_steps: 8,
+        steps: [],
+        pending_tool: null,
+        final_reply: '',
+        error: '',
+        resume_count: 0,
+        model_calls: 0,
+        tool_calls: 0,
+        client_effects: [],
+        user_message: payload.message,
+        original_user_message: payload.message,
+      }
+      return new Response(new ReadableStream({
+        start(controller) {
+          globalOrdinaryStreamController = controller
+          controller.enqueue(encodeSseEvent({
+            type: 'started',
+            run_id: globalOrdinaryFixtureRun.id,
+            trace_id: globalOrdinaryFixtureRun.trace_id,
+            status: 'running',
+            phase: 'plan',
+          }))
+        },
+      }), {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+        },
+      })
+    }
     globalSteerFixtureRun = {
       id: 'global-mid-turn-steer-run',
       trace_id: 'trace-global-mid-turn-steer',
@@ -3709,6 +3792,11 @@ const FixtureApp = {
     const childSummary = computed(() => summarizeWorkEvents(childEvents))
     const compactWorkText = (text) => sanitizeUserFacingAgentText(text, '执行成员正在执行。', 220)
     const agentDisplayName = (agent) => ({ web: '前端', qa: '测试' }[agent] || agent || '执行成员')
+    const ordinaryMultilineMessage = {
+      role: 'assistant',
+      agent: 'coordinator',
+      content: '你好啊！我在呢。\n\n你可以直接问我：\n- 查系统信息\n- 听歌\n- 处理项目任务',
+    }
     const codeDrawer = ref({
       visible: false,
       title: '',
@@ -3865,7 +3953,7 @@ const FixtureApp = {
       groupClarificationInput.value = ''
       groupClarificationTarget.value = null
     }
-    return { conversationDecision, taskDecision, taskCompletedDecision, taskMissingVerificationDecision, taskCard, internalUserRequestSummaryCard, explicitUserRequestSummaryCard, taskStatusFallbackCard, startupAutoRecoveryCard, planGapDeliveryCard, groupIntakeMessage, workQueueCard, workchainTodoCard, workchainCompletedArchivedCard, workchainQualityFollowupCard, ordinaryWorkchainTodoCard, testAgentBlockedPlanCard, testAgentFailedReviewCard, groupLiveTestAgentReviewMergedCard, workItemVerificationReminderCard, receiptResolvedCard, goalRevisionContinuationCard, planRevisionCard, confirmedPlanFollowupCard, mainAgentStatus, mainAgentActiveStatus, mainAgentArchivedTodoStatus, globalHistoryCard, globalTestAgentUnknownCoverageCard, globalTestAgentNotVerifiedCoverageCard, globalTestAgentLatestEvidenceRecheckCard, globalPostReviewSpotCheckRecheckCard, globalDirectDispatchCard, globalSingleProjectDispatchCard, globalFailedHistoryCard, internalProtocolFailureCard, globalCancelledHistoryCard, agentQaVisibleMessage, agentDisplayName, childEvents, childSummary, compactWorkText, codeDrawer, handleTaskAction, closeCodeDrawer, groupWaitingCard, groupWaitingInput, groupWaitingTarget, groupWaitingMessages, handleGroupWaitingTaskAction, submitGroupWaitingSupplement, groupClarificationMessage, groupClarificationInput, groupClarificationTarget, groupClarificationUserMessages, groupClarificationResumedCard, submitGroupClarificationResponse }
+    return { conversationDecision, ordinaryMultilineMessage, taskDecision, taskCompletedDecision, taskMissingVerificationDecision, taskCard, internalUserRequestSummaryCard, explicitUserRequestSummaryCard, taskStatusFallbackCard, startupAutoRecoveryCard, planGapDeliveryCard, groupIntakeMessage, workQueueCard, workchainTodoCard, workchainCompletedArchivedCard, workchainQualityFollowupCard, ordinaryWorkchainTodoCard, testAgentBlockedPlanCard, testAgentFailedReviewCard, groupLiveTestAgentReviewMergedCard, workItemVerificationReminderCard, receiptResolvedCard, goalRevisionContinuationCard, planRevisionCard, confirmedPlanFollowupCard, mainAgentStatus, mainAgentActiveStatus, mainAgentArchivedTodoStatus, globalHistoryCard, globalTestAgentUnknownCoverageCard, globalTestAgentNotVerifiedCoverageCard, globalTestAgentLatestEvidenceRecheckCard, globalPostReviewSpotCheckRecheckCard, globalDirectDispatchCard, globalSingleProjectDispatchCard, globalFailedHistoryCard, internalProtocolFailureCard, globalCancelledHistoryCard, agentQaVisibleMessage, agentDisplayName, childEvents, childSummary, compactWorkText, codeDrawer, handleTaskAction, closeCodeDrawer, groupWaitingCard, groupWaitingInput, groupWaitingTarget, groupWaitingMessages, handleGroupWaitingTaskAction, submitGroupWaitingSupplement, groupClarificationMessage, groupClarificationInput, groupClarificationTarget, groupClarificationUserMessages, groupClarificationResumedCard, submitGroupClarificationResponse }
   },
   template: `
     <main class="visual-fixture">
@@ -3877,6 +3965,17 @@ const FixtureApp = {
       <section id="case-task-plan" class="fixture-case">
         <h2>任务计划</h2>
         <MainAgentDecisionCard :decision="taskDecision" />
+      </section>
+
+      <section id="case-ordinary-multiline-reply" class="fixture-case">
+        <h2>普通问话多行回复</h2>
+        <AgentExecutionMessage
+          :msg="ordinaryMultilineMessage"
+          :display-content="ordinaryMultilineMessage.content"
+          :status="{ tone: 'idle', label: '回复' }"
+          agent-initials="AI"
+          agent-display-name="协调者"
+        />
       </section>
 
       <section id="case-task-plan-missing-verification" class="fixture-case">

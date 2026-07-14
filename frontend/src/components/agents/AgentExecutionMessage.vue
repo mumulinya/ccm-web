@@ -248,6 +248,8 @@ const clarificationSummary = () => props.msg.clarification_summary || props.msg.
 .agent-message-content {
   position: relative;
   z-index: 1;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 .clarification-summary {
   position: relative;

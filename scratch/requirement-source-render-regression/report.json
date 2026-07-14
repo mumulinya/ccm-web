@@ -1,0 +1,10 @@
+{
+  "pass": true,
+  "checks": {
+    "desktopMultipart": true,
+    "desktopFilenameSubmitted": true,
+    "mobileMultipart": true,
+    "screenshotsCreated": true
+  },
+  "outputDir": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\requirement-source-render-regression"
+}

@@ -1,6 +1,8 @@
 import * as fs from "fs";
 import * as path from "path";
+import * as crypto from "crypto";
 import { spawnSync } from "child_process";
+import { getNativeContinuationCapabilityProfile } from "./native-continuation";
 export type AgentRuntimeId = "claudecode" | "claude" | "cursor" | "gemini" | "codex" | "qoder";
 
 export interface AgentCommandOptions {
@@ -25,6 +27,120 @@ export interface AgentRuntimeDescriptor {
     scratchpadContinuation: boolean;
   };
   buildCommand: (msgFile: string, options?: AgentCommandOptions) => string;
+}
+
+export interface AgentRuntimeVersionSnapshot {
+  schema: "ccm-agent-runtime-version-snapshot-v1";
+  version: 1;
+  provider: string;
+  command: string;
+  executablePaths: string[];
+  executableIdentityChecksum: string;
+  versionText: string;
+  semanticVersion: string;
+  status: "ok" | "command_missing" | "version_probe_failed";
+  observedAt: string;
+  snapshotChecksum: string;
+}
+
+const AGENT_RUNTIME_VERSION_CACHE = new Map<string, Omit<AgentRuntimeVersionSnapshot, "observedAt" | "snapshotChecksum">>();
+
+function stableRuntimeChecksum(value: any) {
+  const canonical = (input: any): any => Array.isArray(input)
+    ? input.map(canonical)
+    : input && typeof input === "object"
+      ? Object.keys(input).sort().reduce((result: any, key) => {
+          if (input[key] !== undefined) result[key] = canonical(input[key]);
+          return result;
+        }, {})
+      : input;
+  return crypto.createHash("sha256").update(JSON.stringify(canonical(value))).digest("hex");
+}
+
+function getRuntimeVersionCommand(agentType: string) {
+  const provider = normalizeAgentRuntimeId(agentType);
+  if (provider === "claudecode") return "claude";
+  if (provider === "codex") return "codex";
+  if (provider === "cursor") {
+    const explicit = String(process.env.CCM_CURSOR_AGENT_COMMAND || "").trim();
+    if (explicit) return explicit;
+    return commandExists("cursor-agent") ? "cursor-agent" : "agent";
+  }
+  if (provider === "gemini") return "gemini";
+  if (provider === "qoder") return "qodercli";
+  return provider;
+}
+
+function resolveRuntimeExecutablePaths(command: string) {
+  const explicitPath = String(command || "").trim().replace(/^"|"$/g, "");
+  if (/[\\/]/.test(explicitPath)) {
+    try {
+      if (fs.statSync(explicitPath).isFile()) return [path.resolve(explicitPath)];
+    } catch {}
+  }
+  try {
+    const result = process.platform === "win32"
+      ? spawnSync("where.exe", [command], { windowsHide: true, encoding: "utf-8" })
+      : spawnSync("sh", ["-lc", `command -v ${command}`], { encoding: "utf-8" });
+    if (result.status !== 0) return [];
+    return Array.from(new Set(String(result.stdout || "").split(/\r?\n/).map(item => item.trim()).filter(Boolean)));
+  } catch { return []; }
+}
+
+function executableFileIdentity(paths: string[]) {
+  return paths.map(file => {
+    try {
+      const stat = fs.statSync(file);
+      return { file: path.resolve(file), size: stat.size, mtimeMs: Math.trunc(stat.mtimeMs) };
+    } catch { return { file: path.resolve(file), size: -1, mtimeMs: -1 }; }
+  });
+}
+
+export function captureAgentRuntimeVersionSnapshot(agentType: string): AgentRuntimeVersionSnapshot {
+  const provider = normalizeAgentRuntimeId(agentType);
+  const command = getRuntimeVersionCommand(provider);
+  const executablePaths = resolveRuntimeExecutablePaths(command);
+  const executableIdentity = executableFileIdentity(executablePaths);
+  const executableIdentityChecksum = stableRuntimeChecksum({ provider, command, executableIdentity });
+  const cacheKey = `${provider}:${executableIdentityChecksum}`;
+  let base = AGENT_RUNTIME_VERSION_CACHE.get(cacheKey);
+  if (!base) {
+    let status: AgentRuntimeVersionSnapshot["status"] = executablePaths.length ? "version_probe_failed" : "command_missing";
+    let versionText = "";
+    if (executablePaths.length) {
+      try {
+        const result = spawnSync(command, ["--version"], {
+          windowsHide: true,
+          encoding: "utf-8",
+          shell: process.platform === "win32",
+          timeout: 10_000,
+        });
+        versionText = String(result.stdout || result.stderr || "").trim().split(/\r?\n/).slice(0, 4).join(" ").slice(0, 240);
+        if (result.status === 0 && versionText) status = "ok";
+      } catch {}
+    }
+    const semanticVersion = versionText.match(/\b\d+(?:\.\d+){1,3}(?:[-+][0-9A-Za-z.-]+)?\b/)?.[0] || "";
+    base = {
+      schema: "ccm-agent-runtime-version-snapshot-v1",
+      version: 1,
+      provider,
+      command,
+      executablePaths,
+      executableIdentityChecksum,
+      versionText,
+      semanticVersion,
+      status,
+    };
+    AGENT_RUNTIME_VERSION_CACHE.set(cacheKey, base);
+  }
+  const observedAt = new Date().toISOString();
+  const snapshot: AgentRuntimeVersionSnapshot = {
+    ...base,
+    observedAt,
+    snapshotChecksum: "",
+  };
+  snapshot.snapshotChecksum = stableRuntimeChecksum({ ...snapshot, snapshotChecksum: undefined });
+  return snapshot;
 }
 
 function quoteCmdArg(value: string) {
@@ -271,6 +387,7 @@ export function getPublicAgentRuntimes() {
     label: runtime.label,
     commandLabel: runtime.commandLabel,
     capabilities: runtime.capabilities,
+    nativeContinuation: getNativeContinuationCapabilityProfile(runtime.id),
   }));
 }
 
@@ -313,10 +430,143 @@ export function resolveAvailableAgentRuntime(preferred = "claudecode") {
   };
 }
 
-export function normalizeAgentCommandOutput(agentType: string, rawOutput: string) {
+export function extractAgentCommandUsage(rawOutput: string) {
+  const usage = { inputTokens: 0, outputTokens: 0, totalCostUsd: 0, reported: false };
+  const takeMax = (current: number, ...values: any[]) => values.reduce((max, value) => {
+    const number = Number(value || 0);
+    return Number.isFinite(number) && number > max ? number : max;
+  }, current);
+  for (const line of String(rawOutput || "").split(/\r?\n/)) {
+    const text = line.trim();
+    if (!text.startsWith("{")) continue;
+    try {
+      const event = JSON.parse(text);
+      const candidates = [
+        event.usage,
+        event.response?.usage,
+        event.result?.usage,
+        event.message?.usage,
+        event.metadata?.usage,
+      ].filter(item => item && typeof item === "object");
+      for (const candidate of candidates) {
+        const directInputTokens = takeMax(0, candidate.input_tokens, candidate.inputTokens, candidate.prompt_tokens, candidate.promptTokens);
+        const cacheCreationTokens = takeMax(0, candidate.cache_creation_input_tokens, candidate.cacheCreationInputTokens);
+        const cacheReadTokens = takeMax(0, candidate.cache_read_input_tokens, candidate.cacheReadInputTokens);
+        const inputTokens = directInputTokens + cacheCreationTokens + cacheReadTokens;
+        const outputTokens = takeMax(0, candidate.output_tokens, candidate.outputTokens, candidate.completion_tokens, candidate.completionTokens);
+        const costUsd = takeMax(0, candidate.total_cost_usd, candidate.totalCostUsd, candidate.cost_usd, candidate.costUsd);
+        if (inputTokens > 0 || outputTokens > 0 || costUsd > 0) usage.reported = true;
+        usage.inputTokens = Math.max(usage.inputTokens, inputTokens);
+        usage.outputTokens = Math.max(usage.outputTokens, outputTokens);
+        usage.totalCostUsd = Math.max(usage.totalCostUsd, costUsd);
+      }
+      const eventCost = takeMax(0, event.total_cost_usd, event.totalCostUsd, event.cost_usd, event.costUsd);
+      if (eventCost > 0) {
+        usage.reported = true;
+        usage.totalCostUsd = Math.max(usage.totalCostUsd, eventCost);
+      }
+    } catch {}
+  }
+  return usage;
+}
+
+function providerOutputShape(event: any) {
+  if (!event || typeof event !== "object" || Array.isArray(event)) return "non_object";
+  const top = Object.keys(event).sort().join(",");
+  const nested = ["item", "message", "response", "metadata"]
+    .filter(key => event[key] && typeof event[key] === "object" && !Array.isArray(event[key]))
+    .map(key => `${key}(${Object.keys(event[key]).sort().join(",")})`);
+  return [String(event.type || "untyped"), top, ...nested].join(":");
+}
+
+export function extractProviderOutputContractEvidence(agentType: string, rawOutput: string, options: any = {}) {
+  const provider = normalizeAgentRuntimeId(agentType);
+  const runtimeVersionSnapshot = options.runtimeVersionSnapshot || options.runtime_version_snapshot || null;
+  const raw = String(rawOutput || "").trim();
+  const parsedEvents: any[] = [];
+  let invalidJsonLineCount = 0;
+  for (const line of raw.split(/\r?\n/)) {
+    const text = line.trim();
+    if (!text.startsWith("{")) continue;
+    try { parsedEvents.push(JSON.parse(text)); } catch { invalidJsonLineCount += 1; }
+  }
+  const observedIds: string[] = [];
+  const recognized: any[] = [];
+  const driftReasons: string[] = [];
+  for (let index = 0; index < parsedEvents.length; index += 1) {
+    const event = parsedEvents[index];
+    const eventType = String(event?.type || "");
+    if (provider === "codex") {
+      const id = String(event?.thread_id || event?.threadId || event?.session_id || event?.sessionId || "").trim();
+      if (id) observedIds.push(id);
+      if (eventType === "thread.started" && typeof event?.thread_id === "string" && event.thread_id.trim()) {
+        recognized.push({ index, eventType, sessionIdPath: "thread_id", sessionId: event.thread_id.trim() });
+      } else if (id) {
+        driftReasons.push(`codex_session_id_contract_changed:${eventType || "untyped"}`);
+      }
+    } else if (provider === "cursor") {
+      const id = String(event?.session_id || event?.sessionId || event?.thread_id || event?.threadId || "").trim();
+      if (id) observedIds.push(id);
+      const knownEventType = new Set(["system", "assistant", "user", "tool", "result", "error"]).has(eventType);
+      if (knownEventType && typeof event?.session_id === "string" && event.session_id.trim()) {
+        recognized.push({ index, eventType, sessionIdPath: "session_id", sessionId: event.session_id.trim() });
+      } else if (id) {
+        driftReasons.push(`cursor_session_id_contract_changed:${eventType || "untyped"}`);
+      }
+    }
+  }
+  const uniqueIds = Array.from(new Set(observedIds));
+  if (uniqueIds.length > 1) driftReasons.push("provider_output_session_identity_conflict");
+  if (invalidJsonLineCount > 0) driftReasons.push("provider_output_invalid_json_line");
+  const matched = recognized.length ? recognized[recognized.length - 1] : null;
+  const status = !["codex", "cursor"].includes(provider)
+    ? "not_applicable"
+    : recognized.length > 0 && uniqueIds.length <= 1 && invalidJsonLineCount === 0
+      ? "recognized"
+      : uniqueIds.length > 0 || parsedEvents.length > 0
+        ? "output_format_drift"
+        : "unstructured_output";
+  const shapes = Array.from(new Set(parsedEvents.map(providerOutputShape))).sort();
+  const parserVersion = 2;
+  const contractDefinition = provider === "codex"
+    ? { eventType: "thread.started", sessionIdPath: "thread_id" }
+    : provider === "cursor"
+      ? { eventTypes: ["assistant", "error", "result", "system", "tool", "user"], sessionIdPath: "session_id" }
+      : { acknowledgement: "exit_success" };
+  const runtimeIdentityChecksum = String(runtimeVersionSnapshot?.executableIdentityChecksum || "unresolved");
+  const providerContractId = `pcc_${stableRuntimeChecksum({ provider, parserVersion, contractDefinition, runtimeIdentityChecksum }).slice(0, 24)}`;
+  return {
+    schema: "ccm-provider-output-contract-evidence-v2",
+    version: 2,
+    provider,
+    parserVersion,
+    providerContractId,
+    contractDefinition,
+    runtimeVersionSnapshot,
+    runtimeVersionStatus: String(runtimeVersionSnapshot?.status || "unobserved"),
+    runtimeVersion: String(runtimeVersionSnapshot?.semanticVersion || runtimeVersionSnapshot?.versionText || ""),
+    runtimeIdentityChecksum,
+    status,
+    sessionId: uniqueIds.length === 1 ? uniqueIds[0] : "",
+    trustedSessionId: status === "recognized" ? String(matched?.sessionId || "") : "",
+    sessionIdPath: status === "recognized" ? String(matched?.sessionIdPath || "") : "",
+    matchedEventType: status === "recognized" ? String(matched?.eventType || "") : "",
+    parsedJsonEventCount: parsedEvents.length,
+    recognizedContractEventCount: recognized.length,
+    invalidJsonLineCount,
+    observedSessionIdCount: uniqueIds.length,
+    eventShapes: shapes.slice(0, 24),
+    formatFingerprint: crypto.createHash("sha256").update(JSON.stringify({ provider, shapes })).digest("hex").slice(0, 24),
+    driftReasons: Array.from(new Set(driftReasons)),
+  };
+}
+
+export function normalizeAgentCommandOutput(agentType: string, rawOutput: string, options: any = {}) {
   const runtime = normalizeAgentRuntimeId(agentType);
   const raw = String(rawOutput || "").trim();
-  if (!raw || !["codex", "cursor"].includes(runtime)) return { output: raw, sessionId: "" };
+  const usage = extractAgentCommandUsage(raw);
+  const providerOutputContractEvidence = extractProviderOutputContractEvidence(runtime, raw, options);
+  if (!raw || !["codex", "cursor"].includes(runtime)) return { output: raw, sessionId: "", rawSessionId: "", usage, providerOutputContractEvidence };
 
   if (runtime === "cursor") {
     let sessionId = "";
@@ -340,7 +590,10 @@ export function normalizeAgentCommandOutput(agentType: string, rawOutput: string
     }
     return {
       output: terminalResult.trim() || (parsedAny && assistantDeltas.length ? assistantDeltas.join("").trim() : raw),
-      sessionId,
+      sessionId: providerOutputContractEvidence.trustedSessionId,
+      rawSessionId: sessionId || providerOutputContractEvidence.sessionId,
+      usage,
+      providerOutputContractEvidence,
     };
   }
 
@@ -364,8 +617,155 @@ export function normalizeAgentCommandOutput(agentType: string, rawOutput: string
   }
   return {
     output: parsedAny && messages.length ? messages.join("\n\n").trim() : raw,
-    sessionId,
+    sessionId: providerOutputContractEvidence.trustedSessionId,
+    rawSessionId: sessionId || providerOutputContractEvidence.sessionId,
+    usage,
+    providerOutputContractEvidence,
   };
+}
+
+function stableCapabilityJson(value: any): string {
+  if (Array.isArray(value)) return `[${value.map(stableCapabilityJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${stableCapabilityJson(value[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
+function nativeCapabilityReceiptChecksum(value: any) {
+  const { checksum: _checksum, ...core } = value || {};
+  return crypto.createHash("sha256").update(stableCapabilityJson(core)).digest("hex");
+}
+
+export function extractNativeModelCapabilityReceipt(agentType: string, rawOutput: string, binding: any = {}) {
+  const provider = normalizeAgentRuntimeId(agentType);
+  if (!["codex", "cursor"].includes(provider)) return null;
+  const raw = String(rawOutput || "");
+  const lines = raw.split(/\r?\n/);
+  for (let index = 0; index < lines.length; index++) {
+    const text = lines[index].trim();
+    if (!text.startsWith("{")) continue;
+    try {
+      const event = JSON.parse(text);
+      const capability = event.model_capabilities
+        || event.modelCapabilities
+        || event.response?.model_capabilities
+        || event.response?.modelCapabilities
+        || event.metadata?.model_capabilities
+        || event.metadata?.modelCapabilities
+        || event.capabilities?.model
+        || event.capabilities?.model_context
+        || null;
+      const contextWindow = Math.floor(Number(
+        capability?.context_window
+        || capability?.contextWindow
+        || capability?.max_input_tokens
+        || capability?.maxInputTokens
+        || event.context_window
+        || event.contextWindow
+        || event.max_input_tokens
+        || event.maxInputTokens
+        || 0
+      ));
+      if (!Number.isFinite(contextWindow) || contextWindow < 32_000 || contextWindow > 4_000_000) continue;
+      const maxOutputTokens = Math.floor(Number(
+        capability?.max_output_tokens
+        || capability?.maxOutputTokens
+        || event.max_output_tokens
+        || event.maxOutputTokens
+        || 20_000
+      ));
+      if (!Number.isFinite(maxOutputTokens) || maxOutputTokens < 0 || maxOutputTokens > contextWindow - 16_000) continue;
+      const model = String(capability?.model || capability?.model_id || event.model || event.model_id || event.response?.model || "").trim();
+      const nativeSessionId = String(binding.nativeSessionId || binding.native_session_id || event.thread_id || event.session_id || "").trim();
+      const core: any = {
+        schema: "ccm-native-model-capability-receipt-v1",
+        provider,
+        model,
+        contextWindow,
+        maxOutputTokens,
+        source: "native_executor_receipt",
+        verified: true,
+        eventType: String(event.type || "native_json_event"),
+        eventIndex: index,
+        eventChecksum: crypto.createHash("sha256").update(text).digest("hex"),
+        runner: String(binding.runner || "direct-cli"),
+        runnerRequestId: String(binding.runnerRequestId || binding.runner_request_id || ""),
+        runnerPid: Number(binding.runnerPid || binding.runner_pid || 0),
+        groupId: String(binding.groupId || binding.group_id || ""),
+        taskId: String(binding.taskId || binding.task_id || ""),
+        executionId: String(binding.executionId || binding.execution_id || ""),
+        taskAgentSessionId: String(binding.taskAgentSessionId || binding.task_agent_session_id || ""),
+        nativeSessionId,
+        capturedAt: String(binding.capturedAt || binding.captured_at || new Date().toISOString()),
+      };
+      return { ...core, checksum: nativeCapabilityReceiptChecksum(core) };
+    } catch {}
+  }
+  return null;
+}
+
+export function verifyNativeModelCapabilityReceipt(receipt: any, expected: any = {}) {
+  const gaps: string[] = [];
+  if (receipt?.schema !== "ccm-native-model-capability-receipt-v1") gaps.push("schema");
+  if (receipt?.source !== "native_executor_receipt" || receipt?.verified !== true) gaps.push("trust_state");
+  if (!receipt?.checksum || receipt.checksum !== nativeCapabilityReceiptChecksum(receipt)) gaps.push("checksum");
+  if (!String(receipt?.eventChecksum || "").match(/^[a-f0-9]{64}$/)) gaps.push("event_checksum");
+  for (const [receiptKey, expectedKeys] of Object.entries({
+    provider: ["provider", "agentType", "agent_type"],
+    runnerRequestId: ["runnerRequestId", "runner_request_id"],
+    groupId: ["groupId", "group_id"],
+    taskId: ["taskId", "task_id"],
+    executionId: ["executionId", "execution_id"],
+    taskAgentSessionId: ["taskAgentSessionId", "task_agent_session_id"],
+    nativeSessionId: ["nativeSessionId", "native_session_id"],
+  })) {
+    const expectedValue = (expectedKeys as string[]).map(key => expected?.[key]).find(value => String(value || "").trim());
+    if (expectedValue && String(receipt?.[receiptKey] || "").trim() !== String(expectedValue).trim()) gaps.push(`${receiptKey}_mismatch`);
+  }
+  if (String(receipt?.runner || "") === "node" && !String(receipt?.runnerRequestId || "").trim()) gaps.push("runner_request_id");
+  if (String(receipt?.groupId || "").trim() && String(receipt?.taskId || "").trim() && !String(receipt?.taskAgentSessionId || "").trim()) gaps.push("task_agent_session_id");
+  const contextWindow = Number(receipt?.contextWindow || 0);
+  const maxOutputTokens = Number(receipt?.maxOutputTokens || 0);
+  if (!Number.isFinite(contextWindow) || contextWindow < 32_000 || contextWindow > 4_000_000) gaps.push("context_window");
+  if (!Number.isFinite(maxOutputTokens) || maxOutputTokens < 0 || maxOutputTokens > contextWindow - 16_000) gaps.push("max_output_tokens");
+  return { valid: gaps.length === 0, gaps };
+}
+
+export function runNativeModelCapabilityReceiptSelfTest() {
+  const binding = {
+    runner: "node",
+    runnerRequestId: "ar-phase217",
+    runnerPid: 217,
+    groupId: "group-phase217",
+    taskId: "task-phase217",
+    executionId: "execution-phase217",
+    taskAgentSessionId: "tas-phase217",
+    nativeSessionId: "thread-phase217",
+    capturedAt: "2026-07-12T12:00:00.000Z",
+  };
+  const raw = [
+    JSON.stringify({ type: "thread.started", thread_id: "thread-phase217" }),
+    JSON.stringify({ type: "model.metadata", model: "gpt-phase217", model_capabilities: { context_window: 516_000, max_output_tokens: 64_000 } }),
+    JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "done" } }),
+  ].join("\n");
+  const receipt = extractNativeModelCapabilityReceipt("codex", raw, binding);
+  const valid = verifyNativeModelCapabilityReceipt(receipt, { ...binding, provider: "codex" });
+  const forged = receipt ? { ...receipt, contextWindow: 1_000_000 } : null;
+  const forgedValidation = verifyNativeModelCapabilityReceipt(forged, { ...binding, provider: "codex" });
+  const wrongSession = verifyNativeModelCapabilityReceipt(receipt, { ...binding, provider: "codex", taskAgentSessionId: "tas-other" });
+  const agentTextOnly = extractNativeModelCapabilityReceipt("codex", JSON.stringify({
+    type: "item.completed",
+    item: { type: "agent_message", text: JSON.stringify({ model_capabilities: { context_window: 1_000_000 } }) },
+  }), binding);
+  const checks = {
+    nativeTopLevelMetadataExtracted: receipt?.contextWindow === 516_000 && receipt?.model === "gpt-phase217",
+    completeBindingAccepted: valid.valid === true,
+    checksumForgeryRejected: forgedValidation.valid === false && forgedValidation.gaps.includes("checksum"),
+    sessionBindingMismatchRejected: wrongSession.valid === false && wrongSession.gaps.includes("taskAgentSessionId_mismatch"),
+    agentTextCannotClaimCapacity: agentTextOnly === null,
+  };
+  return { pass: Object.values(checks).every(Boolean), checks, receipt, forgedGaps: forgedValidation.gaps, wrongSessionGaps: wrongSession.gaps };
 }
 
 export function detectAgentCommandFailure(agentType: string, rawOutput: string, exitCode?: number | null, rawError = "") {

@@ -17,8 +17,10 @@ const props = defineProps({
   activeTemplateIndex: { type: Number, default: 0 },
   recommendedTemplate: { type: Object, default: null },
   disabled: { type: Boolean, default: false },
+  busy: { type: Boolean, default: false },
   sendLabel: { type: String, default: '发送' },
   attachTitle: { type: String, default: '添加附件' },
+  accept: { type: String, default: 'image/*,.txt,.md,.json,.csv,.pdf,.docx,.pptx,.xlsx' },
   templateTitle: { type: String, default: '插入对话模板' },
 })
 
@@ -33,6 +35,7 @@ const emit = defineEmits([
   'select-template',
   'apply-recommendation',
   'send',
+  'stop',
 ])
 
 const fileInput = ref(null)
@@ -56,9 +59,9 @@ const onInput = (event) => {
 <template>
   <div class="chat-composer">
     <slot name="prefix" />
-    <input ref="fileInput" type="file" multiple class="hidden-file-input" @change="onFilesSelected">
-    <button class="composer-button" type="button" :title="props.attachTitle" @click="chooseFiles">📎</button>
-    <button class="composer-button" type="button" :title="props.templateTitle" @click="emit('open-template')">📚</button>
+    <input ref="fileInput" type="file" multiple class="hidden-file-input" :accept="props.accept" @change="onFilesSelected">
+    <button class="composer-button" type="button" :disabled="props.disabled || props.busy" :title="props.attachTitle" @click="chooseFiles">📎</button>
+    <button class="composer-button" type="button" :disabled="props.disabled || props.busy" :title="props.templateTitle" @click="emit('open-template')">📚</button>
     <div class="chat-input-wrap">
       <div
         v-if="props.recommendedTemplate"
@@ -75,6 +78,7 @@ const onInput = (event) => {
         :value="props.modelValue"
         :placeholder="props.placeholder"
         :rows="props.rows"
+        :disabled="props.disabled || props.busy"
         @input="onInput"
         @keydown="emit('keydown', $event)"
       ></textarea>
@@ -97,8 +101,8 @@ const onInput = (event) => {
         @select="emit('select-template', $event)"
       />
     </div>
-    <button class="send-button" type="button" :disabled="props.disabled" @click="emit('send')">
-      {{ props.sendLabel }}
+    <button :class="['send-button', { stopping: props.busy }]" type="button" :disabled="props.disabled && !props.busy" @click="emit(props.busy ? 'stop' : 'send')">
+      {{ props.busy ? '停止' : props.sendLabel }}
     </button>
   </div>
 </template>
@@ -157,6 +161,8 @@ const onInput = (event) => {
   cursor: not-allowed;
   opacity: 0.55;
 }
+
+.send-button.stopping { background:#fff; border-color:#dc2626; color:#dc2626; }
 
 .chat-input-wrap {
   position: relative;

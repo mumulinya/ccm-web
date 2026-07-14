@@ -6,7 +6,9 @@ const props = defineProps({
   tools: { type: Object, default: () => ({ mcp: [], skill: [] }) },
   allTools: { type: Object, default: () => ({ mcp: [], skill: [] }) },
   toolAudit: { type: Object, default: null },
-  authorizationReadiness: { type: Object, default: null }
+  authorizationReadiness: { type: Object, default: null },
+  connectionPreflight: { type: Object, default: null },
+  verificationStatus: { type: Object, default: null }
 })
 
 const emit = defineEmits(['close', 'save', 'toggle-tool'])
@@ -16,6 +18,30 @@ const selectedSkills = computed(() => Array.isArray(props.tools.skill) ? props.t
 const availableMcpNames = computed(() => new Set((props.allTools.mcp || []).map(tool => tool.name)))
 const availableSkillNames = computed(() => new Set((props.allTools.skill || []).map(tool => tool.name)))
 const selectedCount = computed(() => selectedMcp.value.length + selectedSkills.value.length)
+const runtimeSummary = computed(() => props.verificationStatus?.runtime?.summary || {})
+const statusStages = computed(() => [
+  {
+    label: '授权配置',
+    state: selectedCount.value === 0 ? 'empty' : (props.authorizationReadiness?.dispatchReady === false ? 'warning' : 'ready'),
+    text: selectedCount.value === 0 ? '尚未配置' : (props.authorizationReadiness?.dispatchReady === false ? '存在不可用项' : '已授权')
+  },
+  {
+    label: '运行时注入',
+    state: Number(runtimeSummary.value.overallReady || 0) > 0 ? 'ready' : 'pending',
+    text: Number(runtimeSummary.value.overallReady || 0) > 0 ? '已注入' : '等待任务运行'
+  },
+  {
+    label: '真实调用',
+    state: props.verificationStatus?.status === 'verified' ? 'ready' : (props.verificationStatus?.status === 'verification_incomplete' ? 'warning' : 'pending'),
+    text: props.verificationStatus?.status === 'verified' ? '已验证' : (props.verificationStatus?.status === 'verification_incomplete' ? '调用未通过' : '尚未验证')
+  }
+])
+const connectionText = computed(() => {
+  const preflight = props.connectionPreflight || {}
+  if (!preflight.schema || selectedCount.value === 0) return ''
+  return preflight.ready ? '所选工具当前连接正常' : `有 ${preflight.summary?.needsAttention || 0} 个授权项需要检查连接或认证`
+})
+const mcpStateLabel = (tool) => tool.connected ? '已连接' : (tool.state === 'auth_required' ? '需要认证' : '连接待检查')
 
 const isSelected = (type, name) => {
   const selected = type === 'mcp' ? selectedMcp.value : selectedSkills.value
@@ -69,6 +95,13 @@ const auditRows = computed(() => {
       <h3>🔧 群聊工具配置 - {{ groupName }}</h3>
       <div class="modal-desc">配置此群聊可用的 MCP 和 Skill，执行成员只会收到这里授权的工具。</div>
 
+      <div class="delivery-stages">
+        <div v-for="stage in statusStages" :key="stage.label" :class="stage.state">
+          <small>{{ stage.label }}</small>
+          <strong>{{ stage.text }}</strong>
+        </div>
+      </div>
+
       <div class="resource-body">
         <div class="resource-section-title">🔌 MCP 服务器</div>
         <div v-if="(allTools.mcp || []).length === 0" class="resource-empty">暂无 MCP 服务器，请先在工具配置页面安装或启用</div>
@@ -80,6 +113,7 @@ const auditRows = computed(() => {
               <strong>{{ tool.name }}</strong>
               <small>{{ tool.description || 'MCP server' }}</small>
             </span>
+            <span class="tool-state" :class="{ ready: tool.connected, warning: !tool.connected }">{{ mcpStateLabel(tool) }}</span>
           </label>
           <div v-if="tool.tools?.length" class="subtool-list">
             <label v-for="subtool in tool.tools" :key="subtool.name" class="subtool-row" :class="{ selected: isMcpToolSelected(tool.name, subtool.name), disabled: isSelected('mcp', tool.name) }">
@@ -131,6 +165,7 @@ const auditRows = computed(() => {
             <small>{{ readinessDetail }}</small>
           </div>
         </div>
+        <div v-if="connectionText" class="connection-preflight" :class="{ warning: connectionPreflight && !connectionPreflight.ready }">{{ connectionText }}</div>
 
         <div v-if="auditRows.length" class="audit-box">
           <strong>服务端授权审计</strong>
@@ -161,6 +196,14 @@ const auditRows = computed(() => {
 .modal h3 { margin: 0 0 8px; font-size: 16px; color: var(--text-primary); }
 .modal-desc, .resource-empty { font-size: 12px; color: var(--text-muted); }
 .modal-desc { margin-bottom: 16px; }
+.delivery-stages { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; margin:0 0 16px; }
+.delivery-stages > div { min-width:0; display:grid; gap:3px; padding:8px 9px; border:1px solid var(--border-color); border-radius:8px; background:rgba(255,255,255,.52); }
+.delivery-stages small { color:var(--text-muted); font-size:10px; }
+.delivery-stages strong { color:var(--text-secondary); font-size:11.5px; overflow-wrap:anywhere; }
+.delivery-stages .ready { border-color:rgba(16,185,129,.24); background:rgba(236,253,245,.72); }
+.delivery-stages .ready strong { color:#047857; }
+.delivery-stages .warning { border-color:rgba(245,158,11,.25); background:rgba(255,251,235,.78); }
+.delivery-stages .warning strong { color:#92400e; }
 .resource-body { flex: 1; overflow-y: auto; padding-right: 2px; }
 .resource-section-title { font-size: 13px; font-weight: 700; color: var(--text-secondary); margin-bottom: 10px; }
 .resource-section-title.spaced { margin-top: 18px; }
@@ -172,6 +215,9 @@ const auditRows = computed(() => {
 .resource-row input, .subtool-row input { margin-top: 2px; accent-color: var(--accent-blue); }
 .resource-copy, .subtool-copy { min-width: 0; display: grid; gap: 2px; }
 .resource-copy strong, .subtool-copy strong { color: var(--text-primary); font-size: 13px; overflow-wrap: anywhere; }
+.tool-state { margin-left:auto; flex:0 0 auto; font-size:10px; color:var(--text-muted); }
+.tool-state.ready { color:#047857; }
+.tool-state.warning { color:#92400e; }
 .resource-copy small, .subtool-copy small { color: var(--text-muted); font-size: 11px; line-height: 1.35; overflow-wrap: anywhere; }
 .subtool-list { display: grid; gap: 4px; padding: 0 10px 10px 36px; }
 .subtool-row { display: flex; align-items: flex-start; gap: 7px; padding: 7px 8px; border-radius: 6px; border: 1px solid rgba(148, 163, 184, 0.18); background: rgba(255, 255, 255, 0.5); cursor: pointer; }
@@ -186,6 +232,8 @@ const auditRows = computed(() => {
 .readiness-box > strong, .readiness-box .audit-row span, .readiness-box .audit-row small, .readiness-box .audit-row code { color: #047857; }
 .readiness-box.warning { border-color: rgba(239, 68, 68, 0.18); background: rgba(254, 242, 242, 0.72); }
 .readiness-box.warning > strong, .readiness-box.warning .audit-row span, .readiness-box.warning .audit-row small, .readiness-box.warning .audit-row code { color: #991b1b; }
+.connection-preflight { margin:8px 0 12px; padding:8px 10px; border-radius:8px; border:1px solid rgba(16,185,129,.24); background:rgba(236,253,245,.78); color:#047857; font-size:11px; }
+.connection-preflight.warning { border-color:rgba(245,158,11,.25); background:rgba(255,251,235,.78); color:#92400e; }
 .audit-row { display: grid; grid-template-columns: 82px minmax(0, 1fr) auto; gap: 8px; align-items: start; font-size: 11px; }
 .audit-row span, .audit-row small { color: #991b1b; }
 .audit-row code { color: #7f1d1d; overflow-wrap: anywhere; white-space: normal; }
@@ -197,6 +245,7 @@ const auditRows = computed(() => {
 .btn-cancel { background: transparent; border: 1px solid rgba(0,0,0,0.08); color: var(--text-secondary); }
 @media (max-width: 640px) {
   .modal { padding: 22px; width: 94vw; }
+  .delivery-stages { grid-template-columns:1fr; }
   .subtool-list { padding-left: 12px; }
   .audit-row { grid-template-columns: 1fr; gap: 3px; }
   .resource-footer { align-items: stretch; flex-direction: column; }

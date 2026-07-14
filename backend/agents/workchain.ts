@@ -47,6 +47,18 @@ function compactText(value: any, max = 240) {
   return `${text.slice(0, max)}...`;
 }
 
+function compactMultilineText(value: any, max = 240) {
+  const text = String(value || "")
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .map(line => line.replace(/[\t\f\v ]+/g, " ").trim())
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  if (text.length <= max) return text;
+  return `${text.slice(0, max)}...`;
+}
+
 function sanitizeWorkchainTerminology(value: string) {
   return sanitizeMainAgentRoleLanguage(
     sanitizeUserFacingProtocolTerms(
@@ -1281,14 +1293,14 @@ function stageStatus(input: MainAgentWorkchainInput, stage: string) {
 }
 
 export function sanitizeWorkchainUserText(value: any, fallback = "我正在处理当前请求。", max = 260) {
-  let text = compactText(value, max);
+  let text = compactMultilineText(value, max);
   if (!text) text = fallback;
   if (INTERNAL_TEXT_PATTERN.test(text)) {
     if (/error|失败|denied|invalid|权限|门禁/i.test(text)) text = "执行时遇到保护或权限问题，我会继续排查；详细信息已放入技术详情。";
     else if (/done|完成|receipt|回执/i.test(text)) text = "执行成员已提交结果说明，我正在汇总验收。";
     else text = fallback;
   }
-  return compactText(sanitizeWorkchainTerminology(text
+  return compactMultilineText(sanitizeWorkchainTerminology(text
     .replace(/\bCoordinator\b/g, "我")
     .replace(/\bPipeline\b/g, "协作看板")
     .replace(/\bRuntime Kernel\b/g, "技术运行信息")
@@ -1401,7 +1413,7 @@ function buildFinalSummaryQuality(input: MainAgentWorkchainInput, evidence: Retu
   const summary = input.summary || {};
   const completion = input.completion || {};
   const deliveryReport = summary.delivery_report || summary.deliveryReport || completion.delivery_report || completion.deliveryReport || {};
-  const isOrdinaryConversation = input.mode === "conversation" && !hasExecutableWorkEvidence(input, evidence);
+  const isOrdinaryConversation = input.mode === "conversation";
   const required = terminal && !isOrdinaryConversation && hasExecutableWorkEvidence(input, evidence);
   const strongVerificationEvidence = hasStrongWorkchainVerificationEvidence(evidence);
   const failedVerificationEvidence = evidence.verification.some(workchainVerificationFailureText);
@@ -1716,6 +1728,7 @@ function replyAlreadyHasFinalSummaryShape(value: string) {
 
 export function formatMainAgentCompletionReply(options: { reply?: any; workchain: any; includeDetails?: boolean }) {
   const original = sanitizeWorkchainUserText(options.reply, "", 1200);
+  if (options.workchain?.mode === "conversation" && options.includeDetails !== true) return original;
   const generic = !original || GENERIC_COMPLETION_REPLY_PATTERN.test(original);
   const summary = options.workchain?.completion_summary || {};
   const quality = summary.final_summary_quality || {};
@@ -2324,7 +2337,16 @@ export function runMainAgentWorkchainSelfTest() {
   const reply = formatMainAgentCompletionReply({ reply: "已完成。", workchain: group, includeDetails: true });
   const shapedReply = formatMainAgentCompletionReply({ reply: "任务已建立", workchain: group, includeDetails: false });
   const ordinary = buildMainAgentWorkchain({ surface: "global", status: "completed", mode: "conversation", userText: "知识库压缩会按时间和主题整理。", traceId: "trace-3" });
+  const ordinaryWithSyntheticEvidence = {
+    ...ordinary,
+    completion_summary: {
+      ...(ordinary.completion_summary || {}),
+      evidence: ["不应展示的内部处理记录"],
+      verification: ["不应展示的内部验证记录"],
+    },
+  };
   const ordinaryReply = formatMainAgentCompletionReply({ reply: "知识库压缩会按时间和主题整理。", workchain: ordinary, includeDetails: false });
+  const ordinarySyntheticEvidenceReply = formatMainAgentCompletionReply({ reply: "你好啊！我在呢。", workchain: ordinaryWithSyntheticEvidence, includeDetails: false });
   const runningTodo = buildMainAgentWorkchain({
     surface: "group",
     status: "running",
@@ -2592,6 +2614,7 @@ export function runMainAgentWorkchainSelfTest() {
     shapedReplyIncludesReviewAndAcceptance: shapedReply.includes("复核与验收") && shapedReply.includes("test-agent") && shapedReply.includes("最终验收已通过"),
     shapedReplyHidesTechnicalBlockers: !INTERNAL_TEXT_PATTERN.test(shapedReply) && shapedReply.includes("排障信息已放入技术详情"),
     ordinaryReplyStaysPlain: ordinaryReply === "知识库压缩会按时间和主题整理。" && !ordinaryReply.includes("处理总结"),
+    ordinarySyntheticEvidenceStillStaysPlain: ordinarySyntheticEvidenceReply === "你好啊！我在呢。" && !ordinarySyntheticEvidenceReply.includes("处理总结"),
     ordinaryTodoHiddenByPolicy: ordinary.todo_plan?.display_policy?.hide_for_ordinary_conversation === true,
     workchainTodoPlanCarriesCcStyleForms: group.todo_plan?.schema === "ccm-main-agent-workchain-todo-v1"
       && group.todo_plan?.steps?.length >= 5

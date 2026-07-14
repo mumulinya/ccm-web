@@ -1,13 +1,14 @@
 import type { IncomingMessage, ServerResponse } from "http";
 import type { UrlWithParsedQuery } from "url";
 type BasicGroupRouteDeps = {
-    getGroupMemoryFile: (groupId: string) => string;
-    loadGroupMemory: (groupId: string) => any;
-    saveGroupMemory: (groupId: string, memory: any) => any;
+    getGroupMemoryFile: (groupId: string, sessionId?: string) => string;
+    loadGroupMemory: (groupId: string, sessionId?: string) => any;
+    saveGroupMemory: (groupId: string, memory: any, sessionId?: string) => any;
     buildGroupMemoryContext: (memory: any) => string;
-    buildAgentMemoryPacket: (groupId: string, project: string) => string;
+    buildAgentMemoryPacket: (groupId: string, project: string, task?: string, options?: any) => string;
     buildInlineTaskRuntime: (task: any) => any;
     getAgentQaItemsForGroup: (groupId: string, limit?: number) => any[];
+    deleteGroupSessionMemoryArtifacts?: (groupId: string, sessionId: string) => any;
 };
 export declare function buildGroupMainAgentStatus(input: {
     groupId: string;

@@ -35,16 +35,34 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.loadGroups = loadGroups;
 exports.saveGroups = saveGroups;
+exports.getGroupChatSessionMessagesFile = getGroupChatSessionMessagesFile;
+exports.listGroupChatSessions = listGroupChatSessions;
+exports.getActiveGroupChatSessionId = getActiveGroupChatSessionId;
+exports.findGroupChatSessionContainingMessage = findGroupChatSessionContainingMessage;
+exports.createGroupChatSession = createGroupChatSession;
+exports.selectGroupChatSession = selectGroupChatSession;
+exports.renameGroupChatSession = renameGroupChatSession;
+exports.archiveGroupChatSession = archiveGroupChatSession;
+exports.findActiveGroupSessionTasks = findActiveGroupSessionTasks;
+exports.reconcileGroupSessionLifecycleAgentCancellations = reconcileGroupSessionLifecycleAgentCancellations;
+exports.deleteGroupChatSession = deleteGroupChatSession;
+exports.purgeLegacyDefaultGroupChatSession = purgeLegacyDefaultGroupChatSession;
+exports.pruneArchivedGroupChatSessions = pruneArchivedGroupChatSessions;
 exports.registerGroupMessageAppendHook = registerGroupMessageAppendHook;
+exports.resolveGroupMessageSessionId = resolveGroupMessageSessionId;
 exports.getGroupMessages = getGroupMessages;
 exports.appendGroupMessage = appendGroupMessage;
 exports.saveGroupMessages = saveGroupMessages;
+exports.runGroupChatSessionsSelfTest = runGroupChatSessionsSelfTest;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const utils_1 = require("../../core/utils");
 const db_1 = require("../../core/db");
 const reliability_ledger_1 = require("../../system/reliability-ledger");
+const execution_kernel_1 = require("../../agents/execution-kernel");
 const group_orchestrator_1 = require("./group-orchestrator");
+const group_post_turn_summary_1 = require("./group-post-turn-summary");
+const group_session_lifecycle_head_1 = require("./group-session-lifecycle-head");
 // === 群聊管理 ===
 function loadGroups() {
     if (!fs.existsSync(utils_1.GROUPS_FILE))
@@ -131,25 +149,370 @@ function getGroupMessageAppendHooks() {
         groupMessageAppendHooks = new Set();
     return groupMessageAppendHooks;
 }
+const GROUP_DEFAULT_SESSION_ID = "default";
+const GROUP_MESSAGE_SESSIONS_DIR = path.join(utils_1.GROUP_MESSAGES_DIR, "sessions");
+function cleanGroupSessionPathPart(value) {
+    return String(value || "").replace(/[^a-zA-Z0-9._-]+/g, "-").slice(0, 120) || "unknown";
+}
+function getGroupSessionManifestFile(groupId) {
+    return path.join(GROUP_MESSAGE_SESSIONS_DIR, cleanGroupSessionPathPart(groupId), "manifest.json");
+}
+function getGroupSessionMessagesFile(groupId, sessionId) {
+    if (!sessionId || sessionId === GROUP_DEFAULT_SESSION_ID)
+        return path.join(utils_1.GROUP_MESSAGES_DIR, `${groupId}.json`);
+    return path.join(GROUP_MESSAGE_SESSIONS_DIR, cleanGroupSessionPathPart(groupId), `${cleanGroupSessionPathPart(sessionId)}.json`);
+}
+function getGroupChatSessionMessagesFile(groupId, sessionId = "") {
+    return getGroupSessionMessagesFile(groupId, String(sessionId || getActiveGroupChatSessionId(groupId)));
+}
+function readGroupSessionManifest(groupId) {
+    const file = getGroupSessionManifestFile(groupId);
+    try {
+        const parsed = JSON.parse(fs.readFileSync(file, "utf-8"));
+        const sessions = Array.isArray(parsed.sessions) ? parsed.sessions : [];
+        return {
+            schema: "ccm-group-chat-sessions-v1",
+            groupId,
+            activeSessionId: String(parsed.activeSessionId || GROUP_DEFAULT_SESSION_ID),
+            sessions,
+            updatedAt: String(parsed.updatedAt || ""),
+        };
+    }
+    catch {
+        return {
+            schema: "ccm-group-chat-sessions-v1",
+            groupId,
+            activeSessionId: GROUP_DEFAULT_SESSION_ID,
+            sessions: [],
+            updatedAt: "",
+        };
+    }
+}
+function writeGroupSessionManifest(groupId, manifest) {
+    const file = getGroupSessionManifestFile(groupId);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const temp = `${file}.${process.pid}.${Date.now()}.tmp`;
+    fs.writeFileSync(temp, JSON.stringify({ ...manifest, updatedAt: new Date().toISOString() }, null, 2), "utf-8");
+    replaceFileWithWindowsRetry(temp, file);
+}
+function defaultGroupSessionRecord(groupId) {
+    const file = getGroupSessionMessagesFile(groupId, GROUP_DEFAULT_SESSION_ID);
+    let messageCount = 0;
+    let updatedAt = "";
+    try {
+        const stat = fs.statSync(file);
+        updatedAt = stat.mtime.toISOString();
+        const parsed = JSON.parse(fs.readFileSync(file, "utf-8"));
+        messageCount = Array.isArray(parsed) ? parsed.length : 0;
+    }
+    catch { }
+    return {
+        id: GROUP_DEFAULT_SESSION_ID,
+        title: messageCount ? "历史会话" : "新会话",
+        createdAt: updatedAt || new Date().toISOString(),
+        updatedAt: updatedAt || new Date().toISOString(),
+        messageCount,
+        legacy: true,
+    };
+}
+function listGroupChatSessions(groupId) {
+    const manifest = readGroupSessionManifest(groupId);
+    const legacyExists = fs.existsSync(getGroupSessionMessagesFile(groupId, GROUP_DEFAULT_SESSION_ID));
+    const sessions = (manifest.sessions.length ? [...manifest.sessions] : [defaultGroupSessionRecord(groupId)])
+        .filter((item) => item.id !== GROUP_DEFAULT_SESSION_ID || legacyExists || manifest.activeSessionId === GROUP_DEFAULT_SESSION_ID);
+    if ((legacyExists || manifest.activeSessionId === GROUP_DEFAULT_SESSION_ID) && !sessions.some((item) => item.id === GROUP_DEFAULT_SESSION_ID)) {
+        sessions.unshift(defaultGroupSessionRecord(groupId));
+    }
+    return { ...manifest, sessions: sessions.sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""))) };
+}
+function getActiveGroupChatSessionId(groupId) {
+    return readGroupSessionManifest(groupId).activeSessionId || GROUP_DEFAULT_SESSION_ID;
+}
+function findGroupChatSessionContainingMessage(groupId, messageId) {
+    const targetId = String(messageId || "").trim();
+    if (!targetId)
+        return null;
+    for (const session of listGroupChatSessions(groupId).sessions) {
+        const messages = getGroupMessages(groupId, session.id);
+        if (messages.some((message) => String(message?.id || "") === targetId))
+            return { session, messages };
+    }
+    return null;
+}
+function createGroupChatSession(groupId, title = "") {
+    const manifest = listGroupChatSessions(groupId);
+    const now = new Date().toISOString();
+    const id = `gcs_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+    const session = { id, title: String(title || "新会话").trim().slice(0, 80) || "新会话", createdAt: now, updatedAt: now, messageCount: 0, legacy: false };
+    const existingSessions = manifest.sessions.filter((item) => item.id !== GROUP_DEFAULT_SESSION_ID || fs.existsSync(getGroupSessionMessagesFile(groupId, GROUP_DEFAULT_SESSION_ID)));
+    (0, group_session_lifecycle_head_1.ensureGroupSessionLifecycleHead)(groupId, id, { createdAt: now, reason: "group_chat_session_created" });
+    try {
+        writeGroupSessionManifest(groupId, { ...manifest, activeSessionId: id, sessions: [...existingSessions, session] });
+        saveGroupMessages(groupId, [], id);
+    }
+    catch (error) {
+        try {
+            (0, group_session_lifecycle_head_1.transitionGroupSessionLifecycleHead)({ groupId, groupSessionId: id, status: "deleted", reason: "group_chat_session_create_failed" });
+        }
+        catch { }
+        throw error;
+    }
+    return session;
+}
+function selectGroupChatSession(groupId, sessionId) {
+    const manifest = listGroupChatSessions(groupId);
+    const session = manifest.sessions.find((item) => item.id === sessionId);
+    if (!session)
+        throw new Error("群聊会话不存在");
+    writeGroupSessionManifest(groupId, { ...manifest, activeSessionId: session.id });
+    return session;
+}
+function renameGroupChatSession(groupId, sessionId, title) {
+    const manifest = listGroupChatSessions(groupId);
+    const cleanTitle = String(title || "").trim().slice(0, 80);
+    if (!cleanTitle)
+        throw new Error("会话名称不能为空");
+    let renamed = null;
+    const sessions = manifest.sessions.map((item) => {
+        if (item.id !== sessionId)
+            return item;
+        renamed = { ...item, title: cleanTitle, updatedAt: new Date().toISOString() };
+        return renamed;
+    });
+    if (!renamed)
+        throw new Error("群聊会话不存在");
+    writeGroupSessionManifest(groupId, { ...manifest, sessions });
+    return renamed;
+}
+function archiveGroupChatSession(groupId, sessionId, archived = true) {
+    const manifest = listGroupChatSessions(groupId);
+    let changed = null;
+    const now = new Date().toISOString();
+    const sessions = manifest.sessions.map((item) => {
+        if (item.id !== sessionId)
+            return item;
+        changed = { ...item, archived: !!archived, archivedAt: archived ? now : "", updatedAt: now };
+        return changed;
+    });
+    if (!changed)
+        throw new Error("群聊会话不存在");
+    const previousLifecycle = sessionId.startsWith("gcs_")
+        ? (0, group_session_lifecycle_head_1.ensureGroupSessionLifecycleHead)(groupId, sessionId, { reason: "archive_lazy_adopt" }).head
+        : null;
+    let lifecycleCancellation = null;
+    if (sessionId.startsWith("gcs_")) {
+        (0, group_session_lifecycle_head_1.transitionGroupSessionLifecycleHead)({
+            groupId,
+            groupSessionId: sessionId,
+            status: archived ? "archived" : "active",
+            reason: archived ? "group_chat_session_archived" : "group_chat_session_restored",
+        });
+        if (archived) {
+            lifecycleCancellation = (0, execution_kernel_1.requestGroupSessionAgentCancellation)({
+                groupId,
+                groupSessionId: sessionId,
+                taskIds: findActiveGroupSessionTasks(groupId, sessionId).map((task) => task.id),
+                reason: "群聊会话已归档，停止该会话仍在运行的项目 Agent",
+                actor: "group-session-archive",
+            });
+        }
+    }
+    let activeSessionId = manifest.activeSessionId;
+    if (archived && activeSessionId === sessionId) {
+        activeSessionId = sessions.find((item) => item.id !== sessionId && item.archived !== true)?.id || "";
+    }
+    try {
+        writeGroupSessionManifest(groupId, { ...manifest, activeSessionId: activeSessionId || manifest.activeSessionId, sessions });
+        if (archived && !activeSessionId) {
+            createGroupChatSession(groupId, "新会话");
+        }
+    }
+    catch (error) {
+        if (sessionId.startsWith("gcs_") && previousLifecycle?.status && previousLifecycle.status !== (archived ? "archived" : "active")) {
+            try {
+                (0, group_session_lifecycle_head_1.transitionGroupSessionLifecycleHead)({ groupId, groupSessionId: sessionId, status: previousLifecycle.status, reason: "group_chat_session_archive_rollback" });
+            }
+            catch { }
+        }
+        throw error;
+    }
+    return lifecycleCancellation ? { ...changed, lifecycleCancellation } : changed;
+}
+function findActiveGroupSessionTasks(groupId, sessionId, tasks = (0, db_1.loadTasks)()) {
+    return tasks.filter((task) => String(task?.group_id || "") === groupId
+        && String(task?.group_session_id || task?.groupSessionId || GROUP_DEFAULT_SESSION_ID) === sessionId
+        && !task?.archived
+        && !["done", "failed", "cancelled", "archived"].includes(String(task?.status || "")));
+}
+function reconcileGroupSessionLifecycleAgentCancellations(tasks = (0, db_1.loadTasks)()) {
+    const scopes = new Map();
+    for (const task of tasks) {
+        const groupId = String(task?.group_id || task?.groupId || "").trim();
+        const groupSessionId = String(task?.group_session_id || task?.groupSessionId || "").trim();
+        if (!groupId || !groupSessionId.startsWith("gcs_") || task?.archived
+            || ["done", "failed", "cancelled", "archived"].includes(String(task?.status || "")))
+            continue;
+        const key = `${groupId}\u0000${groupSessionId}`;
+        const scope = scopes.get(key) || { groupId, groupSessionId, taskIds: [] };
+        if (task?.id)
+            scope.taskIds.push(String(task.id));
+        scopes.set(key, scope);
+    }
+    const revoked = [];
+    let active = 0;
+    for (const scope of scopes.values()) {
+        const head = (0, group_session_lifecycle_head_1.readGroupSessionLifecycleHead)(scope.groupId, scope.groupSessionId);
+        if (head?.status === "active") {
+            active++;
+            continue;
+        }
+        revoked.push({
+            lifecycleStatus: String(head?.status || "missing_or_corrupt"),
+            lifecycleGeneration: Number(head?.generation || 0),
+            ...(0, execution_kernel_1.requestGroupSessionAgentCancellation)({
+                ...scope,
+                reason: `启动恢复发现群聊会话生命周期为 ${head?.status || "missing_or_corrupt"}，停止旧会话 Agent`,
+                actor: "group-session-lifecycle-startup-reconcile",
+            }),
+        });
+    }
+    return {
+        schema: "ccm-group-session-lifecycle-agent-reconciliation-v1",
+        checked: scopes.size,
+        active,
+        revoked: revoked.length,
+        taskCount: revoked.reduce((sum, item) => sum + Number(item.taskIds?.length || 0), 0),
+        scopes: revoked,
+        reconciledAt: new Date().toISOString(),
+    };
+}
+function deleteGroupChatSession(groupId, sessionId, options = {}) {
+    const manifest = listGroupChatSessions(groupId);
+    const session = manifest.sessions.find((item) => item.id === sessionId);
+    if (!session)
+        throw new Error("群聊会话不存在");
+    const activeTasks = findActiveGroupSessionTasks(groupId, sessionId);
+    if (activeTasks.length && options.force !== true) {
+        throw new Error(`会话仍有 ${activeTasks.length} 个未完成任务，请先归档任务或显式强制删除`);
+    }
+    const lifecycleTombstone = sessionId.startsWith("gcs_")
+        ? (0, group_session_lifecycle_head_1.transitionGroupSessionLifecycleHead)({ groupId, groupSessionId: sessionId, status: "deleted", reason: options.reason || "group_chat_session_deleted" })
+        : null;
+    const lifecycleCancellation = sessionId.startsWith("gcs_")
+        ? (0, execution_kernel_1.requestGroupSessionAgentCancellation)({
+            groupId,
+            groupSessionId: sessionId,
+            taskIds: activeTasks.map((task) => task.id),
+            reason: "群聊会话已删除，停止该会话仍在运行的项目 Agent",
+            actor: "group-session-delete",
+        })
+        : null;
+    const file = getGroupSessionMessagesFile(groupId, sessionId);
+    for (const target of [file, `${file}.bak`]) {
+        try {
+            if (fs.existsSync(target))
+                fs.unlinkSync(target);
+        }
+        catch { }
+    }
+    groupMessagesCache.delete(`${groupId}::${sessionId}`);
+    const postTurnSummaries = (0, group_post_turn_summary_1.deleteGroupPostTurnSummaryArtifacts)(groupId, sessionId);
+    const remaining = manifest.sessions.filter((item) => item.id !== sessionId);
+    const nextActive = manifest.activeSessionId === sessionId
+        ? remaining.find((item) => item.archived !== true)?.id || remaining[0]?.id || ""
+        : manifest.activeSessionId;
+    writeGroupSessionManifest(groupId, { ...manifest, activeSessionId: nextActive || GROUP_DEFAULT_SESSION_ID, sessions: remaining });
+    let replacement = null;
+    if (!remaining.length)
+        replacement = createGroupChatSession(groupId, "新会话");
+    return { session, deletedMessageFile: file, postTurnSummaries, activeTaskCount: activeTasks.length, forced: options.force === true, replacement, lifecycleTombstone, lifecycleCancellation };
+}
+function purgeLegacyDefaultGroupChatSession(groupId, options = {}) {
+    const manifest = readGroupSessionManifest(groupId);
+    const legacy = manifest.sessions.find((item) => item.id === GROUP_DEFAULT_SESSION_ID);
+    const file = getGroupSessionMessagesFile(groupId, GROUP_DEFAULT_SESSION_ID);
+    if (!legacy && !fs.existsSync(file)) {
+        return { schema: "ccm-group-chat-legacy-session-purge-v1", groupId, purged: false, reason: "legacy_session_absent" };
+    }
+    const activeTasks = findActiveGroupSessionTasks(groupId, GROUP_DEFAULT_SESSION_ID);
+    if (activeTasks.length && options.force !== true) {
+        throw new Error(`旧会话仍有 ${activeTasks.length} 个未完成任务，请显式 force 后再删除`);
+    }
+    for (const target of [file, `${file}.bak`]) {
+        try {
+            if (fs.existsSync(target))
+                fs.unlinkSync(target);
+        }
+        catch { }
+    }
+    groupMessagesCache.delete(`${groupId}::${GROUP_DEFAULT_SESSION_ID}`);
+    const remaining = manifest.sessions.filter((item) => item.id !== GROUP_DEFAULT_SESSION_ID);
+    const activeSessionId = manifest.activeSessionId === GROUP_DEFAULT_SESSION_ID
+        ? remaining.find((item) => item.archived !== true)?.id || remaining[0]?.id || ""
+        : manifest.activeSessionId;
+    writeGroupSessionManifest(groupId, { ...manifest, activeSessionId: activeSessionId || GROUP_DEFAULT_SESSION_ID, sessions: remaining });
+    const replacement = !remaining.length ? createGroupChatSession(groupId, "新会话") : null;
+    return {
+        schema: "ccm-group-chat-legacy-session-purge-v1",
+        groupId,
+        purged: true,
+        legacySessionId: GROUP_DEFAULT_SESSION_ID,
+        deletedMessageFile: file,
+        activeTaskCount: activeTasks.length,
+        forced: options.force === true,
+        replacement,
+        activeSessionId: replacement?.id || activeSessionId,
+        purgedAt: new Date().toISOString(),
+    };
+}
+function pruneArchivedGroupChatSessions(groupId, options = {}) {
+    const manifest = listGroupChatSessions(groupId);
+    const nowMs = Date.parse(String(options.now || "")) || Date.now();
+    const retentionDays = Math.max(1, Number(options.retentionDays || options.retention_days || 30));
+    const maxArchived = Math.max(1, Number(options.maxArchived || options.max_archived || 20));
+    const dryRun = options.dryRun !== false && options.dry_run !== false;
+    const archived = manifest.sessions.filter((item) => item.archived === true)
+        .sort((a, b) => String(b.archivedAt || b.updatedAt || "").localeCompare(String(a.archivedAt || a.updatedAt || "")));
+    const candidates = archived.filter((item, index) => {
+        const at = Date.parse(String(item.archivedAt || item.updatedAt || "")) || 0;
+        return index >= maxArchived || (at > 0 && nowMs - at >= retentionDays * 86_400_000);
+    });
+    const results = dryRun ? [] : candidates.map((item) => {
+        try {
+            return { id: item.id, deleted: true, result: deleteGroupChatSession(groupId, item.id) };
+        }
+        catch (error) {
+            return { id: item.id, deleted: false, error: error?.message || String(error) };
+        }
+    });
+    return { schema: "ccm-group-chat-session-retention-v1", groupId, dryRun, retentionDays, maxArchived, archivedCount: archived.length, candidateCount: candidates.length, candidates, results, generatedAt: new Date(nowMs).toISOString() };
+}
 function registerGroupMessageAppendHook(hook) {
     const hooks = getGroupMessageAppendHooks();
     hooks.add(hook);
     return () => hooks.delete(hook);
 }
-function getGroupMessages(groupId) {
-    const file = path.join(utils_1.GROUP_MESSAGES_DIR, `${groupId}.json`);
+function resolveGroupMessageSessionId(groupId, msg, tasks = (0, db_1.loadTasks)()) {
+    const linkedTask = msg?.task_id ? tasks.find((task) => task.id === msg.task_id) : null;
+    const taskSessionId = linkedTask ? String(linkedTask?.group_session_id || linkedTask?.groupSessionId || GROUP_DEFAULT_SESSION_ID) : "";
+    return String(msg?.group_session_id || msg?.groupSessionId || taskSessionId || getActiveGroupChatSessionId(groupId));
+}
+function getGroupMessages(groupId, sessionId = "") {
+    const resolvedSessionId = String(sessionId || getActiveGroupChatSessionId(groupId));
+    const cacheKey = `${groupId}::${resolvedSessionId}`;
+    const file = getGroupSessionMessagesFile(groupId, resolvedSessionId);
     if (!fs.existsSync(file)) {
-        groupMessagesCache.delete(groupId);
+        groupMessagesCache.delete(cacheKey);
         return [];
     }
     try {
         const stat = fs.statSync(file);
-        const cached = groupMessagesCache.get(groupId);
+        const cached = groupMessagesCache.get(cacheKey);
         if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size)
             return cached.messages;
         const parsed = JSON.parse(fs.readFileSync(file, "utf-8"));
         const messages = Array.isArray(parsed) ? parsed : [];
-        groupMessagesCache.set(groupId, { mtimeMs: stat.mtimeMs, size: stat.size, messages });
+        groupMessagesCache.set(cacheKey, { mtimeMs: stat.mtimeMs, size: stat.size, messages });
         return messages;
     }
     catch {
@@ -158,26 +521,27 @@ function getGroupMessages(groupId) {
             const parsed = JSON.parse(fs.readFileSync(backup, "utf-8"));
             const messages = Array.isArray(parsed) ? parsed : [];
             const stat = fs.statSync(file);
-            groupMessagesCache.set(groupId, { mtimeMs: stat.mtimeMs, size: stat.size, messages });
+            groupMessagesCache.set(cacheKey, { mtimeMs: stat.mtimeMs, size: stat.size, messages });
             return messages;
         }
         catch {
-            groupMessagesCache.delete(groupId);
+            groupMessagesCache.delete(cacheKey);
             return [];
         }
     }
 }
 function appendGroupMessage(groupId, msg) {
-    const messages = getGroupMessages(groupId);
+    const sessionId = resolveGroupMessageSessionId(groupId, msg);
+    const messages = getGroupMessages(groupId, sessionId);
     const messageId = String(msg?.id || "").trim();
     const existing = messageId ? messages.find((item) => String(item?.id || "") === messageId) : null;
     if (existing)
         return existing;
     const taskTraceId = msg?.task_id ? (0, db_1.loadTasks)().find((task) => task.id === msg.task_id)?.trace_id : "";
     const traceId = (0, reliability_ledger_1.ensureTraceId)(msg?.trace_id || msg?.traceId || taskTraceId, "message");
-    const next = { ...msg, trace_id: traceId };
+    const next = { ...msg, group_session_id: sessionId, trace_id: traceId };
     messages.push(next);
-    saveGroupMessages(groupId, messages);
+    saveGroupMessages(groupId, messages, sessionId);
     (0, reliability_ledger_1.appendTraceEvent)(traceId, { id: `group-message:${groupId}:${messageId || messages.length}`, type: "group.message_persisted", status: "ok", group_id: groupId, task_id: msg?.task_id || "", agent: msg?.agent || msg?.role || "", message: String(msg?.content || "").slice(0, 500), data: { message_id: messageId } });
     for (const hook of getGroupMessageAppendHooks()) {
         try {
@@ -187,11 +551,14 @@ function appendGroupMessage(groupId, msg) {
     }
     return next;
 }
-function saveGroupMessages(groupId, messages) {
+function saveGroupMessages(groupId, messages, sessionId = "") {
     if (!fs.existsSync(utils_1.GROUP_MESSAGES_DIR)) {
         fs.mkdirSync(utils_1.GROUP_MESSAGES_DIR, { recursive: true });
     }
-    const file = path.join(utils_1.GROUP_MESSAGES_DIR, `${groupId}.json`);
+    const resolvedSessionId = String(sessionId || getActiveGroupChatSessionId(groupId));
+    const cacheKey = `${groupId}::${resolvedSessionId}`;
+    const file = getGroupSessionMessagesFile(groupId, resolvedSessionId);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
     const temp = `${file}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}.tmp`;
     if (fs.existsSync(file)) {
         try {
@@ -202,6 +569,107 @@ function saveGroupMessages(groupId, messages) {
     fs.writeFileSync(temp, JSON.stringify(messages, null, 2), "utf-8");
     replaceFileWithWindowsRetry(temp, file);
     const stat = fs.statSync(file);
-    groupMessagesCache.set(groupId, { mtimeMs: stat.mtimeMs, size: stat.size, messages });
+    groupMessagesCache.set(cacheKey, { mtimeMs: stat.mtimeMs, size: stat.size, messages });
+    const manifestFile = getGroupSessionManifestFile(groupId);
+    if (fs.existsSync(manifestFile)) {
+        const manifest = listGroupChatSessions(groupId);
+        const now = new Date().toISOString();
+        const sessions = manifest.sessions.map((item) => item.id === resolvedSessionId ? { ...item, messageCount: messages.length, updatedAt: now } : item);
+        writeGroupSessionManifest(groupId, { ...manifest, sessions });
+    }
+}
+function runGroupChatSessionsSelfTest() {
+    const groupId = `group-chat-sessions-selftest-${process.pid}-${Date.now().toString(36)}`;
+    const groupDir = path.dirname(getGroupSessionManifestFile(groupId));
+    const legacyFile = getGroupSessionMessagesFile(groupId, GROUP_DEFAULT_SESSION_ID);
+    const lifecycleFiles = [];
+    try {
+        const first = createGroupChatSession(groupId, "会话 A");
+        lifecycleFiles.push((0, group_session_lifecycle_head_1.getGroupSessionLifecycleHeadFile)(groupId, first.id));
+        const firstCreatedLifecycle = (0, group_session_lifecycle_head_1.readGroupSessionLifecycleHead)(groupId, first.id);
+        appendGroupMessage(groupId, { id: "session-a-message", role: "user", content: "SESSION_A_SENTINEL", group_session_id: first.id });
+        const second = createGroupChatSession(groupId, "会话 B");
+        lifecycleFiles.push((0, group_session_lifecycle_head_1.getGroupSessionLifecycleHeadFile)(groupId, second.id));
+        appendGroupMessage(groupId, { id: "session-b-message", role: "user", content: "SESSION_B_SENTINEL", group_session_id: second.id });
+        const syntheticTasks = [
+            { id: "late-task", group_id: groupId, group_session_id: first.id, status: "in_progress" },
+            { id: "legacy-task", group_id: groupId, status: "in_progress" },
+            { id: "done-task", group_id: groupId, group_session_id: first.id, status: "done" },
+        ];
+        const lateReceiptSession = resolveGroupMessageSessionId(groupId, { task_id: "late-task" }, syntheticTasks);
+        const legacyReceiptSession = resolveGroupMessageSessionId(groupId, { task_id: "legacy-task" }, syntheticTasks);
+        const activeTaskRows = findActiveGroupSessionTasks(groupId, first.id, syntheticTasks);
+        const firstMessages = getGroupMessages(groupId, first.id);
+        const secondMessages = getGroupMessages(groupId, second.id);
+        selectGroupChatSession(groupId, first.id);
+        const activeMessages = getGroupMessages(groupId);
+        const renamed = renameGroupChatSession(groupId, first.id, "会话 A 已重命名");
+        archiveGroupChatSession(groupId, first.id, true);
+        const firstArchivedLifecycle = (0, group_session_lifecycle_head_1.readGroupSessionLifecycleHead)(groupId, first.id);
+        const activeAfterArchive = getActiveGroupChatSessionId(groupId);
+        const retention = pruneArchivedGroupChatSessions(groupId, { dryRun: true, retentionDays: 30, now: new Date(Date.now() + 31 * 86_400_000).toISOString() });
+        archiveGroupChatSession(groupId, first.id, false);
+        const firstRestoredLifecycle = (0, group_session_lifecycle_head_1.readGroupSessionLifecycleHead)(groupId, first.id);
+        const deleted = deleteGroupChatSession(groupId, second.id);
+        const secondDeletedLifecycle = (0, group_session_lifecycle_head_1.readGroupSessionLifecycleHead)(groupId, second.id);
+        const manifest = listGroupChatSessions(groupId);
+        const checks = {
+            createsIndependentSessionIds: first.id !== second.id,
+            firstSessionContainsOnlyFirstSentinel: JSON.stringify(firstMessages).includes("SESSION_A_SENTINEL") && !JSON.stringify(firstMessages).includes("SESSION_B_SENTINEL"),
+            secondSessionContainsOnlySecondSentinel: JSON.stringify(secondMessages).includes("SESSION_B_SENTINEL") && !JSON.stringify(secondMessages).includes("SESSION_A_SENTINEL"),
+            switchingRestoresSelectedSession: getActiveGroupChatSessionId(groupId) === first.id && JSON.stringify(activeMessages).includes("SESSION_A_SENTINEL"),
+            messagesCarrySessionIdentity: firstMessages[0]?.group_session_id === first.id && secondMessages[0]?.group_session_id === second.id,
+            lateReceiptStaysWithTaskSession: lateReceiptSession === first.id && lateReceiptSession !== second.id,
+            legacyTaskNeverFallsIntoActiveSession: legacyReceiptSession === GROUP_DEFAULT_SESSION_ID,
+            deleteGuardCountsOnlyActiveTasks: activeTaskRows.length === 1 && activeTaskRows[0].id === "late-task",
+            renamePersists: renamed.title === "会话 A 已重命名" && manifest.sessions.find((item) => item.id === first.id)?.title === "会话 A 已重命名",
+            archiveSwitchesActiveSession: activeAfterArchive === second.id,
+            retentionFindsExpiredArchive: retention.candidates.some((item) => item.id === first.id),
+            deleteRemovesOnlyTargetSession: deleted.session.id === second.id
+                && manifest.sessions.some((item) => item.id === first.id)
+                && !manifest.sessions.some((item) => item.id === second.id)
+                && !fs.existsSync(getGroupSessionMessagesFile(groupId, second.id)),
+            lifecycleGenerationTracksArchiveRestore: firstCreatedLifecycle?.status === "active"
+                && firstCreatedLifecycle?.generation === 1
+                && firstArchivedLifecycle?.status === "archived"
+                && firstArchivedLifecycle?.generation === 2
+                && firstRestoredLifecycle?.status === "active"
+                && firstRestoredLifecycle?.generation === 3,
+            deletionLeavesDurableTombstone: secondDeletedLifecycle?.status === "deleted"
+                && secondDeletedLifecycle?.generation === 2
+                && deleted.lifecycleTombstone?.head?.head_checksum === secondDeletedLifecycle?.head_checksum,
+        };
+        return { pass: Object.values(checks).every(Boolean), checks, first, second, manifest };
+    }
+    finally {
+        try {
+            if (fs.existsSync(groupDir)) {
+                for (const name of fs.readdirSync(groupDir)) {
+                    const file = path.join(groupDir, name);
+                    if (fs.statSync(file).isFile())
+                        fs.unlinkSync(file);
+                }
+                fs.rmdirSync(groupDir);
+            }
+        }
+        catch { }
+        try {
+            if (fs.existsSync(legacyFile))
+                fs.unlinkSync(legacyFile);
+        }
+        catch { }
+        try {
+            if (fs.existsSync(`${legacyFile}.bak`))
+                fs.unlinkSync(`${legacyFile}.bak`);
+        }
+        catch { }
+        for (const file of lifecycleFiles.flatMap(item => [item, `${item}.bak`, `${item}.lock`])) {
+            try {
+                if (fs.existsSync(file))
+                    fs.unlinkSync(file);
+            }
+            catch { }
+        }
+    }
 }
 //# sourceMappingURL=storage.js.map

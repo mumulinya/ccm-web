@@ -368,6 +368,7 @@ export declare function runGlobalAgentLoopSelfTest(): Promise<{
         shapedReplyIncludesReviewAndAcceptance: boolean;
         shapedReplyHidesTechnicalBlockers: boolean;
         ordinaryReplyStaysPlain: boolean;
+        ordinarySyntheticEvidenceStillStaysPlain: boolean;
         ordinaryTodoHiddenByPolicy: boolean;
         workchainTodoPlanCarriesCcStyleForms: boolean;
         workchainTodoPlanHasSingleActiveStep: boolean;
@@ -434,6 +435,7 @@ export declare function runGlobalAgentLoopSelfTest(): Promise<{
     };
     multiStepCompletes: boolean;
     dispatchIsNotDeliveryCompletion: boolean;
+    acceptedDispatchStopsSynchronousPolling: boolean;
     supervisingVisibleReplyHidesTechnicalIds: boolean;
     finalGateCompletesOriginalRun: boolean;
     globalSupervisionWaitingRefreshesVisibleWorkchain: boolean;
@@ -441,6 +443,8 @@ export declare function runGlobalAgentLoopSelfTest(): Promise<{
     globalSupervisionGoalRevisionStopsOldRunAndReplans: boolean;
     modelObservesAndContinues: boolean;
     consultationDoesNotDispatch: boolean;
+    ordinaryConversationUsesQuietWorkchain: boolean;
+    readOnlySystemStatusUsesQuietWorkchain: boolean;
     globalVisibleReplySanitizesProtocol: boolean;
     globalVisibleReplyStoresRawTechnicalContent: boolean;
     globalProtocolLeakAnswerHasNoPlanMode: boolean;

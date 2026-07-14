@@ -81,6 +81,7 @@ export interface RuntimeToolReadiness {
     projectName: string;
     groupId: string;
     checkedAt: string;
+    snapshotGeneratedAt: string;
     deliveryReady: boolean;
     runtimeReady: boolean;
     deepChecked: boolean;

@@ -55,7 +55,7 @@ const hasFileChanges = computed(() => (
 </script>
 
 <template>
-  <span class="agent-label">🤖 Agent</span>
+  <span class="agent-label">项目 Agent</span>
   <TaskExperienceCard
     v-if="taskCard"
     :card="taskCard"
@@ -66,11 +66,11 @@ const hasFileChanges = computed(() => (
   <div v-else>{{ message.content }}</div>
   <span v-if="isLastStreaming" class="stream-cursor">▌</span>
 
-  <div v-if="workEvents.length && !taskCard" class="agent-work-events">
-    <div class="work-events-head">
-      <span>Agent 工作输出</span>
+  <details v-if="workEvents.length && !taskCard" class="agent-work-events">
+    <summary class="work-events-head">
+      <span>技术详情</span>
       <span>{{ workEvents.length }} 条</span>
-    </div>
+    </summary>
     <div class="work-events-list">
       <div
         v-for="event in visibleWorkEvents"
@@ -81,7 +81,7 @@ const hasFileChanges = computed(() => (
         <pre>{{ compactWorkText(event.text) }}</pre>
       </div>
     </div>
-  </div>
+  </details>
 
   <div v-if="hasFileChanges && !taskCard" class="file-changes">
     <div class="file-changes-header">📁 修改了 {{ message.fileChanges.count }} 个文件</div>
@@ -213,6 +213,7 @@ const hasFileChanges = computed(() => (
   color: var(--text-secondary);
   font-size: 11px;
   font-weight: 700;
+  cursor: pointer;
 }
 
 .work-events-list {

@@ -1,0 +1,35 @@
+{
+  "pass": true,
+  "generatedAt": "2026-07-14T01:45:05.872Z",
+  "baseUrl": "http://127.0.0.1:3082",
+  "checks": [
+    {
+      "name": "settings source removes hidden diagnostics and uses scoped reset",
+      "pass": true
+    },
+    {
+      "name": "system status exposes real version, process and credential protection",
+      "pass": true
+    },
+    {
+      "name": "public unified model config is redacted and declares all consumers",
+      "pass": true
+    },
+    {
+      "name": "unified model API rejects non-HTTP provider URLs",
+      "pass": true
+    },
+    {
+      "name": "feishu settings API never returns channel secrets",
+      "pass": true
+    },
+    {
+      "name": "legacy unified model key migrated to encrypted credential reference",
+      "pass": true
+    },
+    {
+      "name": "real unified model connection serves all three agent consumers",
+      "pass": true
+    }
+  ]
+}

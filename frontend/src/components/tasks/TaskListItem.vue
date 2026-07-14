@@ -116,17 +116,24 @@ const emit = defineEmits([
           <span v-for="item in evidenceItems" :key="item.key" :class="['evidence-chip', item.tone]">{{ item.label }}</span>
         </div>
         <div v-if="executionBlocked" class="task-execution-block">
-          <strong>等待执行通道恢复</strong>
-          <span>{{ executionBlockedText }}</span>
-          <ul v-if="executionFixActions.length" class="execution-fix-list">
-            <li v-for="action in executionFixActions" :key="action">{{ action }}</li>
-          </ul>
+          <strong>执行通道暂时不可用</strong>
+          <span>可以到“运行管理”复检通道，或恢复执行失败的任务。</span>
+          <details v-if="executionBlockedText || executionFixActions.length" class="task-technical-details">
+            <summary>技术详情</summary>
+            <p v-if="executionBlockedText">{{ executionBlockedText }}</p>
+            <ul v-if="executionFixActions.length" class="execution-fix-list">
+              <li v-for="action in executionFixActions" :key="action">{{ action }}</li>
+            </ul>
+          </details>
         </div>
         <div v-if="task.status_detail" class="task-status-detail">{{ task.status_detail }}</div>
-        <div v-if="task.execution_kernel" class="kernel-summary-row">
-          <span :class="['kernel-chip', kernelState]">{{ kernelStateText }}</span>
-          <span :class="['kernel-chip', 'green-' + kernelGreen]">{{ kernelGreenText }}</span>
-        </div>
+        <details v-if="task.execution_kernel" class="task-technical-details kernel-details">
+          <summary>执行技术状态</summary>
+          <div class="kernel-summary-row">
+            <span :class="['kernel-chip', kernelState]">{{ kernelStateText }}</span>
+            <span :class="['kernel-chip', 'green-' + kernelGreen]">{{ kernelGreenText }}</span>
+          </div>
+        </details>
         <div v-if="task.final_report || task.result" class="task-result">{{ (task.final_report || task.result)?.substring(0, 180) }}</div>
         <div class="task-meta">
           <span class="meta-item">{{ task.assign_type === 'group' ? '💬' : '🤖' }} {{ task.assign_type === 'group' ? groupName : task.target_project }}</span>
@@ -159,7 +166,7 @@ const emit = defineEmits([
         <button class="btn btn-outline btn-sm" @click="emit('logs', task.id)">📋 日志</button>
         <button v-if="task.status !== 'done'" class="btn btn-outline btn-sm" @click="emit('resend', task)">🔄 重派</button>
         <button class="btn btn-outline btn-sm" @click="emit('edit', task)">编辑</button>
-        <button class="btn btn-danger btn-sm" @click="emit('delete', task.id)">🗑️ 删除</button>
+        <button class="btn btn-outline btn-sm" @click="emit('delete', task.id)">归档</button>
       </template>
     </div>
   </div>
@@ -356,6 +363,11 @@ const emit = defineEmits([
 .execution-fix-list li {
   overflow-wrap: anywhere;
 }
+
+.task-technical-details { margin-top: 4px; color: var(--text-muted); font-size: 10.5px; }
+.task-technical-details summary { width: fit-content; color: var(--text-secondary); font-weight: 700; cursor: pointer; }
+.task-technical-details p { margin: 6px 0 0; color: var(--text-secondary); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+.kernel-details { margin: 2px 0 6px; }
 
 .task-status-detail {
   font-size: 12px;

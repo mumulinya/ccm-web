@@ -438,6 +438,7 @@ export declare function runMainAgentWorkchainSelfTest(): {
         shapedReplyIncludesReviewAndAcceptance: boolean;
         shapedReplyHidesTechnicalBlockers: boolean;
         ordinaryReplyStaysPlain: boolean;
+        ordinarySyntheticEvidenceStillStaysPlain: boolean;
         ordinaryTodoHiddenByPolicy: boolean;
         workchainTodoPlanCarriesCcStyleForms: boolean;
         workchainTodoPlanHasSingleActiveStep: boolean;

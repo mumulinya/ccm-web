@@ -1,3 +1,4 @@
+import { type LlmTokenUsage } from "./group-orchestrator-llm-client";
 export declare const COORDINATOR_PROJECT = "coordinator";
 export declare const DEFAULT_GROUP_ORCHESTRATOR: {
     enabled: boolean;
@@ -14,10 +15,39 @@ export declare function defaultOrchestratorConfig(): {
     temperature: number;
     timeoutMs: number;
     fallbackToRules: boolean;
+    memoryContextPreset: string;
+    modelContextWindow: number;
+    modelAutoCompactTokenLimit: number;
+    typedMemoryDeliveryMaxDocuments: number;
+    typedMemoryDeliveryMaxBytesPerDocument: number;
+    typedMemoryDeliveryMaxLinesPerDocument: number;
+    typedMemoryDeliveryMaxSessionBytes: number;
+    typedMemoryDeliveryMaxTokens: number;
+    groupSessionRetentionDays: number;
+    groupSessionMaxArchived: number;
+    groupSessionAutoPruneEnabled: boolean;
+    groupSessionRetentionIntervalHours: number;
+    groupSessionArtifactAutoArchiveEnabled: boolean;
+    groupSessionArtifactHotExecutions: number;
+    groupSessionArtifactMaxHotMb: number;
+    groupSessionArtifactMaxAgeDays: number;
 };
 export declare function loadOrchestratorConfig(): any;
 export declare function saveOrchestratorConfig(updates: any): any;
 export declare function publicOrchestratorConfig(config?: any): any;
+export declare function testUnifiedModelConnection(): Promise<{
+    success: boolean;
+    checkedAt: string;
+    latencyMs: number;
+    provider: string;
+    model: any;
+    message: string;
+    consumers: {
+        ready: boolean;
+        id: string;
+        label: string;
+    }[];
+}>;
 export declare function createCoordinatorMember(agent?: string): {
     project: string;
     role: string;
@@ -59,6 +89,11 @@ export declare function buildCoordinatorPrompt(input: {
     sessionId?: string;
 }): string;
 export declare function buildCoordinatorMaintenanceNotificationInstructions(groupInput: any, options?: any): {
+    text: string;
+    context: any;
+    health: any;
+    cleanup_commit_repair_context?: undefined;
+} | {
     text: string;
     context: {
         schema: string;
@@ -130,6 +165,20 @@ export declare function buildCoordinatorMaintenanceNotificationInstructions(grou
         created_approval_receipt_count: number;
         deleted_count: number;
         file: string;
+    };
+    cleanup_commit_repair_context: {
+        rendered: string;
+        schema: string;
+        group_id: string;
+        audience: string;
+        brief_count: any;
+        briefs: any;
+        assignment_binding_id: any;
+        integrity_valid: boolean;
+        can_claim_or_dispatch: boolean;
+        can_resolve_without_receipt: boolean;
+        cross_group_authorization_allowed: boolean;
+        policy: string;
     };
 };
 export declare function buildMemberPrompt(input: {
@@ -1296,6 +1345,9 @@ export declare function runLlmCoordinatorReview(group: any, userMessage: string,
     maxRounds?: number;
     requiresCodeChanges?: boolean;
     requiresVerification?: boolean;
+    traceId?: string;
+    taskId?: string;
+    executionId?: string;
 }): Promise<{
     agent: any;
     status: string;
@@ -1364,6 +1416,7 @@ export declare function readWorkerContextPtlEmergencyHintForCoordinator(groupId:
 };
 export declare function readWorkerContextCompactOutcomeLedgerForCoordinator(groupId: string): any;
 export declare function compactWorkerContextCompactOutcomeLedgerRetentionForCoordinator(groupId: string, options?: any): any;
+export declare function buildWorkerContextPacketForAssignment(baseAssignment: any, dependsOn: string, replayRepairDispatchBriefs: any[], options?: any): any;
 export declare function validateProviderSwitchDecisionReceiptForCoordinator(receipt?: any, options?: any): {
     schema: string;
     valid: boolean;
@@ -1695,7 +1748,7 @@ export declare function isStructuredCoordinatorFallbackAllowed(input: {
     source?: string;
     message?: string;
 }): boolean;
-export declare function runGroupOrchestrator(input: {
+export type GroupOrchestratorInput = {
     group: any;
     message: string;
     context?: string;
@@ -1711,7 +1764,15 @@ export declare function runGroupOrchestrator(input: {
     context_id?: string;
     sessionId?: string;
     session_id?: string;
-}): Promise<{
+    traceId?: string;
+    trace_id?: string;
+    taskId?: string;
+    task_id?: string;
+    executionId?: string;
+    execution_id?: string;
+};
+export declare function runGroupOrchestrator(input: GroupOrchestratorInput): Promise<{
+    usage: LlmTokenUsage;
     agent: any;
     delegated: any[];
     assignments: any[];
@@ -1736,6 +1797,7 @@ export declare function runGroupOrchestrator(input: {
     executionOrder?: undefined;
     coordinationStrategy?: undefined;
 } | {
+    usage: LlmTokenUsage;
     agent: any;
     delegated: any[];
     assignments: any[];
@@ -1767,6 +1829,101 @@ export declare function runGroupOrchestrator(input: {
     coordinationStrategy: string;
     content: string;
 } | {
+    runtime: string;
+    agentBoundary: {
+        layer: string;
+        planner: string;
+        runtime: string;
+        responsibility: string;
+    };
+    content: string;
+    agent: any;
+    delegated: any[];
+    assignments: any[];
+    analysis: {
+        documentFindings: string[];
+        ragContext: {
+            citations: string[];
+            scoped: boolean;
+            injected: boolean;
+        };
+        coordinationStrategy: string;
+        constraints: string[];
+        needsCoordination: boolean;
+        confidence: number;
+        raw: string;
+        summary: string;
+        intent: string;
+        domains: string[];
+        deliverables: string[];
+        explicitProjects: any;
+        missingInfo: string[];
+        contextSignal: string;
+    };
+    dispatchPolicy: {
+        action: string;
+        reason: string;
+        requiresConfirmation: boolean;
+        risk: string;
+        nextStep: string;
+        confidence: any;
+    };
+    executionOrder?: undefined;
+    coordinationStrategy?: undefined;
+    coordinationPlan?: undefined;
+    usage?: undefined;
+} | {
+    runtime: string;
+    agentBoundary: {
+        layer: string;
+        planner: string;
+        runtime: string;
+        responsibility: string;
+    };
+    content: string;
+    agent: any;
+    delegated: any[];
+    assignments: any[];
+    executionOrder: string;
+    coordinationStrategy: string;
+    analysis: {
+        documentFindings: string[];
+        ragContext: {
+            citations: string[];
+            scoped: boolean;
+            injected: boolean;
+        };
+        coordinationStrategy: string;
+        constraints: string[];
+        needsCoordination: boolean;
+        confidence: number;
+        raw: string;
+        summary: string;
+        intent: string;
+        domains: string[];
+        deliverables: string[];
+        explicitProjects: any;
+        missingInfo: string[];
+        contextSignal: string;
+    };
+    coordinationPlan: {
+        mode: string;
+        strategy: string;
+        executionOrder: string;
+        phases: string[];
+        targets: any[];
+        missingInfo: any;
+    };
+    dispatchPolicy: {
+        action: string;
+        reason: string;
+        requiresConfirmation: boolean;
+        risk: string;
+        nextStep: string;
+        confidence: any;
+    };
+    usage?: undefined;
+} | {
     agent: any;
     delegated: any[];
     assignments: any[];
@@ -1778,7 +1935,9 @@ export declare function runGroupOrchestrator(input: {
         responsibility: string;
     };
     content: string;
+    usage?: undefined;
 } | {
+    usage: LlmTokenUsage;
     contextRecovery: {
         type: string;
         originalChars: number;
@@ -1808,6 +1967,7 @@ export declare function runGroupOrchestrator(input: {
     executionOrder?: undefined;
     coordinationStrategy?: undefined;
 } | {
+    usage: LlmTokenUsage;
     contextRecovery: {
         type: string;
         originalChars: number;
@@ -1842,6 +2002,114 @@ export declare function runGroupOrchestrator(input: {
     };
     executionOrder: string;
     coordinationStrategy: string;
+    content: string;
+} | {
+    runtime: string;
+    usage: any;
+    agentBoundary: {
+        layer: string;
+        planner: string;
+        runtime: string;
+        responsibility: string;
+    };
+    content: string;
+    agent: any;
+    delegated: any[];
+    assignments: any[];
+    analysis: {
+        documentFindings: string[];
+        ragContext: {
+            citations: string[];
+            scoped: boolean;
+            injected: boolean;
+        };
+        coordinationStrategy: string;
+        constraints: string[];
+        needsCoordination: boolean;
+        confidence: number;
+        raw: string;
+        summary: string;
+        intent: string;
+        domains: string[];
+        deliverables: string[];
+        explicitProjects: any;
+        missingInfo: string[];
+        contextSignal: string;
+    };
+    dispatchPolicy: {
+        action: string;
+        reason: string;
+        requiresConfirmation: boolean;
+        risk: string;
+        nextStep: string;
+        confidence: any;
+    };
+    executionOrder?: undefined;
+    coordinationStrategy?: undefined;
+    coordinationPlan?: undefined;
+} | {
+    runtime: string;
+    usage: any;
+    agentBoundary: {
+        layer: string;
+        planner: string;
+        runtime: string;
+        responsibility: string;
+    };
+    content: string;
+    agent: any;
+    delegated: any[];
+    assignments: any[];
+    executionOrder: string;
+    coordinationStrategy: string;
+    analysis: {
+        documentFindings: string[];
+        ragContext: {
+            citations: string[];
+            scoped: boolean;
+            injected: boolean;
+        };
+        coordinationStrategy: string;
+        constraints: string[];
+        needsCoordination: boolean;
+        confidence: number;
+        raw: string;
+        summary: string;
+        intent: string;
+        domains: string[];
+        deliverables: string[];
+        explicitProjects: any;
+        missingInfo: string[];
+        contextSignal: string;
+    };
+    coordinationPlan: {
+        mode: string;
+        strategy: string;
+        executionOrder: string;
+        phases: string[];
+        targets: any[];
+        missingInfo: any;
+    };
+    dispatchPolicy: {
+        action: string;
+        reason: string;
+        requiresConfirmation: boolean;
+        risk: string;
+        nextStep: string;
+        confidence: any;
+    };
+} | {
+    agent: any;
+    delegated: any[];
+    assignments: any[];
+    runtime: string;
+    usage: any;
+    agentBoundary: {
+        layer: string;
+        planner: string;
+        runtime: string;
+        responsibility: string;
+    };
     content: string;
 }>;
 export declare function isContextLimitError(error: any): boolean;

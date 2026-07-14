@@ -1,9 +1,12 @@
 <script setup>
 import { computed, ref, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import { BookOpen, Bot, Gauge, MoreHorizontal, RefreshCw } from '@lucide/vue'
 import { toast, confirmDialog } from '../../utils/toast.js'
 import TaskExperienceCard from '../tasks/TaskExperienceCard.vue'
 import AgentCodeChangeDrawer from '../agents/AgentCodeChangeDrawer.vue'
 import MessageNavigator from '../common/MessageNavigator.vue'
+import CommandResultCard from '../common/CommandResultCard.vue'
+import SlashCommandMenu from '../common/SlashCommandMenu.vue'
 import GlobalAgentSessionSidebar from './GlobalAgentSessionSidebar.vue'
 import { useCodeChangeDrawer } from '../../composables/useCodeChangeDrawer.js'
 import { useGlobalAgentAttachments } from '../../composables/useGlobalAgentAttachments.js'
@@ -11,11 +14,14 @@ import { useGlobalAgentControlCenter } from '../../composables/useGlobalAgentCon
 import { globalMissionConversationState, upsertGlobalMissionConversationNotification, useGlobalAgentSessions } from '../../composables/useGlobalAgentSessions.js'
 import { useMessageNavigation } from '../../composables/useMessageNavigation.js'
 import { usePinnedScroll } from '../../composables/usePinnedScroll.js'
+import { useSlashCommands } from '../../composables/useSlashCommands.js'
+import { createSlashCommandClientActions } from '../../composables/useSlashCommandClientActions.js'
 import { globalAgentRunTaskCard, globalMissionTaskCard } from '../../utils/taskExperience.js'
 import { buildGlobalConversationKnowledgePayload, buildGlobalTaskKnowledgePayload, postKnowledgeCapture } from '../../utils/knowledgeCapture.js'
 import { getDeliveryReport, getTechnicalDetailSections, normalizeTestAgentExecutionPlanSummary, sanitizeUserFacingAgentText, sanitizeUserFacingLegacyTerminology, sanitizeUserFacingPlanText, sanitizeUserFacingStructure } from '../../utils/agentDisplay.js'
 
-const emit = defineEmits(['switch-tab', 'set-navigation'])
+const props = defineProps({ navigateTo: { type: Object, default: null } })
+const emit = defineEmits(['switch-tab', 'set-navigation', 'navigated'])
 
 const RANDOM_MUSIC_KEYWORD = '__random__'
 
@@ -158,6 +164,8 @@ const isSupervisionContinuationInput = computed(() => {
       || (!!currentSupervisedRunMessage.value && isExplicitSupervisionContinuation(chatInput.value)))
 })
 
+const activeGlobalExecutionConfirmed = ref(false)
+
 const syncPendingGlobalClarificationInput = () => {
   const rows = Array.isArray(messages.value) ? messages.value : []
   const pending = [...rows].reverse().find(message => message?.role === 'assistant') || null
@@ -175,6 +183,38 @@ const syncPendingGlobalClarificationInput = () => {
     : null
 }
 
+const searchHighlightMsgIndex = ref(-1)
+const handleSearchNavigation = async () => {
+  const target = props.navigateTo
+  if (!target || target.tab !== 'global-agent' || !target.sessionId) return
+  for (let attempt = 0; attempt < 20 && !sessions.value.some(session => session.id === target.sessionId); attempt += 1) {
+    await syncHistoryFromServer()
+    if (!sessions.value.some(session => session.id === target.sessionId)) await new Promise(resolve => window.setTimeout(resolve, 100))
+  }
+  if (!sessions.value.some(session => session.id === target.sessionId)) {
+    toast.warning('目标会话暂时无法读取')
+    emit('navigated')
+    return
+  }
+  await selectSession(target.sessionId)
+  await nextTick()
+  const keyword = String(target.keyword || '').toLowerCase()
+  let index = target.messageId ? messages.value.findIndex(message => String(message.id || message.message_id || message.messageId || '') === String(target.messageId)) : -1
+  if (index < 0 && Number.isInteger(target.messageIndex) && target.messageIndex >= 0 && target.messageIndex < messages.value.length) index = target.messageIndex
+  if (index < 0 && keyword) index = messages.value.findIndex(message => String(message.content || '').toLowerCase().includes(keyword))
+  if (index >= 0) {
+    searchHighlightMsgIndex.value = index
+    await nextTick()
+    document.getElementById(`msg-${index}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    window.setTimeout(() => { searchHighlightMsgIndex.value = -1 }, 3000)
+  }
+  emit('navigated')
+}
+
+watch(() => props.navigateTo, () => {
+  if (props.navigateTo?.tab === 'global-agent') window.setTimeout(handleSearchNavigation, 100)
+}, { immediate: true })
+
 const globalInputPlaceholder = computed(() => {
   if (!isSending.value) {
     if (pendingGlobalMissionInput.value) return '补充当前任务需要的信息，发送后会继续原任务...'
@@ -183,14 +223,14 @@ const globalInputPlaceholder = computed(() => {
       ? '补充要求或调整当前任务...'
       : '对全局助手说点什么... (例如: 帮我把桌宠打开)'
   }
-  return activeGlobalRunId.value
+  return activeGlobalRunId.value && activeGlobalExecutionConfirmed.value
     ? '补充要求或调整当前目标...'
-    : '正在建立当前任务，请稍候...'
+    : '正在回复...'
 })
 
 const globalSendButtonLabel = computed(() => {
   if (isSteering.value) return '接收中'
-  if (isSending.value) return '补充要求'
+  if (isSending.value) return activeGlobalExecutionConfirmed.value ? '补充要求' : '回复中'
   if (pendingGlobalMissionInput.value) return '提交并继续'
   if (pendingGlobalClarificationInput.value) return '提交补充'
   return isSupervisionContinuationInput.value ? '更新任务' : '发送'
@@ -198,9 +238,69 @@ const globalSendButtonLabel = computed(() => {
 
 const canSendGlobalMessage = computed(() => {
   if (isSteering.value) return false
-  if (isSending.value) return !!chatInput.value.trim() && !!activeGlobalRunId.value
+  if (isSending.value) return activeGlobalExecutionConfirmed.value && !!chatInput.value.trim() && !!activeGlobalRunId.value
   return !!chatInput.value.trim() || selectedFiles.value.length > 0
 })
+
+const runGlobalClientCommand = createSlashCommandClientActions({
+  scope: 'global',
+  messages: () => messages.value,
+  sessions: () => sessions.value,
+  currentSessionId: () => currentSessionId.value,
+  context: () => ({ sessionId: currentSessionId.value }),
+  statusSummary: () => `全局 Agent 当前会话“${currentSession.value?.name || '未选择'}”已加载 ${messages.value.length} 条消息。`,
+  contextMetrics: () => ({ 会话: currentSession.value?.name || '未选择', 会话ID: currentSessionId.value, 全部会话: sessions.value.length }),
+  exportFilename: () => `ccm-global-${currentSessionId.value || 'context'}`,
+  newSession: async () => {
+    const session = createNewSession()
+    return { success: true, summary: '已新建全局 Agent 会话。', metrics: { 会话: session.name, 会话ID: session.id } }
+  },
+  clearSession: async () => {
+    if (!currentSession.value) throw new Error('当前没有可清空的会话')
+    const cleared = currentSession.value.messages.length
+    currentSession.value.messages = [{ ...DEFAULT_WELCOME, timestamp: new Date().toISOString() }]
+    saveHistory()
+    return { success: true, summary: `已清空当前全局 Agent 会话的 ${cleared} 条消息。`, metrics: { 已清空: cleared } }
+  },
+  renameSession: async (name) => {
+    if (!currentSession.value) throw new Error('当前没有可重命名的会话')
+    currentSession.value.name = name
+    currentSession.value.updatedAt = new Date().toISOString()
+    saveHistory()
+    return { success: true, summary: `当前全局 Agent 会话已重命名为“${name}”。`, metrics: { 会话ID: currentSessionId.value } }
+  },
+})
+
+const slash = useSlashCommands({
+  scope: 'global',
+  input: chatInput,
+  context: () => ({ sessionId: currentSessionId.value }),
+  focus: () => nextTick(() => chatInputElement.value?.focus()),
+  onNavigate: (tab) => emit('switch-tab', tab),
+  onPrompt: async (prompt) => {
+    chatInput.value = prompt
+    await nextTick()
+    await sendMessage()
+  },
+  onClientAction: runGlobalClientCommand,
+  onResult: (result) => {
+    if (!currentSession.value) return
+    currentSession.value.messages.push({ role: 'assistant', type: 'command_result', commandResult: result, content: result.summary || '命令已执行', timestamp: new Date().toISOString() })
+    saveHistory()
+    nextTick(() => scrollToBottom())
+  },
+  onError: (message) => toast.error(message),
+  onConfirm: (message) => confirmDialog(message),
+})
+
+const handleGlobalInput = () => slash.onInput()
+const handleGlobalInputKeydown = async (event) => {
+  if (await slash.onKeydown(event)) return
+  if (event.key === 'Enter' && !event.shiftKey) {
+    event.preventDefault()
+    await sendMessage()
+  }
+}
 
 const globalRequestRetrySignature = ({ sessionId, message, files, clarificationRunId }) => JSON.stringify({
   sessionId,
@@ -656,6 +756,44 @@ const globalStreamTodoTone = (status) => {
 
 const globalStreamCurrentTodoTone = (summary = {}) => globalStreamTodoTone(summary.status)
 const isGlobalStreamSupervising = (msg = {}) => String(msg.agenticRun?.status || '').toLowerCase() === 'supervising'
+const GLOBAL_EXECUTION_STREAM_EVENTS = new Set([
+  'tool_started',
+  'tool_completed',
+  'tool_failed',
+  'tool_validation_failed',
+  'clarification_required',
+  'confirmation_required',
+  'dispatch_launch_summary',
+  'plan_mode_ready',
+  'supervising',
+  'test_agent_execution_plan_ready',
+  'test_agent_review_ready',
+  'post_review_spot_check_ready',
+])
+
+const globalEventConfirmsExecution = (event = {}) => {
+  const intent = event.step?.decision?.intent
+    || event.decision?.intent
+    || event.run?.decision_summary?.intent
+    || event.run?.decisionSummary?.intent
+    || null
+  const state = String(event.step?.state || event.state || '').toLowerCase()
+  return intent?.action_required === true
+    || ['execute', 'needs_confirmation'].includes(state)
+    || !!(event.tool?.name || event.pending_tool?.name || event.step?.tool?.name)
+    || !!(event.mission_id || event.missionId || event.run?.mission_id || event.run?.missionId)
+    || GLOBAL_EXECUTION_STREAM_EVENTS.has(String(event.type || ''))
+}
+
+const globalExecutionIntentConfirmed = (msg = {}) => {
+  if (msg.executionIntentConfirmed === true) return true
+  const run = msg.agenticRun || msg.agentic_run || {}
+  const intent = run.decision_summary?.intent || run.decisionSummary?.intent || null
+  if (intent?.action_required === true || Number(run.tool_calls || run.toolCalls || 0) > 0) return true
+  if (run.mission_id || run.missionId || run.supervisor_id || run.supervisorId || run.pending_tool || run.pendingTool) return true
+  if (getGlobalPlanMode(msg) || getGlobalTodoPlan(msg) || globalDispatchLaunchRows(msg).length || globalStreamToolUseSummary(msg)) return true
+  return (msg.streamEvents || []).some(event => GLOBAL_EXECUTION_STREAM_EVENTS.has(String(event.eventType || '')))
+}
 const globalStreamHeaderTitle = (msg = {}) => isGlobalStreamSupervising(msg)
   ? '持续跟进中'
   : msg.streaming
@@ -1507,6 +1645,11 @@ const syncActiveGlobalRunEnvelope = (agentMsg, event = {}) => {
 }
 
 const appendGlobalStreamEvent = (agentMsg, event) => {
+  if (globalEventConfirmsExecution(event)) {
+    agentMsg.executionIntentConfirmed = true
+    activeGlobalExecutionConfirmed.value = true
+    if (activeGlobalRunMessage.value) activeGlobalRunMessage.value.executionIntentConfirmed = true
+  }
   syncActiveGlobalRunEnvelope(agentMsg, event)
   const visible = globalEventToVisibleLine(event)
   if (!visible) return false
@@ -1814,7 +1957,7 @@ const sendGlobalMissionInput = async () => {
 }
 
 const sendMessage = async () => {
-  if (isSending.value) return sendGlobalRunSteer()
+  if (isSending.value) return activeGlobalExecutionConfirmed.value ? sendGlobalRunSteer() : undefined
   if (!chatInput.value.trim() && selectedFiles.value.length === 0) return
   if (pendingGlobalMissionInput.value) return sendGlobalMissionInput()
   const supervisionTarget = currentSupervisedRunMessage.value
@@ -1890,12 +2033,14 @@ const sendMessage = async () => {
       files: [],
       type: 'global_stream',
       streaming: true,
+      executionIntentConfirmed: false,
       streamEvents: [],
       user_message: userText,
       userMessage: userText
     }
     activeGlobalRunMessage.value = agentMsg
     activeGlobalRunId.value = ''
+    activeGlobalExecutionConfirmed.value = false
     const agentMsgAdded = { value: false }
     
     let res
@@ -2045,6 +2190,7 @@ const sendMessage = async () => {
     isSending.value = false
     activeGlobalRunId.value = ''
     activeGlobalRunMessage.value = null
+    activeGlobalExecutionConfirmed.value = false
     scrollToBottom()
   }
 }
@@ -2234,6 +2380,7 @@ const runtimeDebugRows = (msg) => {
 }
 
 const runtimeDebugSections = (msg) => {
+  if (!globalExecutionIntentConfirmed(msg)) return []
   const debug = msg?.agenticRun?.runtime_debug || null
   if (!debug) return []
   const fallback = {
@@ -2309,9 +2456,10 @@ const handleGlobalTaskAction = async (msg, action) => {
       return
     }
     if (action.kind === 'view_trace') {
-      localStorage.setItem('trace-replay-target', JSON.stringify({ scope: 'global', trace_id: action.trace_id || card?.technical?.trace_id || '', at: Date.now() }))
+      const replayTaskId = action.task_id || action.taskId || card?.task_id || card?.taskId || card?.technical?.task_id || ''
+      localStorage.setItem('trace-replay-target', JSON.stringify({ scope: 'global', task_id: replayTaskId, trace_id: action.trace_id || card?.technical?.trace_id || '', at: Date.now() }))
       emit('switch-tab', 'trace-replay')
-      window.dispatchEvent(new CustomEvent('trace-replay-target', { detail: { scope: 'global', trace_id: action.trace_id || card?.technical?.trace_id || '' } }))
+      window.dispatchEvent(new CustomEvent('trace-replay-target', { detail: { scope: 'global', task_id: replayTaskId, trace_id: action.trace_id || card?.technical?.trace_id || '' } }))
       return
     }
     if (action.kind === 'continue_work_item') {
@@ -2539,7 +2687,7 @@ const executeManagementAction = async (action) => {
       else if (operation === 'update') result = await postJson('/api/projects/update', { ...params, name: project })
       else if (operation === 'start') result = await postJson('/api/start', { project, agent: params.agent })
       else if (operation === 'stop') result = await postJson('/api/stop', { project })
-      else if (operation === 'delete') result = await postJson('/api/projects/delete', { name: project })
+      else if (operation === 'delete') result = await postJson('/api/projects/archive', { name: project })
     } else if (action.type === 'manage_task') {
       const id = params.id || params.task_id
       if (operation === 'list') result = await requestJson('/api/tasks')
@@ -2567,7 +2715,10 @@ const executeManagementAction = async (action) => {
     }
     if (!result) throw new Error('不支持的管理操作：' + action.type + '/' + operation)
     await recordManagementAudit(action, 'success', result)
-    addAssistantMessage('系统管理操作已完成：' + operation + ' ' + target, {
+    const completionText = action.type === 'manage_project' && operation === 'delete'
+      ? `${result.message || '项目已归档，可随时恢复。'}${result.audit_id ? `\n审计编号：${result.audit_id}` : ''}`
+      : '系统管理操作已完成：' + operation + ' ' + target
+    addAssistantMessage(completionText, {
       type: 'management_action',
       managementReceipt: { success: true, title: action.capability || '系统管理', details: managementDetails(action, result) }
     })
@@ -3096,12 +3247,6 @@ const handleGitCommitCardSubmit = async (msg) => {
 
 <template>
   <div class="global-assistant-panel">
-    <!-- 背景光效装饰 -->
-    <div class="glow-bg">
-      <div class="glow-ball glow-1"></div>
-      <div class="glow-ball glow-2"></div>
-    </div>
-    
     <GlobalAgentSessionSidebar
       :sessions="sessions"
       :current-session-id="currentSessionId"
@@ -3117,7 +3262,7 @@ const handleGitCommitCardSubmit = async (msg) => {
     <!-- 右侧聊天区 -->
     <div class="chat-container">
       <div class="chat-header">
-        <div class="header-logo">🤖</div>
+        <div class="header-logo"><Bot :size="20" /></div>
         <div class="header-title">
           <h3>全局控制中心</h3>
           <p>
@@ -3127,9 +3272,14 @@ const handleGitCommitCardSubmit = async (msg) => {
         </div>
         <div class="quality-header-actions">
           <span :class="['quality-mode', qualitySnapshot?.policy?.shadowMode ? 'shadow' : 'live']">{{ qualitySnapshot?.policy?.shadowMode ? '影子模式' : '真实执行' }}</span>
-          <button class="btn btn-outline" @click="saveCurrentGlobalSessionKnowledge">保存知识</button>
-          <button class="btn btn-outline" :disabled="controlCenterLoading" @click="toggleControlCenter">总控面板</button>
-          <button class="btn btn-outline" :disabled="qualityLoading" @click="qualityExpanded = !qualityExpanded; qualityExpanded && loadQualitySnapshot()">决策评测</button>
+          <button class="btn btn-outline" @click="saveCurrentGlobalSessionKnowledge"><BookOpen :size="14" />保存知识</button>
+          <details class="global-header-menu">
+            <summary title="更多全局助手操作" aria-label="更多全局助手操作"><MoreHorizontal :size="17" /></summary>
+            <div class="global-header-menu-popover">
+              <button type="button" :disabled="controlCenterLoading" @click="toggleControlCenter"><RefreshCw :size="14" />总控面板</button>
+              <button type="button" :disabled="qualityLoading" @click="qualityExpanded = !qualityExpanded; qualityExpanded && loadQualitySnapshot()"><Gauge :size="14" />决策评测</button>
+            </div>
+          </details>
         </div>
       </div>
       <section v-if="controlCenterExpanded" class="global-control-center">
@@ -3277,7 +3427,7 @@ const handleGitCommitCardSubmit = async (msg) => {
               :key="index"
               :id="'msg-' + index"
               class="chat-bubble-wrapper"
-              :class="msg.role"
+              :class="[msg.role, { 'search-hit': searchHighlightMsgIndex === index }]"
               :data-message-type="msg.type || undefined"
               :data-message-id="msg.id || undefined"
             >
@@ -3286,7 +3436,22 @@ const handleGitCommitCardSubmit = async (msg) => {
               <!-- 助手消息判定 -->
               <template v-if="msg.role === 'assistant'">
                 <div
-                  v-if="msg.type === 'global_stream'"
+                  v-if="msg.type === 'command_result'"
+                  class="global-command-result"
+                >
+                  <CommandResultCard :result="msg.commandResult" />
+                </div>
+                <div
+                  v-else-if="msg.type === 'global_stream' && !globalExecutionIntentConfirmed(msg)"
+                  class="global-stream-replying"
+                  :data-run-id="msg.agenticRun?.id || undefined"
+                  aria-live="polite"
+                >
+                  <span class="stream-dot" :class="{ active: msg.streaming }"></span>
+                  <span>{{ msg.streaming ? '正在回复...' : '回复已完成' }}</span>
+                </div>
+                <div
+                  v-else-if="msg.type === 'global_stream'"
                   class="global-stream-card"
                   :data-run-id="msg.agenticRun?.id || undefined"
                 >
@@ -3618,7 +3783,12 @@ const handleGitCommitCardSubmit = async (msg) => {
         </div>
       </div>
 
-      <MessageNavigator :items="navMessages" @navigate="scrollToMessage" />
+      <MessageNavigator
+        :items="navMessages"
+        :scroll-container="chatBody"
+        target-id-prefix="msg-"
+        @navigate="scrollToMessage"
+      />
     </div>
       
       <div class="chat-footer">
@@ -3647,7 +3817,7 @@ const handleGitCommitCardSubmit = async (msg) => {
             multiple 
             style="display: none" 
             @change="handleFileChange"
-            accept="image/*,.txt,.md,.json,.pdf,.docx,.xlsx"
+            accept="image/*,.txt,.md,.json,.csv,.pdf,.docx,.pptx,.xlsx"
             :disabled="isSending || !!pendingGlobalMissionInput"
           />
           <button
@@ -3665,7 +3835,16 @@ const handleGitCommitCardSubmit = async (msg) => {
             ref="chatInputElement"
             v-model="chatInput" 
             :placeholder="globalInputPlaceholder"
-            @keydown.enter.prevent="sendMessage"
+            @input="handleGlobalInput"
+            @keydown="handleGlobalInputKeydown"
+          />
+          <SlashCommandMenu
+            :open="slash.open"
+            :commands="slash.filtered"
+            :active-index="slash.activeIndex"
+            :loading="slash.loading"
+            :query="slash.query"
+            @select="slash.select"
           />
           <button
             class="send-btn"
@@ -3709,108 +3888,59 @@ const handleGitCommitCardSubmit = async (msg) => {
   width: 100%;
   height: 100%;
   overflow: hidden;
-  background: linear-gradient(135deg, #eef2ff 0%, #f8fafc 40%, #e0f2fe 100%);
+  background: var(--surface);
   display: flex;
-  font-family: 'Outfit', 'Inter', system-ui, -apple-system, sans-serif;
-  transition: background 0.3s ease;
+  font-family: inherit;
+  transition: background 0.2s ease;
 }
 
 :global([data-theme="dark"]) .global-assistant-panel {
-  background: linear-gradient(135deg, #07070a 0%, #0c0d16 50%, #05080e 100%);
-}
-
-/* 霓虹背景光效 */
-.glow-bg {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  overflow: hidden;
-  z-index: 1;
-  pointer-events: none;
-  opacity: 0.22;
-  transition: opacity 0.3s ease;
-}
-:global([data-theme="dark"]) .glow-bg {
-  opacity: 0.32;
-}
-.glow-ball {
-  position: absolute;
-  border-radius: 50%;
-  filter: blur(140px);
-}
-.glow-1 {
-  width: 450px;
-  height: 450px;
-  background: radial-gradient(circle, #6366f1, transparent);
-  top: -80px;
-  left: -80px;
-  animation: moveGlow1 22s infinite alternate ease-in-out;
-}
-.glow-2 {
-  width: 500px;
-  height: 500px;
-  background: radial-gradient(circle, #06b6d4, transparent);
-  bottom: -100px;
-  right: -80px;
-  animation: moveGlow2 26s infinite alternate ease-in-out;
-}
-
-@keyframes moveGlow1 {
-  0% { transform: translate(0, 0) scale(1); }
-  100% { transform: translate(150px, 100px) scale(1.25); }
-}
-@keyframes moveGlow2 {
-  0% { transform: translate(0, 0) scale(1); }
-  100% { transform: translate(-120px, -100px) scale(1.15); }
+  background: var(--surface);
 }
 
 /* 右侧主聊天区 */
 .chat-container {
   flex: 1;
   position: relative;
-  z-index: 2;
+  z-index: 1;
   height: 100%;
-  background: rgba(255, 255, 255, 0.22);
-  backdrop-filter: blur(25px);
-  -webkit-backdrop-filter: blur(25px);
+  background: var(--surface);
   display: flex;
   flex-direction: column;
   min-width: 0;
   transition: background 0.3s;
 }
 :global([data-theme="dark"]) .chat-container {
-  background: rgba(9, 9, 14, 0.35);
+  background: var(--surface);
 }
 
 .chat-header {
-  padding: 18px 24px;
-  border-bottom: 1px solid rgba(99, 102, 241, 0.08);
+  min-height: 58px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border-color);
   display: flex;
   align-items: center;
-  gap: 16px;
-  background: rgba(255, 255, 255, 0.5);
-  backdrop-filter: blur(10px);
+  gap: 10px;
+  background: var(--surface);
   z-index: 4;
   transition: background 0.3s;
 }
 :global([data-theme="dark"]) .chat-header {
-  background: rgba(14, 14, 22, 0.6);
-  border-bottom-color: rgba(255, 255, 255, 0.05);
+  background: var(--surface);
+  border-bottom-color: var(--border-color);
 }
 
 .header-logo {
-  font-size: 28px;
-  background: linear-gradient(135deg, #6366f1, #06b6d4);
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
-  color: white;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  border: 1px solid color-mix(in srgb, var(--accent-blue) 24%, transparent);
+  border-radius: 7px;
+  background: var(--accent-soft);
+  color: var(--accent-blue);
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 4px 15px rgba(99, 102, 241, 0.3);
 }
 
 .header-title h3 {
@@ -3913,6 +4043,18 @@ const handleGitCommitCardSubmit = async (msg) => {
 
 .bubble-content {
   white-space: pre-wrap;
+}
+
+.global-header-menu{position:relative}.global-header-menu summary{width:34px;height:34px;display:grid;place-items:center;list-style:none;border:1px solid var(--border-color);border-radius:6px;background:var(--surface);color:var(--text-secondary);cursor:pointer}.global-header-menu summary::-webkit-details-marker{display:none}.global-header-menu[open] summary,.global-header-menu summary:hover{background:var(--control-hover);border-color:var(--border-strong);color:var(--text-primary)}.global-header-menu-popover{position:absolute;top:calc(100% + 6px);right:0;z-index:30;min-width:156px;padding:5px;border:1px solid var(--border-color);border-radius:7px;background:var(--surface);box-shadow:var(--shadow-md)}.global-header-menu-popover button{width:100%;min-height:32px;display:flex;align-items:center;gap:8px;padding:0 9px;border:0;border-radius:5px;background:transparent;color:var(--text-secondary);font:inherit;font-size:11px;text-align:left;cursor:pointer}.global-header-menu-popover button:hover{background:var(--control-hover);color:var(--text-primary)}.global-header-menu-popover button:disabled{opacity:.55;cursor:not-allowed}
+
+.global-stream-replying {
+  display: inline-flex;
+  min-width: 112px;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 2px;
+  color: var(--text-muted);
+  font-size: 13px;
 }
 
 .global-stream-card {
@@ -5387,5 +5529,10 @@ const handleGitCommitCardSubmit = async (msg) => {
 @keyframes loadingSkeleton {
   0% { background-position: 200% 0; }
   100% { background-position: -200% 0; }
+}
+
+.chat-bubble-wrapper.search-hit .chat-bubble {
+  outline: 2px solid color-mix(in srgb, var(--accent-blue) 55%, transparent);
+  outline-offset: 3px;
 }
 </style>

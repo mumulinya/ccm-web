@@ -15,9 +15,21 @@ export declare function deleteMcpTool(name: string): void;
 export declare function loadSkills(): any[];
 export declare function saveSkill(skill: any): void;
 export declare function deleteSkill(name: string): void;
+export declare function applyMetricToStore(value: any, agent: string, data?: any, now?: Date | string | number): any;
 export declare function loadMetrics(): any;
 export declare function saveMetrics(metrics: any): void;
-export declare function recordMetric(agent: string, data: any): void;
+export declare function recordMetric(agent: string, data: any): boolean;
+export declare function runMetricsAggregationSelfTest(): {
+    pass: boolean;
+    checks: {
+        separatesGroups: boolean;
+        keepsMainAgentOutcomesSeparate: boolean;
+        separatesRolesInsideGroup: boolean;
+        retainsMemberMetricsInsideGroup: boolean;
+        storesTraceIdentity: any;
+        recordsUsageCoverage: boolean;
+    };
+};
 export declare function loadTasks(): any[];
 export declare function saveTasks(tasks: any[]): void;
 export declare function loadTemplates(): any[];

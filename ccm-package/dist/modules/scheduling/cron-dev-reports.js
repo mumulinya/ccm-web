@@ -47,7 +47,9 @@ const path = __importStar(require("path"));
 const db_1 = require("../../core/db");
 const utils_1 = require("../../core/utils");
 const collaboration_1 = require("../collaboration/collaboration");
+const feishu_channel_1 = require("../collaboration/feishu-channel");
 const cron_job_store_1 = require("./cron-job-store");
+const work_journal_1 = require("./work-journal");
 function localDateKey(date = new Date()) {
     return `${date.getFullYear()}-${(0, cron_job_store_1.pad2)(date.getMonth() + 1)}-${(0, cron_job_store_1.pad2)(date.getDate())}`;
 }
@@ -274,100 +276,12 @@ function buildAutoDevReportMarkdown(report) {
     return lines.join("\n");
 }
 function generateAutoDevDailyReport(dateKey = localDateKey()) {
-    const day = parseReportDay(dateKey);
-    const tasks = (0, db_1.loadTasks)();
-    const touched = tasks.filter((task) => taskTouchesDay(task, day));
-    const conversationActivities = collectConversationActivities(day);
-    const taskById = new Map(touched.map((task) => [String(task.id || ""), task]));
-    const activities = conversationActivities.map((item) => {
-        const linkedTask = item.task_id ? taskById.get(String(item.task_id)) : null;
-        const status = String(linkedTask?.status || item.status || "waiting");
-        return {
-            ...item,
-            linked_task: !!linkedTask,
-            task_status: linkedTask?.status || "",
-            status_label: status === "done" || status === "reported_done" ? "已完成" : status === "failed" ? "失败" : status === "blocked" || status === "waiting" ? "等待/阻塞" : status === "in_progress" ? "执行中" : "Agent 已响应",
-            files_changed: linkedTask ? taskChangedFiles(linkedTask) : [],
-            verifications: linkedTask ? taskVerificationLines(linkedTask) : [],
-        };
-    }).slice(0, 80);
-    const jobs = (0, db_1.loadCronJobs)().map(cron_job_store_1.normalizeCronJob);
-    const dailyDevJobs = jobs.filter((job) => job.workflow_type === "daily_dev");
-    const cronRunsToday = dailyDevJobs.filter((job) => isInReportDay(job.last_run, day));
-    const backlog = collectDailyDevBacklogSnapshot();
-    const completed = touched.filter((task) => task.status === "done").slice(0, 20).map((task) => ({
-        id: task.id,
-        title: task.title,
-        result: compactLine(task.delivery_summary?.headline || task.final_report || task.result, "已完成", 220),
-        file_changes: taskFileChangeCount(task),
-        verifications: taskVerificationCount(task),
-        files_changed: taskChangedFiles(task),
-    }));
-    const blockers = touched.filter((task) => ["failed", "blocked", "waiting"].includes(String(task.status || "")) || task.status_detail || task.delivery_summary?.blockers?.length || task.delivery_summary?.needs?.length)
-        .slice(0, 20)
-        .map((task) => ({
-        id: task.id,
-        title: task.title,
-        reason: compactLine(task.status_detail || task.delivery_summary?.blockers?.[0] || task.delivery_summary?.needs?.[0] || task.result, "等待处理", 220),
-    }));
-    const running = tasks.filter((task) => ["pending", "in_progress"].includes(String(task.status || ""))).slice(0, 20).map((task) => ({
-        id: task.id,
-        title: task.title,
-        status: task.status,
-        updated_at: task.updated_at || task.started_at || task.created_at || "",
-    }));
-    const summary = {
-        total_activities: touched.length + activities.filter((item) => !item.linked_task).length,
-        conversation_requests: activities.length,
-        document_requests: activities.filter((item) => item.source === "document_task").length,
-        group_chat_requests: activities.filter((item) => item.source === "group_chat").length,
-        project_chat_requests: activities.filter((item) => item.source === "project_chat").length,
-        touched_tasks: touched.length,
-        done_tasks: touched.filter((task) => task.status === "done").length,
-        running_tasks: tasks.filter((task) => ["pending", "in_progress"].includes(String(task.status || ""))).length,
-        failed_tasks: touched.filter((task) => task.status === "failed").length,
-        blocked_tasks: blockers.length,
-        file_changes: touched.reduce((sum, task) => sum + taskFileChangeCount(task), 0),
-        verifications: touched.reduce((sum, task) => sum + taskVerificationCount(task), 0),
-        enabled_daily_dev_jobs: dailyDevJobs.filter((job) => job.enabled !== false).length,
-        cron_runs_today: cronRunsToday.length,
-    };
-    const tomorrow = [
-        Number(backlog.counts.ready || 0) > 0 ? `继续自动认领 ${backlog.counts.ready} 条可接活需求` : "保持共享文档扫描，等待新的 ready 需求",
-        blockers.length > 0 ? `优先处理 ${blockers.length} 个阻塞/失败任务` : "保持自动复盘，发现缺口后自动续跑",
-        summary.enabled_daily_dev_jobs > 0 ? "确认定时接活任务按计划运行并查看下一份日报" : "创建并启用日常开发定时任务",
-    ];
-    const report = {
-        id: day.key,
-        date: day.key,
-        generated_at: new Date().toISOString(),
-        summary,
-        backlog,
-        cron_jobs: dailyDevJobs.map((job) => ({
-            id: job.id,
-            name: job.name,
-            enabled: job.enabled !== false,
-            schedule: job.schedule,
-            next_run: job.next_run,
-            last_run: job.last_run,
-            last_status: job.last_status || "never",
-            last_result: job.last_result || "",
-            target_group: job.group_id || "",
-            backlog_batch_limit: job.backlog_batch_limit || 1,
-            import_shared_docs: job.import_shared_docs !== false,
-            continue_gaps: job.continue_gaps !== false,
-        })),
-        cron_runs_today: cronRunsToday.map((job) => ({ id: job.id, name: job.name, last_run: job.last_run, status: job.last_status, result: job.last_result })),
-        activities,
-        completed,
-        blockers,
-        running,
-        tomorrow,
-    };
-    report.markdown = buildAutoDevReportMarkdown(report);
-    return report;
+    return (0, work_journal_1.generateEvidenceDailyReport)(dateKey);
 }
-function upsertAutoDevDailyReport(dateKey = localDateKey()) {
+function upsertAutoDevDailyReport(dateKey = localDateKey(), options = {}) {
+    const existing = (0, db_1.loadDevReports)().find((item) => item.date === dateKey || item.id === dateKey);
+    if (options.force !== true && dateKey < localDateKey() && existing?.schema === "ccm-evidence-work-report-v2")
+        return existing;
     const report = generateAutoDevDailyReport(dateKey);
     const reports = (0, db_1.loadDevReports)().filter((item) => item.date !== report.date && item.id !== report.id);
     reports.unshift(report);
@@ -428,47 +342,13 @@ function buildWeeklyReportMarkdown(report) {
     return lines.join("\n");
 }
 function generateAutoDevWeeklyReport(dateKey = localDateKey()) {
-    const range = reportWeekRange(dateKey);
-    const days = Array.from({ length: 7 }, (_, index) => generateAutoDevDailyReport(dateKeyFromDate(addLocalDays(range.start, index))));
-    const weekSpan = { start: range.start, end: addLocalDays(range.end, 1) };
-    const touchedTasks = (0, db_1.loadTasks)().filter((task) => taskTouchesDay(task, weekSpan));
-    const completed = uniqueBy(days.flatMap(day => day.completed || []), (item) => String(item.id || item.title || "")).slice(0, 60);
-    const blockers = uniqueBy(days.flatMap(day => day.blockers || []), (item) => String(item.id || item.title || "")).slice(0, 40);
-    const activities = uniqueBy(days.flatMap(day => day.activities || []), (item) => String(item.task_id || item.id || `${item.source}:${item.title}`)).slice(0, 150);
-    const changedFiles = Array.from(new Set([
-        ...completed.flatMap((item) => item.files_changed || []),
-        ...activities.flatMap((item) => item.files_changed || []),
-    ].map(value => String(value || "").trim()).filter(Boolean))).slice(0, 120);
-    const summary = {
-        total_activities: touchedTasks.length + activities.filter((item) => !item.linked_task).length,
-        done_tasks: touchedTasks.filter((task) => task.status === "done").length,
-        file_changes: touchedTasks.reduce((sum, task) => sum + taskFileChangeCount(task), 0),
-        verifications: touchedTasks.reduce((sum, task) => sum + taskVerificationCount(task), 0),
-        blocked_tasks: blockers.length,
-        active_days: days.filter(day => Number(day.summary?.total_activities || 0) > 0).length,
-    };
-    const report = {
-        id: range.id,
-        type: "weekly",
-        start_date: range.start_key,
-        end_date: range.end_key,
-        generated_at: new Date().toISOString(),
-        summary,
-        completed,
-        blockers,
-        activities,
-        changed_files: changedFiles,
-        daily_reports: days.map(day => ({ date: day.date, summary: day.summary })),
-        next_week: [
-            blockers.length ? `优先解决 ${blockers.length} 个阻塞或失败事项` : "保持任务验收和自动复盘",
-            "继续认领 ready 需求并记录业务到代码的完整证据",
-            "复查本周未形成文件变更或验证证据的开发活动",
-        ],
-    };
-    report.markdown = buildWeeklyReportMarkdown(report);
-    return report;
+    return (0, work_journal_1.generateEvidenceWeeklyReport)(dateKey);
 }
-function upsertAutoDevWeeklyReport(dateKey = localDateKey()) {
+function upsertAutoDevWeeklyReport(dateKey = localDateKey(), options = {}) {
+    const range = (0, work_journal_1.workWeekRange)(dateKey);
+    const existing = (0, db_1.loadDevWeeklyReports)().find((item) => item.id === range.id);
+    if (options.force !== true && range.end_key < localDateKey() && existing?.schema === "ccm-evidence-work-report-v2")
+        return existing;
     const report = generateAutoDevWeeklyReport(dateKey);
     const reports = (0, db_1.loadDevWeeklyReports)().filter((item) => item.id !== report.id);
     reports.unshift(report);
@@ -528,6 +408,15 @@ async function dispatchAutoDevReport(kind, options = {}) {
     const previousAttemptKey = config[`${prefix}_attempt_key`];
     const retryCount = previousAttemptKey === key ? Number(config[retryKey] || 0) + (result.success ? 0 : 1) : (result.success ? 0 : 1);
     const historyItem = { id: `${kind}-${Date.now()}`, kind, report_id: report.id, attempted_at: now, success: !!result.success, target_type: targetType, target_id: result.target_id || targetId, message_id: result.message_id || "", result: result.success ? "发送成功" : result.error || "发送失败" };
+    (0, feishu_channel_1.recordFeishuReportDelivery)({
+        kind,
+        reportId: report.id,
+        success: !!result.success,
+        attemptedAt: now,
+        messageId: result.message_id || "",
+        error: result.error || "",
+        targetType,
+    });
     config = saveNormalizedNotifyConfig({
         ...config,
         [`${prefix}_attempt_key`]: key,

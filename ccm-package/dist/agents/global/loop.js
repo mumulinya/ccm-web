@@ -89,14 +89,13 @@ exports.GLOBAL_AGENT_TOOL_SPECS = [
     { name: "list_cron", description: "查询定时任务。", risk: "read" },
     { name: "query_knowledge", description: "查询本地知识库，只用于获取回答或规划依据。", required: ["query"], risk: "read" },
     { name: "query_global_memory", description: "查询全局 Agent 的长期记忆、历史任务结论和来源引用。", required: ["query"], risk: "read" },
-    { name: "query_group_memory", description: "查询多个群聊的压缩记忆、typed MEMORY.md 召回、质量状态和原始来源路径。", required: ["query"], risk: "read" },
     { name: "manage_global_memory", description: "查询状态、压缩、重建、启用或禁用全局 Agent 长期记忆；变更操作必须提供 reason。", required: ["operation"], risk: args => String(args?.operation || "").toLowerCase() === "status" ? "read" : ["disable", "rebuild"].includes(String(args?.operation || "").toLowerCase()) ? "high" : "write" },
     { name: "inspect_mission", description: "查询全局开发任务及子任务交付状态。", required: ["id"], risk: "read" },
     { name: "inspect_supervision", description: "查询长期任务跟进、恢复动作、交付验收和等待人工事项。", required: ["id"], risk: "read" },
     { name: "orchestrate_development", description: "创建跨项目开发任务并持久派发给真实群聊或项目 Agent。", required: ["business_goal", "targets"], risk: "write" },
     { name: "manage_supervision", description: "暂停、恢复、立即检查、修改目标、取消、归档或人工接管长期任务跟进。", required: ["id", "operation"], risk: args => ["cancel", "archive"].includes(String(args?.operation || "").toLowerCase()) ? "high" : "write" },
     { name: "create_task", description: "创建并派发单群聊开发任务。", required: ["title", "business_goal", "group_id"], risk: "write" },
-    { name: "send_project_cmd", description: "创建受持续监督的单项目任务，让指定项目 Agent 执行并在独立复核通过后总结。", required: ["project", "message"], risk: "write" },
+    { name: "send_project_cmd", description: "把单项目需求交给该项目所属的群聊主 Agent，由其计划、派发项目子 Agent、验收并调用 TestAgent。", required: ["project", "message"], risk: "write" },
     { name: "send_group_cmd", description: "向指定群聊主 Agent 下发协作任务。", required: ["group_id", "message"], risk: "write" },
     { name: "manage_cron", description: "管理定时任务。", required: ["operation"], risk: args => destructiveOperation(args) ? "high" : "write" },
     { name: "manage_group", description: "管理群聊和成员。", required: ["operation"], risk: args => destructiveOperation(args) ? "high" : "write" },
@@ -108,6 +107,7 @@ exports.GLOBAL_AGENT_TOOL_SPECS = [
     { name: "create_template", description: "创建全局对话模板。", required: ["name", "content"], risk: "write" },
     { name: "play_music", description: "搜索并播放音乐。", required: ["keyword"], risk: "write" },
     { name: "toggle_pet", description: "打开或关闭桌面宠物。", required: ["action"], risk: "write" },
+    { name: "create_pet_from_image", description: "使用本次消息上传的参考图片创建动作齐全的 Codex v2 宠物皮肤。reference_path 必须是本次上传附件的本地路径；生成是持久化异步任务。", required: ["reference_path"], risk: "write" },
     { name: "navigate", description: "通知 Web 客户端切换页面；不改变项目数据。", required: ["tab"], risk: "read" },
 ];
 function destructiveOperation(args) {
@@ -217,7 +217,6 @@ function getGlobalToolUserLabel(toolName) {
         list_cron: "读取定时任务",
         query_knowledge: "查询知识库",
         query_global_memory: "查询全局记忆",
-        query_group_memory: "查询群聊记忆",
         manage_global_memory: "管理全局记忆",
         inspect_mission: "查询全局任务",
         inspect_supervision: "查询持续跟进状态",
@@ -236,6 +235,7 @@ function getGlobalToolUserLabel(toolName) {
         create_template: "创建模板",
         play_music: "播放音乐",
         toggle_pet: "控制桌面宠物",
+        create_pet_from_image: "根据参考图创建宠物",
         navigate: "切换页面",
     };
     return labels[String(toolName || "").trim()] || String(toolName || "工具操作");
@@ -833,6 +833,19 @@ function classifyGlobalAgentToolRisk(name, args) {
     if (!spec)
         throw new Error(`未知工具：${name}`);
     return typeof spec.risk === "function" ? spec.risk(args || {}) : spec.risk;
+}
+function isReadOnlyGlobalConsultation(run, status) {
+    if (status !== "completed" || run.mission_id || run.decision_summary?.intent?.action_required === true)
+        return false;
+    const intentCategory = String(run.decision_summary?.intent?.category || "");
+    if (["execution", "high_risk"].includes(intentCategory))
+        return false;
+    if (run.tool_calls === 0)
+        return true;
+    // A completed read query may use tools, but it is still a consultation rather
+    // than a deliverable. Be conservative if a call was not recorded in the trace.
+    const toolSteps = run.steps.filter(step => !!step.tool);
+    return toolSteps.length >= run.tool_calls && toolSteps.every(step => step.tool?.risk === "read");
 }
 function stable(value) {
     if (Array.isArray(value))
@@ -1567,7 +1580,7 @@ function applyGlobalResumeFeedback(run, runtime, value, options = {}) {
     emit(runtime, { type: "resume_feedback", feedback, source, message: "继续处理时的补充要求已记录" }, run);
     return feedback;
 }
-function buildGlobalRunWorkchain(run, status, reply = "", report = null) {
+function buildGlobalRunWorkchain(run, status, reply = "", report = null, options = {}) {
     const actionIds = run.steps.map(step => step.tool?.name || step.state).filter(Boolean);
     const deliveryReport = report?.schema === "ccm-main-agent-delivery-report-v1" ? report : report?.delivery_report || null;
     const dispatchLaunchSummary = buildGlobalDispatchLaunchSummary(run, status);
@@ -1585,7 +1598,7 @@ function buildGlobalRunWorkchain(run, status, reply = "", report = null) {
         || [];
     const workchain = (0, workchain_1.buildMainAgentWorkchain)({
         surface: "global",
-        mode: run.phase,
+        mode: options.mode || run.phase,
         status,
         phase: run.phase,
         userText: visibleReply.text,
@@ -1695,7 +1708,7 @@ function buildGlobalDisplayStreamFromWorkchain(workchain) {
         workchain_stages: workchain.stages,
         technical_details: workchain.technical_details || [],
         todo: {
-            visible: workchain.surface !== "global" || workchain.mode !== "answer",
+            visible: workchain.surface !== "global" || !["answer", "conversation", "question", "analysis"].includes(String(workchain.mode || "")),
             surface: "plan_panel",
             tool_message_visible: false,
             quiet_completed: true,
@@ -1732,9 +1745,11 @@ function completeRun(run, runtime, status, reply, error = "") {
     if (run.plan_mode)
         run.plan_mode = updateGlobalPlanModeStatus(run.plan_mode, status === "completed" ? "completed" : status === "cancelled" ? "cancelled" : "failed", completedAt);
     const rawReply = String(reply || run.final_reply || (status === "completed" ? "已完成。" : "执行未完成。"));
-    const workchain = buildGlobalRunWorkchain(run, status, rawReply, run.final_delivery_report || run.final_report || null);
     const intentCategory = String(run.decision_summary?.intent?.category || "");
-    const includeDetails = status !== "completed" || run.tool_calls > 0 || !!run.mission_id || ["execution", "high_risk"].includes(intentCategory);
+    const ordinaryConversation = isReadOnlyGlobalConsultation(run, status);
+    const workchain = buildGlobalRunWorkchain(run, status, rawReply, run.final_delivery_report || run.final_report || null, { mode: ordinaryConversation ? "conversation" : undefined });
+    const includeDetails = !ordinaryConversation
+        && (status !== "completed" || run.tool_calls > 0 || !!run.mission_id || ["execution", "high_risk"].includes(intentCategory));
     if (includeDetails) {
         const deliveryReport = (0, delivery_report_1.buildMainAgentDeliveryReport)({
             surface: "global",
@@ -1932,7 +1947,7 @@ async function continueLoop(run, runtime) {
                         id: "goal", label: "用户目标得到回答或可核验交付", kind: "goal", status: executionIntent ? (passedToolAssertions.length ? "passed" : "blocked") : "passed",
                         evidence: [...(completion.evidence || []), ...passedToolAssertions.map(item => item.label)], reason: normalizedIntent.reason,
                     });
-                    const includeDeliveryDetails = executionIntent || run.tool_calls > 0;
+                    const includeDeliveryDetails = executionIntent || !isReadOnlyGlobalConsultation(run, "completed");
                     const directReply = decision.message || completion.summary || "已完成。";
                     const parts = [includeDeliveryDetails ? directReply : stripNonExecutionReportSections(directReply)];
                     if (includeDeliveryDetails && completion.evidence?.length)
@@ -2139,8 +2154,13 @@ async function continueLoop(run, runtime) {
             (0, runtime_1.recordGlobalAgentRuntimeOutput)(run, { type: "tool_started", tool: decision.tool.name, risk, arguments: args });
             emit(runtime, { type: "tool_started", tool: step.tool, message: step.message }, run);
             const toolStarted = runtime.now ? runtime.now() : Date.now();
+            let acceptedSupervision = false;
             try {
                 const result = await runtime.executeTool(decision.tool.name, args, run);
+                acceptedSupervision = isGlobalDispatchTool(decision.tool.name)
+                    && result?.accepted === true
+                    && result?.completed !== true
+                    && !!run.supervisor_id;
                 step.observation = compactObservation(result);
                 (0, reasoning_loop_1.captureReasoningFacts)(run.reasoning_loop, `tool:${decision.tool.name}`, result);
                 const toolSucceeded = result?.success !== false && !result?.error;
@@ -2228,6 +2248,9 @@ async function continueLoop(run, runtime) {
             run.pending_tool = null;
             run.updated_at = nowIso(runtime);
             saveRun(run, runtime.persist !== false);
+            if (acceptedSupervision) {
+                return completeRun(run, runtime, "completed", decision.message || "全局任务已派发并进入持续跟进。");
+            }
             if (run.consecutive_failures >= 2)
                 return completeRun(run, runtime, "failed", `工具连续执行失败，已停止：${step.error}`, step.error || "tool_failures");
         }
@@ -2551,6 +2574,25 @@ async function runGlobalAgentLoopSelfTest() {
         executeTool: async () => { throw new Error("不应调用工具"); },
         onEvent: event => consultationEvents.push(event),
     });
+    const readOnlyStatusConsultationDecisions = [
+        {
+            state: "investigate",
+            message: "正在读取系统状态",
+            intent: { category: "question", goal: "了解系统状态", action_required: false, confidence: .98, authorization_basis: "none", reason: "用户只要求查看当前状态" },
+            tool: { name: "inspect_system", arguments: {} },
+        },
+        {
+            state: "answer",
+            message: "系统目前可用：已配置 7 个项目和 3 个协作群，定时任务当前未启用。",
+            intent: { category: "question", goal: "了解系统状态", action_required: false, confidence: .98, authorization_basis: "none", reason: "已读取系统状态并直接回答" },
+            tool: null,
+        },
+    ];
+    const readOnlyStatusConsultation = await startGlobalAgentRun({ message: "系统状态怎么样" }, {
+        persist: false,
+        callModel: async () => readOnlyStatusConsultationDecisions.shift(),
+        executeTool: async () => ({ projects: 7, groups: 3, cron_enabled: false }),
+    });
     const protocolLeak = await startGlobalAgentRun({ message: "普通问话：解释一下任务状态" }, {
         persist: false,
         callModel: async () => ({
@@ -2806,6 +2848,7 @@ async function runGlobalAgentLoopSelfTest() {
     const checks = {
         multiStepCompletes: multi.status === "completed",
         dispatchIsNotDeliveryCompletion: supervised.status === "supervising" && supervised.final_reply.includes("不代表任务已经完成"),
+        acceptedDispatchStopsSynchronousPolling: supervised.model_calls === 1 && supervised.tool_calls === 1,
         supervisingVisibleReplyHidesTechnicalIds: !/任务 ID|监工 ID|mission-supervised|supervisor-1/i.test(supervised.final_reply)
             && JSON.stringify(supervised.display_stream?.technical_details || []).includes("mission-supervised")
             && JSON.stringify(supervised.display_stream?.technical_details || []).includes("supervisor-1"),
@@ -2839,6 +2882,13 @@ async function runGlobalAgentLoopSelfTest() {
             && JSON.stringify(supervisedGoalSteer.run.display_stream?.technical_details || []).includes("停止旧执行轮"),
         modelObservesAndContinues: calls.join(",") === "inspect_system,orchestrate_development",
         consultationDoesNotDispatch: consultation.tool_calls === 0,
+        ordinaryConversationUsesQuietWorkchain: consultation.workchain?.mode === "conversation"
+            && consultation.display_stream?.todo?.visible === false,
+        readOnlySystemStatusUsesQuietWorkchain: readOnlyStatusConsultation.tool_calls === 1
+            && readOnlyStatusConsultation.workchain?.mode === "conversation"
+            && readOnlyStatusConsultation.display_stream?.todo?.visible === false
+            && !readOnlyStatusConsultation.final_delivery_report
+            && !/处理总结|验证与验收|下一步/.test(readOnlyStatusConsultation.final_reply),
         globalVisibleReplySanitizesProtocol: !GLOBAL_USER_SUMMARY_INTERNAL_PATTERN.test(protocolLeak.final_reply)
             && protocolLeak.final_reply.length > 0,
         globalVisibleReplyStoresRawTechnicalContent: String(protocolLeak.final_report?.technical_content || "").includes("CCM_AGENT_RECEIPT")

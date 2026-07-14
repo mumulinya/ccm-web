@@ -34,6 +34,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.validateAgentRunnerSessionLifecycleFence = validateAgentRunnerSessionLifecycleFence;
 exports.validateExternalRunnerRuntimeToolGate = validateExternalRunnerRuntimeToolGate;
 exports.runAgentRunnerSelfTest = runAgentRunnerSelfTest;
 const fs = __importStar(require("fs"));
@@ -41,10 +42,12 @@ const path = __importStar(require("path"));
 const os = __importStar(require("os"));
 const utils_1 = require("../core/utils");
 const runtime_1 = require("./runtime");
+const native_continuation_1 = require("./native-continuation");
 const runtime_tool_sync_1 = require("../tools/runtime-tool-sync");
 const db_1 = require("../core/db");
 const storage_1 = require("../modules/collaboration/storage");
 const execution_kernel_1 = require("./execution-kernel");
+const group_session_lifecycle_head_1 = require("../modules/collaboration/group-session-lifecycle-head");
 const AGENT_RUNNER_DIR = path.join(utils_1.CCM_DIR, "agent-runner");
 const REQUESTS_DIR = path.join(AGENT_RUNNER_DIR, "requests");
 const RESULTS_DIR = path.join(AGENT_RUNNER_DIR, "results");
@@ -75,6 +78,42 @@ function writeJsonAtomic(file, data) {
 function markRequest(file, patch) {
     const request = readJson(file);
     writeJsonAtomic(file, { ...request, ...patch, updated_at: new Date().toISOString() });
+}
+function validateAgentRunnerSessionLifecycleFence(request = {}) {
+    const groupSessionId = String(request.groupSessionId || request.group_session_id || "").trim();
+    const supplied = request.sessionLifecycleFence || request.session_lifecycle_fence || null;
+    return (0, group_session_lifecycle_head_1.validateGroupSessionLifecycleRuntimeFence)({
+        ...(supplied || {}),
+        required: supplied?.required === true || groupSessionId.startsWith("gcs_"),
+        groupId: supplied?.groupId || supplied?.group_id || request.groupId || request.group_id || "",
+        groupSessionId: supplied?.groupSessionId || supplied?.group_session_id || groupSessionId,
+    });
+}
+function writeSessionLifecycleBlockedResult(file, resultFile, request, validation, executionId = "") {
+    const reason = `群聊会话生命周期围栏失效：${validation.issues.join(", ") || validation.status || "unknown"}`;
+    writeJsonAtomic(resultFile, {
+        id: request.id,
+        success: false,
+        cancelled: true,
+        sessionLifecycleStale: true,
+        session_lifecycle_stale: true,
+        sessionLifecycleValidation: validation,
+        error: reason,
+        completed_at: new Date().toISOString(),
+    });
+    markRequest(file, {
+        status: "cancelled",
+        session_lifecycle_stale: true,
+        session_lifecycle_validation: validation,
+        completed_at: new Date().toISOString(),
+        error: reason,
+    });
+    if (executionId)
+        (0, execution_kernel_1.transitionExecution)(executionId, "cancelled", reason, {
+            cancellation: { reason, actor: "group-session-lifecycle-runner", requestedAt: new Date().toISOString() },
+            session_lifecycle_validation: validation,
+            status: "warning",
+        });
 }
 function normalizeVerificationCommands(value) {
     const raw = Array.isArray(value) ? value : (typeof value === "string" ? value.split(/\r?\n|,/) : []);
@@ -506,6 +545,13 @@ async function runRequest(file) {
         return false;
     const taskId = String(request.taskId || request.id);
     const executionId = String(request.executionId || "");
+    const initialSessionLifecycleValidation = validateAgentRunnerSessionLifecycleFence(request);
+    if (!initialSessionLifecycleValidation.valid) {
+        writeHeartbeat("blocked", "session lifecycle fence blocked");
+        writeSessionLifecycleBlockedResult(file, resultFile, request, initialSessionLifecycleValidation, executionId);
+        writeHeartbeat("idle", "");
+        return true;
+    }
     const runtimeToolValidation = validateExternalRunnerRuntimeToolGate(request);
     if (!runtimeToolValidation.ok) {
         writeHeartbeat("blocked", runtimeToolValidation.reason || "runtime tool gate blocked");
@@ -530,6 +576,21 @@ async function runRequest(file) {
     const changeSnapshot = workDir ? (0, utils_1.createFileChangeSnapshot)(workDir) : null;
     const cliAllowedTools = buildCliAllowedTools(request);
     const effectiveMcpConfigPath = resolveRunnerMcpConfigPath(request, runtimeToolValidation);
+    const runtimeVersionSnapshot = (0, runtime_1.captureAgentRuntimeVersionSnapshot)(agentType);
+    let runtimeSessionLifecycleValidation = null;
+    const lifecycleMonitor = initialSessionLifecycleValidation.required
+        ? setInterval(() => {
+            const validation = validateAgentRunnerSessionLifecycleFence(request);
+            if (validation.valid || runtimeSessionLifecycleValidation)
+                return;
+            runtimeSessionLifecycleValidation = validation;
+            const reason = `群聊会话生命周期已变化：${validation.issues.join(", ") || validation.status || "unknown"}`;
+            try {
+                (0, execution_kernel_1.requestTaskCancellation)(taskId, reason, "group-session-lifecycle-runner");
+            }
+            catch { }
+        }, 100)
+        : null;
     try {
         fs.writeFileSync(msgFile, String(request.message || ""), "utf-8");
         const managed = await (0, execution_kernel_1.runManagedCommand)({
@@ -545,7 +606,40 @@ async function runRequest(file) {
             maxOutputBytes: Number(request.maxOutputBytes || 2 * 1024 * 1024),
             env: (0, execution_kernel_1.sanitizeExecutionEnv)((0, runtime_tool_sync_1.getRuntimeExecutionEnv)(agentType), request.envAllowlist || []),
         });
-        const normalizedOutput = (0, runtime_1.normalizeAgentCommandOutput)(agentType, String(managed.stdout || "").trim());
+        const normalizedOutput = (0, runtime_1.normalizeAgentCommandOutput)(agentType, String(managed.stdout || "").trim(), { runtimeVersionSnapshot });
+        const nativeContinuationEvidence = (0, native_continuation_1.buildNativeSessionContinuationEvidence)({
+            provider: agentType,
+            runnerRequestId: request.id,
+            requestedNativeSessionId: request.agentSession?.sessionId || "",
+            returnedNativeSessionId: normalizedOutput.rawSessionId || normalizedOutput.sessionId || "",
+            providerOutputContractEvidence: normalizedOutput.providerOutputContractEvidence || null,
+            providerRuntimeVersionSnapshot: runtimeVersionSnapshot,
+            expectedProviderContractId: request.agentSession?.expectedProviderContractId || request.agentSession?.providerContractId || "",
+            nativeResumeRequested: request.agentSession?.resumeSession === true,
+            runnerSuccess: true,
+        });
+        const nativeModelCapabilityReceipt = (0, runtime_1.extractNativeModelCapabilityReceipt)(agentType, String(managed.stdout || ""), {
+            runner: "node",
+            runnerRequestId: request.id,
+            runnerPid: process.pid,
+            groupId: request.groupId || "",
+            taskId: request.taskId || "",
+            executionId: request.executionId || "",
+            taskAgentSessionId: request.taskAgentSessionId || request.task_agent_session_id || "",
+            nativeSessionId: nativeContinuationEvidence.nativeSessionReusable ? nativeContinuationEvidence.effectiveNativeSessionId : "",
+            requestedNativeSessionId: nativeContinuationEvidence.requestedNativeSessionId,
+            returnedNativeSessionId: nativeContinuationEvidence.returnedNativeSessionId,
+            effectiveNativeSessionId: nativeContinuationEvidence.effectiveNativeSessionId,
+            nativeSessionEvidenceSource: nativeContinuationEvidence.evidenceSource,
+            nativeResumeRequested: nativeContinuationEvidence.nativeResumeRequested,
+            nativeContinuationAcknowledged: nativeContinuationEvidence.nativeContinuationAcknowledged,
+            nativeContinuationEvidence,
+            providerRuntimeVersionSnapshot: runtimeVersionSnapshot,
+            providerOutputContractEvidence: normalizedOutput.providerOutputContractEvidence || null,
+            providerContractId: nativeContinuationEvidence.providerContractId || "",
+            expectedProviderContractId: nativeContinuationEvidence.expectedProviderContractId || "",
+            providerContractTransition: nativeContinuationEvidence.providerContractTransition === true,
+        });
         const agentOutput = (0, execution_kernel_1.persistBoundedOutput)(taskId, normalizedOutput.output, Number(request.maxContextOutputBytes || 256 * 1024)).content;
         const runnerVerification = isAgentProbeRequest(request) || request.skipVerification === true
             ? { ccm_runner_verification: true, status: "skipped", verification: [], failed: [], results: [] }
@@ -556,7 +650,16 @@ async function runRequest(file) {
             id: request.id,
             success: true,
             output,
-            nativeSessionId: normalizedOutput.sessionId || request.agentSession?.sessionId || "",
+            nativeSessionId: nativeContinuationEvidence.nativeSessionReusable ? nativeContinuationEvidence.effectiveNativeSessionId : "",
+            requestedNativeSessionId: nativeContinuationEvidence.requestedNativeSessionId,
+            returnedNativeSessionId: nativeContinuationEvidence.returnedNativeSessionId,
+            effectiveNativeSessionId: nativeContinuationEvidence.effectiveNativeSessionId,
+            nativeSessionEvidenceSource: nativeContinuationEvidence.evidenceSource,
+            nativeResumeRequested: nativeContinuationEvidence.nativeResumeRequested,
+            nativeContinuationAcknowledged: nativeContinuationEvidence.nativeContinuationAcknowledged,
+            nativeContinuationEvidence,
+            usage: normalizedOutput.usage || null,
+            nativeModelCapabilityReceipt,
             fileChanges,
             agentType,
             command: cliAllowedTools.length ? `${command} --allowed-tools ${cliAllowedTools.join(",")}` : command,
@@ -579,6 +682,9 @@ async function runRequest(file) {
             id: request.id,
             success: false,
             cancelled,
+            sessionLifecycleStale: !!runtimeSessionLifecycleValidation,
+            session_lifecycle_stale: !!runtimeSessionLifecycleValidation,
+            sessionLifecycleValidation: runtimeSessionLifecycleValidation,
             failure,
             error: output || "Agent Runner 执行失败",
             output,
@@ -598,6 +704,8 @@ async function runRequest(file) {
             (0, execution_kernel_1.transitionExecution)(executionId, cancelled ? "cancelled" : "failed", output, { failure, failureClass: failure.failureClass });
     }
     finally {
+        if (lifecycleMonitor)
+            clearInterval(lifecycleMonitor);
         try {
             fs.unlinkSync(msgFile);
         }

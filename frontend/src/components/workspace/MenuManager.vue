@@ -34,8 +34,8 @@ const DEFAULT_GROUPS = [
 ]
 
 const DEFAULT_TAB_GROUPS = {
-  projects: 'core', groups: 'collab', tasks: 'collab', autodev: 'collab', 'global-agent': 'core',
-  tools: 'dev', changes: 'dev', terminal: 'dev', templates: 'dev',
+  projects: 'core', groups: 'collab', tasks: 'collab', 'trace-replay': 'collab', autodev: 'collab', 'global-agent': 'core',
+  tools: 'dev', changes: 'dev', terminal: 'dev',
   dashboard: 'data', metrics: 'data', search: 'data',
   cron: 'system', pets: 'system', music: 'system', settings: 'system',
 }

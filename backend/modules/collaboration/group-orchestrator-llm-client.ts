@@ -1,6 +1,16 @@
+import * as http from "http";
+import * as https from "https";
+
 export type LlmChatMessage = {
   role: string;
-  content: string;
+  content: any;
+};
+
+export type LlmTokenUsage = {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  reported: boolean;
 };
 
 type LlmCallOptions = {
@@ -15,7 +25,47 @@ type LlmCallOptions = {
   api_microcompact_native_apply_plan?: any;
   apiMicrocompactNativeApplyTelemetry?: any;
   api_microcompact_native_apply_telemetry?: any;
+  onUsage?: (usage: LlmTokenUsage) => void;
 };
+
+function finiteTokenCount(value: any) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? Math.floor(number) : 0;
+}
+
+export function normalizeLlmTokenUsage(value: any, provider: "openai" | "anthropic" = "openai"): LlmTokenUsage {
+  const usage = value && typeof value === "object" ? value : {};
+  const outputTokens = Math.max(
+    finiteTokenCount(usage.output_tokens),
+    finiteTokenCount(usage.outputTokens),
+    finiteTokenCount(usage.completion_tokens),
+    finiteTokenCount(usage.completionTokens),
+  );
+  const directInputTokens = Math.max(
+    finiteTokenCount(usage.input_tokens),
+    finiteTokenCount(usage.inputTokens),
+    finiteTokenCount(usage.prompt_tokens),
+    finiteTokenCount(usage.promptTokens),
+  );
+  const cacheCreationTokens = provider === "anthropic"
+    ? Math.max(finiteTokenCount(usage.cache_creation_input_tokens), finiteTokenCount(usage.cacheCreationInputTokens))
+    : 0;
+  const cacheReadTokens = provider === "anthropic"
+    ? Math.max(finiteTokenCount(usage.cache_read_input_tokens), finiteTokenCount(usage.cacheReadInputTokens))
+    : 0;
+  const inputTokens = directInputTokens + cacheCreationTokens + cacheReadTokens;
+  const reported = inputTokens > 0 || outputTokens > 0;
+  return {
+    inputTokens,
+    outputTokens,
+    totalTokens: inputTokens + outputTokens,
+    reported,
+  };
+}
+
+function reportTokenUsage(options: LlmCallOptions, usage: LlmTokenUsage) {
+  try { options.onUsage?.(usage); } catch {}
+}
 
 export function normalizeChatCompletionsUrl(apiUrl: string) {
   const base = String(apiUrl || "").trim().replace(/\/+$/, "");
@@ -79,6 +129,67 @@ function assertLlmConfig(config: any, endpoint: string) {
 function formatHttpError(prefix: string, status: number, text: string) {
   const detail = String(text || "").slice(0, 300);
   return detail ? `${prefix} HTTP ${status}: ${detail}` : `${prefix} HTTP ${status}`;
+}
+
+function nativeHttpRequest(endpoint: string | URL, init: any = {}, redirectCount = 0): Promise<any> {
+  return new Promise((resolve, reject) => {
+    const url = endpoint instanceof URL ? endpoint : new URL(String(endpoint));
+    const transport = url.protocol === "https:" ? https : http;
+    const request = transport.request(url, {
+      method: init.method || "GET",
+      headers: init.headers || {},
+      signal: init.signal,
+    }, response => {
+      const status = Number(response.statusCode || 0);
+      const location = String(response.headers.location || "");
+      if (location && [301, 302, 303, 307, 308].includes(status) && init.redirect !== "manual" && redirectCount < 5) {
+        response.resume();
+        const redirected = new URL(location, url);
+        const nextInit = [301, 302, 303].includes(status) && String(init.method || "GET").toUpperCase() !== "GET"
+          ? { ...init, method: "GET", body: undefined }
+          : init;
+        nativeHttpRequest(redirected, nextInit, redirectCount + 1).then(resolve, reject);
+        return;
+      }
+      const chunks: Buffer[] = [];
+      response.on("data", chunk => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+      response.on("error", reject);
+      response.on("end", () => {
+        const body = Buffer.concat(chunks);
+        resolve({
+          ok: status >= 200 && status < 300,
+          status,
+          url: url.toString(),
+          headers: {
+            get(name: string) {
+              const value = response.headers[String(name || "").toLowerCase()];
+              return Array.isArray(value) ? value.join(", ") : String(value || "");
+            },
+          },
+          async text() { return body.toString("utf-8"); },
+          async arrayBuffer() { return body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength); },
+        });
+      });
+    });
+    request.on("error", reject);
+    if (init.body !== undefined && init.body !== null) request.write(init.body);
+    request.end();
+  });
+}
+
+export async function fetchWithNodeHttpFallback(endpoint: string | URL, init: any = {}) {
+  try {
+    return await fetch(endpoint, init);
+  } catch (fetchError: any) {
+    if (init.signal?.aborted) throw fetchError;
+    try {
+      return await nativeHttpRequest(endpoint, init);
+    } catch (nativeError: any) {
+      const fetchCause = fetchError?.cause?.message || fetchError?.cause?.code || fetchError?.message || String(fetchError);
+      const nativeCause = nativeError?.message || String(nativeError);
+      throw new Error(`网络请求失败：${fetchCause}；原生 HTTP/HTTPS 重试失败：${nativeCause}`);
+    }
+  }
 }
 
 function getApiMicrocompactNativeApplyPlan(options: LlmCallOptions) {
@@ -163,7 +274,7 @@ export async function callOpenAiCompatibleChat(config: any, options: LlmCallOpti
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), resolveTimeoutMs(config, options.defaultTimeoutMs || 30000));
   try {
-    const response = await fetch(endpoint, {
+    const response = await fetchWithNodeHttpFallback(endpoint, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -172,6 +283,7 @@ export async function callOpenAiCompatibleChat(config: any, options: LlmCallOpti
       body: JSON.stringify({
         model: config.model,
         temperature: options.temperature ?? resolveTemperature(config, 0.2),
+        ...(options.maxTokens ? { max_tokens: options.maxTokens } : {}),
         messages: options.messages,
       }),
       signal: controller.signal,
@@ -181,6 +293,7 @@ export async function callOpenAiCompatibleChat(config: any, options: LlmCallOpti
       throw new Error(formatHttpError(options.httpErrorPrefix || "HTTP", response.status, text));
     }
     const data = JSON.parse(text);
+    reportTokenUsage(options, normalizeLlmTokenUsage(data?.usage, "openai"));
     return String(data?.choices?.[0]?.message?.content || "");
   } finally {
     clearTimeout(timeout);
@@ -214,7 +327,7 @@ export async function callAnthropicCompatibleChat(config: any, options: LlmCallO
     const sentAt = new Date().toISOString();
     let response: any = null;
     try {
-      response = await fetch(endpoint, {
+      response = await fetchWithNodeHttpFallback(endpoint, {
         method: "POST",
         headers: patched.headers,
         body: JSON.stringify(patched.body),
@@ -254,6 +367,7 @@ export async function callAnthropicCompatibleChat(config: any, options: LlmCallO
       throw new Error(formatHttpError(options.httpErrorPrefix || "HTTP", response.status, text));
     }
     const data = JSON.parse(text);
+    reportTokenUsage(options, normalizeLlmTokenUsage(data?.usage, "anthropic"));
     return (data?.content || [])
       .map((part: any) => part?.type === "text" ? part.text : "")
       .join("")
@@ -275,6 +389,70 @@ export async function callAnthropicCompatibleJson(config: any, options: LlmCallO
   const parsed = extractJsonObject(content);
   if (!parsed) throw new Error(options.invalidJsonMessage || "主 Agent API 未返回有效 JSON");
   return parsed;
+}
+
+export async function runLlmTokenUsageSelfTest() {
+  const originalFetch = (globalThis as any).fetch;
+  let openAiUsage: LlmTokenUsage | null = null;
+  let anthropicUsage: LlmTokenUsage | null = null;
+  try {
+    (globalThis as any).fetch = async () => ({
+      ok: true,
+      status: 200,
+      headers: { get: () => "" },
+      async text() {
+        return JSON.stringify({
+          choices: [{ message: { content: "openai ok" } }],
+          usage: { prompt_tokens: 120, completion_tokens: 30, total_tokens: 150 },
+        });
+      },
+    });
+    const openAiContent = await callOpenAiCompatibleChat({
+      apiUrl: "https://example.com/v1",
+      apiKey: "selftest-key",
+      model: "selftest-model",
+    }, {
+      messages: [{ role: "user", content: "selftest" }],
+      onUsage: usage => { openAiUsage = usage; },
+    });
+
+    (globalThis as any).fetch = async () => ({
+      ok: true,
+      status: 200,
+      headers: { get: () => "" },
+      async text() {
+        return JSON.stringify({
+          content: [{ type: "text", text: "anthropic ok" }],
+          usage: {
+            input_tokens: 100,
+            cache_creation_input_tokens: 20,
+            cache_read_input_tokens: 300,
+            output_tokens: 40,
+          },
+        });
+      },
+    });
+    const anthropicContent = await callAnthropicCompatibleChat({
+      apiUrl: "https://example.com/v1",
+      apiKey: "selftest-key",
+      model: "selftest-model",
+    }, {
+      messages: [{ role: "user", content: "selftest" }],
+      onUsage: usage => { anthropicUsage = usage; },
+    });
+
+    const checks = {
+      openAiContentPreserved: openAiContent === "openai ok",
+      openAiInputTokensCaptured: openAiUsage?.inputTokens === 120,
+      openAiOutputTokensCaptured: openAiUsage?.outputTokens === 30,
+      anthropicContentPreserved: anthropicContent === "anthropic ok",
+      anthropicInputIncludesCacheTokens: anthropicUsage?.inputTokens === 420,
+      anthropicOutputTokensCaptured: anthropicUsage?.outputTokens === 40,
+    };
+    return { pass: Object.values(checks).every(Boolean), checks, openAiUsage, anthropicUsage };
+  } finally {
+    (globalThis as any).fetch = originalFetch;
+  }
 }
 
 export async function runGroupOrchestratorApiMicrocompactNativeAdapterTelemetrySelfTest() {

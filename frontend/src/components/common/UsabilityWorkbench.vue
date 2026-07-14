@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { toast, confirmDialog } from '../../utils/toast.js'
+import AttachmentChips from './AttachmentChips.vue'
 
 const emit = defineEmits(['navigate'])
 const data = ref(null)
@@ -11,6 +12,8 @@ const target = ref('')
 const intakeBusy = ref(false)
 const confirmation = ref(null)
 const actionBusy = ref('')
+const intakeFiles = ref([])
+const intakeFileInput = ref(null)
 let timer = null
 
 const attention = computed(() => data.value?.attention || [])
@@ -23,8 +26,10 @@ const targetOptions = computed(() => [
 ])
 
 const api = async (path, body) => {
+  const multipart = typeof FormData !== 'undefined' && body instanceof FormData
   const response = await fetch(path, body === undefined ? undefined : {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    method: 'POST',
+    ...(multipart ? { body } : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
   })
   const result = await response.json().catch(() => ({}))
   if (!response.ok || result.success === false) throw new Error(result.error || result.message || `请求失败 (${response.status})`)
@@ -45,16 +50,17 @@ const load = async (quiet = false) => {
 }
 
 const createPreview = async () => {
-  if (!requirement.value.trim()) return toast.warning('先用一句话说说你想完成什么')
+  if (!requirement.value.trim() && intakeFiles.value.length === 0) return toast.warning('请说说目标，或者上传需求资料')
   if (!target.value) return toast.warning('请先选择一个项目或协作群')
   intakeBusy.value = true
   try {
     const [kind, id] = target.value.split(':')
-    const result = await api('/api/usability/intake/preview', {
-      requirement: requirement.value.trim(),
-      group_id: kind === 'group' ? id : '',
-      target_project: kind === 'project' ? id : '',
-    })
+    const form = new FormData()
+    form.append('requirement', requirement.value.trim())
+    form.append('group_id', kind === 'group' ? id : '')
+    form.append('target_project', kind === 'project' ? id : '')
+    intakeFiles.value.forEach(file => form.append('files', file))
+    const result = await api('/api/usability/intake/preview', form)
     confirmation.value = { ...result.task, intake: result.confirmation || result.task?.intake_draft || null }
     toast.success('执行计划已整理好，确认前不会开始')
     await load(true)
@@ -69,11 +75,26 @@ const confirmIntake = async () => {
     const result = await api('/api/usability/intake/confirm', { task_id: confirmation.value.id })
     toast.success(result.queued ? '已确认，任务开始推进' : (result.queue_result?.message || '已确认执行'))
     requirement.value = ''
+    intakeFiles.value = []
     confirmation.value = null
     await load()
   } catch (error) { toast.error(error.message) }
   intakeBusy.value = false
 }
+
+const chooseIntakeFiles = () => intakeFileInput.value?.click()
+const addIntakeFiles = (event) => {
+  const incoming = Array.from(event.target.files || [])
+  for (const file of incoming) {
+    if (file.size > 25 * 1024 * 1024) {
+      toast.warning(`${file.name} 超过 25 MB，未添加`)
+      continue
+    }
+    if (!intakeFiles.value.some(item => item.name === file.name && item.size === file.size)) intakeFiles.value.push(file)
+  }
+  event.target.value = ''
+}
+const removeIntakeFile = index => intakeFiles.value.splice(index, 1)
 
 const reviseIntake = async () => {
   if (!confirmation.value?.id) return
@@ -169,13 +190,16 @@ onUnmounted(() => timer && window.clearInterval(timer))
 
     <section class="intake-card">
       <textarea v-model="requirement" rows="3" placeholder="例如：给项目增加支付退款功能，前后端都要完成并跑测试" @keydown.ctrl.enter.prevent="createPreview" />
+      <AttachmentChips :files="intakeFiles" @remove="removeIntakeFile" />
       <div class="intake-footer">
+        <input ref="intakeFileInput" class="hidden-file-input" type="file" multiple accept="image/*,.txt,.md,.json,.csv,.pdf,.docx,.pptx,.xlsx" @change="addIntakeFiles">
+        <button class="attach-action" type="button" :disabled="intakeBusy" title="添加图片或文档" @click="chooseIntakeFiles"><span aria-hidden="true">📎</span><span>添加资料</span></button>
         <select v-model="target">
           <option value="" disabled>选择项目或协作群</option>
           <option v-for="item in targetOptions" :key="item.value" :value="item.value">{{ item.label }}</option>
         </select>
         <span class="hint">Ctrl + Enter</span>
-        <button class="primary" :disabled="intakeBusy || !requirement.trim()" @click="createPreview">整理执行计划</button>
+        <button class="primary" :disabled="intakeBusy || (!requirement.trim() && intakeFiles.length === 0)" @click="createPreview">整理执行计划</button>
       </div>
     </section>
 
@@ -189,12 +213,22 @@ onUnmounted(() => timer && window.clearInterval(timer))
         <div><label>影响范围</label><strong>{{ (confirmation.intake?.scope || confirmation.intake?.impact_scope?.areas || []).join('、') }}</strong></div>
         <div class="wide"><label>验收标准</label><p>{{ Array.isArray(confirmation.intake?.acceptance) ? confirmation.intake.acceptance.join('；') : confirmation.intake?.acceptance }}</p></div>
         <div class="wide"><label>主要风险</label><p>{{ (confirmation.intake?.risks || confirmation.intake?.risk?.reasons || [confirmation.intake?.risk?.summary]).filter(Boolean).join('；') }}</p></div>
+        <div v-if="confirmation.intake?.source_summary" class="wide source-summary"><label>需求资料</label><p>{{ confirmation.intake.source_summary }}</p></div>
         <div v-if="confirmation.intake?.clarification_questions?.length" class="wide">
           <label>需要确认</label>
-          <p v-for="item in confirmation.intake.clarification_questions.slice(0, 4)" :key="item.id || item.question">{{ item.question }}</p>
+          <p v-for="(item, index) in confirmation.intake.clarification_questions.slice(0, 4)" :key="item.id || item.question || index">{{ typeof item === 'string' ? item : item.question }}</p>
         </div>
       </div>
-      <details><summary>技术记录</summary><code>Task {{ confirmation.id }} · Trace {{ confirmation.trace_id }}</code></details>
+      <details><summary>技术记录</summary>
+        <code>任务 {{ confirmation.id }} · 执行记录已关联</code>
+        <p v-if="confirmation.intake?.source_ingestion?.fallback_used" class="source-fallback-notice">需求已改用本地规则整理，请确认计划后再开始。</p>
+        <code v-if="confirmation.intake?.source_ingestion?.extraction_error">需求提取错误：{{ confirmation.intake.source_ingestion.extraction_error }}</code>
+        <ul v-if="confirmation.intake?.source_ingestion?.sources?.length" class="source-technical-list">
+          <li v-for="source in confirmation.intake.source_ingestion.sources" :key="source.id">
+            <strong>{{ source.name }}</strong><span>{{ source.status }} · {{ source.parser }}</span><small v-if="source.error">{{ source.error }}</small>
+          </li>
+        </ul>
+      </details>
       <div class="confirm-actions">
         <button class="ghost" :disabled="intakeBusy" @click="reviseIntake">调整计划</button>
         <button class="ghost danger-text" @click="discardIntake">放弃</button>
@@ -256,6 +290,7 @@ onUnmounted(() => timer && window.clearInterval(timer))
 .eyebrow{font-size:12px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:#4f6fff}.eyebrow.warn{color:#b54708}.success-text{color:#067647}
 .intake-card,.confirm-card,.task-card,.resources button,.technical{background:var(--bg-card,#fff);border:1px solid var(--border-color,#e5e9f2);border-radius:18px;box-shadow:0 10px 35px rgba(31,42,68,.06)}
 .intake-card{padding:18px}.intake-card textarea{width:100%;box-sizing:border-box;border:0;resize:vertical;background:transparent;color:inherit;font:500 17px/1.65 inherit;outline:0}.intake-footer{border-top:1px solid var(--border-color,#edf0f5);padding-top:12px}.intake-footer select{border:0;background:var(--bg-secondary,#f5f7fb);color:inherit;padding:9px 12px;border-radius:10px;max-width:330px}.hint{margin-left:auto;color:#98a2b3;font-size:12px}
+.intake-card :deep(.attachment-row){margin:8px 0 12px}.hidden-file-input{display:none}.attach-action{display:inline-flex;align-items:center;gap:7px;min-height:38px;padding:8px 10px;border:1px solid var(--border-color,#dfe4ec);border-radius:8px;background:var(--bg-card,#fff);color:inherit;font-weight:700}.attach-action:disabled{opacity:.5;cursor:not-allowed}.source-summary{border-left:3px solid #12b76a}.confirm-card details:not([open])>:not(summary){display:none}.source-fallback-notice{margin:8px 0 0;color:#b54708}.confirm-card details>code{display:block;margin-top:7px;overflow-wrap:anywhere}.source-technical-list{display:grid;gap:7px;margin:10px 0 0;padding:0;list-style:none}.source-technical-list li{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:3px 10px;padding:7px 8px;border:1px solid var(--border-color,#e5e9f2);border-radius:8px}.source-technical-list strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.source-technical-list span{color:#667085}.source-technical-list small{grid-column:1/-1;color:#b54708;overflow-wrap:anywhere}
 button{font:inherit;cursor:pointer}.primary,.ghost{border-radius:10px;padding:10px 16px;font-weight:700}.primary{border:1px solid #4f6fff;background:#4f6fff;color:white}.primary:disabled,.ghost:disabled{opacity:.5;cursor:not-allowed}.ghost{border:1px solid var(--border-color,#dfe4ec);background:var(--bg-card,#fff);color:inherit}.small{padding:7px 11px;font-size:13px}.danger-text{color:#b42318}
 .confirm-card{margin-top:18px;padding:20px;border-color:#b9c6ff;background:linear-gradient(135deg,rgba(79,111,255,.06),rgba(255,255,255,.02))}.confirm-head h2{margin:8px 0 0;font-size:20px}.safe-note{font-size:13px;color:#067647}.confirm-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:18px 0}.confirm-grid>div{background:var(--bg-secondary,#f7f8fb);border-radius:12px;padding:13px}.confirm-grid .wide{grid-column:1/-1}.confirm-grid label{display:block;color:#7a8496;font-size:12px;margin-bottom:5px}.confirm-grid p{margin:0;line-height:1.55}.confirm-card details{font-size:12px;color:#7a8496}.confirm-actions{justify-content:flex-end;margin-top:16px}
 .section-block{margin-top:34px}.section-title{margin-bottom:14px}.section-title h2{margin:4px 0 0;font-size:22px}.task-list{display:flex;flex-direction:column;gap:10px}.task-card{padding:17px 18px;display:flex;justify-content:space-between;gap:20px}.task-card.needs_user{border-left:4px solid #f79009}.task-card.failed{border-left:4px solid #f04438}.task-main h3,.task-card.compact h3{margin:8px 0 6px;font-size:17px}.task-main p,.task-card.compact p{margin:0 0 8px;color:var(--text-secondary,#667085);line-height:1.5}.task-main small,.task-card small{color:#98a2b3}.task-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}.status{display:inline-flex;border-radius:999px;padding:4px 8px;font-size:12px;font-weight:800}.status.decision{background:#fff3e0;color:#b54708}.status.danger{background:#fee4e2;color:#b42318}.status.active{background:#e8edff;color:#3e5bd9}.status.queued{background:#f2f4f7;color:#475467}.status.success{background:#dcfae6;color:#067647}

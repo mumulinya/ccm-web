@@ -99,6 +99,7 @@ export interface RuntimeToolReadiness {
   projectName: string;
   groupId: string;
   checkedAt: string;
+  snapshotGeneratedAt: string;
   deliveryReady: boolean;
   runtimeReady: boolean;
   deepChecked: boolean;
@@ -584,6 +585,7 @@ export function probeRuntimeToolReadiness(audit: any, options: { deep?: boolean;
     projectName: String(audit?.projectName || ""),
     groupId: String(audit?.groupId || ""),
     checkedAt: new Date().toISOString(),
+    snapshotGeneratedAt: String(audit?.timestamp || snapshot?.generatedAt || ""),
     deliveryReady,
     runtimeReady,
     deepChecked: options.deep === true,
@@ -812,6 +814,7 @@ function syncManagedSkills(skillRoot: string, skills: any[], audit: RuntimeToolS
         String(skill.name),
         `skill:${String(skill.name)}`,
         directoryName,
+        `$${directoryName}`,
       ].filter(Boolean))),
     });
   }
@@ -1610,7 +1613,7 @@ export function syncRuntimeToolsWithCatalog(
     } else if (runtime === "codex") {
       const runtimeHome = path.join(runtimeStorageRoot, "codex", authorizationId);
       const configPath = path.join(runtimeHome, "config.toml");
-      const skillRoot = path.join(runtimeHome, ".agents", "skills");
+      const skillRoot = path.join(runtimeHome, "skills");
       fs.mkdirSync(runtimeHome, { recursive: true });
       if (codexGateway?.linkAuth) linkCodexAuth(runtimeHome, audit);
       else if (codexGateway) removeManagedCodexAuth(runtimeHome);
@@ -2053,21 +2056,18 @@ export function detectInvokedSkillsFromText(text: string, allowedTools: any = {}
   const allowed = new Set(uniqueNames(allowedTools?.skill));
   if (!allowed.size) return [];
   const haystack = String(text || "");
-  const lower = haystack.toLowerCase();
   return skills
     .filter(skill => skill?.enabled !== false && allowed.has(String(skill.name)))
     .filter(skill => {
       const name = String(skill.name || "");
       return new RegExp(`Skill\\s*[:：]\\s*${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "i").test(haystack)
-        || lower.includes(`skill:${name.toLowerCase()}`)
-        || lower.includes(`skill：${name.toLowerCase()}`)
-        || lower.includes(name.toLowerCase());
+        || new RegExp(`(?:^|[\\s,，;；])skill:${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:$|[\\s,，;；])`, "i").test(haystack);
     })
     .map(skill => ({
       name: String(skill.name),
       contentHash: crypto.createHash("sha256").update(String(skill.prompt || "")).digest("hex").slice(0, 16),
       invokedAt: new Date().toISOString(),
-      source: /Skill\s*[:：]/i.test(haystack) ? "receipt" as const : "output" as const,
+      source: "receipt" as const,
     }));
 }
 

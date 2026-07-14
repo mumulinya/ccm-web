@@ -60,6 +60,7 @@ export declare function listGlobalMissionSupervisors(options?: {
 }): GlobalMissionSupervisorRecord[];
 export declare function startGlobalMissionSupervisor(input: any): GlobalMissionSupervisorRecord;
 export declare function checkGlobalMissionSupervisorNow(id: string, runtime: GlobalMissionSupervisorRuntime): Promise<GlobalMissionSupervisorRecord>;
+export declare function normalizeGlobalMissionSupervisorOperation(operation: any): string;
 export declare function controlGlobalMissionSupervisor(id: string, operation: string, runtime: GlobalMissionSupervisorRuntime, payload?: any): Promise<any>;
 export declare function startGlobalMissionSupervisorScheduler(runtime: GlobalMissionSupervisorRuntime, intervalMs?: number): {
     started: boolean;
@@ -105,6 +106,7 @@ export declare function runGlobalMissionSupervisorSelfTest(): {
 export declare function runGlobalMissionSupervisorAsyncSelfTest(): Promise<{
     pass: boolean;
     checks: {
+        localizedControlOperationsNormalize: boolean;
         asyncRecoveryActionPersisted: boolean;
         restartReloadKeepsIdentity: boolean;
         waitingUserIsRestoredWithoutAutomaticAdvance: boolean;

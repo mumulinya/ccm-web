@@ -125,13 +125,31 @@ const highlightCode = (code) => {
 
 const unifiedLines = computed(() => {
   if (!rawDiff.value) return []
+  let oldLine = null
+  let newLine = null
   return rawDiff.value.split('\n').map(line => {
     if (line.startsWith('+++') || line.startsWith('---') || line.startsWith('@@') || line.startsWith('diff') || line.startsWith('index')) {
-      return { type: 'meta', sign: ' ', html: escapeHtml(line) }
+      if (line.startsWith('@@')) {
+        const match = line.match(/@@ -(\d+),?\d* \+(\d+),?\d* @@/)
+        oldLine = match ? Number(match[1]) : null
+        newLine = match ? Number(match[2]) : null
+      }
+      return { type: 'meta', sign: ' ', oldLine: '', newLine: '', html: escapeHtml(line) }
     }
-    if (line.startsWith('+')) return { type: 'add', sign: '+', html: highlightCode(line.slice(1)) }
-    if (line.startsWith('-')) return { type: 'remove', sign: '-', html: highlightCode(line.slice(1)) }
-    return { type: 'context', sign: ' ', html: highlightCode(line.startsWith(' ') ? line.slice(1) : line) }
+    if (line.startsWith('+')) {
+      const row = { type: 'add', sign: '+', oldLine: '', newLine: newLine ?? '', html: highlightCode(line.slice(1)) }
+      if (newLine !== null) newLine++
+      return row
+    }
+    if (line.startsWith('-')) {
+      const row = { type: 'remove', sign: '-', oldLine: oldLine ?? '', newLine: '', html: highlightCode(line.slice(1)) }
+      if (oldLine !== null) oldLine++
+      return row
+    }
+    const row = { type: 'context', sign: ' ', oldLine: oldLine ?? '', newLine: newLine ?? '', html: highlightCode(line.startsWith(' ') ? line.slice(1) : line) }
+    if (oldLine !== null) oldLine++
+    if (newLine !== null) newLine++
+    return row
   })
 })
 
@@ -335,6 +353,8 @@ watch([selectedFile, mode], () => {
           </div>
           <div v-else class="unified-diff">
             <div v-for="(line, index) in unifiedLines" :key="index" :class="['diff-line', line.type]">
+              <span class="line-number old" :title="line.oldLine ? `修改前第 ${line.oldLine} 行` : ''">{{ line.oldLine }}</span>
+              <span class="line-number new" :title="line.newLine ? `修改后第 ${line.newLine} 行` : ''">{{ line.newLine }}</span>
               <span class="sign">{{ line.sign }}</span>
               <code v-html="highlightSearch(line.html)"></code>
             </div>
@@ -376,8 +396,11 @@ watch([selectedFile, mode], () => {
 .diff-actions button.active { border-color: #2563eb; background: #dbeafe; color: #1d4ed8; }
 .diff-actions button:disabled { opacity: .45; cursor: not-allowed; }
 .unified-diff,.split-diff,.file-preview { flex: 1; overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 1.55; background: #0f172a; color: #cbd5e1; }
-.diff-line,.file-line { display: grid; grid-template-columns: 32px 1fr; min-width: max-content; }
+.diff-line { display:grid; grid-template-columns:44px 44px 24px minmax(max-content,1fr); min-width:max-content; }
+.file-line { display:grid; grid-template-columns:44px minmax(max-content,1fr); min-width:max-content; }
 .diff-line code,.file-line code,.split-cell code { white-space: pre; padding-right: 16px; }
+.line-number { padding:0 7px; border-right:1px solid rgba(148,163,184,.16); color:#64748b; text-align:right; user-select:none; }
+.diff-line.add .line-number.new { color:#86efac; }.diff-line.remove .line-number.old { color:#fca5a5; }
 .diff-line .sign,.file-line span,.split-cell span { user-select: none; color: #64748b; text-align: right; padding: 0 8px; border-right: 1px solid rgba(148, 163, 184, .22); margin-right: 8px; }
 .diff-line.add,.split-cell.add { background: rgba(16, 185, 129, .16); color: #bbf7d0; }
 .diff-line.remove,.split-cell.remove { background: rgba(239, 68, 68, .16); color: #fecaca; }

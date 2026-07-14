@@ -1,0 +1,23 @@
+{
+  "pass": true,
+  "generatedAt": "2026-07-14T02:31:46.072Z",
+  "baseUrl": "http://127.0.0.1:3082",
+  "checks": [
+    {
+      "name": "isolated permanent purge removes execution, TestAgent and replay evidence with audit receipt",
+      "pass": true
+    },
+    {
+      "name": "summary exposes storage, retention policy, quality evidence and cleanup history",
+      "pass": true
+    },
+    {
+      "name": "preview creates expiring exact snapshot without exposing internal fingerprints",
+      "pass": true
+    },
+    {
+      "name": "run API requires both explicit confirmation and a valid preview snapshot",
+      "pass": true
+    }
+  ]
+}

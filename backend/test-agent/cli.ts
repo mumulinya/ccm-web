@@ -4,6 +4,7 @@ import { TestAgentArtifactVerification, verifyTestAgentArtifactManifest } from "
 import { cliOverrides, parseTestAgentCliArgs, testAgentCliUsage } from "./cli-options";
 import { TestAgentWorkOrderContractValidation, validateTestAgentHandoffContract, validateTestAgentWorkOrderContract } from "./contract";
 import { buildTestAgentExecutionPlan, TestAgentExecutionPlan } from "./execution-plan";
+import { invokeTestAgent } from "./invocation";
 import { formatBrowserProviderGapLine, formatBrowserProviderPlanWarningLine } from "./browser/provider-gaps";
 import { formatBrowserProviderSummaryLine } from "./browser/provider-summary";
 import { formatBrowserFlowAttentionLines, formatBrowserFlowSummaryLine } from "./browser/flow-summary";
@@ -305,6 +306,19 @@ export async function runTestAgentCli(args = process.argv.slice(2), io: TestAgen
   }
 
   const overrides = cliOverrides(options);
+  if (options.invocationJson) {
+    const invocation = await invokeTestAgent({
+      schema: "ccm-test-agent-invocation-request-v1",
+      source: options.handoffPath ? "handoff" : "work_order",
+      payload: workOrderJson.input,
+    }, overrides);
+    stdout.write(`${JSON.stringify(invocation, null, 2)}\n`);
+    return {
+      exitCode: invocation.status === "completed"
+        ? (invocation.canAccept ? 0 : 1)
+        : 2,
+    };
+  }
   let workOrderInput: TestAgentWorkOrder | null = null;
   let validation: TestAgentWorkOrderContractValidation;
   if (options.handoffPath) {

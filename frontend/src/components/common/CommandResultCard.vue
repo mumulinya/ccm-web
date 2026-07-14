@@ -2,6 +2,13 @@
 import { ref } from 'vue'
 defineProps({ result: { type: Object, required: true } })
 const expanded = ref(false)
+const implementationLabel = (value) => ({
+  'local-query': '本地直接读取',
+  'local-mutation': '本地操作已执行',
+  client: '当前会话操作',
+  navigation: '页面导航',
+  'agent-workflow': 'Agent 工作流',
+}[value] || 'CCM 命令')
 </script>
 
 <template>
@@ -12,14 +19,14 @@ const expanded = ref(false)
         <small>CCM 本地命令 · /{{ result.command }}</small>
         <strong>{{ result.title }}</strong>
       </div>
-      <span class="local-badge">未调用模型</span>
+      <span class="local-badge">{{ implementationLabel(result.implementation) }}</span>
     </header>
     <p>{{ result.summary }}</p>
     <div v-if="result.metrics?.length" class="command-metrics">
       <div v-for="metric in result.metrics" :key="metric.label"><span>{{ metric.label }}</span><strong>{{ metric.value }}</strong></div>
     </div>
     <div v-if="result.items?.length" class="command-items">
-      <div v-for="(item, index) in result.items.slice(0, 30)" :key="`${item.title}-${index}`">
+      <div v-for="(item, index) in result.items" :key="`${item.title}-${index}`">
         <strong>{{ item.title }}</strong><span>{{ item.detail }}</span><em v-if="item.status">{{ item.status }}</em>
       </div>
     </div>

@@ -23,6 +23,35 @@ export const mainDecisionTone = (decision) => {
   return 'idle'
 }
 
+export const isQuietMainAgentConversationDecision = (decision) => {
+  if (!decision || String(decision.mode || '').toLowerCase() !== 'conversation') return false
+  const actions = decision?.decision?.selected_actions || decision?.decision?.selectedActions || []
+  const workflowActions = new Set([
+    'create_project_task',
+    'dispatch_child_agent',
+    'ask_user_clarification',
+    'govern_task_lifecycle',
+    'replan_from_observation',
+  ])
+  if (actions.some(action => workflowActions.has(String(action)))) return false
+  const permissions = Array.isArray(decision.permissions) ? decision.permissions : []
+  if (permissions.some(item => item?.allowed === false)) return false
+  const blockedActions = decision?.verify?.blocked_actions || decision?.verify?.blockedActions || []
+  if (Array.isArray(blockedActions) && blockedActions.length > 0) return false
+  const steps = decision?.todo_plan?.steps || decision?.todoPlan?.steps || decision?.user_plan_steps || decision?.userPlanSteps || []
+  const hasActiveStep = steps.some(step => [
+    'in_progress',
+    'running',
+    'reviewing',
+    'reworking',
+    'needs_confirmation',
+    'needs_user',
+    'blocked',
+    'failed',
+  ].includes(String(step?.status || '').toLowerCase()))
+  return !hasActiveStep
+}
+
 export const mainDecisionNextStep = (decision) => compactStatusText(decision?.decision?.dispatch_policy?.nextStep || decision?.verify?.conclusion || '等待下一条消息', 120)
 
 export const mainDecisionActionSummary = (decision) => {

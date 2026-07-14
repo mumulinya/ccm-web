@@ -91,7 +91,8 @@ async function run() {
     const technical = task.locator('details.task-card-technical')
     await technical.locator('summary').click()
     await expectVisible(technical.getByText('完整记录'), 'replayed task technical full records after expand')
-    await expectVisible(technical.getByText('trace-replay-task'), 'replayed task trace after expand')
+    await expectVisible(technical.getByText('执行记录'), 'replayed task execution record after expand')
+    await expectHidden(technical.getByText('trace-replay-task'), 'replayed raw trace id after expand')
     await task.screenshot({ path: path.join(outputDir, '03-replay-technical-expanded.png') })
 
     const child = page.locator('#replay-msg-replay-child-agent')

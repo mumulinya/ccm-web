@@ -12,6 +12,7 @@ import {
   CCM_DIR
 } from "../../core/utils";
 import { loadOrchestratorConfig } from "../collaboration/group-orchestrator";
+import { createPetGenerationJob } from "../pets/pet-generation";
 import { getConfigs, getConfigInfo, loadCronJobs, loadTasks, loadMcpTools, loadSkills, loadFeishuConfig } from "../../core/db";
 import {
   loadGroups,
@@ -24,6 +25,14 @@ import {
   type CollabCtx,
 } from "../collaboration/collaboration";
 import { sanitizeMainAgentUserText } from "../collaboration/display";
+import {
+  bindFeishuIdentifiersFromValue,
+  bindFeishuTaskContext,
+  feishuRuntimeEventPresentation,
+  notifyFeishuTaskStage,
+  recordFeishuInbound,
+  resolveFeishuDestination,
+} from "../collaboration/feishu-channel";
 import {
   acquireIdempotency,
   appendTraceEvent,
@@ -41,9 +50,11 @@ import {
 } from "../../agents/worker-handoff";
 import {
   buildGlobalGroupMemoryContext,
+  renderGlobalGroupMemoryContextBundle,
   runGlobalGroupMemoryContextSelfTest,
 } from "../collaboration/memory";
 import {
+  buildPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairContext,
   buildPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationContext,
   inspectPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryHealth,
 } from "../collaboration/group-memory-index";
@@ -108,6 +119,7 @@ import {
 import { buildPostReviewSpotCheckSummary } from "../../agents/post-review-spot-check";
 import { listTaskAgentSessions } from "../../tasks/agent-sessions";
 import { runAgentReasoningLoopSelfTest } from "../../agents/reasoning-loop";
+import { ingestRequirementSources, type RequirementIngestionResult } from "../requirements/source-ingestion";
 import { buildTraceReplaySuite, replayAgentTrace, runAgentRuntimeKernelSelfTest } from "../../agents/runtime-kernel";
 import {
   buildGlobalAgentSessionDebug,
@@ -117,6 +129,7 @@ import {
   getGlobalAgentBackgroundOutput,
   loadGlobalAgentHooks,
   loadGlobalAgentPermissionRules,
+  recordGlobalAgentRuntimeOutput,
   runGlobalAgentRuntimeSelfTest,
   saveGlobalAgentHook,
   saveGlobalAgentPermissionRule,
@@ -133,6 +146,14 @@ import {
 type LocalIntentResult = {
   reply: string;
   action: any;
+  intent?: {
+    category: "conversation" | "question" | "analysis" | "execution" | "high_risk" | "ambiguous";
+    goal: string;
+    action_required: boolean;
+    confidence: number;
+    authorization_basis: "none" | "current_message" | "confirmation";
+    reason: string;
+  };
 };
 
 const GLOBAL_AGENT_HISTORY_FILE = path.join(CCM_DIR, "global-agent-history.json");
@@ -464,7 +485,6 @@ function getGlobalToolDisplayName(toolName: string) {
     list_cron: "读取定时任务",
     query_knowledge: "查询知识库",
     query_global_memory: "查询全局记忆",
-    query_group_memory: "查询群聊记忆",
     manage_global_memory: "管理全局记忆",
     inspect_mission: "查询全局任务",
     inspect_supervision: "查询持续跟进状态",
@@ -483,6 +503,7 @@ function getGlobalToolDisplayName(toolName: string) {
     create_template: "创建模板",
     play_music: "播放音乐",
     toggle_pet: "控制桌面宠物",
+    create_pet_from_image: "根据参考图创建宠物",
     navigate: "切换页面",
   };
   const key = String(toolName || "").trim();
@@ -878,11 +899,45 @@ function saveGlobalAgentHistoryStore(store: any) {
   writeGlobalJsonAtomic(GLOBAL_AGENT_HISTORY_FILE, store);
 }
 
+function reconcileGlobalAgentWebHistory(store: any, payload: any) {
+  const incomingSessions = Array.isArray(payload.sessions) ? payload.sessions : [];
+  const preservedSessions = (Array.isArray(store.sessions) ? store.sessions : [])
+    .filter((session: any) => session.source !== "web");
+  const existingWebSessions = new Map(
+    (Array.isArray(store.sessions) ? store.sessions : [])
+      .filter((session: any) => session.source === "web")
+      .map((session: any) => [String(session.id), session])
+  );
+  const webSessions: any[] = [];
+  for (const session of incomingSessions) {
+    const id = String(session.id || "").trim();
+    if (!id) continue;
+    const existing = existingWebSessions.get(id) as any;
+    const incomingMessages = Array.isArray(session.messages) ? session.messages : [];
+    const lastMessageAt = incomingMessages[incomingMessages.length - 1]?.timestamp || "";
+    webSessions.push({
+      id,
+      name: session.name || existing?.name || "全局 Agent 会话",
+      source: "web",
+      createdAt: existing?.createdAt || session.createdAt || new Date().toISOString(),
+      updatedAt: session.updatedAt || session.updated_at || lastMessageAt || existing?.updatedAt || new Date().toISOString(),
+      messages: mergeGlobalAgentMessages(existing?.messages || [], incomingMessages),
+    });
+  }
+
+  const sessions = [...webSessions, ...preservedSessions];
+  const requestedCurrentId = String(payload.currentSessionId || "").trim();
+  const currentSessionId = webSessions.some((session: any) => session.id === requestedCurrentId)
+    ? requestedCurrentId
+    : webSessions
+      .slice()
+      .sort((a: any, b: any) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")))[0]?.id || "";
+  return { ...store, sessions, current_session_id: currentSessionId };
+}
+
 function syncGlobalAgentWebHistory(payload: any) {
   const sessions = Array.isArray(payload.sessions) ? payload.sessions : [];
   const store = loadGlobalAgentHistoryStore();
-  const byId = new Map<string, any>();
-  for (const session of store.sessions || []) byId.set(String(session.id), session);
   for (const session of sessions) {
     const id = String(session.id || "").trim();
     if (!id) continue;
@@ -891,20 +946,10 @@ function syncGlobalAgentWebHistory(payload: any) {
     } catch (error: any) {
       console.warn(`[全局记忆] Web 会话写入失败 (${id})：${error?.message || error}`);
     }
-    const existing = byId.get(id);
-    byId.set(id, {
-      id,
-      name: session.name || existing?.name || "全局 Agent 会话",
-      source: "web",
-      createdAt: existing?.createdAt || session.createdAt || new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      messages: mergeGlobalAgentMessages(existing?.messages || [], session.messages || []),
-    });
   }
-  store.sessions = Array.from(byId.values());
-  if (payload.currentSessionId) store.current_session_id = String(payload.currentSessionId);
-  saveGlobalAgentHistoryStore(store);
-  return store;
+  const reconciled = reconcileGlobalAgentWebHistory(store, payload);
+  saveGlobalAgentHistoryStore(reconciled);
+  return reconciled;
 }
 
 function getBaseGlobalAgentMessages(store: any) {
@@ -951,6 +996,39 @@ function appendGlobalAgentConversationMessage(sessionId: string, role: "user" | 
 function buildFeishuConversationId(payload: any) {
   const raw = payload?.session_id || payload?.sessionId || payload?.sessionKey || payload?.conversation_id || payload?.conversationId || payload?.message?.session_id || payload?.data?.session_id || "default";
   return "feishu:" + String(raw || "default").replace(/[^a-zA-Z0-9:_@.-]/g, "_").slice(0, 120);
+}
+
+function resolveFeishuGlobalAgentSessionId(payload: any, store = loadGlobalAgentHistoryStore()) {
+  const sessions = Array.isArray(store.sessions) ? store.sessions : [];
+  const webSessions = sessions.filter((session: any) => session.source === "web" && session.id);
+  const currentSessionId = String(store.current_session_id || "").trim();
+  const current = webSessions.find((session: any) => String(session.id) === currentSessionId);
+  if (current) return String(current.id);
+  const recent = webSessions
+    .slice()
+    .sort((a: any, b: any) => String(b.updatedAt || b.createdAt || "").localeCompare(String(a.updatedAt || a.createdAt || "")))[0];
+  return recent ? String(recent.id) : buildFeishuConversationId(payload);
+}
+
+export function runFeishuGlobalAgentSessionRoutingSelfTest() {
+  const oldWeb = { id: "session-deleted", source: "web", updatedAt: "2026-07-01T00:00:00.000Z", messages: [{ role: "user", content: "old" }] };
+  const recentWeb = { id: "session-recent", source: "web", updatedAt: "2026-07-12T08:00:00.000Z", messages: [{ role: "user", content: "recent" }] };
+  const currentWeb = { id: "session-current", source: "web", updatedAt: "2026-07-11T08:00:00.000Z", messages: [{ role: "user", content: "current" }] };
+  const staleStore = { current_session_id: oldWeb.id, sessions: [oldWeb, currentWeb, recentWeb] };
+  const reconciled = reconcileGlobalAgentWebHistory(staleStore, { sessions: [currentWeb, recentWeb], currentSessionId: recentWeb.id });
+  const checks = {
+    removesDeletedWebSession: !reconciled.sessions.some((session: any) => session.id === oldWeb.id),
+    usesValidCurrentSession: resolveFeishuGlobalAgentSessionId({ sessionId: "acp-bound" }, reconciled) === recentWeb.id,
+    fallsBackToMostRecentWebSession: resolveFeishuGlobalAgentSessionId(
+      { sessionId: "acp-bound" },
+      { ...reconciled, current_session_id: "missing" }
+    ) === recentWeb.id,
+    onlyUsesAcpSessionWithoutWebHistory: resolveFeishuGlobalAgentSessionId(
+      { sessionId: "acp-bound" },
+      { current_session_id: "", sessions: [] }
+    ) === "feishu:acp-bound",
+  };
+  return { pass: Object.values(checks).every(Boolean), checks };
 }
 
 function getFeishuMessageId(payload: any) {
@@ -1292,9 +1370,35 @@ function guessCronSchedule(message: string) {
   return "";
 }
 
+function inferLocalConversationFallback(message: string): LocalIntentResult | null {
+  const compact = normalizeText(message).replace(/[。！？!?]+$/g, "").trim().toLowerCase();
+  const greeting = /^(?:你好|您好|嗨|哈喽|嘿|在吗|早上好|上午好|下午好|晚上好|hi|hello|hey)(?:呀|啊|哦|哟|啦)?$/i.test(compact);
+  const identityQuestion = /^(?:你是谁|你是什么|你能做什么|你会做什么|介绍一下你自己)$/i.test(compact);
+  if (!greeting && !identityQuestion) return null;
+  const reply = identityQuestion
+    ? "我是全局助手，可以回答问题，也可以在你明确提出任务时协调项目、群聊和执行成员完成工作。"
+    : compact === "在吗"
+      ? "在的，有什么我可以帮你的吗？"
+      : "你好！有什么我可以帮你的吗？";
+  return {
+    reply,
+    action: null,
+    intent: {
+      category: "conversation",
+      goal: identityQuestion ? "了解全局助手" : "普通问候",
+      action_required: false,
+      confidence: 1,
+      authorization_basis: "none",
+      reason: identityQuestion ? "普通身份问答" : "普通问候",
+    },
+  };
+}
+
 function inferLocalGlobalAction(message: string, projects: string[], groups: any[], resources: any = {}): LocalIntentResult | null {
   const text = normalizeText(message);
   if (!text) return null;
+  const conversationFallback = inferLocalConversationFallback(text);
+  if (conversationFallback) return conversationFallback;
   const explicitWriteAuthorization = hasExplicitGlobalWriteAuthorization(text);
   const explicitReadRequest = /^(?:请)?(?:查看|列出|检查|打开|进入|跳转|搜索|查询)|(?:系统|任务|项目|群聊|定时任务).*(?:当前状态|运行状态|列表)/.test(text);
   const consultationOnly = /[?？]|(?:怎么|如何|为什么|是什么|原理|介绍|讲讲|说明|建议|觉得|能否|能不能|可不可以|是否|会不会|有哪些|有什么)/.test(text);
@@ -1444,7 +1548,6 @@ function inferLocalGlobalAction(message: string, projects: string[], groups: any
     [/任务派发|任务列表|开发任务/, "tasks", "任务派发"],
     [/定时任务|计划任务|cron/i, "cron", "定时任务"],
     [/终端|控制台/, "terminal", "内置终端"],
-    [/模板|提示词/, "templates", "对话模板"],
     [/搜索|查对话/, "search", "对话搜索"],
     [/设置|配置/, "settings", "系统设置"],
   ];
@@ -1698,6 +1801,31 @@ export function runGlobalAgentIntentSelfTest() {
     && !/[{}"]|trace_id|CCM_AGENT_RECEIPT/i.test(modelUnavailableObservationSummary.message || "")
     && /查询完成|查询已返回|已返回结果|技术详情/.test(modelUnavailableObservationSummary.message || "")
     && !/操作已完成|完成信息/.test(modelUnavailableObservationSummary.message || "");
+  const localGreeting = inferLocalGlobalAction("你好", projects, groups, {});
+  const modelUnavailableGreeting = localActionToAgenticDecision(
+    localGreeting,
+    { steps: [], user_message: "你好", explicit_write_authorization: false } as any,
+  );
+  const fallbackGreetingStaysConversation = modelUnavailableGreeting?.state === "answer"
+    && modelUnavailableGreeting?.intent?.category === "conversation"
+    && modelUnavailableGreeting?.intent?.action_required === false
+    && modelUnavailableGreeting?.message === "你好！有什么我可以帮你的吗？"
+    && !modelUnavailableGreeting.tool;
+  const boundedGroupMemoryModelContext = buildGlobalAgentGroupMemoryModelContext({
+    schema: "ccm-global-group-memory-context-v1",
+    generated_at: "2026-07-12T00:00:00.000Z",
+    query: "检查群聊记忆",
+    total_group_count: 1,
+    selected_group_count: 1,
+    memory_policy: { use: "must_consider_relevant_groups" },
+    groups: [{ group_id: "group-1", group_name: "开发群", score: 10, typed_memory: { raw: "x".repeat(80_000) } }],
+    rendered_text: `群聊记忆摘要\n${"摘要内容".repeat(8_000)}`,
+  }, { maxChars: 12_000 });
+  const groupMemoryModelContextBounded = boundedGroupMemoryModelContext.schema === "ccm-global-group-memory-model-context-v1"
+    && boundedGroupMemoryModelContext.rendered_text.length <= 12_000
+    && boundedGroupMemoryModelContext.context_budget.truncated === true
+    && boundedGroupMemoryModelContext.context_budget.source_bytes > 80_000
+    && !JSON.stringify(boundedGroupMemoryModelContext).includes('"raw"');
   const staleLocalHistory = Array.from({ length: GLOBAL_AGENT_HISTORY_LIMIT }, (_, index) => ({
     role: index % 2 === 0 ? "user" : "assistant",
     content: `旧前端历史 ${index}`,
@@ -2577,6 +2705,7 @@ export function runGlobalAgentIntentSelfTest() {
   const statusChecks = {
     globalStatusFollowupRecognized: isGlobalProgressStatusRequest("现在进展怎么样？") && isGlobalProgressStatusRequest("How's it going?"),
     globalStatusFollowupAvoidsManagementMutation: !isGlobalProgressStatusRequest("把任务状态设置为 done"),
+    globalStatusShortcutDoesNotCaptureExplicitDevelopment: !isGlobalProgressStatusRequest("我明确授权你立即修改 backend-api，创建任务并持续跟进进度直到完成"),
     globalStatusSummaryFriendly: statusSummary.includes("最近全局任务进展") && statusSummary.includes("子目标") && statusSummary.includes("web 已完成") && statusSummary.includes("api 处理中"),
     globalStatusShowsChildAgentWaitingState: statusSummary.includes("执行成员等待情况") && statusSummary.includes("已回传：web") && statusSummary.includes("处理中：api") && !statusSummary.includes("已完成：web"),
     globalStatusWeakMissionStaysReviewing: statusSummary.includes("弱验收全局任务：验收中")
@@ -2664,10 +2793,14 @@ export function runGlobalAgentIntentSelfTest() {
     singleProjectDispatchUsesPersistentMission: supervisedSingleProjectPayload.targets.length === 1
       && supervisedSingleProjectPayload.targets[0].project === "backend-api"
       && supervisedSingleProjectPayload.auto_execute === true
+      && supervisedSingleProjectPayload.single_project_supervision.schema === "ccm-global-to-group-supervision-v1"
+      && supervisedSingleProjectPayload.single_project_supervision.group_orchestration_required === true
+      && supervisedSingleProjectPayload.single_project_supervision.global_agent_review_owner === false
+      && supervisedSingleProjectPayload.single_project_supervision.test_agent_owner === "group-main-agent"
       && supervisedSingleProjectPayload.single_project_supervision.independent_review_required === true
       && supervisedSingleProjectPayload.single_project_supervision.post_review_spot_check_required === true,
     singleProjectDispatchCarriesReviewAcceptance: supervisedSingleProjectPayload.acceptance.includes("TestAgent")
-      && supervisedSingleProjectPayload.acceptance.includes("主 Agent 抽查")
+      && supervisedSingleProjectPayload.acceptance.includes("群聊主 Agent")
       && supervisedSingleProjectPayload.targets[0].requires_independent_review === true,
     dispatchLaunchUiFriendly: dispatchLaunchUi?.title === "已派发的工作" && dispatchLaunchUi?.text.includes("dev-group") && dispatchLaunchUi?.checkpoint?.label === "已派发的工作",
     dispatchLaunchUiHidesProtocol: !/CCM_AGENT_RECEIPT|trace_id|raw payload/i.test(JSON.stringify(protocolDispatchLaunchUi || {})),
@@ -2781,6 +2914,8 @@ export function runGlobalAgentIntentSelfTest() {
       && fallbackCronCannotWrite
       && ambiguousFallbackCannotWrite
       && fallbackObservationFriendly
+      && fallbackGreetingStaysConversation
+      && groupMemoryModelContextBounded
       && globalHistoryMergePreservesBackendCompletion
       && Object.values(statusChecks).every(Boolean)
       && Object.values(directDispatchChecks).every(Boolean)
@@ -2793,6 +2928,8 @@ export function runGlobalAgentIntentSelfTest() {
     fallbackCronCannotWrite,
     ambiguousFallbackCannotWrite,
     fallbackObservationFriendly,
+    fallbackGreetingStaysConversation,
+    groupMemoryModelContextBounded,
     globalHistoryMergePreservesBackendCompletion,
     statusChecks,
     directDispatchChecks,
@@ -3406,14 +3543,14 @@ function buildGlobalSingleProjectMissionPayload(input: {
     business_goal: userGoal || message,
     acceptance: [
       "项目执行成员必须说明实际动作、文件变化、已执行验证和剩余风险。",
-      "需要独立复核时，TestAgent 必须基于最新状态执行；复核失败先返工再复验。",
-      "TestAgent 通过后由主 Agent 抽查关键验证，全部门禁通过后才能输出最终总结。",
+      "群聊主 Agent 必须先验收项目执行成员的结果，再把最新交付交给 TestAgent 独立复核。",
+      "复核失败由群聊主 Agent 安排原项目执行成员返工并复验；全部门禁通过后由群聊主 Agent 输出最终总结。",
     ].join("；"),
     targets: [{
       type: "project",
       project,
       task: message,
-      reason: "全局主 Agent 判断该需求适合由指定项目执行，并由全局任务链持续监督验收。",
+      reason: "全局 Agent 指定目标项目；系统必须先解析该项目所属协作群，再交给群聊主 Agent 计划、派发和验收。",
       requires_code_changes: requiresCodeChanges,
       requires_verification: true,
       requires_independent_review: true,
@@ -3428,8 +3565,11 @@ function buildGlobalSingleProjectMissionPayload(input: {
     session_id: input.sessionId || "default",
     idempotency_key: input.idempotencyKey || "",
     single_project_supervision: {
-      schema: "ccm-global-single-project-supervision-v1",
+      schema: "ccm-global-to-group-supervision-v1",
       project,
+      group_orchestration_required: true,
+      global_agent_review_owner: false,
+      test_agent_owner: "group-main-agent",
       independent_review_required: true,
       post_review_spot_check_required: true,
     },
@@ -3506,6 +3646,7 @@ function renderGlobalDirectGroupDispatchAcceptedSummary(input: {
 function isGlobalProgressStatusRequest(message: string) {
   const text = normalizeText(message);
   if (!text) return false;
+  if (hasExplicitDevelopmentExecutionIntent(text) || hasExplicitGlobalWriteAuthorization(text)) return false;
   if (/^(?:\/status|status|progress|任务状态|查看任务状态|全局任务|最近任务)$/i.test(text)) return true;
   if (/(设置|修改|标记|改成|更新|创建|新建|删除|移除)/.test(text) && /(任务状态|状态)/.test(text)) return false;
   return /(进展|进度|做到哪|处理到哪|现在怎么样|怎么样了|完成了吗|有结果了吗|还在(?:执行|处理|跑)|任务状态|最近任务|全局任务|how'?s it going|how is it going|what'?s the status)/i.test(text);
@@ -4613,7 +4754,7 @@ async function executeFeishuManagementAction(baseUrl: string, action: any, origi
     else if (operation === "update") result = await postLocalApi(baseUrl, "/api/projects/update", { ...params, name: project });
     else if (operation === "start") result = await postLocalApi(baseUrl, "/api/start", { project, agent: params.agent });
     else if (operation === "stop") result = await postLocalApi(baseUrl, "/api/stop", { project });
-    else if (operation === "delete") result = await postLocalApi(baseUrl, "/api/projects/delete", { name: project });
+    else if (operation === "delete") result = await postLocalApi(baseUrl, "/api/projects/archive", { name: project });
   } else if (action.type === "manage_group") {
     if (operation === "list") result = await callLocalApi(baseUrl, "/api/groups");
     else if (operation === "create") result = await postLocalApi(baseUrl, "/api/groups/create", { name: params.name, members: params.members || (params.project ? [{ project: params.project }] : []) });
@@ -4636,6 +4777,9 @@ async function executeFeishuManagementAction(baseUrl: string, action: any, origi
   if (action.type === "manage_cron" && operation === "create") {
     const cronParams = fillCronParams(params, originalText, loadGroups(), getConfigs().map(c => c.name));
     return `定时任务已创建：${result.job?.name || cronParams.name || "未命名任务"}\n- Cron：${result.job?.schedule || cronParams.schedule}\n- 提示词：${result.job?.prompt || cronParams.prompt}`;
+  }
+  if (action.type === "manage_project" && operation === "delete") {
+    return `${result.message || "项目已归档，可随时恢复"}${result.audit_id ? `\n- 审计编号：${result.audit_id}` : ""}`;
   }
   const count = result.jobs?.length ?? result.tasks?.length ?? result.projects?.length ?? result.groups?.length;
   return count === undefined ? `操作已返回结果：${action.type}/${operation}` : `查询已返回 ${count} 条记录。`;
@@ -4677,19 +4821,29 @@ async function executeFeishuAction(baseUrl: string, action: any, originalText = 
     return formatGlobalDevelopmentDispatchVisibleResult(result, params);
   }
   if (action.type === "create_task") {
-    const result = await postLocalApi(baseUrl, "/api/tasks/create-daily-dev", {
+    const businessGoal = params.business_goal || params.businessGoal || params.message || params.title || originalText;
+    const result = await postLocalApi(baseUrl, "/api/global-agent/orchestrate", {
       title: params.title || "飞书下发的开发任务",
-      group_id: params.group_id || params.groupId,
-      business_goal: params.business_goal || params.businessGoal || params.title,
-      scope: params.scope || "",
-      documents: params.documents || "",
-      acceptance: params.acceptance || "子 Agent 提供结果说明；主 Agent 输出最终报告",
-      persist_documents: true,
+      business_goal: businessGoal,
+      acceptance: params.acceptance || "群聊主 Agent 负责计划、项目子 Agent 派发与验收、TestAgent 独立复核、返工复验和最终总结",
+      targets: [{
+        type: "group",
+        group_id: params.group_id || params.groupId,
+        task: businessGoal,
+        reason: "飞书全局 Agent 将复杂任务交给群聊主 Agent 完整执行。",
+        requires_code_changes: params.requires_code_changes !== false,
+        requires_verification: true,
+        requires_independent_review: true,
+      }],
+      requires_code_changes: params.requires_code_changes !== false,
+      requires_verification: true,
+      requires_independent_review: true,
       auto_execute: true,
+      source: options.source || "feishu-control-bot-create-task",
       trace_id: traceId,
       idempotency_key: traceId ? `feishu:${traceId}` : undefined,
     });
-    return formatGlobalTaskDispatchVisibleResult(result, params);
+    return formatGlobalDevelopmentDispatchVisibleResult(result, params);
   }
   if (action.type === "send_group_cmd") {
     const groupId = params.group_id || params.groupId;
@@ -4837,6 +4991,44 @@ function summarizeGlobalToolObservationForUser(observation: any, fallback = "操
   return "操作已返回结果；详细记录已放入技术详情。";
 }
 
+export function buildGlobalAgentGroupMemoryModelContext(bundle: any, options: any = {}) {
+  const maxChars = Math.max(4_000, Math.min(24_000, Number(options.maxChars || options.max_chars || 12_000)));
+  const sourceText = typeof bundle === "string"
+    ? bundle
+    : String(bundle?.rendered_text || renderGlobalGroupMemoryContextBundle(bundle) || "");
+  const truncated = sourceText.length > maxChars;
+  const renderedText = truncated
+    ? `${sourceText.slice(0, Math.max(0, maxChars - 56)).trimEnd()}\n[群聊记忆摘要已按模型上下文预算截断]`
+    : sourceText;
+  const selectedGroups = Array.isArray(bundle?.groups)
+    ? bundle.groups.slice(0, 12).map((group: any) => ({
+        group_id: String(group?.group_id || ""),
+        group_name: String(group?.group_name || ""),
+        score: Number(group?.score || 0),
+      }))
+    : [];
+  const sourceBytes = typeof bundle === "string" ? Buffer.byteLength(bundle) : Buffer.byteLength(JSON.stringify(bundle || {}));
+  return {
+    schema: "ccm-global-group-memory-model-context-v1",
+    source_schema: typeof bundle === "object" ? String(bundle?.schema || "") : "text",
+    generated_at: typeof bundle === "object" ? String(bundle?.generated_at || "") : "",
+    query: typeof bundle === "object" ? String(bundle?.query || "") : "",
+    total_group_count: Number(bundle?.total_group_count || 0),
+    selected_group_count: Number(bundle?.selected_group_count || selectedGroups.length),
+    selected_groups: selectedGroups,
+    memory_policy: bundle?.memory_policy || null,
+    rendered_text: renderedText,
+    context_budget: {
+      max_chars: maxChars,
+      used_chars: renderedText.length,
+      approximate_tokens: Math.ceil(renderedText.length / 3),
+      source_bytes: sourceBytes,
+      truncated,
+      full_context_available_via: "query_group_memory technical endpoint",
+    },
+  };
+}
+
 export function buildAgenticContext(query = "", sessionId = "", options: any = {}) {
   const tasks = loadTasks();
   const groups = Array.isArray(options.groups) ? options.groups : loadGroups();
@@ -4883,6 +5075,14 @@ export function buildAgenticContext(query = "", sessionId = "", options: any = {
       invalid_delivery_count: health.invalid_delivery_count,
       policy: health.policy,
     }));
+  const cleanupCommitRepairContexts = groups
+    .map((group: any) => buildPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairContext(
+      String(group.id || ""),
+      "global-agent",
+      { limit: options.cleanupCommitRepairLimit || options.cleanup_commit_repair_limit || 2 },
+    ))
+    .filter((context: any) => context.brief_count > 0)
+    .slice(0, 8);
   return {
     projects: safeProjectRows(),
     groups: groups.map((group: any) => ({ id: group.id, name: group.name, members: (group.members || []).map((member: any) => ({ project: member.project, agent: member.agent })) })),
@@ -4896,8 +5096,17 @@ export function buildAgenticContext(query = "", sessionId = "", options: any = {
       mcp: loadMcpTools().map((tool: any) => tool.name),
       skills: loadSkills().map((skill: any) => skill.name),
     },
-    global_memory: query ? buildGlobalAgentMemoryPacket(query, { sessionId, limit: 7 }) : "",
-    group_memory_context: buildGlobalGroupMemoryContext(query, { sessionId, groups, maxGroups: 6, maxTypedMemory: 3 }),
+    global_memory: query ? buildGlobalAgentMemoryPacket(query, {
+      sessionId,
+      limit: 7,
+      recordMetric: options.recordMemoryMetric !== false && options.record_memory_metric !== false,
+    }) : "",
+    memory_context_boundary: {
+      schema: "ccm-global-agent-memory-boundary-v1",
+      policy: "global_memory_only_group_session_content_excluded",
+      group_session_context_included: false,
+      routing_directory_included: true,
+    },
     conflict_resolution_maintenance_notifications: {
       schema: "ccm-global-conflict-resolution-maintenance-notification-context-v1",
       group_count: maintenanceNotifications.length,
@@ -4909,6 +5118,15 @@ export function buildAgenticContext(query = "", sessionId = "", options: any = {
       group_count: maintenanceDeliveryHealth.length,
       groups: maintenanceDeliveryHealth,
       policy: "read_only_health_no_cross_group_authorization_no_task_no_approval_no_delete",
+    },
+    cleanup_commit_repair_context: {
+      schema: "ccm-global-cleanup-commit-repair-context-v1",
+      group_count: cleanupCommitRepairContexts.length,
+      groups: cleanupCommitRepairContexts,
+      can_claim_or_dispatch: false,
+      can_resolve_without_receipt: false,
+      cross_group_authorization_allowed: false,
+      policy: "visibility_only_group_scoped_no_claim_no_dispatch_no_resolution_no_task_no_approval_no_delete",
     },
   };
 }
@@ -4925,7 +5143,22 @@ function localActionToAgenticDecision(localIntent: LocalIntentResult | null, run
     };
   }
   if (!localIntent?.action?.type) {
-    return { state: "answer", message: "当前统一大模型不可用。我不会依据关键词擅自操作项目；请先检查统一大模型配置后再试。", tool: null };
+    if (localIntent?.intent?.category === "conversation") {
+      return { state: "answer", message: localIntent.reply, tool: null, intent: localIntent.intent };
+    }
+    return {
+      state: "answer",
+      message: "当前统一大模型不可用。我不会依据关键词擅自操作项目；请先检查统一大模型配置后再试。",
+      tool: null,
+      intent: {
+        category: "question",
+        goal: run.user_message,
+        action_required: false,
+        confidence: 0.2,
+        authorization_basis: "none",
+        reason: "模型不可用，未执行任何操作",
+      },
+    };
   }
   const action = localIntent.action;
   const toolName = action.type === "system_status" ? "inspect_system" : action.type;
@@ -4956,21 +5189,53 @@ function createMissionSupervisorRuntime(ctx: CollabCtx): GlobalMissionSupervisor
       recordGlobalMissionMemory({ missionId: record.mission_id, sessionId: record.session_id, traceId: record.trace_id, source: record.source, status: "completed", report });
       if (record.global_run_id) completeGlobalAgentSupervision(record.global_run_id, { ...report, formatted }, "completed");
       if (/feishu/i.test(record.source)) {
-        await sendFeishuReportMessage({ title: "全局 Agent 最终交付报告", markdown: formatted });
+        bindFeishuIdentifiersFromValue(record.session_id, report);
+        bindFeishuTaskContext({ sessionId: record.session_id, runIds: [record.global_run_id], missionIds: [record.mission_id], source: record.source });
+        const delivered = await notifyFeishuTaskStage({ stage: "completion", title: "任务已经完成", markdown: formatted, sessionId: record.session_id, runId: record.global_run_id, missionId: record.mission_id, dedupeKey: `mission:${record.mission_id}:completed` });
+        if (delivered.reason === "no_binding") await sendFeishuReportMessage({ title: "全局 Agent 最终交付报告", markdown: formatted });
       }
     },
     onProgress: async (record, event) => {
       if (event?.type === "waiting_user") recordGlobalMissionMemory({ missionId: record.mission_id, sessionId: record.session_id, traceId: record.trace_id, source: record.source, status: "waiting_user", report: { summary: `全局任务等待人工处理`, remaining_items: (event.items || []).map((item: any) => item.reason || item.task_id) } });
       if (record.global_run_id && event?.type === "waiting_user") updateGlobalAgentSupervisionState(record.global_run_id, "waiting_user");
-      if (event?.type !== "waiting_user" || !/feishu/i.test(record.source)) return;
-      const lines = (event.items || []).map((item: any) => `- ${item.task_id || "任务"}: ${item.reason || "需要人工处理"}`);
-      await sendFeishuReportMessage({ title: "全局 Agent 等待人工处理", markdown: `全局任务 ${record.mission_id} 自动恢复已达到安全上限：\n${lines.join("\n")}` });
+      if (!/feishu/i.test(record.source)) return;
+      const taskIds = [
+        ...(event.items || []).map((item: any) => item.task_id || item.taskId),
+        ...(event.actions || []).map((item: any) => item.task_id || item.taskId),
+      ].filter(Boolean);
+      bindFeishuTaskContext({ sessionId: record.session_id, runIds: [record.global_run_id], missionIds: [record.mission_id], taskIds, source: record.source });
+      if (event?.type === "waiting_user") {
+        const lines = (event.items || []).map((item: any) => `- ${item.reason || "需要你补充信息"}`);
+        const markdown = `任务暂时需要你的帮助：\n${lines.join("\n")}`;
+        const delivered = await notifyFeishuTaskStage({ stage: "waiting_user", title: "任务需要你补充信息", markdown, sessionId: record.session_id, missionId: record.mission_id, dedupeKey: `mission:${record.mission_id}:waiting-user:${record.cycle_count}` });
+        if (delivered.reason === "no_binding") await sendFeishuReportMessage({ title: "全局 Agent 等待人工处理", markdown });
+        return;
+      }
+      if (event?.type === "actions" && event.actions?.length) {
+        const actionLabels: Record<string, string> = {
+          gate_gap_rework: "验收发现缺口，已安排定向返工",
+          failure_rework: "执行遇到问题，已安排返工",
+          runtime_recovery: "执行通道异常，正在恢复原任务",
+          stalled_recovery: "任务停滞，已从原进度继续恢复",
+          merge_conflict_rework: "代码合并出现冲突，已安排定向处理",
+          merge_failed: "代码合并未通过，正在处理",
+          worktree_merged: "项目代码已经合并，正在继续验收",
+          dependency_released: "前置任务已完成，后续工作开始执行",
+          queue_recovered: "任务已重新进入执行队列",
+        };
+        const lines = event.actions.map((item: any) => `- ${actionLabels[item.type] || "任务进度已经更新"}`);
+        await notifyFeishuTaskStage({ stage: "rework", title: "任务进度更新", markdown: [...new Set(lines)].join("\n"), sessionId: record.session_id, missionId: record.mission_id, dedupeKey: `mission:${record.mission_id}:actions:${record.cycle_count}` });
+      }
     },
     onTerminal: async (record, outcome, report) => {
       recordGlobalMissionMemory({ missionId: record.mission_id, sessionId: record.session_id, traceId: record.trace_id, source: record.source, status: outcome, report });
       if (record.global_run_id) completeGlobalAgentSupervision(record.global_run_id, report, outcome);
       if (/feishu/i.test(record.source)) {
-        await sendFeishuReportMessage({ title: outcome === "cancelled" ? "全局任务已取消" : "全局任务监督失败", markdown: report?.summary || "全局任务未完成" });
+        bindFeishuTaskContext({ sessionId: record.session_id, runIds: [record.global_run_id], missionIds: [record.mission_id], source: record.source });
+        const title = outcome === "cancelled" ? "任务已取消" : "任务执行遇到问题";
+        const markdown = report?.summary || "任务未完成，我已经保留执行记录供排查。";
+        const delivered = await notifyFeishuTaskStage({ stage: outcome, title, markdown, sessionId: record.session_id, missionId: record.mission_id, dedupeKey: `mission:${record.mission_id}:terminal:${outcome}` });
+        if (delivered.reason === "no_binding") await sendFeishuReportMessage({ title, markdown });
       }
     },
   };
@@ -5052,16 +5317,6 @@ async function executeAgenticTool(baseUrl: string, ctx: CollabCtx, name: string,
       observation = { success: true, query: args.query, content: queryKnowledgeBase(String(args.query || "")) || "未检索到相关知识" };
     } else if (name === "query_global_memory") {
       observation = { success: true, query: args.query, ...recallGlobalAgentMemory(String(args.query || ""), { sessionId: run.session_id, limit: Number(args.limit || 8) }) };
-    } else if (name === "query_group_memory") {
-      observation = {
-        success: true,
-        query: args.query,
-        group_memory_context: buildGlobalGroupMemoryContext(String(args.query || run.user_message || ""), {
-          sessionId: run.session_id,
-          maxGroups: Number(args.max_groups || args.maxGroups || args.limit || 8),
-          maxTypedMemory: Number(args.max_typed_memory || args.maxTypedMemory || 4),
-        }),
-      };
     } else if (name === "manage_global_memory") {
       const operation = String(args.operation || "").toLowerCase();
       if (operation !== "status" && !String(args.reason || "").trim()) throw new Error("全局记忆变更操作必须说明原因");
@@ -5082,7 +5337,7 @@ async function executeAgenticTool(baseUrl: string, ctx: CollabCtx, name: string,
       const supervisor = getGlobalMissionSupervisor(String(args.id || ""));
       if (!supervisor) throw new Error("全局任务监工不存在");
       observation = { success: true, supervisor, mission: getGlobalDevelopmentMission(supervisor.mission_id) };
-    } else if (name === "orchestrate_development" || name === "send_project_cmd") {
+    } else if (name === "orchestrate_development" || name === "send_project_cmd" || name === "create_task") {
       const missionArgs = name === "send_project_cmd"
         ? buildGlobalSingleProjectMissionPayload({
             project: String(args.project || args.projectName || ""),
@@ -5094,14 +5349,52 @@ async function executeAgenticTool(baseUrl: string, ctx: CollabCtx, name: string,
             source: run.source || "global-agent-single-project-dispatch",
             idempotencyKey: args.idempotency_key || `${run.id}:single-project-mission`,
           })
-        : {
+        : name === "create_task"
+          ? {
+              title: args.title || "全局 Agent 下发的协作任务",
+              business_goal: args.business_goal || args.businessGoal || args.goal || args.message || run.original_user_message || run.user_message,
+              source_documents: args.source_documents || args.sourceDocuments || run.user_message || "",
+              source_attachments: args.source_attachments || args.sourceAttachments || (run as any).source_attachments || [],
+              requirement_extraction: args.requirement_extraction || args.requirementExtraction || (run as any).requirement_extraction || null,
+              source_ingestion: args.source_ingestion || args.sourceIngestion || (run as any).source_ingestion || null,
+              acceptance: args.acceptance || args.acceptance_criteria || [
+                "群聊主 Agent 必须创建计划并派发项目子 Agent。",
+                "群聊主 Agent 必须验收项目子 Agent 的实际变更和验证证据。",
+                "涉及独立复核时由群聊主 Agent 调用 TestAgent，并负责返工、复验和最终总结。",
+              ].join("；"),
+              targets: [{
+                type: "group",
+                group_id: args.group_id || args.groupId || "",
+                task: args.business_goal || args.businessGoal || args.goal || args.message || run.original_user_message || run.user_message,
+                reason: "全局 Agent 将复杂任务交给群聊主 Agent 计划、派发、验收和总结。",
+                requires_code_changes: args.requires_code_changes !== false,
+                requires_verification: args.requires_verification !== false,
+                requires_independent_review: args.requires_independent_review !== false,
+              }],
+              requires_code_changes: args.requires_code_changes !== false,
+              requires_verification: args.requires_verification !== false,
+              requires_independent_review: args.requires_independent_review !== false,
+              auto_execute: args.auto_execute !== false,
+              source: run.source || "global-agent-create-task",
+              trace_id: run.trace_id,
+              idempotency_key: args.idempotency_key || `${run.id}:group-mission`,
+            }
+          : {
             ...args,
+            source_documents: args.source_documents || args.sourceDocuments || run.user_message || "",
+            source_attachments: args.source_attachments || args.sourceAttachments || (run as any).source_attachments || [],
+            requirement_extraction: args.requirement_extraction || args.requirementExtraction || (run as any).requirement_extraction || null,
+            source_ingestion: args.source_ingestion || args.sourceIngestion || (run as any).source_ingestion || null,
             source: run.source || "global-agent",
             trace_id: run.trace_id,
             idempotency_key: args.idempotency_key || `${run.id}:mission`,
           };
       const missionResult = createGlobalDevelopmentMission({
         ...missionArgs,
+        source_documents: missionArgs.source_documents || missionArgs.sourceDocuments || run.user_message || "",
+        source_attachments: missionArgs.source_attachments || missionArgs.sourceAttachments || (run as any).source_attachments || [],
+        requirement_extraction: missionArgs.requirement_extraction || missionArgs.requirementExtraction || (run as any).requirement_extraction || null,
+        source_ingestion: missionArgs.source_ingestion || missionArgs.sourceIngestion || (run as any).source_ingestion || null,
       }, ctx);
       const supervisor = startGlobalMissionSupervisor({
         mission_id: missionResult.mission.id,
@@ -5138,6 +5431,33 @@ async function executeAgenticTool(baseUrl: string, ctx: CollabCtx, name: string,
       observation = await postLocalApi(baseUrl, "/api/global-agent/git-review", { project: args.project });
     } else if (name === "git_commit") {
       observation = await postLocalApi(baseUrl, "/api/git/commit", { project: args.project, message: args.message || "chore: 由全局 Agent 提交变更", files: args.files || [] });
+    } else if (name === "create_pet_from_image") {
+      const attachments = Array.isArray((run as any).source_attachments)
+        ? (run as any).source_attachments
+        : Array.isArray((run as any).sourceAttachments) ? (run as any).sourceAttachments : [];
+      const imageAttachment = attachments.find((item: any) => {
+        const kind = String(item?.kind || item?.type || item?.mime_type || item?.mimeType || "").toLowerCase();
+        const filePath = item?.path || item?.savedPath || item?.localPath || item?.filePath;
+        return Boolean(filePath) && (kind === "image" || kind.startsWith("image/") || /\.(png|jpe?g|webp)$/i.test(String(filePath)));
+      });
+      const attachmentPath = imageAttachment?.path || imageAttachment?.savedPath || imageAttachment?.localPath || imageAttachment?.filePath;
+      const referencePath = String(args.reference_path || args.referencePath || attachmentPath || "").trim();
+      if (!referencePath) throw new Error("请先上传一张 PNG、JPG 或 WebP 参考图片");
+      const job = createPetGenerationJob({
+        referencePath,
+        name: args.name || args.pet_name || args.petName || imageAttachment?.name || "我的宠物",
+        description: args.description || args.prompt || "",
+        style: args.style || "auto",
+        targetAgent: args.target_agent || args.targetAgent || "global-agent",
+      });
+      ctx.setAgentActivity(GLOBAL_PET_AGENT_NAME, "building", `正在根据参考图创建宠物「${job.name}」`, { tab: "pets" }, 30 * 60 * 1000);
+      ctx.broadcastPetSpeech(GLOBAL_PET_AGENT_NAME, { role: "status", text: `宠物「${job.name}」已开始生成，我会制作并校验完整动作。`, source: "global" });
+      observation = {
+        success: true,
+        message: `宠物「${job.name}」已经进入生成队列。生成完成并通过动作校验后会自动应用到全局 Agent。`,
+        job: { id: job.id, name: job.name, status: job.status, progress: job.progress, targetAgent: job.targetAgent },
+        client_effect: { type: "navigate", params: { tab: "pets" } },
+      };
     } else if (name === "create_template") {
       observation = await postLocalApi(baseUrl, "/api/templates", { name: args.name, category: args.category || "custom", prompt: args.content || args.prompt || "" });
     } else {
@@ -5167,16 +5487,35 @@ async function executeAgenticTool(baseUrl: string, ctx: CollabCtx, name: string,
   }
 }
 
-function createAgenticRuntime(baseUrl: string, ctx: CollabCtx, input: { localIntent?: LocalIntentResult | null; onEvent?: (event: any) => void } = {}): GlobalAgentLoopRuntime {
+function attachGlobalRunRequirementSources(run: GlobalAgentRun, ingestion?: RequirementIngestionResult | null) {
+  if (!ingestion?.sources?.length) return;
+  (run as any).source_ingestion = ingestion.technical;
+  (run as any).sourceIngestion = ingestion.technical;
+  (run as any).source_attachments = ingestion.attachments;
+  (run as any).sourceAttachments = ingestion.attachments;
+  (run as any).requirement_extraction = ingestion.requirement;
+  (run as any).requirementExtraction = ingestion.requirement;
+}
+
+function createAgenticRuntime(baseUrl: string, ctx: CollabCtx, input: { localIntent?: LocalIntentResult | null; onEvent?: (event: any) => void; sourceIngestion?: RequirementIngestionResult | null } = {}): GlobalAgentLoopRuntime {
   const config = loadOrchestratorConfig();
   return {
-    callModel: async (messages) => {
+    callModel: async (messages, run) => {
+      attachGlobalRunRequirementSources(run, input.sourceIngestion);
       if (!config.apiKey || !config.apiUrl || !config.model) throw new Error("统一大模型尚未配置");
-      return callLlm(config, messages);
+      return callGlobalModelWithRetry(config, messages);
     },
     getContext: (run) => buildAgenticContext(run.user_message, run.session_id),
-    executeTool: (name, args, run) => executeAgenticTool(baseUrl, ctx, name, args, run, input.onEvent),
-    fallbackDecision: (run) => localActionToAgenticDecision(input.localIntent || null, run),
+    executeTool: (name, args, run) => {
+      attachGlobalRunRequirementSources(run, input.sourceIngestion);
+      return executeAgenticTool(baseUrl, ctx, name, args, run, input.onEvent);
+    },
+    fallbackDecision: (run, error) => {
+      const detail = compactPetText(error?.message || error || "统一大模型调用失败", 800);
+      console.warn(`[全局 Agent] 模型决策失败，已进入安全兜底：${detail}`);
+      recordGlobalAgentRuntimeOutput(run, { type: "model_fallback", status: "warning", error: detail });
+      return localActionToAgenticDecision(input.localIntent || null, run);
+    },
     onEvent: input.onEvent ? (event) => input.onEvent!(event) : undefined,
   };
 }
@@ -5189,11 +5528,12 @@ async function runAgenticGlobalRequest(baseUrl: string, ctx: CollabCtx, input: {
   traceId?: string;
   clarificationRunId?: string;
   onEvent?: (event: any) => void;
+  sourceIngestion?: RequirementIngestionResult | null;
 }) {
   const projects = getConfigs().map((item: any) => item.name);
   const groups = loadGroups();
   const localIntent = inferLocalGlobalAction(input.message, projects, groups, { cronJobs: loadCronJobs(), tasks: loadTasks(), mcpTools: loadMcpTools(), skills: loadSkills() });
-  const runtime = createAgenticRuntime(baseUrl, ctx, { localIntent, onEvent: input.onEvent });
+  const runtime = createAgenticRuntime(baseUrl, ctx, { localIntent, onEvent: input.onEvent, sourceIngestion: input.sourceIngestion });
   const sessionId = input.sessionId || "default";
   if (!/feishu/i.test(input.source || "")) {
     try {
@@ -5227,6 +5567,7 @@ async function runAgenticGlobalRequest(baseUrl: string, ctx: CollabCtx, input: {
         maxSteps: 10,
         timeoutMs: 12 * 60 * 1000,
       }, runtime);
+  attachGlobalRunRequirementSources(run, input.sourceIngestion);
   if (!/feishu/i.test(input.source || "")) {
     try {
       ingestGlobalAgentConversation({
@@ -5317,6 +5658,9 @@ function publicGlobalAgentRun(run: GlobalAgentRun | null, includeObservations = 
     supervision_state: run.supervision_state,
     final_delivery_report: run.final_delivery_report,
     final_report: run.final_report,
+    source_ingestion: (run as any).source_ingestion || null,
+    source_attachments: (run as any).source_attachments || [],
+    requirement_extraction: (run as any).requirement_extraction || null,
     display_stream: run.display_stream,
     displayStream: run.display_stream,
     workchain: run.workchain,
@@ -5431,7 +5775,9 @@ function buildPublicGlobalStatusRun(input: { message: string; reply: string; ses
 async function processFeishuGlobalAgentMessage(baseUrl: string, ctx: CollabCtx, text: string, payload: any, options: { sendReport?: boolean; traceId?: string } = {}) {
   const sendReport = options.sendReport !== false;
   const traceId = ensureTraceId(options.traceId, "feishu");
-  const conversationId = buildFeishuConversationId(payload);
+  const conversationId = resolveFeishuGlobalAgentSessionId(payload);
+  const destination = recordFeishuInbound({ payload, sessionId: conversationId, messageId: getFeishuMessageId(payload) });
+  bindFeishuTaskContext({ sessionId: conversationId, destination, source: "feishu-control-bot" });
   const historyBeforeUser = getGlobalAgentConversationMessages(conversationId);
   appendGlobalAgentConversationMessage(conversationId, "user", text, "feishu");
   const auditBase = {
@@ -5471,14 +5817,34 @@ async function processFeishuGlobalAgentMessage(baseUrl: string, ctx: CollabCtx, 
         cancelled: /^取消/i.test(confirmationMatch[1]),
       });
     } else {
+      const onFeishuRuntimeEvent = (event: any) => {
+        bindFeishuIdentifiersFromValue(conversationId, event, destination);
+        const presentation = feishuRuntimeEventPresentation(event);
+        if (!presentation) return;
+        void notifyFeishuTaskStage({
+          ...presentation,
+          sessionId: conversationId,
+          dedupeKey: `runtime:${traceId}:${event?.type || "event"}:${event?.tool || event?.name || ""}:${event?.task_id || event?.taskId || ""}`,
+        });
+      };
       run = await runAgenticGlobalRequest(baseUrl, ctx, {
         message: text,
         history: historyBeforeUser.map((item: any) => ({ role: item.role, content: item.content })),
         sessionId: conversationId,
         source: "feishu-control-bot",
         traceId,
+        onEvent: onFeishuRuntimeEvent,
       });
     }
+    const missionSnapshot = run.mission_id ? getGlobalDevelopmentMission(run.mission_id) : null;
+    bindFeishuTaskContext({
+      sessionId: conversationId,
+      destination,
+      runIds: [run.id],
+      missionIds: [run.mission_id],
+      taskIds: [run.mission_id, ...(missionSnapshot?.children || []).map((item: any) => item.id)],
+      source: "feishu-control-bot",
+    });
     const confirmationHint = run.status === "waiting_confirmation"
       ? `\n\n待确认操作：${run.pending_tool?.name || "写入操作"}\n运行 ID：${run.id}\n回复“确认 ${run.id}”继续，或回复“取消 ${run.id}”。`
       : "";
@@ -5573,7 +5939,7 @@ export function handleGlobalAgentApi(
           sendJson(res, { success: false, error: "未从控制机器人载荷中识别到文本消息" }, 400);
           return;
         }
-        const conversationId = buildFeishuConversationId(payload);
+        const conversationId = resolveFeishuGlobalAgentSessionId(payload);
         const messageId = getFeishuMessageId(payload);
         const operationKey = messageId ? `${conversationId}:${messageId}` : "";
         const operation = operationKey ? acquireIdempotency({ scope: "feishu-control-message", key: operationKey, leaseMs: 11 * 60 * 1000, metadata: { conversation_id: conversationId, message_id: messageId } }) : null;
@@ -6247,9 +6613,13 @@ export function handleGlobalAgentApi(
       };
       try {
         let message = String(payload.message || "").trim();
-        if (files.length) {
-          const fileContext = buildUploadedFilesContext(files, "本次消息附件");
-          message = message ? `${message}\n\n${fileContext}` : `请处理以下附件：\n${fileContext}`;
+        const sourceIngestion = await ingestRequirementSources({
+          files,
+          userText: message,
+          extractRequirement: files.length > 0 || /https?:\/\//i.test(message),
+        });
+        if (sourceIngestion.agent_context) {
+          message = message ? `${message}${sourceIngestion.agent_context}` : `请处理以下资料：${sourceIngestion.agent_context}`;
         }
         if (!message) throw new Error("消息不能为空");
         let history: any[] = [];
@@ -6308,6 +6678,7 @@ export function handleGlobalAgentApi(
           source: "web",
           traceId: operation?.traceId,
           clarificationRunId: payload.clarification_run_id || payload.clarificationRunId || "",
+          sourceIngestion,
           onEvent: (event: any) => {
             emit(event);
             relayGlobalPetEvent(ctx, event);
@@ -6377,9 +6748,13 @@ export function handleGlobalAgentApi(
       };
       try {
         let message = String(payload.message || "").trim();
-        if (files.length) {
-          const fileContext = buildUploadedFilesContext(files, "本次消息附件");
-          message = message ? `${message}\n\n${fileContext}` : `请处理以下附件：\n${fileContext}`;
+        const sourceIngestion = await ingestRequirementSources({
+          files,
+          userText: message,
+          extractRequirement: files.length > 0 || /https?:\/\//i.test(message),
+        });
+        if (sourceIngestion.agent_context) {
+          message = message ? `${message}${sourceIngestion.agent_context}` : `请处理以下资料：${sourceIngestion.agent_context}`;
         }
         if (!message) throw new Error("消息不能为空");
         let history: any[] = [];
@@ -6415,6 +6790,7 @@ export function handleGlobalAgentApi(
           history,
           sessionId,
           source: "legacy-chat-proxy",
+          sourceIngestion,
           onEvent: emit,
         });
         const result = publicGlobalAgentRun(run);
@@ -6577,10 +6953,17 @@ async function callLlm(config: any, messages: any[]): Promise<string> {
       };
     }
 
+    const requestBody = JSON.stringify(bodyObj);
+    const requestBytes = Buffer.byteLength(requestBody);
+    const maxRequestBytes = 512 * 1024;
+    if (requestBytes > maxRequestBytes) {
+      throw new Error(`统一大模型请求上下文过大：${requestBytes} bytes，安全上限 ${maxRequestBytes} bytes`);
+    }
+
     const response = await fetch(endpoint, {
       method: "POST",
       headers,
-      body: JSON.stringify(bodyObj),
+      body: requestBody,
       signal: controller.signal
     });
 
@@ -6598,5 +6981,62 @@ async function callLlm(config: any, messages: any[]): Promise<string> {
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function shouldRetryGlobalModelError(error: any) {
+  const message = String(error?.message || error || "");
+  const status = Number(message.match(/HTTP\s+(\d{3})/i)?.[1] || 0);
+  if (status >= 400 && status < 500 && ![408, 409, 425, 429].includes(status)) return false;
+  return true;
+}
+
+async function callGlobalModelWithRetry(config: any, messages: any[], options: { attempts?: number; delayMs?: number; call?: (config: any, messages: any[]) => Promise<string> } = {}) {
+  const attempts = Math.max(1, Math.min(3, Number(options.attempts || 2)));
+  const delayMs = Math.max(0, Math.min(5_000, Number(options.delayMs ?? 500)));
+  const call = options.call || callLlm;
+  let lastError: any = null;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      return await call(config, messages);
+    } catch (error: any) {
+      lastError = error;
+      if (attempt >= attempts || !shouldRetryGlobalModelError(error)) throw error;
+      console.warn(`[全局 Agent] 统一大模型调用暂时失败，正在重试（${attempt + 1}/${attempts}）：${compactPetText(error?.message || error, 240)}`);
+      if (delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs));
+    }
+  }
+  throw lastError;
+}
+
+export async function runGlobalModelRetrySelfTest() {
+  let transientCalls = 0;
+  const transient = await callGlobalModelWithRetry({}, [], {
+    attempts: 2,
+    delayMs: 0,
+    call: async () => {
+      transientCalls += 1;
+      if (transientCalls === 1) throw new Error("统一大模型 API 调用失败: HTTP 503 - temporary");
+      return "ok";
+    },
+  });
+  let permanentCalls = 0;
+  let permanentRejected = false;
+  try {
+    await callGlobalModelWithRetry({}, [], {
+      attempts: 2,
+      delayMs: 0,
+      call: async () => {
+        permanentCalls += 1;
+        throw new Error("统一大模型 API 调用失败: HTTP 400 - invalid request");
+      },
+    });
+  } catch {
+    permanentRejected = true;
+  }
+  const checks = {
+    transientFailureRetriesOnce: transient === "ok" && transientCalls === 2,
+    permanentClientErrorDoesNotRetry: permanentRejected && permanentCalls === 1,
+  };
+  return { pass: Object.values(checks).every(Boolean), checks };
 }
 

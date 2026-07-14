@@ -13,6 +13,7 @@ export interface TestAgentCliOptions {
   help: boolean;
   validateOnly: boolean;
   planOnly: boolean;
+  invocationJson: boolean;
   summary: boolean;
   json: boolean;
   artifactDir?: string;
@@ -37,6 +38,7 @@ export function testAgentCliUsage() {
     "Options:",
     "  --validate-only              Validate the work order contract without executing checks.",
     "  --plan-only                  Print the normalized execution plan without running checks.",
+    "  --invocation-json            Print the validated invocation result, including canAccept and artifact verification.",
     "  --from-handoff <file>        Build a work order from a group-main-agent handoff JSON file.",
     "  --verify-artifacts <file>    Verify an artifact-manifest.json integrity bundle.",
     "  --self-test-matrix           Run exported TestAgent self-tests in isolated child processes.",
@@ -84,6 +86,7 @@ export function parseTestAgentCliArgs(args: string[]): TestAgentCliParseResult {
     help: false,
     validateOnly: false,
     planOnly: false,
+    invocationJson: false,
     summary: false,
     json: true,
   };
@@ -97,6 +100,8 @@ export function parseTestAgentCliArgs(args: string[]): TestAgentCliParseResult {
       options.validateOnly = true;
     } else if (arg === "--plan-only") {
       options.planOnly = true;
+    } else if (arg === "--invocation-json") {
+      options.invocationJson = true;
     } else if (arg === "--verify-artifacts" || arg.startsWith("--verify-artifacts=")) {
       const { value, consumed } = readValue(args, i, "--verify-artifacts");
       if (!value || value.startsWith("--")) errors.push("--verify-artifacts requires an artifact manifest file.");
@@ -179,6 +184,10 @@ export function parseTestAgentCliArgs(args: string[]): TestAgentCliParseResult {
   if (!options.selfTestMatrix && options.selfTestStopOnFailure) errors.push("--self-test-stop-on-failure requires --self-test-matrix.");
   if (!options.selfTestMatrix && options.selfTestModulePath) errors.push("--self-test-module requires --self-test-matrix.");
   if (options.validateOnly && options.planOnly) errors.push("--validate-only cannot be combined with --plan-only.");
+  if (options.invocationJson && options.planOnly) errors.push("--invocation-json cannot be combined with --plan-only.");
+  if (options.invocationJson && options.validateOnly) errors.push("--invocation-json cannot be combined with --validate-only.");
+  if (options.invocationJson && options.summary) errors.push("--invocation-json cannot be combined with --summary.");
+  if (options.invocationJson && (options.verifyArtifactsPath || options.selfTestMatrix)) errors.push("--invocation-json requires a handoff or work order.");
   return { options, errors };
 }
 

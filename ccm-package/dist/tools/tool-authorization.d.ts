@@ -34,12 +34,31 @@ export declare function buildAuthorizationReadiness(toolAudit: any, tools: ToolG
         skill: any;
     };
 };
+export declare function buildToolConnectionPreflight(toolAudit: any, tools: ToolGrantSet): {
+    schema: string;
+    status: string;
+    ready: boolean;
+    checkedAt: string;
+    summary: {
+        configured: number;
+        ready: number;
+        needsAttention: number;
+    };
+    checks: any[];
+};
 export declare function normalizeToolAuthorization(input?: any): ToolGrantSet;
 export declare function buildToolAuthorizationPayload(input?: any): {
     tools: ToolGrantSet;
     tool_audit: any;
     authorization_readiness: any;
+    connection_preflight: any;
 };
+export declare function buildFreshToolAuthorizationPayload(input?: any): Promise<{
+    tools: ToolGrantSet;
+    tool_audit: any;
+    authorization_readiness: any;
+    connection_preflight: any;
+}>;
 export declare function buildToolAuthorizationChangeRecord(input: {
     scope: "project" | "group" | string;
     scopeId: string;
@@ -130,6 +149,7 @@ export declare function runToolAuthorizationSelfTest(): {
         inventoryHidesScopeSecrets: boolean;
         inventorySummarizesRuntimeCoverage: boolean;
         inventoryAttachesProjectRuntimeCoverage: boolean;
+        inventoryUsesLatestSnapshotAfterRuntimeSwitch: boolean;
         inventoryAttachesGroupRuntimeCoverage: boolean;
         inventoryHidesRuntimePaths: boolean;
     };

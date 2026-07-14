@@ -1,11 +1,11 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { toast, confirmDialog } from '../../utils/toast.js'
+import { toast } from '../../utils/toast.js'
 import PetAgentList from './PetAgentList.vue'
 import PetSkinGrid from './PetSkinGrid.vue'
 import PetAssetGrid from './PetAssetGrid.vue'
-import PetCreateModal from './PetCreateModal.vue'
-import PetSkinCreateModal from './PetSkinCreateModal.vue'
+import PetGenerationModal from './PetGenerationModal.vue'
+import PetSprite from './PetSprite.vue'
 
 const props = defineProps({
   agents: { type: Array, default: () => [] },
@@ -114,6 +114,9 @@ const fallbackPetTypes = [
 const petTypes = computed(() => {
   return [...fallbackPetTypes, ...customPetTypes.value]
 })
+const editablePetTypes = computed(() => petTypes.value.filter(pet => Number(pet.spriteVersionNumber) !== 2))
+const getPetTypeInfo = (type) => petTypes.value.find(pet => pet.id === type) || null
+const isV2PetType = (type) => Number(getPetTypeInfo(type)?.spriteVersionNumber) === 2
 
 const normalizePetType = (type) => {
   const id = String(type || '').trim()
@@ -577,7 +580,7 @@ const isMusicAgentSelected = computed(() => selectedAgent.value === MUSIC_PET_AG
 const isSystemAgentSelected = computed(() => [GLOBAL_PET_AGENT_NAME, MUSIC_PET_AGENT_NAME].includes(selectedAgent.value))
 
 const workspaceMood = computed(() => {
-  if (desktopPetRunning.value) return { key: 'working', label: '桌宠在线', detail: '桌面宠物引擎正在运行，音乐 Agent 和自定义宠物可显示到桌面。', progress: 72 }
+  if (desktopPetRunning.value) return { key: 'working', label: '桌宠在线', detail: '桌面宠物引擎正在运行，全局 Agent 和音乐 Agent 会显示到桌面。', progress: 72 }
   return { key: 'idle', label: '安静待命', detail: '启动桌面宠物引擎后，独立宠物会出现在 Windows 桌面上。', progress: 24 }
 })
 
@@ -585,7 +588,7 @@ const companionSignals = computed(() => [
   { label: '引擎', value: desktopPetRunning.value ? '运行' : '停止' },
   { label: '全局', value: props.agents.some(agent => agent.name === GLOBAL_PET_AGENT_NAME) ? '可选' : '未连接' },
   { label: '音乐', value: props.agents.some(agent => agent.name === MUSIC_PET_AGENT_NAME) ? '可选' : '未连接' },
-  { label: '挂件', value: Math.max(0, allPetAgents.value.length - props.agents.length) },
+  { label: '皮肤', value: petTypes.value.length },
 ])
 
 const syncAgentLabelDraft = () => {
@@ -640,114 +643,16 @@ const toggleAll = () => {
   saveConfigs()
 }
 
-const showCreateModal = ref(false)
-const newPetLabel = ref('')
-const newPetType = ref(BUILTIN_FALLBACK_PET_TYPE)
+const showGenerationModal = ref(false)
 
 const allPetAgents = computed(() => {
-  const list = [...props.agents]
-  const projectNames = new Set(props.projects.map(a => a.name || a.project).filter(Boolean))
   const systemPetNames = new Set([GLOBAL_PET_AGENT_NAME, MUSIC_PET_AGENT_NAME])
-  
-  for (const name of Object.keys(petConfigs.value)) {
-    if (!systemPetNames.has(name) && !projectNames.has(name)) {
-      const cfg = petConfigs.value[name]
-      list.push({
-        name: name,
-        displayName: cfg.label || name,
-        petLabel: cfg.label || name,
-        virtual: true,
-        type: 'custom'
-      })
-    }
-  }
-  return list
+  return props.agents.filter(agent => systemPetNames.has(agent.name))
 })
 
-const createCustomPet = async () => {
-  const label = newPetLabel.value.trim()
-  if (!label) {
-    toast.warning('请输入宠物昵称')
-    return
-  }
-  const id = `custom-pet-${Date.now()}`
-  petConfigs.value = {
-    ...petConfigs.value,
-    [id]: {
-      type: newPetType.value,
-      enabled: true,
-      label: label,
-      size: 150
-    }
-  }
-  await saveConfigs()
-  showCreateModal.value = false
-  newPetLabel.value = ''
-  selectedAgent.value = id
-  syncAgentLabelDraft()
-  toast.success('自定义宠物创建成功！已添加至桌面。')
+const handleGenerationCompleted = async () => {
+  await loadConfigs()
   emit('agents-updated')
-}
-
-const isCustomPet = (agentName) => {
-  if (!agentName || [GLOBAL_PET_AGENT_NAME, MUSIC_PET_AGENT_NAME].includes(agentName)) return false
-  const projectNames = new Set(props.projects.map(a => a.name || a.project).filter(Boolean))
-  return !projectNames.has(agentName)
-}
-
-const deleteCustomPet = async (agentName) => {
-  if (!(await confirmDialog('确定要删除这只自定义宠物吗？它将从桌面消失。'))) return
-  const newConfigs = { ...petConfigs.value }
-  delete newConfigs[agentName]
-  petConfigs.value = newConfigs
-  await saveConfigs()
-  selectedAgent.value = allPetAgents.value.length > 0 ? allPetAgents.value[0].name : null
-  syncAgentLabelDraft()
-  toast.success('已成功删除自定义宠物')
-  emit('agents-updated')
-}
-
-const showCreateSkinModal = ref(false)
-const newSkinId = ref('')
-const newSkinLabel = ref('')
-const newSkinEmoji = ref('🐱')
-const newSkinColor = ref('#3f3f46')
-const newSkinFormat = ref('png')
-
-const createCustomSkin = async () => {
-  const id = newSkinId.value.trim().toLowerCase()
-  const label = newSkinLabel.value.trim()
-  if (!id || !label) {
-    toast.warning('请输入皮肤 ID 和名称')
-    return
-  }
-  if (!/^[a-z0-9_-]+$/.test(id)) {
-    toast.warning('皮肤 ID 必须由小写字母、数字、下划线或连字符组成')
-    return
-  }
-  if (petTypes.value.some(p => p.id === id)) {
-    toast.warning('此皮肤 ID 已存在')
-    return
-  }
-  customPetTypes.value.push({
-    id: id,
-    name: label,
-    emoji: newSkinEmoji.value.trim() || '🐱',
-    color: newSkinColor.value || '#3f3f46',
-    format: newSkinFormat.value || 'png'
-  })
-  await saveConfigs()
-  showCreateSkinModal.value = false
-  newSkinId.value = ''
-  newSkinLabel.value = ''
-  newSkinEmoji.value = '🐱'
-  newSkinColor.value = '#3f3f46'
-  newSkinFormat.value = 'png'
-  
-  if (selectedAgent.value) {
-    updatePetType(selectedAgent.value, id)
-  }
-  toast.success(`宠物外观“${label}”创建成功！请在右侧选择它并上传动作图片。`)
 }
 
 const isCustomSkin = (type) => {
@@ -770,7 +675,7 @@ onMounted(async () => {
   await loadConfigs()
   checkDesktopPet()
   loadPetActionStrategy()
-  // 默认选择音乐宠物/自定义宠物，不再默认选择项目宠物
+  // 宠物空间只保留两个系统工作伴侣。
   if (allPetAgents.value.length > 0) {
     selectedAgent.value = allPetAgents.value[0].name
     syncAgentLabelDraft()
@@ -786,7 +691,7 @@ onMounted(async () => {
         <div class="companion-copy">
           <div class="companion-kicker">WORKSPACE COMPANION</div>
           <h2>一个安静的工作台宠物</h2>
-          <p>这里专注管理全局 Agent、音乐 Agent 和自定义挂件；项目状态回到项目管理和任务看板里展示。</p>
+          <p>这里只管理全局 Agent 与音乐 Agent；群聊、子 Agent、第三方 Agent 和 TestAgent 的工作统一映射到全局宠物。</p>
         </div>
         <div class="companion-stage" :class="workspaceMood.key">
           <div class="orbit-ring ring-one"></div>
@@ -841,7 +746,7 @@ onMounted(async () => {
         @select-agent="selectAgent"
         @toggle-agent="togglePet"
         @toggle-all="toggleAll"
-        @create-pet="showCreateModal = true"
+        @create-pet="showGenerationModal = true"
       />
     </div>
 
@@ -868,13 +773,27 @@ onMounted(async () => {
           <div v-if="rightTab === 'config'" class="config-tab-pane">
             <div v-if="!selectedAgent" class="empty-detail">
               <span class="icon">🐾</span>
-              <p>请选择全局 Agent、音乐 Agent 或自定义宠物</p>
-              <p class="sub">项目已经移到工作台星球，不再作为独立宠物配置</p>
+              <p>请选择全局 Agent 或音乐 Agent</p>
+              <p class="sub">其他执行 Agent 的工作状态会汇总到全局 Agent 宠物</p>
             </div>
             <div v-else class="config-wrapper">
               <div class="current-pet-hero">
                 <div class="hero-avatar">
-                  <img :src="getPetIconPath(getConfig(selectedAgent).type)" width="80" height="80" :class="{ pixelated: isPixelated(getConfig(selectedAgent).type) }" />
+                  <PetSprite
+                    v-if="isV2PetType(getConfig(selectedAgent).type)"
+                    :type="getConfig(selectedAgent).type"
+                    :skin="getPetTypeInfo(getConfig(selectedAgent).type)"
+                    :state="selectedAgentInfo?.state || 'idle'"
+                    :size="80"
+                  />
+                  <img
+                    v-else
+                    :src="getPetIconPath(getConfig(selectedAgent).type)"
+                    width="80"
+                    height="80"
+                    :class="{ pixelated: isPixelated(getConfig(selectedAgent).type) }"
+                    alt=""
+                  />
                 </div>
                 <div class="hero-meta">
                   <div class="hero-agent">{{ getAgentLabel(selectedAgentInfo) || selectedAgent }}</div>
@@ -907,17 +826,12 @@ onMounted(async () => {
                   :get-pet-icon-path="getPetIconPath"
                   :is-pixelated="isPixelated"
                   @select-skin="updatePetType(selectedAgent, $event)"
-                  @create-skin="showCreateSkinModal = true"
+                  @create-skin="showGenerationModal = true"
                 />
                 <!-- 仅当前装扮为自定义皮肤时，才显示彻底删除皮肤分类的按钮 -->
                 <div v-if="isCustomSkin(getConfig(selectedAgent).type)" class="delete-skin-section" style="margin-top: 24px; padding-top: 16px; border-top: 1px dashed rgba(0,0,0,0.08);">
                   <button class="btn btn-outline btn-danger btn-sm" @click="deleteCustomSkin(getConfig(selectedAgent).type)">
                     🗑️ 彻底删除“{{ petTypes.find(p => p.id === getConfig(selectedAgent).type)?.name }}”皮肤分类
-                  </button>
-                </div>
-                <div v-if="isCustomPet(selectedAgent)" class="delete-pet-section" style="margin-top: 12px; padding-top: 12px; border-top: 1px dashed rgba(0,0,0,0.08);">
-                  <button class="btn btn-danger btn-sm" @click="deleteCustomPet(selectedAgent)">
-                    🗑️ 删除此自定义宠物
                   </button>
                 </div>
               </div>
@@ -929,7 +843,8 @@ onMounted(async () => {
             <div class="gallery-grid">
               <div v-for="pt in petTypes" :key="pt.id" class="gallery-item-card">
                 <div class="item-avatar">
-                  <img :src="getPetIconPath(pt.id)" width="56" height="56" :class="{ pixelated: isPixelated(pt.id) }" />
+                  <PetSprite v-if="Number(pt.spriteVersionNumber) === 2" :type="pt.id" :skin="pt" state="idle" :size="56" />
+                  <img v-else :src="getPetIconPath(pt.id)" width="56" height="56" :class="{ pixelated: isPixelated(pt.id) }" alt="">
                 </div>
                 <div class="item-info">
                   <div class="item-title">{{ pt.emoji }} {{ pt.name }}</div>
@@ -939,7 +854,8 @@ onMounted(async () => {
                     <span v-else-if="pt.id === 'yuexinmiao'">带着金币小挂饰的月薪喵，会用呼吸、眨眼、搬运和提醒动作陪你处理任务。</span>
                     <span v-else-if="pt.id === 'cloudling'">软绵绵的可爱小云朵，会随着任务的变化展现出下雨、打雷或杂耍的有趣姿态。</span>
                     <span v-else-if="pt.id === 'calico'">三花色的小花猫，精美的 APNG 帧动画，拥有打哈欠、抓小鱼、玩杂耍等超流畅的动作细节。</span>
-                    <span v-else>自定义宠物皮肤，可上传自己的动作资源。</span>
+                    <span v-else-if="pt.generated">根据参考图生成，包含 9 组标准动作和 16 个观察方向。</span>
+                    <span v-else>自定义宠物皮肤。</span>
                   </div>
                 </div>
               </div>
@@ -997,7 +913,7 @@ onMounted(async () => {
           <PetAssetGrid
             v-if="rightTab === 'assets'"
             v-model:action-pet-type="actionPetType"
-            :pet-types="petTypes"
+            :pet-types="editablePetTypes"
             :rows="actionAssetRows"
             :image-errors="imageErrors"
             :uploading-asset="uploadingAsset"
@@ -1013,24 +929,10 @@ onMounted(async () => {
         </div>
       </div>
       
-      <PetCreateModal
-        v-if="showCreateModal"
-        v-model:label="newPetLabel"
-        v-model:type="newPetType"
-        :pet-types="petTypes"
-        @submit="createCustomPet"
-        @close="showCreateModal = false"
-      />
-
-      <PetSkinCreateModal
-        v-if="showCreateSkinModal"
-        v-model:skin-id="newSkinId"
-        v-model:label="newSkinLabel"
-        v-model:emoji="newSkinEmoji"
-        v-model:color="newSkinColor"
-        v-model:format="newSkinFormat"
-        @submit="createCustomSkin"
-        @close="showCreateSkinModal = false"
+      <PetGenerationModal
+        v-if="showGenerationModal"
+        @completed="handleGenerationCompleted"
+        @close="showGenerationModal = false"
       />
     </div>
   </div>

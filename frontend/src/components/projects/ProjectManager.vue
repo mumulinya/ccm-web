@@ -15,12 +15,16 @@ import ProjectFolderBrowserModal from './ProjectFolderBrowserModal.vue'
 import ProjectToolsModal from './ProjectToolsModal.vue'
 import ProjectSharedFilesModal from './ProjectSharedFilesModal.vue'
 import ProjectAgentSwitchModal from './ProjectAgentSwitchModal.vue'
+import ProjectWorkspaceHeader from './ProjectWorkspaceHeader.vue'
+import ProjectSessionSidebar from './ProjectSessionSidebar.vue'
+import ProjectArchiveManager from './ProjectArchiveManager.vue'
+import { PanelLeft } from '@lucide/vue'
 import { useSlashCommands } from '../../composables/useSlashCommands.js'
+import { createSlashCommandClientActions } from '../../composables/useSlashCommandClientActions.js'
 import { useChatTemplates } from '../../composables/useChatTemplates.js'
 import { useCodeChangeDrawer } from '../../composables/useCodeChangeDrawer.js'
 import { useMessageNavigation } from '../../composables/useMessageNavigation.js'
 import { usePinnedScroll } from '../../composables/usePinnedScroll.js'
-import { downloadCommandJson } from '../../utils/commandExport.js'
 import { projectExecutionTaskCard } from '../../utils/taskExperience.js'
 import { buildProjectSessionKnowledgePayload, buildProjectTaskKnowledgePayload, postKnowledgeCapture } from '../../utils/knowledgeCapture.js'
 
@@ -51,10 +55,12 @@ const handleNavigation = async () => {
     } else if (target.sessionId) {
       await nextTick()
       await selectSession(target.sessionId)
-      if (target.keyword) {
+      if (target.messageId || Number.isInteger(target.messageIndex) || target.keyword) {
         await nextTick()
-        const kw = target.keyword.toLowerCase()
-        const idx = messages.value.findIndex(m => (m.content || '').toLowerCase().includes(kw))
+        const kw = String(target.keyword || '').toLowerCase()
+        let idx = target.messageId ? messages.value.findIndex(m => String(m.id || m.message_id || m.messageId || '') === String(target.messageId)) : -1
+        if (idx < 0 && Number.isInteger(target.messageIndex) && target.messageIndex >= 0 && target.messageIndex < messages.value.length) idx = target.messageIndex
+        if (idx < 0 && kw) idx = messages.value.findIndex(m => (m.content || '').toLowerCase().includes(kw))
         if (idx !== -1) {
           highlightMsgIndex.value = idx
           const el = document.getElementById(`msg-${idx}`)
@@ -103,13 +109,21 @@ const {
   closeCodeChangeDrawer,
 } = useCodeChangeDrawer({ title: '项目 Agent 代码改动', project: () => currentProject.value || '' })
 const slashNavigate = inject('slashNavigate', () => {})
-const runProjectClientCommand = async (action) => {
-  if (!currentProject.value) throw new Error('请先选择项目')
-  if (action === 'new_session') {
+const runProjectClientCommand = createSlashCommandClientActions({
+  scope: 'project',
+  messages: () => messages.value,
+  sessions: () => sessions.value,
+  currentSessionId: () => currentSession.value || '',
+  context: () => ({ project: currentProject.value || '', sessionId: currentSession.value || '' }),
+  statusSummary: () => `项目 ${currentProject.value || '未选择'} 的当前会话已加载 ${messages.value.length} 条消息。`,
+  contextMetrics: () => ({ 项目: currentProject.value || '未选择', 会话: currentSession.value || '未选择' }),
+  exportFilename: () => `ccm-project-${currentProject.value || 'unknown'}-${currentSession.value || 'context'}`,
+  newSession: async () => {
+    if (!currentProject.value) throw new Error('请先选择项目')
     await createSession()
     return { success: true, summary: '已新建项目 Agent 会话。', metrics: { 项目: currentProject.value, 会话: currentSession.value || '新会话' } }
-  }
-  if (action === 'clear_session') {
+  },
+  clearSession: async () => {
     if (!currentProject.value || !currentSession.value) throw new Error('请先选择项目会话')
     const res = await fetch('/api/sessions/clear', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ project: currentProject.value, sessionId: currentSession.value }) })
     const data = await res.json()
@@ -117,22 +131,14 @@ const runProjectClientCommand = async (action) => {
     messages.value = []
     await loadSessions(currentProject.value)
     return { success: true, summary: `已清空项目会话 ${currentSession.value}。`, metrics: { 已清空: data.cleared || 0 } }
-  }
-  if (action === 'context') {
-    const chars = messages.value.reduce((sum, item) => sum + String(item.content || '').length, 0)
-    return {
-      success: true,
-      summary: `项目 ${currentProject.value} 的会话 ${currentSession.value || '未选择'} 当前有 ${messages.value.length} 条消息。`,
-      metrics: { 项目: currentProject.value, 会话: currentSession.value, 消息: messages.value.length, 用户消息: messages.value.filter(item => item.role === 'user').length, 估算Token: Math.ceil(chars / 4) },
-      items: messages.value.slice(-8).reverse().map(item => ({ title: item.role === 'user' ? '用户' : 'Agent', detail: String(item.content || '').slice(0, 180), status: item.timestamp || '' }))
-    }
-  }
-  if (action === 'export_context') {
-    downloadCommandJson(`ccm-project-${currentProject.value}-${currentSession.value || 'context'}`, { project: currentProject.value, sessionId: currentSession.value, messages: messages.value })
-    return { success: true, summary: '项目 Agent 当前会话已导出为 JSON。', metrics: { 消息: messages.value.length } }
-  }
-  throw new Error(`不支持的客户端命令：${action}`)
-}
+  },
+  renameSession: async (name) => {
+    if (!currentProject.value || !currentSession.value) throw new Error('请先选择项目会话')
+    await sessionsApi.rename({ project: currentProject.value, sessionId: currentSession.value, name })
+    await loadSessions(currentProject.value)
+    return { success: true, summary: `当前项目会话已重命名为“${name}”。`, metrics: { 项目: currentProject.value, 会话: currentSession.value } }
+  },
+})
 const slash = useSlashCommands({
   scope: 'project',
   input: chatInput,
@@ -224,6 +230,9 @@ const showEdit = ref(false)
 const showSwitchAgent = ref(false)
 const showTools = ref(false)
 const showSharedFiles = ref(false)
+const showArchives = ref(false)
+const mobileSessionsOpen = ref(false)
+const projectActionBusy = ref('')
 
 const showFeishuQr = ref(false)
 const editProject = ref(null)
@@ -232,6 +241,7 @@ const editProject = ref(null)
 const feishuQrUrl = ref('')
 const feishuQrStatus = ref('')
 const feishuQrLoading = ref(false)
+const feishuProjectSetupToken = ref('')
 
 // 文件夹浏览器
 const browsePath = ref('')
@@ -269,7 +279,7 @@ const loadProjects = async () => {
   pageInfo.value = `${projects.value.length} 个项目 · ${projects.value.filter(p => p.running).length} 个运行中`
   // 自动选择第一个项目
   if (projects.value.length > 0 && !currentProject.value) {
-    selectProject(projects.value[0].name)
+    await selectProject(projects.value[0].name)
   }
 }
 
@@ -292,12 +302,15 @@ if (activeSelectedTemplate) {
 
 // 选择项目
 const selectProject = async (name) => {
+  if (isStreaming.value) stopStreaming()
   currentProject.value = name
   currentSession.value = null
   await loadSessions(name)
   // 如果会话列表非空，且没有选中会话，则默认选中第一个会话，以便载入单聊输入框
   if (sessions.value.length > 0 && !currentSession.value) {
-    await selectSession(sessions.value[0].id)
+    const remembered = localStorage.getItem(`ccm:project-session:${name}`)
+    const target = sessions.value.find(item => item.id === remembered) || sessions.value[0]
+    await selectSession(target.id)
   }
   // 如果有挂起的待使用模板，在此应用
   if (pendingTemplateToApply.value) {
@@ -317,8 +330,11 @@ const loadSessions = async (project) => {
 }
 
 // 选择会话
-const selectSession = async (sessionId) => {
+const selectSession = async (sessionId, newSession = false) => {
+  if (isStreaming.value) stopStreaming()
   currentSession.value = sessionId
+  currentSessionNew.value = newSession
+  if (currentProject.value) localStorage.setItem(`ccm:project-session:${currentProject.value}`, sessionId)
   const data = await sessionsApi.detail(currentProject.value, sessionId)
   messages.value = data.history || []
   scrollToBottom({ force: true })
@@ -326,28 +342,50 @@ const selectSession = async (sessionId) => {
 
 // 启动项目
 const startProject = async (name) => {
-  await projectsApi.start(name)
-  setTimeout(loadProjects, 1500)
+  if (!name || projectActionBusy.value) return
+  projectActionBusy.value = 'start'
+  try {
+    const result = await projectsApi.start(name)
+    await loadProjects()
+    toast.success(result.message || '项目 Agent 已启动')
+  } catch (error) { toast.error(error?.message || '项目 Agent 启动失败') }
+  finally { projectActionBusy.value = '' }
 }
 
 // 停止项目
 const stopProject = async (name) => {
-  await projectsApi.stop(name)
-  setTimeout(loadProjects, 500)
+  if (!name || projectActionBusy.value) return
+  projectActionBusy.value = 'stop'
+  try {
+    const result = await projectsApi.stop(name)
+    await loadProjects()
+    toast.success(result.message || '项目 Agent 已停止')
+  } catch (error) { toast.error(error?.message || '项目 Agent 停止失败') }
+  finally { projectActionBusy.value = '' }
 }
 
 // 删除项目
 const deleteProject = async (name) => {
-  const confirmed = await confirmDialog(`确定删除项目 "${name}"？删除后无法恢复。`)
+  const confirmed = await confirmDialog(`确定归档项目“${name}”？项目会从活动列表移除，但会话、任务、回放、验收证据和源码都会保留，可随时恢复。`)
   if (!confirmed) return
-  await projectsApi.delete(name)
-  if (currentProject.value === name) {
-    currentProject.value = null
-    sessions.value = []
-    messages.value = []
-  }
-  loadProjects()
-  toast.success('项目已删除')
+  projectActionBusy.value = 'archive'
+  try {
+    const result = await projectsApi.archive(name)
+    if (currentProject.value === name) {
+      currentProject.value = null
+      currentSession.value = null
+      sessions.value = []
+      messages.value = []
+    }
+    await loadProjects()
+    toast.success(`${result.message}，审计编号 ${result.audit_id}`)
+  } catch (error) { toast.error(error?.message || '项目归档失败') }
+  finally { projectActionBusy.value = '' }
+}
+
+const handleArchiveNotify = ({ type, text }) => {
+  const method = type === 'error' ? 'error' : type === 'warning' ? 'warning' : 'success'
+  toast[method](text)
 }
 
 // 显示创建弹窗
@@ -362,9 +400,10 @@ const submitCreate = async () => {
     toast.warning('请填写项目名称和目录')
     return
   }
-  const res = await projectsApi.create(form.value)
+  const res = await projectsApi.create({ ...form.value, setup_token: feishuProjectSetupToken.value || undefined })
   if (res.success) {
     showCreate.value = false
+    feishuProjectSetupToken.value = ''
     loadProjects()
     toast.success('项目创建成功！')
   } else {
@@ -407,29 +446,36 @@ const openSwitchAgent = (project) => {
 
 // 切换 Agent
 const switchAgent = async (agentType) => {
-  await stopProject(editProject.value.name)
-  setTimeout(() => {
-    startProject(editProject.value.name, agentType)
+  if (!editProject.value?.name || projectActionBusy.value) return
+  const projectName = editProject.value.name
+  projectActionBusy.value = 'switch'
+  try {
+    await projectsApi.stop(projectName)
+    await startProjectWithAgent(projectName, agentType, false)
     showSwitchAgent.value = false
-  }, 1000)
+    await loadProjects()
+    toast.success(`已切换到 ${agentType} 并重新启动`)
+  } catch (error) { toast.error(error?.message || 'Agent 切换失败') }
+  finally { projectActionBusy.value = '' }
 }
 
 // 启动项目（指定 Agent）
-const startProjectWithAgent = async (name, agent) => {
-  await projectsApi.start(name, agent)
-  setTimeout(loadProjects, 1500)
+const startProjectWithAgent = async (name, agent, refresh = true) => {
+  const result = await projectsApi.start(name, agent)
+  if (refresh) await loadProjects()
+  return result
 }
 
 // 创建会话
 const createSession = async () => {
   if (!currentProject.value) {
-    alert('请先选择项目')
+    toast.info('请先选择项目')
     return
   }
   const res = await sessionsApi.create({ project: currentProject.value })
   if (res.success) {
     await loadSessions(currentProject.value)
-    selectSession(res.sessionId)
+    await selectSession(res.sessionId, true)
   }
 }
 
@@ -443,10 +489,11 @@ const renameSession = async (sessionId) => {
 
 // 删除会话
 const deleteSession = async (sessionId) => {
-  if (!confirm('确定删除此会话？')) return
+  if (!await confirmDialog('确定删除此会话？会话消息删除后无法恢复。')) return
   await sessionsApi.delete({ project: currentProject.value, sessionId })
   if (currentSession.value === sessionId) {
     currentSession.value = null
+    localStorage.removeItem(`ccm:project-session:${currentProject.value}`)
     messages.value = []
   }
   loadSessions(currentProject.value)
@@ -560,10 +607,18 @@ const handleProjectTaskAction = async (msg, action) => {
 const isStreaming = ref(false)
 const thinkingMessages = ref([]) // 存储思考过程消息
 const pendingProjectParentRunId = ref('')
+const streamController = ref(null)
 const makeProjectMessageId = () => `pmsg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+const stopStreaming = () => streamController.value?.abort()
 
 const sendMessage = async () => {
-  if ((!chatInput.value.trim() && chatFiles.value.length === 0) || !currentProject.value) return
+  if (isStreaming.value || (!chatInput.value.trim() && chatFiles.value.length === 0) || !currentProject.value) return
+  if (!currentSession.value) {
+    toast.info('请先新建或选择一个会话')
+    return
+  }
+  const projectAtSend = currentProject.value
+  const sessionAtSend = currentSession.value
   const msg = chatInput.value.trim()
   const filesToSend = [...chatFiles.value]
   const parentRunId = pendingProjectParentRunId.value
@@ -577,12 +632,6 @@ const sendMessage = async () => {
   const userMsg = { id: makeProjectMessageId(), role: 'user', content: `${msg || '请处理附件'}${attachmentText}`, timestamp: new Date().toISOString() }
   messages.value.push(userMsg)
 
-  // 保存用户消息到会话
-  if (currentSession.value) {
-    sessionsApi.saveMessage({ project: currentProject.value, sessionId: currentSession.value, message: userMsg }).catch(() => {})
-  }
-
-  // 创建思考过程消息
   const thinkingMsg = {
     id: makeProjectMessageId(),
     role: 'thinking',
@@ -592,42 +641,25 @@ const sendMessage = async () => {
   messages.value.push(thinkingMsg)
   scrollToBottom({ force: true })
 
-  // 创建 Agent 回复消息
   const agentMsg = { id: makeProjectMessageId(), role: 'assistant', content: '', workEvents: [], requestText: msg, streaming: true, timestamp: new Date().toISOString() }
-
+  const controller = new AbortController()
+  streamController.value = controller
   isStreaming.value = true
   thinkingMessages.value = []
-
-  let res
-  if (filesToSend.length > 0) {
-    const formData = new FormData()
-    formData.append('project', currentProject.value)
-    formData.append('message', msg)
-    if (parentRunId) formData.append('parent_run_id', parentRunId)
-    filesToSend.forEach(file => formData.append('files', file))
-    res = await fetch('/api/send-stream', { method: 'POST', body: formData })
-  } else {
-    res = await fetch('/api/send-stream', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ project: currentProject.value, message: msg, parent_run_id: parentRunId })
-    })
-  }
-
-  if (!res.ok || !res.body) {
-    agentMsg.content = `❌ 错误: 发送失败：${res.status}`
-    messages.value.push(agentMsg)
-    isStreaming.value = false
-    const thinkingIdx = messages.value.indexOf(thinkingMsg)
-    if (thinkingIdx !== -1) messages.value.splice(thinkingIdx, 1)
-    scrollToBottom()
-    return
-  }
-
-  const reader = res.body.getReader()
-  const decoder = new TextDecoder()
   let agentMsgAdded = false
-  let sseBuffer = ''
+  let responseAccepted = false
+  let userPersisted = false
+  let backendError = ''
+
+  const addAgentMessage = () => {
+    if (agentMsgAdded) return
+    messages.value.push(agentMsg)
+    agentMsgAdded = true
+  }
+  const removeThinkingMessage = () => {
+    const index = messages.value.indexOf(thinkingMsg)
+    if (index !== -1) messages.value.splice(index, 1)
+  }
 
   const handleSseEvent = (rawEvent) => {
     const dataText = rawEvent
@@ -639,7 +671,6 @@ const sendMessage = async () => {
     try {
       const data = JSON.parse(dataText)
       if (data.type === 'status') {
-        // 更新思考过程
         thinkingMessages.value.push(data.text)
         thinkingMsg.content = thinkingMessages.value.join('\n')
         scrollToBottom()
@@ -647,10 +678,7 @@ const sendMessage = async () => {
         agentMsg.projectRun = data.run || agentMsg.projectRun
         agentMsg.task_id = data.taskExperience?.task_id || data.run?.id || agentMsg.task_id
         agentMsg.taskExperience = data.taskExperience || agentMsg.taskExperience
-        if (!agentMsgAdded) {
-          messages.value.push(agentMsg)
-          agentMsgAdded = true
-        }
+        addAgentMessage()
         scrollToBottom()
       } else if (data.type === 'work_event') {
         if (!Array.isArray(agentMsg.workEvents)) agentMsg.workEvents = []
@@ -659,26 +687,14 @@ const sendMessage = async () => {
           agentMsg.workEvents.push(event)
           if (agentMsg.workEvents.length > 80) agentMsg.workEvents.splice(0, agentMsg.workEvents.length - 80)
         }
-        if (!agentMsgAdded) {
-          messages.value.push(agentMsg)
-          agentMsgAdded = true
-        }
+        addAgentMessage()
         scrollToBottom()
       } else if (data.type === 'chunk') {
-        // 添加 Agent 回复消息（如果还没添加）
-        if (!agentMsgAdded) {
-          messages.value.push(agentMsg)
-          agentMsgAdded = true
-        }
+        addAgentMessage()
         agentMsg.content += data.text
         scrollToBottom()
       } else if (data.type === 'done') {
-        isStreaming.value = false
-        // 移除思考消息，保留 Agent 回复
-        const thinkingIdx = messages.value.indexOf(thinkingMsg);
-        if (thinkingIdx !== -1) {
-          messages.value.splice(thinkingIdx, 1);
-        }
+        removeThinkingMessage()
         if (data.fileChanges && data.fileChanges.count > 0) {
           agentMsg.fileChanges = data.fileChanges
         }
@@ -687,54 +703,92 @@ const sendMessage = async () => {
         agentMsg.taskExperience = data.taskExperience || agentMsg.taskExperience
         agentMsg.workEvents = data.workEvents || agentMsg.workEvents
       } else if (data.type === 'error') {
-        if (!agentMsgAdded) {
-          messages.value.push(agentMsg)
-          agentMsgAdded = true
-        }
+        addAgentMessage()
         agentMsg.projectRun = data.run || agentMsg.projectRun
         agentMsg.task_id = data.taskExperience?.task_id || data.run?.id || agentMsg.task_id
         agentMsg.taskExperience = data.taskExperience || agentMsg.taskExperience
-        agentMsg.content = '❌ 错误: ' + data.text
-        agentMsg.streaming = false
-        isStreaming.value = false
+        backendError = String(data.text || '项目 Agent 执行失败')
       }
     } catch {}
   }
 
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
+  try {
+    await sessionsApi.saveMessage({ project: projectAtSend, sessionId: sessionAtSend, message: userMsg })
+    userPersisted = true
 
-    sseBuffer += decoder.decode(value, { stream: true })
-    const events = sseBuffer.split(/\r?\n\r?\n/)
-    sseBuffer = events.pop() || ''
-    for (const event of events) {
-      handleSseEvent(event)
+    let res
+    if (filesToSend.length > 0) {
+      const formData = new FormData()
+      formData.append('project', projectAtSend)
+      formData.append('message', msg)
+      if (parentRunId) formData.append('parent_run_id', parentRunId)
+      filesToSend.forEach(file => formData.append('files', file))
+      res = await fetch('/api/send-stream', { method: 'POST', body: formData, signal: controller.signal })
+    } else {
+      res = await fetch('/api/send-stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project: projectAtSend, message: msg, parent_run_id: parentRunId }),
+        signal: controller.signal,
+      })
     }
-  }
-  sseBuffer += decoder.decode()
-  if (sseBuffer.trim()) handleSseEvent(sseBuffer)
+    if (!res.ok || !res.body) throw new Error(`发送失败（HTTP ${res.status}）`)
+    responseAccepted = true
 
-  isStreaming.value = false
-  agentMsg.streaming = false
-  // 确保移除思考消息
-  const thinkingIdx = messages.value.indexOf(thinkingMsg);
-  if (thinkingIdx !== -1) {
-    messages.value.splice(thinkingIdx, 1);
-  }
-
-  // 保存 Agent 回复到会话
-  if (currentSession.value && agentMsg.content) {
-    sessionsApi.saveMessage({
-      project: currentProject.value,
-      sessionId: currentSession.value,
-      message: { id: agentMsg.id, role: 'assistant', content: agentMsg.content, requestText: agentMsg.requestText, task_id: agentMsg.task_id || '', taskExperience: agentMsg.taskExperience || null, timestamp: agentMsg.timestamp || new Date().toISOString(), fileChanges: agentMsg.fileChanges || null, workEvents: agentMsg.workEvents || [] }
-    }).catch(() => {})
-  }
-
-  // 会话自动命名
-  if (currentSessionNew.value && currentSession.value && agentMsg.content) {
-    autoNameSession(currentProject.value, currentSession.value, msg)
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let sseBuffer = ''
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      sseBuffer += decoder.decode(value, { stream: true })
+      const events = sseBuffer.split(/\r?\n\r?\n/)
+      sseBuffer = events.pop() || ''
+      for (const event of events) handleSseEvent(event)
+    }
+    sseBuffer += decoder.decode()
+    if (sseBuffer.trim()) handleSseEvent(sseBuffer)
+    if (backendError) throw new Error(backendError)
+  } catch (error) {
+    const stopped = error?.name === 'AbortError'
+    addAgentMessage()
+    if (stopped) {
+      agentMsg.content = agentMsg.content
+        ? `${agentMsg.content}\n\n本次处理已停止，已保留上面的回复。`
+        : '本次处理已停止，你可以调整需求后重新发送。'
+    } else {
+      const detail = error?.message || '连接中断'
+      agentMsg.content = agentMsg.content
+        ? `${agentMsg.content}\n\n连接中断，已保留收到的内容。你可以继续追问或重新发送。`
+        : `这次没有完成：${detail}。请检查项目 Agent 状态后重试。`
+      if (!responseAccepted) {
+        chatInput.value = msg
+        chatFiles.value = filesToSend
+      }
+    }
+  } finally {
+    removeThinkingMessage()
+    agentMsg.streaming = false
+    isStreaming.value = false
+    if (streamController.value === controller) streamController.value = null
+    const hasAgentResult = agentMsg.content || agentMsg.taskExperience || agentMsg.workEvents.length
+    if (hasAgentResult) {
+      addAgentMessage()
+      if (userPersisted) {
+        try {
+          await sessionsApi.saveMessage({
+            project: projectAtSend,
+            sessionId: sessionAtSend,
+            message: { id: agentMsg.id, role: 'assistant', content: agentMsg.content, requestText: agentMsg.requestText, task_id: agentMsg.task_id || '', taskExperience: agentMsg.taskExperience || null, timestamp: agentMsg.timestamp, fileChanges: agentMsg.fileChanges || null, workEvents: agentMsg.workEvents || [] }
+          })
+        } catch (error) { toast.warning('回复已显示，但会话保存失败，请刷新后确认') }
+      }
+    }
+    if (currentSessionNew.value && userPersisted && agentMsg.content) {
+      currentSessionNew.value = false
+      autoNameSession(projectAtSend, sessionAtSend, msg)
+    }
+    scrollToBottom()
   }
 }
 
@@ -821,6 +875,7 @@ const openFeishuQr = () => {
   feishuQrUrl.value = ''
   feishuQrStatus.value = ''
   feishuQrLoading.value = false
+  feishuProjectSetupToken.value = ''
 }
 
 const startFeishuQrSetup = async () => {
@@ -835,6 +890,7 @@ const startFeishuQrSetup = async () => {
       body: JSON.stringify({ name: projectName })
     })
     const data = await res.json()
+    feishuProjectSetupToken.value = data.setup_token || ''
 
     if (data.success && data.scan_url) {
       feishuQrUrl.value = data.scan_url
@@ -922,9 +978,16 @@ const projectTools = ref({ mcp: [], skill: [] })
 const allTools = ref({ mcp: [], skill: [] })
 const projectToolAudit = ref(null)
 const projectAuthorizationReadiness = ref(null)
+const projectConnectionPreflight = ref(null)
+const projectToolVerification = ref(null)
 const projectVerificationCommands = ref('')
 const inferredProjectVerificationCommands = ref([])
 const projectVerificationSource = ref('missing')
+const projectResponsibility = ref('')
+const projectCapabilities = ref('')
+const projectWritablePaths = ref('')
+const projectForbiddenPaths = ref('')
+const projectDeliveryContract = ref('')
 
 const normalizeProjectTools = (tools = {}) => ({
   mcp: Array.from(new Set((Array.isArray(tools.mcp) ? tools.mcp : []).map(item => String(item || '').trim()).filter(Boolean))),
@@ -940,6 +1003,7 @@ const loadProjectTools = async () => {
   projectTools.value = normalizeProjectTools(projData.tools)
   projectToolAudit.value = projData.tool_audit || null
   projectAuthorizationReadiness.value = projData.authorization_readiness || null
+  projectConnectionPreflight.value = projData.connection_preflight || null
   projectVerificationCommands.value = Array.isArray(projData.verification_commands)
     ? projData.verification_commands.join('\n')
     : ''
@@ -956,6 +1020,8 @@ const loadProjectTools = async () => {
   const options = await fetch('/api/tools/authorization-options').then(r => r.json()).catch(() => ({ mcp: [], skill: [] }))
   allTools.value.mcp = options.mcp || []
   allTools.value.skill = options.skill || []
+  const verification = await fetch(`/api/tools/chain-verification?project=${encodeURIComponent(currentProject.value)}`).then(r => r.json()).catch(() => ({ rows: [] }))
+  projectToolVerification.value = verification.rows?.[0] || null
 
   showTools.value = true
 }
@@ -989,6 +1055,7 @@ const saveProjectTools = async () => {
     projectTools.value = normalizeProjectTools(data.tools)
     projectToolAudit.value = data.tool_audit || null
     projectAuthorizationReadiness.value = data.authorization_readiness || null
+    projectConnectionPreflight.value = data.connection_preflight || null
     showTools.value = false
     if (data.authorization_readiness && data.authorization_readiness.dispatchReady === false) {
       toast.warning('工具配置已保存，但有授权项当前不可用')
@@ -1109,6 +1176,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  stopStreaming()
   detachMessagesResizeObserver()
 })
 
@@ -1140,87 +1208,43 @@ const handleKeydown = async (e) => {
 
 <template>
   <div class="project-manager">
-    <!-- 顶部工具栏 -->
-    <div class="toolbar">
-      <div class="toolbar-left">
-        <span class="label">项目：</span>
-        <div class="project-select-wrapper">
-          <select v-model="currentProject" @change="selectProject(currentProject)" class="select">
-            <option value="">选择项目...</option>
-            <option v-for="p in projects" :key="p.name" :value="p.name">
-              {{ p.running ? '🟢' : '⚪' }} {{ p.name }}
-            </option>
-          </select>
-          <!-- 项目操作按钮 -->
-          <div v-if="currentProject" class="project-actions-inline">
-            <template v-if="projects.find(p => p.name === currentProject)?.running">
-              <button class="btn btn-stop btn-sm" @click="stopProject(currentProject)">⏹ 停止</button>
-              <button class="btn btn-outline btn-sm" @click="openSwitchAgent(projects.find(p => p.name === currentProject))">🔄 切换</button>
-            </template>
-            <template v-else>
-              <button class="btn btn-start btn-sm" @click="startProject(currentProject)">▶ 启动</button>
-            </template>
-            <button class="btn btn-outline btn-sm" @click="openEditModal(projects.find(p => p.name === currentProject))">✏️ 编辑</button>
-            <button class="btn btn-outline btn-sm" @click="loadProjectTools()">🔧 工具</button>
-            <button class="btn btn-outline btn-sm" @click="loadProjectSharedFiles()">📁 文件</button>
-            <button class="btn btn-outline btn-sm" :disabled="!currentSession" @click="saveCurrentProjectSessionKnowledge">保存知识</button>
-            <button class="btn btn-danger btn-sm" @click="deleteProject(currentProject)">🗑️ 删除</button>
-          </div>
-        </div>
-      </div>
-      <div class="toolbar-right">
-        <span class="info">{{ pageInfo }}</span>
-        <button class="btn btn-primary" @click="openCreateModal">+ 新建项目</button>
-      </div>
-    </div>
+    <ProjectWorkspaceHeader
+      v-model="currentProject"
+      :projects="projects"
+      :page-info="pageInfo"
+      :busy-action="projectActionBusy"
+      :has-session="!!currentSession"
+      @select="selectProject"
+      @start="startProject($event.name)"
+      @stop="stopProject($event.name)"
+      @switch-agent="openSwitchAgent"
+      @edit="openEditModal"
+      @tools="loadProjectTools"
+      @files="loadProjectSharedFiles"
+      @save-knowledge="saveCurrentProjectSessionKnowledge"
+      @archive="deleteProject($event.name)"
+      @open-archives="showArchives = true"
+      @create="openCreateModal"
+    />
 
-    <!-- 主内容区 -->
     <div class="main-content">
-      <!-- 左侧会话列表 -->
-      <div class="sidebar">
-        <div class="sidebar-header">
-          <span>💬 会话列表</span>
-          <div style="display:flex;gap:6px">
-            <button class="btn btn-primary btn-sm" @click="createSession">+ 新建</button>
-            <button class="btn btn-outline btn-sm" @click="loadSessions(currentProject)">↻</button>
-          </div>
-        </div>
-        <div class="session-list">
-          <div v-if="!currentProject" class="empty-sm">
-            <span>💬</span>
-            <span>选择项目查看会话</span>
-          </div>
-          <div v-else-if="sessions.length === 0" class="empty-sm">
-            <span>💬</span>
-            <span>暂无会话</span>
-          </div>
-          <div v-else>
-            <div v-for="s in sessions" :key="s.id"
-              class="session-item"
-              :class="{ active: currentSession === s.id }"
-              @click="selectSession(s.id)">
-              <div style="display:flex;justify-content:space-between;align-items:flex-start">
-                <div style="flex:1;min-width:0">
-                  <div class="session-name">{{ s.name || s.id }}</div>
-                  <div class="session-meta">
-                    <span>{{ s.message_count }} 条</span>
-                    <span>{{ s.id }}</span>
-                  </div>
-                </div>
-                <div class="session-actions">
-                  <button class="btn-icon" @click.stop="renameSession(s.id)" title="重命名">✏️</button>
-                  <button class="btn-icon" @click.stop="deleteSession(s.id)" title="删除">🗑️</button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+      <ProjectSessionSidebar
+        :project="currentProject || ''"
+        :sessions="sessions"
+        :current-session="currentSession || ''"
+        :open="mobileSessionsOpen"
+        @select="selectSession"
+        @create="createSession"
+        @refresh="loadSessions(currentProject)"
+        @rename="renameSession"
+        @delete="deleteSession"
+        @close="mobileSessionsOpen = false"
+      />
 
-      <!-- 右侧内容区 -->
       <div class="content">
         <div class="content-header">
-          <span>{{ currentSession ? `${currentProject} - 消息记录` : '消息记录' }}</span>
+          <button class="mobile-session-trigger" title="打开会话列表" @click="mobileSessionsOpen = true"><PanelLeft :size="18" /></button>
+          <span>{{ currentSession ? `${currentProject} · ${sessions.find(item => item.id === currentSession)?.name || '当前会话'}` : '项目对话' }}</span>
         </div>
         <div id="messages" ref="messagesEl" class="messages" @scroll="updateMessageScrollState">
           <div v-if="!currentSession" class="empty">
@@ -1233,10 +1257,8 @@ const handleKeydown = async (e) => {
               <!-- 思考过程消息 -->
               <div v-else-if="msg.role === 'thinking'" class="thinking-bubble">
                 <div class="thinking-header">
-                  <span class="thinking-icon">🧠</span>
-                  <span>Agent 思考中...</span>
+                  <span>项目 Agent 正在处理...</span>
                 </div>
-                <div class="thinking-content">{{ msg.content }}</div>
                 <span class="stream-cursor">▌</span>
               </div>
               <!-- 用户消息 -->
@@ -1257,12 +1279,17 @@ const handleKeydown = async (e) => {
             </div>
           </template>
         </div>
-        <MessageNavigator :items="navMessages" @navigate="scrollToMessage" />
+        <MessageNavigator
+          :items="navMessages"
+          :scroll-container="messagesEl"
+          target-id-prefix="msg-"
+          @navigate="scrollToMessage"
+        />
         <ChatComposer
           v-model="chatInput"
           input-id="projectChatInput"
-          placeholder="输入消息发送给 Agent...（Enter 发送，输入 / 打开命令中心）"
-          send-label="发送 ➤"
+          placeholder="向项目 Agent 发送消息..."
+          send-label="发送"
           :files="chatFiles"
           :slash="slash"
           :templates-open="showTemplateSelector"
@@ -1270,7 +1297,8 @@ const handleKeydown = async (e) => {
           :template-search-query="templateSearchQuery"
           :active-template-index="activeTemplateIndex"
           :recommended-template="recommendedTemplate"
-          :disabled="!currentProject"
+          :disabled="!currentProject || !currentSession"
+          :busy="isStreaming"
           @files-selected="onChatFilesSelected"
           @remove-file="removeChatFile"
           @open-template="openTemplateSelector"
@@ -1280,6 +1308,7 @@ const handleKeydown = async (e) => {
           @keydown="handleKeydown"
           @input="handleInput"
           @send="sendMessage"
+          @stop="stopStreaming"
         />
         <!-- 日志面板 -->
         <div v-if="showLogsPanel" class="logs-panel">
@@ -1372,6 +1401,8 @@ const handleKeydown = async (e) => {
       :project-tools="projectTools"
       :tool-audit="projectToolAudit"
       :authorization-readiness="projectAuthorizationReadiness"
+      :connection-preflight="projectConnectionPreflight"
+      :verification-status="projectToolVerification"
       :responsibility="projectResponsibility"
       :capabilities="projectCapabilities"
       :writable-paths="projectWritablePaths"
@@ -1404,6 +1435,13 @@ const handleKeydown = async (e) => {
       @close-add="showAddFile = false"
       @close-edit="showEditFile = false"
       @close="showSharedFiles = false"
+    />
+
+    <ProjectArchiveManager
+      v-if="showArchives"
+      @close="showArchives = false"
+      @changed="loadProjects"
+      @notify="handleArchiveNotify"
     />
 
     <TemplateVariablesModal
@@ -1672,9 +1710,12 @@ const handleKeydown = async (e) => {
   font-weight: 700;
   color: var(--text-secondary);
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-start;
+  gap: 10px;
   align-items: center;
 }
+
+.mobile-session-trigger { display:none; width:34px; height:34px; align-items:center; justify-content:center; padding:0; border:1px solid rgba(15,23,42,.1); border-radius:7px; background:var(--surface,#fff); color:var(--text-secondary); }
 
 .messages {
   flex: 1;
@@ -1719,6 +1760,7 @@ const handleKeydown = async (e) => {
   font-size: 15.0px;
   line-height: 1.65;
   word-break: break-word;
+  white-space: pre-wrap;
 }
 
 .message.user .bubble {
@@ -1755,16 +1797,6 @@ const handleKeydown = async (e) => {
   gap: 12px;
   color: var(--text-muted);
   position: relative;
-}
-
-.empty::before {
-  content: '';
-  position: absolute;
-  width: 320px;
-  height: 320px;
-  background: radial-gradient(circle, rgba(59, 130, 246, 0.04) 0%, transparent 70%);
-  z-index: 0;
-  pointer-events: none;
 }
 
 .empty .icon {
@@ -2090,20 +2122,12 @@ const handleKeydown = async (e) => {
 
 /* 移动端适配 */
 @media (max-width: 768px) {
-  .pm-container {
-    flex-direction: column;
-  }
-  .pm-sidebar {
-    width: 100% !important;
-    min-width: 0 !important;
-    max-height: 40vh;
-    border-right: none !important;
-    border-bottom: 1px solid rgba(0, 0, 0, 0.04);
-  }
-  .pm-sidebar .session-sidebar {
-    width: 100% !important;
-    min-width: 0 !important;
-  }
+  .main-content,.content { min-width:0; width:100%; }
+  .content-header { padding:10px 12px; min-height:48px; }
+  .mobile-session-trigger { display:inline-flex; }
+  .messages { padding:14px 12px; }
+  .message { max-width:94%; }
+  .message .bubble { padding:10px 12px; border-radius:10px; font-size:14px; }
   .toolbar {
     flex-wrap: wrap;
     gap: 6px;

@@ -1,6 +1,6 @@
 import { ChildProcess, spawn, spawnSync } from "child_process";
 import { DevServerResult, NormalizedTestAgentProjectTarget, NormalizedTestAgentWorkOrder } from "./types";
-import { appendLimited, compactText, hasRequiredCheck, nowIso } from "./utils";
+import { appendLimited, buildTestAgentSubprocessEnv, compactText, hasRequiredCheck, nowIso, redactTestAgentSensitiveText, verificationCommandInvocation } from "./utils";
 import { browserCheckUsesExistingSession } from "./browser/existing-session";
 import { checksForProject } from "./browser/shared";
 
@@ -79,12 +79,20 @@ async function startProjectServer(project: NormalizedTestAgentProjectTarget, max
     };
   }
 
+  const invocation = verificationCommandInvocation(command);
+  if (invocation.error) {
+    return {
+      result: { project: project.name, command, cwd: project.workDir, url, status: "failed", startedAt, error: invocation.error },
+      stop: () => {},
+    };
+  }
+
   let output = "";
-  const child = spawn(command, {
+  const child = spawn(invocation.executable, invocation.args, {
     cwd: project.workDir,
-    shell: true,
+    shell: invocation.requiresShell,
     windowsHide: true,
-    env: { ...process.env, ...project.env },
+    env: buildTestAgentSubprocessEnv(project.env),
   });
   child.stdout?.on("data", chunk => { output = appendLimited(output, chunk, maxOutputChars); });
   child.stderr?.on("data", chunk => { output = appendLimited(output, chunk, maxOutputChars); });
@@ -99,13 +107,13 @@ async function startProjectServer(project: NormalizedTestAgentProjectTarget, max
     const error = exitError || `Dev server did not become reachable at ${url} within ${project.startupTimeoutMs}ms.`;
     stopProcessTree(child);
     return {
-      result: { project: project.name, command, cwd: project.workDir, url, status: "failed", startedAt, error, output: compactText(output, maxOutputChars) },
+      result: { project: project.name, command, cwd: project.workDir, url, status: "failed", startedAt, error: redactTestAgentSensitiveText(error, Object.values(project.env)), output: compactText(redactTestAgentSensitiveText(output, Object.values(project.env)), maxOutputChars) },
       stop: () => {},
     };
   }
 
   return {
-    result: { project: project.name, command, cwd: project.workDir, url, status: "started", startedAt, readyAt: nowIso(), output: compactText(output, maxOutputChars) },
+    result: { project: project.name, command, cwd: project.workDir, url, status: "started", startedAt, readyAt: nowIso(), output: compactText(redactTestAgentSensitiveText(output, Object.values(project.env)), maxOutputChars) },
     stop: () => stopProcessTree(child),
   };
 }
