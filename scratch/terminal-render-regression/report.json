@@ -1,0 +1,29 @@
+{
+  "pass": true,
+  "generatedAt": "2026-07-14T05:55:13.110Z",
+  "checks": [
+    {
+      "name": "desktop keeps two persisted sessions and toggles split view without deleting either session",
+      "pass": true
+    },
+    {
+      "name": "streamed command output, completion state, exit code and duration render in the active terminal",
+      "pass": true
+    },
+    {
+      "name": "persisted command history is searchable and reusable",
+      "pass": true
+    },
+    {
+      "name": "mobile keeps one usable terminal, horizontal presets and command input without page overflow",
+      "pass": true
+    }
+  ],
+  "screenshots": [
+    "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\terminal-render-regression\\desktop-split-workspace.png",
+    "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\terminal-render-regression\\desktop-command-result.png",
+    "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\terminal-render-regression\\desktop-history-drawer.png",
+    "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\terminal-render-regression\\mobile-terminal-workspace.png"
+  ],
+  "errors": []
+}

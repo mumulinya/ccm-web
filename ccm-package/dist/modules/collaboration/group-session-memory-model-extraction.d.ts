@@ -27,6 +27,7 @@ export declare function readGroupSessionMemoryModelExtractionHistory(scopeId: st
     rows: any[];
 };
 export declare function verifyGroupSessionMemoryModelExtractionReceipt(receipt: any): boolean;
+export declare function verifyGroupSessionMemoryDirectWriteSuppressionReceipt(receipt: any): boolean;
 export declare function verifyGroupSessionMemoryModelExtractionReplayEvidence(evidence: any): boolean;
 export declare function buildGroupSessionMemoryModelExtractionPrompt(input?: any): {
     schema: string;
@@ -39,6 +40,9 @@ export declare function buildGroupSessionMemoryModelExtractionPrompt(input?: any
         sourceLastMessageId: any;
         sourceTranscriptChecksum: string;
         currentNotesChecksum: string;
+        existingMemoryManifestChecksum: string;
+        existingMemoryManifestChars: number;
+        existingMemoryManifestBounded: boolean;
         promptChecksum: string;
         estimatedInputTokens: number;
         maxInputTokens: number;
@@ -56,6 +60,7 @@ export declare function buildGroupSessionMemoryModelExtractionPrompt(input?: any
     };
     replayMaterial: {
         currentNotes: string;
+        existingMemoryManifest: string;
         transcript: string;
     };
 };
@@ -371,6 +376,23 @@ export declare function runGroupSessionMemoryModelExtractionArtifactRetention(sc
         artifacts: any;
     }[];
 };
+export declare function getGroupSessionMemoryTypedMemoryRetryFile(scopeId: string): string;
+export declare function readGroupSessionMemoryTypedMemoryRetryState(scopeId: string): any;
+export declare function scheduleGroupSessionMemoryTypedMemoryRetry(scopeId: string, executionId: string, options?: any): {
+    scheduled: boolean;
+    scopeId: string;
+    executionId: string;
+    delayMs: number;
+};
+export declare function retryGroupSessionModelExtractionTypedMemory(scopeId: string, executionId: string, options?: any): any;
+export declare function recoverPendingGroupSessionMemoryTypedMemoryRetries(options?: any): {
+    schema: string;
+    pendingCount: number;
+    recoveredCount: number;
+    scheduledCount: number;
+    pending: any[];
+    results: any[];
+};
 export declare function validateGroupSessionMemoryModelOutput(output: string): {
     markdown: string;
     markdownChecksum: string;
@@ -433,13 +455,14 @@ export declare function analyzeGroupSessionMemoryModelMergeQuality(input?: any):
         outputMarkdownChecksum: string;
         sourceTranscriptChecksum: string;
         sourceMessageCount: number;
-        factCount: any;
+        factCount: number;
         retainedFactCount: any;
         supersededFactCount: any;
         unjustifiedLostFactCount: any;
         unjustifiedLostConstraintCount: any;
+        modelConfirmedFactCount: number;
         activeFactCount: number;
-        facts: any;
+        facts: any[];
         edges: any[];
         activeFacts: any[];
     };

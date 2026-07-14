@@ -1,0 +1,167 @@
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
+import { spawn } from "child_process";
+import { CCM_DIR, sendJson } from "../../core/utils";
+import { readJsonWithBackup, writeJsonAtomic } from "../../core/atomic-json-file";
+
+const TERMINAL_STATE_FILE = path.join(CCM_DIR, "terminal-workspace.json");
+const TERMINAL_TEMP_DIR = path.join(CCM_DIR, "temp", "terminal");
+const MAX_ACTIVE_RUNS = 4;
+const MAX_SESSIONS = 4;
+const MAX_OUTPUT_LINES = 300;
+const MAX_HISTORY = 200;
+const MAX_COMMAND_LENGTH = 16_000;
+const activeRuns = new Map<string, any>();
+
+function requestBody(req: any): Promise<any> {
+  return new Promise((resolve, reject) => {
+    let body = "";
+    req.on("data", (chunk: any) => {
+      body += chunk;
+      if (body.length > 2 * 1024 * 1024) reject(new Error("请求内容过大"));
+    });
+    req.on("end", () => {
+      try { resolve(body ? JSON.parse(body) : {}); } catch { reject(new Error("请求 JSON 无效")); }
+    });
+    req.on("error", reject);
+  });
+}
+
+function normalizeCwd(value: any) {
+  const candidate = String(value || "").trim() || os.homedir();
+  try { if (fs.statSync(candidate).isDirectory()) return candidate; } catch {}
+  return os.homedir();
+}
+
+function compactText(value: any, max = 24_000) {
+  const text = String(value || "");
+  return text.length > max ? `${text.slice(0, max)}\n...[输出已截断]` : text;
+}
+
+function sanitizeWorkspace(input: any) {
+  const sessions = (Array.isArray(input?.sessions) ? input.sessions : []).slice(0, MAX_SESSIONS).map((session: any, index: number) => ({
+    id: String(session?.id || `terminal-${index + 1}`).slice(0, 100),
+    name: String(session?.name || `终端 ${index + 1}`).slice(0, 80),
+    selectedProject: String(session?.selectedProject || "").slice(0, 180),
+    currentCwd: normalizeCwd(session?.currentCwd),
+    history: (Array.isArray(session?.history) ? session.history : []).slice(-MAX_HISTORY).map((item: any) => String(item || "").slice(0, MAX_COMMAND_LENGTH)),
+    terminalOutput: (Array.isArray(session?.terminalOutput) ? session.terminalOutput : []).slice(-MAX_OUTPUT_LINES).map((line: any) => ({
+      text: compactText(line?.text),
+      type: ["command", "output", "error", "system"].includes(String(line?.type)) ? String(line.type) : "output",
+      time: String(line?.time || "").slice(0, 40),
+    })),
+    lastExitCode: session?.lastExitCode === null || session?.lastExitCode === undefined || session?.lastExitCode === ''
+      ? null
+      : Number.isFinite(Number(session.lastExitCode)) ? Number(session.lastExitCode) : null,
+    lastDurationMs: Math.max(0, Number(session?.lastDurationMs || 0)),
+  }));
+  return {
+    version: 1,
+    updatedAt: new Date().toISOString(),
+    activeTerminalId: String(input?.activeTerminalId || sessions[0]?.id || ""),
+    splitMode: input?.splitMode === true,
+    sessions,
+  };
+}
+
+function writeSse(res: any, payload: any) {
+  if (!res.writableEnded && !res.destroyed) res.write(`data: ${JSON.stringify(payload)}\n\n`);
+}
+
+function terminalScript(command: string, cwdReceiptFile: string) {
+  if (process.platform === "win32") {
+    const receipt = cwdReceiptFile.replace(/'/g, "''");
+    return {
+      executable: "powershell.exe",
+      args: ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", `[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new(); $OutputEncoding = [System.Text.UTF8Encoding]::new();\n${command}\n[IO.File]::WriteAllText('${receipt}', (Get-Location).ProviderPath, [System.Text.UTF8Encoding]::new($false))`],
+    };
+  }
+  const receipt = cwdReceiptFile.replace(/'/g, `'"'"'`);
+  return { executable: "bash", args: ["-lc", `${command}\nprintf '%s' \"$PWD\" > '${receipt}'`] };
+}
+
+function readFinalCwd(receiptFile: string, fallback: string) {
+  try {
+    const value = fs.readFileSync(receiptFile, "utf-8").replace(/^\uFEFF/, "").trim();
+    if (value && fs.statSync(value).isDirectory()) return value;
+  } catch {}
+  return fallback;
+}
+
+function startTerminalStream(payload: any, res: any) {
+  const command = String(payload?.command || "").trim();
+  if (!command) return sendJson(res, { error: "命令不能为空" }, 400);
+  if (command.length > MAX_COMMAND_LENGTH) return sendJson(res, { error: "命令过长" }, 400);
+  if (activeRuns.size >= MAX_ACTIVE_RUNS) return sendJson(res, { error: `最多同时运行 ${MAX_ACTIVE_RUNS} 个终端命令` }, 429);
+
+  const cwd = normalizeCwd(payload?.cwd);
+  const runId = `terminal_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 9)}`;
+  const startedAt = Date.now();
+  fs.mkdirSync(TERMINAL_TEMP_DIR, { recursive: true });
+  const cwdReceiptFile = path.join(TERMINAL_TEMP_DIR, `${runId}.cwd`);
+  const script = terminalScript(command, cwdReceiptFile);
+  res.writeHead(200, { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache, no-transform", "Connection": "keep-alive", "X-Accel-Buffering": "no" });
+  if (typeof res.flushHeaders === "function") res.flushHeaders();
+
+  const child = spawn(script.executable, script.args, { cwd, windowsHide: true, shell: false, stdio: ["ignore", "pipe", "pipe"], env: process.env });
+  const run = { id: runId, child, command, cwd, startedAt, stopped: false };
+  activeRuns.set(runId, run);
+  writeSse(res, { type: "started", runId, cwd, startedAt: new Date(startedAt).toISOString() });
+  child.stdout.on("data", (chunk: Buffer) => writeSse(res, { type: "stdout", text: chunk.toString("utf-8") }));
+  child.stderr.on("data", (chunk: Buffer) => writeSse(res, { type: "stderr", text: chunk.toString("utf-8") }));
+  child.on("error", (error: any) => writeSse(res, { type: "stderr", text: error?.message || String(error) }));
+  child.on("close", (code: number | null, signal: string | null) => {
+    activeRuns.delete(runId);
+    const finalCwd = readFinalCwd(cwdReceiptFile, cwd);
+    try { fs.unlinkSync(cwdReceiptFile); } catch {}
+    writeSse(res, { type: "done", runId, exitCode: typeof code === "number" ? code : (run.stopped ? 130 : 1), signal: signal || "", stopped: run.stopped, cwd: finalCwd, durationMs: Date.now() - startedAt });
+    try { res.end(); } catch {}
+  });
+}
+
+export function stopAllTerminalRuns() {
+  for (const run of activeRuns.values()) {
+    run.stopped = true;
+    try { run.child.kill(); } catch {}
+  }
+}
+
+export function handleTerminalApi(pathname: string, req: any, res: any): boolean {
+  if (pathname === "/api/terminal/stream" && req.method === "POST") {
+    requestBody(req).then(payload => startTerminalStream(payload, res)).catch(error => sendJson(res, { error: error.message }, 400));
+    return true;
+  }
+  if (pathname === "/api/terminal/stop" && req.method === "POST") {
+    requestBody(req).then(payload => {
+      const run = activeRuns.get(String(payload?.runId || ""));
+      if (!run) return sendJson(res, { success: false, error: "运行已结束或不存在" }, 404);
+      run.stopped = true;
+      try { run.child.kill(); } catch {}
+      sendJson(res, { success: true, runId: run.id });
+    }).catch(error => sendJson(res, { error: error.message }, 400));
+    return true;
+  }
+  if (pathname === "/api/terminal/runs" && req.method === "GET") {
+    sendJson(res, { success: true, runs: [...activeRuns.values()].map(run => ({ id: run.id, command: run.command, cwd: run.cwd, startedAt: new Date(run.startedAt).toISOString() })) });
+    return true;
+  }
+  if (pathname === "/api/terminal/workspace" && req.method === "GET") {
+    sendJson(res, { success: true, workspace: sanitizeWorkspace(readJsonWithBackup(TERMINAL_STATE_FILE, { sessions: [] })) });
+    return true;
+  }
+  if (pathname === "/api/terminal/workspace" && req.method === "PUT") {
+    requestBody(req).then(payload => {
+      const workspace = sanitizeWorkspace(payload?.workspace || payload);
+      writeJsonAtomic(TERMINAL_STATE_FILE, workspace);
+      sendJson(res, { success: true, workspace });
+    }).catch(error => sendJson(res, { error: error.message }, 400));
+    return true;
+  }
+  return false;
+}
+
+export function runTerminalModuleSelfTest() {
+  const sample = sanitizeWorkspace({ activeTerminalId: "one", splitMode: true, sessions: [{ id: "one", name: "主终端", currentCwd: os.homedir(), history: Array.from({ length: 240 }, (_, index) => `echo ${index}`), terminalOutput: Array.from({ length: 340 }, (_, index) => ({ text: `line ${index}`, type: "output" })) }] });
+  return { success: sample.sessions.length === 1 && sample.sessions[0].history.length === MAX_HISTORY && sample.sessions[0].terminalOutput.length === MAX_OUTPUT_LINES, checks: { capsHistory: sample.sessions[0].history.length, capsOutput: sample.sessions[0].terminalOutput.length, validCwd: !!sample.sessions[0].currentCwd } };
+}

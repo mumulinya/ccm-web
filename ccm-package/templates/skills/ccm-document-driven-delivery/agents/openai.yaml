@@ -1,0 +1,4 @@
+interface:
+  display_name: "CCM Document Driven Delivery"
+  short_description: "Map PRD and API document clauses to implementation proof"
+  default_prompt: "Use $ccm-document-driven-delivery to implement and verify this document-backed requirement."

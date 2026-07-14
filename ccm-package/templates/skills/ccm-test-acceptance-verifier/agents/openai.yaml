@@ -1,0 +1,4 @@
+interface:
+  display_name: "CCM Test Acceptance Verifier"
+  short_description: "Independently verify acceptance criteria with real evidence"
+  default_prompt: "Use $ccm-test-acceptance-verifier to verify this delivery independently."

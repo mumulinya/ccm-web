@@ -224,13 +224,13 @@ textarea:focus {
   font-weight: 700;
 }
 
-:global([data-theme="dark"]) .chat-composer {
+:global([data-theme="dark"] .chat-composer){
   border-top-color: rgba(255, 255, 255, 0.08);
   background: rgba(15, 23, 42, 0.78);
 }
 
-:global([data-theme="dark"]) .composer-button,
-:global([data-theme="dark"]) textarea {
+:global([data-theme="dark"] .composer-button),
+:global([data-theme="dark"] textarea){
   border-color: rgba(255, 255, 255, 0.08);
   background: rgba(15, 23, 42, 0.82);
 }

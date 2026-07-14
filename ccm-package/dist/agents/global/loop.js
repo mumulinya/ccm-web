@@ -46,7 +46,10 @@ exports.findWaitingGlobalAgentRun = findWaitingGlobalAgentRun;
 exports.findClarifyingGlobalAgentRun = findClarifyingGlobalAgentRun;
 exports.getGlobalAgentToolSpec = getGlobalAgentToolSpec;
 exports.classifyGlobalAgentToolRisk = classifyGlobalAgentToolRisk;
+exports.projectGlobalAgentObservationForModel = projectGlobalAgentObservationForModel;
+exports.projectGlobalAgentReasoningForModel = projectGlobalAgentReasoningForModel;
 exports.parseGlobalAgentDecision = parseGlobalAgentDecision;
+exports.buildGlobalAgentModelMessages = buildGlobalAgentModelMessages;
 exports.classifyGlobalAgentUserSteer = classifyGlobalAgentUserSteer;
 exports.steerGlobalAgentRun = steerGlobalAgentRun;
 exports.applyGlobalAgentSupervisionSteer = applyGlobalAgentSupervisionSteer;
@@ -69,6 +72,7 @@ const runtime_1 = require("./runtime");
 const workchain_1 = require("../workchain");
 const delivery_report_1 = require("../delivery-report");
 const user_facing_text_1 = require("../user-facing-text");
+const role_skills_1 = require("../../skills/role-skills");
 const STORE_DIR = path.join(utils_1.CCM_DIR, "global-agent-runs");
 const STORE_FILE = path.join(STORE_DIR, "runs.json");
 const STORE_BACKUP = `${STORE_FILE}.bak`;
@@ -83,7 +87,7 @@ const activeRunObjects = new Map();
 exports.GLOBAL_AGENT_TOOL_SPECS = [
     { name: "inspect_system", description: "读取 CCM 服务、项目、群聊、任务、定时任务和执行器概况。", risk: "read" },
     { name: "list_projects", description: "列出真实项目及 Agent 配置。", risk: "read" },
-    { name: "inspect_project", description: "读取指定项目配置、目录结构和项目记忆。", required: ["project"], risk: "read" },
+    { name: "inspect_project", description: "读取指定项目的路由配置；项目记忆由群聊主 Agent 和项目子 Agent 使用。", required: ["project"], risk: "read" },
     { name: "list_groups", description: "列出群聊、成员项目及协调配置。", risk: "read" },
     { name: "list_tasks", description: "查询开发任务；可按 id 或 status 过滤。", risk: "read" },
     { name: "list_cron", description: "查询定时任务。", risk: "read" },
@@ -879,6 +883,136 @@ function compactObservation(value) {
         return value;
     return { truncated: true, preview: text.slice(0, MAX_OBSERVATION_CHARS), original_chars: text.length };
 }
+const GLOBAL_MODEL_ROUTE_KEYS = new Set([
+    "success", "accepted", "completed", "replayed", "operation", "id", "mission_id", "global_mission_id",
+    "supervisor_id", "status", "state", "supervisor_status", "task_id", "group_id", "project", "target",
+    "name", "queued", "enabled", "schedule", "target_type", "children", "rejected", "count", "total", "active",
+    "updated_at", "created_at", "completed_at", "trace_id", "phase", "attempt", "attempts", "max_attempts",
+]);
+const GLOBAL_MODEL_FORBIDDEN_FIELD = /(?:^|_)(?:group_session(?:_id)?|group_messages?|group_memory|project_memory|messages?|prompt|raw_payload|raw_receipt|worker_context_packet|task_agent_session|native_session)(?:$|_)/i;
+const GROUP_SESSION_ID_PATTERN = /\bgcs_[a-z0-9_-]+\b/ig;
+function redactGroupSessionIds(value) {
+    return typeof value === "string" ? value.replace(GROUP_SESSION_ID_PATTERN, "[group-session-redacted]") : value;
+}
+function redactGroupSessionFields(value) {
+    if (Array.isArray(value))
+        return value.slice(0, 100).map(redactGroupSessionFields);
+    if (!value || typeof value !== "object")
+        return redactGroupSessionIds(value);
+    const projected = {};
+    for (const [key, nested] of Object.entries(value)) {
+        if (GLOBAL_MODEL_FORBIDDEN_FIELD.test(key))
+            continue;
+        projected[key] = redactGroupSessionFields(nested);
+    }
+    return projected;
+}
+function projectRoutingValue(value) {
+    if (Array.isArray(value))
+        return value.slice(0, 100).map(projectRoutingValue);
+    if (!value || typeof value !== "object")
+        return redactGroupSessionIds(value);
+    const projected = {};
+    for (const [key, nested] of Object.entries(value)) {
+        if (GLOBAL_MODEL_FORBIDDEN_FIELD.test(key) || !GLOBAL_MODEL_ROUTE_KEYS.has(key))
+            continue;
+        projected[key] = projectRoutingValue(nested);
+    }
+    return projected;
+}
+function projectProjectRows(rows) {
+    return (Array.isArray(rows) ? rows : []).slice(0, 100).map((row) => ({
+        name: redactGroupSessionIds(String(row?.name || "")),
+        work_dir: redactGroupSessionIds(String(row?.work_dir || row?.workDir || "")),
+        agent: redactGroupSessionIds(String(row?.agent || "")),
+        platform: redactGroupSessionIds(String(row?.platform || "")),
+    }));
+}
+function projectGroupRows(rows) {
+    return (Array.isArray(rows) ? rows : []).slice(0, 100).map((row) => ({
+        id: redactGroupSessionIds(String(row?.id || "")),
+        name: redactGroupSessionIds(String(row?.name || "")),
+        members: (Array.isArray(row?.members) ? row.members : []).slice(0, 100).map((member) => ({
+            project: redactGroupSessionIds(String(member?.project || "")),
+            agent: redactGroupSessionIds(String(member?.agent || "")),
+        })),
+    }));
+}
+function projectGlobalTaskRows(observation) {
+    if (observation?.task_boundary?.policy !== "global_agent_owned_tasks_only")
+        return [];
+    return (Array.isArray(observation?.tasks) ? observation.tasks : []).slice(0, 100).map((task) => ({
+        id: redactGroupSessionIds(String(task?.id || "")),
+        title: redactGroupSessionIds(String(task?.title || "")),
+        status: String(task?.status || ""),
+        status_detail: redactGroupSessionIds(String(task?.status_detail || "")),
+        group_id: redactGroupSessionIds(String(task?.group_id || "")),
+        target_project: redactGroupSessionIds(String(task?.target_project || "")),
+        updated_at: String(task?.updated_at || ""),
+        trace_id: redactGroupSessionIds(String(task?.trace_id || "")),
+    }));
+}
+function projectGlobalAgentObservationForModel(toolName, observation) {
+    const name = String(toolName || "");
+    if (!observation || typeof observation !== "object")
+        return observation === undefined ? undefined : { available: true };
+    if (name === "list_projects")
+        return { success: observation.success !== false, projects: projectProjectRows(observation.projects) };
+    if (name === "inspect_project")
+        return {
+            success: observation.success !== false,
+            project: redactGroupSessionIds(String(observation.project || "")),
+            config: observation.config ? {
+                work_dir: redactGroupSessionIds(String(observation.config.work_dir || "")),
+                agent: redactGroupSessionIds(String(observation.config.agent || "")),
+                platform: redactGroupSessionIds(String(observation.config.platform || "")),
+            } : undefined,
+            memory_boundary: { project_memory_included: false, policy: "routing_metadata_only_delegate_to_group_main_agent" },
+        };
+    if (name === "list_groups")
+        return { success: observation.success !== false, groups: projectGroupRows(observation.groups) };
+    if (name === "list_tasks")
+        return {
+            success: observation.success !== false,
+            tasks: projectGlobalTaskRows(observation),
+            task_boundary: { policy: "global_agent_owned_tasks_only", historical_unproven_rows_dropped: observation?.task_boundary?.policy !== "global_agent_owned_tasks_only" },
+        };
+    if (name === "list_cron")
+        return { success: observation.success !== false, jobs: projectRoutingValue(observation.jobs) };
+    if (name === "inspect_system")
+        return {
+            success: observation.success !== false,
+            projects: projectProjectRows(observation.projects),
+            groups: projectGroupRows(observation.groups),
+            missions: projectRoutingValue(observation.missions),
+            memory_context_boundary: { group_session_context_included: false, group_memory_included: false, project_memory_included: false },
+        };
+    if (["query_global_memory", "manage_global_memory", "query_knowledge"].includes(name))
+        return compactObservation(redactGroupSessionFields(observation));
+    return projectRoutingValue(observation);
+}
+function projectGlobalAgentReasoningForModel(reasoning) {
+    return {
+        version: reasoning.version,
+        original_goal: reasoning.original_goal,
+        effective_goal: reasoning.effective_goal,
+        authorization_scope: reasoning.authorization_scope,
+        clarification_chain: reasoning.clarification_chain,
+        plan_version: reasoning.plan_version,
+        replan_required: reasoning.replan_required,
+        fact_snapshots: reasoning.fact_snapshots.map(item => ({ id: item.id, source: item.source, hash: item.hash, at: item.at })),
+        assertions: reasoning.assertions.map(item => ({ id: item.id, kind: item.kind, status: item.status, updated_at: item.updated_at })),
+        deviations: reasoning.deviations.map(item => ({ id: item.id, type: item.type, severity: item.severity, at: item.at })),
+        recovery_checks: reasoning.recovery_checks.map(item => ({
+            goal_revalidated: item.goal_revalidated,
+            state_revalidated: item.state_revalidated,
+            acceptance_revalidated: item.acceptance_revalidated,
+            remaining_gap_count: item.remaining_gaps.length,
+            at: item.at,
+        })),
+        updated_at: reasoning.updated_at,
+    };
+}
 const GLOBAL_DISPATCH_VISIBLE_TEXT_PATTERN = /CCM_AGENT_RECEIPT|CCM_AGENT_REQUESTS|WorkerContextPacket|task-notification|receipt[-_\s]*status|trace_id|session_id|run_id|native_session|task_agent_session|raw[_\s-]*payload|raw[_\s-]*receipt|scratchpad|Runtime Kernel|Trace Replay|回执要求/i;
 function sanitizeGlobalDispatchVisibleText(value, fallback = "派发信息已整理，技术细节已放入技术详情。", max = 260) {
     let text = String(value || "").replace(/\r/g, "").replace(/\n{3,}/g, "\n\n").trim();
@@ -1092,17 +1226,22 @@ function buildToolPrompt() {
         .map(spec => `- ${spec.name}${spec.required?.length ? `（必填：${spec.required.join("、")}）` : ""}：${spec.description}；schema=${JSON.stringify(spec.inputSchema)}；risk=${spec.risk}`)
         .join("\n");
 }
-async function buildMessages(run, runtime) {
+async function buildGlobalAgentModelMessages(run, runtime) {
     const context = runtime.getContext ? await runtime.getContext(run) : {};
+    const boundaryValidation = runtime.verifyContextBoundary?.(context, run);
+    if (boundaryValidation === false || (typeof boundaryValidation === "object" && boundaryValidation?.valid !== true)) {
+        const issues = typeof boundaryValidation === "object" && Array.isArray(boundaryValidation?.issues) ? boundaryValidation.issues : ["context_boundary_rejected"];
+        throw new Error(`global agent model context boundary failed: ${issues.join(", ")}`);
+    }
     (0, reasoning_loop_1.captureReasoningFacts)(run.reasoning_loop, "current_system_context", context);
     const priorSteps = run.steps.map(step => ({
         index: step.index,
         state: step.state,
-        message: step.message,
-        tool: step.tool ? { name: step.tool.name, arguments: step.tool.arguments, risk: step.tool.risk } : null,
-        observation: step.observation,
-        error: step.error,
+        tool: step.tool ? { name: step.tool.name, arguments: redactGroupSessionFields(step.tool.arguments), risk: step.tool.risk } : null,
+        observation: projectGlobalAgentObservationForModel(step.tool?.name || "", step.observation),
+        error: step.error ? "tool_failed" : "",
     }));
+    const roleSkills = (0, role_skills_1.buildRoleSkillPrompt)("global-agent", run.reasoning_loop.effective_goal || run.user_message, { source: run.source || "", phase: "planning" });
     const system = `你是 CCM 全局 Agent 的决策内核。你不是关键词触发器，而是根据用户完整语义、真实系统上下文和工具观察结果决定下一步。
 
 状态只能是 answer、investigate、plan、execute、needs_confirmation、complete。
@@ -1130,7 +1269,7 @@ ${buildToolPrompt()}
 
 只输出一个合法 JSON 对象，不要输出 Markdown：
 {"state":"investigate|plan|execute|needs_confirmation|answer|complete","message":"非终态写进度；终态写直接回答用户的完整内容","intent":{"category":"conversation|question|analysis|execution|high_risk|ambiguous","goal":"用户真实目标","action_required":false,"target_refs":[],"impact_scope":[],"confidence":0.95,"authorization_basis":"current_message|confirmation|none","reason":"判断依据"},"plan":["步骤"],"tool":{"name":"工具名","arguments":{}},"completion":{"summary":"结论","evidence":[],"risks":[],"next_action":""}}
-不调用工具时 tool 必须为 null。`;
+不调用工具时 tool 必须为 null。${roleSkills.prompt ? `\n\n${roleSkills.prompt}` : ""}`;
     const state = JSON.stringify({
         run: {
             id: run.id,
@@ -1141,8 +1280,9 @@ ${buildToolPrompt()}
             remaining_steps: Math.max(0, run.max_steps - run.steps.length),
             latest_user_steer: run.last_user_steer || run.lastUserSteer || null,
             replan_required: run.reasoning_loop.replan_required === true,
+            selected_role_skills: roleSkills.names,
         },
-        reasoning_loop: run.reasoning_loop,
+        reasoning_loop: projectGlobalAgentReasoningForModel(run.reasoning_loop),
         context,
         prior_steps: priorSteps,
     });
@@ -1852,7 +1992,7 @@ async function continueLoop(run, runtime) {
             let decision;
             const decisionStarted = now;
             try {
-                const messages = await buildMessages(run, runtime);
+                const messages = await buildGlobalAgentModelMessages(run, runtime);
                 run.model_calls += 1;
                 const rawDecision = await runtime.callModel(messages, run);
                 if (applyPendingGlobalAgentUserSteers(run, runtime).length)

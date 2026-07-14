@@ -18,11 +18,28 @@ const result_builder_1 = require("./result-builder");
 const utils_1 = require("./utils");
 const work_order_1 = require("./work-order");
 const artifact_retention_1 = require("./artifact-retention");
+const role_skills_1 = require("../skills/role-skills");
 async function runTestAgent(input, options = {}) {
     const startedAt = (0, utils_1.nowIso)();
     const normalized = (0, work_order_1.normalizeTestAgentWorkOrder)(input, options);
     const planned = (0, command_planner_1.planVerificationCommands)(normalized.workOrder, normalized.issues);
     const { workOrder, issues } = planned;
+    const roleSkills = (0, role_skills_1.selectRoleSkills)("test-agent", [
+        workOrder.originalUserGoal,
+        ...(workOrder.acceptanceCriteria || []),
+        ...(workOrder.requiredChecks || []),
+    ].join("\n"), { forceWork: true, phase: "verification" });
+    workOrder.metadata = {
+        ...workOrder.metadata,
+        roleSkills: {
+            schema: "ccm-role-skill-selection-v1",
+            role: "test-agent",
+            phase: "verification",
+            applied: true,
+            appliedBy: "ccm-native-test-agent-engine",
+            selected: roleSkills.map(skill => ({ name: skill.name, kind: skill.kind, reason: skill.reason })),
+        },
+    };
     if ((0, shared_1.wantsBrowser)(workOrder)) {
         workOrder.metadata = {
             ...workOrder.metadata,

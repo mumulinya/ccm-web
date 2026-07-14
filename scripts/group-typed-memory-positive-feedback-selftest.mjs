@@ -220,7 +220,10 @@ try {
       && feedbackText.includes("**Why:**")
       && feedbackText.includes("**How to apply:**"),
     qualityBindingGatePasses: first.quality?.checks?.some(check => check.id === "positive_feedback_binding" && check.pass === true),
-    idempotentRepeat: second.newFactCount === 0 && second.updatedFactCount === first.newFactCount,
+    idempotentRepeat: second.skipped === true
+      && second.reason === "no_new_messages_after_committed_cursor"
+      && second.newFactCount === 0
+      && second.updatedFactCount === 0,
     crossSessionTargetRejected: allFacts(scopeBLedger).length === 0
       && scopeBLedger.admission?.positiveConfirmationRejectedCount === 1,
     legacyUnboundFactEvicted: allFacts(legacyLedger).length === 0 && legacyResult.evictedExistingFactCount === 1,

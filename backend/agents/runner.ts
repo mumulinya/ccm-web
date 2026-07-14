@@ -656,6 +656,13 @@ async function runRequest(file: string) {
       : await runProjectVerificationCommands(request.projectName || "", workDir, timeoutMs, request);
     const output = appendRunnerVerificationOutput(agentOutput, runnerVerification);
     const fileChanges = getFileChanges(request.projectName || "", changeSnapshot);
+    const finalSessionLifecycleValidation = validateAgentRunnerSessionLifecycleFence(request);
+    if (!finalSessionLifecycleValidation.valid) {
+      runtimeSessionLifecycleValidation = finalSessionLifecycleValidation;
+      throw Object.assign(new Error(`群聊会话生命周期已变化：${finalSessionLifecycleValidation.issues.join(", ")}`), {
+        code: "CCM_SESSION_LIFECYCLE_STALE",
+      });
+    }
     writeJsonAtomic(resultFile, {
       id: request.id,
       success: true,
@@ -716,6 +723,11 @@ async function runRequest(file: string) {
     writeHeartbeat("idle", "");
   }
   return true;
+}
+
+export async function runAgentRunnerRequestFile(file: string) {
+  ensureDirs();
+  return runRequest(file);
 }
 
 export function runAgentRunnerSelfTest() {

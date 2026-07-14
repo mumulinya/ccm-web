@@ -75,6 +75,8 @@ export const tasksApi = {
 // 工具相关 API
 export const toolsApi = {
   authorizationInventory: () => api('/api/tools/authorization-inventory'),
+  goalAudit: () => api('/api/tools/mcp-skill-goal-audit'),
+  catalogImpact: (data) => api('/api/tools/catalog-impact', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
   chainVerification: (input = {}) => {
     const params = new URLSearchParams()
     ;['scope', 'scopeId', 'groupId', 'project', 'projectName', 'status'].forEach((key) => {
@@ -110,6 +112,7 @@ export const toolsApi = {
   mcp: {
     list: () => api('/api/mcp'),
     create: (data) => api('/api/mcp', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
+    test: (data) => api('/api/tools/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
     delete: (name) => api('/api/mcp/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) }),
   },
   skills: {
@@ -119,7 +122,13 @@ export const toolsApi = {
     delete: (name) => api('/api/skills/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) }),
   },
   marketplace: {
-    list: (source = 'local', url = '') => api(`/api/marketplace/list?source=${encodeURIComponent(source)}&url=${encodeURIComponent(url)}`),
+    list: (source = 'local', url = '', options = {}) => {
+      const params = new URLSearchParams({ source, url })
+      Object.entries(options || {}).forEach(([key, value]) => {
+        if (value !== undefined && value !== null && value !== '') params.set(key, String(value))
+      })
+      return api(`/api/marketplace/list?${params.toString()}`)
+    },
     installations: () => api('/api/marketplace/installations'),
     operations: (limit = 20) => api(`/api/marketplace/operations?limit=${encodeURIComponent(limit)}`),
     sources: () => api('/api/marketplace/sources'),
@@ -149,4 +158,7 @@ export const sharedApi = {
 export const terminalApi = {
   exec: (data) => api('/api/terminal/exec', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
   info: () => api('/api/terminal/info'),
+  workspace: () => api('/api/terminal/workspace'),
+  saveWorkspace: (workspace) => api('/api/terminal/workspace', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ workspace }) }),
+  stop: (runId) => api('/api/terminal/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ runId }) }),
 };

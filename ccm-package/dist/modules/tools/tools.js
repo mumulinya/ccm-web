@@ -46,6 +46,9 @@ const storage_1 = require("../collaboration/storage");
 const runtime_tool_sync_1 = require("../../tools/runtime-tool-sync");
 const tool_authorization_1 = require("../../tools/tool-authorization");
 const runtime_tool_real_cli_matrix_1 = require("../../tools/runtime-tool-real-cli-matrix");
+const terminal_1 = require("./terminal");
+const marketplace_1 = require("./marketplace");
+const tool_catalog_management_1 = require("../../tools/tool-catalog-management");
 const { toolManager } = require("../../tools/tool-manager");
 const TOOL_CATALOG_AUDIT_FILE = path.join(os.homedir(), ".cc-connect", "tools", "catalog-operations.jsonl");
 const TOOL_INVOCATION_AUDIT_FILES = {
@@ -103,6 +106,12 @@ function appendJsonlBounded(file, entry) {
 }
 async function reloadToolManagerAfterCatalogMutation(entry) {
     await toolManager.loadTools();
+    const lifecycle = (0, marketplace_1.completeToolCatalogMutationLifecycle)({
+        action: entry.action,
+        type: entry.type,
+        name: entry.name,
+        autoResync: entry.autoResync !== false,
+    });
     const toolList = toolManager.getToolList();
     const audit = {
         schema: "ccm-tool-catalog-operation-v1",
@@ -117,9 +126,26 @@ async function reloadToolManagerAfterCatalogMutation(entry) {
             mcpTools: Array.isArray(toolList.mcp) ? toolList.mcp.length : 0,
             skills: Array.isArray(toolList.skillTools) ? toolList.skillTools.length : 0,
         },
+        ...lifecycle,
     };
     appendJsonlBounded(TOOL_CATALOG_AUDIT_FILE, audit);
     return audit;
+}
+async function rollbackCatalogMutation(type, name, previous) {
+    if (previous) {
+        if (type === "mcp")
+            (0, db_1.saveMcpTool)(previous);
+        else
+            (0, db_1.saveSkill)(previous);
+    }
+    else if (type === "mcp")
+        (0, db_1.deleteMcpTool)(name);
+    else
+        (0, db_1.deleteSkill)(name);
+    try {
+        await toolManager.loadTools();
+    }
+    catch { }
 }
 function cleanAuditText(value, max = 240) {
     return String(value || "").replace(/[\0\r\n\t]+/g, " ").trim().slice(0, max);
@@ -168,7 +194,7 @@ function runtimeAuditTargetKey(audit) {
         return `group:${group}:${project}`;
     if (project)
         return `project:${project}`;
-    return `snapshot:${cleanAuditText(audit?.runtime || "", 80)}:${cleanAuditText(audit?.snapshotId || audit?.mcpConfigPath || "", 180)}`;
+    return `runtime:${cleanAuditText(audit?.runtime || "unknown", 80)}:unscoped`;
 }
 function selectLatestRuntimeToolAudits(audits) {
     const seen = new Set();
@@ -182,6 +208,13 @@ function selectLatestRuntimeToolAudits(audits) {
         seen.add(key);
         return true;
     });
+}
+function loadLatestRuntimeToolReadiness(limit = 240, options = {}) {
+    const readiness = selectLatestRuntimeToolAudits((0, runtime_tool_sync_1.listRecentRuntimeToolAudits)(limit))
+        .map(audit => (0, runtime_tool_sync_1.probeRuntimeToolReadiness)(audit, { record: false }));
+    return options.businessOnly
+        ? readiness.filter(item => !!item.projectName || !!item.groupId)
+        : readiness;
 }
 function scopeSummary(scope = {}) {
     return {
@@ -570,7 +603,7 @@ function buildChainVerificationGate(rows) {
 function buildToolChainVerification(input = {}) {
     const runtimeReadiness = Array.isArray(input.runtimeReadiness)
         ? input.runtimeReadiness
-        : (0, runtime_tool_sync_1.listRecentRuntimeToolAudits)(80).map(audit => (0, runtime_tool_sync_1.probeRuntimeToolReadiness)(audit, { record: false }));
+        : loadLatestRuntimeToolReadiness(240, { businessOnly: true });
     const inventory = input.inventory || (0, tool_authorization_1.buildToolAuthorizationInventory)({
         projects: input.projects || (0, db_1.loadProjectConfigs)(),
         groups: input.groups || (0, storage_1.loadGroups)(),
@@ -1345,6 +1378,8 @@ function loadCustomSkills() {
     return result;
 }
 function handleToolsAndMetricsApi(pathname, req, res, parsed) {
+    if ((0, terminal_1.handleTerminalApi)(pathname, req, res))
+        return true;
     // === MCP/Skills API ===
     if (pathname === "/api/tools/status" && req.method === "GET") {
         (0, utils_1.sendJson)(res, { success: true, ...toolManager.getToolList() });
@@ -1362,7 +1397,7 @@ function handleToolsAndMetricsApi(pathname, req, res, parsed) {
         try {
             const includeRuntime = !["0", "false", "no"].includes(String(parsed?.query?.runtime || "1").toLowerCase());
             const runtimeReadiness = includeRuntime
-                ? (0, runtime_tool_sync_1.listRecentRuntimeToolAudits)(80).map(audit => (0, runtime_tool_sync_1.probeRuntimeToolReadiness)(audit, { record: false }))
+                ? loadLatestRuntimeToolReadiness(240, { businessOnly: true })
                 : [];
             const inventory = (0, tool_authorization_1.buildToolAuthorizationInventory)({
                 projects: (0, db_1.loadProjectConfigs)(),
@@ -1401,7 +1436,7 @@ function handleToolsAndMetricsApi(pathname, req, res, parsed) {
     if (pathname === "/api/tools/runtime-readiness" && req.method === "GET") {
         const deep = ["1", "true", "yes"].includes(String(parsed?.query?.deep || "").toLowerCase());
         const includeHistory = ["1", "true", "yes"].includes(String(parsed?.query?.history || "").toLowerCase());
-        const historicalAudits = (0, runtime_tool_sync_1.listRecentRuntimeToolAudits)(80);
+        const historicalAudits = (0, runtime_tool_sync_1.listRecentRuntimeToolAudits)(240);
         const audits = includeHistory ? historicalAudits : selectLatestRuntimeToolAudits(historicalAudits);
         const readiness = audits.map(audit => (0, runtime_tool_sync_1.probeRuntimeToolReadiness)(audit, { deep }));
         (0, utils_1.sendJson)(res, {
@@ -1455,16 +1490,37 @@ function handleToolsAndMetricsApi(pathname, req, res, parsed) {
         });
         return true;
     }
+    if (pathname === "/api/tools/catalog-impact" && req.method === "POST") {
+        let body = "";
+        req.on("data", (chunk) => body += chunk);
+        req.on("end", () => {
+            try {
+                const payload = body ? JSON.parse(body) : {};
+                const type = payload.type === "skill" ? "skill" : "mcp";
+                const name = (0, tool_catalog_management_1.normalizeToolCatalogName)(payload.name);
+                (0, utils_1.sendJson)(res, { success: true, ...(0, marketplace_1.previewToolCatalogMutationImpact)({ action: payload.action || "preview", type, name }) });
+            }
+            catch (e) {
+                (0, utils_1.sendJson)(res, { success: false, error: e.message }, 400);
+            }
+        });
+        return true;
+    }
     if (pathname === "/api/tools/test" && req.method === "POST") {
         let body = "";
         req.on("data", (chunk) => body += chunk);
         req.on("end", () => {
             try {
-                const { command, args, env } = JSON.parse(body);
-                toolManager.testConnection(command, env || "", args || []).then((result) => (0, utils_1.sendJson)(res, result));
+                const payload = JSON.parse(body || "{}");
+                const name = payload.name ? (0, tool_catalog_management_1.normalizeToolCatalogName)(payload.name) : "connection-test";
+                const existing = (0, db_1.loadMcpTools)().find(item => String(item.name) === name);
+                const candidate = (0, tool_catalog_management_1.mergeMcpToolUpdate)(existing, { ...payload, name }, { create: !existing });
+                toolManager.testConnection(candidate.command, candidate.env, candidate.args || [])
+                    .then((result) => (0, utils_1.sendJson)(res, { ...result, tested: (0, tool_catalog_management_1.redactMcpToolForDisplay)(candidate) }))
+                    .catch((e) => (0, utils_1.sendJson)(res, { success: false, error: e.message }, 400));
             }
             catch (e) {
-                (0, utils_1.sendJson)(res, { error: e.message }, 400);
+                (0, utils_1.sendJson)(res, { success: false, error: e.message }, 400);
             }
         });
         return true;
@@ -1495,7 +1551,7 @@ function handleToolsAndMetricsApi(pathname, req, res, parsed) {
     }
     // === MCP 工具管理 API ===
     if (pathname === "/api/mcp" && req.method === "GET") {
-        (0, utils_1.sendJson)(res, { tools: (0, db_1.loadMcpTools)() });
+        (0, utils_1.sendJson)(res, { success: true, tools: (0, db_1.loadMcpTools)().map(tool_catalog_management_1.redactMcpToolForDisplay) });
         return true;
     }
     if (pathname === "/api/mcp" && req.method === "POST") {
@@ -1503,22 +1559,29 @@ function handleToolsAndMetricsApi(pathname, req, res, parsed) {
         req.on("data", (chunk) => body += chunk);
         req.on("end", async () => {
             try {
-                const tool = JSON.parse(body);
-                if (!tool.name)
-                    return (0, utils_1.sendJson)(res, { error: "名称不能为空" }, 400);
-                const previous = (0, db_1.loadMcpTools)().some(item => String(item.name) === String(tool.name));
-                tool.type = "mcp";
-                tool.created_at = tool.created_at || new Date().toISOString();
+                const payload = JSON.parse(body || "{}");
+                const name = (0, tool_catalog_management_1.normalizeToolCatalogName)(payload.name);
+                const previous = (0, db_1.loadMcpTools)().find(item => String(item.name) === name) || null;
+                if (payload.createOnly === true && previous)
+                    return (0, utils_1.sendJson)(res, { success: false, error: "同名 MCP 服务器已存在" }, 409);
+                const tool = (0, tool_catalog_management_1.mergeMcpToolUpdate)(previous, { ...payload, name }, { create: !previous });
                 (0, db_1.saveMcpTool)(tool);
-                const reload = await reloadToolManagerAfterCatalogMutation({
-                    action: previous ? "update" : "create",
-                    type: "mcp",
-                    name: tool.name,
-                });
-                (0, utils_1.sendJson)(res, { success: true, tool, reload });
+                let reload;
+                try {
+                    reload = await reloadToolManagerAfterCatalogMutation({
+                        action: previous ? (previous.enabled !== tool.enabled && Object.keys(payload).every(key => ["name", "enabled"].includes(key)) ? "toggle" : "update") : "create",
+                        type: "mcp",
+                        name,
+                    });
+                }
+                catch (error) {
+                    await rollbackCatalogMutation("mcp", name, previous);
+                    throw error;
+                }
+                (0, utils_1.sendJson)(res, { success: true, tool: (0, tool_catalog_management_1.redactMcpToolForDisplay)(tool), reload });
             }
             catch (e) {
-                (0, utils_1.sendJson)(res, { error: e.message }, 400);
+                (0, utils_1.sendJson)(res, { success: false, error: e.message }, 400);
             }
         });
         return true;
@@ -1528,19 +1591,28 @@ function handleToolsAndMetricsApi(pathname, req, res, parsed) {
         req.on("data", (chunk) => body += chunk);
         req.on("end", async () => {
             try {
-                const { name } = JSON.parse(body);
-                const previous = (0, db_1.loadMcpTools)().some(item => String(item.name) === String(name));
+                const { name: rawName } = JSON.parse(body || "{}");
+                const name = (0, tool_catalog_management_1.normalizeToolCatalogName)(rawName);
+                const previous = (0, db_1.loadMcpTools)().find(item => String(item.name) === name) || null;
+                const impact = (0, marketplace_1.previewToolCatalogMutationImpact)({ action: "delete", type: "mcp", name });
                 (0, db_1.deleteMcpTool)(name);
-                const reload = await reloadToolManagerAfterCatalogMutation({
-                    action: "delete",
-                    type: "mcp",
-                    name,
-                    changed: previous,
-                });
-                (0, utils_1.sendJson)(res, { success: true, removed: previous, reload });
+                let reload;
+                try {
+                    reload = await reloadToolManagerAfterCatalogMutation({
+                        action: "delete",
+                        type: "mcp",
+                        name,
+                        changed: !!previous,
+                    });
+                }
+                catch (error) {
+                    await rollbackCatalogMutation("mcp", name, previous);
+                    throw error;
+                }
+                (0, utils_1.sendJson)(res, { success: true, removed: !!previous, impact, reload });
             }
             catch (e) {
-                (0, utils_1.sendJson)(res, { error: e.message }, 400);
+                (0, utils_1.sendJson)(res, { success: false, error: e.message }, 400);
             }
         });
         return true;
@@ -1559,22 +1631,29 @@ function handleToolsAndMetricsApi(pathname, req, res, parsed) {
         req.on("data", (chunk) => body += chunk);
         req.on("end", async () => {
             try {
-                const skill = JSON.parse(body);
-                if (!skill.name)
-                    return (0, utils_1.sendJson)(res, { error: "名称不能为空" }, 400);
-                const previous = (0, db_1.loadSkills)().some(item => String(item.name) === String(skill.name));
-                skill.type = "skill";
-                skill.created_at = skill.created_at || new Date().toISOString();
+                const payload = JSON.parse(body || "{}");
+                const name = (0, tool_catalog_management_1.normalizeToolCatalogName)(payload.name);
+                const previous = (0, db_1.loadSkills)().find(item => String(item.name) === name) || null;
+                if (payload.createOnly === true && previous)
+                    return (0, utils_1.sendJson)(res, { success: false, error: "同名 Prompt Skill 已存在" }, 409);
+                const skill = (0, tool_catalog_management_1.mergeSkillUpdate)(previous, { ...payload, name }, { create: !previous });
                 (0, db_1.saveSkill)(skill);
-                const reload = await reloadToolManagerAfterCatalogMutation({
-                    action: previous ? "update" : "create",
-                    type: "skill",
-                    name: skill.name,
-                });
+                let reload;
+                try {
+                    reload = await reloadToolManagerAfterCatalogMutation({
+                        action: previous ? "update" : "create",
+                        type: "skill",
+                        name,
+                    });
+                }
+                catch (error) {
+                    await rollbackCatalogMutation("skill", name, previous);
+                    throw error;
+                }
                 (0, utils_1.sendJson)(res, { success: true, skill, reload });
             }
             catch (e) {
-                (0, utils_1.sendJson)(res, { error: e.message }, 400);
+                (0, utils_1.sendJson)(res, { success: false, error: e.message }, 400);
             }
         });
         return true;
@@ -1584,19 +1663,28 @@ function handleToolsAndMetricsApi(pathname, req, res, parsed) {
         req.on("data", (chunk) => body += chunk);
         req.on("end", async () => {
             try {
-                const { name } = JSON.parse(body);
-                const previous = (0, db_1.loadSkills)().some(item => String(item.name) === String(name));
+                const { name: rawName } = JSON.parse(body || "{}");
+                const name = (0, tool_catalog_management_1.normalizeToolCatalogName)(rawName);
+                const previous = (0, db_1.loadSkills)().find(item => String(item.name) === name) || null;
+                const impact = (0, marketplace_1.previewToolCatalogMutationImpact)({ action: "delete", type: "skill", name });
                 (0, db_1.deleteSkill)(name);
-                const reload = await reloadToolManagerAfterCatalogMutation({
-                    action: "delete",
-                    type: "skill",
-                    name,
-                    changed: previous,
-                });
-                (0, utils_1.sendJson)(res, { success: true, removed: previous, reload });
+                let reload;
+                try {
+                    reload = await reloadToolManagerAfterCatalogMutation({
+                        action: "delete",
+                        type: "skill",
+                        name,
+                        changed: !!previous,
+                    });
+                }
+                catch (error) {
+                    await rollbackCatalogMutation("skill", name, previous);
+                    throw error;
+                }
+                (0, utils_1.sendJson)(res, { success: true, removed: !!previous, impact, reload });
             }
             catch (e) {
-                (0, utils_1.sendJson)(res, { error: e.message }, 400);
+                (0, utils_1.sendJson)(res, { success: false, error: e.message }, 400);
             }
         });
         return true;

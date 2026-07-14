@@ -23,6 +23,8 @@ const workEvents = computed(() => (
   Array.isArray(props.message?.workEvents) ? props.message.workEvents.filter(Boolean) : []
 ))
 
+const isTaskMessage = computed(() => String(props.message?.messageMode || props.message?.message_mode || '').toLowerCase() === 'task' || !!props.taskCard)
+
 const visibleWorkEvents = computed(() => workEvents.value.slice(-10))
 
 const sanitizeUserVisibleWorkText = (value) => {
@@ -66,7 +68,7 @@ const hasFileChanges = computed(() => (
   <div v-else>{{ message.content }}</div>
   <span v-if="isLastStreaming" class="stream-cursor">▌</span>
 
-  <details v-if="workEvents.length && !taskCard" class="agent-work-events">
+  <details v-if="workEvents.length && !taskCard && isTaskMessage" class="agent-work-events">
     <summary class="work-events-head">
       <span>技术详情</span>
       <span>{{ workEvents.length }} 条</span>
@@ -83,7 +85,7 @@ const hasFileChanges = computed(() => (
     </div>
   </details>
 
-  <div v-if="hasFileChanges && !taskCard" class="file-changes">
+  <div v-if="hasFileChanges && !taskCard && isTaskMessage" class="file-changes">
     <div class="file-changes-header">📁 修改了 {{ message.fileChanges.count }} 个文件</div>
     <button
       v-for="file in message.fileChanges.files"

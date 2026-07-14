@@ -30,7 +30,7 @@ async function launchBrowser() {
 async function openTaskDispatch(page, mobile = false) {
   await page.goto(baseUrl, { waitUntil: 'domcontentloaded' })
   if (mobile) {
-    const taskNav = page.locator('.bottom-item').filter({ hasText: '📋任务' })
+    const taskNav = page.getByRole('button', { name: '任务派发', exact: true })
     if (await taskNav.count() !== 1) throw new Error('mobile task navigation should be unique')
     await taskNav.click()
   } else {

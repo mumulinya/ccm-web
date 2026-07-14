@@ -52,6 +52,7 @@ const storage_1 = require("./storage");
 const reliability_ledger_1 = require("../../system/reliability-ledger");
 const user_facing_text_1 = require("../../agents/user-facing-text");
 const source_ingestion_1 = require("../requirements/source-ingestion");
+const group_memory_index_1 = require("./group-memory-index");
 function compactGroupLiveText(value, max = 180) {
     const text = String(value || "").replace(/\s+/g, " ").trim();
     return text.length > max ? `${text.slice(0, max)}...` : text;
@@ -316,6 +317,75 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                 if (groupSession.archived === true)
                     return (0, utils_1.sendJson)(res, { error: "归档会话为只读状态，请恢复或新建会话后继续" }, 409);
                 (0, group_orchestrator_1.normalizeGroupOrchestrator)(group);
+                const directMemoryActionName = String(payload.memory_action || payload.memoryAction || "").trim().toLowerCase();
+                if (directMemoryActionName) {
+                    if (!["remember", "forget"].includes(directMemoryActionName))
+                        return (0, utils_1.sendJson)(res, { error: "不支持的记忆操作" }, 400);
+                    if (!groupSessionId.startsWith("gcs_"))
+                        return (0, utils_1.sendJson)(res, { error: "旧群聊会话不再接收记忆写入，请新建会话" }, 409);
+                    if (uploadedFiles.length)
+                        return (0, utils_1.sendJson)(res, { error: "记忆命令暂不接收附件，请输入明确文本" }, 400);
+                    const messageTraceId = ensureTraceId(payload.trace_id || payload.traceId, "group-memory");
+                    const messageId = client_message_id ? String(client_message_id) : `m${Date.now().toString(36)}`;
+                    const typedMemoryScopeId = `${group_id}--${groupSessionId}`;
+                    const action = (0, group_memory_index_1.buildGroupDirectMemoryAction)(typedMemoryScopeId, {
+                        action: directMemoryActionName,
+                        messageId,
+                        content: String(payload.memory_content || payload.memoryContent || userMessage).trim(),
+                        memoryType: payload.memory_type || payload.memoryType || "user",
+                        targetMemoryId: payload.target_memory_id || payload.targetMemoryId || "",
+                    });
+                    const userMsg = {
+                        id: messageId,
+                        role: "user",
+                        target: "coordinator",
+                        content: userMessageForHistory,
+                        timestamp: new Date().toISOString(),
+                        trace_id: messageTraceId,
+                        group_session_id: groupSessionId,
+                        memory_direct_action: action,
+                    };
+                    (0, storage_1.appendGroupMessage)(group_id, userMsg);
+                    const commit = (0, group_memory_index_1.commitGroupDirectMemoryAction)(typedMemoryScopeId, (0, storage_1.getGroupMessages)(group_id, groupSessionId), {
+                        requestId: action.requestId,
+                        reason: `group-chat-${directMemoryActionName}`,
+                    });
+                    const receipt = commit.receipt || {};
+                    const candidateHint = Array.isArray(receipt.candidates) && receipt.candidates.length
+                        ? ` 可选记忆：${receipt.candidates.map((item) => `${item.memoryId}（${compactGroupLiveText(item.text, 80)}）`).join("；")}`
+                        : "";
+                    const responseText = receipt.status === "committed" && directMemoryActionName === "remember"
+                        ? `已记入当前群聊会话，记忆 ID：${receipt.memoryId}。`
+                        : receipt.status === "duplicate"
+                            ? `当前群聊会话已经有这条记忆，记忆 ID：${receipt.memoryId}。`
+                            : receipt.status === "committed" && directMemoryActionName === "forget"
+                                ? `已从当前群聊会话忘记记忆 ${receipt.memoryId}。`
+                                : `没有修改记忆：${receipt.reason || "记忆操作未通过校验"}。${candidateHint}`;
+                    const responseMessageId = `${messageId}-memory-receipt`;
+                    (0, storage_1.appendGroupMessage)(group_id, {
+                        id: responseMessageId,
+                        role: "assistant",
+                        agent: "coordinator",
+                        type: "group_memory_receipt",
+                        content: responseText,
+                        timestamp: new Date().toISOString(),
+                        trace_id: messageTraceId,
+                        group_session_id: groupSessionId,
+                        memory_receipt: receipt,
+                    });
+                    (0, logs_1.addGroupLog)(group_id, receipt.status === "rejected" ? "warning" : "info", "direct_memory", responseText, {
+                        group_session_id: groupSessionId,
+                        typed_memory_scope_id: typedMemoryScopeId,
+                        action: directMemoryActionName,
+                        request_id: action.requestId,
+                        receipt,
+                    });
+                    res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "Connection": "keep-alive", "Access-Control-Allow-Origin": "*" });
+                    writeSse(res, { type: "agent_done", agent: "coordinator", messageId: responseMessageId, text: responseText, memoryReceipt: receipt });
+                    writeSse(res, { type: "done", messageId: responseMessageId, memoryReceipt: receipt });
+                    res.end();
+                    return;
+                }
                 const explicitContinuationTaskId = String(payload.continuation_task_id || payload.continuationTaskId || "").trim();
                 const explicitContinuationResolution = resolveExplicitGroupContinuationTask((0, db_1.loadTasks)(), group_id, explicitContinuationTaskId);
                 const explicitContinuationTask = explicitContinuationResolution.task;
@@ -1067,7 +1137,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                         ctx.setAgentActivity(member.project, "working", "群聊协作中", { tab: "groups", groupId: group_id });
                         ctx.broadcastPetSpeech(member.project, { role: "status", text: "群聊协作中，正在思考...", source: "group" });
                     }
-                    const getAgentPrompt = (member) => {
+                    const getAgentPrompt = async (member) => {
                         const context = buildGroupContextPacket(group_id, { recentLimit: 10, olderLimit: 24, fullCount: 5, groupSessionId });
                         const memberList = group.members.map((m) => m.project).filter((p) => p !== member.project && p !== "coordinator").join(", ");
                         const collaborationInstructions = (0, group_orchestrator_1.buildMemberCollaborationInstructions)(member.project, memberList);
@@ -1076,7 +1146,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                         const memberConfig = configs.find(c => c.name === member.project);
                         const memberWorkDir = memberConfig ? (0, db_1.getConfigInfo)(memberConfig.path)[0]?.workDir : "";
                         const memberAgentType = memberConfig ? ((0, db_1.getConfigInfo)(memberConfig.path)[0]?.agent || member.agent || "claudecode") : (member.agent || "claudecode");
-                        const memoryBundle = buildAgentMemoryContextBundle(group_id, member.project, messageForAgent, {
+                        const memoryBundle = await deps.buildAgentMemoryContextBundleWithManifestSelection(group_id, member.project, messageForAgent, {
                             workDir: memberWorkDir,
                             groupSessionId,
                         });
@@ -1106,7 +1176,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                             const info = (0, db_1.getConfigInfo)(config.path);
                             const workDir = info[0]?.workDir;
                             const agentType = info[0]?.agent || "claudecode";
-                            const agentPrompt = getAgentPrompt(member);
+                            const agentPrompt = await getAgentPrompt(member);
                             try {
                                 const runtimeToolContext = prepareAgentRuntimeTools(group_id, member.project, workDir, agentType, agentPrompt.allowedTools, res, {
                                     toolAudit: agentPrompt.toolAudit,
@@ -1310,7 +1380,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                 if (projectConfig.shared_files && projectConfig.shared_files.length > 0) {
                     sharedFilesContext += ctx.buildFilesContext(projectConfig.shared_files, "[项目共享文件]");
                 }
-                const memoryBundle = buildAgentMemoryContextBundle(group_id, target_project_actual, messageForAgent, {
+                const memoryBundle = await deps.buildAgentMemoryContextBundleWithManifestSelection(group_id, target_project_actual, messageForAgent, {
                     workDir,
                     groupSessionId,
                 });
@@ -1504,7 +1574,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                     }
                     const memberList = group.members.map((m) => m.project).filter((p) => p !== member.project && p !== "coordinator").join(", ");
                     const memberInstructions = (0, group_orchestrator_1.buildMemberCollaborationInstructions)(member.project, memberList);
-                    const memoryBundle = buildAgentMemoryContextBundle(group_id, member.project, message, {
+                    const memoryBundle = await deps.buildAgentMemoryContextBundleWithManifestSelection(group_id, member.project, message, {
                         workDir,
                         groupSessionId,
                     });

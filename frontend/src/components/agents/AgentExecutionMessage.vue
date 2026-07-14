@@ -321,19 +321,19 @@ const clarificationSummary = () => props.msg.clarification_summary || props.msg.
   color: #92400e !important;
   font-weight: 800;
 }
-:global([data-theme="dark"]) .agent-avatar {
+:global([data-theme="dark"] .agent-avatar){
   background: color-mix(in srgb, var(--agent-accent) 20%, rgba(15, 23, 42, 0.9));
   border-color: color-mix(in srgb, var(--agent-accent) 32%, rgba(255, 255, 255, 0.08));
 }
-:global([data-theme="dark"]) .clarification-summary {
+:global([data-theme="dark"] .clarification-summary){
   border-color: rgba(245, 158, 11, 0.3);
   background: rgba(69, 49, 17, 0.42);
 }
-:global([data-theme="dark"]) .clarification-question {
+:global([data-theme="dark"] .clarification-question){
   background: rgba(15, 23, 42, 0.48);
   border-color: rgba(245, 158, 11, 0.24);
 }
-:global([data-theme="dark"]) .clarification-question strong {
+:global([data-theme="dark"] .clarification-question strong){
   color: #f8fafc;
 }
 .delivery-summary-actions { display: flex; align-items: center; gap: 8px; margin-top: 10px; }

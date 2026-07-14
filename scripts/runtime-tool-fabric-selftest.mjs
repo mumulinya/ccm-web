@@ -13,10 +13,15 @@ const { runToolCallLoopSelfTest } = require("../ccm-package/dist/tools/tool-call
 const { runToolManagerRuntimeSelfTest } = require("../ccm-package/dist/tools/tool-manager.js");
 const { runAgentRunnerSelfTest } = require("../ccm-package/dist/agents/runner.js");
 const { runToolChainVerificationSelfTest } = require("../ccm-package/dist/modules/tools/tools.js");
+const { runToolCatalogManagementSelfTest } = require("../ccm-package/dist/tools/tool-catalog-management.js");
 const projectManagerSource = fs.readFileSync(new URL("../frontend/src/components/projects/ProjectManager.vue", import.meta.url), "utf-8");
 const projectToolsModalSource = fs.readFileSync(new URL("../frontend/src/components/projects/ProjectToolsModal.vue", import.meta.url), "utf-8");
 const toolsConfigSource = fs.readFileSync(new URL("../frontend/src/components/tools/ToolsConfig.vue", import.meta.url), "utf-8");
 const appSource = fs.readFileSync(new URL("../frontend/src/App.vue", import.meta.url), "utf-8");
+const mcpEditorSource = fs.readFileSync(new URL("../frontend/src/components/tools/McpServerEditor.vue", import.meta.url), "utf-8");
+const skillMarkdownSource = fs.readFileSync(new URL("../frontend/src/components/tools/SkillMarkdownViewer.vue", import.meta.url), "utf-8");
+const toolsBackendSource = fs.readFileSync(new URL("../backend/modules/tools/tools.ts", import.meta.url), "utf-8");
+const dbSource = fs.readFileSync(new URL("../backend/core/db.ts", import.meta.url), "utf-8");
 const projectToolUiChecks = {
   projectResponsibilityStateDeclared: /const projectResponsibility = ref\(''\)/.test(projectManagerSource),
   projectCapabilitiesStateDeclared: /const projectCapabilities = ref\(''\)/.test(projectManagerSource),
@@ -27,6 +32,13 @@ const projectToolUiChecks = {
   incompleteScopeActionNavigatesToBusinessSurface: /action\?\.kind === 'open_scope_real_task'[\s\S]*?emit\('navigate', \{ tab: 'groups', groupId: scopeId \}\)[\s\S]*?emit\('navigate', \{ tab: 'projects', project: scopeId \}\)/.test(toolsConfigSource),
   incompleteScopeActionDoesNotRunGenericMatrix: !/action\?\.kind === 'run_child_agent_e2e'[\s\S]*?runRealCliMatrix\(\)/.test(toolsConfigSource),
   toolsNavigationUsesWorkspaceRouter: /<ToolsConfig @navigate="applyPetNavigationTarget" \/>/.test(appSource),
+  operationalOverviewIsDefault: /const currentFilter = ref\('overview'\)/.test(toolsConfigSource) && /<ToolControlOverview/.test(toolsConfigSource),
+  mcpEditorSupportsPreSaveTest: /catalogImpact/.test(mcpEditorSource) && /保存前测试/.test(mcpEditorSource),
+  skillMarkdownAllowsOnlyWebLinks: /\['http:', 'https:'\]/.test(skillMarkdownSource) && /rel="noopener noreferrer"/.test(skillMarkdownSource),
+  mcpListIsRedactedForBrowser: /loadMcpTools\(\)\.map\(redactMcpToolForDisplay\)/.test(toolsBackendSource),
+  catalogMutationHasRollbackAndResync: /rollbackCatalogMutation/.test(toolsBackendSource) && /completeToolCatalogMutationLifecycle/.test(toolsBackendSource),
+  mcpEnvironmentUsesCredentialStore: /protectCredential\(scope, `env\.\$\{key\}`/.test(dbSource),
+  feishuMcpUsesSettingsCredentialFallback: /control_bot_app_id \|\| feishu\?\.app_id/.test(dbSource),
 };
 
 const results = {
@@ -39,6 +51,7 @@ const results = {
   toolLoop: await runToolCallLoopSelfTest(),
   marketplace: await runMarketplaceSelfTest(),
   toolChainVerification: runToolChainVerificationSelfTest(),
+  toolCatalogManagement: runToolCatalogManagementSelfTest(),
   projectToolUi: { pass: Object.values(projectToolUiChecks).every(Boolean), checks: projectToolUiChecks },
 };
 

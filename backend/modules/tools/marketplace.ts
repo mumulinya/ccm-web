@@ -35,13 +35,26 @@ const MAX_SKILL_FILE_BYTES = 2 * 1024 * 1024;
 const MAX_SKILL_PACKAGE_BYTES = 10 * 1024 * 1024;
 const MAX_SKILL_PACKAGE_FILES = 300;
 const CCM_COMMUNITY_CATALOG_URL = "https://raw.githubusercontent.com/mumulinya/ccm-web/main/public/marketplace.json";
+const SKILLS_SH_SEARCH_URL = "https://skills.sh/api/search";
+const SMITHERY_SERVERS_URL = "https://api.smithery.ai/servers";
+const DEFAULT_MARKETPLACE_PAGE_SIZE = 12;
+const MAX_MARKETPLACE_PAGE_SIZE = 50;
 
 interface MarketplaceSource {
   id: string;
   label: string;
-  kind: "builtin" | "smithery" | "catalog" | "github" | "direct";
+  kind: "builtin" | "skills-sh" | "smithery" | "catalog" | "github" | "direct";
   url?: string;
   trust: "official" | "community" | "custom";
+}
+
+interface MarketplaceListOptions {
+  query?: string;
+  page?: number;
+  pageSize?: number;
+  category?: string;
+  sort?: string;
+  requestedItem?: any;
 }
 
 interface InstallationRecord {
@@ -556,6 +569,28 @@ function maybeAutoResyncMarketplaceRuntime(impact: any, options: any = {}, store
   }
 }
 
+export function previewToolCatalogMutationImpact(input: { action: string; type: string; name: string }, store: MarketplaceInstallStore = {}) {
+  const type = input?.type === "skill" ? "skill" : "mcp";
+  const name = cleanImpactText(input?.name || "", 240);
+  if (!name) throw new Error("工具名称不能为空");
+  const action = cleanImpactText(input?.action || "preview", 40);
+  return {
+    authorizationImpact: buildMarketplaceAuthorizationImpact({ action, type, name }, store),
+    runtimeImpact: buildMarketplaceRuntimeImpact({ action, type, name }, store),
+  };
+}
+
+export function completeToolCatalogMutationLifecycle(input: { action: string; type: string; name: string; autoResync?: any }, store: MarketplaceInstallStore = {}) {
+  const preview = previewToolCatalogMutationImpact(input, store);
+  const runtimeResync = maybeAutoResyncMarketplaceRuntime(preview.runtimeImpact, {
+    autoResync: input?.autoResync !== false,
+  }, store);
+  const runtimeImpact = runtimeResync?.summary?.resynced || runtimeResync?.summary?.created
+    ? buildMarketplaceRuntimeImpact({ action: input.action, type: input.type, name: input.name }, store)
+    : preview.runtimeImpact;
+  return { authorizationImpact: preview.authorizationImpact, runtimeImpact, runtimeResync };
+}
+
 function loadInstallations(): InstallationRecord[] {
   try {
     const parsed = JSON.parse(fs.readFileSync(INSTALLATIONS_FILE, "utf-8"));
@@ -709,6 +744,7 @@ function sanitizeMarketplacePreviewItem(item: any) {
   return {
     id: cleanImpactText(item?.id || "", 260),
     name: cleanImpactText(item?.name || "", 240),
+    displayName: cleanImpactText(item?.displayName || item?.name || "", 240),
     type: item?.type === "skill" ? "skill" : (item?.type === "mcp" ? "mcp" : ""),
     description: cleanImpactText(item?.description || "", 500),
     author: cleanImpactText(item?.author || "", 160),
@@ -762,7 +798,7 @@ function normalizeSource(value: any, fallback: MarketplaceSource): MarketplaceSo
   return {
     id: String(source.id || fallback.id),
     label: String(source.label || fallback.label),
-    kind: ["builtin", "smithery", "catalog", "github", "direct"].includes(source.kind) ? source.kind : fallback.kind,
+    kind: ["builtin", "skills-sh", "smithery", "catalog", "github", "direct"].includes(source.kind) ? source.kind : fallback.kind,
     url: String(source.url || fallback.url || "") || undefined,
     trust: ["official", "community", "custom"].includes(source.trust) ? source.trust : fallback.trust,
   };
@@ -1481,32 +1517,244 @@ export async function runMarketplaceSelfTest() {
     sourceBoundInstallUsesCatalogMaterial: sourceBoundResolved.args?.[0] === "trusted-server.js",
     sourceBoundInstallRejectsUnsavedSource: unsavedSourceRejected,
     sourceBoundUpdateUsesCatalogMaterial: sourceBoundUpdateResolved.version === "1.1.0" && sourceBoundUpdateResolved.args?.[0] === "trusted-update.js",
+    onlineMarketplaceQueryIsSanitized: cleanMarketplaceQuery("  react\n\ttesting  ") === "react testing",
+    onlineMarketplacePaginationIsBounded: normalizeMarketplaceListOptions({ page: -4, pageSize: 500 }).page === 1
+      && normalizeMarketplaceListOptions({ page: -4, pageSize: 500 }).pageSize === MAX_MARKETPLACE_PAGE_SIZE,
+    skillsShIdentityIsSourceBound: skillsShRegistryIdFromItemId("skills-sh:vercel-labs/agent-skills/web-design-guidelines") === "vercel-labs/agent-skills/web-design-guidelines",
+    smitheryIdentityIsSourceBound: smitheryQualifiedNameFromItemId("smithery:upstash/context7-mcp") === "upstash/context7-mcp",
+    anonymousSourceStatusHidesCredentials: marketplaceSourceStatus({ id: "smithery", label: "Smithery", kind: "smithery", trust: "community" }).anonymous === true
+      && !JSON.stringify(marketplaceSourceStatus({ id: "smithery", label: "Smithery", kind: "smithery", trust: "community" })).toLowerCase().includes("token"),
     marketplaceInstallE2E: installE2E.pass,
   };
   return { pass: Object.values(checks).every(Boolean), checks, localItems, authorizationOptions, installE2E };
 }
 
-async function loadSmitheryItems() {
-  let key = "";
+function cleanMarketplaceQuery(value: any, maxLength = 120) {
+  return String(value || "").replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").trim().slice(0, maxLength);
+}
+
+function marketplacePageNumber(value: any, fallback = 1) {
+  const parsed = Number.parseInt(String(value || ""), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function normalizeMarketplaceListOptions(options: MarketplaceListOptions = {}): Required<Omit<MarketplaceListOptions, "requestedItem">> & { requestedItem?: any } {
+  return {
+    query: cleanMarketplaceQuery(options.query),
+    page: marketplacePageNumber(options.page, 1),
+    pageSize: Math.min(MAX_MARKETPLACE_PAGE_SIZE, marketplacePageNumber(options.pageSize, DEFAULT_MARKETPLACE_PAGE_SIZE)),
+    category: cleanMarketplaceQuery(options.category || "all", 40).toLowerCase() || "all",
+    sort: ["relevance", "popular", "name"].includes(String(options.sort || "")) ? String(options.sort) : "popular",
+    requestedItem: options.requestedItem,
+  };
+}
+
+function marketplacePagination(page: number, pageSize: number, total: number, totalPages?: number) {
+  const pages = Math.max(1, Number(totalPages || Math.ceil(total / pageSize) || 1));
+  return {
+    schema: "ccm-marketplace-pagination-v1",
+    page,
+    pageSize,
+    total,
+    totalPages: pages,
+    hasPrevious: page > 1,
+    hasNext: page < pages,
+  };
+}
+
+function marketplaceSourceStatus(source: MarketplaceSource, input: any = {}) {
+  return {
+    schema: "ccm-marketplace-source-status-v1",
+    id: source.id,
+    label: source.label,
+    online: input.online !== false,
+    anonymous: input.anonymous !== false,
+    authenticated: !!input.authenticated,
+    upstream: cleanMarketplaceQuery(input.upstream || source.url || "", 300),
+    resultLimited: !!input.resultLimited,
+    message: cleanMarketplaceQuery(input.message || "", 300),
+  };
+}
+
+function sortRegistryItems(items: any[], sort: string) {
+  const next = [...items];
+  if (sort === "name") return next.sort((left, right) => String(left.displayName || left.name).localeCompare(String(right.displayName || right.name)));
+  if (sort === "popular") return next.sort((left, right) => Number(right.registryUsage || 0) - Number(left.registryUsage || 0));
+  return next;
+}
+
+function friendlyRegistryError(label: string, error: any) {
+  const message = String(error?.message || error || "");
+  if (/HTTP 429/i.test(message)) return new Error(`${label} 请求过于频繁，请稍后重试`);
+  if (/超时/i.test(message)) return new Error(`${label} 响应超时，请稍后重试`);
+  return new Error(`${label} 暂时不可用：${message || "未知上游错误"}`);
+}
+
+const SKILLS_SH_CATEGORY_QUERIES: Record<string, string> = {
+  development: "development",
+  design: "design",
+  data: "data analysis",
+  writing: "writing",
+  productivity: "productivity",
+};
+
+function skillsShRegistryIdFromItemId(value: any) {
+  const id = String(value || "");
+  return id.startsWith("skills-sh:") ? id.slice("skills-sh:".length) : "";
+}
+
+async function loadSkillsShItems(rawOptions: MarketplaceListOptions = {}) {
+  const options = normalizeMarketplaceListOptions(rawOptions);
+  const requestedRegistryId = skillsShRegistryIdFromItemId(options.requestedItem?.id);
+  const requestedName = cleanMarketplaceQuery(options.requestedItem?.name || requestedRegistryId.split("/").pop() || "");
+  const categoryQuery = SKILLS_SH_CATEGORY_QUERIES[options.category] || "";
+  const appliedQuery = options.query || requestedName || categoryQuery || "agent";
+  if (appliedQuery.length < 2) throw new Error("Skills.sh 搜索词至少需要 2 个字符");
+  const params = new URLSearchParams({ q: appliedQuery, limit: "100" });
+  let parsed: any;
   try {
-    key = String(JSON.parse(fs.readFileSync(SMITHERY_CONFIG_FILE, "utf-8")).key || "");
-  } catch {}
-  if (!key) return { needKey: true, items: [] as any[] };
-  const remote = await fetchRemote("https://api.smithery.ai/servers?pageSize=50", MAX_CATALOG_BYTES, { Authorization: `Bearer ${key}` });
-  const parsed = JSON.parse(remote.body.toString("utf-8"));
-  const servers = Array.isArray(parsed) ? parsed : (parsed.servers || parsed.data || parsed.items || []);
-  const source: MarketplaceSource = { id: "smithery", label: "Smithery", kind: "smithery", url: "https://smithery.ai", trust: "community" };
-  const items = servers.map((server: any) => normalizeMarketplaceItem({
-    name: server.displayName || server.qualifiedName || server.name || server.slug,
+    const remote = await fetchRemote(`${SKILLS_SH_SEARCH_URL}?${params.toString()}`, MAX_CATALOG_BYTES);
+    parsed = JSON.parse(remote.body.toString("utf-8"));
+  } catch (error) {
+    throw friendlyRegistryError("Skills.sh", error);
+  }
+  const source: MarketplaceSource = { id: "skills-sh", label: "Skills.sh", kind: "skills-sh", url: "https://skills.sh", trust: "community" };
+  const rawSkills = Array.isArray(parsed?.skills) ? parsed.skills : [];
+  const normalized = rawSkills.map((skill: any) => {
+    const registryId = cleanMarketplaceQuery(skill?.id, 260);
+    const repository = cleanMarketplaceQuery(skill?.source, 180);
+    const skillName = cleanMarketplaceQuery(skill?.skillId || skill?.name || registryId.split("/").pop(), 120);
+    if (!registryId || !repository || !skillName || !githubRepoFromUrlOrShorthand(repository)) return null;
+    return normalizeMarketplaceItem({
+      id: `skills-sh:${registryId}`,
+      name: skillName,
+      displayName: skillName,
+      registryId,
+      type: "skill",
+      description: `来自 ${repository} 的 Agent Skill`,
+      author: repository.split("/")[0] || "Skills.sh",
+      version: "0.0.0",
+      sourceUrl: `https://github.com/${repository}`,
+      homepage: `https://skills.sh/${registryId}`,
+      registryUsage: Number(skill?.installs || 0),
+      installs: Number(skill?.installs || 0),
+      category: options.category,
+    }, source);
+  }).filter(Boolean);
+  const exact = requestedRegistryId ? normalized.filter((item: any) => item.registryId === requestedRegistryId) : normalized;
+  const sorted = sortRegistryItems(exact, options.sort);
+  const total = sorted.length;
+  const start = (options.page - 1) * options.pageSize;
+  const items = sorted.slice(start, start + options.pageSize);
+  return {
+    needKey: false,
+    items,
+    pagination: marketplacePagination(options.page, options.pageSize, total),
+    query: { text: options.query, applied: appliedQuery, category: options.category, sort: options.sort, defaulted: !options.query && !categoryQuery && !requestedName },
+    sourceStatus: marketplaceSourceStatus(source, {
+      upstream: SKILLS_SH_SEARCH_URL,
+      resultLimited: rawSkills.length >= 100,
+      message: rawSkills.length >= 100 ? "Skills.sh 单次搜索最多返回 100 条结果，可继续缩小搜索词" : "已通过 Skills.sh 官方公开搜索接口加载",
+    }),
+  };
+}
+
+const SMITHERY_CATEGORY_QUERIES: Record<string, string> = {
+  development: "developer",
+  data: "data",
+  automation: "automation",
+  productivity: "productivity",
+  communication: "communication",
+};
+
+function smitheryQualifiedNameFromItemId(value: any) {
+  const id = String(value || "");
+  return id.startsWith("smithery:") ? id.slice("smithery:".length) : "";
+}
+
+function smitheryRegistryUrl(qualifiedName: string) {
+  return `https://smithery.ai/servers/${qualifiedName.split("/").map(encodeURIComponent).join("/")}`;
+}
+
+function smitheryGatewayUrl(qualifiedName: string) {
+  return `https://server.smithery.ai/${qualifiedName.split("/").map(encodeURIComponent).join("/")}`;
+}
+
+function smitheryServerItem(server: any, source: MarketplaceSource) {
+  const qualifiedName = cleanMarketplaceQuery(server?.qualifiedName || server?.name || server?.slug, 180);
+  if (!qualifiedName) return null;
+  const connection = Array.isArray(server?.connections)
+    ? server.connections.find((item: any) => item?.type === "http" && /^https:\/\//i.test(String(item?.deploymentUrl || "")))
+    : null;
+  const deploymentUrl = cleanMarketplaceQuery(server?.deploymentUrl || connection?.deploymentUrl || "", 500);
+  const owner = typeof server?.owner === "string"
+    ? server.owner
+    : (server?.owner?.displayName || server?.owner?.name || server?.namespace || "Smithery");
+  return normalizeMarketplaceItem({
+    id: `smithery:${qualifiedName}`,
+    name: safeSlug(qualifiedName.replace(/\//g, "--")),
+    displayName: cleanMarketplaceQuery(server?.displayName || qualifiedName, 120),
+    qualifiedName,
     type: "mcp",
-    description: server.description || server.summary || "",
-    command: "npx",
-    args: ["-y", "@smithery/cli", "run", server.qualifiedName || server.name || server.slug],
-    author: server.namespace || server.owner || "Smithery",
-    version: server.version || "0.0.0",
-    homepage: server.homepage || server.repository || "",
-  }, source));
-  return { needKey: false, items };
+    description: server?.description || server?.summary || "",
+    url: deploymentUrl || smitheryGatewayUrl(qualifiedName),
+    author: owner,
+    version: String(server?.version || "0.0.0"),
+    homepage: server?.homepage || smitheryRegistryUrl(qualifiedName),
+    sourceUrl: smitheryRegistryUrl(qualifiedName),
+    registryUsage: Number(server?.useCount || 0),
+    useCount: Number(server?.useCount || 0),
+    verified: server?.verified === true,
+    remote: server?.remote !== false,
+    deployed: server?.isDeployed !== false,
+    iconUrl: /^https:\/\//i.test(String(server?.iconUrl || "")) ? String(server.iconUrl) : "",
+  }, source);
+}
+
+async function loadSmitheryItems(rawOptions: MarketplaceListOptions = {}) {
+  const options = normalizeMarketplaceListOptions(rawOptions);
+  const source: MarketplaceSource = { id: "smithery", label: "Smithery", kind: "smithery", url: "https://smithery.ai", trust: "community" };
+  const requestedQualifiedName = smitheryQualifiedNameFromItemId(options.requestedItem?.id);
+  if (requestedQualifiedName) {
+    try {
+      const pathName = requestedQualifiedName.split("/").map(encodeURIComponent).join("/");
+      const remote = await fetchRemote(`${SMITHERY_SERVERS_URL}/${pathName}`, MAX_CATALOG_BYTES);
+      const detail = JSON.parse(remote.body.toString("utf-8"));
+      const item = smitheryServerItem(detail, source);
+      return {
+        needKey: false,
+        items: item ? [item] : [],
+        pagination: marketplacePagination(1, 1, item ? 1 : 0),
+        query: { text: requestedQualifiedName, applied: requestedQualifiedName, category: "all", sort: "relevance", defaulted: false },
+        sourceStatus: marketplaceSourceStatus(source, { upstream: SMITHERY_SERVERS_URL, message: "已从 Smithery 官方详情接口复验安装材料" }),
+      };
+    } catch (error) {
+      throw friendlyRegistryError("Smithery", error);
+    }
+  }
+  const categoryQuery = SMITHERY_CATEGORY_QUERIES[options.category] || "";
+  const appliedQuery = options.query || categoryQuery;
+  const params = new URLSearchParams({ page: String(options.page), pageSize: String(options.pageSize) });
+  if (appliedQuery) params.set("q", appliedQuery);
+  let parsed: any;
+  try {
+    const remote = await fetchRemote(`${SMITHERY_SERVERS_URL}?${params.toString()}`, MAX_CATALOG_BYTES);
+    parsed = JSON.parse(remote.body.toString("utf-8"));
+  } catch (error) {
+    throw friendlyRegistryError("Smithery", error);
+  }
+  const servers = Array.isArray(parsed) ? parsed : (parsed?.servers || parsed?.data || parsed?.items || []);
+  const items = sortRegistryItems(servers.map((server: any) => smitheryServerItem(server, source)).filter(Boolean), options.sort);
+  const upstreamPagination = parsed?.pagination || {};
+  const total = Number(upstreamPagination.totalCount || items.length);
+  const totalPages = Number(upstreamPagination.totalPages || Math.ceil(total / options.pageSize) || 1);
+  return {
+    needKey: false,
+    items,
+    pagination: marketplacePagination(options.page, options.pageSize, total, totalPages),
+    query: { text: options.query, applied: appliedQuery, category: options.category, sort: options.sort, defaulted: !options.query && !categoryQuery },
+    sourceStatus: marketplaceSourceStatus(source, { upstream: SMITHERY_SERVERS_URL, message: "匿名访问 Smithery 官方注册表，无需配置 API Key" }),
+  };
 }
 
 async function loadCatalogItems(url: string, source: MarketplaceSource) {
@@ -1541,13 +1789,16 @@ async function loadCatalogItems(url: string, source: MarketplaceSource) {
   }
 }
 
-async function loadMarketplaceItemsForSource(source: MarketplaceSource): Promise<any[]> {
+async function loadMarketplaceItemsForSource(source: MarketplaceSource, requestedItem: any = null): Promise<any[]> {
   const sourceId = String(source?.id || "");
   const baseSourceId = baseMarketplaceSourceId(sourceId);
   if (baseSourceId === "ccm-official" || source.kind === "builtin") return localMarketplaceItems();
+  if (baseSourceId === "skills-sh" || source.kind === "skills-sh") {
+    const result = await loadSkillsShItems({ requestedItem, page: 1, pageSize: 100, sort: "relevance" });
+    return result.items;
+  }
   if (baseSourceId === "smithery" || source.kind === "smithery") {
-    const result = await loadSmitheryItems();
-    if (result.needKey) throw new Error("Smithery API Key 未配置，无法复验安装来源");
+    const result = await loadSmitheryItems({ requestedItem, page: 1, pageSize: 50, sort: "relevance" });
     return result.items;
   }
   if (baseSourceId === "ccm-community") {
@@ -1639,7 +1890,10 @@ function deleteMarketplaceSource(payload: any) {
 }
 
 async function previewMarketplaceItem(rawItem: any) {
-  const item = normalizeMarketplaceItem(rawItem, { id: "custom", label: "Custom source", kind: "direct", trust: "custom" });
+  const rawSourceId = baseMarketplaceSourceId(rawItem?.source?.id);
+  const item = ["skills-sh", "smithery", "ccm-official", "ccm-community"].includes(rawSourceId)
+    ? await resolveMarketplaceItemForInstall(rawItem, "install")
+    : normalizeMarketplaceItem(rawItem, { id: "custom", label: "Custom source", kind: "direct", trust: "custom" });
   const sourceProof = buildMarketplaceSourceProof(item);
   if (item.type === "mcp") {
     const envKeys = item.env && typeof item.env === "object"
@@ -1666,6 +1920,31 @@ async function previewMarketplaceItem(rawItem: any) {
     const remote = await fetchRemote(item.downloadUrl, MAX_SKILL_FILE_BYTES);
     const parsed = parseSkillMarkdown(remote.body.toString("utf-8"), item.name, item.description);
     return { item: sanitizeMarketplacePreviewItem(item), preview: { name: parsed.name, description: parsed.description, content: parsed.content.slice(0, 20000), packageBacked: false, trust: item.source.trust, sourceProof: buildMarketplaceSourceProof(item, { checksum: sha256(remote.body) }) } };
+  }
+  if (parseGithubSkillSource(item.sourceUrl || item.downloadUrl)) {
+    const staging = fs.mkdtempSync(path.join(os.tmpdir(), "ccm-skill-preview-"));
+    try {
+      await cloneGithubSkill(item, staging);
+      const packageStats = validateSkillDirectory(staging);
+      const content = fs.readFileSync(path.join(staging, "SKILL.md"), "utf-8");
+      const parsed = parseSkillMarkdown(content, item.name, item.description);
+      return {
+        item: sanitizeMarketplacePreviewItem(item),
+        preview: {
+          name: parsed.name,
+          description: parsed.description,
+          content: parsed.content.slice(0, 20000),
+          sourceUrl: item.sourceUrl,
+          packageBacked: true,
+          packageStats,
+          trust: item.source.trust,
+          sourceProof: buildMarketplaceSourceProof(item, { checksum: sha256(content), packageStats }),
+          note: "已从 GitHub 拉取并校验 Skill 包；安装时仍会重新复验来源与内容限制。",
+        },
+      };
+    } finally {
+      fs.rmSync(staging, { recursive: true, force: true });
+    }
   }
   return {
     item: sanitizeMarketplacePreviewItem(item),
@@ -2260,7 +2539,7 @@ export function handleMarketplaceApi(pathname: string, req: any, res: any, parse
   if (pathname === "/api/smithery/config" && req.method === "GET") {
     let key = "";
     try { key = String(JSON.parse(fs.readFileSync(SMITHERY_CONFIG_FILE, "utf-8")).key || ""); } catch {}
-    sendJson(res, { success: true, key });
+    sendJson(res, { success: true, configured: !!key, key: "" });
     return true;
   }
 
@@ -2308,13 +2587,34 @@ export function handleMarketplaceApi(pathname: string, req: any, res: any, parse
   if (pathname === "/api/marketplace/list" && req.method === "GET") {
     const source = String(parsed.query.source || "local");
     const customUrl = String(parsed.query.url || "");
+    const listOptions: MarketplaceListOptions = {
+      query: String(parsed.query.query || parsed.query.q || ""),
+      page: marketplacePageNumber(parsed.query.page, 1),
+      pageSize: marketplacePageNumber(parsed.query.pageSize, DEFAULT_MARKETPLACE_PAGE_SIZE),
+      category: String(parsed.query.category || "all"),
+      sort: String(parsed.query.sort || "popular"),
+    };
     (async () => {
-      if (source === "local") return { items: localMarketplaceItems(), needKey: false };
-      if (source === "smithery") return loadSmitheryItems();
-      if (source === "github") {
+      if (source === "skills-sh") return loadSkillsShItems(listOptions);
+      if (source === "smithery") return loadSmitheryItems(listOptions);
+      if (source === "local") {
+        const items = localMarketplaceItems();
         return {
-          items: await loadCatalogItems(CCM_COMMUNITY_CATALOG_URL, { id: "ccm-community", label: "CCM Community", kind: "catalog", url: CCM_COMMUNITY_CATALOG_URL, trust: "community" }),
+          items,
           needKey: false,
+          pagination: marketplacePagination(1, items.length || DEFAULT_MARKETPLACE_PAGE_SIZE, items.length),
+          query: { text: "", applied: "", category: "all", sort: "popular", defaulted: false },
+          sourceStatus: marketplaceSourceStatus({ id: "ccm-official", label: "CCM 官方精选", kind: "builtin", trust: "official" }, { online: false, anonymous: true, message: "本地内置精选，无需联网" }),
+        };
+      }
+      if (source === "github") {
+        const items = await loadCatalogItems(CCM_COMMUNITY_CATALOG_URL, { id: "ccm-community", label: "CCM Community", kind: "catalog", url: CCM_COMMUNITY_CATALOG_URL, trust: "community" });
+        return {
+          items,
+          needKey: false,
+          pagination: marketplacePagination(1, items.length || DEFAULT_MARKETPLACE_PAGE_SIZE, items.length),
+          query: { text: "", applied: "", category: "all", sort: "popular", defaulted: false },
+          sourceStatus: marketplaceSourceStatus({ id: "ccm-community", label: "CCM Community", kind: "catalog", url: CCM_COMMUNITY_CATALOG_URL, trust: "community" }, { message: "已读取 CCM 社区精选源" }),
         };
       }
       if (source === "custom" && customUrl) {
@@ -2332,7 +2632,14 @@ export function handleMarketplaceApi(pathname: string, req: any, res: any, parse
       }
       throw new Error("未指定有效的商城来源");
     })()
-      .then(result => sendJson(res, { success: true, needKey: result.needKey, items: decorateInstallState(result.items) }))
+      .then((result: any) => sendJson(res, {
+        success: true,
+        needKey: false,
+        items: decorateInstallState(result.items || []),
+        pagination: result.pagination || marketplacePagination(1, (result.items || []).length || DEFAULT_MARKETPLACE_PAGE_SIZE, (result.items || []).length),
+        query: result.query || { text: listOptions.query || "", applied: listOptions.query || "", category: listOptions.category || "all", sort: listOptions.sort || "popular", defaulted: false },
+        sourceStatus: result.sourceStatus || null,
+      }))
       .catch(error => sendJson(res, { success: false, error: error.message, items: [] }, 400));
     return true;
   }

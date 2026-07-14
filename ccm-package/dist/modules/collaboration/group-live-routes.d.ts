@@ -33,6 +33,7 @@ type GroupLiveRoutesDeps = {
     prepareAgentRuntimeTools: (groupId: string, project: string, workDir: string, agentType: string, allowedTools: any, streamRes?: ServerResponse | null, options?: any) => any;
     getProjectExtraConfig: (project: string) => any;
     buildAgentMemoryContextBundle: (groupId: string, project: string, message: string, options?: any) => any;
+    buildAgentMemoryContextBundleWithManifestSelection: (groupId: string, project: string, message: string, options?: any) => Promise<any>;
     buildAgentMemoryPacket: (groupId: string, project: string, message: string, options?: any) => string;
     buildChildAgentDevelopmentContract: (project: string, message: string, options?: any) => string;
     buildProjectVerificationHints: (project: string, workDir: string) => any;

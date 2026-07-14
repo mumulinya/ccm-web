@@ -506,14 +506,14 @@ const emit = defineEmits([
   color: #dc2626;
 }
 
-:global([data-theme="dark"]) .priority-high,
-:global([data-theme="dark"]) .priority-normal,
-:global([data-theme="dark"]) .priority-low,
-:global([data-theme="dark"]) .workflow-chip,
-:global([data-theme="dark"]) .agent-preview-chip,
-:global([data-theme="dark"]) .evidence-chip,
-:global([data-theme="dark"]) .task-execution-block,
-:global([data-theme="dark"]) .kernel-chip {
+:global([data-theme="dark"] .priority-high),
+:global([data-theme="dark"] .priority-normal),
+:global([data-theme="dark"] .priority-low),
+:global([data-theme="dark"] .workflow-chip),
+:global([data-theme="dark"] .agent-preview-chip),
+:global([data-theme="dark"] .evidence-chip),
+:global([data-theme="dark"] .task-execution-block),
+:global([data-theme="dark"] .kernel-chip){
   filter: brightness(1.08);
 }
 

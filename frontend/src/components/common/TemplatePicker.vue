@@ -172,12 +172,12 @@ const filteredTemplates = computed(() => {
   font-size: 11px;
 }
 
-:global([data-theme="dark"]) .template-dropdown {
+:global([data-theme="dark"] .template-dropdown){
   border-color: rgba(255, 255, 255, 0.08);
   background: rgba(15, 23, 42, 0.96);
 }
 
-:global([data-theme="dark"]) .search-input {
+:global([data-theme="dark"] .search-input){
   border-color: rgba(255, 255, 255, 0.08);
   background: rgba(15, 23, 42, 0.78);
 }

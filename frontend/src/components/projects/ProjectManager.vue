@@ -26,6 +26,7 @@ import { useCodeChangeDrawer } from '../../composables/useCodeChangeDrawer.js'
 import { useMessageNavigation } from '../../composables/useMessageNavigation.js'
 import { usePinnedScroll } from '../../composables/usePinnedScroll.js'
 import { projectExecutionTaskCard } from '../../utils/taskExperience.js'
+import { shouldShowProjectTaskCard } from '../../utils/projectChatPresentation.js'
 import { buildProjectSessionKnowledgePayload, buildProjectTaskKnowledgePayload, postKnowledgeCapture } from '../../utils/knowledgeCapture.js'
 
 const props = defineProps({ navigateTo: { type: Object, default: null } })
@@ -513,7 +514,7 @@ const saveCurrentProjectSessionKnowledge = async () => {
   }
 }
 
-const getProjectTaskCard = (msg) => projectExecutionTaskCard(msg, currentProject.value)
+const getProjectTaskCard = (msg) => shouldShowProjectTaskCard(msg) ? projectExecutionTaskCard(msg, currentProject.value) : null
 const postTaskAction = async (path, body) => {
   const response = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) })
   const payload = await response.json()
@@ -636,12 +637,13 @@ const sendMessage = async () => {
     id: makeProjectMessageId(),
     role: 'thinking',
     content: '',
+    messageMode: 'conversation',
     timestamp: new Date().toISOString()
   }
   messages.value.push(thinkingMsg)
   scrollToBottom({ force: true })
 
-  const agentMsg = { id: makeProjectMessageId(), role: 'assistant', content: '', workEvents: [], requestText: msg, streaming: true, timestamp: new Date().toISOString() }
+  const agentMsg = { id: makeProjectMessageId(), role: 'assistant', content: '', workEvents: [], requestText: msg, messageMode: 'conversation', streaming: true, timestamp: new Date().toISOString() }
   const controller = new AbortController()
   streamController.value = controller
   isStreaming.value = true
@@ -670,7 +672,11 @@ const sendMessage = async () => {
     if (!dataText) return
     try {
       const data = JSON.parse(dataText)
-      if (data.type === 'status') {
+      if (data.type === 'presentation') {
+        const mode = String(data.message_mode || data.messageMode || 'conversation')
+        thinkingMsg.messageMode = mode
+        agentMsg.messageMode = mode
+      } else if (data.type === 'status') {
         thinkingMessages.value.push(data.text)
         thinkingMsg.content = thinkingMessages.value.join('\n')
         scrollToBottom()
@@ -678,8 +684,10 @@ const sendMessage = async () => {
         agentMsg.projectRun = data.run || agentMsg.projectRun
         agentMsg.task_id = data.taskExperience?.task_id || data.run?.id || agentMsg.task_id
         agentMsg.taskExperience = data.taskExperience || agentMsg.taskExperience
-        addAgentMessage()
-        scrollToBottom()
+        if (agentMsg.messageMode === 'task') {
+          addAgentMessage()
+          scrollToBottom()
+        }
       } else if (data.type === 'work_event') {
         if (!Array.isArray(agentMsg.workEvents)) agentMsg.workEvents = []
         const event = data.event
@@ -687,14 +695,17 @@ const sendMessage = async () => {
           agentMsg.workEvents.push(event)
           if (agentMsg.workEvents.length > 80) agentMsg.workEvents.splice(0, agentMsg.workEvents.length - 80)
         }
-        addAgentMessage()
-        scrollToBottom()
+        if (agentMsg.messageMode === 'task') {
+          addAgentMessage()
+          scrollToBottom()
+        }
       } else if (data.type === 'chunk') {
         addAgentMessage()
         agentMsg.content += data.text
         scrollToBottom()
       } else if (data.type === 'done') {
         removeThinkingMessage()
+        agentMsg.messageMode = data.message_mode || data.messageMode || agentMsg.messageMode
         if (data.fileChanges && data.fileChanges.count > 0) {
           agentMsg.fileChanges = data.fileChanges
         }
@@ -704,6 +715,7 @@ const sendMessage = async () => {
         agentMsg.workEvents = data.workEvents || agentMsg.workEvents
       } else if (data.type === 'error') {
         addAgentMessage()
+        agentMsg.messageMode = data.message_mode || data.messageMode || agentMsg.messageMode
         agentMsg.projectRun = data.run || agentMsg.projectRun
         agentMsg.task_id = data.taskExperience?.task_id || data.run?.id || agentMsg.task_id
         agentMsg.taskExperience = data.taskExperience || agentMsg.taskExperience
@@ -779,7 +791,7 @@ const sendMessage = async () => {
           await sessionsApi.saveMessage({
             project: projectAtSend,
             sessionId: sessionAtSend,
-            message: { id: agentMsg.id, role: 'assistant', content: agentMsg.content, requestText: agentMsg.requestText, task_id: agentMsg.task_id || '', taskExperience: agentMsg.taskExperience || null, timestamp: agentMsg.timestamp, fileChanges: agentMsg.fileChanges || null, workEvents: agentMsg.workEvents || [] }
+            message: { id: agentMsg.id, role: 'assistant', content: agentMsg.content, requestText: agentMsg.requestText, messageMode: agentMsg.messageMode, task_id: agentMsg.task_id || '', taskExperience: agentMsg.taskExperience || null, timestamp: agentMsg.timestamp, fileChanges: agentMsg.fileChanges || null, workEvents: agentMsg.workEvents || [] }
           })
         } catch (error) { toast.warning('回复已显示，但会话保存失败，请刷新后确认') }
       }
@@ -1257,7 +1269,7 @@ const handleKeydown = async (e) => {
               <!-- 思考过程消息 -->
               <div v-else-if="msg.role === 'thinking'" class="thinking-bubble">
                 <div class="thinking-header">
-                  <span>项目 Agent 正在处理...</span>
+                  <span>{{ msg.messageMode === 'task' ? '项目 Agent 正在处理任务...' : '项目 Agent 正在回复...' }}</span>
                 </div>
                 <span class="stream-cursor">▌</span>
               </div>

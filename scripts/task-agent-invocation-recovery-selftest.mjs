@@ -16,6 +16,7 @@ const lineage = require(path.join(root, "ccm-package", "dist", "tasks", "task-ag
 const spool = require(path.join(root, "ccm-package", "dist", "agents", "direct-dispatch-spool.js"));
 const wal = require(path.join(root, "ccm-package", "dist", "modules", "collaboration", "typed-memory-dispatch-wal.js"));
 const memory = require(path.join(root, "ccm-package", "dist", "modules", "collaboration", "memory.js"));
+const lifecycle = require(path.join(root, "ccm-package", "dist", "modules", "collaboration", "group-session-lifecycle-head.js"));
 
 const sha = (value, length = 64) => crypto.createHash("sha256").update(String(value)).digest("hex").slice(0, length);
 const nonce = `${process.pid}-${Date.now().toString(36)}`;
@@ -29,6 +30,7 @@ function prepareBoundEdge(label, options = {}) {
   const taskId = options.taskId || `task-phase255-${label}-${nonce}`;
   const taskAgentSessionId = options.taskAgentSessionId || `tas_phase255_${label}_${nonce}`;
   const prompt = `phase255 ${label} prompt`;
+  const lifecycleHead = lifecycle.ensureGroupSessionLifecycleHead(groupId, groupSessionId, { reason: "phase255 invocation recovery fixture" }).head;
   let edge = lineage.prepareTaskAgentInvocationEdge({
     groupId,
     groupSessionId,
@@ -45,6 +47,13 @@ function prepareBoundEdge(label, options = {}) {
   edge = lineage.bindTaskAgentInvocationContext(edge, {
     workerContextPacketId: `wcp_${label}_${nonce}`,
     memoryContextSnapshotId: `tams_${label}_${nonce}`,
+    groupSessionMemoryBinding: {
+      sessionLifecycleFenceRequired: true,
+      sessionLifecycleHeadId: lifecycleHead.lifecycle_head_id,
+      sessionLifecycleGeneration: lifecycleHead.generation,
+      sessionLifecycleStatus: lifecycleHead.status,
+      sessionLifecycleHeadChecksum: lifecycleHead.head_checksum,
+    },
     renderedPrompt: prompt,
   });
   return { groupId, groupSessionId, taskId, taskAgentSessionId, prompt, edge };

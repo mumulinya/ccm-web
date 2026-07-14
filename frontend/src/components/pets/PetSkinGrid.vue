@@ -49,5 +49,5 @@ const emit = defineEmits(['select-skin', 'create-skin'])
 .skin-card-add { border-style: dashed; }
 .skin-card-add .add-icon { color: var(--text-muted); font-size: 18px; }
 .pixelated { image-rendering: pixelated; }
-:global([data-theme="dark"]) .skin-card, :global([data-theme="dark"]) .skin-avatar-wrap { background: rgba(10, 10, 20, 0.38); border-color: rgba(255,255,255,0.06); }
+:global([data-theme="dark"] .skin-card), :global([data-theme="dark"] .skin-avatar-wrap){ background: rgba(10, 10, 20, 0.38); border-color: rgba(255,255,255,0.06); }
 </style>

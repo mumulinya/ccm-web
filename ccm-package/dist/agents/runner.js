@@ -36,6 +36,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.validateAgentRunnerSessionLifecycleFence = validateAgentRunnerSessionLifecycleFence;
 exports.validateExternalRunnerRuntimeToolGate = validateExternalRunnerRuntimeToolGate;
+exports.runAgentRunnerRequestFile = runAgentRunnerRequestFile;
 exports.runAgentRunnerSelfTest = runAgentRunnerSelfTest;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
@@ -646,6 +647,13 @@ async function runRequest(file) {
             : await runProjectVerificationCommands(request.projectName || "", workDir, timeoutMs, request);
         const output = appendRunnerVerificationOutput(agentOutput, runnerVerification);
         const fileChanges = (0, utils_1.getFileChanges)(request.projectName || "", changeSnapshot);
+        const finalSessionLifecycleValidation = validateAgentRunnerSessionLifecycleFence(request);
+        if (!finalSessionLifecycleValidation.valid) {
+            runtimeSessionLifecycleValidation = finalSessionLifecycleValidation;
+            throw Object.assign(new Error(`群聊会话生命周期已变化：${finalSessionLifecycleValidation.issues.join(", ")}`), {
+                code: "CCM_SESSION_LIFECYCLE_STALE",
+            });
+        }
         writeJsonAtomic(resultFile, {
             id: request.id,
             success: true,
@@ -713,6 +721,10 @@ async function runRequest(file) {
         writeHeartbeat("idle", "");
     }
     return true;
+}
+async function runAgentRunnerRequestFile(file) {
+    ensureDirs();
+    return runRequest(file);
 }
 function runAgentRunnerSelfTest() {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ccm-runner-gate-"));

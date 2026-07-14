@@ -88,7 +88,7 @@ const emit = defineEmits([
   position: relative;
 }
 
-:global([data-theme="dark"]) .assistant-sidebar {
+:global([data-theme="dark"] .assistant-sidebar){
   background: var(--panel-muted);
   border-right-color: var(--border-color);
 }
@@ -170,7 +170,7 @@ const emit = defineEmits([
   transition: background 0.15s ease, border-color 0.15s ease;
 }
 
-:global([data-theme="dark"]) .expand-sidebar-btn {
+:global([data-theme="dark"] .expand-sidebar-btn){
   background: var(--surface);
   border-color: var(--border-color);
 }
@@ -209,7 +209,7 @@ const emit = defineEmits([
   color: var(--text-primary);
 }
 
-:global([data-theme="dark"]) .session-item:hover {
+:global([data-theme="dark"] .session-item:hover){
   background: var(--control-hover);
 }
 
@@ -220,7 +220,7 @@ const emit = defineEmits([
   border-color: color-mix(in srgb, var(--accent-blue) 24%, transparent);
 }
 
-:global([data-theme="dark"]) .session-item.active {
+:global([data-theme="dark"] .session-item.active){
   background: var(--accent-soft);
   color: var(--accent-blue);
   border-color: color-mix(in srgb, var(--accent-blue) 28%, transparent);
@@ -294,5 +294,26 @@ const emit = defineEmits([
   border-color: #ef4444;
   color: #ef4444;
   background: rgba(239, 68, 68, 0.04);
+}
+
+@media (max-width: 768px) {
+  .assistant-sidebar {
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: min(82vw, 280px);
+    z-index: 60;
+    box-shadow: var(--shadow-lg);
+  }
+
+  .assistant-sidebar.collapsed {
+    width: 0;
+    transform: translateX(-100%);
+    box-shadow: none;
+  }
+
+  .expand-sidebar-btn {
+    left: 8px;
+    top: 60px;
+  }
 }
 </style>

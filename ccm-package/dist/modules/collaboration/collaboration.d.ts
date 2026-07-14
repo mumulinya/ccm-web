@@ -13088,7 +13088,7 @@ export declare function runCoordinatorReworkProtocolSelfTest(): {
             } | {
                 available: boolean;
                 project?: undefined;
-                workDir?: undefined;
+                readonly workDir?: undefined;
             };
             candidates: any[];
         };
@@ -13105,7 +13105,7 @@ export declare function runCoordinatorReworkProtocolSelfTest(): {
             } | {
                 available: boolean;
                 project?: undefined;
-                workDir?: undefined;
+                readonly workDir?: undefined;
             };
             candidates: any[];
         };
@@ -13699,7 +13699,7 @@ export declare function runCollaborationProtocolSelfTest(): {
                 } | {
                     available: boolean;
                     project?: undefined;
-                    workDir?: undefined;
+                    readonly workDir?: undefined;
                 };
                 candidates: any[];
             };
@@ -13716,7 +13716,7 @@ export declare function runCollaborationProtocolSelfTest(): {
                 } | {
                     available: boolean;
                     project?: undefined;
-                    workDir?: undefined;
+                    readonly workDir?: undefined;
                 };
                 candidates: any[];
             };

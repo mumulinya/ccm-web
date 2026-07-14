@@ -195,6 +195,7 @@ export declare function validateExternalRunnerRuntimeToolGate(request: any, opti
     runtimeToolDispatchGate: any;
     reason?: undefined;
 };
+export declare function runAgentRunnerRequestFile(file: string): Promise<boolean>;
 export declare function runAgentRunnerSelfTest(): {
     pass: boolean;
     checks: {

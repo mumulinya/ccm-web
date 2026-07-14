@@ -9,6 +9,10 @@ export const GROUP_TYPED_MEMORY_ENTRYPOINT = "MEMORY.md";
 export const GROUP_TYPED_MEMORY_MAX_INDEX_LINES = 200;
 export const GROUP_TYPED_MEMORY_MAX_INDEX_BYTES = 25_000;
 export const GROUP_TYPED_MEMORY_MAX_RECALL = 5;
+export const GROUP_TYPED_MEMORY_MANIFEST_MAX_FILES = 200;
+export const GROUP_TYPED_MEMORY_MANIFEST_MAX_SELECTION = 5;
+export const GROUP_TYPED_MEMORY_MANIFEST_SELECTOR_VERSION = 1;
+export const GROUP_TYPED_MEMORY_MANIFEST_SELECTOR_DECISION_DIR = ".manifest-selector-decisions";
 export const GROUP_TYPED_MEMORY_RECALL_LEDGER = ".recall-ledger.json";
 export const GROUP_TYPED_MEMORY_RECALL_LEDGER_MAX_SCOPES = 160;
 export const GROUP_TYPED_MEMORY_RECALL_LEDGER_MAX_DELIVERY_LEASES_PER_SCOPE = 160;
@@ -38,10 +42,23 @@ export const GROUP_CLAUDE_MEMORY_SETTING_SOURCE_POLICY_VERSION = 1;
 export const GROUP_CLAUDE_INSTRUCTIONS_LOADED_HOOK_VERSION = 1;
 export const GROUP_TYPED_MEMORY_DISTILLATION_VERSION = 1;
 export const GROUP_TYPED_MEMORY_DISTILLATION_LEDGER = ".distillation-ledger.json";
+export const GROUP_TYPED_MEMORY_DISTILLATION_LOCK = ".distillation-transaction.lock";
+export const GROUP_TYPED_MEMORY_DISTILLATION_TRANSACTION_STATE = ".distillation-transaction-state.json";
+export const GROUP_TYPED_MEMORY_ARTIFACT_TRANSACTION_JOURNAL = ".distillation-artifact-transaction.json";
+export const GROUP_TYPED_MEMORY_ARTIFACT_TRANSACTION_STAGE_DIR = ".distillation-artifact-stage";
+export const GROUP_TYPED_MEMORY_DISTILLATION_TRANSACTION_VERSION = 1;
 export const GROUP_TYPED_MEMORY_DISTILLATION_MAX_MESSAGES = 1200;
 export const GROUP_TYPED_MEMORY_DISTILLATION_FACT_LIMIT = 100;
 export const GROUP_TYPED_MEMORY_DISTILLATION_QUALITY_VERSION = 1;
 export const GROUP_TYPED_MEMORY_WRITE_ADMISSION_VERSION = 1;
+export const GROUP_TYPED_MEMORY_DIRECT_OPERATION_VERSION = 1;
+export const GROUP_SESSION_MODEL_EXTRACTION_TYPED_MEMORY_VERSION = 1;
+export const GROUP_SESSION_MODEL_EXTRACTION_TOPIC_VERSION = 2;
+export const GROUP_SESSION_MODEL_EXTRACTION_MAX_TOPICS_PER_CATEGORY = 40;
+export const GROUP_SESSION_MODEL_EXTRACTION_MAX_FACTS_PER_TOPIC_FILE = 15;
+export const GROUP_SESSION_MODEL_EXTRACTION_TOPIC_ASSIGNMENT_MIN_CONFIDENCE = 0.5;
+export const GROUP_SESSION_MODEL_EXTRACTION_TOPIC_REUSE_MIN_SIMILARITY = 0.62;
+export const GROUP_SESSION_MODEL_EXTRACTION_TOPIC_MERGE_MIN_SIMILARITY = 0.82;
 export const GROUP_POSITIVE_FEEDBACK_LIFECYCLE_VERSION = 1;
 export const GROUP_PROVIDER_REPROOF_RECEIPT_CONSUMPTION_DISTILLATION_VERSION = 1;
 export const GROUP_PROVIDER_RANKING_PROVENANCE_COMPACT_REPAIR_RECEIPT_CONSUMPTION_DISTILLATION_VERSION = 1;
@@ -86,6 +103,9 @@ const CLAUDE_MEMORY_INCLUDE_TEXT_EXTENSIONS = new Set([
   ".sql", ".graphql", ".gql", ".proto", ".ini", ".cfg", ".conf",
 ]);
 const groupMemoryInstructionsLoadedHooks = new Set<(input: any) => any>();
+type GroupTypedMemoryManifestSelectorExecutor = (request: any) => Promise<any>;
+let configuredGroupTypedMemoryManifestSelectorExecutor: GroupTypedMemoryManifestSelectorExecutor | null = null;
+const activeGroupTypedMemoryDistillationMutations = new Map<string, any>();
 const DELIVERY_CLEANUP_EXECUTOR_INSTANCE_ID = `${os.hostname()}:${process.pid}:${crypto.randomBytes(6).toString("hex")}`;
 const DELIVERY_CLEANUP_EXECUTION_LEASE_TTL_MS = 30_000;
 const DELIVERY_CLEANUP_EXECUTION_LEASE_MAX_TTL_MS = 5 * 60_000;
@@ -184,7 +204,8 @@ function uniqueStrings(values: any[] = [], limit = 20) {
 }
 
 function checksum(value: any, length = 16) {
-  return crypto.createHash("sha256").update(typeof value === "string" ? value : JSON.stringify(value)).digest("hex").slice(0, length);
+  const input = Buffer.isBuffer(value) ? value : typeof value === "string" ? value : JSON.stringify(value);
+  return crypto.createHash("sha256").update(input).digest("hex").slice(0, length);
 }
 
 function ensureGroupTypedMemoryDir(groupId: string) {
@@ -193,25 +214,75 @@ function ensureGroupTypedMemoryDir(groupId: string) {
   return dir;
 }
 
-function writeTextAtomic(file: string, content: string) {
+function writeTextAtomicRaw(file: string, content: string) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   try {
     if (fs.existsSync(file) && fs.readFileSync(file, "utf-8") === content) return false;
   } catch {}
   const temp = `${file}.${process.pid}.${Date.now()}.tmp`;
-  fs.writeFileSync(temp, content, "utf-8");
+  fs.writeFileSync(temp, content, { encoding: "utf-8", flush: true });
   fs.renameSync(temp, file);
   return true;
 }
 
+function writeTextAtomic(file: string, content: string) {
+  const mutation = activeGroupTypedMemoryArtifactMutationForFile(file);
+  if (!mutation) return writeTextAtomicRaw(file, content);
+  return stageGroupTypedMemoryArtifact(mutation, file, content);
+}
+
 function readJson(file: string, fallback: any) {
+  const mutation = activeGroupTypedMemoryArtifactMutationForFile(file);
+  const pending = mutation?.pendingArtifacts?.get(normalizeArtifactFile(file));
+  if (pending) {
+    if (pending.delete === true) return fallback;
+    try { return JSON.parse(String(pending.content || "")); } catch { return fallback; }
+  }
   try { return JSON.parse(fs.readFileSync(file, "utf-8")); } catch { return fallback; }
 }
 
 function writeJsonAtomic(file: string, value: any) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
+  if (path.basename(file) === GROUP_TYPED_MEMORY_DISTILLATION_LEDGER) {
+    const groupId = String(value?.groupId || "");
+    const mutation = activeGroupTypedMemoryDistillationMutations.get(groupId);
+    if (!groupId || !mutation?.handle) throw new Error("uncoordinated_group_typed_memory_distillation_ledger_write");
+    const renewed = renewGroupTypedMemoryDistillationLock(mutation.handle);
+    if (!renewed.renewed) throw new Error(`typed_memory_distillation_lock_lost_before_ledger_write:${renewed.reason}`);
+    const current = readJson(file, {});
+    const currentFence = Number(current?.distillationMutation?.fencingToken || current?.distillationTransaction?.fencingToken || 0);
+    const mutationFence = Number(mutation.handle.lock?.fencingToken || 0);
+    if (currentFence > mutationFence) throw new Error(`typed_memory_distillation_fence_superseded:${currentFence}>${mutationFence}`);
+    mutation.writeCount = Number(mutation.writeCount || 0) + 1;
+    mutation.lastWriteAt = now();
+    value = {
+      ...value,
+      distillationMutation: {
+        schema: "ccm-group-typed-memory-distillation-mutation-commit-v1",
+        version: GROUP_TYPED_MEMORY_DISTILLATION_TRANSACTION_VERSION,
+        groupId,
+        mutationKind: String(mutation.mutationKind || "unknown"),
+        mutationKinds: uniqueStrings((mutation.mutationKinds || [mutation.mutationKind]).map(String), 32),
+        leaseId: String(mutation.handle.lock?.leaseId || ""),
+        fencingToken: mutationFence,
+        ownerPid: Number(mutation.handle.lock?.ownerPid || 0),
+        ownerHostname: String(mutation.handle.lock?.ownerHostname || ""),
+        acquiredAt: String(mutation.handle.lock?.acquiredAt || ""),
+        renewedAt: String(mutation.handle.lock?.renewedAt || ""),
+        waitedMs: Number(mutation.handle.waitedMs || 0),
+        recoveredLeaseCount: Number(mutation.handle.recoveredLeaseCount || 0),
+        writeSequence: Number(mutation.writeCount || 0),
+        committedAt: mutation.lastWriteAt,
+      },
+    };
+  }
+  const artifactMutation = activeGroupTypedMemoryArtifactMutationForFile(file);
+  if (artifactMutation) {
+    stageGroupTypedMemoryArtifact(artifactMutation, file, JSON.stringify(value, null, 2));
+    return;
+  }
   const temp = `${file}.${process.pid}.${Date.now()}.tmp`;
-  fs.writeFileSync(temp, JSON.stringify(value, null, 2), "utf-8");
+  fs.writeFileSync(temp, JSON.stringify(value, null, 2), { encoding: "utf-8", flush: true });
   fs.renameSync(temp, file);
 }
 
@@ -335,13 +406,23 @@ function evaluateTypedMemoryPathCondition(doc: any, targetPaths: any[] = []) {
 
 function listMemoryMarkdownFiles(groupId: string) {
   const dir = getGroupTypedMemoryDir(groupId);
+  const files = new Map<string, string>();
   try {
-    return fs.readdirSync(dir)
-      .filter(name => name.toLowerCase().endsWith(".md") && name !== GROUP_TYPED_MEMORY_ENTRYPOINT)
-      .map(name => path.join(dir, name));
-  } catch {
-    return [];
+    for (const name of fs.readdirSync(dir)) {
+      if (!name.toLowerCase().endsWith(".md") || name === GROUP_TYPED_MEMORY_ENTRYPOINT) continue;
+      const file = path.join(dir, name);
+      files.set(normalizeArtifactFile(file), file);
+    }
+  } catch {}
+  const mutation = activeGroupTypedMemoryDistillationMutations.get(groupId);
+  for (const entry of mutation?.pendingArtifacts?.values?.() || []) {
+    const name = path.basename(String(entry.file || ""));
+    if (!name.toLowerCase().endsWith(".md") || name === GROUP_TYPED_MEMORY_ENTRYPOINT) continue;
+    const key = normalizeArtifactFile(entry.file);
+    if (entry.delete === true) files.delete(key);
+    else files.set(key, entry.file);
   }
+  return [...files.values()];
 }
 
 function tokens(value: any) {
@@ -2531,16 +2612,42 @@ function scoreWorkerContextPressureFeedbackPolicyRecallRisk(doc: any, corpus: st
   };
 }
 
-function truncateIndexContent(content: string) {
-  let lines = content.split("\n").slice(0, GROUP_TYPED_MEMORY_MAX_INDEX_LINES);
-  let text = lines.join("\n");
-  const maxBytes = GROUP_TYPED_MEMORY_MAX_INDEX_BYTES;
-  while (Buffer.byteLength(text, "utf-8") > maxBytes && lines.length > 1) {
-    lines = lines.slice(0, -1);
-    text = lines.join("\n");
+export function truncateGroupTypedMemoryEntrypointContent(raw: string) {
+  const trimmed = String(raw || "").trim();
+  const sourceLines = trimmed ? trimmed.split("\n") : [];
+  const lineCount = sourceLines.length;
+  const byteCount = Buffer.byteLength(trimmed, "utf-8");
+  const wasLineTruncated = lineCount > GROUP_TYPED_MEMORY_MAX_INDEX_LINES;
+  const wasByteTruncated = byteCount > GROUP_TYPED_MEMORY_MAX_INDEX_BYTES;
+  let loadedLines = wasLineTruncated
+    ? sourceLines.slice(0, GROUP_TYPED_MEMORY_MAX_INDEX_LINES)
+    : sourceLines.slice();
+  while (Buffer.byteLength(loadedLines.join("\n"), "utf-8") > GROUP_TYPED_MEMORY_MAX_INDEX_BYTES && loadedLines.length > 1) {
+    loadedLines.pop();
   }
-  if (content !== text) text += "\n- [index truncated] More typed memories exist on disk.";
-  return text;
+  let content = loadedLines.join("\n");
+  if (wasLineTruncated || wasByteTruncated) {
+    const reason = wasLineTruncated && wasByteTruncated
+      ? `${lineCount} lines and ${byteCount} bytes`
+      : wasLineTruncated
+        ? `${lineCount} lines (limit: ${GROUP_TYPED_MEMORY_MAX_INDEX_LINES})`
+        : `${byteCount} bytes (limit: ${GROUP_TYPED_MEMORY_MAX_INDEX_BYTES}); index entries are too long`;
+    content += `${content ? "\n\n" : ""}> WARNING: ${GROUP_TYPED_MEMORY_ENTRYPOINT} is ${reason}. Only part of it was loaded. Keep index entries to one line under ~200 chars; move detail into topic files.`;
+  }
+  return {
+    schema: "ccm-group-typed-memory-entrypoint-truncation-v1",
+    version: 1,
+    content,
+    lineCount,
+    byteCount,
+    loadedLineCount: loadedLines.length,
+    loadedByteCount: Buffer.byteLength(loadedLines.join("\n"), "utf-8"),
+    wasLineTruncated,
+    wasByteTruncated,
+    truncated: wasLineTruncated || wasByteTruncated,
+    maxLines: GROUP_TYPED_MEMORY_MAX_INDEX_LINES,
+    maxBytes: GROUP_TYPED_MEMORY_MAX_INDEX_BYTES,
+  };
 }
 
 function markdownLinkTitle(value: any) {
@@ -2589,6 +2696,799 @@ export function getGroupTypedMemoryPressureRecallUsageLedgerFile(groupId: string
 
 export function getGroupTypedMemoryDistillationLedgerFile(groupId: string) {
   return path.join(getGroupTypedMemoryDir(groupId), GROUP_TYPED_MEMORY_DISTILLATION_LEDGER);
+}
+
+export function getGroupTypedMemoryDistillationLockFile(groupId: string) {
+  return path.join(getGroupTypedMemoryDir(groupId), GROUP_TYPED_MEMORY_DISTILLATION_LOCK);
+}
+
+export function getGroupTypedMemoryDistillationTransactionStateFile(groupId: string) {
+  return path.join(getGroupTypedMemoryDir(groupId), GROUP_TYPED_MEMORY_DISTILLATION_TRANSACTION_STATE);
+}
+
+export function getGroupTypedMemoryArtifactTransactionJournalFile(groupId: string) {
+  return path.join(getGroupTypedMemoryDir(groupId), GROUP_TYPED_MEMORY_ARTIFACT_TRANSACTION_JOURNAL);
+}
+
+export function getGroupTypedMemoryArtifactTransactionStageRoot(groupId: string) {
+  return path.join(getGroupTypedMemoryDir(groupId), GROUP_TYPED_MEMORY_ARTIFACT_TRANSACTION_STAGE_DIR);
+}
+
+function normalizeArtifactFile(file: string) {
+  return path.resolve(String(file || "")).replace(/\\/g, "/").toLowerCase();
+}
+
+function isCoordinatedGroupTypedMemoryArtifactFile(groupId: string, file: string) {
+  const target = path.resolve(String(file || ""));
+  const dir = path.resolve(getGroupTypedMemoryDir(groupId));
+  if (path.dirname(target).toLowerCase() !== dir.toLowerCase()) return false;
+  const name = path.basename(target);
+  return name === GROUP_TYPED_MEMORY_DISTILLATION_LEDGER || name.toLowerCase().endsWith(".md");
+}
+
+function activeGroupTypedMemoryArtifactMutationForFile(file: string) {
+  for (const mutation of activeGroupTypedMemoryDistillationMutations.values()) {
+    if (!mutation?.handle || !(mutation.pendingArtifacts instanceof Map)) continue;
+    if (isCoordinatedGroupTypedMemoryArtifactFile(String(mutation.groupId || ""), file)) return mutation;
+  }
+  return null;
+}
+
+function stageGroupTypedMemoryArtifact(mutation: any, file: string, content: string) {
+  const target = path.resolve(file);
+  if (!isCoordinatedGroupTypedMemoryArtifactFile(String(mutation.groupId || ""), target)) {
+    throw new Error("typed_memory_artifact_target_outside_mutation_scope");
+  }
+  const key = normalizeArtifactFile(target);
+  const pending = mutation.pendingArtifacts.get(key);
+  let effective: string | null = null;
+  if (pending) effective = pending.delete === true ? null : String(pending.content || "");
+  else {
+    try { effective = fs.readFileSync(target, "utf-8"); } catch { effective = null; }
+  }
+  if (effective === content) return false;
+  let base: string | null = null;
+  try { base = fs.readFileSync(target, "utf-8"); } catch { base = null; }
+  if (base === content) mutation.pendingArtifacts.delete(key);
+  else mutation.pendingArtifacts.set(key, { file: target, content, delete: false, stagedAt: now() });
+  return true;
+}
+
+function stageGroupTypedMemoryArtifactRemoval(mutation: any, file: string) {
+  const target = path.resolve(file);
+  if (!isCoordinatedGroupTypedMemoryArtifactFile(String(mutation.groupId || ""), target)) {
+    throw new Error("typed_memory_artifact_target_outside_mutation_scope");
+  }
+  const key = normalizeArtifactFile(target);
+  const pending = mutation.pendingArtifacts.get(key);
+  const effectiveExists = pending ? pending.delete !== true : fs.existsSync(target);
+  if (!effectiveExists) return false;
+  if (!fs.existsSync(target)) mutation.pendingArtifacts.delete(key);
+  else mutation.pendingArtifacts.set(key, { file: target, content: "", delete: true, stagedAt: now() });
+  return true;
+}
+
+function readGroupTypedMemoryArtifactText(file: string) {
+  const mutation = activeGroupTypedMemoryArtifactMutationForFile(file);
+  const pending = mutation?.pendingArtifacts?.get(normalizeArtifactFile(file));
+  if (pending) return pending.delete === true ? null : String(pending.content || "");
+  try { return fs.readFileSync(file, "utf-8"); } catch { return null; }
+}
+
+function groupTypedMemoryArtifactJournalChecksum(journal: any = {}) {
+  return checksum({
+    schema: journal.schema || "",
+    version: Number(journal.version || 0),
+    groupId: journal.groupId || "",
+    status: journal.status || "",
+    leaseId: journal.leaseId || "",
+    fencingToken: Number(journal.fencingToken || 0),
+    mutationKind: journal.mutationKind || "",
+    mutationKinds: Array.isArray(journal.mutationKinds) ? journal.mutationKinds.map(String) : [],
+    artifactCount: Number(journal.artifactCount || 0),
+    artifacts: (Array.isArray(journal.artifacts) ? journal.artifacts : []).map((artifact: any) => ({
+      target: artifact.target || "",
+      beforeExists: artifact.beforeExists === true,
+      beforeChecksum: artifact.beforeChecksum || "",
+      beforeBytes: Number(artifact.beforeBytes || 0),
+      beforeStage: artifact.beforeStage || "",
+      afterDelete: artifact.afterDelete === true,
+      afterChecksum: artifact.afterChecksum || "",
+      afterBytes: Number(artifact.afterBytes || 0),
+      afterStage: artifact.afterStage || "",
+      commitOrder: Number(artifact.commitOrder || 0),
+    })),
+    preparedAt: journal.preparedAt || "",
+    committedAt: journal.committedAt || "",
+    recoveredAt: journal.recoveredAt || "",
+    recoveryAction: journal.recoveryAction || "",
+    stageCleanedAt: journal.stageCleanedAt || "",
+    updatedAt: journal.updatedAt || "",
+  }, 64);
+}
+
+function writeGroupTypedMemoryArtifactJournalRaw(groupId: string, value: any) {
+  const journal: any = {
+    schema: "ccm-group-typed-memory-artifact-transaction-v1",
+    version: 1,
+    groupId,
+    ...value,
+  };
+  delete journal.journalChecksum;
+  journal.journalChecksum = groupTypedMemoryArtifactJournalChecksum(journal);
+  writeTextAtomicRaw(getGroupTypedMemoryArtifactTransactionJournalFile(groupId), JSON.stringify(journal, null, 2));
+  return journal;
+}
+
+export function inspectGroupTypedMemoryArtifactTransaction(groupId: string) {
+  const file = getGroupTypedMemoryArtifactTransactionJournalFile(groupId);
+  let journal: any = null;
+  try { journal = JSON.parse(fs.readFileSync(file, "utf-8")); } catch {}
+  if (!journal) return fs.existsSync(file)
+    ? { file, present: true, valid: false, corrupt: true, journal: null }
+    : { file, present: false, valid: true, corrupt: false, journal: null };
+  const checksumValid = String(journal.journalChecksum || "") === groupTypedMemoryArtifactJournalChecksum(journal);
+  const identityValid = journal.schema === "ccm-group-typed-memory-artifact-transaction-v1"
+    && Number(journal.version || 0) === 1
+    && String(journal.groupId || "") === groupId
+    && !!String(journal.leaseId || "")
+    && Number(journal.fencingToken || 0) > 0;
+  return { file, present: true, valid: checksumValid && identityValid, checksumValid, identityValid, corrupt: false, journal };
+}
+
+function groupTypedMemoryArtifactStageDir(groupId: string, leaseId: string) {
+  const root = path.resolve(getGroupTypedMemoryArtifactTransactionStageRoot(groupId));
+  const dir = path.resolve(root, safeSegment(leaseId, "invalid-lease"));
+  if (path.dirname(dir).toLowerCase() !== root.toLowerCase()) throw new Error("typed_memory_artifact_stage_path_invalid");
+  return dir;
+}
+
+function groupTypedMemoryArtifactTarget(groupId: string, target: string) {
+  const name = path.basename(String(target || ""));
+  if (!name || name !== target || (name !== GROUP_TYPED_MEMORY_DISTILLATION_LEDGER && !name.toLowerCase().endsWith(".md"))) {
+    throw new Error("typed_memory_artifact_journal_target_invalid");
+  }
+  return path.join(getGroupTypedMemoryDir(groupId), name);
+}
+
+function readVerifiedArtifactStageFile(stageDir: string, name: string, expectedChecksum: string) {
+  if (!name || path.basename(name) !== name) throw new Error("typed_memory_artifact_stage_file_invalid");
+  const file = path.resolve(stageDir, name);
+  if (path.dirname(file).toLowerCase() !== path.resolve(stageDir).toLowerCase()) throw new Error("typed_memory_artifact_stage_file_outside_transaction");
+  const content = fs.readFileSync(file);
+  if (checksum(content, 64) !== expectedChecksum) throw new Error("typed_memory_artifact_stage_checksum_mismatch");
+  return content;
+}
+
+function applyGroupTypedMemoryArtifactVersion(groupId: string, journal: any, artifact: any, version: "before" | "after") {
+  const target = groupTypedMemoryArtifactTarget(groupId, String(artifact.target || ""));
+  const stageDir = groupTypedMemoryArtifactStageDir(groupId, String(journal.leaseId || ""));
+  const remove = version === "after" ? artifact.afterDelete === true : artifact.beforeExists !== true;
+  if (remove) {
+    try { fs.unlinkSync(target); } catch (error: any) { if (error?.code !== "ENOENT") throw error; }
+    return;
+  }
+  const stageName = String(version === "after" ? artifact.afterStage || "" : artifact.beforeStage || "");
+  const expected = String(version === "after" ? artifact.afterChecksum || "" : artifact.beforeChecksum || "");
+  const content = readVerifiedArtifactStageFile(stageDir, stageName, expected);
+  writeTextAtomicRaw(target, content.toString("utf-8"));
+}
+
+function verifyGroupTypedMemoryArtifactVersion(groupId: string, artifact: any, version: "before" | "after") {
+  const target = groupTypedMemoryArtifactTarget(groupId, String(artifact.target || ""));
+  const remove = version === "after" ? artifact.afterDelete === true : artifact.beforeExists !== true;
+  if (remove) return !fs.existsSync(target);
+  try {
+    const expected = String(version === "after" ? artifact.afterChecksum || "" : artifact.beforeChecksum || "");
+    return checksum(fs.readFileSync(target), 64) === expected;
+  } catch {
+    return false;
+  }
+}
+
+function cleanupGroupTypedMemoryArtifactStage(groupId: string, leaseId: string) {
+  const dir = groupTypedMemoryArtifactStageDir(groupId, leaseId);
+  try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+  const root = getGroupTypedMemoryArtifactTransactionStageRoot(groupId);
+  try { if (fs.existsSync(root) && fs.readdirSync(root).length === 0) fs.rmdirSync(root); } catch {}
+}
+
+function recoverGroupTypedMemoryArtifactTransaction(groupId: string) {
+  const inspected = inspectGroupTypedMemoryArtifactTransaction(groupId);
+  if (!inspected.present) return { recovered: false, reason: "artifact_journal_absent" };
+  if (!inspected.valid) throw new Error("typed_memory_artifact_journal_corrupt");
+  const journal = inspected.journal;
+  if (["committed", "recovered_rollforward", "recovered_rollback"].includes(String(journal.status || ""))) {
+    cleanupGroupTypedMemoryArtifactStage(groupId, String(journal.leaseId || ""));
+    return { recovered: false, reason: "artifact_journal_terminal", status: journal.status };
+  }
+  if (journal.status !== "prepared") throw new Error(`typed_memory_artifact_journal_status_invalid:${journal.status || "missing"}`);
+  const artifacts = Array.isArray(journal.artifacts) ? journal.artifacts : [];
+  if (artifacts.length !== Number(journal.artifactCount || 0)) throw new Error("typed_memory_artifact_journal_count_mismatch");
+  let ledger: any = {};
+  try { ledger = JSON.parse(fs.readFileSync(getGroupTypedMemoryDistillationLedgerFile(groupId), "utf-8")); } catch {}
+  const ledgerCommit = ledger?.distillationMutation || ledger?.distillationTransaction || {};
+  const rollforward = Number(ledgerCommit.fencingToken || 0) === Number(journal.fencingToken || 0)
+    && String(ledgerCommit.leaseId || "") === String(journal.leaseId || "");
+  const ordered = [...artifacts].sort((a: any, b: any) => Number(a.commitOrder || 0) - Number(b.commitOrder || 0));
+  const apply = rollforward ? ordered : [...ordered].reverse();
+  for (const artifact of apply) applyGroupTypedMemoryArtifactVersion(groupId, journal, artifact, rollforward ? "after" : "before");
+  const verified = artifacts.every((artifact: any) => verifyGroupTypedMemoryArtifactVersion(groupId, artifact, rollforward ? "after" : "before"));
+  if (!verified) throw new Error("typed_memory_artifact_recovery_verification_failed");
+  const recoveredAt = now();
+  const recovered = writeGroupTypedMemoryArtifactJournalRaw(groupId, {
+    ...journal,
+    status: rollforward ? "recovered_rollforward" : "recovered_rollback",
+    recoveredAt,
+    recoveryAction: rollforward ? "rollforward_from_committed_ledger_fence" : "rollback_before_uncommitted_ledger_fence",
+    stageCleanedAt: recoveredAt,
+    updatedAt: recoveredAt,
+  });
+  cleanupGroupTypedMemoryArtifactStage(groupId, String(journal.leaseId || ""));
+  return { recovered: true, action: recovered.recoveryAction, journal: recovered };
+}
+
+function prepareGroupTypedMemoryArtifactTransaction(context: any) {
+  const pending = [...(context.pendingArtifacts?.values() || [])];
+  if (!pending.length) return null;
+  const groupId = String(context.groupId || "");
+  const leaseId = String(context.handle?.lock?.leaseId || "");
+  const fencingToken = Number(context.handle?.lock?.fencingToken || 0);
+  const stageDir = groupTypedMemoryArtifactStageDir(groupId, leaseId);
+  fs.mkdirSync(stageDir, { recursive: true });
+  const sorted = pending.sort((a: any, b: any) => {
+    const rank = (entry: any) => path.basename(entry.file) === GROUP_TYPED_MEMORY_DISTILLATION_LEDGER
+      ? 2
+      : path.basename(entry.file) === GROUP_TYPED_MEMORY_ENTRYPOINT ? 1 : 0;
+    return rank(a) - rank(b) || path.basename(a.file).localeCompare(path.basename(b.file));
+  });
+  const artifacts = sorted.map((entry: any, index: number) => {
+    const target = groupTypedMemoryArtifactTarget(groupId, path.basename(entry.file));
+    const beforeExists = fs.existsSync(target);
+    const before = beforeExists ? fs.readFileSync(target) : Buffer.alloc(0);
+    const after = entry.delete === true ? Buffer.alloc(0) : Buffer.from(String(entry.content || ""), "utf-8");
+    const beforeStage = beforeExists ? `before-${String(index).padStart(3, "0")}.bin` : "";
+    const afterStage = entry.delete === true ? "" : `after-${String(index).padStart(3, "0")}.bin`;
+    if (beforeExists) fs.writeFileSync(path.join(stageDir, beforeStage), before, { flush: true });
+    if (entry.delete !== true) fs.writeFileSync(path.join(stageDir, afterStage), after, { flush: true });
+    return {
+      target: path.basename(target),
+      beforeExists,
+      beforeChecksum: beforeExists ? checksum(before, 64) : "",
+      beforeBytes: before.length,
+      beforeStage,
+      afterDelete: entry.delete === true,
+      afterChecksum: entry.delete === true ? "" : checksum(after, 64),
+      afterBytes: after.length,
+      afterStage,
+      commitOrder: index,
+    };
+  });
+  const preparedAt = now();
+  return writeGroupTypedMemoryArtifactJournalRaw(groupId, {
+    status: "prepared",
+    leaseId,
+    fencingToken,
+    mutationKind: String(context.mutationKind || "unknown"),
+    mutationKinds: uniqueStrings((context.mutationKinds || [context.mutationKind]).map(String), 32),
+    artifactCount: artifacts.length,
+    artifacts,
+    preparedAt,
+    committedAt: "",
+    recoveredAt: "",
+    recoveryAction: "",
+    stageCleanedAt: "",
+    updatedAt: preparedAt,
+  });
+}
+
+function commitGroupTypedMemoryArtifactMutation(context: any) {
+  const journal = prepareGroupTypedMemoryArtifactTransaction(context);
+  if (!journal) return { committed: false, artifactCount: 0, reason: "no_staged_artifacts" };
+  const groupId = String(context.groupId || "");
+  const artifacts = [...journal.artifacts].sort((a: any, b: any) => Number(a.commitOrder || 0) - Number(b.commitOrder || 0));
+  try {
+    let appliedCount = 0;
+    for (const artifact of artifacts) {
+      applyGroupTypedMemoryArtifactVersion(groupId, journal, artifact, "after");
+      appliedCount += 1;
+      const holdAfter = Number(context.options?.__artifactDiagnosticHoldAfterApplyCount || 0);
+      if (holdAfter === appliedCount) {
+        typedMemoryDistillationWait(Math.max(0, Math.min(30_000, Number(context.options?.__artifactDiagnosticHoldMs || 0))));
+      }
+      const failAfter = Number(context.options?.__artifactDiagnosticFailAfterApplyCount || 0);
+      if (failAfter === appliedCount) throw new Error(`diagnostic_artifact_commit_failure_after_${appliedCount}`);
+    }
+    if (!artifacts.every((artifact: any) => verifyGroupTypedMemoryArtifactVersion(groupId, artifact, "after"))) {
+      throw new Error("typed_memory_artifact_commit_verification_failed");
+    }
+    const committedAt = now();
+    const committed = writeGroupTypedMemoryArtifactJournalRaw(groupId, {
+      ...journal,
+      status: "committed",
+      committedAt,
+      stageCleanedAt: committedAt,
+      updatedAt: committedAt,
+    });
+    cleanupGroupTypedMemoryArtifactStage(groupId, String(journal.leaseId || ""));
+    context.artifactTransaction = {
+      schema: "ccm-group-typed-memory-artifact-transaction-receipt-v1",
+      groupId,
+      leaseId: journal.leaseId,
+      fencingToken: journal.fencingToken,
+      status: committed.status,
+      artifactCount: artifacts.length,
+      targets: artifacts.map((artifact: any) => artifact.target),
+      preparedAt: journal.preparedAt,
+      committedAt,
+    };
+    context.pendingArtifacts.clear();
+    return { committed: true, ...context.artifactTransaction };
+  } catch (error) {
+    try { context.artifactRecovery = recoverGroupTypedMemoryArtifactTransaction(groupId); } catch {}
+    throw error;
+  }
+}
+
+export function recoverGroupTypedMemoryArtifactTransactionsFleet(options: any = {}) {
+  const maxScopes = Math.max(1, Math.min(5000, Number(options.maxScopes || options.max_scopes || 1000)));
+  let scopeIds: string[] = [];
+  try {
+    scopeIds = fs.readdirSync(GROUP_TYPED_MEMORY_DIR, { withFileTypes: true })
+      .filter(entry => entry.isDirectory() && /--gcs_[a-zA-Z0-9._-]+$/.test(entry.name))
+      .map(entry => entry.name)
+      .filter(scopeId => fs.existsSync(getGroupTypedMemoryArtifactTransactionJournalFile(scopeId)))
+      .slice(0, maxScopes);
+  } catch {}
+  const rows: any[] = [];
+  for (const groupId of scopeIds) {
+    const inspected = inspectGroupTypedMemoryArtifactTransaction(groupId);
+    const stagePresent = fs.existsSync(getGroupTypedMemoryArtifactTransactionStageRoot(groupId));
+    if (!inspected.valid) {
+      rows.push({ groupId, status: "failed", reason: "artifact_journal_corrupt", stagePresent });
+      continue;
+    }
+    if (inspected.journal?.status !== "prepared" && !stagePresent) {
+      rows.push({ groupId, status: "current", reason: "terminal_without_stage", stagePresent: false });
+      continue;
+    }
+    try {
+      const result: any = runGroupTypedMemoryDistillationMutation(groupId, "artifact_transaction_startup_recovery", {
+        transactionMaxWaitMs: Number(options.transactionMaxWaitMs ?? options.transaction_max_wait_ms ?? 0),
+      }, () => ({ schema: "ccm-group-typed-memory-artifact-startup-recovery-v1", groupId }));
+      const recovery = result.distillationMutation?.artifactRecovery || {};
+      rows.push({
+        groupId,
+        status: recovery.recovered === true ? "recovered" : "cleaned",
+        action: String(recovery.action || ""),
+        reason: String(recovery.reason || ""),
+        fencingToken: Number(result.distillationMutation?.fencingToken || 0),
+      });
+    } catch (error: any) {
+      rows.push({ groupId, status: "failed", reason: String(error?.code || "artifact_recovery_failed"), error: compactText(error?.message || error, 800) });
+    }
+  }
+  return {
+    schema: "ccm-group-typed-memory-artifact-startup-recovery-fleet-v1",
+    checked: scopeIds.length,
+    recovered: rows.filter(row => row.status === "recovered").length,
+    cleaned: rows.filter(row => row.status === "cleaned").length,
+    current: rows.filter(row => row.status === "current").length,
+    failed: rows.filter(row => row.status === "failed").length,
+    rollbackCount: rows.filter(row => row.action === "rollback_before_uncommitted_ledger_fence").length,
+    rollforwardCount: rows.filter(row => row.action === "rollforward_from_committed_ledger_fence").length,
+    rows,
+    recoveredAt: now(),
+  };
+}
+
+export function ensureGroupTypedMemoryArtifactReadConsistency(groupId: string, options: any = {}) {
+  if (activeGroupTypedMemoryDistillationMutations.get(groupId)?.handle) {
+    return { consistent: true, skipped: true, reason: "active_local_mutation_uses_staged_overlay" };
+  }
+  const inspected = inspectGroupTypedMemoryArtifactTransaction(groupId);
+  if (!inspected.present) return { consistent: true, skipped: true, reason: "artifact_journal_absent" };
+  if (!inspected.valid) throw new Error("typed_memory_artifact_read_barrier_journal_corrupt");
+  if (inspected.journal?.status !== "prepared") return { consistent: true, skipped: true, reason: "artifact_journal_terminal", status: inspected.journal?.status };
+  const result: any = runGroupTypedMemoryDistillationMutation(groupId, "artifact_read_barrier_recovery", {
+    transactionMaxWaitMs: Number(options.transactionMaxWaitMs ?? options.transaction_max_wait_ms ?? 10_000),
+  }, () => ({ schema: "ccm-group-typed-memory-artifact-read-barrier-v1", groupId }));
+  const recovery = result.distillationMutation?.artifactRecovery || {};
+  return {
+    consistent: recovery.recovered === true || ["artifact_journal_terminal", "artifact_journal_absent"].includes(String(recovery.reason || "")),
+    skipped: false,
+    recovery,
+    fencingToken: Number(result.distillationMutation?.fencingToken || 0),
+  };
+}
+
+function groupTypedMemoryDistillationLockChecksum(lock: any = {}) {
+  return checksum({
+    schema: lock.schema || "",
+    version: Number(lock.version || 0),
+    groupId: lock.groupId || "",
+    leaseId: lock.leaseId || "",
+    fencingToken: Number(lock.fencingToken || 0),
+    ownerPid: Number(lock.ownerPid || 0),
+    ownerHostname: lock.ownerHostname || "",
+    status: lock.status || "",
+    acquiredAt: lock.acquiredAt || "",
+    renewedAt: lock.renewedAt || "",
+    expiresAt: lock.expiresAt || "",
+    renewalCount: Number(lock.renewalCount || 0),
+  }, 64);
+}
+
+function groupTypedMemoryDistillationStateChecksum(state: any = {}) {
+  return checksum({
+    schema: state.schema || "",
+    version: Number(state.version || 0),
+    groupId: state.groupId || "",
+    status: state.status || "",
+    mutationKind: state.mutationKind || "",
+    mutationKinds: Array.isArray(state.mutationKinds) ? state.mutationKinds.map(String) : [],
+    lastMutationKind: state.lastMutationKind || "",
+    leaseId: state.leaseId || "",
+    fencingToken: Number(state.fencingToken || 0),
+    lastFencingToken: Number(state.lastFencingToken || 0),
+    lastCommittedFencingToken: Number(state.lastCommittedFencingToken || 0),
+    recoveredLeaseCount: Number(state.recoveredLeaseCount || 0),
+    waitedMs: Number(state.waitedMs || 0),
+    writeCount: Number(state.writeCount || 0),
+    startedAt: state.startedAt || "",
+    completedAt: state.completedAt || "",
+    failedAt: state.failedAt || "",
+    error: state.error || "",
+    updatedAt: state.updatedAt || "",
+  }, 64);
+}
+
+function typedMemoryDistillationProcessAlive(pid: number) {
+  if (!Number.isFinite(pid) || pid <= 0) return false;
+  try { process.kill(pid, 0); return true; } catch { return false; }
+}
+
+function typedMemoryDistillationWait(ms: number) {
+  if (!Number.isFinite(ms) || ms <= 0) return;
+  try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.max(1, Math.floor(ms))); } catch {}
+}
+
+export function inspectGroupTypedMemoryDistillationLock(groupId: string, options: any = {}) {
+  const file = String(options.file || getGroupTypedMemoryDistillationLockFile(groupId));
+  const lock = readJson(file, null);
+  const filePresent = fs.existsSync(file);
+  if (!lock) {
+    let ageMs = 0;
+    try { ageMs = Math.max(0, Date.now() - fs.statSync(file).mtimeMs); } catch {}
+    return filePresent
+      ? { file, present: true, valid: false, checksumValid: false, identityValid: false, active: false, stale: false, corrupt: true, ageMs, lock: null }
+      : { file, present: false, valid: true, active: false, stale: false, corrupt: false, ageMs: 0, lock: null };
+  }
+  const checksumValid = String(lock.lockChecksum || "") === groupTypedMemoryDistillationLockChecksum(lock);
+  const identityValid = lock.schema === "ccm-group-typed-memory-distillation-lock-v1"
+    && Number(lock.version || 0) === GROUP_TYPED_MEMORY_DISTILLATION_TRANSACTION_VERSION
+    && String(lock.groupId || "") === groupId
+    && !!String(lock.leaseId || "")
+    && Number(lock.fencingToken || 0) > 0;
+  const ownerLocal = String(lock.ownerHostname || "") === os.hostname();
+  const ownerAlive = !ownerLocal || typedMemoryDistillationProcessAlive(Number(lock.ownerPid || 0));
+  const expiresAtMs = Date.parse(String(lock.expiresAt || ""));
+  const unexpired = Number.isFinite(expiresAtMs) && Date.now() < expiresAtMs;
+  const valid = checksumValid && identityValid;
+  // A live local owner remains authoritative even if a long synchronous
+  // distillation crosses its nominal TTL. Remote owners require an unexpired lease.
+  const active = valid && lock.status === "active" && ownerAlive && (ownerLocal || unexpired);
+  let ageMs = 0;
+  try { ageMs = Math.max(0, Date.now() - fs.statSync(file).mtimeMs); } catch {}
+  return {
+    file,
+    present: true,
+    valid,
+    checksumValid,
+    identityValid,
+    active,
+    stale: valid && lock.status === "active" && !active,
+    ownerLocal,
+    ownerAlive,
+    unexpired,
+    ageMs,
+    lock,
+  };
+}
+
+export function readGroupTypedMemoryDistillationTransactionState(groupId: string) {
+  const file = getGroupTypedMemoryDistillationTransactionStateFile(groupId);
+  const state = readJson(file, null);
+  const filePresent = fs.existsSync(file);
+  if (!state) return filePresent
+    ? { file, present: true, valid: false, checksumValid: false, identityValid: false, corrupt: true, state: null }
+    : { file, present: false, valid: true, corrupt: false, state: null };
+  const checksumValid = String(state.stateChecksum || "") === groupTypedMemoryDistillationStateChecksum(state);
+  const identityValid = state.schema === "ccm-group-typed-memory-distillation-transaction-state-v1"
+    && Number(state.version || 0) === GROUP_TYPED_MEMORY_DISTILLATION_TRANSACTION_VERSION
+    && String(state.groupId || "") === groupId;
+  return { file, present: true, valid: checksumValid && identityValid, checksumValid, identityValid, state };
+}
+
+function writeGroupTypedMemoryDistillationTransactionState(groupId: string, value: any) {
+  const file = getGroupTypedMemoryDistillationTransactionStateFile(groupId);
+  const state = {
+    schema: "ccm-group-typed-memory-distillation-transaction-state-v1",
+    version: GROUP_TYPED_MEMORY_DISTILLATION_TRANSACTION_VERSION,
+    groupId,
+    ...value,
+  };
+  state.stateChecksum = groupTypedMemoryDistillationStateChecksum(state);
+  writeJsonAtomic(file, state);
+  return { ...state, file };
+}
+
+function nextGroupTypedMemoryDistillationFencingToken(groupId: string, abandonedLock: any = null) {
+  const state = readGroupTypedMemoryDistillationTransactionState(groupId);
+  const ledger = readJson(getGroupTypedMemoryDistillationLedgerFile(groupId), {});
+  const timestampFloor = Date.now() * 1000 + Math.abs(process.pid % 1000);
+  return Math.max(
+    timestampFloor,
+    Number(state.valid ? state.state?.lastFencingToken || state.state?.fencingToken || 0 : 0) + 1,
+    Number(ledger?.distillationMutation?.fencingToken || ledger?.distillationTransaction?.fencingToken || 0) + 1,
+    Number(abandonedLock?.fencingToken || 0) + 1,
+  );
+}
+
+function writeGroupTypedMemoryDistillationLockHandle(handle: any, patch: any = {}) {
+  const lock = { ...handle.lock, ...patch };
+  delete lock.lockChecksum;
+  lock.lockChecksum = groupTypedMemoryDistillationLockChecksum(lock);
+  fs.ftruncateSync(handle.fd, 0);
+  fs.writeSync(handle.fd, JSON.stringify(lock, null, 2), 0, "utf-8");
+  fs.fsyncSync(handle.fd);
+  handle.lock = lock;
+  return lock;
+}
+
+function acquireGroupTypedMemoryDistillationLock(groupId: string, options: any = {}) {
+  const file = getGroupTypedMemoryDistillationLockFile(groupId);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const maxWaitMs = Math.max(0, Math.min(30_000, Number(options.transactionMaxWaitMs ?? options.transaction_max_wait_ms ?? 10_000)));
+  const ttlMs = Math.max(10_000, Math.min(10 * 60_000, Number(options.transactionTtlMs ?? options.transaction_ttl_ms ?? 120_000)));
+  const corruptGraceMs = Math.max(250, Math.min(30_000, Number(options.transactionCorruptGraceMs ?? options.transaction_corrupt_grace_ms ?? 5_000)));
+  let waitedMs = 0;
+  let recoveredLeaseCount = 0;
+  let abandonedLock: any = null;
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    const status = inspectGroupTypedMemoryDistillationLock(groupId);
+    if (status.present) {
+      if (status.active || (!status.valid && status.ageMs < corruptGraceMs)) {
+        if (waitedMs >= maxWaitMs) return { acquired: false, reason: status.active ? "distillation_lock_busy" : "distillation_lock_corrupt_grace", waitedMs, status };
+        const waitMs = Math.min(maxWaitMs - waitedMs, Math.max(5, Math.min(100, 5 * Math.pow(1.35, Math.min(attempt, 20)))));
+        typedMemoryDistillationWait(waitMs);
+        waitedMs += waitMs;
+        continue;
+      }
+      abandonedLock = status.lock;
+      const archive = `${file}.abandoned.${checksum([status.lock?.leaseId || "invalid", Date.now(), crypto.randomBytes(4).toString("hex")], 20)}`;
+      try {
+        fs.renameSync(file, archive);
+        recoveredLeaseCount += 1;
+        pruneCleanupMetadataArchives(path.dirname(file), `${path.basename(file)}.abandoned.`, 32);
+      } catch {
+        continue;
+      }
+    }
+    let fd = -1;
+    try {
+      fd = fs.openSync(file, "wx+");
+      const acquiredAt = now();
+      const fencingToken = nextGroupTypedMemoryDistillationFencingToken(groupId, abandonedLock);
+      const leaseId = `gtmdl_${checksum([groupId, fencingToken, process.pid, crypto.randomBytes(12).toString("hex")], 32)}`;
+      const handle: any = {
+        fd,
+        file,
+        released: false,
+        waitedMs,
+        recoveredLeaseCount,
+        ttlMs,
+        lock: {
+          schema: "ccm-group-typed-memory-distillation-lock-v1",
+          version: GROUP_TYPED_MEMORY_DISTILLATION_TRANSACTION_VERSION,
+          groupId,
+          leaseId,
+          fencingToken,
+          ownerPid: process.pid,
+          ownerHostname: os.hostname(),
+          status: "active",
+          acquiredAt,
+          renewedAt: acquiredAt,
+          expiresAt: new Date(Date.now() + ttlMs).toISOString(),
+          renewalCount: 0,
+        },
+      };
+      writeGroupTypedMemoryDistillationLockHandle(handle);
+      const priorState = readGroupTypedMemoryDistillationTransactionState(groupId);
+      writeGroupTypedMemoryDistillationTransactionState(groupId, {
+        status: "in_progress",
+        mutationKind: String(options.mutationKind || options.mutation_kind || ""),
+        mutationKinds: uniqueStrings([options.mutationKind || options.mutation_kind].filter(Boolean).map(String), 32),
+        leaseId,
+        fencingToken,
+        lastFencingToken: fencingToken,
+        lastCommittedFencingToken: Number(priorState.valid ? priorState.state?.lastCommittedFencingToken || 0 : 0),
+        recoveredLeaseCount: Number(priorState.valid ? priorState.state?.recoveredLeaseCount || 0 : 0) + recoveredLeaseCount,
+        waitedMs,
+        writeCount: 0,
+        startedAt: acquiredAt,
+        completedAt: "",
+        failedAt: "",
+        error: "",
+        updatedAt: acquiredAt,
+      });
+      return { acquired: true, handle, lock: handle.lock, waitedMs, recoveredLeaseCount };
+    } catch (error: any) {
+      if (fd >= 0) try { fs.closeSync(fd); } catch {}
+      if (error?.code === "EEXIST") continue;
+      return { acquired: false, reason: "distillation_lock_acquire_failed", waitedMs, error: String(error?.message || error) };
+    }
+  }
+  return { acquired: false, reason: "distillation_lock_contended", waitedMs };
+}
+
+function verifyGroupTypedMemoryDistillationLock(handle: any) {
+  if (!handle || handle.released === true || Number(handle.fd) < 0) return { owned: false, reason: "lock_handle_unavailable" };
+  const status = inspectGroupTypedMemoryDistillationLock(String(handle.lock?.groupId || ""), { file: handle.file });
+  const owned = status.valid === true
+    && status.active === true
+    && String(status.lock?.leaseId || "") === String(handle.lock?.leaseId || "")
+    && Number(status.lock?.fencingToken || 0) === Number(handle.lock?.fencingToken || 0);
+  return { owned, reason: owned ? "owned" : status.present ? "lock_replaced_or_invalid" : "lock_missing", status };
+}
+
+function renewGroupTypedMemoryDistillationLock(handle: any) {
+  const before = verifyGroupTypedMemoryDistillationLock(handle);
+  if (!before.owned) return { renewed: false, reason: before.reason, verification: before };
+  const renewedAt = now();
+  writeGroupTypedMemoryDistillationLockHandle(handle, {
+    renewedAt,
+    expiresAt: new Date(Date.now() + Number(handle.ttlMs || 120_000)).toISOString(),
+    renewalCount: Number(handle.lock?.renewalCount || 0) + 1,
+  });
+  const after = verifyGroupTypedMemoryDistillationLock(handle);
+  return { renewed: after.owned, reason: after.owned ? "renewed" : after.reason, verification: after, lock: handle.lock };
+}
+
+function releaseGroupTypedMemoryDistillationLock(handle: any, finalStatus = "completed") {
+  if (!handle || handle.released === true || Number(handle.fd) < 0) return false;
+  const releasedAt = now();
+  try {
+    writeGroupTypedMemoryDistillationLockHandle(handle, {
+      status: "released",
+      releasedAt,
+      expiresAt: releasedAt,
+      finalStatus,
+    });
+  } catch {}
+  try { fs.closeSync(handle.fd); } catch {}
+  handle.fd = -1;
+  handle.released = true;
+  const current = readJson(handle.file, null);
+  if (current?.leaseId === handle.lock?.leaseId && Number(current?.fencingToken || 0) === Number(handle.lock?.fencingToken || 0)) {
+    try { fs.unlinkSync(handle.file); } catch {}
+  }
+  return true;
+}
+
+function runGroupTypedMemoryDistillationMutation(groupId: string, mutationKind: string, options: any, operation: (context: any) => any) {
+  const existing = activeGroupTypedMemoryDistillationMutations.get(groupId);
+  if (existing?.handle) {
+    existing.depth = Number(existing.depth || 1) + 1;
+    existing.mutationKinds = [...new Set([...(existing.mutationKinds || []), mutationKind])];
+    try {
+      return operation(existing);
+    } finally {
+      existing.depth = Math.max(1, Number(existing.depth || 2) - 1);
+    }
+  }
+
+  const acquired = acquireGroupTypedMemoryDistillationLock(groupId, { ...(options || {}), mutationKind });
+  if (!acquired.acquired) {
+    const error: any = new Error(`typed_memory_distillation_mutation_unavailable:${acquired.reason || "lock_unavailable"}`);
+    error.code = acquired.reason || "distillation_lock_unavailable";
+    error.transaction = acquired;
+    throw error;
+  }
+  const handle = acquired.handle;
+  const context: any = {
+    groupId,
+    mutationKind,
+    mutationKinds: [mutationKind],
+    handle,
+    options: options || {},
+    pendingArtifacts: new Map<string, any>(),
+    depth: 1,
+    writeCount: 0,
+    startedAt: String(handle.lock?.acquiredAt || now()),
+  };
+  activeGroupTypedMemoryDistillationMutations.set(groupId, context);
+  try {
+    context.artifactRecovery = recoverGroupTypedMemoryArtifactTransaction(groupId);
+    const diagnosticHoldMs = Math.max(0, Math.min(10_000, Number(options?.__mutationDiagnosticHoldMs || 0)));
+    if (diagnosticHoldMs > 0) typedMemoryDistillationWait(diagnosticHoldMs);
+    const value = operation(context);
+    commitGroupTypedMemoryArtifactMutation(context);
+    const ownership = verifyGroupTypedMemoryDistillationLock(handle);
+    if (!ownership.owned) throw new Error(`typed_memory_distillation_lock_lost_after_mutation:${ownership.reason}`);
+    const completedAt = now();
+    const priorState = readGroupTypedMemoryDistillationTransactionState(groupId);
+    const committed = Number(context.writeCount || 0) > 0;
+    writeGroupTypedMemoryDistillationTransactionState(groupId, {
+      status: "completed",
+      mutationKind,
+      mutationKinds: context.mutationKinds,
+      lastMutationKind: mutationKind,
+      leaseId: String(handle.lock?.leaseId || ""),
+      fencingToken: Number(handle.lock?.fencingToken || 0),
+      lastFencingToken: Number(handle.lock?.fencingToken || 0),
+      lastCommittedFencingToken: committed
+        ? Number(handle.lock?.fencingToken || 0)
+        : Number(priorState.valid ? priorState.state?.lastCommittedFencingToken || 0 : 0),
+      recoveredLeaseCount: Number(priorState.valid ? priorState.state?.recoveredLeaseCount || 0 : acquired.recoveredLeaseCount || 0),
+      waitedMs: Number(acquired.waitedMs || 0),
+      writeCount: Number(context.writeCount || 0),
+      startedAt: context.startedAt,
+      completedAt,
+      failedAt: "",
+      error: "",
+      updatedAt: completedAt,
+    });
+    if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+    return {
+      ...value,
+      distillationMutation: {
+        schema: "ccm-group-typed-memory-distillation-mutation-v1",
+        version: GROUP_TYPED_MEMORY_DISTILLATION_TRANSACTION_VERSION,
+        groupId,
+        mutationKind,
+        mutationKinds: context.mutationKinds,
+        leaseId: String(handle.lock?.leaseId || ""),
+        fencingToken: Number(handle.lock?.fencingToken || 0),
+        waitedMs: Number(acquired.waitedMs || 0),
+        recoveredLeaseCount: Number(acquired.recoveredLeaseCount || 0),
+        writeCount: Number(context.writeCount || 0),
+        status: "completed",
+        acquiredAt: context.startedAt,
+        completedAt,
+        artifactTransaction: context.artifactTransaction || null,
+        artifactRecovery: context.artifactRecovery || null,
+      },
+    };
+  } catch (error: any) {
+    const failedAt = now();
+    const ownership = verifyGroupTypedMemoryDistillationLock(handle);
+    if (ownership.owned) {
+      const priorState = readGroupTypedMemoryDistillationTransactionState(groupId);
+      writeGroupTypedMemoryDistillationTransactionState(groupId, {
+        status: "failed",
+        mutationKind,
+        mutationKinds: context.mutationKinds,
+        lastMutationKind: String(priorState.valid ? priorState.state?.lastMutationKind || "" : ""),
+        leaseId: String(handle.lock?.leaseId || ""),
+        fencingToken: Number(handle.lock?.fencingToken || 0),
+        lastFencingToken: Number(handle.lock?.fencingToken || 0),
+        lastCommittedFencingToken: Number(priorState.valid ? priorState.state?.lastCommittedFencingToken || 0 : 0),
+        recoveredLeaseCount: Number(priorState.valid ? priorState.state?.recoveredLeaseCount || 0 : acquired.recoveredLeaseCount || 0),
+        waitedMs: Number(acquired.waitedMs || 0),
+        writeCount: Number(context.writeCount || 0),
+        startedAt: context.startedAt,
+        completedAt: "",
+        failedAt,
+        error: compactText(error?.message || error, 800),
+        updatedAt: failedAt,
+      });
+    }
+    throw error;
+  } finally {
+    activeGroupTypedMemoryDistillationMutations.delete(groupId);
+    releaseGroupTypedMemoryDistillationLock(handle, context.writeCount > 0 ? "completed" : "no_write");
+  }
 }
 
 export function getGroupClaudeInstructionsLoadedHookLedgerFile(groupId: string) {
@@ -3190,9 +4090,11 @@ export function importGlobalClaudeMemoryToGroupTypedMemory(groupId: string, opti
 
 function scanGroupTypedMemoryDocumentsRaw(groupId: string) {
   return listMemoryMarkdownFiles(groupId).map(file => {
-    const content = fs.readFileSync(file, "utf-8");
+    const content = readGroupTypedMemoryArtifactText(file);
+    if (content === null) return null;
     const parsed = parseFrontmatter(content);
-    const stat = fs.statSync(file);
+    let stat: any = null;
+    try { stat = fs.statSync(file); } catch {}
     return {
       file,
       relPath: path.basename(file),
@@ -3201,16 +4103,17 @@ function scanGroupTypedMemoryDocumentsRaw(groupId: string) {
       type: normalizeMemoryType(parsed.meta.type),
       source: parsed.meta.source || "",
       paths: normalizePathGlobs(parsed.meta.paths || parsed.meta.path_globs || parsed.meta.globs || []),
-      updatedAt: parsed.meta.updated_at || stat.mtime.toISOString(),
+      updatedAt: parsed.meta.updated_at || (stat ? stat.mtime.toISOString() : now()),
       checksum: parsed.meta.checksum || checksum(content, 24),
       body: parsed.body,
-      mtimeMs: stat.mtimeMs,
-      bytes: stat.size,
+      mtimeMs: Number(stat?.mtimeMs || Date.now()),
+      bytes: Buffer.byteLength(content, "utf-8"),
     };
-  }).sort((a, b) => String(a.type).localeCompare(String(b.type)) || String(a.name).localeCompare(String(b.name)));
+  }).filter(Boolean).sort((a: any, b: any) => String(a.type).localeCompare(String(b.type)) || String(a.name).localeCompare(String(b.name)));
 }
 
 export function scanGroupTypedMemoryDocuments(groupId: string) {
+  ensureGroupTypedMemoryArtifactReadConsistency(groupId);
   const docs = scanGroupTypedMemoryDocumentsRaw(groupId);
   const ledger = readGroupTypedMemoryStaleCandidateLedger(groupId);
   if (ledger.ledger_checksum_valid !== true) return [];
@@ -3237,10 +4140,22 @@ export function buildGroupTypedMemoryIndex(groupId: string) {
     for (const doc of subset) lines.push(`- [${markdownLinkTitle(doc.name)}](${doc.relPath}) - ${compactText(doc.description, 150)}`);
     lines.push("");
   }
-  const content = truncateIndexContent(lines.join("\n").trim() + "\n");
+  const content = lines.join("\n").trim() + "\n";
+  const entrypointProjection = truncateGroupTypedMemoryEntrypointContent(content);
   const file = path.join(dir, GROUP_TYPED_MEMORY_ENTRYPOINT);
   const changed = writeTextAtomic(file, content);
-  return { file, dir, docs, changed, lineCount: content.split("\n").length, bytes: Buffer.byteLength(content, "utf-8") };
+  return {
+    file,
+    dir,
+    docs,
+    changed,
+    lineCount: content.trim().split("\n").length,
+    bytes: Buffer.byteLength(content, "utf-8"),
+    entrypointTruncation: {
+      ...entrypointProjection,
+      content: undefined,
+    },
+  };
 }
 
 function groupTypedMemoryPriority(type: any) {
@@ -3543,7 +4458,11 @@ function resolveTypedMemoryIncludePath(baseFile: string, ref: string) {
 function buildTypedMemoryLoadEntry(input: any) {
   const file = String(input.file || "");
   const stat = fs.statSync(file);
-  const content = fs.readFileSync(file, "utf-8");
+  const sourceContent = fs.readFileSync(file, "utf-8");
+  const entrypointProjection = input.kind === "entrypoint"
+    ? truncateGroupTypedMemoryEntrypointContent(sourceContent)
+    : null;
+  const content = entrypointProjection?.content ?? sourceContent;
   const parsed = parseFrontmatter(content);
   const type = input.kind === "entrypoint" ? "entrypoint" : normalizeMemoryType(parsed.meta.type || input.type);
   const body = parsed.body || content;
@@ -3568,9 +4487,18 @@ function buildTypedMemoryLoadEntry(input: any) {
     loadReason: input.parentRelPath ? "include" : input.kind === "entrypoint" ? "entrypoint" : "typed_doc",
     includeRefs,
     mtimeMs: stat.mtimeMs,
-    bytes: stat.size,
+    bytes: Buffer.byteLength(content, "utf-8"),
+    sourceBytes: stat.size,
+    sourceLineCount: sourceContent.trim() ? sourceContent.trim().split("\n").length : 0,
     checksum: checksum(content, 24),
+    sourceChecksum: checksum(sourceContent, 24),
     estimatedTokens: Math.max(1, Math.ceil(Buffer.byteLength(content, "utf-8") / 4)),
+    ...(entrypointProjection ? {
+      entrypointTruncation: {
+        ...entrypointProjection,
+        content: undefined,
+      },
+    } : {}),
   };
 }
 
@@ -3669,7 +4597,10 @@ export function buildGroupTypedMemoryLoadPlan(groupId: string, options: any = {}
     processFile(doc.file, { kind: "typed_doc", relPath: doc.relPath, type: doc.type, depth: 0, pathCondition: condition, targetPaths });
   }
   const boundedEntries = entries.slice(0, maxEntries).map((entry, loadOrder) => ({ ...entry, loadOrder }));
-  const truncated = entries.length > boundedEntries.length;
+  const entrypointEntry = entries.find(entry => entry.kind === "entrypoint") || null;
+  const entryListTruncated = entries.length > boundedEntries.length;
+  const entrypointTruncated = entrypointEntry?.entrypointTruncation?.truncated === true;
+  const truncated = entryListTruncated || entrypointTruncated;
   const totalBytes = boundedEntries.reduce((sum, entry) => sum + Number(entry.bytes || 0), 0);
   const estimatedTokens = boundedEntries.reduce((sum, entry) => sum + Number(entry.estimatedTokens || 0), 0);
   const byType = boundedEntries.reduce((acc: any, entry: any) => {
@@ -3703,6 +4634,9 @@ export function buildGroupTypedMemoryLoadPlan(groupId: string, options: any = {}
     entryCount: boundedEntries.length,
     totalDiscoveredEntries: entries.length,
     truncated,
+    entryListTruncated,
+    entrypointTruncated,
+    entrypointTruncation: entrypointEntry?.entrypointTruncation || null,
     totalBytes,
     estimatedTokens,
     byType,
@@ -3752,6 +4686,54 @@ function messageIdentity(message: any, index = 0) {
 
 function messageActor(message: any) {
   return message?.role === "user" ? `用户 -> ${message?.target || "all"}` : message?.agent || message?.role || "Agent";
+}
+
+function normalizeDirectMemoryText(value: any) {
+  return String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+function normalizeGroupDirectMemoryRequest(groupId: string, message: any, index = 0) {
+  const raw = message?.memoryDirectAction || message?.memory_direct_action || null;
+  if (!raw || typeof raw !== "object") return null;
+  const action = String(raw.action || "").trim().toLowerCase();
+  if (!["remember", "forget"].includes(action)) return null;
+  const messageId = messageIdentity(message, index);
+  const claimedScopeId = compactText(raw.scopeId || raw.scope_id || "", 180);
+  const content = compactText(raw.content || raw.text || raw.query || messageContent(message), 1800);
+  const memoryType = normalizeMemoryType(raw.memoryType || raw.memory_type || raw.type || "user");
+  const targetMemoryId = compactText(raw.targetMemoryId || raw.target_memory_id || raw.memoryId || raw.memory_id || "", 180);
+  const requestId = compactText(raw.requestId || raw.request_id || `gmdr_${checksum([groupId, messageId, action, content, targetMemoryId], 28)}`, 180);
+  const expectedChecksum = checksum([GROUP_TYPED_MEMORY_DIRECT_OPERATION_VERSION, groupId, messageId, action, memoryType, content, targetMemoryId], 64);
+  const claimedChecksum = String(raw.requestChecksum || raw.request_checksum || "").trim().toLowerCase();
+  return {
+    schema: "ccm-group-direct-memory-request-v1",
+    version: GROUP_TYPED_MEMORY_DIRECT_OPERATION_VERSION,
+    requestId,
+    action,
+    groupId,
+    claimedScopeId,
+    scopeMatches: !!claimedScopeId && claimedScopeId === groupId,
+    sourceRole: String(message?.role || ""),
+    messageId,
+    sourceIndex: Number(message?.__typedMemorySourceIndex ?? index),
+    content,
+    normalizedContent: normalizeDirectMemoryText(content),
+    memoryType,
+    targetMemoryId,
+    expectedChecksum,
+    claimedChecksum,
+    checksumMatches: !!claimedChecksum && claimedChecksum === expectedChecksum,
+    requestedAt: String(message?.timestamp || message?.created_at || ""),
+  };
+}
+
+function directMemoryFactIdentity(groupId: string, type: GroupTypedMemoryType, text: string) {
+  const textChecksum = checksum(normalizeDirectMemoryText(text), 64);
+  return {
+    factKey: checksum(["direct-memory", groupId, type, textChecksum], 24),
+    memoryId: `gmem_${checksum([groupId, type, textChecksum], 28)}`,
+    textChecksum,
+  };
 }
 
 function extractMessageFiles(message: any) {
@@ -4000,6 +4982,7 @@ function extractGroupLogPositiveFeedbackLifecycleRequests(groupId: string, messa
   const requests: any[] = [];
   for (let index = 0; index < messages.length; index += 1) {
     const message = messages[index];
+    if (normalizeGroupDirectMemoryRequest(groupId, message, index)) continue;
     const content = messageContent(message);
     const requested = normalizeGroupLogMemoryRevocation(message);
     const explicit = requested.revoked === true || GROUP_LOG_POSITIVE_REVOCATION_PATTERN.test(content);
@@ -4237,6 +5220,10 @@ function groupLogDistillationAdmission(candidate: any) {
     howToApply: howToApply || defaultHow,
   });
 
+  if (candidate?.directMemory?.requestId && candidate?.sourceRole === "user" && type === "explicit_remember") {
+    return admit("explicit_user_remember", 1, "Apply only inside this group session unless the user explicitly forgets or supersedes it.");
+  }
+
   if (activityNoise) return reject("activity_log_noise", true);
   if (["completed_work", "assignment"].includes(type)) return reject("ephemeral_task_activity", true);
   if (["files", "skills", "verification"].includes(type)) return reject("derivable_current_project_state", true);
@@ -4297,7 +5284,7 @@ function addDistilledCandidate(candidates: any[], category: GroupTypedMemoryType
     category,
     type,
     messageId,
-    sourceIndex: index,
+    sourceIndex: Number(message?.__typedMemorySourceIndex ?? index),
     actor,
     sourceRole: String(message?.role || ""),
     timestamp: String(message?.timestamp || message?.time || ""),
@@ -4312,6 +5299,9 @@ function extractGroupLogDistillationCandidates(groupId: string, messages: any[] 
   const candidates: any[] = [];
   for (let index = 0; index < messages.length; index += 1) {
     const message = messages[index];
+    // Explicit remember/forget is committed by the direct-memory transaction below.
+    // Keeping it out of heuristic extraction prevents a second, differently keyed fact.
+    if (normalizeGroupDirectMemoryRequest(groupId, message, index)) continue;
     const content = messageContent(message);
     if (!content) continue;
     const actor = messageActor(message);
@@ -4386,7 +5376,7 @@ function filterExistingDistilledFactsByAdmission(facts: any = {}) {
     admittedFacts[category] = {};
     for (const [key, fact] of Object.entries(facts?.[category] || {}) as Array<[string, any]>) {
       const admission = groupLogDistillationAdmission({ ...fact, category });
-      if (admission.admitted) admittedFacts[category][key] = { ...fact, category, admission };
+      if (admission.admitted) admittedFacts[category][key] = { ...fact, category, admission, count: 1 };
       else rejected.push({ ...fact, category, admission });
     }
   }
@@ -4396,7 +5386,7 @@ function filterExistingDistilledFactsByAdmission(facts: any = {}) {
 function buildGroupLogDistillationAdmissionLedger(previous: any = {}, admitted: any[] = [], rejected: any[] = [], evicted: any[] = [], updatedAt = now()) {
   const observations = new Map<string, any>();
   for (const row of Array.isArray(previous?.observations) ? previous.observations : []) {
-    if (row?.observationId) observations.set(String(row.observationId), row);
+    if (row?.observationId) observations.set(String(row.observationId), { ...row, count: 1 });
   }
   for (const row of [...rejected, ...evicted]) {
     const reason = String(row?.admission?.reason || "rejected");
@@ -4412,7 +5402,7 @@ function buildGroupLogDistillationAdmissionLedger(previous: any = {}, admitted: 
       hardExclusion: row?.admission?.hardExclusion === true,
       firstSeenAt: prior?.firstSeenAt || updatedAt,
       lastSeenAt: updatedAt,
-      count: Number(prior?.count || 0) + 1,
+      count: prior ? Math.max(1, Number(prior.count || 1)) : 1,
       evictedExistingFact: evicted.includes(row),
     });
   }
@@ -4469,6 +5459,231 @@ function pruneDistilledFacts(facts: any = {}, perTypeLimit = GROUP_TYPED_MEMORY_
   return next;
 }
 
+function directMemoryFactRows(facts: any = {}) {
+  const rows: any[] = [];
+  for (const type of ["user", "project", "feedback", "reference"] as GroupTypedMemoryType[]) {
+    for (const [factKey, fact] of Object.entries(facts?.[type] || {}) as Array<[string, any]>) {
+      const derived = directMemoryFactIdentity(String(fact?.groupId || "legacy"), type, String(fact?.text || ""));
+      const identity = {
+        factKey,
+        memoryId: String(fact?.memoryId || derived.memoryId),
+        textChecksum: String(fact?.textChecksum || derived.textChecksum),
+      };
+      rows.push({ type, factKey, fact, ...identity });
+    }
+  }
+  return rows;
+}
+
+function applyGroupDirectMemoryRequests(groupId: string, factsInput: any, requests: any[] = [], previous: any = {}, updatedAt = now()) {
+  const facts: any = {};
+  for (const type of ["user", "project", "feedback", "reference"] as GroupTypedMemoryType[]) {
+    facts[type] = { ...(factsInput?.[type] || {}) };
+  }
+  const receipts = new Map<string, any>();
+  for (const row of Array.isArray(previous?.receipts) ? previous.receipts : []) {
+    if (row?.requestId) receipts.set(String(row.requestId), row);
+  }
+  const tombstones = new Map<string, any>();
+  for (const row of Array.isArray(previous?.tombstones) ? previous.tombstones : []) {
+    if (row?.tombstoneId) tombstones.set(String(row.tombstoneId), row);
+  }
+  let rememberedThisRun = 0;
+  let forgottenThisRun = 0;
+  let duplicateThisRun = 0;
+  let rejectedThisRun = 0;
+
+  for (const request of [...requests].sort((a, b) => Number(a.sourceIndex || 0) - Number(b.sourceIndex || 0))) {
+    if (receipts.has(request.requestId)) {
+      duplicateThisRun += 1;
+      continue;
+    }
+    const base = {
+      schema: "ccm-group-direct-memory-receipt-v1",
+      version: GROUP_TYPED_MEMORY_DIRECT_OPERATION_VERSION,
+      requestId: request.requestId,
+      action: request.action,
+      groupId,
+      messageId: request.messageId,
+      sourceIndex: request.sourceIndex,
+      requestChecksum: request.expectedChecksum,
+      committedAt: updatedAt,
+    };
+    const reject = (reason: string, candidates: any[] = []) => {
+      rejectedThisRun += 1;
+      receipts.set(request.requestId, {
+        ...base,
+        status: "rejected",
+        reason,
+        candidateCount: candidates.length,
+        candidates: candidates.slice(0, 12).map(row => ({
+          memoryId: row.memoryId,
+          type: row.type,
+          messageId: String(row.fact?.messageId || ""),
+          text: compactText(row.fact?.text || "", 240),
+        })),
+      });
+    };
+    if (request.sourceRole !== "user") {
+      reject("direct_memory_requires_user_message");
+      continue;
+    }
+    if (!request.scopeMatches) {
+      reject("direct_memory_scope_mismatch");
+      continue;
+    }
+    if (!request.checksumMatches) {
+      reject("direct_memory_request_checksum_mismatch");
+      continue;
+    }
+    if (!request.content) {
+      reject("direct_memory_content_required");
+      continue;
+    }
+
+    if (request.action === "remember") {
+      const identity = directMemoryFactIdentity(groupId, request.memoryType, request.content);
+      const bucket = facts[request.memoryType] || {};
+      const existing = bucket[identity.factKey];
+      for (const [key, tombstone] of tombstones.entries()) {
+        if (String(tombstone?.textChecksum || "") === identity.textChecksum) tombstones.delete(key);
+      }
+      bucket[identity.factKey] = {
+        id: identity.factKey,
+        category: request.memoryType,
+        type: "explicit_remember",
+        groupId,
+        memoryId: identity.memoryId,
+        textChecksum: identity.textChecksum,
+        messageId: request.messageId,
+        sourceIndex: request.sourceIndex,
+        actor: "用户 -> coordinator",
+        sourceRole: "user",
+        timestamp: request.requestedAt,
+        text: request.content,
+        checksum: identity.factKey,
+        firstSeenAt: existing?.firstSeenAt || updatedAt,
+        lastSeenAt: updatedAt,
+        count: 1,
+        directMemory: { requestId: request.requestId, requestChecksum: request.expectedChecksum },
+        admission: {
+          admitted: true,
+          reason: "explicit_user_remember",
+          hardExclusion: false,
+          durable: true,
+          nonObvious: true,
+          hasRationale: true,
+          confidence: 1,
+          why: "The user explicitly requested this current group-session memory.",
+          howToApply: "Apply only inside this group session unless the user explicitly forgets or supersedes it.",
+        },
+      };
+      facts[request.memoryType] = bucket;
+      if (existing) duplicateThisRun += 1;
+      else rememberedThisRun += 1;
+      receipts.set(request.requestId, {
+        ...base,
+        status: existing ? "duplicate" : "committed",
+        reason: existing ? "same_scoped_memory_already_exists" : "explicit_memory_committed",
+        memoryId: identity.memoryId,
+        memoryType: request.memoryType,
+        textChecksum: identity.textChecksum,
+      });
+      continue;
+    }
+
+    const allRows = directMemoryFactRows(facts).map(row => {
+      if (row.fact?.memoryId && row.fact?.textChecksum) return row;
+      const derived = directMemoryFactIdentity(groupId, row.type, String(row.fact?.text || ""));
+      return { ...row, memoryId: derived.memoryId, textChecksum: derived.textChecksum };
+    });
+    const target = normalizeDirectMemoryText(request.targetMemoryId || request.content);
+    let matches = allRows.filter(row => [row.memoryId, row.factKey, row.fact?.id, row.fact?.checksum, row.fact?.messageId]
+      .some(value => normalizeDirectMemoryText(value) === target));
+    if (!matches.length) {
+      matches = allRows.filter(row => normalizeDirectMemoryText(row.fact?.text) === target);
+    }
+    if (!matches.length && target.length >= 8) {
+      matches = allRows.filter(row => normalizeDirectMemoryText(row.fact?.text).includes(target));
+    }
+    if (matches.length !== 1) {
+      reject(matches.length ? "forget_target_ambiguous" : "forget_target_not_found", matches);
+      continue;
+    }
+    const matched = matches[0];
+    delete facts[matched.type][matched.factKey];
+    const tombstoneId = `gmt_${checksum([groupId, matched.memoryId, matched.factKey, request.requestId], 28)}`;
+    tombstones.set(tombstoneId, {
+      schema: "ccm-group-direct-memory-tombstone-v1",
+      tombstoneId,
+      groupId,
+      memoryId: matched.memoryId,
+      factKey: matched.factKey,
+      textChecksum: matched.textChecksum || checksum(normalizeDirectMemoryText(matched.fact?.text), 64),
+      sourceMessageId: String(matched.fact?.messageId || ""),
+      forgetMessageId: request.messageId,
+      requestId: request.requestId,
+      forgottenAt: updatedAt,
+    });
+    forgottenThisRun += 1;
+    receipts.set(request.requestId, {
+      ...base,
+      status: "committed",
+      reason: "explicit_memory_forgotten",
+      memoryId: matched.memoryId,
+      memoryType: matched.type,
+      textChecksum: matched.textChecksum,
+    });
+  }
+
+  const boundedReceipts = [...receipts.values()]
+    .sort((a, b) => String(a.committedAt || "").localeCompare(String(b.committedAt || "")))
+    .slice(-500);
+  const boundedTombstones = [...tombstones.values()]
+    .sort((a, b) => String(a.forgottenAt || "").localeCompare(String(b.forgottenAt || "")))
+    .slice(-500);
+  return {
+    facts,
+    ledger: {
+      schema: "ccm-group-direct-memory-ledger-v1",
+      version: GROUP_TYPED_MEMORY_DIRECT_OPERATION_VERSION,
+      groupId,
+      evaluatedThisRun: requests.length,
+      rememberedThisRun,
+      forgottenThisRun,
+      duplicateThisRun,
+      rejectedThisRun,
+      activeDirectMemoryCount: directMemoryFactRows(facts).filter(row => row.fact?.directMemory?.requestId).length,
+      receiptCount: boundedReceipts.length,
+      tombstoneCount: boundedTombstones.length,
+      receipts: boundedReceipts,
+      tombstones: boundedTombstones,
+      updatedAt,
+    },
+  };
+}
+
+function filterFactsByDirectMemoryTombstones(facts: any, directMemory: any) {
+  const blockedTextChecksums = new Set((Array.isArray(directMemory?.tombstones) ? directMemory.tombstones : [])
+    .map((row: any) => String(row?.textChecksum || ""))
+    .filter(Boolean));
+  if (!blockedTextChecksums.size) return { facts, suppressedCount: 0 };
+  const next: any = {};
+  let suppressedCount = 0;
+  for (const type of ["user", "project", "feedback", "reference"] as GroupTypedMemoryType[]) {
+    next[type] = {};
+    for (const [key, fact] of Object.entries(facts?.[type] || {}) as Array<[string, any]>) {
+      const textChecksum = String(fact?.textChecksum || checksum(normalizeDirectMemoryText(fact?.text), 64));
+      if (blockedTextChecksums.has(textChecksum)) {
+        suppressedCount += 1;
+        continue;
+      }
+      next[type][key] = fact;
+    }
+  }
+  return { facts: next, suppressedCount };
+}
+
 function renderDistilledMemoryBody(title: string, facts: any[], options: any = {}) {
   const lines = [
     `# ${title}`,
@@ -4483,6 +5698,7 @@ function renderDistilledMemoryBody(title: string, facts: any[], options: any = {
     const kind = fact.type ? `[${fact.type}] ` : "";
     const actor = fact.actor ? `${fact.actor}: ` : "";
     lines.push(`- ${source} ${kind}${actor}${compactText(fact.text, 900)}`);
+    if (fact?.memoryId) lines.push(`  - **Memory ID:** ${compactText(fact.memoryId, 180)}`);
     if (fact?.confirmation?.targetMessageId) lines.push(`  - **Validated approach:** #${compactText(fact.confirmation.targetMessageId, 160)} (${fact.confirmation.bindingMode || "bound"})`);
     if (fact?.admission?.why) lines.push(`  - **Why:** ${compactText(fact.admission.why, 420)}`);
     if (fact?.admission?.howToApply) lines.push(`  - **How to apply:** ${compactText(fact.admission.howToApply, 420)}`);
@@ -4553,6 +5769,7 @@ function preservedGroupTypedMemoryDistillationArchives(...ledgers: any[]) {
     "contextUsageRepairArchive",
     "compactStrategyTypedArchive",
     "ptlEmergencyTypedArchive",
+    "modelExtractionTypedMemoryArchive",
     "positiveFeedbackLifecycle",
   ];
   const out: any = {};
@@ -4561,6 +5778,818 @@ function preservedGroupTypedMemoryDistillationArchives(...ledgers: any[]) {
     if (value?.schema) out[key] = value;
   }
   return out;
+}
+
+function modelExtractionTypedArchiveChecksum(archive: any) {
+  const payload = { ...(archive || {}) };
+  delete payload.checksum;
+  return checksum(JSON.stringify(payload), 64);
+}
+
+function modelExtractionReceiptChecksum(receipt: any) {
+  const payload = { ...(receipt || {}) };
+  delete payload.checksum;
+  delete payload.receiptFile;
+  return checksum(JSON.stringify(payload), 64);
+}
+
+function modelExtractionArtifactChecksum(artifact: any) {
+  const payload = { ...(artifact || {}) };
+  delete payload.checksum;
+  return checksum(JSON.stringify(payload), 64);
+}
+
+function modelExtractionGraphChecksum(graph: any) {
+  const payload = { ...(graph || {}) };
+  delete payload.checksum;
+  return checksum(JSON.stringify(payload), 64);
+}
+
+function modelExtractionEvidenceComparable(value: any) {
+  return String(value || "")
+    .replace(/^[-*+]\s+/, "")
+    .replace(/^\d+[.)]\s+/, "")
+    .replace(/[`*]/g, "")
+    .replace(/^_+|_+$/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function verifyModelExtractionGraphForTypedMemory(graph: any) {
+  if (graph?.schema !== "ccm-group-session-memory-fact-supersession-graph-v1"
+    || !graph?.checksum
+    || modelExtractionGraphChecksum(graph) !== String(graph.checksum || "")) return false;
+  const facts = Array.isArray(graph.facts) ? graph.facts : [];
+  const edges = Array.isArray(graph.edges) ? graph.edges : [];
+  const factById = new Map(facts.map((fact: any) => [String(fact.factId || ""), fact]));
+  return edges.every((edge: any) => {
+    const oldFact: any = factById.get(String(edge.oldFactId || ""));
+    return !!oldFact
+      && oldFact.status === "superseded"
+      && String(oldFact.factChecksum || "") === String(edge.oldFactChecksum || "")
+      && String(oldFact.supersessionEdgeId || "") === String(edge.edgeId || "")
+      && !!String(edge.sourceMessageId || "")
+      && checksum(edge.replacementText, 32) === String(edge.newFactChecksum || "")
+      && checksum(edge.sourceMessageText, 32) === String(edge.sourceMessageChecksum || "");
+  });
+}
+
+function validateModelExtractionTypedMemoryInput(scopeId: string, input: any) {
+  if (!isExactGroupTypedMemorySessionScope(scopeId)) throw new Error("model_extraction_typed_memory_requires_exact_group_gcs_scope");
+  const separator = scopeId.lastIndexOf("--gcs_");
+  const groupId = scopeId.slice(0, separator);
+  const groupSessionId = scopeId.slice(separator + 2);
+  const receipt = input?.receipt || {};
+  const graph = input?.factSupersessionGraph || receipt.factSupersessionGraph || {};
+  const transcript = String(input?.transcript || "");
+  const markdown = String(input?.markdown || "");
+  const requestArtifact = input?.requestArtifact?.artifact || input?.requestArtifact || {};
+  const resultArtifact = input?.resultArtifact?.artifact || input?.resultArtifact || {};
+  if (receipt.schema !== "ccm-group-session-memory-model-extraction-receipt-v1"
+    || receipt.status !== "committed"
+    || modelExtractionReceiptChecksum(receipt) !== String(receipt.checksum || "")) {
+    throw new Error("model_extraction_typed_memory_receipt_invalid");
+  }
+  if (String(receipt.groupId || "") !== groupId
+    || String(receipt.groupSessionId || "") !== groupSessionId
+    || String(receipt.scopeId || "") !== scopeId
+    || !String(receipt.executionId || "")
+    || Number(receipt.fencingToken || 0) <= 0) {
+    throw new Error("model_extraction_typed_memory_receipt_scope_or_fence_invalid");
+  }
+  const expectedReceiptFile = path.resolve(CCM_DIR, "group-session-memory", scopeId, "model-extraction-receipt.json");
+  if (path.resolve(String(receipt.receiptFile || "")) !== expectedReceiptFile) {
+    throw new Error("model_extraction_typed_memory_receipt_file_binding_invalid");
+  }
+  const persistedReceipt = readJson(expectedReceiptFile, null);
+  const currentReceiptValid = !!persistedReceipt
+    && String(persistedReceipt.checksum || "") === String(receipt.checksum || "")
+    && modelExtractionReceiptChecksum(persistedReceipt) === String(persistedReceipt.checksum || "");
+  const resultArtifactValid = resultArtifact.schema === "ccm-group-session-memory-model-extraction-result-artifact-v1"
+    && resultArtifact.status === "committed"
+    && String(resultArtifact.scopeId || "") === scopeId
+    && String(resultArtifact.executionId || "") === String(receipt.executionId || "")
+    && String(resultArtifact.kind || "") === "result"
+    && modelExtractionArtifactChecksum(resultArtifact) === String(resultArtifact.checksum || "")
+    && String(resultArtifact.receipt?.checksum || "") === String(receipt.checksum || "")
+    && modelExtractionReceiptChecksum(resultArtifact.receipt) === String(receipt.checksum || "")
+    && String(resultArtifact.validated?.markdown || "") === markdown;
+  if (!currentReceiptValid && !resultArtifactValid) {
+    throw new Error("model_extraction_typed_memory_committed_receipt_missing_or_changed");
+  }
+  if (!verifyModelExtractionGraphForTypedMemory(graph)
+    || String(receipt.factSupersessionGraphChecksum || "") !== String(graph.checksum || "")
+    || String(graph.sourceTranscriptChecksum || "") !== String(receipt.requestAudit?.sourceTranscriptChecksum || "")
+    || String(graph.outputMarkdownChecksum || "") !== checksum(markdown, 24)
+    || String(receipt.markdownChecksum || "") !== checksum(markdown, 24)) {
+    throw new Error("model_extraction_typed_memory_graph_or_markdown_binding_invalid");
+  }
+  let sourceRows: any[] = [];
+  try { sourceRows = JSON.parse(transcript); } catch {}
+  if (!Array.isArray(sourceRows)
+    || checksum(JSON.stringify(sourceRows), 32) !== String(receipt.requestAudit?.sourceTranscriptChecksum || "")) {
+    throw new Error("model_extraction_typed_memory_transcript_checksum_invalid");
+  }
+  if (requestArtifact.schema !== "ccm-group-session-memory-model-extraction-request-artifact-v1"
+    || String(requestArtifact.scopeId || "") !== scopeId
+    || String(requestArtifact.executionId || "") !== String(receipt.executionId || "")
+    || String(requestArtifact.transcript || "") !== transcript
+    || String(requestArtifact.checksum || "") !== String(receipt.requestArtifactChecksum || "")
+    || modelExtractionArtifactChecksum(requestArtifact) !== String(requestArtifact.checksum || "")
+    || Number(requestArtifact.fencingToken || 0) !== Number(receipt.fencingToken || 0)) {
+    throw new Error("model_extraction_typed_memory_request_artifact_invalid");
+  }
+  const expectedFence = Number(input?.extractionFencingToken || input?.extraction_fencing_token || 0);
+  if (expectedFence > 0 && expectedFence !== Number(receipt.fencingToken || 0)) {
+    throw new Error("model_extraction_typed_memory_extraction_fence_mismatch");
+  }
+  return { groupId, groupSessionId, receipt, graph, transcript, sourceRows, markdown, requestArtifact, resultArtifact, currentReceiptValid, resultArtifactValid };
+}
+
+const MODEL_EXTRACTION_TOPIC_GENERIC_CONCEPTS = new Set([
+  "必须", "长期", "保留", "使用", "启用", "禁止", "不要", "不得", "始终", "只能", "不能", "用户", "规则", "要求", "更正", "改为",
+  "必须长期使用", "必须长期保留", "必须长期记住", "请长期记住", "用户要求", "长期使用", "长期保留", "长期记住", "记住", "这个", "那个", "这样", "如此", "事情", "内容",
+  "must", "always", "never", "required", "requirement", "user", "rule", "using", "use", "keep", "remember", "this", "that", "thing", "content",
+]);
+
+const MODEL_EXTRACTION_TOPIC_CANONICAL_CONCEPTS: Array<[string, RegExp]> = [
+  ["domain_database", /(?:\bdatabase\b|\bdb\b|数据库|資料庫)/i],
+  ["domain_backup", /(?:\bbackups?\b|\brestore\b|备份|備份|恢复|還原)/i],
+  ["domain_retention", /(?:\bretention\b|\barchive\b|保留期|留存|归档|歸檔)/i],
+  ["domain_frontend", /(?:\bfront[ -]?end\b|\bui\b|前端|界面)/i],
+  ["domain_accessibility", /(?:\baccessibility\b|\ba11y\b|无障碍|無障礙|可访问性|可訪問性)/i],
+  ["domain_testing", /(?:\btests?\b|\btesting\b|测试|測試)/i],
+  ["domain_deployment", /(?:\bdeploy(?:ment)?\b|\brelease\b|部署|发布|發佈)/i],
+  ["domain_security", /(?:\bsecurity\b|\bsecure\b|安全|密钥|密鑰|凭据|憑據)/i],
+  ["domain_auth", /(?:\bauth(?:entication|orization)?\b|\blogin\b|认证|認證|鉴权|鑒權|登录|登入)/i],
+  ["domain_api", /(?:\bapi\b|接口|端点|端點)/i],
+  ["domain_performance", /(?:\bperformance\b|\blatency\b|性能|延迟|延遲)/i],
+  ["domain_logging", /(?:\blog(?:ging)?\b|\bobservability\b|日志|日誌|可观测性|可觀測性)/i],
+  ["domain_memory", /(?:\bmemory\b|记忆|記憶)/i],
+  ["domain_context", /(?:\bcontext\b|上下文)/i],
+  ["domain_compression", /(?:\bcompact(?:ion)?\b|\bcompress(?:ion)?\b|压缩|壓縮)/i],
+  ["domain_session", /(?:\bsessions?\b|会话|會話)/i],
+  ["domain_agent", /(?:\bagents?\b|智能体|智能體|代理)/i],
+  ["domain_documentation", /(?:\bdocs?\b|\bdocumentation\b|文档|文檔)/i],
+  ["domain_git", /(?:\bgit\b|\bcommit\b|提交记录|提交記錄)/i],
+];
+
+function modelExtractionTopicConceptProfile(value: any) {
+  const text = String(value || "").normalize("NFKC").replace(/https?:\/\/\S+/gi, " ");
+  const semanticText = text.replace(/[_-]+/g, " ");
+  const cjkCharCount = (text.match(/[\u4e00-\u9fff]/g) || []).length;
+  const latinCharCount = (text.match(/[A-Za-z]/g) || []).length;
+  const language = cjkCharCount >= 4 ? "cjk" : latinCharCount >= 4 ? "latin" : "unknown";
+  const canonical = MODEL_EXTRACTION_TOPIC_CANONICAL_CONCEPTS.filter(([, pattern]) => pattern.test(semanticText)).map(([concept]) => concept);
+  const rawTokens = text.match(/[A-Z][A-Z0-9_]{3,}|[A-Za-z][A-Za-z0-9_-]{3,}|[\u4e00-\u9fff]{2,16}/g) || [];
+  const lexical: string[] = [];
+  const seen = new Set(canonical);
+  for (const token of rawTokens) {
+    let normalized = token.toLowerCase().replace(/^_+|_+$/g, "");
+    normalized = normalized.replace(/^(?:必须长期使用|必须长期保留|必须长期记住|请长期记住|用户要求|长期使用|长期保留|长期记住)+/, "");
+    if (!normalized || normalized.length < 2 || MODEL_EXTRACTION_TOPIC_GENERIC_CONCEPTS.has(normalized) || seen.has(normalized)) continue;
+    if (/^(?:phase\d+|current|future|matching|apply|inside|unless|policy|value_?\d*)$/.test(normalized)) continue;
+    if (/^[\u4e00-\u9fff]+$/.test(normalized) && /^(?:这个|那个|这样|如此|事情|内容|规则|要求)$/.test(normalized)) continue;
+    seen.add(normalized);
+    lexical.push(normalized.slice(0, 80));
+    if (lexical.length >= 12) break;
+  }
+  const identifierCount = lexical.filter(token => /[_\d]/.test(token) || /^[a-z][a-z0-9_-]{4,}$/i.test(token)).length;
+  const cjkCount = lexical.filter(token => /^[\u4e00-\u9fff]+$/.test(token)).length;
+  const confidence = canonical.length >= 2
+    ? 0.95
+    : canonical.length === 1 && lexical.length > 0
+      ? 0.86
+      : canonical.length === 1
+        ? 0.72
+        : identifierCount > 0
+          ? 0.78
+          : cjkCount > 0
+            ? 0.6
+            : lexical.length > 0
+              ? 0.56
+              : 0.2;
+  return {
+    concepts: uniqueStrings([...canonical, ...lexical], 16),
+    canonicalConcepts: canonical,
+    lexicalConcepts: lexical,
+    confidence,
+    lowConfidence: confidence < GROUP_SESSION_MODEL_EXTRACTION_TOPIC_ASSIGNMENT_MIN_CONFIDENCE,
+    language,
+  };
+}
+
+function modelExtractionTopicConcepts(value: any) {
+  return modelExtractionTopicConceptProfile(value).concepts;
+}
+
+function modelExtractionTopicSimilarity(left: string[] = [], right: string[] = []) {
+  if (!left.length || !right.length) return 0;
+  const a = new Set(left);
+  const b = new Set(right);
+  let overlap = 0;
+  for (const item of a) if (b.has(item)) overlap += 1;
+  if (!overlap) return 0;
+  const canonicalOverlap = [...a].filter(item => item.startsWith("domain_") && b.has(item)).length;
+  const overlapCoefficient = overlap / Math.max(1, Math.min(a.size, b.size));
+  const jaccard = overlap / Math.max(1, new Set([...a, ...b]).size);
+  return Math.min(1, canonicalOverlap > 0
+    ? 0.64 + Math.min(0.2, canonicalOverlap * 0.1) + (jaccard * 0.16)
+    : (overlapCoefficient * 0.55) + (jaccard * 0.45));
+}
+
+function modelExtractionTopicDisplayConcept(concepts: string[], category: string, topicId: string) {
+  const preferred = concepts.find(concept => /[a-z0-9]/i.test(concept)) || concepts[0] || topicId.slice(-8);
+  return `${category === "feedback" ? "Corrections" : "User constraints"}: ${preferred.replace(/[_-]+/g, " ")}`;
+}
+
+function modelExtractionTopicSlug(category: string, concepts: string[], topicId: string) {
+  const readable = concepts.find(concept => /^[a-z0-9][a-z0-9_-]{2,48}$/i.test(concept)) || "topic";
+  return safeSegment(`model-${category}-${readable}-${checksum(topicId, 8)}`, `model-${category}-${checksum(topicId, 12)}`).toLowerCase();
+}
+
+export function buildGroupSessionModelExtractionTypedMemoryTopics(factsInput: any = {}, previousTopicsInput: any = {}, options: any = {}) {
+  const at = String(options.at || now());
+  const maxPerCategory = Math.max(2, Math.min(100, Number(options.maxTopicsPerCategory || options.max_topics_per_category || GROUP_SESSION_MODEL_EXTRACTION_MAX_TOPICS_PER_CATEGORY)));
+  const facts: any = Object.fromEntries(Object.entries(factsInput || {}).map(([key, fact]: any) => [key, { ...fact }]));
+  const previousTopics: any = Object.fromEntries(Object.entries(previousTopicsInput || {})
+    .filter(([, topic]: any) => topic?.schema === "ccm-group-session-model-extraction-topic-v1")
+    .map(([topicId, topic]: any) => {
+      const normalizedConcepts = modelExtractionTopicConceptProfile((topic.concepts || []).join(" ")).concepts;
+      return [topicId, { ...topic, concepts: uniqueStrings([...(topic.concepts || []), ...normalizedConcepts], 20) }];
+    }));
+  for (const fact of Object.values(facts) as any[]) {
+    const priorTopic = previousTopics[String(fact?.topicId || "")];
+    if (!priorTopic || fact?.status !== "active") continue;
+    const profile = modelExtractionTopicConceptProfile(fact.text);
+    priorTopic.concepts = uniqueStrings([...(priorTopic.concepts || []), ...profile.concepts], 20);
+    priorTopic.languages = uniqueStrings([...(priorTopic.languages || []), profile.language].filter(language => language !== "unknown"), 4);
+    priorTopic.assignmentVersion = GROUP_SESSION_MODEL_EXTRACTION_TOPIC_VERSION;
+  }
+  const topicAliases = new Map<string, string>();
+  const priorRows: any[] = Object.values(previousTopics).sort((a: any, b: any) => String(a.createdAt || "").localeCompare(String(b.createdAt || "")) || String(a.topicId || "").localeCompare(String(b.topicId || "")));
+  for (const topic of priorRows) {
+    if (topic.status === "merged" && previousTopics[String(topic.mergedIntoTopicId || "")]) {
+      topicAliases.set(topic.topicId, String(topic.mergedIntoTopicId));
+    }
+  }
+  for (let index = 0; index < priorRows.length; index += 1) {
+    const topic = priorRows[index];
+    if (topicAliases.has(topic.topicId) || ["retired", "merged"].includes(String(topic.status || "")) || /_(?:general|unclassified)$/.test(String(topic.topicId || ""))) continue;
+    for (let cursor = index + 1; cursor < priorRows.length; cursor += 1) {
+      const candidate = priorRows[cursor];
+      if (candidate.category !== topic.category
+        || topicAliases.has(candidate.topicId)
+        || ["retired", "merged"].includes(String(candidate.status || ""))
+        || /_(?:general|unclassified)$/.test(String(candidate.topicId || ""))) continue;
+      if (modelExtractionTopicSimilarity(topic.concepts || [], candidate.concepts || []) >= GROUP_SESSION_MODEL_EXTRACTION_TOPIC_MERGE_MIN_SIMILARITY) {
+        topicAliases.set(candidate.topicId, topic.topicId);
+      }
+    }
+  }
+
+  const topics = new Map<string, any>();
+  for (const topic of priorRows) {
+    const canonical = topicAliases.get(topic.topicId);
+    if (canonical) continue;
+    topics.set(topic.topicId, { ...topic, factChecksums: [], status: topic.status === "retired" ? "retired" : "inactive" });
+  }
+  let createdTopicCount = 0;
+  let reusedTopicCount = 0;
+  let lowConfidenceFactCount = 0;
+  const activeFacts = Object.entries(facts)
+    .filter(([, fact]: any) => fact?.status === "active" && ["user", "feedback"].includes(String(fact?.category || "")))
+    .sort((a: any, b: any) => String(a[1].firstCommittedAt || "").localeCompare(String(b[1].firstCommittedAt || "")) || String(a[0]).localeCompare(String(b[0])));
+
+  for (const [factChecksum, fact] of activeFacts as Array<[string, any]>) {
+    const category = String(fact.category || "user");
+    const profile = modelExtractionTopicConceptProfile(fact.text);
+    const concepts = profile.concepts;
+    const originalTopicId = String(fact.topicId || "");
+    const priorTopicId = topicAliases.get(originalTopicId) || originalTopicId;
+    let topic: any = null;
+    let strategy = "new_semantic_topic";
+    let similarityScore = 0;
+    let crossLanguageReuse = false;
+    if (profile.lowConfidence) {
+      lowConfidenceFactCount += 1;
+      const topicId = `met_${category}_unclassified`;
+      topic = topics.get(topicId);
+      if (!topic) {
+        topic = {
+          schema: "ccm-group-session-model-extraction-topic-v1",
+          version: GROUP_SESSION_MODEL_EXTRACTION_TOPIC_VERSION,
+          assignmentVersion: GROUP_SESSION_MODEL_EXTRACTION_TOPIC_VERSION,
+          topicId,
+          category,
+          name: category === "feedback" ? "Corrections: unclassified" : "User constraints: unclassified",
+          slug: `model-${category}-unclassified`,
+          concepts: ["unclassified"],
+          createdAt: at,
+          factChecksums: [],
+        };
+        topics.set(topicId, topic);
+        createdTopicCount += 1;
+      } else {
+        reusedTopicCount += 1;
+      }
+      strategy = "low_confidence_unclassified";
+    } else {
+      topic = priorTopicId ? topics.get(priorTopicId) : null;
+      if (topic && topic.category !== category) topic = null;
+      if (topic) {
+        strategy = topicAliases.has(originalTopicId) ? "historical_topic_rebalanced" : "stable_topic_reuse";
+        similarityScore = modelExtractionTopicSimilarity(concepts, topic.concepts || []);
+      }
+    }
+    if (!topic && !profile.lowConfidence) {
+      const candidates = [...topics.values()]
+        .filter(row => row.category === category && !["retired", "merged"].includes(String(row.status || "")) && !/_(?:general|unclassified)$/.test(String(row.topicId || "")))
+        .map(row => ({ row, score: modelExtractionTopicSimilarity(concepts, row.concepts || []) }))
+        .filter(item => item.score >= GROUP_SESSION_MODEL_EXTRACTION_TOPIC_REUSE_MIN_SIMILARITY)
+        .sort((a, b) => b.score - a.score || String(a.row.createdAt || "").localeCompare(String(b.row.createdAt || "")));
+      topic = candidates[0]?.row || null;
+      if (topic) {
+        similarityScore = candidates[0].score;
+        strategy = "semantic_similarity_reuse";
+        reusedTopicCount += 1;
+        const topicCanonical = new Set((topic.concepts || []).filter((concept: string) => concept.startsWith("domain_")));
+        const lexicalOverlap = profile.lexicalConcepts.some((concept: string) => (topic.concepts || []).includes(concept));
+        const topicLanguages = new Set(topic.languages || []);
+        crossLanguageReuse = !lexicalOverlap
+          && profile.language !== "unknown"
+          && topicLanguages.size > 0
+          && !topicLanguages.has(profile.language)
+          && profile.canonicalConcepts.some((concept: string) => topicCanonical.has(concept));
+      }
+    }
+    if (!topic) {
+      const categoryTopics = [...topics.values()].filter(row => row.category === category && row.status !== "retired");
+      // Reserve one bounded slot for the deterministic overflow topic.
+      if (categoryTopics.length >= maxPerCategory - 1) {
+        const topicId = `met_${category}_general`;
+        topic = topics.get(topicId);
+        if (!topic) {
+          topic = {
+            schema: "ccm-group-session-model-extraction-topic-v1",
+            version: GROUP_SESSION_MODEL_EXTRACTION_TOPIC_VERSION,
+            assignmentVersion: GROUP_SESSION_MODEL_EXTRACTION_TOPIC_VERSION,
+            topicId,
+            category,
+            name: category === "feedback" ? "Corrections: consolidated" : "User constraints: consolidated",
+            slug: `model-${category}-consolidated`,
+            concepts: ["consolidated"],
+            createdAt: at,
+            factChecksums: [],
+          };
+          topics.set(topicId, topic);
+          createdTopicCount += 1;
+        }
+        strategy = "capacity_consolidated";
+      } else {
+        const identityConcepts = concepts.length ? concepts.slice(0, 4) : [checksum(fact.text, 12)];
+        let topicId = `met_${checksum([category, identityConcepts], 20)}`;
+        let collision = 0;
+        while (topics.has(topicId)) {
+          collision += 1;
+          topicId = `met_${checksum([category, identityConcepts, collision], 20)}`;
+        }
+        topic = {
+          schema: "ccm-group-session-model-extraction-topic-v1",
+          version: GROUP_SESSION_MODEL_EXTRACTION_TOPIC_VERSION,
+          assignmentVersion: GROUP_SESSION_MODEL_EXTRACTION_TOPIC_VERSION,
+          topicId,
+          category,
+          name: modelExtractionTopicDisplayConcept(identityConcepts, category, topicId),
+          slug: modelExtractionTopicSlug(category, identityConcepts, topicId),
+          concepts: identityConcepts,
+          createdAt: at,
+          factChecksums: [],
+        };
+        topics.set(topicId, topic);
+        createdTopicCount += 1;
+      }
+    } else if (!["low_confidence_unclassified", "semantic_similarity_reuse"].includes(strategy)) {
+      reusedTopicCount += 1;
+    }
+    topic.status = "active";
+    delete topic.retiredAt;
+    delete topic.mergedIntoTopicId;
+    topic.updatedAt = at;
+    topic.assignmentVersion = GROUP_SESSION_MODEL_EXTRACTION_TOPIC_VERSION;
+    topic.concepts = uniqueStrings([...(topic.concepts || []), ...concepts], 20);
+    topic.languages = uniqueStrings([...(topic.languages || []), profile.language].filter(language => language !== "unknown"), 4);
+    topic.factChecksums = [...new Set([...(topic.factChecksums || []), factChecksum])];
+    const rebalancedNow = !!originalTopicId && originalTopicId !== topic.topicId;
+    const rebalanced = rebalancedNow || fact.topicAssignment?.rebalanced === true;
+    facts[factChecksum] = {
+      ...fact,
+      topicId: topic.topicId,
+      topicSlug: topic.slug,
+      topicAssignment: {
+        schema: "ccm-group-session-model-extraction-topic-assignment-v1",
+        version: GROUP_SESSION_MODEL_EXTRACTION_TOPIC_VERSION,
+        strategy,
+        confidence: profile.confidence,
+        similarityScore: Number(similarityScore.toFixed(4)),
+        lowConfidence: profile.lowConfidence,
+        rebalanced,
+        rebalancedFromTopicId: rebalancedNow ? originalTopicId : String(fact.topicAssignment?.rebalancedFromTopicId || ""),
+        crossLanguageReuse: crossLanguageReuse || fact.topicAssignment?.crossLanguageReuse === true,
+        initialStrategy: String(fact.topicAssignment?.initialStrategy || fact.topicAssignment?.strategy || strategy),
+        language: profile.language,
+        concepts: profile.concepts,
+        firstAssignedAt: String(fact.topicAssignment?.firstAssignedAt || fact.topicAssignment?.assignedAt || at),
+        assignedAt: at,
+      },
+    };
+  }
+
+  for (const category of ["user", "feedback"]) {
+    const generalTopicId = `met_${category}_general`;
+    const unclassifiedTopicId = `met_${category}_unclassified`;
+    const regularTopics = [...topics.values()]
+      .filter(topic => topic.category === category
+        && topic.status === "active"
+        && ![generalTopicId, unclassifiedTopicId].includes(topic.topicId)
+        && (topic.factChecksums || []).length > 0)
+      .sort((a, b) => String(a.createdAt || "").localeCompare(String(b.createdAt || "")) || String(a.topicId || "").localeCompare(String(b.topicId || "")));
+    const unclassifiedActive = Number((topics.get(unclassifiedTopicId)?.factChecksums || []).length > 0);
+    const generalAlreadyActive = Number((topics.get(generalTopicId)?.factChecksums || []).length > 0);
+    const currentRegularLimit = Math.max(0, maxPerCategory - unclassifiedActive - generalAlreadyActive);
+    if (regularTopics.length <= currentRegularLimit) continue;
+    let generalTopic = topics.get(generalTopicId);
+    if (!generalTopic) {
+      generalTopic = {
+        schema: "ccm-group-session-model-extraction-topic-v1",
+        version: GROUP_SESSION_MODEL_EXTRACTION_TOPIC_VERSION,
+        assignmentVersion: GROUP_SESSION_MODEL_EXTRACTION_TOPIC_VERSION,
+        topicId: generalTopicId,
+        category,
+        name: category === "feedback" ? "Corrections: consolidated" : "User constraints: consolidated",
+        slug: `model-${category}-consolidated`,
+        concepts: ["consolidated"],
+        createdAt: at,
+        factChecksums: [],
+      };
+      topics.set(generalTopicId, generalTopic);
+      createdTopicCount += 1;
+    }
+    generalTopic.status = "active";
+    generalTopic.updatedAt = at;
+    generalTopic.assignmentVersion = GROUP_SESSION_MODEL_EXTRACTION_TOPIC_VERSION;
+    delete generalTopic.retiredAt;
+    const boundedRegularLimit = Math.max(0, maxPerCategory - unclassifiedActive - 1);
+    for (const overflowTopic of regularTopics.slice(boundedRegularLimit)) {
+      for (const factChecksum of overflowTopic.factChecksums || []) {
+        generalTopic.factChecksums = [...new Set([...(generalTopic.factChecksums || []), factChecksum])];
+        if (facts[factChecksum]) {
+          const assignment = facts[factChecksum].topicAssignment || {};
+          facts[factChecksum] = {
+            ...facts[factChecksum],
+            topicId: generalTopic.topicId,
+            topicSlug: generalTopic.slug,
+            topicAssignment: {
+              ...assignment,
+              strategy: "capacity_rebalanced",
+              rebalanced: true,
+              rebalancedFromTopicId: String(assignment.rebalancedFromTopicId || overflowTopic.topicId),
+              initialStrategy: String(assignment.initialStrategy || assignment.strategy || "capacity_rebalanced"),
+              assignedAt: at,
+            },
+          };
+        }
+      }
+      generalTopic.concepts = uniqueStrings([...(generalTopic.concepts || []), ...(overflowTopic.concepts || [])], 20);
+      overflowTopic.factChecksums = [];
+      overflowTopic.updatedAt = at;
+    }
+  }
+
+  for (const topic of topics.values()) {
+    const topicFacts = (topic.factChecksums || []).map((factChecksum: string) => facts[factChecksum]).filter(Boolean);
+    if (!topicFacts.length) continue;
+    const confidences = topicFacts.map((fact: any) => Number(fact.topicAssignment?.confidence || 0));
+    topic.assignmentVersion = GROUP_SESSION_MODEL_EXTRACTION_TOPIC_VERSION;
+    topic.meanAssignmentConfidence = Number((confidences.reduce((sum: number, value: number) => sum + value, 0) / confidences.length).toFixed(4));
+    topic.lowConfidenceFactCount = topicFacts.filter((fact: any) => fact.topicAssignment?.lowConfidence === true).length;
+    topic.rebalancedFactCount = topicFacts.filter((fact: any) => fact.topicAssignment?.rebalanced === true).length;
+  }
+
+  for (const [topicId, topic] of topics.entries()) {
+    if ((topic.factChecksums || []).length > 0) continue;
+    topic.status = "retired";
+    topic.retiredAt = topic.retiredAt || at;
+    topics.set(topicId, topic);
+  }
+  for (const [retiredId, canonicalId] of topicAliases.entries()) {
+    const prior: any = previousTopics[retiredId];
+    if (!prior) continue;
+    topics.set(retiredId, { ...prior, status: "merged", mergedIntoTopicId: canonicalId, factChecksums: [], retiredAt: at, updatedAt: at });
+  }
+  const activeTopicCount = [...topics.values()].filter(topic => topic.status === "active").length;
+  const retiredTopicCount = [...topics.values()].filter(topic => topic.status === "retired").length;
+  const consolidatedFactCount = [...topics.values()]
+    .filter(topic => topic.status === "active" && topic.topicId === `met_${topic.category}_general`)
+    .reduce((sum, topic) => sum + Number(topic.factChecksums?.length || 0), 0);
+  const unclassifiedFactCount = [...topics.values()]
+    .filter(topic => topic.status === "active" && topic.topicId === `met_${topic.category}_unclassified`)
+    .reduce((sum, topic) => sum + Number(topic.factChecksums?.length || 0), 0);
+  const activeAssignmentFacts = Object.values(facts).filter((fact: any) => fact?.status === "active");
+  const rebalancedFactCount = activeAssignmentFacts.filter((fact: any) => fact.topicAssignment?.rebalanced === true).length;
+  const crossLanguageReuseCount = activeAssignmentFacts.filter((fact: any) => fact.topicAssignment?.crossLanguageReuse === true).length;
+  return {
+    schema: "ccm-group-session-model-extraction-topic-lifecycle-v1",
+    version: GROUP_SESSION_MODEL_EXTRACTION_TOPIC_VERSION,
+    facts,
+    topics: Object.fromEntries([...topics.entries()]
+      .sort((a: any, b: any) => Number(a[1].status === "active") - Number(b[1].status === "active") || String(a[1].updatedAt || a[1].createdAt || "").localeCompare(String(b[1].updatedAt || b[1].createdAt || "")))
+      .slice(-200)),
+    activeTopicCount,
+    retiredTopicCount,
+    mergedTopicCount: topicAliases.size,
+    createdTopicCount,
+    reusedTopicCount,
+    consolidatedFactCount,
+    unclassifiedFactCount,
+    lowConfidenceFactCount,
+    rebalancedFactCount,
+    crossLanguageReuseCount,
+    maxTopicsPerCategory: maxPerCategory,
+    updatedAt: at,
+  };
+}
+
+function renderModelExtractionTypedMemoryBody(title: string, facts: any[], updatedAt: string) {
+  const lines = [
+    `# ${title}`,
+    "",
+    `Committed from evidence-bound model extraction proposals at ${updatedAt}.`,
+    "Only active facts with an exact raw user-message source are rendered. Superseded facts remain in the audit ledger but are not injected.",
+    "",
+    "## Active Facts",
+  ];
+  for (const fact of facts) {
+    lines.push(`- #${fact.sourceMessageId} ${compactText(fact.text, 900)}`);
+    lines.push(`  - **Evidence:** execution=${fact.executionId}; receipt=${fact.receiptChecksum}; graph=${fact.graphChecksum}`);
+  }
+  return `${lines.join("\n").trim()}\n`;
+}
+
+export function distillGroupSessionModelExtractionToTypedMemory(scopeId: string, input: any, options: any = {}) {
+  const validated = validateModelExtractionTypedMemoryInput(String(scopeId || "").trim(), input);
+  return runGroupTypedMemoryDistillationMutation(scopeId, "model_extraction_typed_memory", options, () => {
+    if (options.__modelExtractionTypedMemoryFailAfterSnapshot === true) {
+      throw new Error("model_extraction_typed_memory_injected_failure");
+    }
+    const at = String(options.at || validated.receipt.completedAt || now());
+    const ledger = readGroupTypedMemoryDistillationLedger(scopeId);
+    const previousArchive = ledger.modelExtractionTypedMemoryArchive || null;
+    if (previousArchive?.schema
+      && (previousArchive.schema !== "ccm-group-session-model-extraction-typed-memory-archive-v1"
+        || modelExtractionTypedArchiveChecksum(previousArchive) !== String(previousArchive.checksum || ""))) {
+      throw new Error("model_extraction_typed_memory_archive_integrity_invalid");
+    }
+    const sourceById = new Map(validated.sourceRows.map((row: any) => [String(row?.id || ""), row]));
+    const edges = Array.isArray(validated.graph.edges) ? validated.graph.edges : [];
+    const edgeByNewChecksum = new Map(edges.map((edge: any) => [String(edge.newFactChecksum || ""), edge]));
+    const facts = new Map<string, any>(Object.entries(previousArchive?.facts || {}));
+    const rejections: any[] = [];
+    const admitted: any[] = [];
+    let duplicateCount = 0;
+    let supersededCount = 0;
+
+    for (const edge of edges) {
+      for (const [factId, fact] of facts.entries()) {
+        if (fact.status !== "active") continue;
+        if (![fact.graphFactChecksum, fact.anchorChecksum, fact.sourceFactChecksum].includes(String(edge.oldFactChecksum || ""))) continue;
+        facts.set(factId, {
+          ...fact,
+          status: "superseded",
+          supersededAt: at,
+          supersededByGraphFactChecksum: String(edge.newFactChecksum || ""),
+          supersessionEdgeId: String(edge.edgeId || ""),
+          supersessionExecutionId: String(validated.receipt.executionId || ""),
+        });
+        supersededCount += 1;
+      }
+    }
+
+    const activeFacts = Array.isArray(validated.graph.activeFacts) ? validated.graph.activeFacts : [];
+    for (const proposal of activeFacts) {
+      const proposalType = String(proposal?.type || "");
+      const source = String(proposal?.source || "");
+      const reject = (reason: string) => rejections.push({
+        proposalType,
+        source,
+        factChecksum: String(proposal?.factChecksum || ""),
+        sourceMessageId: String(proposal?.sourceMessageId || ""),
+        reason,
+        executionId: String(validated.receipt.executionId || ""),
+        rejectedAt: at,
+      });
+      if (["unresolved", "path", "symbol"].includes(proposalType)) {
+        reject("ephemeral_or_derivable_fact_shape");
+        continue;
+      }
+      if (!["constraint", "replacement"].includes(proposalType)) {
+        reject("unsupported_model_fact_shape");
+        continue;
+      }
+      if (!["model_confirmed_source", "explicit_replacement"].includes(source)) {
+        reject("missing_current_raw_message_evidence");
+        continue;
+      }
+      const edge: any = source === "explicit_replacement"
+        ? edgeByNewChecksum.get(String(proposal.factChecksum || ""))
+        : null;
+      const sourceMessageId = String(proposal.sourceMessageId || edge?.sourceMessageId || "");
+      const sourceRow: any = sourceById.get(sourceMessageId);
+      const sourceContent = String(sourceRow?.content || "");
+      const sourceChecksum = checksum(sourceContent, 32);
+      const expectedSourceChecksum = String(proposal.sourceMessageChecksum || edge?.sourceMessageChecksum || "");
+      const text = compactText(proposal.text || edge?.replacementText || "", 900);
+      const comparableText = modelExtractionEvidenceComparable(text);
+      const sourceComparable = modelExtractionEvidenceComparable(sourceContent);
+      const markdownComparable = modelExtractionEvidenceComparable(validated.markdown);
+      if (!sourceRow || String(sourceRow?.role || "").toLowerCase() !== "user") {
+        reject("source_message_missing_or_not_user");
+        continue;
+      }
+      if (!expectedSourceChecksum || sourceChecksum !== expectedSourceChecksum) {
+        reject("source_message_checksum_mismatch");
+        continue;
+      }
+      if (!comparableText || !sourceComparable.includes(comparableText) || !markdownComparable.includes(comparableText)) {
+        reject("fact_not_exactly_bound_to_source_and_model_output");
+        continue;
+      }
+      const category: GroupTypedMemoryType = proposalType === "replacement" ? "feedback" : "user";
+      const stableFactChecksum = checksum([category, comparableText], 64);
+      const existing = facts.get(stableFactChecksum);
+      if (existing?.status === "active") duplicateCount += 1;
+      const fact = {
+        schema: "ccm-group-session-model-extraction-typed-memory-fact-v1",
+        version: GROUP_SESSION_MODEL_EXTRACTION_TYPED_MEMORY_VERSION,
+        stableFactChecksum,
+        graphFactChecksum: String(proposal.factChecksum || ""),
+        anchorChecksum: checksum(`constraint\0${text}`, 32),
+        sourceFactChecksum: checksum(text, 32),
+        category,
+        proposalType,
+        text,
+        status: "active",
+        sourceMessageId,
+        sourceMessageChecksum: sourceChecksum,
+        sourceTranscriptChecksum: String(validated.receipt.requestAudit?.sourceTranscriptChecksum || ""),
+        executionId: String(validated.receipt.executionId || ""),
+        receiptChecksum: String(validated.receipt.checksum || ""),
+        requestArtifactChecksum: String(validated.receipt.requestArtifactChecksum || ""),
+        graphChecksum: String(validated.graph.checksum || ""),
+        extractionFencingToken: Number(validated.receipt.fencingToken || 0),
+        firstCommittedAt: existing?.firstCommittedAt || at,
+        lastCommittedAt: at,
+      };
+      facts.set(stableFactChecksum, fact);
+      admitted.push(fact);
+    }
+
+    let boundedFacts = Array.from(facts.entries())
+      .sort((a: any, b: any) => Number(a[1].status === "active") - Number(b[1].status === "active")
+        || String(a[1].lastCommittedAt || a[1].supersededAt || "").localeCompare(String(b[1].lastCommittedAt || b[1].supersededAt || "")))
+      .slice(-500);
+    const topicLifecycle = buildGroupSessionModelExtractionTypedMemoryTopics(
+      Object.fromEntries(boundedFacts),
+      previousArchive?.topics || {},
+      { at, maxTopicsPerCategory: options.maxTopicsPerCategory || options.max_topics_per_category }
+    );
+    boundedFacts = Object.entries(topicLifecycle.facts || {});
+    const activeTopicRows = Object.values(topicLifecycle.topics || {})
+      .filter((topic: any) => topic?.status === "active")
+      .sort((a: any, b: any) => String(a.category || "").localeCompare(String(b.category || "")) || String(a.name || "").localeCompare(String(b.name || "")));
+    const topicDocumentSpecs: any[] = [];
+    for (const topic of activeTopicRows as any[]) {
+      const rows = (topic.factChecksums || [])
+        .map((factChecksum: string) => topicLifecycle.facts?.[factChecksum])
+        .filter((fact: any) => fact?.status === "active");
+      const partCount = Math.max(1, Math.ceil(rows.length / GROUP_SESSION_MODEL_EXTRACTION_MAX_FACTS_PER_TOPIC_FILE));
+      topic.docSlugs = [];
+      for (let part = 0; part < partCount; part += 1) {
+        const partRows = rows.slice(part * GROUP_SESSION_MODEL_EXTRACTION_MAX_FACTS_PER_TOPIC_FILE, (part + 1) * GROUP_SESSION_MODEL_EXTRACTION_MAX_FACTS_PER_TOPIC_FILE);
+        if (!partRows.length) continue;
+        const slug = `${topic.slug}${partCount > 1 ? `-part-${part + 1}` : ""}`;
+        topic.docSlugs.push(slug);
+        topicDocumentSpecs.push({
+          topic,
+          rows: partRows,
+          slug,
+          name: partCount > 1 ? `${topic.name} (${part + 1}/${partCount})` : topic.name,
+          description: `${topic.category === "feedback" ? "User corrections" : "Durable user constraints"} about ${(topic.concepts || []).slice(0, 4).join(", ") || "a stable semantic topic"}.`,
+        });
+      }
+    }
+    const execution = {
+      executionId: String(validated.receipt.executionId || ""),
+      receiptChecksum: String(validated.receipt.checksum || ""),
+      graphChecksum: String(validated.graph.checksum || ""),
+      proposalCount: activeFacts.length,
+      admittedCount: admitted.length,
+      rejectedCount: rejections.length,
+      duplicateCount,
+      supersededCount,
+      activeTopicCount: topicLifecycle.activeTopicCount,
+      createdTopicCount: topicLifecycle.createdTopicCount,
+      reusedTopicCount: topicLifecycle.reusedTopicCount,
+      consolidatedFactCount: topicLifecycle.consolidatedFactCount,
+      unclassifiedFactCount: topicLifecycle.unclassifiedFactCount,
+      lowConfidenceFactCount: topicLifecycle.lowConfidenceFactCount,
+      rebalancedFactCount: topicLifecycle.rebalancedFactCount,
+      crossLanguageReuseCount: topicLifecycle.crossLanguageReuseCount,
+      status: "committed",
+      committedAt: at,
+    };
+    const executions = [...(Array.isArray(previousArchive?.executions) ? previousArchive.executions : [])
+      .filter((row: any) => String(row?.executionId || "") !== execution.executionId), execution].slice(-200);
+    const archiveCore: any = {
+      schema: "ccm-group-session-model-extraction-typed-memory-archive-v1",
+      version: GROUP_SESSION_MODEL_EXTRACTION_TYPED_MEMORY_VERSION,
+      scopeId,
+      groupId: validated.groupId,
+      groupSessionId: validated.groupSessionId,
+      facts: Object.fromEntries(boundedFacts),
+      topics: topicLifecycle.topics,
+      executions,
+      rejections: [...(Array.isArray(previousArchive?.rejections) ? previousArchive.rejections : []), ...rejections].slice(-500),
+      activeFactCount: boundedFacts.filter(([, fact]: any) => fact.status === "active").length,
+      supersededFactCount: boundedFacts.filter(([, fact]: any) => fact.status === "superseded").length,
+      activeTopicCount: topicLifecycle.activeTopicCount,
+      retiredTopicCount: topicLifecycle.retiredTopicCount,
+      mergedTopicCount: topicLifecycle.mergedTopicCount,
+      consolidatedFactCount: topicLifecycle.consolidatedFactCount,
+      unclassifiedFactCount: topicLifecycle.unclassifiedFactCount,
+      lowConfidenceFactCount: topicLifecycle.lowConfidenceFactCount,
+      rebalancedFactCount: topicLifecycle.rebalancedFactCount,
+      crossLanguageReuseCount: topicLifecycle.crossLanguageReuseCount,
+      updatedAt: at,
+    };
+    const archive = { ...archiveCore, checksum: modelExtractionTypedArchiveChecksum(archiveCore) };
+    const writes: any[] = [];
+    const currentDocSlugs = new Set(topicDocumentSpecs.map(spec => spec.slug));
+    for (const doc of scanGroupTypedMemoryDocumentsRaw(scopeId)) {
+      if (String(doc.source || "") !== "auto:model-extraction-evidence-admission" || currentDocSlugs.has(String(doc.relPath || "").replace(/\.md$/i, ""))) continue;
+      stageGroupTypedMemoryArtifactRemoval(activeGroupTypedMemoryDistillationMutations.get(scopeId), doc.file);
+    }
+    for (const spec of topicDocumentSpecs) {
+      writes.push(upsertGroupTypedMemoryDocument(scopeId, {
+        type: spec.topic.category,
+        slug: spec.slug,
+        name: spec.name,
+        description: spec.description,
+        source: "auto:model-extraction-evidence-admission",
+        updatedAt: at,
+        body: renderModelExtractionTypedMemoryBody(spec.name, spec.rows, at),
+        maxBodyChars: Number(options.maxBodyChars || options.max_body_chars || 24_000),
+      }));
+    }
+    const index = buildGroupTypedMemoryIndex(scopeId);
+    writeJsonAtomic(ledger.file, {
+      ...ledger,
+      schema: "ccm-group-typed-memory-distillation-ledger-v1",
+      version: GROUP_TYPED_MEMORY_DISTILLATION_VERSION,
+      groupId: scopeId,
+      modelExtractionTypedMemoryArchive: archive,
+      updatedAt: at,
+    });
+    return {
+      schema: "ccm-group-session-model-extraction-typed-memory-commit-v1",
+      version: GROUP_SESSION_MODEL_EXTRACTION_TYPED_MEMORY_VERSION,
+      committed: true,
+      status: "committed",
+      scopeId,
+      executionId: execution.executionId,
+      proposalCount: activeFacts.length,
+      admittedCount: admitted.length,
+      rejectedCount: rejections.length,
+      duplicateCount,
+      supersededCount,
+      activeFactCount: archive.activeFactCount,
+      activeTopicCount: topicLifecycle.activeTopicCount,
+      retiredTopicCount: topicLifecycle.retiredTopicCount,
+      mergedTopicCount: topicLifecycle.mergedTopicCount,
+      createdTopicCount: topicLifecycle.createdTopicCount,
+      reusedTopicCount: topicLifecycle.reusedTopicCount,
+      consolidatedFactCount: topicLifecycle.consolidatedFactCount,
+      unclassifiedFactCount: topicLifecycle.unclassifiedFactCount,
+      lowConfidenceFactCount: topicLifecycle.lowConfidenceFactCount,
+      rebalancedFactCount: topicLifecycle.rebalancedFactCount,
+      crossLanguageReuseCount: topicLifecycle.crossLanguageReuseCount,
+      archiveChecksum: archive.checksum,
+      writes,
+      index,
+      rejections,
+    };
+  });
 }
 
 function normalizeProviderReproofReceiptConsumptionStatus(value: any) {
@@ -4741,6 +6770,7 @@ function providerReproofReceiptConsumptionArchive(rows: any[] = [], options: any
 }
 
 export function distillProviderReproofReceiptConsumptionToTypedMemory(groupId: string, input: any = {}, options: any = {}) {
+  if (options.__distillationMutationCoordinator !== true) return runGroupTypedMemoryDistillationMutation(groupId, "provider_reproof_receipt_consumption", options, () => distillProviderReproofReceiptConsumptionToTypedMemory(groupId, input, { ...options, __distillationMutationCoordinator: true }));
   if (options.disabled === true || options.disableDistillation === true || options.disable_distillation === true) {
     return {
       schema: "ccm-provider-reproof-receipt-consumption-distillation-v1",
@@ -5022,6 +7052,7 @@ function renderProviderRankingProvenanceCompactRepairReceiptConsumptionBody(arch
 }
 
 export function distillProviderRankingProvenanceCompactRepairReceiptConsumptionToTypedMemory(groupId: string, input: any = {}, options: any = {}) {
+  if (options.__distillationMutationCoordinator !== true) return runGroupTypedMemoryDistillationMutation(groupId, "provider_ranking_provenance_compact_repair", options, () => distillProviderRankingProvenanceCompactRepairReceiptConsumptionToTypedMemory(groupId, input, { ...options, __distillationMutationCoordinator: true }));
   if (options.disabled === true || options.disableDistillation === true || options.disable_distillation === true) {
     return {
       schema: "ccm-provider-ranking-provenance-compact-repair-receipt-consumption-distillation-v1",
@@ -5311,6 +7342,7 @@ function renderPostCompactReinjectionRepairReceiptConsumptionBody(title: string,
 }
 
 export function distillPostCompactReinjectionRepairReceiptConsumptionToTypedMemory(groupId: string, input: any = {}, options: any = {}) {
+  if (options.__distillationMutationCoordinator !== true) return runGroupTypedMemoryDistillationMutation(groupId, "post_compact_reinjection_repair", options, () => distillPostCompactReinjectionRepairReceiptConsumptionToTypedMemory(groupId, input, { ...options, __distillationMutationCoordinator: true }));
   if (options.disabled === true || options.disableDistillation === true || options.disable_distillation === true) {
     return {
       schema: "ccm-post-compact-reinjection-repair-receipt-consumption-distillation-v1",
@@ -5599,6 +7631,7 @@ function renderPostCompactReceiptMemoryUsageRepairCompletionBody(archive: any = 
 }
 
 export function distillPostCompactReceiptMemoryUsageRepairCompletionToTypedMemory(groupId: string, input: any = {}, options: any = {}) {
+  if (options.__distillationMutationCoordinator !== true) return runGroupTypedMemoryDistillationMutation(groupId, "post_compact_receipt_memory_usage_repair", options, () => distillPostCompactReceiptMemoryUsageRepairCompletionToTypedMemory(groupId, input, { ...options, __distillationMutationCoordinator: true }));
   if (options.disabled === true || options.disableDistillation === true || options.disable_distillation === true) {
     return {
       schema: "ccm-post-compact-receipt-memory-usage-repair-completion-distillation-v1",
@@ -5832,6 +7865,7 @@ function renderPostCompactCompletionMemoryPreservationRepairClosureBody(archive:
 }
 
 export function distillPostCompactCompletionMemoryPreservationRepairClosureToTypedMemory(groupId: string, input: any = {}, options: any = {}) {
+  if (options.__distillationMutationCoordinator !== true) return runGroupTypedMemoryDistillationMutation(groupId, "post_compact_completion_memory_preservation_closure", options, () => distillPostCompactCompletionMemoryPreservationRepairClosureToTypedMemory(groupId, input, { ...options, __distillationMutationCoordinator: true }));
   if (options.disabled === true || options.disableDistillation === true || options.disable_distillation === true) {
     return {
       schema: "ccm-post-compact-completion-memory-preservation-repair-closure-distillation-v1",
@@ -11863,6 +13897,7 @@ export function lookupPostCompactCompletionMemoryPreservationClosureConflictReso
 }
 
 export function restorePostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveRows(groupId: string, query: any = {}, options: any = {}) {
+  if (options.__distillationMutationCoordinator !== true) return runGroupTypedMemoryDistillationMutation(groupId, "conflict_resolution_cold_archive_restore", options, () => restorePostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveRows(groupId, query, { ...options, __distillationMutationCoordinator: true }));
   const lookup = lookupPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchive(groupId, query, options);
   if (lookup.status === "tampered") return {
     schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-cold-restore-v1",
@@ -11932,6 +13967,7 @@ export function restorePostCompactCompletionMemoryPreservationClosureConflictRes
 }
 
 export function distillPostCompactCompletionMemoryPreservationClosureConflictResolutionToTypedMemory(groupId: string, input: any = {}, options: any = {}) {
+  if (options.__distillationMutationCoordinator !== true) return runGroupTypedMemoryDistillationMutation(groupId, "post_compact_completion_conflict_resolution", options, () => distillPostCompactCompletionMemoryPreservationClosureConflictResolutionToTypedMemory(groupId, input, { ...options, __distillationMutationCoordinator: true }));
   const updatedAt = String(options.updatedAt || options.updated_at || now());
   const ledger = readGroupTypedMemoryDistillationLedger(groupId);
   const incomingRows = normalizePostCompactCompletionMemoryPreservationClosureConflictResolutionRows(groupId, input, { ...options, updatedAt });
@@ -12207,6 +14243,7 @@ function renderProviderRankingMemoryUsageReceiptRepairBody(archive: any = {}, op
 }
 
 export function distillProviderRankingMemoryUsageReceiptRepairToTypedMemory(groupId: string, input: any = {}, options: any = {}) {
+  if (options.__distillationMutationCoordinator !== true) return runGroupTypedMemoryDistillationMutation(groupId, "provider_ranking_memory_usage_repair", options, () => distillProviderRankingMemoryUsageReceiptRepairToTypedMemory(groupId, input, { ...options, __distillationMutationCoordinator: true }));
   if (options.disabled === true || options.disableDistillation === true || options.disable_distillation === true) {
     return {
       schema: "ccm-provider-ranking-memory-usage-receipt-repair-distillation-v1",
@@ -12545,6 +14582,7 @@ function renderPressureProvenanceProviderDispatchOverrideFollowupBody(archive: a
 }
 
 export function distillProviderDispatchOverrideFollowupToTypedMemory(groupId: string, input: any = {}, options: any = {}) {
+  if (options.__distillationMutationCoordinator !== true) return runGroupTypedMemoryDistillationMutation(groupId, "provider_dispatch_override_followup", options, () => distillProviderDispatchOverrideFollowupToTypedMemory(groupId, input, { ...options, __distillationMutationCoordinator: true }));
   if (options.disabled === true || options.disableDistillation === true || options.disable_distillation === true) {
     return {
       schema: "ccm-pressure-provenance-provider-dispatch-override-followup-distillation-v1",
@@ -12893,6 +14931,7 @@ function renderProviderSwitchExecutionBody(archive: any = {}, options: any = {})
 }
 
 export function distillProviderSwitchExecutionToTypedMemory(groupId: string, input: any = {}, options: any = {}) {
+  if (options.__distillationMutationCoordinator !== true) return runGroupTypedMemoryDistillationMutation(groupId, "provider_switch_execution", options, () => distillProviderSwitchExecutionToTypedMemory(groupId, input, { ...options, __distillationMutationCoordinator: true }));
   if (options.disabled === true || options.disableDistillation === true || options.disable_distillation === true) {
     return {
       schema: "ccm-provider-switch-execution-distillation-v1",
@@ -13169,6 +15208,7 @@ function renderPressureProvenanceProviderDispatchOverrideFollowupReceiptValidati
 }
 
 export function distillProviderDispatchOverrideFollowupReceiptValidationToTypedMemory(groupId: string, input: any = {}, options: any = {}) {
+  if (options.__distillationMutationCoordinator !== true) return runGroupTypedMemoryDistillationMutation(groupId, "provider_dispatch_override_followup_validation", options, () => distillProviderDispatchOverrideFollowupReceiptValidationToTypedMemory(groupId, input, { ...options, __distillationMutationCoordinator: true }));
   if (options.disabled === true || options.disableDistillation === true || options.disable_distillation === true) {
     return {
       schema: "ccm-pressure-provenance-provider-dispatch-override-followup-receipt-validation-distillation-v1",
@@ -13390,6 +15430,7 @@ function renderIgnoreMemoryReceiptRepairBody(rows: any[] = [], options: any = {}
 }
 
 export function distillIgnoreMemoryReceiptRepairToTypedMemory(groupId: string, input: any = {}, options: any = {}) {
+  if (options.__distillationMutationCoordinator !== true) return runGroupTypedMemoryDistillationMutation(groupId, "ignore_memory_receipt_repair", options, () => distillIgnoreMemoryReceiptRepairToTypedMemory(groupId, input, { ...options, __distillationMutationCoordinator: true }));
   if (options.disabled === true || options.disableDistillation === true || options.disable_distillation === true) {
     return {
       schema: "ccm-ignore-memory-receipt-repair-distillation-v1",
@@ -13672,6 +15713,7 @@ function renderPressureMemoryProvenanceReceiptRepairBody(rows: any[] = [], optio
 }
 
 export function distillPressureMemoryProvenanceReceiptRepairToTypedMemory(groupId: string, input: any = {}, options: any = {}) {
+  if (options.__distillationMutationCoordinator !== true) return runGroupTypedMemoryDistillationMutation(groupId, "pressure_memory_provenance_repair", options, () => distillPressureMemoryProvenanceReceiptRepairToTypedMemory(groupId, input, { ...options, __distillationMutationCoordinator: true }));
   if (options.disabled === true || options.disableDistillation === true || options.disable_distillation === true) {
     return {
       schema: "ccm-pressure-memory-provenance-receipt-repair-distillation-v1",
@@ -13945,6 +15987,7 @@ function renderPressureProvenancePreDispatchComplianceBody(archive: any = {}, op
 }
 
 export function distillPressureProvenancePreDispatchComplianceToTypedMemory(groupId: string, input: any = {}, options: any = {}) {
+  if (options.__distillationMutationCoordinator !== true) return runGroupTypedMemoryDistillationMutation(groupId, "pressure_provenance_pre_dispatch_compliance", options, () => distillPressureProvenancePreDispatchComplianceToTypedMemory(groupId, input, { ...options, __distillationMutationCoordinator: true }));
   if (options.disabled === true || options.disableDistillation === true || options.disable_distillation === true) {
     return {
       schema: "ccm-pressure-provenance-pre-dispatch-compliance-distillation-v1",
@@ -14175,6 +16218,7 @@ function renderPressureProvenancePreDispatchComplianceRecoveryBody(archive: any 
 }
 
 export function distillPressureProvenancePreDispatchComplianceRecoveryToTypedMemory(groupId: string, input: any = {}, options: any = {}) {
+  if (options.__distillationMutationCoordinator !== true) return runGroupTypedMemoryDistillationMutation(groupId, "pressure_provenance_compliance_recovery", options, () => distillPressureProvenancePreDispatchComplianceRecoveryToTypedMemory(groupId, input, { ...options, __distillationMutationCoordinator: true }));
   if (options.disabled === true || options.disableDistillation === true || options.disable_distillation === true) {
     return {
       schema: "ccm-pressure-provenance-pre-dispatch-compliance-recovery-distillation-v1",
@@ -15558,6 +17602,7 @@ function renderContextUsageRepairBody(rows: any[] = [], options: any = {}) {
 }
 
 export function distillContextUsageRepairToTypedMemory(groupId: string, input: any = {}, options: any = {}) {
+  if (options.__distillationMutationCoordinator !== true) return runGroupTypedMemoryDistillationMutation(groupId, "context_usage_repair", options, () => distillContextUsageRepairToTypedMemory(groupId, input, { ...options, __distillationMutationCoordinator: true }));
   if (options.disabled === true || options.disableDistillation === true || options.disable_distillation === true) {
     return {
       schema: "ccm-context-usage-repair-distillation-v1",
@@ -15794,6 +17839,7 @@ function renderCompactStrategyCautionBody(archive: any = {}, options: any = {}) 
 }
 
 export function distillCompactStrategyToTypedMemory(groupId: string, input: any = {}, options: any = {}) {
+  if (options.__distillationMutationCoordinator !== true) return runGroupTypedMemoryDistillationMutation(groupId, "compact_strategy", options, () => distillCompactStrategyToTypedMemory(groupId, input, { ...options, __distillationMutationCoordinator: true }));
   if (options.disabled === true || options.disableDistillation === true || options.disable_distillation === true) {
     return {
       schema: "ccm-compact-strategy-typed-memory-distillation-v1",
@@ -16008,6 +18054,7 @@ function renderPtlEmergencyTypedBody(archive: any = {}, options: any = {}) {
 }
 
 export function distillPtlEmergencyDowngradeToTypedMemory(groupId: string, input: any = {}, options: any = {}) {
+  if (options.__distillationMutationCoordinator !== true) return runGroupTypedMemoryDistillationMutation(groupId, "ptl_emergency_downgrade", options, () => distillPtlEmergencyDowngradeToTypedMemory(groupId, input, { ...options, __distillationMutationCoordinator: true }));
   if (options.disabled === true || options.disableDistillation === true || options.disable_distillation === true) {
     return {
       schema: "ccm-ptl-emergency-typed-memory-distillation-v1",
@@ -16325,19 +18372,212 @@ export function evaluateGroupTypedMemoryDistillationQuality(groupId: string, opt
   };
 }
 
-export function distillGroupMessagesToTypedMemory(groupId: string, messages: any[] = [], memory: any = {}, options: any = {}) {
+function groupTypedMemoryDistillationArchiveFingerprint(archive: any = {}) {
+  return checksum((Array.isArray(archive?.rows) ? archive.rows : []).map((row: any) => [
+    row?.candidate_id || "",
+    row?.value || "",
+    row?.recommendation || "",
+    Number(row?.used_count || 0),
+    Number(row?.verified_count || 0),
+    Number(row?.ignored_count || 0),
+    Number(row?.mentioned_count || 0),
+  ]), 40);
+}
+
+function buildGroupTypedMemoryDistillationWorkState(groupId: string, messages: any[] = [], options: any = {}) {
+  const maxMessages = Math.max(1, Math.min(5000, Number(options.maxMessages || options.max_messages || GROUP_TYPED_MEMORY_DISTILLATION_MAX_MESSAGES)));
+  const ledger = readGroupTypedMemoryDistillationLedger(groupId);
+  const eligibleRows = (messages || [])
+    .filter(message => !String(message?.content || "").startsWith("📤"))
+    .map((message, index) => ({ message, index, id: messageIdentity(message, index) }));
+  const previousCursorMessageId = String(
+    ledger.distillationCursor?.lastCommittedMessageId
+      || ledger.distillation_cursor?.last_committed_message_id
+      || ledger.lastDistilledMessageId
+      || ""
+  );
+  const cursorIndex = previousCursorMessageId
+    ? eligibleRows.findIndex(row => row.id === previousCursorMessageId)
+    : -1;
+  const forceRescan = options.forceDistillationRescan === true || options.force_distillation_rescan === true;
+  const cursorMissing = !!previousCursorMessageId && cursorIndex < 0;
+  const pendingRows = forceRescan || !previousCursorMessageId || cursorMissing
+    ? eligibleRows
+    : eligibleRows.slice(cursorIndex + 1);
+  const selectedRows = pendingRows.slice(0, maxMessages);
+  const existingAdmission = filterExistingDistilledFactsByAdmission(ledger.facts || {});
+  const inflatedFactCount: number = Object.values(ledger.facts || {}).reduce<number>(
+    (total: number, bucket: any) => total + Object.values(bucket || {}).filter((fact: any) => Number(fact?.count || 1) > 1).length,
+    0,
+  );
+  const inflatedAdmissionObservationCount = (Array.isArray(ledger.admission?.observations) ? ledger.admission.observations : [])
+    .filter((row: any) => Number(row?.count || 1) > 1).length;
+  const postCompactUsageArchive = buildPostCompactCandidateUsageArchive(options);
+  const previousPostCompactUsageArchive = ledger.postCompactUsageArchive || {};
+  const postCompactUsageArchiveChanged = postCompactUsageArchive.archived_count > 0
+    && groupTypedMemoryDistillationArchiveFingerprint(postCompactUsageArchive) !== groupTypedMemoryDistillationArchiveFingerprint(previousPostCompactUsageArchive);
+  const transactionState = readGroupTypedMemoryDistillationTransactionState(groupId);
+  const artifactTransaction = inspectGroupTypedMemoryArtifactTransaction(groupId);
+  const artifactStagePresent = fs.existsSync(getGroupTypedMemoryArtifactTransactionStageRoot(groupId));
+  const artifactRecoveryRequired = artifactTransaction.present
+    && (!artifactTransaction.valid || String(artifactTransaction.journal?.status || "") === "prepared" || artifactStagePresent);
+  const recoveryReasons = [
+    fs.existsSync(getGroupTypedMemoryDistillationLockFile(groupId)) ? "distillation_lock_present" : "",
+    artifactRecoveryRequired
+      ? !artifactTransaction.valid
+        ? "artifact_journal_corrupt"
+        : String(artifactTransaction.journal?.status || "") === "prepared"
+          ? "artifact_journal_prepared"
+          : "artifact_stage_present"
+      : "",
+    transactionState.valid && ["started", "in_progress", "failed"].includes(String(transactionState.state?.status || ""))
+      ? `transaction_state_${String(transactionState.state?.status || "unknown")}`
+      : "",
+  ].filter(Boolean);
+  const maintenanceReasons = [
+    existingAdmission.rejected.length > 0 ? "inadmissible_existing_facts" : "",
+    postCompactUsageArchiveChanged ? "post_compact_usage_archive_changed" : "",
+    inflatedFactCount > 0 ? "inflated_fact_counts" : "",
+    inflatedAdmissionObservationCount > 0 ? "inflated_admission_observations" : "",
+  ].filter(Boolean);
+  const disabled = options.disabled === true || options.disableDistillation === true || options.disable_distillation === true;
+  const runRequired = recoveryReasons.length > 0
+    || (!disabled && (forceRescan || pendingRows.length > 0 || maintenanceReasons.length > 0));
+  return {
+    ledger,
+    eligibleRows,
+    previousCursorMessageId,
+    cursorIndex,
+    forceRescan,
+    cursorMissing,
+    pendingRows,
+    selectedRows,
+    existingAdmission,
+    inflatedFactCount,
+    inflatedAdmissionObservationCount,
+    postCompactUsageArchive,
+    postCompactUsageArchiveChanged,
+    artifactTransaction,
+    artifactStagePresent,
+    recoveryReasons,
+    maintenanceReasons,
+    disabled,
+    runRequired,
+    maxMessages,
+  };
+}
+
+export function inspectGroupTypedMemoryDistillationWork(groupId: string, messages: any[] = [], options: any = {}) {
+  const state = buildGroupTypedMemoryDistillationWorkState(groupId, messages, options);
+  const skipReason = state.disabled && state.recoveryReasons.length === 0
+    ? "disabled"
+    : state.runRequired
+      ? "work_pending"
+      : "no_new_messages_after_committed_cursor";
+  return {
+    schema: "ccm-group-typed-memory-distillation-preflight-v1",
+    version: 1,
+    groupId,
+    runRequired: state.runRequired,
+    skipped: !state.runRequired,
+    reason: skipReason,
+    disabled: state.disabled,
+    lockRequired: state.runRequired,
+    lockAcquired: false,
+    previousCommittedMessageId: state.previousCursorMessageId,
+    cursorFound: !state.previousCursorMessageId || state.cursorIndex >= 0,
+    cursorMissingFallback: state.cursorMissing,
+    forceRescan: state.forceRescan,
+    eligibleMessageCount: state.eligibleRows.length,
+    pendingMessageCount: state.pendingRows.length,
+    selectedMessageCount: state.selectedRows.length,
+    remainingMessageCount: Math.max(0, state.pendingRows.length - state.selectedRows.length),
+    maxMessages: state.maxMessages,
+    maintenanceRequired: state.maintenanceReasons.length > 0,
+    maintenanceReasons: state.maintenanceReasons,
+    recoveryRequired: state.recoveryReasons.length > 0,
+    recoveryReasons: state.recoveryReasons,
+    postCompactUsageArchiveChanged: state.postCompactUsageArchiveChanged,
+  };
+}
+
+function distillGroupMessagesToTypedMemoryUnlocked(groupId: string, messages: any[] = [], memory: any = {}, options: any = {}) {
   if (options.disabled === true || options.disableDistillation === true || options.disable_distillation === true) {
     return { schema: "ccm-group-typed-memory-distillation-v1", version: GROUP_TYPED_MEMORY_DISTILLATION_VERSION, groupId, skipped: true, reason: "disabled" };
   }
   const updatedAt = now();
-  const maxMessages = Math.max(1, Math.min(5000, Number(options.maxMessages || options.max_messages || GROUP_TYPED_MEMORY_DISTILLATION_MAX_MESSAGES)));
-  const sourceMessages = (messages || []).filter(message => !String(message?.content || "").startsWith("📤")).slice(-maxMessages);
+  const workState = buildGroupTypedMemoryDistillationWorkState(groupId, messages, options);
+  const {
+    ledger,
+    eligibleRows,
+    previousCursorMessageId,
+    cursorIndex,
+    forceRescan,
+    cursorMissing,
+    pendingRows,
+    selectedRows,
+    existingAdmission,
+    inflatedFactCount,
+    inflatedAdmissionObservationCount,
+    postCompactUsageArchive,
+  } = workState;
+  const sourceMessages = selectedRows.map(row => ({ ...row.message, __typedMemorySourceIndex: row.index }));
+  const cursorAudit = {
+    schema: "ccm-group-typed-memory-distillation-cursor-v1",
+    previousCommittedMessageId: previousCursorMessageId,
+    lastCommittedMessageId: selectedRows[selectedRows.length - 1]?.id || previousCursorMessageId,
+    cursorFound: !previousCursorMessageId || cursorIndex >= 0,
+    cursorMissingFallback: cursorMissing,
+    forceRescan,
+    eligibleMessageCount: eligibleRows.length,
+    pendingMessageCount: pendingRows.length,
+    processedMessageCount: selectedRows.length,
+    remainingMessageCount: Math.max(0, pendingRows.length - selectedRows.length),
+    batchLimited: pendingRows.length > selectedRows.length,
+    committedAt: updatedAt,
+  };
+  const directRequests = sourceMessages
+    .map((message, index) => normalizeGroupDirectMemoryRequest(groupId, message, index))
+    .filter(Boolean);
   const extractedCandidates = extractGroupLogDistillationCandidates(groupId, sourceMessages);
   const lifecycleRequests = extractGroupLogPositiveFeedbackLifecycleRequests(groupId, sourceMessages);
   const admissionResult = applyGroupLogDistillationAdmission(extractedCandidates);
   const candidates = admissionResult.admitted;
-  const ledger = readGroupTypedMemoryDistillationLedger(groupId);
-  const existingAdmission = filterExistingDistilledFactsByAdmission(ledger.facts || {});
+  const maintenanceRequired = existingAdmission.rejected.length > 0
+    || workState.postCompactUsageArchiveChanged
+    || inflatedFactCount > 0
+    || inflatedAdmissionObservationCount > 0;
+  if (!sourceMessages.length && !maintenanceRequired && !forceRescan) {
+    return {
+      schema: "ccm-group-typed-memory-distillation-v1",
+      version: GROUP_TYPED_MEMORY_DISTILLATION_VERSION,
+      groupId,
+      skipped: true,
+      reason: "no_new_messages_after_committed_cursor",
+      ledgerFile: ledger.file,
+      sourceMessageCount: 0,
+      candidateCount: 0,
+      extractedCandidateCount: 0,
+      rejectedCandidateCount: 0,
+      evictedExistingFactCount: 0,
+      newFactCount: 0,
+      updatedFactCount: 0,
+      writeCount: 0,
+      removalCount: 0,
+      writes: [],
+      removals: [],
+      quality: ledger.quality || null,
+      admission: ledger.admission || null,
+      positiveFeedbackLifecycle: {
+        ...(ledger.positiveFeedbackLifecycle || {}),
+        appliedThisRun: 0,
+        rejectedThisRun: 0,
+      },
+      cursor: { ...cursorAudit, committedAt: String(ledger.distillationCursor?.committedAt || ledger.lastDistilledAt || "") },
+      lastDistilledMessageId: previousCursorMessageId,
+      distilledAt: String(ledger.lastDistilledAt || ledger.updatedAt || ""),
+    };
+  }
   let facts = { ...existingAdmission.admittedFacts };
   const admissionBase = buildGroupLogDistillationAdmissionLedger(
     ledger.admission,
@@ -16356,12 +18596,26 @@ export function distillGroupMessagesToTypedMemory(groupId: string, messages: any
       ...candidate,
       firstSeenAt: previous?.firstSeenAt || updatedAt,
       lastSeenAt: updatedAt,
-      count: Number(previous?.count || 0) + 1,
+      count: previous ? Math.max(1, Number(previous.count || 1)) : 1,
     };
     facts[type] = bucket;
     if (previous) updatedFactCount += 1;
     else newFactCount += 1;
   }
+  const tombstoneFiltered = filterFactsByDirectMemoryTombstones(facts, ledger.directMemory);
+  facts = tombstoneFiltered.facts;
+  const directApplied = applyGroupDirectMemoryRequests(
+    groupId,
+    facts,
+    directRequests,
+    ledger.directMemory,
+    updatedAt,
+  );
+  facts = directApplied.facts;
+  const directMemory = {
+    ...directApplied.ledger,
+    tombstoneSuppressedFactCountThisRun: tombstoneFiltered.suppressedCount,
+  };
   const lifecycleApplied = applyGroupPositiveFeedbackLifecycle(
     groupId,
     facts,
@@ -16381,34 +18635,27 @@ export function distillGroupMessagesToTypedMemory(groupId: string, messages: any
     positiveFeedbackCurrentSourceProofCount: Number(positiveFeedbackLifecycle.currentSourceProofCount || 0),
   };
   const prunedFacts = pruneDistilledFacts(facts, Number(options.perTypeLimit || options.per_type_limit || GROUP_TYPED_MEMORY_DISTILLATION_FACT_LIMIT));
-  const lastMessage = sourceMessages[sourceMessages.length - 1];
-  const lastMessageId = lastMessage ? messageIdentity(lastMessage, (messages || []).length - 1) : "";
-  const postCompactUsageArchive = buildPostCompactCandidateUsageArchive(options, { updatedAt });
-  writeJsonAtomic(ledger.file, {
-    schema: "ccm-group-typed-memory-distillation-ledger-v1",
-    version: GROUP_TYPED_MEMORY_DISTILLATION_VERSION,
+  const lastMessageId = cursorAudit.lastCommittedMessageId;
+  const transaction = options.__distillationTransaction || null;
+  if (transaction?.handle) {
+    const renewed = renewGroupTypedMemoryDistillationLock(transaction.handle);
+    if (!renewed.renewed) throw new Error(`typed_memory_distillation_lock_lost_before_document_commit:${renewed.reason}`);
+  }
+  const distillationTransaction = transaction?.handle ? {
+    schema: "ccm-group-typed-memory-distillation-transaction-commit-v1",
+    version: GROUP_TYPED_MEMORY_DISTILLATION_TRANSACTION_VERSION,
     groupId,
-    reason: compactText(options.reason || "", 220),
-    sourceMessageCount: sourceMessages.length,
-    candidateCount: candidates.length,
-    extractedCandidateCount: extractedCandidates.length,
-    rejectedCandidateCount: admissionResult.rejected.length,
-    newFactCount,
-    updatedFactCount,
-    lastDistilledMessageId: lastMessageId,
-    lastDistilledAt: updatedAt,
-    ...preservedGroupTypedMemoryDistillationArchives(ledger),
-    facts: prunedFacts,
-    admission,
-    positiveFeedbackLifecycle,
-    postCompactUsageArchive: {
-      schema: postCompactUsageArchive.schema,
-      archived_count: postCompactUsageArchive.archived_count,
-      rows: postCompactUsageArchive.rows,
-      updatedAt,
-    },
-    updatedAt,
-  });
+    leaseId: String(transaction.handle.lock?.leaseId || ""),
+    fencingToken: Number(transaction.handle.lock?.fencingToken || 0),
+    ownerPid: Number(transaction.handle.lock?.ownerPid || 0),
+    ownerHostname: String(transaction.handle.lock?.ownerHostname || ""),
+    acquiredAt: String(transaction.handle.lock?.acquiredAt || ""),
+    renewedAt: String(transaction.handle.lock?.renewedAt || ""),
+    waitedMs: Number(transaction.handle.waitedMs || 0),
+    recoveredLeaseCount: Number(transaction.handle.recoveredLeaseCount || 0),
+    committedAt: updatedAt,
+    lastCommittedMessageId: lastMessageId,
+  } : null;
 
   const writes: any[] = [];
   const removals: any[] = [];
@@ -16448,8 +18695,11 @@ export function distillGroupMessagesToTypedMemory(groupId: string, messages: any
       const staleFile = path.join(getGroupTypedMemoryDir(groupId), `${safeSegment(spec.slug)}.md`);
       if (fs.existsSync(staleFile)) {
         try {
-          fs.unlinkSync(staleFile);
-          removals.push({ file: staleFile, slug: spec.slug, type: spec.type, removed: true, reason: "no_admitted_facts" });
+          const mutation = activeGroupTypedMemoryDistillationMutations.get(groupId);
+          const removed = mutation?.handle
+            ? stageGroupTypedMemoryArtifactRemoval(mutation, staleFile)
+            : (() => { fs.unlinkSync(staleFile); return true; })();
+          removals.push({ file: staleFile, slug: spec.slug, type: spec.type, removed, reason: "no_admitted_facts" });
         } catch (error: any) {
           removals.push({ file: staleFile, slug: spec.slug, type: spec.type, removed: false, reason: "no_admitted_facts", error: compactText(error?.message || error, 300) });
         }
@@ -16480,10 +18730,6 @@ export function distillGroupMessagesToTypedMemory(groupId: string, messages: any
     }));
   }
   const index = buildGroupTypedMemoryIndex(groupId);
-  const quality = evaluateGroupTypedMemoryDistillationQuality(groupId, {
-    projectRoot: options.projectRoot || options.project_root,
-  });
-  const persistedLedger = readGroupTypedMemoryDistillationLedger(groupId);
   writeJsonAtomic(ledger.file, {
     schema: "ccm-group-typed-memory-distillation-ledger-v1",
     version: GROUP_TYPED_MEMORY_DISTILLATION_VERSION,
@@ -16497,10 +18743,64 @@ export function distillGroupMessagesToTypedMemory(groupId: string, messages: any
     updatedFactCount,
     lastDistilledMessageId: lastMessageId,
     lastDistilledAt: updatedAt,
+    distillationCursor: cursorAudit,
+    cumulativeProcessedMessageCount: Number(ledger.cumulativeProcessedMessageCount || 0) + sourceMessages.length,
+    duplicateInflationRepair: {
+      schema: "ccm-group-typed-memory-distillation-duplicate-inflation-repair-v1",
+      repairedFactCount: inflatedFactCount,
+      repairedAdmissionObservationCount: inflatedAdmissionObservationCount,
+      repairedAt: updatedAt,
+    },
+    ...preservedGroupTypedMemoryDistillationArchives(ledger),
+    facts: prunedFacts,
+    admission,
+    positiveFeedbackLifecycle,
+    directMemory,
+    ...(distillationTransaction ? { distillationTransaction } : {}),
+    postCompactUsageArchive: {
+      schema: postCompactUsageArchive.schema,
+      archived_count: postCompactUsageArchive.archived_count,
+      rows: postCompactUsageArchive.rows,
+      updatedAt,
+    },
+    updatedAt,
+  });
+  const quality = evaluateGroupTypedMemoryDistillationQuality(groupId, {
+    projectRoot: options.projectRoot || options.project_root,
+  });
+  const persistedLedger = readGroupTypedMemoryDistillationLedger(groupId);
+  if (transaction?.handle) {
+    const renewed = renewGroupTypedMemoryDistillationLock(transaction.handle);
+    if (!renewed.renewed) throw new Error(`typed_memory_distillation_lock_lost_before_quality_commit:${renewed.reason}`);
+    if (distillationTransaction) distillationTransaction.renewedAt = String(transaction.handle.lock?.renewedAt || distillationTransaction.renewedAt);
+  }
+  writeJsonAtomic(ledger.file, {
+    schema: "ccm-group-typed-memory-distillation-ledger-v1",
+    version: GROUP_TYPED_MEMORY_DISTILLATION_VERSION,
+    groupId,
+    reason: compactText(options.reason || "", 220),
+    sourceMessageCount: sourceMessages.length,
+    candidateCount: candidates.length,
+    extractedCandidateCount: extractedCandidates.length,
+    rejectedCandidateCount: admissionResult.rejected.length,
+    newFactCount,
+    updatedFactCount,
+    lastDistilledMessageId: lastMessageId,
+    lastDistilledAt: updatedAt,
+    distillationCursor: cursorAudit,
+    cumulativeProcessedMessageCount: Number(persistedLedger.cumulativeProcessedMessageCount || ledger.cumulativeProcessedMessageCount || 0),
+    duplicateInflationRepair: persistedLedger.duplicateInflationRepair || {
+      schema: "ccm-group-typed-memory-distillation-duplicate-inflation-repair-v1",
+      repairedFactCount: inflatedFactCount,
+      repairedAdmissionObservationCount: inflatedAdmissionObservationCount,
+      repairedAt: updatedAt,
+    },
     ...preservedGroupTypedMemoryDistillationArchives(persistedLedger, ledger),
     facts: persistedLedger.facts || prunedFacts,
     admission: persistedLedger.admission || admission,
     positiveFeedbackLifecycle: persistedLedger.positiveFeedbackLifecycle || positiveFeedbackLifecycle,
+    directMemory: persistedLedger.directMemory || directMemory,
+    ...(distillationTransaction ? { distillationTransaction } : {}),
     postCompactUsageArchive: {
       schema: postCompactUsageArchive.schema,
       archived_count: postCompactUsageArchive.archived_count,
@@ -16532,13 +18832,310 @@ export function distillGroupMessagesToTypedMemory(groupId: string, messages: any
     quality,
     admission: persistedLedger.admission || admission,
     positiveFeedbackLifecycle: persistedLedger.positiveFeedbackLifecycle || positiveFeedbackLifecycle,
+    directMemory: persistedLedger.directMemory || directMemory,
+    distillationTransaction,
     postCompactUsageArchive: {
       schema: postCompactUsageArchive.schema,
       archived_count: postCompactUsageArchive.archived_count,
       rows: postCompactUsageArchive.rows,
     },
+    cursor: cursorAudit,
+    duplicateInflationRepair: {
+      repairedFactCount: inflatedFactCount,
+      repairedAdmissionObservationCount: inflatedAdmissionObservationCount,
+    },
     lastDistilledMessageId: lastMessageId,
     distilledAt: updatedAt,
+  };
+}
+
+export function distillGroupMessagesToTypedMemory(groupId: string, messages: any[] = [], memory: any = {}, options: any = {}): any {
+  const existingMutation = activeGroupTypedMemoryDistillationMutations.get(groupId);
+  if (existingMutation?.handle) {
+    existingMutation.depth = Number(existingMutation.depth || 1) + 1;
+    existingMutation.mutationKinds = [...new Set([...(existingMutation.mutationKinds || []), "group_log_distillation"])];
+    try {
+      const value = distillGroupMessagesToTypedMemoryUnlocked(groupId, messages, memory, {
+        ...options,
+        __distillationTransaction: { handle: existingMutation.handle, summary: null },
+      });
+      return {
+        ...value,
+        transaction: {
+          schema: "ccm-group-typed-memory-distillation-transaction-v1",
+          version: GROUP_TYPED_MEMORY_DISTILLATION_TRANSACTION_VERSION,
+          groupId,
+          leaseId: String(existingMutation.handle.lock?.leaseId || ""),
+          fencingToken: Number(existingMutation.handle.lock?.fencingToken || 0),
+          status: "reentrant",
+          committed: value?.skipped !== true,
+        },
+      };
+    } finally {
+      existingMutation.depth = Math.max(1, Number(existingMutation.depth || 2) - 1);
+    }
+  }
+  const preflight = inspectGroupTypedMemoryDistillationWork(groupId, messages, options);
+  if (!preflight.runRequired) {
+    const ledger = readGroupTypedMemoryDistillationLedger(groupId);
+    return {
+      schema: "ccm-group-typed-memory-distillation-v1",
+      version: GROUP_TYPED_MEMORY_DISTILLATION_VERSION,
+      groupId,
+      skipped: true,
+      reason: preflight.reason,
+      ledgerFile: ledger.file,
+      sourceMessageCount: 0,
+      candidateCount: 0,
+      extractedCandidateCount: 0,
+      rejectedCandidateCount: 0,
+      evictedExistingFactCount: 0,
+      newFactCount: 0,
+      updatedFactCount: 0,
+      writeCount: 0,
+      removalCount: 0,
+      writes: [],
+      removals: [],
+      quality: ledger.quality || null,
+      admission: ledger.admission || null,
+      positiveFeedbackLifecycle: {
+        ...(ledger.positiveFeedbackLifecycle || {}),
+        appliedThisRun: 0,
+        rejectedThisRun: 0,
+      },
+      cursor: {
+        schema: "ccm-group-typed-memory-distillation-cursor-v1",
+        previousCommittedMessageId: preflight.previousCommittedMessageId,
+        lastCommittedMessageId: preflight.previousCommittedMessageId,
+        cursorFound: preflight.cursorFound,
+        cursorMissingFallback: preflight.cursorMissingFallback,
+        forceRescan: preflight.forceRescan,
+        eligibleMessageCount: preflight.eligibleMessageCount,
+        pendingMessageCount: preflight.pendingMessageCount,
+        processedMessageCount: 0,
+        remainingMessageCount: preflight.pendingMessageCount,
+        batchLimited: false,
+        committedAt: String(ledger.distillationCursor?.committedAt || ledger.lastDistilledAt || ""),
+      },
+      lastDistilledMessageId: preflight.previousCommittedMessageId,
+      distilledAt: String(ledger.lastDistilledAt || ledger.updatedAt || ""),
+      preflight,
+      transaction: {
+        schema: "ccm-group-typed-memory-distillation-transaction-v1",
+        version: GROUP_TYPED_MEMORY_DISTILLATION_TRANSACTION_VERSION,
+        groupId,
+        status: "preflight_skipped",
+        committed: false,
+        lockAcquired: false,
+      },
+    };
+  }
+  const acquired = acquireGroupTypedMemoryDistillationLock(groupId, { ...options, mutationKind: "group_log_distillation" });
+  if (!acquired.acquired) {
+    const error: any = new Error(`typed_memory_distillation_transaction_unavailable:${acquired.reason || "lock_unavailable"}`);
+    error.code = acquired.reason || "distillation_lock_unavailable";
+    error.transaction = acquired;
+    throw error;
+  }
+  const handle = acquired.handle;
+  const mutationContext: any = {
+    groupId,
+    mutationKind: "group_log_distillation",
+    mutationKinds: ["group_log_distillation"],
+    handle,
+    options,
+    pendingArtifacts: new Map<string, any>(),
+    depth: 1,
+    writeCount: 0,
+    startedAt: String(handle.lock?.acquiredAt || now()),
+  };
+  activeGroupTypedMemoryDistillationMutations.set(groupId, mutationContext);
+  const transactionSummary = {
+    schema: "ccm-group-typed-memory-distillation-transaction-v1",
+    version: GROUP_TYPED_MEMORY_DISTILLATION_TRANSACTION_VERSION,
+    groupId,
+    leaseId: String(handle.lock?.leaseId || ""),
+    fencingToken: Number(handle.lock?.fencingToken || 0),
+    waitedMs: Number(acquired.waitedMs || 0),
+    recoveredLeaseCount: Number(acquired.recoveredLeaseCount || 0),
+    acquiredAt: String(handle.lock?.acquiredAt || ""),
+  };
+  try {
+    mutationContext.artifactRecovery = recoverGroupTypedMemoryArtifactTransaction(groupId);
+    const diagnosticHoldMs = Math.max(0, Math.min(10_000, Number(options.__transactionDiagnosticHoldMs || 0)));
+    if (diagnosticHoldMs > 0) typedMemoryDistillationWait(diagnosticHoldMs);
+    const value = distillGroupMessagesToTypedMemoryUnlocked(groupId, messages, memory, {
+      ...options,
+      __distillationTransaction: { handle, summary: transactionSummary },
+    });
+    commitGroupTypedMemoryArtifactMutation(mutationContext);
+    const ownership = verifyGroupTypedMemoryDistillationLock(handle);
+    if (!ownership.owned) throw new Error(`typed_memory_distillation_lock_lost_after_commit:${ownership.reason}`);
+    const completedAt = now();
+    const priorState = readGroupTypedMemoryDistillationTransactionState(groupId);
+    const committed = value?.skipped !== true;
+    writeGroupTypedMemoryDistillationTransactionState(groupId, {
+      status: "completed",
+      mutationKind: "group_log_distillation",
+      mutationKinds: mutationContext.mutationKinds,
+      lastMutationKind: "group_log_distillation",
+      leaseId: transactionSummary.leaseId,
+      fencingToken: transactionSummary.fencingToken,
+      lastFencingToken: transactionSummary.fencingToken,
+      lastCommittedFencingToken: committed
+        ? transactionSummary.fencingToken
+        : Number(priorState.valid ? priorState.state?.lastCommittedFencingToken || 0 : 0),
+      recoveredLeaseCount: Number(priorState.valid ? priorState.state?.recoveredLeaseCount || 0 : acquired.recoveredLeaseCount || 0),
+      waitedMs: Number(acquired.waitedMs || 0),
+      writeCount: Number(mutationContext.writeCount || 0),
+      startedAt: transactionSummary.acquiredAt,
+      completedAt,
+      failedAt: "",
+      error: "",
+      updatedAt: completedAt,
+    });
+    activeGroupTypedMemoryDistillationMutations.delete(groupId);
+    releaseGroupTypedMemoryDistillationLock(handle, "completed");
+    return {
+      ...value,
+      preflight: {
+        ...preflight,
+        lockAcquired: true,
+      },
+      transaction: {
+        ...transactionSummary,
+        status: "completed",
+        committed,
+        completedAt,
+        artifactTransaction: mutationContext.artifactTransaction || null,
+        artifactRecovery: mutationContext.artifactRecovery || null,
+      },
+    };
+  } catch (error: any) {
+    const failedAt = now();
+    const ownership = verifyGroupTypedMemoryDistillationLock(handle);
+    if (ownership.owned) {
+      const priorState = readGroupTypedMemoryDistillationTransactionState(groupId);
+      writeGroupTypedMemoryDistillationTransactionState(groupId, {
+        status: "failed",
+        mutationKind: "group_log_distillation",
+        mutationKinds: mutationContext.mutationKinds,
+        lastMutationKind: String(priorState.valid ? priorState.state?.lastMutationKind || "" : ""),
+        leaseId: transactionSummary.leaseId,
+        fencingToken: transactionSummary.fencingToken,
+        lastFencingToken: transactionSummary.fencingToken,
+        lastCommittedFencingToken: Number(priorState.valid ? priorState.state?.lastCommittedFencingToken || 0 : 0),
+        recoveredLeaseCount: Number(priorState.valid ? priorState.state?.recoveredLeaseCount || 0 : acquired.recoveredLeaseCount || 0),
+        waitedMs: Number(acquired.waitedMs || 0),
+        writeCount: Number(mutationContext.writeCount || 0),
+        startedAt: transactionSummary.acquiredAt,
+        completedAt: "",
+        failedAt,
+        error: compactText(error?.message || error, 800),
+        updatedAt: failedAt,
+      });
+    }
+    activeGroupTypedMemoryDistillationMutations.delete(groupId);
+    releaseGroupTypedMemoryDistillationLock(handle, "failed");
+    throw error;
+  }
+}
+
+export function distillGroupMessagesToTypedMemoryUntilCaughtUp(groupId: string, messages: any[] = [], memory: any = {}, options: any = {}) {
+  const maxBatches = Math.max(1, Math.min(32, Number(options.maxCatchUpBatches || options.max_catch_up_batches || 8)));
+  const batches: any[] = [];
+  let latest: any = null;
+  for (let batch = 0; batch < maxBatches; batch += 1) {
+    latest = distillGroupMessagesToTypedMemory(groupId, messages, memory, options);
+    batches.push(latest);
+    if (latest?.skipped === true || Number(latest?.cursor?.remainingMessageCount || 0) <= 0) break;
+  }
+  const sum = (key: string) => batches.reduce((total, row) => total + Number(row?.[key] || 0), 0);
+  const remainingMessageCount = Number(latest?.cursor?.remainingMessageCount || 0);
+  return {
+    ...(latest || {
+      schema: "ccm-group-typed-memory-distillation-v1",
+      version: GROUP_TYPED_MEMORY_DISTILLATION_VERSION,
+      groupId,
+      skipped: true,
+      reason: "no_distillation_batch_executed",
+    }),
+    sourceMessageCount: sum("sourceMessageCount"),
+    candidateCount: sum("candidateCount"),
+    extractedCandidateCount: sum("extractedCandidateCount"),
+    rejectedCandidateCount: sum("rejectedCandidateCount"),
+    evictedExistingFactCount: sum("evictedExistingFactCount"),
+    newFactCount: sum("newFactCount"),
+    updatedFactCount: sum("updatedFactCount"),
+    writeCount: sum("writeCount"),
+    removalCount: sum("removalCount"),
+    writes: batches.flatMap(row => Array.isArray(row?.writes) ? row.writes : []),
+    removals: batches.flatMap(row => Array.isArray(row?.removals) ? row.removals : []),
+    catchUp: {
+      schema: "ccm-group-typed-memory-distillation-catch-up-v1",
+      batchCount: batches.length,
+      maxBatches,
+      complete: remainingMessageCount === 0,
+      remainingMessageCount,
+      batches: batches.map((row, index) => ({
+        batch: index + 1,
+        skipped: row?.skipped === true,
+        reason: row?.reason || "",
+        sourceMessageCount: Number(row?.sourceMessageCount || 0),
+        newFactCount: Number(row?.newFactCount || 0),
+        updatedFactCount: Number(row?.updatedFactCount || 0),
+        previousCommittedMessageId: row?.cursor?.previousCommittedMessageId || "",
+        lastCommittedMessageId: row?.cursor?.lastCommittedMessageId || row?.lastDistilledMessageId || "",
+        remainingMessageCount: Number(row?.cursor?.remainingMessageCount || 0),
+      })),
+    },
+  };
+}
+
+export function buildGroupDirectMemoryAction(groupId: string, input: any = {}) {
+  const action = String(input.action || "").trim().toLowerCase();
+  if (!["remember", "forget"].includes(action)) throw new Error("unsupported_direct_memory_action");
+  const messageId = compactText(input.messageId || input.message_id || "", 180);
+  if (!messageId) throw new Error("direct_memory_message_id_required");
+  const content = compactText(input.content || input.text || input.query || "", 1800);
+  if (!content) throw new Error("direct_memory_content_required");
+  const memoryType = normalizeMemoryType(input.memoryType || input.memory_type || input.type || "user");
+  const targetMemoryId = compactText(input.targetMemoryId || input.target_memory_id || input.memoryId || input.memory_id || "", 180);
+  const requestId = compactText(input.requestId || input.request_id || `gmdr_${checksum([groupId, messageId, action, content, targetMemoryId], 28)}`, 180);
+  const requestChecksum = checksum([GROUP_TYPED_MEMORY_DIRECT_OPERATION_VERSION, groupId, messageId, action, memoryType, content, targetMemoryId], 64);
+  return {
+    schema: "ccm-group-direct-memory-action-v1",
+    version: GROUP_TYPED_MEMORY_DIRECT_OPERATION_VERSION,
+    requestId,
+    action,
+    scopeId: groupId,
+    content,
+    memoryType,
+    targetMemoryId,
+    requestChecksum,
+  };
+}
+
+export function commitGroupDirectMemoryAction(groupId: string, messages: any[] = [], input: any = {}) {
+  const requestId = String(input.requestId || input.request_id || "").trim();
+  if (!requestId) throw new Error("direct_memory_request_id_required");
+  const distillation = distillGroupMessagesToTypedMemoryUntilCaughtUp(groupId, messages, {}, {
+    reason: String(input.reason || "direct-group-memory-action"),
+    maxCatchUpBatches: Number(input.maxCatchUpBatches || input.max_catch_up_batches || 32),
+  });
+  const ledger = readGroupTypedMemoryDistillationLedger(groupId);
+  const receipt = (Array.isArray(ledger.directMemory?.receipts) ? ledger.directMemory.receipts : [])
+    .find((row: any) => String(row?.requestId || "") === requestId) || null;
+  return {
+    schema: "ccm-group-direct-memory-commit-v1",
+    version: GROUP_TYPED_MEMORY_DIRECT_OPERATION_VERSION,
+    groupId,
+    requestId,
+    committed: receipt?.status === "committed" || receipt?.status === "duplicate",
+    receipt,
+    directMemory: ledger.directMemory || null,
+    distillation,
+    index: buildGroupTypedMemoryIndex(groupId),
   };
 }
 
@@ -17699,6 +20296,410 @@ function buildGroupTypedMemoryRecallFreshness(doc: any, nowMs = Date.now()) {
   };
 }
 
+const GROUP_TYPED_MEMORY_MANIFEST_SELECTOR_SYSTEM_PROMPT = `You are selecting memories that will be useful to a coding Agent as it processes a user's query. You will be given the user's query and a list of available memory files with their filenames and descriptions.
+
+Return a list of filenames for the memories that will clearly be useful to the coding Agent as it processes the user's query (up to 5). Only include memories that you are certain will be helpful based on their name and description.
+- If you are unsure if a memory will be useful in processing the user's query, then do not include it in your list. Be selective and discerning.
+- If there are no memories in the list that would clearly be useful, return an empty list.
+- If a list of recently-used tools is provided, do not select memories that are usage reference or API documentation for those tools. Do still select memories containing warnings, gotchas, or known issues about those tools.`;
+
+function groupTypedMemoryManifestSelectionChecksum(value: any) {
+  const payload = { ...(value || {}) };
+  delete payload.checksum;
+  delete payload.decisionFile;
+  return checksum(JSON.stringify(payload), 64);
+}
+
+export function getGroupTypedMemoryManifestSelectorDecisionDir(scopeId: string) {
+  return path.join(getGroupTypedMemoryDir(scopeId), GROUP_TYPED_MEMORY_MANIFEST_SELECTOR_DECISION_DIR);
+}
+
+function recordGroupTypedMemoryManifestSelectorDecision(scopeId: string, decision: any) {
+  const dir = path.resolve(getGroupTypedMemoryManifestSelectorDecisionDir(scopeId));
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.resolve(dir, `${safeSegment(decision.requestId, `ms-${checksum(decision, 16)}`)}.json`);
+  if (path.dirname(file).toLowerCase() !== dir.toLowerCase()) throw new Error("typed_memory_manifest_selector_decision_path_invalid");
+  writeTextAtomicRaw(file, JSON.stringify(decision, null, 2));
+  try {
+    const files = fs.readdirSync(dir)
+      .filter(name => name.toLowerCase().endsWith(".json"))
+      .map(name => ({ name, file: path.resolve(dir, name), mtimeMs: fs.statSync(path.resolve(dir, name)).mtimeMs }))
+      .filter(item => path.dirname(item.file).toLowerCase() === dir.toLowerCase())
+      .sort((a, b) => b.mtimeMs - a.mtimeMs || b.name.localeCompare(a.name));
+    for (const item of files.slice(200)) {
+      try { fs.unlinkSync(item.file); } catch {}
+    }
+  } catch {}
+  return file;
+}
+
+export function verifyGroupTypedMemoryManifestSelection(selection: any, expectedScopeId = "") {
+  const selected = Array.isArray(selection?.selectedRelPaths) ? selection.selectedRelPaths : [];
+  const valid = !!selection
+    && selection.schema === "ccm-group-typed-memory-manifest-selection-v1"
+    && Number(selection.version || 0) === GROUP_TYPED_MEMORY_MANIFEST_SELECTOR_VERSION
+    && isExactGroupTypedMemorySessionScope(String(selection.scopeId || ""))
+    && (!expectedScopeId || String(selection.scopeId || "") === expectedScopeId)
+    && selected.length <= GROUP_TYPED_MEMORY_MANIFEST_MAX_SELECTION
+    && selected.every((item: any) => typeof item === "string" && path.basename(item) === item && item.toLowerCase().endsWith(".md"))
+    && String(selection.checksum || "") === groupTypedMemoryManifestSelectionChecksum(selection);
+  return {
+    valid,
+    scopeValid: !expectedScopeId || String(selection?.scopeId || "") === expectedScopeId,
+    checksumValid: !!selection && String(selection.checksum || "") === groupTypedMemoryManifestSelectionChecksum(selection),
+    selectedCount: selected.length,
+  };
+}
+
+export function configureGroupTypedMemoryManifestSelector(executor: GroupTypedMemoryManifestSelectorExecutor | null) {
+  configuredGroupTypedMemoryManifestSelectorExecutor = typeof executor === "function" ? executor : null;
+  return { configured: !!configuredGroupTypedMemoryManifestSelectorExecutor };
+}
+
+export function buildGroupTypedMemoryManifest(scopeId: string, query: string, options: any = {}) {
+  if (!isExactGroupTypedMemorySessionScope(scopeId)) {
+    return {
+      schema: "ccm-group-typed-memory-selection-manifest-v1",
+      version: 1,
+      scopeId,
+      validScope: false,
+      candidates: [],
+      manifest: "",
+      candidateCount: 0,
+      filteredCount: 0,
+      filterCounts: { invalid_scope: 1 },
+      checksum: "",
+    };
+  }
+  const text = String(query || "");
+  const index = buildGroupTypedMemoryIndex(scopeId);
+  const already = new Set<string>((options.alreadySurfaced || options.already_surfaced || [])
+    .map((item: any) => String(item || "").trim().toLowerCase()).filter(Boolean));
+  const targetPaths = deriveGroupTypedMemoryTargetPaths(text, options.targetPaths || options.target_paths || []);
+  const topicIndex = buildGroupSessionModelExtractionTopicRecallIndex(scopeId);
+  const staleIndex = buildGroupTypedMemoryPendingStaleConflictIndex(scopeId);
+  const filterCounts: Record<string, number> = {};
+  const filtered = (reason: string) => { filterCounts[reason] = Number(filterCounts[reason] || 0) + 1; };
+  const candidates = index.docs
+    .filter((doc: any) => {
+      const relPath = String(doc.relPath || "");
+      const relKey = relPath.toLowerCase();
+      const fileKey = String(doc.file || "").toLowerCase();
+      if (already.has(relKey) || already.has(fileKey)) { filtered("already_surfaced"); return false; }
+      if ((staleIndex.byRelPath.get(relKey) || []).length > 0) { filtered("pending_stale_conflict"); return false; }
+      if (String(doc.source || "") === "auto:model-extraction-evidence-admission"
+        && (!topicIndex.valid || !topicIndex.byRelPath.has(relKey))) {
+        filtered("model_topic_archive_invalid_or_unbound");
+        return false;
+      }
+      const pathCondition = evaluateTypedMemoryPathCondition(doc, targetPaths);
+      if (pathCondition.conditional && !pathCondition.matched) { filtered("path_condition_miss"); return false; }
+      return true;
+    })
+    .sort((a: any, b: any) => Number(b.mtimeMs || 0) - Number(a.mtimeMs || 0) || String(a.relPath).localeCompare(String(b.relPath)))
+    .slice(0, Math.max(1, Math.min(GROUP_TYPED_MEMORY_MANIFEST_MAX_FILES, Number(options.maxFiles || options.max_files || GROUP_TYPED_MEMORY_MANIFEST_MAX_FILES))))
+    .map((doc: any) => ({
+      filename: String(doc.relPath || ""),
+      filePath: String(doc.file || ""),
+      mtimeMs: Number(doc.mtimeMs || 0),
+      mtime: new Date(Number(doc.mtimeMs || Date.now())).toISOString(),
+      description: doc.description ? compactText(doc.description, 300) : "",
+      type: normalizeMemoryType(doc.type),
+      source: String(doc.source || ""),
+    }));
+  const manifest = candidates.map((item: any) => {
+    const tag = item.type ? `[${item.type}] ` : "";
+    return item.description
+      ? `- ${tag}${item.filename} (${item.mtime}): ${item.description}`
+      : `- ${tag}${item.filename} (${item.mtime})`;
+  }).join("\n");
+  const manifestCore = {
+    schema: "ccm-group-typed-memory-selection-manifest-v1",
+    version: 1,
+    scopeId,
+    validScope: true,
+    candidates,
+    manifest,
+    candidateCount: candidates.length,
+    sourceDocumentCount: index.docs.length,
+    filteredCount: Object.values(filterCounts).reduce((sum, count) => sum + Number(count || 0), 0),
+    filterCounts,
+    targetPaths,
+    alreadySurfacedCount: already.size,
+    generatedAt: String(options.generatedAt || options.generated_at || now()),
+  };
+  return { ...manifestCore, checksum: checksum(JSON.stringify(manifestCore), 64) };
+}
+
+function parseGroupTypedMemoryManifestSelectorOutput(value: any) {
+  if (Array.isArray(value?.selected_memories)) return value.selected_memories;
+  if (Array.isArray(value?.selectedMemories)) return value.selectedMemories;
+  const raw = String(value?.output ?? value?.text ?? value?.content ?? value ?? "").trim();
+  if (!raw) return [];
+  const fenced = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+  const candidates = [fenced, fenced.match(/\{[\s\S]*\}/)?.[0] || ""].filter(Boolean);
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate);
+      if (Array.isArray(parsed?.selected_memories)) return parsed.selected_memories;
+      if (Array.isArray(parsed?.selectedMemories)) return parsed.selectedMemories;
+    } catch {}
+  }
+  throw new Error("manifest_selector_output_json_invalid");
+}
+
+function finalizeGroupTypedMemoryManifestSelection(scopeId: string, input: any, options: any = {}) {
+  const core = {
+    schema: "ccm-group-typed-memory-manifest-selection-v1",
+    version: GROUP_TYPED_MEMORY_MANIFEST_SELECTOR_VERSION,
+    scopeId,
+    requestId: String(input.requestId || `ms_${checksum([scopeId, Date.now(), crypto.randomBytes(8).toString("hex")], 24)}`),
+    status: String(input.status || "empty"),
+    reason: String(input.reason || ""),
+    queryChecksum: String(input.queryChecksum || ""),
+    manifestChecksum: String(input.manifestChecksum || ""),
+    candidateCount: Number(input.candidateCount || 0),
+    selectedRelPaths: uniqueStrings((input.selectedRelPaths || []).map(String), GROUP_TYPED_MEMORY_MANIFEST_MAX_SELECTION),
+    unknownFilenames: uniqueStrings((input.unknownFilenames || []).map(String), 20),
+    invalidFilenameCount: Number(input.invalidFilenameCount || 0),
+    recentTools: uniqueStrings((input.recentTools || []).map(String), 20),
+    filterCounts: input.filterCounts || {},
+    selectorProject: String(input.selectorProject || ""),
+    selectorAgentType: String(input.selectorAgentType || ""),
+    selectorModel: String(input.selectorModel || ""),
+    startedAt: String(input.startedAt || ""),
+    completedAt: String(input.completedAt || now()),
+  };
+  const decision: any = { ...core, checksum: groupTypedMemoryManifestSelectionChecksum(core) };
+  if (options.recordDecision !== false && isExactGroupTypedMemorySessionScope(scopeId)) {
+    try { decision.decisionFile = recordGroupTypedMemoryManifestSelectorDecision(scopeId, decision); }
+    catch (error: any) { decision.recordError = compactText(error?.message || error, 240); }
+  }
+  return decision;
+}
+
+export async function selectGroupTypedMemoryManifest(scopeId: string, query: string, options: any = {}) {
+  const startedAt = now();
+  const requestId = `ms_${checksum([scopeId, query, startedAt, crypto.randomBytes(8).toString("hex")], 24)}`;
+  const queryChecksum = checksum(String(query || ""), 64);
+  const recentTools = uniqueStrings((options.recentTools || options.recent_tools || []).map(String), 20);
+  const manifest = buildGroupTypedMemoryManifest(scopeId, query, options);
+  const finish = (input: any) => finalizeGroupTypedMemoryManifestSelection(scopeId, {
+    requestId,
+    queryChecksum,
+    manifestChecksum: manifest.checksum || "",
+    candidateCount: manifest.candidateCount || 0,
+    filterCounts: manifest.filterCounts || {},
+    recentTools,
+    startedAt,
+    completedAt: now(),
+    ...input,
+  }, options);
+  if (!manifest.validScope) return finish({ status: "invalid_scope", reason: "exact_group_gcs_scope_required", selectedRelPaths: [] });
+  if (shouldIgnoreGroupMemoryRequest(query, options)) return finish({ status: "ignored", reason: "user_requested_ignore_memory", selectedRelPaths: [] });
+  if (!manifest.candidateCount) return finish({ status: "no_candidates", reason: "manifest_empty_after_filters", selectedRelPaths: [] });
+  if (options.signal?.aborted) return finish({ status: "aborted", reason: "selector_aborted_before_call", selectedRelPaths: [] });
+  const executor = options.executor || configuredGroupTypedMemoryManifestSelectorExecutor;
+  if (typeof executor !== "function") return finish({ status: "unavailable", reason: "manifest_selector_executor_not_configured", selectedRelPaths: [] });
+  const toolsSection = recentTools.length ? `\n\nRecently used tools: ${recentTools.join(", ")}` : "";
+  try {
+    const response = await executor({
+      schema: "ccm-group-typed-memory-manifest-selector-request-v1",
+      version: 1,
+      requestId,
+      scopeId,
+      groupId: String(options.groupId || options.group_id || scopeId.slice(0, scopeId.lastIndexOf("--gcs_"))),
+      groupSessionId: String(options.groupSessionId || options.group_session_id || scopeId.slice(scopeId.lastIndexOf("--") + 2)),
+      query: compactText(query, 6000),
+      systemPrompt: GROUP_TYPED_MEMORY_MANIFEST_SELECTOR_SYSTEM_PROMPT,
+      userPrompt: `Query: ${compactText(query, 6000)}\n\nAvailable memories:\n${manifest.manifest}${toolsSection}`,
+      recentTools,
+      manifest: manifest.manifest,
+      manifestChecksum: manifest.checksum,
+      maxTokens: 256,
+      maxSelection: GROUP_TYPED_MEMORY_MANIFEST_MAX_SELECTION,
+      outputSchema: {
+        type: "object",
+        properties: { selected_memories: { type: "array", items: { type: "string" } } },
+        required: ["selected_memories"],
+        additionalProperties: false,
+      },
+      signal: options.signal,
+    });
+    if (options.signal?.aborted) return finish({ status: "aborted", reason: "selector_aborted_after_call", selectedRelPaths: [] });
+    const rawSelected = parseGroupTypedMemoryManifestSelectorOutput(response);
+    const validNames = new Set(manifest.candidates.map((item: any) => item.filename));
+    const selectedRelPaths: string[] = [];
+    const unknownFilenames: string[] = [];
+    let invalidFilenameCount = 0;
+    for (const raw of rawSelected) {
+      if (typeof raw !== "string" || path.basename(raw) !== raw || !raw.toLowerCase().endsWith(".md")) { invalidFilenameCount += 1; continue; }
+      if (!validNames.has(raw)) { unknownFilenames.push(raw); continue; }
+      if (!selectedRelPaths.includes(raw)) selectedRelPaths.push(raw);
+      if (selectedRelPaths.length >= GROUP_TYPED_MEMORY_MANIFEST_MAX_SELECTION) break;
+    }
+    return finish({
+      status: selectedRelPaths.length ? "selected" : "empty",
+      reason: selectedRelPaths.length ? "selector_returned_certain_memories" : "selector_returned_empty",
+      selectedRelPaths,
+      unknownFilenames,
+      invalidFilenameCount,
+      selectorProject: response?.project || "",
+      selectorAgentType: response?.agentType || "",
+      selectorModel: response?.model || "",
+    });
+  } catch (error: any) {
+    return finish({ status: "failed", reason: compactText(error?.message || error, 240), selectedRelPaths: [] });
+  }
+}
+
+export function summarizeGroupTypedMemoryManifestSelectorDecisions(scopeId: string, options: any = {}) {
+  const dir = getGroupTypedMemoryManifestSelectorDecisionDir(scopeId);
+  const limit = Math.max(1, Math.min(200, Number(options.limit || 200)));
+  const rows: any[] = [];
+  let unreadableCount = 0;
+  try {
+    const files = fs.readdirSync(dir)
+      .filter(name => name.toLowerCase().endsWith(".json"))
+      .map(name => path.join(dir, name));
+    for (const file of files) {
+      try {
+        const decision = JSON.parse(fs.readFileSync(file, "utf-8"));
+        const verification = verifyGroupTypedMemoryManifestSelection(decision, scopeId);
+        rows.push({ ...decision, decisionFile: file, valid: verification.valid === true });
+      } catch { unreadableCount += 1; }
+    }
+  } catch {}
+  rows.sort((a, b) => String(b.completedAt || "").localeCompare(String(a.completedAt || "")) || String(b.requestId || "").localeCompare(String(a.requestId || "")));
+  const bounded = rows.slice(0, limit);
+  const validRows = bounded.filter(row => row.valid === true);
+  const statusCounts: Record<string, number> = {};
+  for (const row of validRows) statusCounts[String(row.status || "unknown")] = Number(statusCounts[String(row.status || "unknown")] || 0) + 1;
+  const selectedDocumentCount = validRows.reduce((sum, row) => sum + Number(row.selectedRelPaths?.length || 0), 0);
+  const latest = bounded[0] || null;
+  return {
+    schema: "ccm-group-typed-memory-manifest-selector-summary-v1",
+    version: 1,
+    scopeId,
+    dir,
+    present: rows.length > 0 || unreadableCount > 0,
+    valid: unreadableCount === 0 && rows.every(row => row.valid === true),
+    decisionCount: rows.length + unreadableCount,
+    validDecisionCount: rows.filter(row => row.valid === true).length,
+    invalidDecisionCount: rows.filter(row => row.valid !== true).length + unreadableCount,
+    selectedDecisionCount: Number(statusCounts.selected || 0),
+    emptyDecisionCount: Number(statusCounts.empty || 0) + Number(statusCounts.no_candidates || 0),
+    failedDecisionCount: Number(statusCounts.failed || 0) + Number(statusCounts.unavailable || 0) + Number(statusCounts.aborted || 0),
+    ignoredDecisionCount: Number(statusCounts.ignored || 0),
+    selectedDocumentCount,
+    averageSelectedDocuments: validRows.length ? Number((selectedDocumentCount / validRows.length).toFixed(3)) : 0,
+    latest: latest ? {
+      requestId: String(latest.requestId || ""),
+      status: String(latest.status || ""),
+      valid: latest.valid === true,
+      candidateCount: Number(latest.candidateCount || 0),
+      selectedCount: Number(latest.selectedRelPaths?.length || 0),
+      selectedRelPaths: Array.isArray(latest.selectedRelPaths) ? latest.selectedRelPaths.slice(0, GROUP_TYPED_MEMORY_MANIFEST_MAX_SELECTION) : [],
+      completedAt: String(latest.completedAt || ""),
+      selectorProject: String(latest.selectorProject || ""),
+      selectorAgentType: String(latest.selectorAgentType || ""),
+      selectorModel: String(latest.selectorModel || ""),
+      decisionFile: String(latest.decisionFile || ""),
+    } : null,
+    rows: options.includeRows === true ? bounded.map(row => ({
+      requestId: String(row.requestId || ""),
+      status: String(row.status || ""),
+      valid: row.valid === true,
+      candidateCount: Number(row.candidateCount || 0),
+      selectedCount: Number(row.selectedRelPaths?.length || 0),
+      completedAt: String(row.completedAt || ""),
+    })) : undefined,
+  };
+}
+
+function buildGroupSessionModelExtractionTopicRecallIndex(groupId: string) {
+  const ledger = readGroupTypedMemoryDistillationLedger(groupId);
+  const archive = ledger.modelExtractionTypedMemoryArchive || null;
+  const valid = !!archive
+    && archive.schema === "ccm-group-session-model-extraction-typed-memory-archive-v1"
+    && modelExtractionTypedArchiveChecksum(archive) === String(archive.checksum || "");
+  const byRelPath = new Map<string, any>();
+  if (valid) {
+    for (const topic of Object.values(archive.topics || {}) as any[]) {
+      if (topic?.status !== "active") continue;
+      for (const slug of topic.docSlugs || []) {
+        byRelPath.set(`${String(slug || "").toLowerCase()}.md`, topic);
+      }
+    }
+  }
+  return {
+    schema: "ccm-group-session-model-extraction-topic-recall-index-v1",
+    valid,
+    archivePresent: !!archive,
+    archiveChecksum: String(archive?.checksum || ""),
+    byRelPath,
+  };
+}
+
+function buildGroupTypedMemoryPendingStaleConflictIndex(groupId: string) {
+  const ledger = readGroupTypedMemoryStaleCandidateLedger(groupId);
+  const byRelPath = new Map<string, any[]>();
+  if (ledger.ledger_checksum_valid === true) {
+    for (const candidate of ledger.candidates || []) {
+      if (candidate?.status !== "pending") continue;
+      const relPath = String(candidate.rel_path || "").trim().toLowerCase();
+      if (!relPath) continue;
+      byRelPath.set(relPath, [...(byRelPath.get(relPath) || []), candidate]);
+    }
+  }
+  return {
+    schema: "ccm-group-typed-memory-pending-stale-conflict-index-v1",
+    valid: ledger.ledger_checksum_valid === true,
+    pendingCount: [...byRelPath.values()].reduce((sum, rows) => sum + rows.length, 0),
+    byRelPath,
+  };
+}
+
+function scoreGroupSessionModelExtractionTopicRecall(doc: any, topic: any, query: string, queryTokens: string[]) {
+  if (!topic) return null;
+  const queryProfile = modelExtractionTopicConceptProfile(query);
+  const similarity = modelExtractionTopicSimilarity(queryProfile.concepts, topic.concepts || []);
+  const factText = String(doc.body || "").split("\n")
+    .filter(line => /^- #/.test(line.trim()))
+    .join("\n")
+    .toLowerCase();
+  const genericTokens = new Set(["continue", "project", "task", "memory", "session", "agent", "继续", "任务", "项目", "记忆", "会话"]);
+  const matchedTokens = queryTokens.filter(token => !genericTokens.has(token) && factText.includes(token));
+  const latinMatches = matchedTokens.filter(token => /[a-z0-9_]/i.test(token) && token.length >= 5);
+  const cjkMatches = matchedTokens.filter(token => /^[\u3400-\u9fff]+$/.test(token));
+  const strongLexicalMatch = latinMatches.length > 0 || cjkMatches.length >= 2;
+  const unclassified = /_unclassified$/.test(String(topic.topicId || ""));
+  const semanticMatch = !unclassified && similarity >= GROUP_SESSION_MODEL_EXTRACTION_TOPIC_REUSE_MIN_SIMILARITY;
+  const eligible = semanticMatch || strongLexicalMatch;
+  const adjustment = semanticMatch
+    ? Math.max(8, Math.round(similarity * 24))
+    : strongLexicalMatch
+      ? Math.min(14, 4 + latinMatches.length * 3 + cjkMatches.length)
+      : -12;
+  return {
+    schema: "ccm-group-session-model-extraction-topic-recall-score-v1",
+    topicId: String(topic.topicId || ""),
+    topicSlug: String(topic.slug || ""),
+    assignmentVersion: Number(topic.assignmentVersion || topic.version || 0),
+    similarity: Number(similarity.toFixed(4)),
+    queryConcepts: queryProfile.concepts,
+    topicConcepts: topic.concepts || [],
+    matchedTokens: uniqueStrings(matchedTokens, 24),
+    semanticMatch,
+    strongLexicalMatch,
+    unclassified,
+    meanAssignmentConfidence: Number(topic.meanAssignmentConfidence || 0),
+    lowConfidenceFactCount: Number(topic.lowConfidenceFactCount || 0),
+    eligible,
+    adjustment,
+  };
+}
+
 export function buildGroupTypedMemoryRecall(groupId: string, query: string, options: any = {}) {
   const text = String(query || "");
   const requestedNowMs = Number(options.nowMs || options.now_ms || Date.now());
@@ -17727,6 +20728,19 @@ export function buildGroupTypedMemoryRecall(groupId: string, query: string, opti
   const workerContextPressureUsageHints = normalizeWorkerContextPressureRecallUsageHints(groupId, options);
   const pressureProvenanceDispatchFeedbackPolicy = normalizePressureProvenanceDispatchFeedbackPolicyForRecall(options);
   const semanticStats = semanticRecallCorpusStats(index.docs, text);
+  const modelExtractionTopicIndex = buildGroupSessionModelExtractionTopicRecallIndex(groupId);
+  const pendingStaleConflictIndex = buildGroupTypedMemoryPendingStaleConflictIndex(groupId);
+  const manifestSelection = options.typedMemoryManifestSelection || options.typed_memory_manifest_selection || options.manifestSelection || options.manifest_selection || null;
+  const manifestSelectionVerification = manifestSelection
+    ? verifyGroupTypedMemoryManifestSelection(manifestSelection, groupId)
+    : { valid: false, scopeValid: true, checksumValid: true, selectedCount: 0 };
+  const manifestSelectionQueryValid = !manifestSelection
+    || String(manifestSelection.queryChecksum || "") === checksum(text, 64);
+  const manifestSelectionApplied = !!manifestSelection;
+  const manifestSelectionValid = manifestSelectionVerification.valid === true && manifestSelectionQueryValid;
+  const manifestSelectedRelPaths = new Set<string>(manifestSelectionValid
+    ? (manifestSelection.selectedRelPaths || []).map((item: any) => String(item || "").toLowerCase())
+    : []);
   const typedMemoryConsumptionSummary = buildGroupTypedMemoryConsumptionSummary(groupId, {
     targetProject: options.targetProject || options.target_project || "",
     queryFeatures: semanticStats.queryFeatures,
@@ -17738,6 +20752,25 @@ export function buildGroupTypedMemoryRecall(groupId: string, query: string, opti
   const scored = index.docs.map(doc => {
     const freshness = buildGroupTypedMemoryRecallFreshness(doc, recallNowMs);
     const requiredRecall = requiredRelPaths.has(String(doc.relPath || "").toLowerCase());
+    const modelExtractionDocument = String(doc.source || "") === "auto:model-extraction-evidence-admission";
+    const modelExtractionTopic = modelExtractionTopicIndex.byRelPath.get(String(doc.relPath || "").toLowerCase()) || null;
+    const pendingStaleConflicts = pendingStaleConflictIndex.byRelPath.get(String(doc.relPath || "").toLowerCase()) || [];
+    const manifestSelected = manifestSelectedRelPaths.has(String(doc.relPath || "").toLowerCase());
+    if (modelExtractionDocument && (!modelExtractionTopicIndex.valid || !modelExtractionTopic)) {
+      diagnostics.push({ relPath: doc.relPath, skipped: true, reason: "model_topic_archive_invalid_or_unbound", freshness });
+      return null;
+    }
+    if (pendingStaleConflicts.length > 0 && !requiredRecall) {
+      diagnostics.push({
+        relPath: doc.relPath,
+        skipped: true,
+        reason: "pending_stale_conflict_quarantined",
+        pendingStaleConflictCount: pendingStaleConflicts.length,
+        pendingStaleCandidateIds: pendingStaleConflicts.map((candidate: any) => candidate.candidate_id),
+        freshness,
+      });
+      return null;
+    }
     if (!requiredRecall && (already.has(doc.relPath.toLowerCase()) || already.has(doc.file.toLowerCase()))) {
       diagnostics.push({ relPath: doc.relPath, skipped: true, reason: "already_surfaced", freshness });
       return null;
@@ -17747,9 +20780,23 @@ export function buildGroupTypedMemoryRecall(groupId: string, query: string, opti
       diagnostics.push({ relPath: doc.relPath, skipped: true, reason: "path_condition_miss", globs: pathCondition.globs, targetPaths, freshness });
       return null;
     }
+    if (manifestSelectionApplied && !requiredRecall && (!manifestSelectionValid || !manifestSelected)) {
+      diagnostics.push({
+        relPath: doc.relPath,
+        skipped: true,
+        reason: manifestSelectionValid ? "manifest_selector_not_selected" : "manifest_selector_selection_invalid",
+        manifestSelectionStatus: String(manifestSelection?.status || ""),
+        manifestSelectionValid,
+        manifestSelectionQueryValid,
+        freshness,
+      });
+      return null;
+    }
     const corpus = `${doc.name}\n${doc.description}\n${doc.body}`.toLowerCase();
     let score = 0;
-    for (const token of queryTokens) if (corpus.includes(token)) score += token.length >= 5 ? 3 : 1;
+    let lexicalScore = 0;
+    for (const token of queryTokens) if (corpus.includes(token)) lexicalScore += token.length >= 5 ? 3 : 1;
+    score += lexicalScore;
     if (doc.type === "user") score += 4;
     if (doc.type === "feedback") score += 3;
     if (doc.type === "project") score += 2;
@@ -17759,6 +20806,7 @@ export function buildGroupTypedMemoryRecall(groupId: string, query: string, opti
     if (source.includes("global-claude-memory:managed:")) score += 2;
     if (pathCondition.conditional && pathCondition.matched) score += 64;
     if (requiredRecall) score += 100;
+    if (manifestSelected) score += 48;
     for (const tool of recentTools) {
       if (!tool || !corpus.includes(tool)) continue;
       if (/(警告|陷阱|风险|失败|阻塞|不要|禁止|warning|pitfall|risk|failed|blocked|do not|never)/i.test(corpus)) score += 2;
@@ -17791,6 +20839,28 @@ export function buildGroupTypedMemoryRecall(groupId: string, query: string, opti
       semanticReference.gated = true;
       semanticReference.gateReason = "specialized_recall_policy_non_positive";
     }
+    const modelExtractionTopicRecall = modelExtractionDocument
+      ? scoreGroupSessionModelExtractionTopicRecall(doc, modelExtractionTopic, text, queryTokens)
+      : null;
+    if (modelExtractionTopicRecall?.adjustment) score += modelExtractionTopicRecall.adjustment;
+    const forceMemory = options.forceMemory === true || options.force_memory === true;
+    if (modelExtractionDocument
+      && !requiredRecall
+      && !manifestSelected
+      && !forceMemory
+      && modelExtractionTopicRecall?.eligible !== true) {
+      diagnostics.push({
+        relPath: doc.relPath,
+        skipped: true,
+        reason: modelExtractionTopicRecall?.unclassified ? "unclassified_topic_not_clearly_relevant" : "model_topic_not_clearly_relevant",
+        score,
+        lexicalScore,
+        modelExtractionTopicRecall,
+        semanticReference,
+        freshness,
+      });
+      return null;
+    }
     const typedMemoryConsumption: any = scoreGroupTypedMemoryConsumptionRecall(doc, typedMemoryConsumptionSummary);
     const consumptionAdjustmentApplied = typedMemoryConsumption.adjustment <= 0 || score > 0 || requiredRecall;
     if (consumptionAdjustmentApplied && typedMemoryConsumption.adjustment) score += typedMemoryConsumption.adjustment;
@@ -17806,10 +20876,10 @@ export function buildGroupTypedMemoryRecall(groupId: string, query: string, opti
         && Number(workerContextPressureFeedbackPolicy.adjustment || 0) < 0
         ? "pressure_feedback_policy_risk_gated"
         : "low_score";
-      diagnostics.push({ relPath: doc.relPath, skipped: true, reason, score, postCompactUsage, workerContextPressureRecall, workerContextPressureUsage, workerContextPressureFeedbackPolicy, semanticReference, typedMemoryConsumption, freshness });
+      diagnostics.push({ relPath: doc.relPath, skipped: true, reason, score, postCompactUsage, workerContextPressureRecall, workerContextPressureUsage, workerContextPressureFeedbackPolicy, semanticReference, modelExtractionTopicRecall, typedMemoryConsumption, freshness });
       return null;
     }
-    diagnostics.push({ relPath: doc.relPath, skipped: false, score, pathCondition, postCompactUsage, workerContextPressureRecall, workerContextPressureUsage, workerContextPressureFeedbackPolicy, semanticReference, typedMemoryConsumption, freshness });
+    diagnostics.push({ relPath: doc.relPath, skipped: false, score, pathCondition, manifestSelected, postCompactUsage, workerContextPressureRecall, workerContextPressureUsage, workerContextPressureFeedbackPolicy, semanticReference, modelExtractionTopicRecall, pendingStaleConflictCount: pendingStaleConflicts.length, typedMemoryConsumption, freshness });
     return {
       ...doc,
       pathCondition,
@@ -17819,17 +20889,37 @@ export function buildGroupTypedMemoryRecall(groupId: string, query: string, opti
       workerContextPressureUsage,
       workerContextPressureFeedbackPolicy,
       semanticReference,
+      modelExtractionTopicRecall,
+      pendingStaleConflicts,
       typedMemoryConsumption,
       freshness,
       requiredRecall,
+      manifestSelected,
       snippet: extractSemanticRecallSnippet(doc.body, semanticStats.queryFeatures, Number(options.snippetChars || options.snippet_chars || 800)),
     };
   }).filter(Boolean).sort((a: any, b: any) => b.score - a.score || b.mtimeMs - a.mtimeMs);
   const recallLimit = Math.max(1, Number(options.max || options.limit || GROUP_TYPED_MEMORY_MAX_RECALL));
   const recalled: any[] = [];
   let semanticDuplicateCount = 0;
+  let modelTopicDuplicateCount = 0;
   for (const candidate of scored) {
     if (recalled.length >= recallLimit) break;
+    const modelTopicDuplicateOf = candidate.requiredRecall
+      ? null
+      : recalled.find(item => candidate.modelExtractionTopicRecall?.topicId
+        && candidate.modelExtractionTopicRecall.topicId === item.modelExtractionTopicRecall?.topicId);
+    if (modelTopicDuplicateOf) {
+      modelTopicDuplicateCount += 1;
+      diagnostics.push({
+        relPath: candidate.relPath,
+        skipped: true,
+        reason: "model_topic_duplicate",
+        duplicateOf: modelTopicDuplicateOf.relPath,
+        topicId: candidate.modelExtractionTopicRecall.topicId,
+        score: candidate.score,
+      });
+      continue;
+    }
     const duplicateOf = candidate.requiredRecall || (candidate.pathCondition?.conditional && candidate.pathCondition?.matched)
       ? null
       : semanticRecallDuplicateOf(candidate, recalled);
@@ -17881,6 +20971,41 @@ export function buildGroupTypedMemoryRecall(groupId: string, query: string, opti
       query_concepts: semanticStats.queryFeatures.concepts || [],
       query_polarities: semanticStats.queryFeatures.polarities || [],
       query_relations: semanticStats.queryFeatures.relations || [],
+    },
+    modelExtractionTopicScoring: {
+      schema: "ccm-group-session-model-extraction-topic-recall-scoring-v1",
+      archive_present: modelExtractionTopicIndex.archivePresent,
+      archive_valid: modelExtractionTopicIndex.valid,
+      model_document_count: index.docs.filter((item: any) => String(item.source || "") === "auto:model-extraction-evidence-admission").length,
+      archive_bound_document_count: modelExtractionTopicIndex.byRelPath.size,
+      archive_integrity_gated_count: diagnostics.filter((item: any) => item.reason === "model_topic_archive_invalid_or_unbound").length,
+      evaluated_count: diagnostics.filter((item: any) => item.modelExtractionTopicRecall).length,
+      boosted_count: diagnostics.filter((item: any) => Number(item.modelExtractionTopicRecall?.adjustment || 0) > 0).length,
+      clearly_relevant_count: diagnostics.filter((item: any) => item.modelExtractionTopicRecall?.eligible === true).length,
+      relevance_gated_count: diagnostics.filter((item: any) => ["model_topic_not_clearly_relevant", "unclassified_topic_not_clearly_relevant"].includes(item.reason)).length,
+      unclassified_matched_count: diagnostics.filter((item: any) => item.modelExtractionTopicRecall?.unclassified === true && item.modelExtractionTopicRecall?.eligible === true).length,
+      pending_stale_conflict_count: pendingStaleConflictIndex.pendingCount,
+      stale_conflict_gated_count: diagnostics.filter((item: any) => item.reason === "pending_stale_conflict_quarantined").length,
+      topic_duplicate_count: modelTopicDuplicateCount,
+    },
+    manifestSelectionScoring: {
+      schema: "ccm-group-typed-memory-manifest-selection-scoring-v1",
+      applied: manifestSelectionApplied,
+      valid: manifestSelectionValid,
+      scope_valid: manifestSelectionVerification.scopeValid !== false,
+      checksum_valid: manifestSelectionVerification.checksumValid !== false,
+      query_valid: manifestSelectionQueryValid,
+      status: String(manifestSelection?.status || ""),
+      request_id: String(manifestSelection?.requestId || ""),
+      candidate_count: Number(manifestSelection?.candidateCount || 0),
+      selected_count: manifestSelectedRelPaths.size,
+      selected_rel_paths: [...manifestSelectedRelPaths],
+      selected_recalled_count: recalled.filter((item: any) => item.manifestSelected === true).length,
+      not_selected_gated_count: diagnostics.filter((item: any) => item.reason === "manifest_selector_not_selected").length,
+      invalid_selection_gated_count: diagnostics.filter((item: any) => item.reason === "manifest_selector_selection_invalid").length,
+      unknown_filename_count: Array.isArray(manifestSelection?.unknownFilenames) ? manifestSelection.unknownFilenames.length : 0,
+      invalid_filename_count: Number(manifestSelection?.invalidFilenameCount || 0),
+      decision_file: String(manifestSelection?.decisionFile || ""),
     },
     typedMemoryConsumptionScoring: {
       schema: "ccm-group-typed-memory-consumption-recall-scoring-v1",
@@ -17972,8 +21097,16 @@ export function renderGroupTypedMemoryRecall(recall: any) {
   const consumptionHint = Number(consumptionScoring.entry_count || 0) > 0
     ? `；消费反馈 +${consumptionScoring.boosted_count || 0}/-${consumptionScoring.deprioritized_count || 0}/冲突 ${consumptionScoring.conflict_count || 0}`
     : "";
+  const topicScoring = recall.modelExtractionTopicScoring || recall.model_extraction_topic_scoring || {};
+  const topicHint = Number(topicScoring.model_document_count || 0) > 0
+    ? `；模型 Topic 明确相关 ${topicScoring.clearly_relevant_count || 0}/门禁 ${topicScoring.relevance_gated_count || 0}/同 Topic 去重 ${topicScoring.topic_duplicate_count || 0}`
+    : "";
+  const manifestScoring = recall.manifestSelectionScoring || recall.manifest_selection_scoring || {};
+  const manifestHint = manifestScoring.applied
+    ? `；manifest selector ${manifestScoring.status || "unknown"} ${manifestScoring.selected_recalled_count || 0}/${manifestScoring.selected_count || 0}`
+    : "";
   const lines = [
-    `类型化长期记忆（MEMORY.md 索引召回，路径条件匹配 ${recall.conditionalMatched || 0}、跳过 ${recall.conditionalSkipped || 0}${semanticHint}${consumptionHint}${recall.workerContextPressureScoring?.active ? `；上下文压力召回 ${recall.workerContextPressureScoring.boosted_count || 0}` : ""}${feedbackHint}；陈旧 ${recall.memoryFreshness?.stale_count || 0}/${docs.length}；使用前如涉及文件/函数/flag 必须再核验当前仓库）：`,
+    `类型化长期记忆（MEMORY.md 索引召回，路径条件匹配 ${recall.conditionalMatched || 0}、跳过 ${recall.conditionalSkipped || 0}${semanticHint}${topicHint}${manifestHint}${consumptionHint}${recall.workerContextPressureScoring?.active ? `；上下文压力召回 ${recall.workerContextPressureScoring.boosted_count || 0}` : ""}${feedbackHint}；陈旧 ${recall.memoryFreshness?.stale_count || 0}/${docs.length}；使用前如涉及文件/函数/flag 必须再核验当前仓库）：`,
   ];
   for (const doc of docs) {
     const pathHint = doc.pathCondition?.conditional ? `；paths ${doc.pathCondition.matchedPaths?.join(",") || "matched"}` : "";
@@ -18011,16 +21144,99 @@ export function renderGroupTypedMemoryRecall(recall: any) {
     const consumptionDocHint = Number(consumption.matched_count || 0) > 0
       ? `；consumption ${consumption.adjustment > 0 ? "+" : ""}${consumption.adjustment}${consumption.conflict ? " conflict/reverify" : ""}`
       : "";
+    const modelTopic = doc.modelExtractionTopicRecall || doc.model_extraction_topic_recall || {};
+    const modelTopicHint = modelTopic.topicId
+      ? `；topic ${modelTopic.topicId} ${modelTopic.semanticMatch ? `semantic ${modelTopic.similarity}` : `lexical ${Array.isArray(modelTopic.matchedTokens) ? modelTopic.matchedTokens.slice(0, 4).join(",") : "matched"}`}`
+      : "";
+    const pendingStaleConflicts = Array.isArray(doc.pendingStaleConflicts)
+      ? doc.pendingStaleConflicts
+      : Array.isArray(doc.pending_stale_conflicts) ? doc.pending_stale_conflicts : [];
+    const staleConflictHint = pendingStaleConflicts.length
+      ? `；PENDING STALE CONFLICT ${pendingStaleConflicts.length} / REVERIFY REQUIRED`
+      : "";
+    const manifestSelectedHint = doc.manifestSelected === true ? "；manifest selected" : "";
     const freshness = doc.freshness || {};
     const freshnessHint = freshness.stale === true
       ? `；STALE ${freshness.age_days || 0} days old`
       : `；saved ${freshness.age_label || "today"}`;
+    if (pendingStaleConflicts.length) {
+      const candidateIds = pendingStaleConflicts.map((item: any) => String(item.candidate_id || "")).filter(Boolean).slice(0, 4);
+      lines.push(`- PENDING STALE CONFLICT / REVERIFY REQUIRED ${doc.relPath}：该记忆仅因 requiredRelPath 被显式加载，当前存在待处理冲突${candidateIds.length ? `（${candidateIds.join(", ")}）` : ""}。在读取当前来源并重新验证前，不得把旧记忆当作事实或据此修改代码。`);
+    }
     if (freshness.stale === true && freshness.warning) lines.push(`- 记忆新鲜度警告 ${doc.relPath}：${freshness.warning}`);
-    lines.push(`- [${doc.type}] ${doc.name}（score ${doc.score}，${doc.relPath}${freshnessHint}${pathHint}${semanticDocHint}${consumptionDocHint}${usageHint}${pressureHint}${pressureUsageHint}${pressureRepairHint}${feedbackPolicyHint}${provenanceHint}）：${doc.description || ""}`);
+    lines.push(`- [${doc.type}] ${doc.name}（score ${doc.score}，${doc.relPath}${freshnessHint}${pathHint}${semanticDocHint}${modelTopicHint}${manifestSelectedHint}${staleConflictHint}${consumptionDocHint}${usageHint}${pressureHint}${pressureUsageHint}${pressureRepairHint}${feedbackPolicyHint}${provenanceHint}）：${doc.description || ""}`);
     if (doc.snippet) lines.push(`  ${compactText(doc.snippet, 700).replace(/\n/g, "\n  ")}`);
   }
   lines.push("- 回执要求：最终 CCM_AGENT_RECEIPT.typedMemoryUsage 必须逐条引用上述 relPath，声明 usageState=used/verified/ignored、currentSourceVerified 和 reason；memoryUsed/memoryIgnored 保留同一 relPath 的人类可读说明。");
   return lines.join("\n");
+}
+
+export function runGroupTypedMemoryDistillationMutationCoordinatorSelfTest() {
+  const groupId = `group-phase272-reentrant-${process.pid}-${Date.now().toString(36)}--gcs_phase272_reentrant`;
+  const dir = getGroupTypedMemoryDir(groupId);
+  try {
+    const result: any = runGroupTypedMemoryDistillationMutation(groupId, "phase272_outer", {}, outer => {
+      const nested = runGroupTypedMemoryDistillationMutation(groupId, "phase272_inner", {}, inner => {
+        const ledger = readGroupTypedMemoryDistillationLedger(groupId);
+        const ledgerState = { ...ledger };
+        delete ledgerState.file;
+        writeJsonAtomic(ledger.file, {
+          ...ledgerState,
+          schema: "ccm-group-typed-memory-distillation-ledger-v1",
+          version: GROUP_TYPED_MEMORY_DISTILLATION_VERSION,
+          groupId,
+          facts: ledger.facts || {},
+          coordinatorSelfTestArchive: {
+            schema: "ccm-group-typed-memory-distillation-mutation-coordinator-selftest-v1",
+            nestedDepth: Number(inner.depth || 0),
+            sameLease: String(inner.handle?.lock?.leaseId || "") === String(outer.handle?.lock?.leaseId || ""),
+            updatedAt: now(),
+          },
+          updatedAt: now(),
+        });
+        return {
+          nestedDepth: Number(inner.depth || 0),
+          sameLease: String(inner.handle?.lock?.leaseId || "") === String(outer.handle?.lock?.leaseId || ""),
+        };
+      });
+      return { nested };
+    });
+    const ledger = readGroupTypedMemoryDistillationLedger(groupId);
+    const state = readGroupTypedMemoryDistillationTransactionState(groupId);
+    let failClosed = false;
+    try {
+      writeJsonAtomic(ledger.file, { schema: "invalid-uncoordinated-selftest", groupId });
+    } catch (error: any) {
+      failClosed = String(error?.message || error).includes("uncoordinated_group_typed_memory_distillation_ledger_write");
+    }
+    const receipt = result.distillationMutation || {};
+    const commit = ledger.distillationMutation || {};
+    const mutationKinds = Array.isArray(receipt.mutationKinds) ? receipt.mutationKinds : [];
+    const checks = {
+      nestedCallReusesLease: result.nested?.sameLease === true && Number(result.nested?.nestedDepth || 0) === 2,
+      nestedKindsAreAudited: mutationKinds.includes("phase272_outer") && mutationKinds.includes("phase272_inner"),
+      oneLedgerWriteCommitted: Number(receipt.writeCount || 0) === 1 && Number(commit.writeSequence || 0) === 1,
+      receiptBindsLedgerFence: String(receipt.leaseId || "") === String(commit.leaseId || "")
+        && Number(receipt.fencingToken || 0) === Number(commit.fencingToken || 0),
+      stateBindsMutation: state.valid === true
+        && state.state?.status === "completed"
+        && state.state?.mutationKind === "phase272_outer"
+        && Number(state.state?.fencingToken || 0) === Number(receipt.fencingToken || 0),
+      lockReleased: inspectGroupTypedMemoryDistillationLock(groupId).present === false,
+      uncoordinatedWriteFailsClosed: failClosed,
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      schema: "ccm-group-typed-memory-distillation-mutation-coordinator-selftest-v1",
+      groupId,
+      checks,
+      receipt,
+      commit,
+      state: state.state,
+    };
+  } finally {
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+  }
 }
 
 export function runGroupTypedMemoryIndexSelfTest() {
@@ -19180,7 +22396,10 @@ export function runGroupTypedMemoryLogDistillationSelfTest() {
     const rendered = renderGroupTypedMemoryRecall(recall);
     const checks = {
       distillationCreatedFacts: first.newFactCount >= 4 && first.writeCount >= 4,
-      repeatDoesNotAddDuplicates: second.newFactCount === 0 && second.updatedFactCount >= first.newFactCount,
+      repeatDoesNotAddDuplicates: second.skipped === true
+        && second.reason === "no_new_messages_after_committed_cursor"
+        && second.newFactCount === 0
+        && second.updatedFactCount === 0,
       qualityReportRecorded: first.quality?.schema === "ccm-group-typed-memory-distillation-quality-v1"
         && typeof first.quality.score === "number",
       ledgerPersistsFacts: Object.values(ledger.facts || {}).some((bucket: any) => Object.keys(bucket || {}).length > 0),

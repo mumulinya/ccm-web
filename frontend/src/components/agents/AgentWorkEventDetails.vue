@@ -266,10 +266,10 @@ const formatWorkDuration = () => {
 .work-event.ok .work-event-kind { background: rgba(34, 197, 94, 0.12); color: var(--accent-green); }
 .work-event.fail .work-event-kind { background: rgba(239, 68, 68, 0.12); color: var(--accent-red); }
 .work-event.output .work-event-kind { background: color-mix(in srgb, var(--agent-accent) 12%, transparent); color: var(--agent-accent); }
-:global([data-theme="dark"]) .agent-work-events {
+:global([data-theme="dark"] .agent-work-events){
   background: color-mix(in srgb, var(--agent-accent) 7%, rgba(15, 23, 42, 0.72));
 }
-:global([data-theme="dark"]) .work-events-head {
+:global([data-theme="dark"] .work-events-head){
   border-color: rgba(148, 163, 184, 0.12);
 }
 </style>

@@ -50,7 +50,8 @@ const runViewport = async (name, viewport) => {
   await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 })
   await page.locator('body').waitFor()
   if (viewport.width <= 768) {
-    await page.locator('.bottom-item').filter({ hasText: '📖' }).click()
+    await page.getByRole('button', { name: '更多', exact: true }).click()
+    await page.locator('.mobile-more-grid').getByRole('button', { name: '知识库与文档', exact: true }).click()
   } else {
     await page.getByText('知识库与文档', { exact: true }).first().click()
   }

@@ -42,7 +42,6 @@ import {
   getIdempotencyRecord,
   settleIdempotencyByTrace,
 } from "../../system/reliability-ledger";
-import { buildProjectMemoryPacket } from "../../projects/memory";
 import {
   buildSelfContainedWorkerHandoff,
   renderSelfContainedWorkerHandoff,
@@ -53,11 +52,6 @@ import {
   renderGlobalGroupMemoryContextBundle,
   runGlobalGroupMemoryContextSelfTest,
 } from "../collaboration/memory";
-import {
-  buildPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairContext,
-  buildPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationContext,
-  inspectPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryHealth,
-} from "../collaboration/group-memory-index";
 import {
   cancelGlobalAgentRun,
   attachGlobalAgentRunSupervision,
@@ -4972,6 +4966,65 @@ function compactTask(task: any) {
   };
 }
 
+function isGlobalAgentOwnedTask(task: any) {
+  const source = String(task?.source || task?.created_by || task?.createdBy || "").toLowerCase();
+  return !!String(task?.global_mission_id || task?.globalMissionId || task?.global_run_id || task?.globalRunId || task?.parent_run_id || task?.parentRunId || "").trim()
+    || source.includes("global-agent")
+    || source.includes("global_agent");
+}
+
+const GLOBAL_AGENT_CONTEXT_ALLOWED_KEYS = new Set([
+  "projects",
+  "groups",
+  "task_summary",
+  "cron_jobs",
+  "tools",
+  "global_memory",
+  "memory_context_boundary",
+  "context_source_manifest",
+  "context_boundary_proof",
+]);
+
+function globalAgentContextProofPayload(context: any = {}) {
+  const payload = { ...(context || {}) };
+  delete payload.context_boundary_proof;
+  return payload;
+}
+
+export function verifyGlobalAgentContextBoundary(context: any = {}) {
+  const issues: string[] = [];
+  for (const key of Object.keys(context || {})) if (!GLOBAL_AGENT_CONTEXT_ALLOWED_KEYS.has(key)) issues.push(`global_context_source_not_allowed:${key}`);
+  if (context?.memory_context_boundary?.group_session_context_included !== false) issues.push("global_context_group_session_boundary_missing");
+  if (context?.memory_context_boundary?.project_memory_included !== false) issues.push("global_context_project_memory_boundary_missing");
+  if (context?.memory_context_boundary?.group_memory_included !== false) issues.push("global_context_group_memory_boundary_missing");
+  for (const group of Array.isArray(context?.groups) ? context.groups : []) {
+    for (const key of Object.keys(group || {})) if (!new Set(["id", "name", "members"]).has(key)) issues.push(`global_context_group_directory_field_not_allowed:${key}`);
+    if (group?.group_session_id || group?.groupSessionId || group?.messages || group?.memory) issues.push("global_context_group_session_payload_present");
+    for (const member of Array.isArray(group?.members) ? group.members : []) {
+      for (const key of Object.keys(member || {})) if (!new Set(["project", "agent"]).has(key)) issues.push(`global_context_group_member_field_not_allowed:${key}`);
+    }
+  }
+  for (const project of Array.isArray(context?.projects) ? context.projects : []) {
+    for (const key of Object.keys(project || {})) if (!new Set(["name", "work_dir", "agent", "platform"]).has(key)) issues.push(`global_context_project_directory_field_not_allowed:${key}`);
+  }
+  if (context?.task_summary?.policy !== "global_agent_owned_tasks_only") issues.push("global_context_task_boundary_missing");
+  for (const task of Array.isArray(context?.task_summary?.recent) ? context.task_summary.recent : []) {
+    for (const key of Object.keys(task || {})) if (!new Set(["id", "title", "status", "status_detail", "group_id", "target_project", "updated_at", "trace_id"]).has(key)) issues.push(`global_context_task_field_not_allowed:${key}`);
+    if (task?.group_session_id || task?.groupSessionId || task?.description || task?.content || task?.memory) issues.push("global_context_group_task_payload_present");
+  }
+  const manifestEntries = Array.isArray(context?.context_source_manifest?.entries) ? context.context_source_manifest.entries : [];
+  const expectedSources = ["global_agent_memory", "global_agent_session", "routing_directory", "global_task_state", "runtime_capability_directory"];
+  if (expectedSources.some(source => !manifestEntries.some((entry: any) => entry.source === source && entry.allowed === true))) issues.push("global_context_source_manifest_incomplete");
+  if (manifestEntries.some((entry: any) => !expectedSources.includes(String(entry?.source || "")))) issues.push("global_context_source_manifest_unknown_source");
+  if (manifestEntries.some((entry: any) => entry.allowed !== true)) issues.push("global_context_source_manifest_contains_unapproved_source");
+  const proof = context?.context_boundary_proof || {};
+  if (proof.schema !== "ccm-global-agent-context-boundary-proof-v1") issues.push("global_context_boundary_proof_schema_invalid");
+  const expectedChecksum = crypto.createHash("sha256").update(JSON.stringify(globalAgentContextProofPayload(context))).digest("hex");
+  if (String(proof.context_checksum || "") !== expectedChecksum) issues.push("global_context_boundary_checksum_invalid");
+  if (/\bgcs_[a-z0-9_-]+\b/i.test(JSON.stringify(context || {}))) issues.push("global_context_group_session_identifier_present");
+  return { schema: "ccm-global-agent-context-boundary-validation-v1", valid: issues.length === 0, issues, expectedChecksum };
+}
+
 function summarizeGlobalToolObservationForUser(observation: any, fallback = "操作已返回结果。") {
   if (!observation) return fallback;
   if (observation.success === false || observation.error) {
@@ -5032,64 +5085,15 @@ export function buildGlobalAgentGroupMemoryModelContext(bundle: any, options: an
 export function buildAgenticContext(query = "", sessionId = "", options: any = {}) {
   const tasks = loadTasks();
   const groups = Array.isArray(options.groups) ? options.groups : loadGroups();
-  const recordMaintenanceDelivery = !!sessionId || options.recordDelivery === true;
-  const maintenanceContextId = String(options.contextId || options.context_id || (sessionId
-    ? `global-agent-context:${sessionId}`
-    : `global-agent-context:${crypto.createHash("sha256").update(String(query || "status")).digest("hex").slice(0, 20)}`));
-  const maintenanceNotifications = groups
-    .map((group: any) => buildPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationContext(
-      String(group.id || ""),
-      "global-agent",
-      {
-        maxNotifications: 2,
-        at: options.at || options.now,
-        recordDelivery: recordMaintenanceDelivery,
-        contextId: maintenanceContextId,
-        consumerSessionId: sessionId || options.sessionId || options.session_id || "global-agent-internal-read",
-        channel: "global-agent-context",
-      },
-    ))
-    .filter((context: any) => context.pending_count > 0)
-    .slice(0, 8)
-    .map((context: any) => ({
-      group_id: context.group_id,
-      pending_count: context.pending_count,
-      notifications: context.notifications,
-      policy: context.policy,
-      advisory_only: true,
-      cross_group_authorization_allowed: false,
-    }));
-  const maintenanceDeliveryHealth = groups
-    .map((group: any) => inspectPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryHealth(
-      String(group.id || ""),
-      { at: options.at || options.now },
-    ))
-    .filter((health: any) => health.pending_count > 0 || health.invalid_delivery_count > 0)
-    .slice(0, 8)
-    .map((health: any) => ({
-      group_id: health.group_id,
-      pending_count: health.pending_count,
-      delivered_pending_count: health.delivered_pending_count,
-      unseen_pending_count: health.unseen_pending_count,
-      repeated_unseen_count: health.repeated_unseen_count,
-      invalid_delivery_count: health.invalid_delivery_count,
-      policy: health.policy,
-    }));
-  const cleanupCommitRepairContexts = groups
-    .map((group: any) => buildPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairContext(
-      String(group.id || ""),
-      "global-agent",
-      { limit: options.cleanupCommitRepairLimit || options.cleanup_commit_repair_limit || 2 },
-    ))
-    .filter((context: any) => context.brief_count > 0)
-    .slice(0, 8);
-  return {
+  const globalTasks = tasks.filter(isGlobalAgentOwnedTask);
+  const context: any = {
     projects: safeProjectRows(),
     groups: groups.map((group: any) => ({ id: group.id, name: group.name, members: (group.members || []).map((member: any) => ({ project: member.project, agent: member.agent })) })),
     task_summary: {
-      total: tasks.length,
-      active: tasks.filter((task: any) => ["pending", "queued", "in_progress", "running"].includes(String(task.status))).length,
-      recent: tasks.slice(-12).map(compactTask),
+      total: globalTasks.length,
+      active: globalTasks.filter((task: any) => ["pending", "queued", "in_progress", "running"].includes(String(task.status))).length,
+      recent: globalTasks.slice(-12).map(compactTask),
+      policy: "global_agent_owned_tasks_only",
     },
     cron_jobs: loadCronJobs().map((job: any) => ({ id: job.id, name: job.name, schedule: job.schedule, enabled: job.enabled !== false, target_type: job.target_type, group_id: job.group_id, project: job.project })),
     tools: {
@@ -5105,30 +5109,30 @@ export function buildAgenticContext(query = "", sessionId = "", options: any = {
       schema: "ccm-global-agent-memory-boundary-v1",
       policy: "global_memory_only_group_session_content_excluded",
       group_session_context_included: false,
+      group_memory_included: false,
+      project_memory_included: false,
       routing_directory_included: true,
+      global_task_state_included: true,
     },
-    conflict_resolution_maintenance_notifications: {
-      schema: "ccm-global-conflict-resolution-maintenance-notification-context-v1",
-      group_count: maintenanceNotifications.length,
-      groups: maintenanceNotifications,
-      policy: "bounded_advisory_only_no_cross_group_authorization_no_task_no_approval_no_delete",
-    },
-    conflict_resolution_maintenance_delivery_health: {
-      schema: "ccm-global-conflict-resolution-maintenance-delivery-health-v1",
-      group_count: maintenanceDeliveryHealth.length,
-      groups: maintenanceDeliveryHealth,
-      policy: "read_only_health_no_cross_group_authorization_no_task_no_approval_no_delete",
-    },
-    cleanup_commit_repair_context: {
-      schema: "ccm-global-cleanup-commit-repair-context-v1",
-      group_count: cleanupCommitRepairContexts.length,
-      groups: cleanupCommitRepairContexts,
-      can_claim_or_dispatch: false,
-      can_resolve_without_receipt: false,
-      cross_group_authorization_allowed: false,
-      policy: "visibility_only_group_scoped_no_claim_no_dispatch_no_resolution_no_task_no_approval_no_delete",
+    context_source_manifest: {
+      schema: "ccm-global-agent-context-source-manifest-v1",
+      entries: [
+        { source: "global_agent_memory", allowed: true },
+        { source: "global_agent_session", allowed: true },
+        { source: "routing_directory", allowed: true },
+        { source: "global_task_state", allowed: true },
+        { source: "runtime_capability_directory", allowed: true },
+      ],
     },
   };
+  context.context_boundary_proof = {
+    schema: "ccm-global-agent-context-boundary-proof-v1",
+    context_checksum: crypto.createHash("sha256").update(JSON.stringify(globalAgentContextProofPayload(context))).digest("hex"),
+    generated_at: new Date().toISOString(),
+  };
+  const validation = verifyGlobalAgentContextBoundary(context);
+  if (!validation.valid) throw new Error(`global agent context boundary failed: ${validation.issues.join(", ")}`);
+  return context;
 }
 
 function localActionToAgenticDecision(localIntent: LocalIntentResult | null, run: GlobalAgentRun): GlobalAgentDecision | null {
@@ -5304,13 +5308,17 @@ async function executeAgenticTool(baseUrl: string, ctx: CollabCtx, name: string,
         success: true,
         project,
         config: { work_dir: info.workDir || "", agent: info.agent || "claudecode", platform: info.platform || "" },
-        memory: buildProjectMemoryPacket(project, { workDir: info.workDir, query: run.user_message }),
+        memory_boundary: { project_memory_included: false, policy: "routing_metadata_only_delegate_to_group_main_agent" },
       };
     } else if (name === "list_groups") {
       observation = { success: true, groups: buildAgenticContext().groups };
     } else if (name === "list_tasks") {
-      const tasks = loadTasks().filter((task: any) => !args.id || task.id === args.id).filter((task: any) => !args.status || task.status === args.status);
-      observation = { success: true, tasks: tasks.slice(-50).map(compactTask) };
+      const tasks = loadTasks().filter(isGlobalAgentOwnedTask).filter((task: any) => !args.id || task.id === args.id).filter((task: any) => !args.status || task.status === args.status);
+      observation = {
+        success: true,
+        tasks: tasks.slice(-50).map(compactTask),
+        task_boundary: { schema: "ccm-global-agent-task-boundary-v1", policy: "global_agent_owned_tasks_only" },
+      };
     } else if (name === "list_cron") {
       observation = { success: true, jobs: buildAgenticContext().cron_jobs };
     } else if (name === "query_knowledge") {
@@ -5506,6 +5514,7 @@ function createAgenticRuntime(baseUrl: string, ctx: CollabCtx, input: { localInt
       return callGlobalModelWithRetry(config, messages);
     },
     getContext: (run) => buildAgenticContext(run.user_message, run.session_id),
+    verifyContextBoundary: context => verifyGlobalAgentContextBoundary(context),
     executeTool: (name, args, run) => {
       attachGlobalRunRequirementSources(run, input.sourceIngestion);
       return executeAgenticTool(baseUrl, ctx, name, args, run, input.onEvent);

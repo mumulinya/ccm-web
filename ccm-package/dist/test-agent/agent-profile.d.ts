@@ -7,5 +7,6 @@ export declare const TEST_AGENT_DEFINITION: {
     allowedCapabilities: string[];
     disallowedCapabilities: string[];
     reportSchema: string;
+    roleSkills: string[];
     systemPrompt: string;
 };

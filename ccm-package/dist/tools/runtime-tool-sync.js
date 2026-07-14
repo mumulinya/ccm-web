@@ -1643,7 +1643,9 @@ function resyncMissingRuntimeToolSnapshots(options = {}) {
     const limit = Math.max(1, Math.min(30, Number(options.missingLimit || options.limit || 20) || 20));
     const runtimeReadiness = Array.isArray(options.runtimeReadiness)
         ? options.runtimeReadiness
-        : listRecentRuntimeToolAudits(120).map(audit => probeRuntimeToolReadiness(audit, { record: false, catalog: options.catalog || {} }));
+        : listRecentRuntimeToolAudits(120)
+            .map(audit => probeRuntimeToolReadiness(audit, { record: false, catalog: options.catalog || {} }))
+            .filter(readiness => !!readiness.projectName || !!readiness.groupId);
     const groups = Array.isArray(options.groups) ? options.groups : (0, storage_1.loadGroups)();
     const projects = options.projects || (0, db_1.loadProjectConfigs)();
     const inventory = (0, tool_authorization_1.buildToolAuthorizationInventory)({
@@ -1737,7 +1739,10 @@ function resyncRecentRuntimeToolSnapshots(options = {}) {
     const requestedLimit = Number(options.limit || 30);
     const limit = Math.max(1, Math.min(50, Number.isFinite(requestedLimit) ? requestedLimit : 30));
     const staleOnly = options.staleOnly !== false;
-    const audits = Array.isArray(options.audits) ? options.audits : listRecentRuntimeToolAudits(Math.max(limit * 2, 30));
+    const requestedSnapshotIds = Array.isArray(options.snapshotIds) ? options.snapshotIds.filter(Boolean) : [];
+    const audits = Array.isArray(options.audits)
+        ? options.audits
+        : listRecentRuntimeToolAudits(requestedSnapshotIds.length ? 240 : Math.max(limit * 2, 30));
     const items = [];
     const seen = new Set();
     let scanned = 0;

@@ -36,6 +36,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.runGlobalAgentHistorySyncSelfTest = runGlobalAgentHistorySyncSelfTest;
 exports.runFeishuGlobalAgentSessionRoutingSelfTest = runFeishuGlobalAgentSessionRoutingSelfTest;
 exports.runGlobalAgentIntentSelfTest = runGlobalAgentIntentSelfTest;
+exports.verifyGlobalAgentContextBoundary = verifyGlobalAgentContextBoundary;
 exports.buildGlobalAgentGroupMemoryModelContext = buildGlobalAgentGroupMemoryModelContext;
 exports.buildAgenticContext = buildAgenticContext;
 exports.resumeGlobalAgentLoopsForServer = resumeGlobalAgentLoopsForServer;
@@ -57,13 +58,11 @@ const collaboration_1 = require("../collaboration/collaboration");
 const display_1 = require("../collaboration/display");
 const feishu_channel_1 = require("../collaboration/feishu-channel");
 const reliability_ledger_1 = require("../../system/reliability-ledger");
-const memory_1 = require("../../projects/memory");
 const worker_handoff_1 = require("../../agents/worker-handoff");
-const memory_2 = require("../collaboration/memory");
-const group_memory_index_1 = require("../collaboration/group-memory-index");
+const memory_1 = require("../collaboration/memory");
 const loop_1 = require("../../agents/global/loop");
 const mission_supervisor_1 = require("../../agents/global/mission-supervisor");
-const memory_3 = require("../../agents/global/memory");
+const memory_2 = require("../../agents/global/memory");
 const quality_center_1 = require("../../agents/quality-center");
 const test_agent_review_bridge_1 = require("../../agents/test-agent-review-bridge");
 const post_review_spot_check_1 = require("../../agents/post-review-spot-check");
@@ -829,7 +828,7 @@ function syncGlobalAgentWebHistory(payload) {
         if (!id)
             continue;
         try {
-            (0, memory_3.ingestGlobalAgentConversation)({ sessionId: id, source: "web", messages: session.messages || [] });
+            (0, memory_2.ingestGlobalAgentConversation)({ sessionId: id, source: "web", messages: session.messages || [] });
         }
         catch (error) {
             console.warn(`[全局记忆] Web 会话写入失败 (${id})：${error?.message || error}`);
@@ -869,7 +868,7 @@ function appendGlobalAgentConversationMessage(sessionId, role, content, source =
     }
     const message = { role, content, timestamp: new Date().toISOString(), source };
     try {
-        (0, memory_3.ingestGlobalAgentConversation)({ sessionId, source, messages: [message] });
+        (0, memory_2.ingestGlobalAgentConversation)({ sessionId, source, messages: [message] });
     }
     catch (error) {
         console.warn(`[全局记忆] 会话消息写入失败 (${sessionId})：${error?.message || error}`);
@@ -4669,6 +4668,83 @@ function compactTask(task) {
         trace_id: task.trace_id,
     };
 }
+function isGlobalAgentOwnedTask(task) {
+    const source = String(task?.source || task?.created_by || task?.createdBy || "").toLowerCase();
+    return !!String(task?.global_mission_id || task?.globalMissionId || task?.global_run_id || task?.globalRunId || task?.parent_run_id || task?.parentRunId || "").trim()
+        || source.includes("global-agent")
+        || source.includes("global_agent");
+}
+const GLOBAL_AGENT_CONTEXT_ALLOWED_KEYS = new Set([
+    "projects",
+    "groups",
+    "task_summary",
+    "cron_jobs",
+    "tools",
+    "global_memory",
+    "memory_context_boundary",
+    "context_source_manifest",
+    "context_boundary_proof",
+]);
+function globalAgentContextProofPayload(context = {}) {
+    const payload = { ...(context || {}) };
+    delete payload.context_boundary_proof;
+    return payload;
+}
+function verifyGlobalAgentContextBoundary(context = {}) {
+    const issues = [];
+    for (const key of Object.keys(context || {}))
+        if (!GLOBAL_AGENT_CONTEXT_ALLOWED_KEYS.has(key))
+            issues.push(`global_context_source_not_allowed:${key}`);
+    if (context?.memory_context_boundary?.group_session_context_included !== false)
+        issues.push("global_context_group_session_boundary_missing");
+    if (context?.memory_context_boundary?.project_memory_included !== false)
+        issues.push("global_context_project_memory_boundary_missing");
+    if (context?.memory_context_boundary?.group_memory_included !== false)
+        issues.push("global_context_group_memory_boundary_missing");
+    for (const group of Array.isArray(context?.groups) ? context.groups : []) {
+        for (const key of Object.keys(group || {}))
+            if (!new Set(["id", "name", "members"]).has(key))
+                issues.push(`global_context_group_directory_field_not_allowed:${key}`);
+        if (group?.group_session_id || group?.groupSessionId || group?.messages || group?.memory)
+            issues.push("global_context_group_session_payload_present");
+        for (const member of Array.isArray(group?.members) ? group.members : []) {
+            for (const key of Object.keys(member || {}))
+                if (!new Set(["project", "agent"]).has(key))
+                    issues.push(`global_context_group_member_field_not_allowed:${key}`);
+        }
+    }
+    for (const project of Array.isArray(context?.projects) ? context.projects : []) {
+        for (const key of Object.keys(project || {}))
+            if (!new Set(["name", "work_dir", "agent", "platform"]).has(key))
+                issues.push(`global_context_project_directory_field_not_allowed:${key}`);
+    }
+    if (context?.task_summary?.policy !== "global_agent_owned_tasks_only")
+        issues.push("global_context_task_boundary_missing");
+    for (const task of Array.isArray(context?.task_summary?.recent) ? context.task_summary.recent : []) {
+        for (const key of Object.keys(task || {}))
+            if (!new Set(["id", "title", "status", "status_detail", "group_id", "target_project", "updated_at", "trace_id"]).has(key))
+                issues.push(`global_context_task_field_not_allowed:${key}`);
+        if (task?.group_session_id || task?.groupSessionId || task?.description || task?.content || task?.memory)
+            issues.push("global_context_group_task_payload_present");
+    }
+    const manifestEntries = Array.isArray(context?.context_source_manifest?.entries) ? context.context_source_manifest.entries : [];
+    const expectedSources = ["global_agent_memory", "global_agent_session", "routing_directory", "global_task_state", "runtime_capability_directory"];
+    if (expectedSources.some(source => !manifestEntries.some((entry) => entry.source === source && entry.allowed === true)))
+        issues.push("global_context_source_manifest_incomplete");
+    if (manifestEntries.some((entry) => !expectedSources.includes(String(entry?.source || ""))))
+        issues.push("global_context_source_manifest_unknown_source");
+    if (manifestEntries.some((entry) => entry.allowed !== true))
+        issues.push("global_context_source_manifest_contains_unapproved_source");
+    const proof = context?.context_boundary_proof || {};
+    if (proof.schema !== "ccm-global-agent-context-boundary-proof-v1")
+        issues.push("global_context_boundary_proof_schema_invalid");
+    const expectedChecksum = crypto.createHash("sha256").update(JSON.stringify(globalAgentContextProofPayload(context))).digest("hex");
+    if (String(proof.context_checksum || "") !== expectedChecksum)
+        issues.push("global_context_boundary_checksum_invalid");
+    if (/\bgcs_[a-z0-9_-]+\b/i.test(JSON.stringify(context || {})))
+        issues.push("global_context_group_session_identifier_present");
+    return { schema: "ccm-global-agent-context-boundary-validation-v1", valid: issues.length === 0, issues, expectedChecksum };
+}
 function summarizeGlobalToolObservationForUser(observation, fallback = "操作已返回结果。") {
     if (!observation)
         return fallback;
@@ -4696,7 +4772,7 @@ function buildGlobalAgentGroupMemoryModelContext(bundle, options = {}) {
     const maxChars = Math.max(4_000, Math.min(24_000, Number(options.maxChars || options.max_chars || 12_000)));
     const sourceText = typeof bundle === "string"
         ? bundle
-        : String(bundle?.rendered_text || (0, memory_2.renderGlobalGroupMemoryContextBundle)(bundle) || "");
+        : String(bundle?.rendered_text || (0, memory_1.renderGlobalGroupMemoryContextBundle)(bundle) || "");
     const truncated = sourceText.length > maxChars;
     const renderedText = truncated
         ? `${sourceText.slice(0, Math.max(0, maxChars - 56)).trimEnd()}\n[群聊记忆摘要已按模型上下文预算截断]`
@@ -4732,60 +4808,22 @@ function buildGlobalAgentGroupMemoryModelContext(bundle, options = {}) {
 function buildAgenticContext(query = "", sessionId = "", options = {}) {
     const tasks = (0, db_1.loadTasks)();
     const groups = Array.isArray(options.groups) ? options.groups : (0, collaboration_1.loadGroups)();
-    const recordMaintenanceDelivery = !!sessionId || options.recordDelivery === true;
-    const maintenanceContextId = String(options.contextId || options.context_id || (sessionId
-        ? `global-agent-context:${sessionId}`
-        : `global-agent-context:${crypto.createHash("sha256").update(String(query || "status")).digest("hex").slice(0, 20)}`));
-    const maintenanceNotifications = groups
-        .map((group) => (0, group_memory_index_1.buildPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationContext)(String(group.id || ""), "global-agent", {
-        maxNotifications: 2,
-        at: options.at || options.now,
-        recordDelivery: recordMaintenanceDelivery,
-        contextId: maintenanceContextId,
-        consumerSessionId: sessionId || options.sessionId || options.session_id || "global-agent-internal-read",
-        channel: "global-agent-context",
-    }))
-        .filter((context) => context.pending_count > 0)
-        .slice(0, 8)
-        .map((context) => ({
-        group_id: context.group_id,
-        pending_count: context.pending_count,
-        notifications: context.notifications,
-        policy: context.policy,
-        advisory_only: true,
-        cross_group_authorization_allowed: false,
-    }));
-    const maintenanceDeliveryHealth = groups
-        .map((group) => (0, group_memory_index_1.inspectPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryHealth)(String(group.id || ""), { at: options.at || options.now }))
-        .filter((health) => health.pending_count > 0 || health.invalid_delivery_count > 0)
-        .slice(0, 8)
-        .map((health) => ({
-        group_id: health.group_id,
-        pending_count: health.pending_count,
-        delivered_pending_count: health.delivered_pending_count,
-        unseen_pending_count: health.unseen_pending_count,
-        repeated_unseen_count: health.repeated_unseen_count,
-        invalid_delivery_count: health.invalid_delivery_count,
-        policy: health.policy,
-    }));
-    const cleanupCommitRepairContexts = groups
-        .map((group) => (0, group_memory_index_1.buildPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairContext)(String(group.id || ""), "global-agent", { limit: options.cleanupCommitRepairLimit || options.cleanup_commit_repair_limit || 2 }))
-        .filter((context) => context.brief_count > 0)
-        .slice(0, 8);
-    return {
+    const globalTasks = tasks.filter(isGlobalAgentOwnedTask);
+    const context = {
         projects: safeProjectRows(),
         groups: groups.map((group) => ({ id: group.id, name: group.name, members: (group.members || []).map((member) => ({ project: member.project, agent: member.agent })) })),
         task_summary: {
-            total: tasks.length,
-            active: tasks.filter((task) => ["pending", "queued", "in_progress", "running"].includes(String(task.status))).length,
-            recent: tasks.slice(-12).map(compactTask),
+            total: globalTasks.length,
+            active: globalTasks.filter((task) => ["pending", "queued", "in_progress", "running"].includes(String(task.status))).length,
+            recent: globalTasks.slice(-12).map(compactTask),
+            policy: "global_agent_owned_tasks_only",
         },
         cron_jobs: (0, db_1.loadCronJobs)().map((job) => ({ id: job.id, name: job.name, schedule: job.schedule, enabled: job.enabled !== false, target_type: job.target_type, group_id: job.group_id, project: job.project })),
         tools: {
             mcp: (0, db_1.loadMcpTools)().map((tool) => tool.name),
             skills: (0, db_1.loadSkills)().map((skill) => skill.name),
         },
-        global_memory: query ? (0, memory_3.buildGlobalAgentMemoryPacket)(query, {
+        global_memory: query ? (0, memory_2.buildGlobalAgentMemoryPacket)(query, {
             sessionId,
             limit: 7,
             recordMetric: options.recordMemoryMetric !== false && options.record_memory_metric !== false,
@@ -4794,30 +4832,31 @@ function buildAgenticContext(query = "", sessionId = "", options = {}) {
             schema: "ccm-global-agent-memory-boundary-v1",
             policy: "global_memory_only_group_session_content_excluded",
             group_session_context_included: false,
+            group_memory_included: false,
+            project_memory_included: false,
             routing_directory_included: true,
+            global_task_state_included: true,
         },
-        conflict_resolution_maintenance_notifications: {
-            schema: "ccm-global-conflict-resolution-maintenance-notification-context-v1",
-            group_count: maintenanceNotifications.length,
-            groups: maintenanceNotifications,
-            policy: "bounded_advisory_only_no_cross_group_authorization_no_task_no_approval_no_delete",
-        },
-        conflict_resolution_maintenance_delivery_health: {
-            schema: "ccm-global-conflict-resolution-maintenance-delivery-health-v1",
-            group_count: maintenanceDeliveryHealth.length,
-            groups: maintenanceDeliveryHealth,
-            policy: "read_only_health_no_cross_group_authorization_no_task_no_approval_no_delete",
-        },
-        cleanup_commit_repair_context: {
-            schema: "ccm-global-cleanup-commit-repair-context-v1",
-            group_count: cleanupCommitRepairContexts.length,
-            groups: cleanupCommitRepairContexts,
-            can_claim_or_dispatch: false,
-            can_resolve_without_receipt: false,
-            cross_group_authorization_allowed: false,
-            policy: "visibility_only_group_scoped_no_claim_no_dispatch_no_resolution_no_task_no_approval_no_delete",
+        context_source_manifest: {
+            schema: "ccm-global-agent-context-source-manifest-v1",
+            entries: [
+                { source: "global_agent_memory", allowed: true },
+                { source: "global_agent_session", allowed: true },
+                { source: "routing_directory", allowed: true },
+                { source: "global_task_state", allowed: true },
+                { source: "runtime_capability_directory", allowed: true },
+            ],
         },
     };
+    context.context_boundary_proof = {
+        schema: "ccm-global-agent-context-boundary-proof-v1",
+        context_checksum: crypto.createHash("sha256").update(JSON.stringify(globalAgentContextProofPayload(context))).digest("hex"),
+        generated_at: new Date().toISOString(),
+    };
+    const validation = verifyGlobalAgentContextBoundary(context);
+    if (!validation.valid)
+        throw new Error(`global agent context boundary failed: ${validation.issues.join(", ")}`);
+    return context;
 }
 function localActionToAgenticDecision(localIntent, run) {
     if (run.steps.length > 0) {
@@ -4873,7 +4912,7 @@ function createMissionSupervisorRuntime(ctx) {
         controlMission: (missionId, operation, payload) => (0, collaboration_1.controlGlobalDevelopmentMission)(missionId, operation, ctx, payload),
         onCompleted: async (record, report) => {
             const formatted = (0, mission_supervisor_1.formatGlobalMissionFinalReport)(report);
-            (0, memory_3.recordGlobalMissionMemory)({ missionId: record.mission_id, sessionId: record.session_id, traceId: record.trace_id, source: record.source, status: "completed", report });
+            (0, memory_2.recordGlobalMissionMemory)({ missionId: record.mission_id, sessionId: record.session_id, traceId: record.trace_id, source: record.source, status: "completed", report });
             if (record.global_run_id)
                 (0, loop_1.completeGlobalAgentSupervision)(record.global_run_id, { ...report, formatted }, "completed");
             if (/feishu/i.test(record.source)) {
@@ -4886,7 +4925,7 @@ function createMissionSupervisorRuntime(ctx) {
         },
         onProgress: async (record, event) => {
             if (event?.type === "waiting_user")
-                (0, memory_3.recordGlobalMissionMemory)({ missionId: record.mission_id, sessionId: record.session_id, traceId: record.trace_id, source: record.source, status: "waiting_user", report: { summary: `全局任务等待人工处理`, remaining_items: (event.items || []).map((item) => item.reason || item.task_id) } });
+                (0, memory_2.recordGlobalMissionMemory)({ missionId: record.mission_id, sessionId: record.session_id, traceId: record.trace_id, source: record.source, status: "waiting_user", report: { summary: `全局任务等待人工处理`, remaining_items: (event.items || []).map((item) => item.reason || item.task_id) } });
             if (record.global_run_id && event?.type === "waiting_user")
                 (0, loop_1.updateGlobalAgentSupervisionState)(record.global_run_id, "waiting_user");
             if (!/feishu/i.test(record.source))
@@ -4921,7 +4960,7 @@ function createMissionSupervisorRuntime(ctx) {
             }
         },
         onTerminal: async (record, outcome, report) => {
-            (0, memory_3.recordGlobalMissionMemory)({ missionId: record.mission_id, sessionId: record.session_id, traceId: record.trace_id, source: record.source, status: outcome, report });
+            (0, memory_2.recordGlobalMissionMemory)({ missionId: record.mission_id, sessionId: record.session_id, traceId: record.trace_id, source: record.source, status: outcome, report });
             if (record.global_run_id)
                 (0, loop_1.completeGlobalAgentSupervision)(record.global_run_id, report, outcome);
             if (/feishu/i.test(record.source)) {
@@ -5004,15 +5043,19 @@ async function executeAgenticTool(baseUrl, ctx, name, args, run, onEvent) {
                 success: true,
                 project,
                 config: { work_dir: info.workDir || "", agent: info.agent || "claudecode", platform: info.platform || "" },
-                memory: (0, memory_1.buildProjectMemoryPacket)(project, { workDir: info.workDir, query: run.user_message }),
+                memory_boundary: { project_memory_included: false, policy: "routing_metadata_only_delegate_to_group_main_agent" },
             };
         }
         else if (name === "list_groups") {
             observation = { success: true, groups: buildAgenticContext().groups };
         }
         else if (name === "list_tasks") {
-            const tasks = (0, db_1.loadTasks)().filter((task) => !args.id || task.id === args.id).filter((task) => !args.status || task.status === args.status);
-            observation = { success: true, tasks: tasks.slice(-50).map(compactTask) };
+            const tasks = (0, db_1.loadTasks)().filter(isGlobalAgentOwnedTask).filter((task) => !args.id || task.id === args.id).filter((task) => !args.status || task.status === args.status);
+            observation = {
+                success: true,
+                tasks: tasks.slice(-50).map(compactTask),
+                task_boundary: { schema: "ccm-global-agent-task-boundary-v1", policy: "global_agent_owned_tasks_only" },
+            };
         }
         else if (name === "list_cron") {
             observation = { success: true, jobs: buildAgenticContext().cron_jobs };
@@ -5021,23 +5064,23 @@ async function executeAgenticTool(baseUrl, ctx, name, args, run, onEvent) {
             observation = { success: true, query: args.query, content: (0, rag_1.queryKnowledgeBase)(String(args.query || "")) || "未检索到相关知识" };
         }
         else if (name === "query_global_memory") {
-            observation = { success: true, query: args.query, ...(0, memory_3.recallGlobalAgentMemory)(String(args.query || ""), { sessionId: run.session_id, limit: Number(args.limit || 8) }) };
+            observation = { success: true, query: args.query, ...(0, memory_2.recallGlobalAgentMemory)(String(args.query || ""), { sessionId: run.session_id, limit: Number(args.limit || 8) }) };
         }
         else if (name === "manage_global_memory") {
             const operation = String(args.operation || "").toLowerCase();
             if (operation !== "status" && !String(args.reason || "").trim())
                 throw new Error("全局记忆变更操作必须说明原因");
             if (operation === "compact") {
-                observation = { success: true, operation, sessions: (0, memory_3.loadGlobalAgentMemory)().sessions.map((session) => (0, memory_3.compactGlobalAgentSession)(session.sessionId, { force: true, reason: args.reason })) };
+                observation = { success: true, operation, sessions: (0, memory_2.loadGlobalAgentMemory)().sessions.map((session) => (0, memory_2.compactGlobalAgentSession)(session.sessionId, { force: true, reason: args.reason })) };
             }
             else if (operation === "rebuild") {
-                observation = { success: true, operation, memory: (0, memory_3.rebuildGlobalAgentMemory)(args.reason, "global-agent") };
+                observation = { success: true, operation, memory: (0, memory_2.rebuildGlobalAgentMemory)(args.reason, "global-agent") };
             }
             else if (["enable", "disable"].includes(operation)) {
-                observation = { success: true, operation, policy: (0, memory_3.setGlobalAgentMemoryPolicy)({ disabled: operation === "disable", reason: args.reason, actor: "global-agent" }) };
+                observation = { success: true, operation, policy: (0, memory_2.setGlobalAgentMemoryPolicy)({ disabled: operation === "disable", reason: args.reason, actor: "global-agent" }) };
             }
             else if (operation === "status") {
-                observation = { success: true, operation, policy: (0, memory_3.getGlobalAgentMemoryPolicy)(), memory: (0, memory_3.loadGlobalAgentMemory)() };
+                observation = { success: true, operation, policy: (0, memory_2.getGlobalAgentMemoryPolicy)(), memory: (0, memory_2.loadGlobalAgentMemory)() };
             }
             else
                 throw new Error(`不支持的全局记忆操作：${operation}`);
@@ -5235,6 +5278,7 @@ function createAgenticRuntime(baseUrl, ctx, input = {}) {
             return callGlobalModelWithRetry(config, messages);
         },
         getContext: (run) => buildAgenticContext(run.user_message, run.session_id),
+        verifyContextBoundary: context => verifyGlobalAgentContextBoundary(context),
         executeTool: (name, args, run) => {
             attachGlobalRunRequirementSources(run, input.sourceIngestion);
             return executeAgenticTool(baseUrl, ctx, name, args, run, input.onEvent);
@@ -5256,7 +5300,7 @@ async function runAgenticGlobalRequest(baseUrl, ctx, input) {
     const sessionId = input.sessionId || "default";
     if (!/feishu/i.test(input.source || "")) {
         try {
-            (0, memory_3.ingestGlobalAgentConversation)({ sessionId, source: input.source || "web", messages: [...(input.history || []), { role: "user", content: input.message, timestamp: new Date().toISOString(), trace_id: input.traceId }] });
+            (0, memory_2.ingestGlobalAgentConversation)({ sessionId, source: input.source || "web", messages: [...(input.history || []), { role: "user", content: input.message, timestamp: new Date().toISOString(), trace_id: input.traceId }] });
         }
         catch (error) {
             console.warn(`[全局记忆] Agentic 请求写入失败：${error?.message || error}`);
@@ -5293,7 +5337,7 @@ async function runAgenticGlobalRequest(baseUrl, ctx, input) {
     attachGlobalRunRequirementSources(run, input.sourceIngestion);
     if (!/feishu/i.test(input.source || "")) {
         try {
-            (0, memory_3.ingestGlobalAgentConversation)({
+            (0, memory_2.ingestGlobalAgentConversation)({
                 sessionId,
                 source: input.source || "web",
                 messages: [{
@@ -5329,7 +5373,7 @@ function bootstrapGlobalAgentMemoryForServer() {
     const results = [];
     for (const session of store.sessions || []) {
         try {
-            results.push((0, memory_3.ingestGlobalAgentConversation)({ sessionId: session.id, source: session.source || "history-migration", messages: session.messages || [] }));
+            results.push((0, memory_2.ingestGlobalAgentConversation)({ sessionId: session.id, source: session.source || "history-migration", messages: session.messages || [] }));
         }
         catch (error) {
             results.push({ sessionId: session.id, error: error?.message || String(error) });
@@ -5880,7 +5924,7 @@ function handleGlobalAgentApi(pathname, req, res, parsed, ctx) {
                 }
                 const userSupplement = String(payload.message || payload.followup || "").trim();
                 if (operation === "update_goal" && userSupplement && supervisor.session_id) {
-                    (0, memory_3.ingestGlobalAgentConversation)({
+                    (0, memory_2.ingestGlobalAgentConversation)({
                         sessionId: supervisor.session_id,
                         source: payload.source || "global_mission_user_input",
                         messages: [{
@@ -5932,7 +5976,7 @@ function handleGlobalAgentApi(pathname, req, res, parsed, ctx) {
         const query = String(parsed.query.query || parsed.query.q || "").trim();
         (0, utils_1.sendJson)(res, {
             success: true,
-            group_memory_context: (0, memory_2.buildGlobalGroupMemoryContext)(query, {
+            group_memory_context: (0, memory_1.buildGlobalGroupMemoryContext)(query, {
                 sessionId: String(parsed.query.session_id || parsed.query.sessionId || ""),
                 maxGroups: Number(parsed.query.max_groups || parsed.query.maxGroups || 8),
                 maxTypedMemory: Number(parsed.query.max_typed_memory || parsed.query.maxTypedMemory || 4),
@@ -5941,7 +5985,7 @@ function handleGlobalAgentApi(pathname, req, res, parsed, ctx) {
         return true;
     }
     if (pathname === "/api/global-agent/group-memory/self-test" && req.method === "GET") {
-        const result = (0, memory_2.runGlobalGroupMemoryContextSelfTest)();
+        const result = (0, memory_1.runGlobalGroupMemoryContextSelfTest)();
         (0, utils_1.sendJson)(res, { success: result.pass, result }, result.pass ? 200 : 500);
         return true;
     }
@@ -6187,7 +6231,7 @@ function handleGlobalAgentApi(pathname, req, res, parsed, ctx) {
                         continuationSummary: supervisor.last_continuation || null,
                     });
                     try {
-                        (0, memory_3.ingestGlobalAgentConversation)({
+                        (0, memory_2.ingestGlobalAgentConversation)({
                             sessionId: result.run.session_id,
                             source,
                             messages: [{
@@ -6229,7 +6273,7 @@ function handleGlobalAgentApi(pathname, req, res, parsed, ctx) {
                     requestId: payload.request_id || payload.requestId || "",
                 });
                 try {
-                    (0, memory_3.ingestGlobalAgentConversation)({
+                    (0, memory_2.ingestGlobalAgentConversation)({
                         sessionId: result.run.session_id,
                         source: payload.source || "global_web_mid_turn",
                         messages: [{
@@ -6379,7 +6423,7 @@ function handleGlobalAgentApi(pathname, req, res, parsed, ctx) {
                     const reply = formatMissionStatus();
                     const result = buildPublicGlobalStatusRun({ message, reply, sessionId, source: "web", traceId: operation?.traceId });
                     try {
-                        (0, memory_3.ingestGlobalAgentConversation)({
+                        (0, memory_2.ingestGlobalAgentConversation)({
                             sessionId,
                             source: "web",
                             messages: [
@@ -6517,7 +6561,7 @@ function handleGlobalAgentApi(pathname, req, res, parsed, ctx) {
                     const reply = formatMissionStatus();
                     const result = buildPublicGlobalStatusRun({ message, reply, sessionId, source: "legacy-chat-proxy" });
                     try {
-                        (0, memory_3.ingestGlobalAgentConversation)({
+                        (0, memory_2.ingestGlobalAgentConversation)({
                             sessionId,
                             source: "legacy-chat-proxy",
                             messages: [

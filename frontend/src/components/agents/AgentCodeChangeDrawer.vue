@@ -414,14 +414,14 @@ watch([selectedFile, mode], () => {
 :deep(.hl-string) { color: #fde68a; }
 :deep(.hl-number) { color: #c4b5fd; }
 :deep(.hl-match) { background: #facc15; color: #111827; border-radius: 3px; }
-:global([data-theme="dark"]) .code-drawer { background: #0f172a; color: #e2e8f0; }
-:global([data-theme="dark"]) .code-drawer-head,
-:global([data-theme="dark"]) .drawer-files,
-:global([data-theme="dark"]) .diff-toolbar { background: #111827; border-color: rgba(148, 163, 184, .2); }
-:global([data-theme="dark"]) .drawer-summary { background: #1e293b; border-color: rgba(148, 163, 184, .2); }
-:global([data-theme="dark"]) .drawer-files button.active { background: rgba(37, 99, 235, .22); border-color: rgba(96, 165, 250, .5); }
-:global([data-theme="dark"]) .diff-actions input,
-:global([data-theme="dark"]) .diff-actions button { background: #0f172a; border-color: rgba(148, 163, 184, .3); color: #e2e8f0; }
+:global([data-theme="dark"] .code-drawer){ background: #0f172a; color: #e2e8f0; }
+:global([data-theme="dark"] .code-drawer-head),
+:global([data-theme="dark"] .drawer-files),
+:global([data-theme="dark"] .diff-toolbar){ background: #111827; border-color: rgba(148, 163, 184, .2); }
+:global([data-theme="dark"] .drawer-summary){ background: #1e293b; border-color: rgba(148, 163, 184, .2); }
+:global([data-theme="dark"] .drawer-files button.active){ background: rgba(37, 99, 235, .22); border-color: rgba(96, 165, 250, .5); }
+:global([data-theme="dark"] .diff-actions input),
+:global([data-theme="dark"] .diff-actions button){ background: #0f172a; border-color: rgba(148, 163, 184, .3); color: #e2e8f0; }
 @media (max-width: 820px) {
   .drawer-body { grid-template-columns: 1fr; }
   .drawer-files { max-height: 220px; border-right: 0; border-bottom: 1px solid #e2e8f0; }

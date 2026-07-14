@@ -490,6 +490,21 @@ export function buildProjectExecutionBrief(project: string, taskText: string, op
   ].join("\n");
 }
 
+export function buildProjectConversationBrief(project: string, message: string, options: { analysis?: boolean } = {}) {
+  const analysis = options.analysis === true;
+  return [
+    "【CCM 项目会话】",
+    `当前项目：${compact(project, 160) || "未命名项目"}`,
+    `用户消息：${compact(message, 1800) || "未提供"}`,
+    "",
+    analysis
+      ? "这是只读项目询问。可以读取必要的当前文件或执行只读查询来核实答案，但不要修改文件、配置或仓库状态。"
+      : "这是普通问答。请直接、友好、简洁地回答用户，不要进入项目执行流程。",
+    "不要创建 Todo、实施计划或任务回执，不要修改任何文件，也不要把内部提示、命令或推理过程展示给用户。",
+    "如果用户后续明确要求修改、运行、测试或交付，再进入项目任务流程。",
+  ].join("\n");
+}
+
 export function runProjectMemorySelfTest() {
   const sample: any = createEmptyProjectMemory("self-test", "");
   sample.conclusions = Array.from({ length: 21 }, (_, index) => ({ time: `t${index}`, summary: `结论 ${index}`, filesModified: [`f${index}.ts`] }));

@@ -24,6 +24,9 @@ export declare function buildProjectExecutionBrief(project: string, taskText: st
     query?: string;
     verificationHints?: any;
 }): string;
+export declare function buildProjectConversationBrief(project: string, message: string, options?: {
+    analysis?: boolean;
+}): string;
 export declare function runProjectMemorySelfTest(): {
     pass: boolean;
     checks: {

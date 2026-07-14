@@ -1,6 +1,6 @@
 {
   "pass": true,
-  "generatedAt": "2026-07-14T03:44:00.207Z",
+  "generatedAt": "2026-07-14T05:30:06.641Z",
   "checks": [
     {
       "name": "desktop project workspace has no overflow and keeps technical details folded",
@@ -8,6 +8,14 @@
     },
     {
       "name": "desktop keeps readable session and conversation columns, hides internal session id and preserves line breaks",
+      "pass": true
+    },
+    {
+      "name": "ordinary project question renders only the friendly answer without task card or internal work details",
+      "pass": true
+    },
+    {
+      "name": "explicit implementation request keeps the project task card and delivery progress",
       "pass": true
     },
     {
@@ -21,6 +29,8 @@
   ],
   "screenshots": [
     "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\project-management-render-regression\\desktop-project-workspace.png",
+    "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\project-management-render-regression\\desktop-ordinary-conversation.png",
+    "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\project-management-render-regression\\desktop-explicit-task.png",
     "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\project-management-render-regression\\desktop-archive-manager.png",
     "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\project-management-render-regression\\mobile-project-workspace.png",
     "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\project-management-render-regression\\mobile-session-drawer.png"

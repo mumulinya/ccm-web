@@ -310,11 +310,11 @@ onUnmounted(() => {
   color: #a8b0bd;
 }
 
-:global([data-theme="dark"]) .msg-nav-line { background: rgba(203, 213, 225, 0.34); }
-:global([data-theme="dark"]) .msg-nav-marker.complete .msg-nav-line { background: rgba(226, 232, 240, 0.44); }
-:global([data-theme="dark"]) .msg-nav-marker:hover .msg-nav-line,
-:global([data-theme="dark"]) .msg-nav-marker:focus-visible .msg-nav-line { background: rgba(248, 250, 252, 0.72); }
-:global([data-theme="dark"]) .msg-nav-marker.active .msg-nav-line { background: #f8fafc; }
+:global([data-theme="dark"] .msg-nav-line){ background: rgba(203, 213, 225, 0.34); }
+:global([data-theme="dark"] .msg-nav-marker.complete .msg-nav-line){ background: rgba(226, 232, 240, 0.44); }
+:global([data-theme="dark"] .msg-nav-marker:hover .msg-nav-line),
+:global([data-theme="dark"] .msg-nav-marker:focus-visible .msg-nav-line){ background: rgba(248, 250, 252, 0.72); }
+:global([data-theme="dark"] .msg-nav-marker.active .msg-nav-line){ background: #f8fafc; }
 
 @media (max-width: 720px) {
   .msg-navigator { left: 5px; width: 29px; max-height: min(260px, calc(100% - 100px)); }

@@ -24,6 +24,7 @@ import {
   loadProjectConfigs,
   AGENTS
 } from "../../core/db";
+import { buildSelectedSkillUsageDirective, selectRoleSkills } from "../../skills/role-skills";
 import {
   buildCodedCoordinatorSummary,
   buildCoordinatorCollaborationInstructions,
@@ -55,6 +56,7 @@ import {
 import {
   appendWorkerLedger,
   buildAgentMemoryContextBundle,
+  buildAgentMemoryContextBundleWithManifestSelection,
   buildAgentMemoryPacket,
   buildGroupContextPacket,
   buildGroupMemoryContext,
@@ -83,6 +85,7 @@ import {
   configureGroupSessionMemoryModelExecutor,
 } from "./group-session-memory-model-extraction";
 import {
+  configureGroupTypedMemoryManifestSelector,
   recordGroupTypedMemoryConsumptionLedger,
   recordGroupTypedMemoryStaleCandidates,
   readGroupTypedMemoryPressureRecallUsageLedger,
@@ -15116,7 +15119,7 @@ async function processCrossAgents(
       invocationKind: memoryDeliveryAttemptSequence > 1 ? "resume" : "spawn",
       branchKind: "main",
     }) : null;
-    let groupMemoryBundle = buildAgentMemoryContextBundle(groupId, targetName, childTaskText, {
+    let groupMemoryBundle = await buildAgentMemoryContextBundleWithManifestSelection(groupId, targetName, childTaskText, {
       taskId,
       traceId: sourceTask?.trace_id || "",
       executionId: laneExecutionId,
@@ -15246,7 +15249,7 @@ async function processCrossAgents(
       ? { prompt: "\n[TestAgent 原生复核]\n- 当前请求由 CCM TestAgent 原生 runner 执行，只读取工作单并运行验证，不注入第三方 Agent 工具。\n", allowedTools: { mcp: [], skill: [] }, toolAudit: null, authorizationReadiness: null }
       : advisoryOnly
       ? { prompt: "\n[Agent 问答权限隔离]\n- 当前请求仅允许提供只读建议，不注入任何额外 MCP 或 Skill。\n", allowedTools: { mcp: [], skill: [] }, toolAudit: null, authorizationReadiness: null }
-      : buildAgentToolContext(ctx, group, targetName);
+      : buildAgentToolContext(ctx, group, targetName, childTaskText);
     let runtimeToolContext = nativeTestAgentDispatch
       ? buildNativeTestAgentRuntimeToolContext(targetName, tWorkDir)
       : prepareAgentRuntimeTools(groupId, targetName, tWorkDir, tAgentType, toolContext.allowedTools, streamRes, { taskId, task: sourceTask, toolAudit: toolContext.toolAudit, authorizationReadiness: toolContext.authorizationReadiness });
@@ -15962,7 +15965,7 @@ ${childTaskText}
             retryOfInvocationEdgeId: previousInvocationEdge?.invocation_edge_id || "",
             forkReason: sameRuntimeResume ? "native_session_recovery" : `${previousRuntime}_to_${activeRuntime}`,
           }) : null;
-          groupMemoryBundle = buildAgentMemoryContextBundle(groupId, targetName, childTaskText, {
+          groupMemoryBundle = await buildAgentMemoryContextBundleWithManifestSelection(groupId, targetName, childTaskText, {
             taskId,
             traceId: sourceTask?.trace_id || "",
             executionId: laneExecutionId,
@@ -17083,7 +17086,7 @@ async function resumeAgentQaFromStoredContinuation(qa: any, group: any, ctx: Col
   const workDir = String(continuation.source_work_dir || runtime?.workDir || "").trim();
   const agentType = String(continuation.source_agent_type || runtime?.agentType || "claudecode").trim();
   if (!workDir) return { resumed: false, reason: "缺少原 Agent 工作目录，无法安全续跑" };
-  const toolContext = buildAgentToolContext(ctx, group, qa.from_agent);
+    const toolContext = buildAgentToolContext(ctx, group, qa.from_agent, `${continuation.original_prompt || ""}\n${qa.question || ""}\n${qa.answer || ""}`);
   const resumedAllowedTools = continuation.allowed_tools || toolContext.allowedTools;
   const resumedToolOptions = continuation.allowed_tools
     ? { taskId: qa.task_id }
@@ -22143,7 +22146,7 @@ async function executeTask(task: any, ctx: CollabCtx) {
     let workDir = info[0]?.workDir;
     const agentType = info[0]?.agent || "claudecode";
 
-    const toolContext = buildAgentToolContext(ctx, null, task.target_project);
+    const toolContext = buildAgentToolContext(ctx, null, task.target_project, `${task.title || ""}\n${task.description || ""}\n${task.acceptance_criteria || ""}`);
     const preparedWorkDir = prepareChildAgentWorkDir(workDir, {
       mode: getChildAgentIsolationMode(null, task),
       taskId: task.id,
@@ -22232,7 +22235,7 @@ async function executeTask(task: any, ctx: CollabCtx) {
       branchKind: "main",
     }) : null;
     const directGroupMemoryContext = task.group_id
-      ? buildAgentMemoryContextBundle(task.group_id, task.target_project, directTaskText, {
+      ? await buildAgentMemoryContextBundleWithManifestSelection(task.group_id, task.target_project, directTaskText, {
         taskId: task.id,
         traceId: task.trace_id || "",
         agentType,
@@ -27286,12 +27289,26 @@ function collectProjectPolicyViolations(actualFileChanges: any[] = [], evidenceE
   return violations;
 }
 
-function buildAgentToolContext(ctx: CollabCtx, group: any, projectName: string) {
-  const allowedTools = normalizeToolAuthorization(mergeToolSelections(group?.tools || {}, getProjectToolSelection(projectName)));
-  const prompt = ctx.toolManager.buildToolPrompt(allowedTools);
+function buildAgentToolContext(ctx: CollabCtx, group: any, projectName: string, taskText = "") {
+  const selectedRoleSkills = selectRoleSkills("project-child-agent", taskText, { forceWork: true, phase: "execution" });
+  const allowedTools = normalizeToolAuthorization(mergeToolSelections(
+    group?.tools || {},
+    getProjectToolSelection(projectName),
+    { skill: selectedRoleSkills.map(skill => skill.name) },
+  ));
+  const prompt = [
+    buildSelectedSkillUsageDirective(selectedRoleSkills),
+    ctx.toolManager.buildToolPrompt(allowedTools),
+  ].filter(Boolean).join("\n\n");
   const toolAudit = typeof ctx.toolManager.buildScopeAudit === "function" ? ctx.toolManager.buildScopeAudit(allowedTools) : null;
   const authorizationReadiness = buildAuthorizationReadiness(toolAudit, allowedTools);
-  return { prompt, allowedTools, toolAudit, authorizationReadiness };
+  return {
+    prompt,
+    allowedTools,
+    toolAudit,
+    authorizationReadiness,
+    selectedRoleSkills: selectedRoleSkills.map(skill => ({ name: skill.name, kind: skill.kind, reason: skill.reason })),
+  };
 }
 
 function mergeRuntimeToolManagerAudit(audit: any, toolAudit: any) {
@@ -30241,6 +30258,71 @@ export function handleCollaborationApi(
       model: String(executionMetadata.nativeModelCapabilityReceipt?.model || executionMetadata.nativeModelCapabilityRecord?.entry?.model || ""),
     };
   });
+  configureGroupTypedMemoryManifestSelector(async (request: any) => {
+    const group = loadGroups().find((item: any) => String(item?.id || "") === String(request.groupId || ""));
+    if (!group) throw new Error("typed_memory_manifest_selector_group_not_found");
+    const coordinator = getCoordinatorMember(group);
+    const candidates = [coordinator, ...getRoutableMembers(group)].filter(Boolean);
+    const configs = getConfigs();
+    let selected: any = null;
+    let config: any = null;
+    for (const candidate of candidates) {
+      const match = configs.find((item: any) => item.name === candidate.project);
+      if (!match) continue;
+      selected = candidate;
+      config = match;
+      break;
+    }
+    if (!selected || !config) throw new Error("typed_memory_manifest_selector_executor_not_configured");
+    const info = getConfigInfo(config.path);
+    const agentType = String(info[0]?.agent || selected.agent || "claudecode");
+    const sandbox = path.join(
+      CCM_DIR,
+      "memory-manifest-selector-sandbox",
+      String(request.scopeId || "session").replace(/[^a-zA-Z0-9._-]+/g, "-").slice(0, 180)
+    );
+    fs.mkdirSync(sandbox, { recursive: true });
+    let executionMetadata: any = {};
+    const prompt = [
+      String(request.systemPrompt || ""),
+      "",
+      String(request.userPrompt || ""),
+      "",
+      "Return only one JSON object matching this schema: {\"selected_memories\":[\"filename.md\"]}. Do not use tools, inspect files, or modify the workspace.",
+    ].join("\n");
+    const output = await ctx.callAgent(
+      selected.project,
+      prompt,
+      sandbox,
+      agentType,
+      120_000,
+      {
+        tab: "groups",
+        groupId: request.groupId,
+        group_session_id: request.groupSessionId,
+        taskId: request.requestId,
+        executionId: request.requestId,
+        title: "Typed Memory manifest selection",
+        background: true,
+        skipIndependentVerification: true,
+        allowedTools: [],
+        maxOutputBytes: 64 * 1024,
+        maxContextOutputBytes: 64 * 1024,
+        onDone: (metadata: any) => { executionMetadata = metadata || {}; },
+      }
+    );
+    if (/^\[[^\]]+\]\s+Agent(?:\s+Runner)?\s+(?:错误|响应超时)/i.test(String(output || "").trim())) {
+      throw new Error(`typed_memory_manifest_selector_failed:${String(output || "").slice(0, 300)}`);
+    }
+    if (executionMetadata?.fileChanges?.count > 0) throw new Error("typed_memory_manifest_selector_modified_sandbox");
+    return {
+      output,
+      project: selected.project,
+      agentType,
+      nativeSessionId: String(executionMetadata.nativeSessionId || ""),
+      model: String(executionMetadata.nativeModelCapabilityReceipt?.model || executionMetadata.nativeModelCapabilityRecord?.entry?.model || ""),
+    };
+  });
   if (pathname === "/api/tasks/replay/artifact" && req.method === "GET") {
     const taskId = String(parsed.query.task_id || parsed.query.taskId || "").trim();
     const runId = String(parsed.query.run_id || parsed.query.runId || "").trim();
@@ -31253,6 +31335,7 @@ export function handleCollaborationApi(
     prepareAgentRuntimeTools,
     getProjectExtraConfig,
     buildAgentMemoryContextBundle,
+    buildAgentMemoryContextBundleWithManifestSelection,
     buildAgentMemoryPacket,
     buildChildAgentDevelopmentContract,
     buildProjectVerificationHints,
@@ -31287,7 +31370,7 @@ export function handleCollaborationApi(
 
         const autoAssignGroupId = String(group_id || task.group_id || "");
         const group = autoAssignGroupId ? loadGroups().find(g => g.id === autoAssignGroupId) : null;
-        const toolContext = buildAgentToolContext(ctx, group, task.target_project);
+        const toolContext = buildAgentToolContext(ctx, group, task.target_project, `${task.title || ""}\n${task.description || ""}\n${task.acceptance_criteria || ""}`);
         const runtimeToolContext = prepareAgentRuntimeTools(autoAssignGroupId, task.target_project, workDir, agentType, toolContext.allowedTools, null, { taskId: task.id, task, toolAudit: toolContext.toolAudit, authorizationReadiness: toolContext.authorizationReadiness });
         if (runtimeToolContext.dispatchBlocked) {
           const blockedReceipt = runtimeToolDispatchBlockedReceipt(task.target_project, runtimeToolContext);
@@ -31320,7 +31403,7 @@ export function handleCollaborationApi(
           branchKind: "main",
         }) : null;
         const autoAssignGroupMemoryContext = autoAssignGroupId
-          ? buildAgentMemoryContextBundle(autoAssignGroupId, task.target_project, directTaskText, {
+          ? await buildAgentMemoryContextBundleWithManifestSelection(autoAssignGroupId, task.target_project, directTaskText, {
             taskId: task.id,
             traceId: task.trace_id || "",
             agentType,
@@ -31788,7 +31871,7 @@ ${diff}
           const agentType = info[0]?.agent || "claudecode";
 
           try {
-            const toolContext = buildAgentToolContext(ctx, reviewGroup, reviewer);
+            const toolContext = buildAgentToolContext(ctx, reviewGroup, reviewer, reviewPrompt);
             const runtimeToolContext = prepareAgentRuntimeTools(group_id || "", reviewer, workDir, agentType, toolContext.allowedTools, null, {
               toolAudit: toolContext.toolAudit,
               authorizationReadiness: toolContext.authorizationReadiness,

@@ -39,6 +39,7 @@ import {
   buildPostCompactCompletionMemoryPreservationClosureUsageSummary,
   deriveGroupTypedMemoryTargetPaths,
   distillGroupMessagesToTypedMemory,
+  distillGroupMessagesToTypedMemoryUntilCaughtUp,
   evaluateGroupTypedMemoryDistillationQuality,
   getAlreadySurfacedGroupTypedMemory,
   getGroupTypedMemoryRecallScopeStats,
@@ -46,6 +47,7 @@ import {
   importGlobalClaudeMemoryToGroupTypedMemory,
   importProjectMemoryFilesToGroupTypedMemory,
   recordGroupTypedMemoryRecall,
+  selectGroupTypedMemoryManifest,
   readGroupTypedMemoryRecallLedger,
   recordGroupTypedMemoryPressureRecallUsageLedger,
   readGroupTypedMemoryDistillationLedger,
@@ -6520,6 +6522,7 @@ function buildBackgroundCompactionState(input: any = {}) {
     summarizedThroughMessageId: String(input.summarizedThroughMessageId || ""),
     keepIndex: Number(input.keepIndex || 0),
     messageCount: Number(input.messageCount || 0),
+    typedMemoryScopeId: String(input.typedMemoryScopeId || input.typed_memory_scope_id || ""),
     error: compactMemoryText(input.error || "", 500),
     startedAt: String(input.startedAt || ""),
     completedAt: String(input.completedAt || new Date().toISOString()),
@@ -6530,6 +6533,7 @@ export function scheduleGroupMemoryAutoCompaction(groupId: string, options: any 
   const id = String(groupId || "").trim();
   if (!id) return { scheduled: false, reason: "missing_group_id" };
   const sessionId = String(options.sessionId || options.session_id || getActiveGroupChatSessionId(id));
+  if (!sessionId.startsWith("gcs_")) return { scheduled: false, reason: "legacy_default_session_rejected", groupId: id, sessionId };
   const scopeKey = `${id}::${sessionId}`;
   if (groupMemoryAutoCompactTimers.has(scopeKey)) {
     clearTimeout(groupMemoryAutoCompactTimers.get(scopeKey)!);
@@ -6547,6 +6551,8 @@ export async function runGroupMemoryAutoCompactionNow(groupId: string, options: 
   const id = String(groupId || "").trim();
   if (!id) return { success: false, compacted: false, reason: "missing_group_id" };
   const sessionId = String(options.sessionId || options.session_id || getActiveGroupChatSessionId(id));
+  if (!sessionId.startsWith("gcs_")) return { success: false, compacted: false, reason: "legacy_default_session_rejected", groupId: id, sessionId };
+  const typedMemoryScopeId = `${id}--${sessionId}`;
   const scopeKey = `${id}::${sessionId}`;
   if (groupMemoryAutoCompactTimers.has(scopeKey)) {
     clearTimeout(groupMemoryAutoCompactTimers.get(scopeKey)!);
@@ -6590,10 +6596,11 @@ export async function runGroupMemoryAutoCompactionNow(groupId: string, options: 
       summarizedThroughMessageId: result.boundary?.summarizedThroughMessageId || nextMemory?.compaction?.lastCompactedMessageId || "",
       keepIndex: result.keepIndex || 0,
       messageCount: messages.length,
+      typedMemoryScopeId,
       startedAt,
       completedAt: new Date().toISOString(),
     });
-    const logDistillation = distillGroupMessagesToTypedMemory(id, messages, nextMemory, {
+    const logDistillation = distillGroupMessagesToTypedMemory(typedMemoryScopeId, messages, nextMemory, {
       reason: `auto_compaction:${background.reason || "message_append"}`,
       throughMessageId: result.boundary?.summarizedThroughMessageId || nextMemory?.compaction?.lastCompactedMessageId || "",
       maxMessages: options.distillMaxMessages || options.distill_max_messages,
@@ -6610,13 +6617,14 @@ export async function runGroupMemoryAutoCompactionNow(groupId: string, options: 
     const compactHead = sessionId.startsWith("gcs_") && result.compacted && result.compactTransactionReceipt
       ? commitGroupCompactHead({ groupId: id, groupSessionId: sessionId, compactTransactionReceipt: result.compactTransactionReceipt })
       : null;
-    return { success: true, compacted: !!result.compacted, boundary: result.boundary || null, keepIndex: result.keepIndex, background, memory: saved, compactHead };
+    return { success: true, compacted: !!result.compacted, boundary: result.boundary || null, keepIndex: result.keepIndex, background, memory: saved, compactHead, typedMemoryScopeId, logDistillation };
   } catch (error: any) {
     const memory = loadGroupMemory(id, sessionId);
     const background = buildBackgroundCompactionState({
       status: "failed",
       reason: options.reason || "message_append",
       messageId: options.messageId || "",
+      typedMemoryScopeId,
       error: error?.message || String(error),
       startedAt,
       completedAt: new Date().toISOString(),
@@ -6646,7 +6654,8 @@ export function ensureGroupMemoryAutoCompactionHook() {
   if (groupMemoryAutoCompactHookRegistered) return { registered: true, already: true };
   registerGroupMessageAppendHook((groupId, message) => {
     const sessionId = String(message?.group_session_id || message?.groupSessionId || "");
-    if (sessionId.startsWith("gcs_")) recordGroupPostTurnSummary(groupId, sessionId, message);
+    if (!sessionId.startsWith("gcs_")) return;
+    recordGroupPostTurnSummary(groupId, sessionId, message);
     scheduleGroupMemoryAutoCompaction(groupId, {
       reason: "message_append",
       messageId: String(message?.id || ""),
@@ -6661,9 +6670,12 @@ ensureGroupMemoryAutoCompactionHook();
 
 export async function runGroupMemoryAutoCompactionSelfTest() {
   const groupId = `group-memory-auto-compact-selftest-${process.pid}-${Date.now().toString(36)}`;
-  const messageFile = getGroupMessagesFileHint(groupId);
-  const memoryFile = getGroupMemoryFile(groupId);
-  const typedDir = getGroupTypedMemoryDir(groupId);
+  const sessionId = `gcs_auto_compact_${process.pid}_${Date.now().toString(36)}`;
+  const typedMemoryScopeId = `${groupId}--${sessionId}`;
+  const messageFile = getGroupMessagesFileHint(groupId, sessionId);
+  const memoryFile = getGroupMemoryFile(groupId, sessionId);
+  const typedDir = getGroupTypedMemoryDir(typedMemoryScopeId);
+  const bareGroupTypedDir = getGroupTypedMemoryDir(groupId);
   const messages = Array.from({ length: 80 }, (_, index) => ({
     id: `gm-auto-${index}`,
     role: index % 2 === 0 ? "user" : "assistant",
@@ -6671,19 +6683,20 @@ export async function runGroupMemoryAutoCompactionSelfTest() {
     agent: index % 2 === 1 ? "frontend" : undefined,
     timestamp: `2026-07-07T01:${String(index % 60).padStart(2, "0")}:00.000Z`,
     content: index === 0
-      ? "必须保留自动压缩哨兵 AUTO_COMPACT_SENTINEL_20260707"
+      ? "长期必须保留自动压缩哨兵 AUTO_COMPACT_SENTINEL_20260707"
       : `自动压缩测试消息 ${index}，涉及 src/auto-${index}.ts，${"上下文".repeat(40)}`,
   }));
   try {
-    saveGroupMessages(groupId, messages);
+    saveGroupMessages(groupId, messages, sessionId);
     const result: any = await runGroupMemoryAutoCompactionNow(groupId, {
+      sessionId,
       force: true,
       rebuild: true,
       reason: "selftest",
       config: { memoryCompactionUseModel: false },
     });
-    const memory = loadGroupMemory(groupId);
-    const rawMessages = getGroupMessages(groupId);
+    const memory = loadGroupMemory(groupId, sessionId);
+    const rawMessages = getGroupMessages(groupId, sessionId);
     const checks = {
       success: result.success === true,
       compacted: result.compacted === true,
@@ -6696,6 +6709,10 @@ export async function runGroupMemoryAutoCompactionSelfTest() {
         && memory?.messageCompression?.postCompactRecoveryAudit?.schema === "ccm-post-compact-recovery-audit-v1",
       logDistillationRecorded: memory?.compaction?.logDistillation?.schema === "ccm-group-typed-memory-distillation-v1"
         && Number(memory.compaction.logDistillation.candidateCount || 0) > 0,
+      typedMemoryBoundToSession: result.typedMemoryScopeId === typedMemoryScopeId
+        && memory?.compaction?.background?.typedMemoryScopeId === typedMemoryScopeId
+        && memory?.compaction?.logDistillation?.groupId === typedMemoryScopeId,
+      noBareGroupTypedMemoryCreated: !fs.existsSync(bareGroupTypedDir),
       contextPressureWarningRecorded: memory?.compaction?.contextPressureWarning?.schema === "ccm-group-compact-warning-v1"
         && memory?.messageCompression?.contextPressureWarning?.schema === "ccm-group-compact-warning-v1",
       summaryPreservesSentinel: JSON.stringify(memory?.conversationSummary || {}).includes("AUTO_COMPACT_SENTINEL_20260707")
@@ -7900,9 +7917,10 @@ export function buildAgentMemoryContextBundle(groupId: string, targetProject: st
       || options.disable_pressure_recall_usage_repair_hints,
   };
   const projectMemoryRoot = resolveGroupProjectMemoryRoot(project, options);
-  const typedLogDistillation = distillGroupMessagesToTypedMemory(typedMemoryScopeId, allMessages, memory, {
+  const typedLogDistillation = distillGroupMessagesToTypedMemoryUntilCaughtUp(typedMemoryScopeId, allMessages, memory, {
     reason: "context_bundle",
     maxMessages: options.distillMaxMessages || options.distill_max_messages,
+    maxCatchUpBatches: options.distillMaxCatchUpBatches || options.distill_max_catch_up_batches,
     postCompactCandidateUsage,
     projectRoot: projectMemoryRoot,
   });
@@ -7987,6 +8005,7 @@ export function buildAgentMemoryContextBundle(groupId: string, targetProject: st
       targetProject: project,
       postCompactCandidateUsage,
       pressureProvenanceDispatchFeedbackPolicy: preliminaryPressureProvenanceDispatchFeedbackPolicy,
+      typedMemoryManifestSelection: options.typedMemoryManifestSelection || options.typed_memory_manifest_selection || null,
       ...typedMemoryPressureRecallOptions,
       max: Number(options.maxTypedMemory || options.max_typed_memory || 5),
     }
@@ -8041,6 +8060,7 @@ export function buildAgentMemoryContextBundle(groupId: string, targetProject: st
         targetProject: project,
         postCompactCandidateUsage,
         pressureProvenanceDispatchFeedbackPolicy: preliminaryPressureProvenanceDispatchFeedbackPolicy,
+        typedMemoryManifestSelection: options.typedMemoryManifestSelection || options.typed_memory_manifest_selection || null,
         ...typedMemoryPressureRecallOptions,
         max: Number(options.maxTypedMemory || options.max_typed_memory || 5),
       }
@@ -8473,6 +8493,8 @@ export function buildAgentMemoryContextBundle(groupId: string, targetProject: st
         globalClaudeMemoryImport,
         projectMemoryImport,
         loadPlan: effectiveTypedMemoryLoadPlan,
+        recallQuery: typedMemoryRecallQuery,
+        recentTools,
         targetPaths: typedMemoryTargetPaths,
         recall: deliveredEffectiveTypedMemoryRecall,
         deliveryCapsule: typedMemoryDeliveryCapsule,
@@ -8620,6 +8642,40 @@ export function buildAgentMemoryContextBundle(groupId: string, targetProject: st
   const renderedWithReferences = renderGroupMemoryContextBundle(bundle);
   bundle.context_budget = buildContextBudget({ context: renderedWithReferences, maxChars: 36_000, maxTokens: 90_000 });
   bundle.rendered_text = compactPreserveLines(renderedWithReferences, Number(options.maxRenderedChars || 14_000));
+  return bundle;
+}
+
+export async function buildAgentMemoryContextBundleWithManifestSelection(groupId: string, targetProject: string, task = "", options: any = {}) {
+  if (shouldIgnoreGroupMemoryRequest(task, options)) return buildAgentMemoryContextBundle(groupId, targetProject, task, options);
+  const suppliedSelection = options.typedMemoryManifestSelection || options.typed_memory_manifest_selection || null;
+  if (suppliedSelection) return buildAgentMemoryContextBundle(groupId, targetProject, task, options);
+  const groupSessionId = String(options.groupSessionId || options.group_session_id || getActiveGroupChatSessionId(groupId));
+  if (!groupSessionId.startsWith("gcs_")) return buildAgentMemoryContextBundle(groupId, targetProject, task, options);
+  const bootstrap = buildAgentMemoryContextBundle(groupId, targetProject, task, {
+    ...options,
+    manifestSelectorBootstrap: true,
+  });
+  const typedMemory = bootstrap.group_state?.typedMemory || {};
+  const scopeId = `${groupId}--${groupSessionId}`;
+  const selection = await selectGroupTypedMemoryManifest(scopeId, String(typedMemory.recallQuery || task || ""), {
+    groupId,
+    groupSessionId,
+    targetProject,
+    taskId: options.taskId || options.task_id || "",
+    taskAgentSessionId: options.taskAgentSessionId || options.task_agent_session_id || "",
+    alreadySurfaced: typedMemory.ledger?.alreadySurfaced || [],
+    targetPaths: typedMemory.targetPaths || options.targetPaths || options.target_paths || [],
+    recentTools: typedMemory.recentTools || options.recentTools || options.recent_tools || [],
+    executor: options.manifestSelectorExecutor || options.manifest_selector_executor,
+    signal: options.signal,
+    recordDecision: options.recordManifestSelectorDecision !== false && options.record_manifest_selector_decision !== false,
+  });
+  const bundle = buildAgentMemoryContextBundle(groupId, targetProject, task, {
+    ...options,
+    typedMemoryManifestSelection: selection,
+  });
+  bundle.typed_memory_manifest_selection = selection;
+  bundle.typedMemoryManifestSelection = selection;
   return bundle;
 }
 

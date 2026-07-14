@@ -9,6 +9,7 @@ const require = createRequire(import.meta.url);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const memory = require(path.join(root, "ccm-package", "dist", "modules", "collaboration", "memory.js"));
 const storage = require(path.join(root, "ccm-package", "dist", "modules", "collaboration", "storage.js"));
+const lifecycle = require(path.join(root, "ccm-package", "dist", "modules", "collaboration", "group-session-lifecycle-head.js"));
 const typed = require(path.join(root, "ccm-package", "dist", "modules", "collaboration", "group-memory-index.js"));
 const center = require(path.join(root, "ccm-package", "dist", "modules", "knowledge", "memory-control-center.js"));
 const groupId = `memory-center-session-${process.pid}-${Date.now().toString(36)}`;
@@ -178,6 +179,16 @@ try {
   assert.equal(Object.values(checks).every(Boolean), true, JSON.stringify({ checks, row, evidence }, null, 2));
   process.stdout.write(`${JSON.stringify({ pass: true, checks }, null, 2)}\n`);
 } finally {
+  for (const id of [sessionId, sessionB].filter(Boolean)) {
+    for (const file of [
+      lifecycle.getGroupSessionLifecycleHeadFile(groupId, id),
+      lifecycle.getGroupSessionLifecycleJournalFile(groupId, id),
+      lifecycle.getGroupSessionLifecycleCommitFile(groupId, id),
+      lifecycle.getGroupSessionLifecycleCommittedFile(groupId, id),
+    ]) {
+      try { if (fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+  }
   for (const file of [memoryFile, `${memoryFile}.bak`, memoryFileB, `${memoryFileB}.bak`, messageFile, `${messageFile}.bak`, messageFileB, `${messageFileB}.bak`]) {
     try { if (fs.existsSync(file)) fs.unlinkSync(file); } catch {}
   }

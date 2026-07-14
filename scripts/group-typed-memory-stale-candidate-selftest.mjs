@@ -124,8 +124,18 @@ try {
   fs.rmSync(scopeBLedgerFile, { force: true });
 
   const before = typed.buildGroupTypedMemoryRecall(scopeA, "PHASE242_UPDATE_OLD PHASE242_REMOVE_OLD", { disableLedger: true, forceMemory: true, max: 12 });
-  assert.ok(before.recalled.some(row => row.relPath === updateDoc.relPath), "pending update must not alter recall");
-  assert.ok(before.recalled.some(row => row.relPath === removeDoc.relPath), "pending remove must not alter recall");
+  assert.ok(!before.recalled.some(row => row.relPath === updateDoc.relPath), "pending update conflict must be quarantined from automatic recall");
+  assert.ok(!before.recalled.some(row => row.relPath === removeDoc.relPath), "pending remove conflict must be quarantined from automatic recall");
+  assert.ok(before.modelExtractionTopicScoring.stale_conflict_gated_count >= 2, "pending conflict quarantine must be auditable");
+  const explicitlyRequired = typed.buildGroupTypedMemoryRecall(scopeA, "PHASE242_UPDATE_OLD PHASE242_REMOVE_OLD", {
+    disableLedger: true,
+    forceMemory: true,
+    max: 12,
+    requiredRelPaths: [updateDoc.relPath, removeDoc.relPath],
+  });
+  assert.ok(explicitlyRequired.recalled.some(row => row.relPath === updateDoc.relPath), "required relPath may explicitly load a pending update conflict");
+  assert.ok(explicitlyRequired.recalled.some(row => row.relPath === removeDoc.relPath), "required relPath may explicitly load a pending remove conflict");
+  assert.match(typed.renderGroupTypedMemoryRecall(explicitlyRequired), /PENDING STALE CONFLICT \/ REVERIFY REQUIRED/, "explicit conflict recall must warn the child Agent to reverify current source");
 
   const updateCandidate = recorded.candidates.find(row => row.rel_path === updateDoc.relPath);
   const removeCandidate = recorded.candidates.find(row => row.rel_path === removeDoc.relPath);
@@ -246,7 +256,7 @@ try {
 
   console.log(JSON.stringify({
     pass: true,
-    checks: 36,
+    checks: 40,
     pending: finalLedger.pending_count,
     applied: finalLedger.applied_count,
     rejected: finalLedger.rejected_count,

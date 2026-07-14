@@ -1,0 +1,50 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.classifyProjectChatIntent = classifyProjectChatIntent;
+exports.runProjectChatIntentSelfTest = runProjectChatIntentSelfTest;
+const GREETING_ONLY = /^(你好|您好|hi|hello|hey|在吗|在不在|早上好|下午好|晚上好|谢谢|感谢|ok|好的|嗯|哦|哈喽)[。.!！?？\s]*$/i;
+const ORDINARY_QUESTION = /^(你|我|它|这个|那个|模型|系统|项目\s*Agent|agent|Agent).{0,48}(是什么|是谁|是啥|什么意思|叫什么|什么模型|能做什么|怎么样|有问题吗|需要吗)[。.!！?？\s]*$/i;
+const PROJECT_ANALYSIS_SIGNAL = /项目|代码|仓库|架构|技术栈|目录|文件|模块|接口|页面|组件|数据库|配置|依赖|怎么运行|如何运行|能运行吗|可以运行吗/i;
+const ACTION_SIGNALS = [
+    /(?:帮我|给我|请|麻烦|需要|开始|继续).{0,28}(?:实现|新增|添加|修改|修复|删除|优化|重构|接入|配置|部署|测试|检查|创建|开发|完成|生成|编写|补充|对接|支持|运行|执行|跑|改|加|做|写)/i,
+    /(?:实现|新增|添加|修改|修复|删除|优化|重构|接入|配置|部署|测试|检查|创建|开发|完成|生成|编写|补充|对接|支持|运行|执行|跑).{0,44}(?:功能|接口|页面|组件|代码|项目|文件|数据库|服务|测试|配置|bug|API)/i,
+    /(?:把|将).{1,90}(?:改成|修改为|接入|迁移|重构|删掉|删除|加上|加入|换成|拆成|合并)/i,
+    /(?:报错|错误|bug|失败|不能用|崩溃|异常).{0,44}(?:修|修复|看一下|排查|解决|处理)/i,
+    /(?:提交|发布|上线|构建|编译|单测|测试|接口|页面|组件|数据库|路由|权限|登录|支付|订单|表单|样式|前端|后端).{0,44}(?:实现|新增|修改|修复|优化|检查|补充|接入|部署|运行)/i,
+];
+function classifyProjectChatIntent(message, uploadedFiles = [], options = {}) {
+    const text = String(message || "").trim();
+    const compact = text.replace(/\s+/g, "");
+    const hasAttachment = Array.isArray(uploadedFiles) && uploadedFiles.length > 0;
+    const executable = options.forceTask === true || hasAttachment || ACTION_SIGNALS.some(pattern => pattern.test(text));
+    if (executable) {
+        return {
+            mode: "task",
+            executable: true,
+            reason: options.forceTask ? "继续已有项目任务" : hasAttachment ? "包含待处理附件" : "包含明确修改或执行意图",
+        };
+    }
+    if (GREETING_ONLY.test(compact) || ORDINARY_QUESTION.test(compact)) {
+        return { mode: "conversation", executable: false, reason: "普通问答，不展示任务链路" };
+    }
+    if (PROJECT_ANALYSIS_SIGNAL.test(text)) {
+        return { mode: "project_analysis", executable: false, reason: "只读项目询问，不展示任务链路" };
+    }
+    return { mode: "conversation", executable: false, reason: "未发现明确项目执行动作" };
+}
+function runProjectChatIntentSelfTest() {
+    const cases = [
+        ["你好", "conversation"],
+        ["你是什么模型", "conversation"],
+        ["这个项目是什么架构？", "project_analysis"],
+        ["修改登录接口并运行测试", "task"],
+        ["帮我修复登录 bug 并跑测试", "task"],
+    ];
+    const checks = cases.map(([message, expected]) => ({
+        message,
+        expected,
+        actual: classifyProjectChatIntent(message).mode,
+    }));
+    return { success: checks.every(item => item.actual === item.expected), checks };
+}
+//# sourceMappingURL=project-chat-intent.js.map

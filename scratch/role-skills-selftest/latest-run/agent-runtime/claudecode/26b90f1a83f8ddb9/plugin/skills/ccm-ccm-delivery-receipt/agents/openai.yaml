@@ -1,0 +1,4 @@
+interface:
+  display_name: "CCM Delivery Receipt"
+  short_description: "Return structured implementation and verification evidence"
+  default_prompt: "Use $ccm-delivery-receipt to return a verifiable delivery receipt."

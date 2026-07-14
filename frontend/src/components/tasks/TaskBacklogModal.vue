@@ -175,12 +175,12 @@ const emit = defineEmits(['close', 'import-shared-docs', 'dispatch-ready', 'disp
   .backlog-toolbar { flex-direction: column; align-items: stretch; }
 }
 
-:global([data-theme="dark"]) .backlog-item {
+:global([data-theme="dark"] .backlog-item){
   background: var(--surface);
   border-color: var(--border-color);
 }
 
-:global([data-theme="dark"]) .backlog-item:hover {
+:global([data-theme="dark"] .backlog-item:hover){
   border-color: rgba(59, 130, 246, 0.4);
 }
 </style>

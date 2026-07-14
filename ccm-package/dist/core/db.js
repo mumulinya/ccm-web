@@ -75,6 +75,7 @@ const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const os = __importStar(require("os"));
 const credential_store_1 = require("./credential-store");
+const tool_catalog_management_1 = require("../tools/tool-catalog-management");
 const CCM_DIR = path.join(os.homedir(), ".cc-connect");
 const CONFIGS_DIR = path.join(CCM_DIR, "configs");
 const PID_DIR = path.join(CCM_DIR, "pids");
@@ -243,7 +244,32 @@ function loadMcpTools() {
         const files = fs.readdirSync(exports.MCP_DIR).filter(f => f.endsWith('.json'));
         return files.map(f => {
             try {
-                const content = (0, credential_store_1.resolveObjectSecrets)(JSON.parse(fs.readFileSync(path.join(exports.MCP_DIR, f), 'utf-8')));
+                const file = path.join(exports.MCP_DIR, f);
+                const stored = JSON.parse(fs.readFileSync(file, 'utf-8'));
+                const storedEnvironment = (0, tool_catalog_management_1.normalizeMcpEnvironment)(stored?.env);
+                const environment = (0, tool_catalog_management_1.normalizeMcpEnvironment)((0, credential_store_1.resolveObjectSecrets)(storedEnvironment));
+                let credentialBindingChanged = false;
+                if (String(stored?.name || "") === "mcp-feishu") {
+                    const feishu = loadFeishuConfig();
+                    const appId = String(feishu?.control_bot_app_id || feishu?.app_id || "").trim();
+                    const appSecret = String(feishu?.control_bot_app_secret || feishu?.app_secret || "").trim();
+                    const isPlaceholder = (value) => /^(?:your[_-]|placeholder|change[_-]?me|x{3,})/i.test(String(value || "").trim());
+                    if ((!environment.FEISHU_APP_ID || isPlaceholder(environment.FEISHU_APP_ID)) && appId) {
+                        environment.FEISHU_APP_ID = appId;
+                        credentialBindingChanged = true;
+                    }
+                    if ((!environment.FEISHU_APP_SECRET || isPlaceholder(environment.FEISHU_APP_SECRET)) && appSecret) {
+                        environment.FEISHU_APP_SECRET = appSecret;
+                        credentialBindingChanged = true;
+                    }
+                }
+                const hasPlainStoredEnvironment = Object.values(storedEnvironment).some(value => value && !(0, credential_store_1.isCredentialReference)(value));
+                if (hasPlainStoredEnvironment || credentialBindingChanged) {
+                    saveMcpTool({ ...stored, env: environment });
+                }
+                const content = (0, credential_store_1.resolveObjectSecrets)(hasPlainStoredEnvironment || credentialBindingChanged
+                    ? JSON.parse(fs.readFileSync(file, 'utf-8'))
+                    : stored);
                 return { ...content, filename: f };
             }
             catch {
@@ -257,7 +283,13 @@ function loadMcpTools() {
 }
 function saveMcpTool(tool) {
     const filename = tool.name.replace(/[^a-zA-Z0-9-_]/g, '_') + '.json';
-    const protectedTool = (0, credential_store_1.protectObjectSecrets)(tool, `mcp-${filename.replace(/\.json$/i, "")}`);
+    const scope = `mcp-${filename.replace(/\.json$/i, "")}`;
+    const environment = (0, tool_catalog_management_1.normalizeMcpEnvironment)(tool?.env, { strict: true });
+    const protectedEnvironment = Object.fromEntries(Object.entries(environment).map(([key, value]) => [
+        key,
+        (0, credential_store_1.protectCredential)(scope, `env.${key}`, value),
+    ]));
+    const protectedTool = (0, credential_store_1.protectObjectSecrets)({ ...tool, env: protectedEnvironment }, scope);
     writeJsonAtomic(path.join(exports.MCP_DIR, filename), protectedTool);
 }
 function deleteMcpTool(name) {

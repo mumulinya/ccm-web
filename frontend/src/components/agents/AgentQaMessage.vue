@@ -238,18 +238,18 @@ const isLoading = (action) => !!props.actionLoading[`${qa.value.id}:${action}`]
   padding-top: 10px;
   border-top: 1px solid rgba(15, 23, 42, 0.08);
 }
-:global([data-theme="dark"]) .agent-qa-bubble {
+:global([data-theme="dark"] .agent-qa-bubble){
   background: color-mix(in srgb, var(--agent-accent, #60a5fa) 12%, rgba(15, 23, 42, 0.7)) !important;
 }
-:global([data-theme="dark"]) .agent-qa-question,
-:global([data-theme="dark"]) .agent-qa-answer {
+:global([data-theme="dark"] .agent-qa-question),
+:global([data-theme="dark"] .agent-qa-answer){
   background: rgba(255, 255, 255, 0.06);
 }
-:global([data-theme="dark"]) .agent-qa-details dl {
+:global([data-theme="dark"] .agent-qa-details dl){
   background: rgba(15, 23, 42, 0.45);
   border-color: rgba(255, 255, 255, 0.08);
 }
-:global([data-theme="dark"]) .agent-qa-actions {
+:global([data-theme="dark"] .agent-qa-actions){
   border-top-color: rgba(255, 255, 255, 0.08);
 }
 </style>

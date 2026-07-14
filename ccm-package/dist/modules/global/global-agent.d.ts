@@ -116,6 +116,12 @@ export declare function runGlobalAgentIntentSelfTest(): {
     };
     visibleReply: string;
 };
+export declare function verifyGlobalAgentContextBoundary(context?: any): {
+    schema: string;
+    valid: boolean;
+    issues: string[];
+    expectedChecksum: string;
+};
 export declare function buildGlobalAgentGroupMemoryModelContext(bundle: any, options?: any): {
     schema: string;
     source_schema: string;
@@ -135,70 +141,7 @@ export declare function buildGlobalAgentGroupMemoryModelContext(bundle: any, opt
         full_context_available_via: string;
     };
 };
-export declare function buildAgenticContext(query?: string, sessionId?: string, options?: any): {
-    projects: {
-        name: any;
-        work_dir: any;
-        agent: any;
-        platform: any;
-    }[];
-    groups: any;
-    task_summary: {
-        total: number;
-        active: number;
-        recent: {
-            id: any;
-            title: any;
-            status: any;
-            status_detail: any;
-            group_id: any;
-            target_project: any;
-            updated_at: any;
-            trace_id: any;
-        }[];
-    };
-    cron_jobs: {
-        id: any;
-        name: any;
-        schedule: any;
-        enabled: boolean;
-        target_type: any;
-        group_id: any;
-        project: any;
-    }[];
-    tools: {
-        mcp: any[];
-        skills: any[];
-    };
-    global_memory: string;
-    memory_context_boundary: {
-        schema: string;
-        policy: string;
-        group_session_context_included: boolean;
-        routing_directory_included: boolean;
-    };
-    conflict_resolution_maintenance_notifications: {
-        schema: string;
-        group_count: any;
-        groups: any;
-        policy: string;
-    };
-    conflict_resolution_maintenance_delivery_health: {
-        schema: string;
-        group_count: any;
-        groups: any;
-        policy: string;
-    };
-    cleanup_commit_repair_context: {
-        schema: string;
-        group_count: any;
-        groups: any;
-        can_claim_or_dispatch: boolean;
-        can_resolve_without_receipt: boolean;
-        cross_group_authorization_allowed: boolean;
-        policy: string;
-    };
-};
+export declare function buildAgenticContext(query?: string, sessionId?: string, options?: any): any;
 export declare function resumeGlobalAgentLoopsForServer(ctx: CollabCtx, port: number): Promise<{
     total: number;
     resumed: number;

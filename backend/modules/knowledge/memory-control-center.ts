@@ -10,9 +10,12 @@ import {
 } from "../collaboration/group-session-memory-extraction";
 import {
   inspectGroupSessionMemoryModelExtractionArtifactRetention,
+  readGroupSessionMemoryTypedMemoryRetryState,
+  retryGroupSessionModelExtractionTypedMemory,
   readGroupSessionMemoryModelExtractionHistory,
   replayGroupSessionMemoryModelExtraction,
   runGroupSessionMemoryModelExtractionArtifactRetention,
+  verifyGroupSessionMemoryDirectWriteSuppressionReceipt,
   verifyGroupSessionMemoryFactSupersessionGraph,
   verifyGroupSessionMemoryModelExtractionReceipt,
   verifyGroupSessionMemoryModelExtractionReplayEvidence,
@@ -29,6 +32,13 @@ import {
   verifyTypedMemoryDispatchWal,
 } from "../collaboration/typed-memory-dispatch-wal";
 import { readGroupPostTurnSummaries } from "../collaboration/group-post-turn-summary";
+import {
+  GROUP_SESSION_LIFECYCLE_HEAD_DIR,
+  readGroupSessionLifecycleCommitChain,
+  readGroupSessionLifecycleHead,
+  readGroupSessionLifecycleJournal,
+  verifyGroupSessionLifecycleHead,
+} from "../collaboration/group-session-lifecycle-head";
 
 export type MemoryScope = "group" | "project" | "global";
 type MemoryAction = "pin" | "unpin" | "lock" | "unlock" | "edit" | "deprecate" | "delete" | "restore";
@@ -642,7 +652,12 @@ export function buildGroupPostCompactUsageDiagnostics(groupId: string, memory: a
       readGroupTypedMemoryConsumptionLedger,
       readGroupTypedMemoryStaleCandidateLedger,
       readGroupTypedMemoryDistillationLedger,
+      readGroupTypedMemoryDistillationTransactionState,
+      inspectGroupTypedMemoryDistillationLock,
+      inspectGroupTypedMemoryArtifactTransaction,
+      inspectGroupTypedMemoryDistillationWork,
       scanGroupTypedMemoryDocuments,
+      buildGroupTypedMemoryIndex,
     } = require("../collaboration/group-memory-index");
     const { readGroupMemoryCompactionHookLedger } = require("../collaboration/group-memory-compaction");
 
@@ -650,8 +665,18 @@ export function buildGroupPostCompactUsageDiagnostics(groupId: string, memory: a
     const hookLedger = summarizeCompactionHookLedger(id, memory, readGroupMemoryCompactionHookLedger(id));
     const usageSummary = buildGroupPostCompactCandidateUsageSummary(id, { groupSessionId: resolvedSessionId });
     const distillationLedger = readGroupTypedMemoryDistillationLedger(typedScopeId);
+    const distillationTransactionState = readGroupTypedMemoryDistillationTransactionState(typedScopeId);
+    const distillationLock = inspectGroupTypedMemoryDistillationLock(typedScopeId);
+    const artifactTransaction = inspectGroupTypedMemoryArtifactTransaction(typedScopeId);
     const archive = distillationLedger.postCompactUsageArchive || {};
+    const { getGroupMessages } = require("../collaboration/storage");
+    const scopedMessages = getGroupMessages(id, resolvedSessionId)
+      .filter((message: any) => !String(message?.content || "").startsWith("📤"));
+    const distillationPreflight = inspectGroupTypedMemoryDistillationWork(typedScopeId, scopedMessages, {
+      postCompactCandidateUsage: usageSummary,
+    });
     const docs = scanGroupTypedMemoryDocuments(typedScopeId);
+    const typedMemoryIndex = buildGroupTypedMemoryIndex(typedScopeId);
     const recallQuery = buildGroupPostCompactRecallProbeQuery(memory, usageSummary, archive);
     const recall = buildGroupTypedMemoryRecall(typedScopeId, recallQuery, {
       max: 8,
@@ -740,13 +765,12 @@ export function buildGroupPostCompactUsageDiagnostics(groupId: string, memory: a
     const replayRepairDispatchCandidates = buildReplayRepairMainAgentDispatchCandidates(id, { groupSessionId: resolvedSessionId });
     const sessionMemory = memory?.sessionMemory?.schema ? memory.sessionMemory : readGroupSessionMemorySnapshotForCenter(typedScopeId);
     const toolContinuity = memory?.toolContinuity?.schema ? memory.toolContinuity : readGroupToolContinuitySnapshotForCenter(typedScopeId);
-    const { getGroupMessages } = require("../collaboration/storage");
     const { inspectGroupMemoryResumeProjection } = require("../collaboration/group-memory-boundary-journal");
     const resumeProjection = inspectGroupMemoryResumeProjection({
       groupId: id,
       sessionId: resolvedSessionId,
       memory,
-      messages: getGroupMessages(id, resolvedSessionId).filter((message: any) => !String(message?.content || "").startsWith("📤")),
+      messages: scopedMessages,
     });
     const sourceManifest = buildGroupMemorySourceManifest(id, {
       generatedAt: now(),
@@ -919,6 +943,22 @@ export function buildGroupPostCompactUsageDiagnostics(groupId: string, memory: a
       typedMemory: {
         totalDocs: Array.isArray(docs) ? docs.length : 0,
         byType: docsByType,
+        distillationPreflight,
+        entrypoint: {
+          schema: "ccm-memory-center-typed-memory-entrypoint-v1",
+          file: String(typedMemoryIndex.file || ""),
+          completeOnDisk: true,
+          documentCount: Number(typedMemoryIndex.docs?.length || 0),
+          diskLineCount: Number(typedMemoryIndex.lineCount || 0),
+          diskBytes: Number(typedMemoryIndex.bytes || 0),
+          injectionLineCount: Number(typedMemoryIndex.entrypointTruncation?.loadedLineCount || 0),
+          injectionBytes: Number(typedMemoryIndex.entrypointTruncation?.loadedByteCount || 0),
+          maxInjectionLines: Number(typedMemoryIndex.entrypointTruncation?.maxLines || 200),
+          maxInjectionBytes: Number(typedMemoryIndex.entrypointTruncation?.maxBytes || 25_000),
+          lineTruncated: typedMemoryIndex.entrypointTruncation?.wasLineTruncated === true,
+          byteTruncated: typedMemoryIndex.entrypointTruncation?.wasByteTruncated === true,
+          injectionTruncated: typedMemoryIndex.entrypointTruncation?.truncated === true,
+        },
         recallQueryHash: hash(recallQuery, 16),
         writeAdmission: distillationLedger.admission?.schema ? {
           schema: String(distillationLedger.admission.schema),
@@ -942,6 +982,69 @@ export function buildGroupPostCompactUsageDiagnostics(groupId: string, memory: a
           admittedByCategory: distillationLedger.admission.admittedByCategory || {},
           reasonCounts: distillationLedger.admission.reasonCounts || {},
           updatedAt: String(distillationLedger.admission.updatedAt || distillationLedger.updatedAt || ""),
+        } : null,
+        directOperations: distillationLedger.directMemory?.schema ? {
+          schema: String(distillationLedger.directMemory.schema),
+          version: Number(distillationLedger.directMemory.version || 1),
+          evaluatedThisRun: Number(distillationLedger.directMemory.evaluatedThisRun || 0),
+          rememberedThisRun: Number(distillationLedger.directMemory.rememberedThisRun || 0),
+          forgottenThisRun: Number(distillationLedger.directMemory.forgottenThisRun || 0),
+          duplicateThisRun: Number(distillationLedger.directMemory.duplicateThisRun || 0),
+          rejectedThisRun: Number(distillationLedger.directMemory.rejectedThisRun || 0),
+          activeDirectMemoryCount: Number(distillationLedger.directMemory.activeDirectMemoryCount || 0),
+          receiptCount: Number(distillationLedger.directMemory.receiptCount || 0),
+          tombstoneCount: Number(distillationLedger.directMemory.tombstoneCount || 0),
+          tombstoneSuppressedFactCountThisRun: Number(distillationLedger.directMemory.tombstoneSuppressedFactCountThisRun || 0),
+          recentReceipts: (Array.isArray(distillationLedger.directMemory.receipts) ? distillationLedger.directMemory.receipts : [])
+            .slice(-12)
+            .map((row: any) => ({
+              requestId: String(row?.requestId || ""),
+              action: String(row?.action || ""),
+              status: String(row?.status || ""),
+              reason: String(row?.reason || ""),
+              memoryId: String(row?.memoryId || ""),
+              memoryType: String(row?.memoryType || ""),
+              messageId: String(row?.messageId || ""),
+              committedAt: String(row?.committedAt || ""),
+              candidateCount: Number(row?.candidateCount || 0),
+            })),
+          updatedAt: String(distillationLedger.directMemory.updatedAt || distillationLedger.updatedAt || ""),
+        } : null,
+        distillationTransaction: {
+          schema: "ccm-group-typed-memory-distillation-transaction-health-v1",
+          status: String(distillationTransactionState.state?.status || (distillationLock.active ? "in_progress" : "idle")),
+          stateValid: distillationTransactionState.valid === true,
+          statePresent: distillationTransactionState.present === true,
+          lockPresent: distillationLock.present === true,
+          lockValid: distillationLock.valid === true,
+          lockActive: distillationLock.active === true,
+          lockStale: distillationLock.stale === true,
+          leaseId: String(distillationLock.lock?.leaseId || distillationTransactionState.state?.leaseId || ""),
+          fencingToken: Number(distillationLock.lock?.fencingToken || distillationTransactionState.state?.fencingToken || 0),
+          lastCommittedFencingToken: Number(distillationTransactionState.state?.lastCommittedFencingToken || 0),
+          recoveredLeaseCount: Number(distillationTransactionState.state?.recoveredLeaseCount || 0),
+          waitedMs: Number(distillationLedger.distillationTransaction?.waitedMs || 0),
+          committedAt: String(distillationLedger.distillationTransaction?.committedAt || ""),
+          updatedAt: String(distillationTransactionState.state?.updatedAt || ""),
+          error: String(distillationTransactionState.state?.error || ""),
+        },
+        artifactTransaction: artifactTransaction.present ? {
+          schema: "ccm-group-typed-memory-artifact-transaction-health-v1",
+          status: String(artifactTransaction.journal?.status || "unknown"),
+          valid: artifactTransaction.valid === true,
+          checksumValid: artifactTransaction.checksumValid === true,
+          corrupt: artifactTransaction.corrupt === true,
+          leaseId: String(artifactTransaction.journal?.leaseId || ""),
+          fencingToken: Number(artifactTransaction.journal?.fencingToken || 0),
+          mutationKind: String(artifactTransaction.journal?.mutationKind || ""),
+          mutationKinds: Array.isArray(artifactTransaction.journal?.mutationKinds) ? artifactTransaction.journal.mutationKinds.map(String) : [],
+          artifactCount: Number(artifactTransaction.journal?.artifactCount || 0),
+          targets: (Array.isArray(artifactTransaction.journal?.artifacts) ? artifactTransaction.journal.artifacts : []).map((item: any) => String(item?.target || "")).filter(Boolean),
+          recoveryAction: String(artifactTransaction.journal?.recoveryAction || ""),
+          preparedAt: String(artifactTransaction.journal?.preparedAt || ""),
+          committedAt: String(artifactTransaction.journal?.committedAt || ""),
+          recoveredAt: String(artifactTransaction.journal?.recoveredAt || ""),
+          updatedAt: String(artifactTransaction.journal?.updatedAt || ""),
         } : null,
         recallScoring: recall?.postCompactUsageScoring || {
           schema: "ccm-group-typed-memory-post-compact-usage-scoring-v1",
@@ -29639,6 +29742,18 @@ export function buildGroupSessionMemorySnapshotReport(options: any = {}) {
     const groupSessionId = String(entry.sessionId || memory.groupSessionId || "default");
     const scopeId = String(entry.scopeId || (groupSessionId === "default" ? groupId : `${groupId}::${groupSessionId}`));
     const typedScopeId = groupSessionId === "default" ? groupId : `${groupId}--${groupSessionId}`;
+    const manifestSelectorSummary = groupSessionId.startsWith("gcs_")
+      ? require("../collaboration/group-memory-index").summarizeGroupTypedMemoryManifestSelectorDecisions(typedScopeId)
+      : { present: false, valid: true, decisionCount: 0, selectedDecisionCount: 0, emptyDecisionCount: 0, failedDecisionCount: 0, selectedDocumentCount: 0, averageSelectedDocuments: 0, latest: null };
+    const manifestSelectorInvalid = manifestSelectorSummary.present === true && manifestSelectorSummary.valid !== true;
+    const autoCompactionBackground = memory.compaction?.background || null;
+    const autoCompactionLogDistillation = memory.compaction?.logDistillation || memory.longTermLogDistillation || null;
+    const autoCompactionScopeEvidencePresent = !!autoCompactionBackground?.status || !!autoCompactionLogDistillation?.schema;
+    const autoCompactionBackgroundScopeId = String(autoCompactionBackground?.typedMemoryScopeId || autoCompactionBackground?.typed_memory_scope_id || "");
+    const autoCompactionDistillationScopeId = String(autoCompactionLogDistillation?.groupId || autoCompactionLogDistillation?.group_id || "");
+    const autoCompactionTypedMemoryScopeValid = !autoCompactionScopeEvidencePresent || (groupSessionId.startsWith("gcs_")
+      && autoCompactionBackgroundScopeId === typedScopeId
+      && autoCompactionDistillationScopeId === typedScopeId);
     const postTurnSummaryLedger = groupSessionId.startsWith("gcs_")
       ? readGroupPostTurnSummaries(groupId, groupSessionId, { limit: 10_000 })
       : null;
@@ -29657,6 +29772,16 @@ export function buildGroupSessionMemorySnapshotReport(options: any = {}) {
     const snapshot = readGroupSessionMemorySnapshotForCenter(typedScopeId);
     const budget = snapshot.memoryBudget || {};
     const cadence = snapshot.updateCadence || {};
+    const directMemorySuppression = cadence.directMemorySuppression || null;
+    const directMemorySuppressionPresent = !!directMemorySuppression;
+    const directMemorySuppressionChecksumValid = directMemorySuppressionPresent
+      && verifyGroupSessionMemoryDirectWriteSuppressionReceipt(directMemorySuppression)
+      && String(directMemorySuppression.groupId || "") === groupId
+      && String(directMemorySuppression.groupSessionId || "") === groupSessionId
+      && String(directMemorySuppression.scopeId || "") === typedScopeId
+      && String(directMemorySuppression.cursorAfter || "") === String(cadence.lastExtractionMessageId || "");
+    const directMemorySuppressionActive = String(cadence.status || "") === "direct_memory_write_suppressed"
+      && directMemorySuppressionChecksumValid;
     const extractionState = readGroupSessionMemoryExtractionState(typedScopeId);
     const extractionLease = inspectGroupSessionMemoryExtractionLease(typedScopeId);
     const extractionFailed = String(extractionState.status || "") === "failed";
@@ -29665,6 +29790,23 @@ export function buildGroupSessionMemorySnapshotReport(options: any = {}) {
     const modelReceiptFile = path.join(path.dirname(snapshot.snapshotFile || getGroupSessionMemorySnapshotFile(typedScopeId)), "model-extraction-receipt.json");
     const persistedModelReceipt = readJson(modelReceiptFile, null);
     const modelReceipt = persistedModelReceipt || snapshot.modelExtractionReceipt || null;
+    const typedDistillationLedger = readJson(path.join(GROUP_TYPED_MEMORY_MD_DIR, cleanId(typedScopeId), ".distillation-ledger.json"), {});
+    const modelExtractionTypedMemoryArchive = typedDistillationLedger?.modelExtractionTypedMemoryArchive || null;
+    const modelExtractionTypedMemoryArchivePayload = modelExtractionTypedMemoryArchive
+      ? { ...modelExtractionTypedMemoryArchive }
+      : null;
+    if (modelExtractionTypedMemoryArchivePayload) delete modelExtractionTypedMemoryArchivePayload.checksum;
+    const modelExtractionTypedMemoryArchiveValid = !modelExtractionTypedMemoryArchive
+      || (modelExtractionTypedMemoryArchive.schema === "ccm-group-session-model-extraction-typed-memory-archive-v1"
+        && String(modelExtractionTypedMemoryArchive.scopeId || "") === typedScopeId
+        && hash(JSON.stringify(modelExtractionTypedMemoryArchivePayload), 64) === String(modelExtractionTypedMemoryArchive.checksum || ""));
+    const latestModelTypedExecution = Array.isArray(modelExtractionTypedMemoryArchive?.executions)
+      ? modelExtractionTypedMemoryArchive.executions[modelExtractionTypedMemoryArchive.executions.length - 1] || null
+      : null;
+    const modelExtractionTypedMemoryRetry = readGroupSessionMemoryTypedMemoryRetryState(typedScopeId);
+    const modelExtractionTypedMemoryRetryInvalid = modelExtractionTypedMemoryRetry.valid !== true;
+    const modelExtractionTypedMemoryRetryPendingCount = Number(modelExtractionTypedMemoryRetry.pendingCount || 0);
+    const modelExtractionTypedMemoryRetryExhaustedCount = Number(modelExtractionTypedMemoryRetry.exhaustedCount || 0);
     const modelReceiptChecksumValid = !!modelReceipt
       && String(modelReceipt.status || "") === "committed"
       && verifyGroupSessionMemoryModelExtractionReceipt(modelReceipt)
@@ -29721,7 +29863,7 @@ export function buildGroupSessionMemorySnapshotReport(options: any = {}) {
       && String(modelExtractionDeliveryEvidence.factSupersessionGraphChecksum || "") === String(factSupersessionGraph?.checksum || modelReceipt?.factSupersessionGraphChecksum || "")
       && modelExtractionDeliveryReplay?.pass === true;
     const modelExtracted = snapshot.modelExtracted === true || String(snapshot.extractionMethod || "") === "forked_model_session_memory";
-    const modelExtractionPending = cadence.initialized === true && !modelExtracted;
+    const modelExtractionPending = cadence.initialized === true && !modelExtracted && !directMemorySuppressionActive;
     const modelExtractionBackoff = extractionFailed
       && (Date.parse(String(extractionState.nextRetryAt || "")) || 0) > Date.now();
     const requiresSnapshot = extractionFailed
@@ -29751,14 +29893,19 @@ export function buildGroupSessionMemorySnapshotReport(options: any = {}) {
     const modelExtractionDeliveryEvidenceInvalid = modelExtracted && !modelExtractionDeliveryEvidenceValid;
     const status = postTurnSummaryInvalid
       ? "fail"
+      : !autoCompactionTypedMemoryScopeValid
+      ? "fail"
+      : directMemorySuppressionPresent && !directMemorySuppressionChecksumValid
+      ? "fail"
       : !requiresSnapshot
       ? "empty"
-      : budgetExceeded || modelEvidenceInvalid || modelFailureEvidenceInvalid || modelHistoryEvidenceInvalid || modelReplayEvidenceInvalid || modelExtractionDeliveryEvidenceInvalid || modelArtifactRetentionInvalid || modelArtifactRetentionCapacityExceeded || factSupersessionGraphInvalid || extractionStale || (cadenceOverdue && !extractionActive && !hasSummary) || (extractionFailed && !snapshot.hasSummary) ? "fail"
-      : snapshotExists && markdownExists && checksumMatches && hasSummary && !budgetNearLimit && !modelArtifactRetentionDue && !extractionFailed && !modelExtractionPending ? "ok"
+      : budgetExceeded || modelEvidenceInvalid || modelFailureEvidenceInvalid || modelHistoryEvidenceInvalid || modelReplayEvidenceInvalid || modelExtractionDeliveryEvidenceInvalid || modelArtifactRetentionInvalid || modelArtifactRetentionCapacityExceeded || factSupersessionGraphInvalid || !modelExtractionTypedMemoryArchiveValid || modelExtractionTypedMemoryRetryInvalid || modelExtractionTypedMemoryRetryExhaustedCount > 0 || manifestSelectorInvalid || extractionStale || (cadenceOverdue && !extractionActive && !hasSummary) || (extractionFailed && !snapshot.hasSummary) ? "fail"
+      : snapshotExists && markdownExists && checksumMatches && hasSummary && !budgetNearLimit && !modelArtifactRetentionDue && !extractionFailed && !modelExtractionPending && modelExtractionTypedMemoryRetryPendingCount === 0 ? "ok"
       : snapshotExists && markdownExists && hasSummary ? "warn"
       : "fail";
     const gaps = [];
     if (postTurnSummaryInvalid) gaps.push({ reason: `逐轮摘要账本完整性失败：issues=${postTurnSummaryLedger?.issues?.length || 0}` });
+    if (!autoCompactionTypedMemoryScopeValid) gaps.push({ reason: `自动压缩长期蒸馏作用域错绑：expected=${typedScopeId}, background=${autoCompactionBackgroundScopeId || "missing"}, distillation=${autoCompactionDistillationScopeId || "missing"}` });
     if (missingPostTurnSummaryMessageIds.length) gaps.push({ reason: `有 ${missingPostTurnSummaryMessageIds.length} 个 assistant turn 尚未写入逐轮摘要账本` });
     if (requiresSnapshot && !snapshotExists) gaps.push({ reason: "缺少 group session memory snapshot.json" });
     if (requiresSnapshot && !markdownExists) gaps.push({ reason: "缺少 group session memory summary.md" });
@@ -29784,6 +29931,12 @@ export function buildGroupSessionMemorySnapshotReport(options: any = {}) {
     if (modelArtifactRetentionCapacityExceeded) gaps.push({ reason: `模型抽取制品热存储超过容量：${modelExtractionArtifactRetention.projectedHotBytes}/${modelExtractionArtifactRetention.policy?.maxHotBytes || 0} bytes` });
     if (modelArtifactRetentionDue) gaps.push({ reason: `有 ${modelExtractionArtifactRetention.candidateExecutionCount} 次模型抽取制品等待冷归档` });
     if (factSupersessionGraphInvalid) gaps.push({ reason: "Session Memory 事实替代图 checksum、边绑定或 markdown 绑定验证失败" });
+    if (!modelExtractionTypedMemoryArchiveValid) gaps.push({ reason: "模型 extraction typed-memory 提案归档 checksum 或会话绑定无效" });
+    if (modelExtractionTypedMemoryRetryInvalid) gaps.push({ reason: "模型 extraction typed-memory retry ledger checksum 或会话绑定无效" });
+    if (modelExtractionTypedMemoryRetryPendingCount > 0) gaps.push({ reason: `有 ${modelExtractionTypedMemoryRetryPendingCount} 个模型 extraction typed-memory 提交等待 artifact-only 重试` });
+    if (modelExtractionTypedMemoryRetryExhaustedCount > 0) gaps.push({ reason: `有 ${modelExtractionTypedMemoryRetryExhaustedCount} 个模型 extraction typed-memory 提交已耗尽自动重试` });
+    if (manifestSelectorInvalid) gaps.push({ reason: `typed-memory manifest selector 决策完整性失败：invalid=${manifestSelectorSummary.invalidDecisionCount || 0}` });
+    if (directMemorySuppressionPresent && !directMemorySuppressionChecksumValid) gaps.push({ reason: "直接记忆模型抽取抑制回执 checksum、会话身份或游标绑定无效" });
     if (extractionFailed) gaps.push({ reason: `group session memory 最近一次提取失败：${extractionState.lastError || "unknown error"}` });
     if (modelExtractionBackoff) gaps.push({ reason: `模型 Session Memory 提取处于失败退避，计划 ${extractionState.nextRetryAt} 重试` });
     if (extractionStale) gaps.push({ reason: "group session memory 提取状态为 in_progress，但没有有效租约，需要 stale recovery" });
@@ -29793,6 +29946,11 @@ export function buildGroupSessionMemorySnapshotReport(options: any = {}) {
       groupSessionId,
       scopeId,
       modelExtractionScopeId: typedScopeId,
+      autoCompactionScopeEvidencePresent,
+      autoCompactionTypedMemoryScopeValid,
+      autoCompactionExpectedTypedMemoryScopeId: typedScopeId,
+      autoCompactionBackgroundScopeId,
+      autoCompactionDistillationScopeId,
       postTurnSummaryLedgerFile: String(postTurnSummaryLedger?.file || ""),
       postTurnSummaryLedgerValid: postTurnSummaryLedger?.valid !== false,
       postTurnSummaryEventCount: Number(postTurnSummaryLedger?.eventCount || 0),
@@ -29834,6 +29992,17 @@ export function buildGroupSessionMemorySnapshotReport(options: any = {}) {
       cadenceExtractionCount: Number(cadence.extractionCount || 0),
       cadenceLastExtractedAt: String(cadence.lastExtractedAt || ""),
       cadenceOverdue,
+      directMemorySuppressionCount: Number(cadence.directMemorySuppressionCount || 0),
+      directMemorySuppressionPresent,
+      directMemorySuppressionActive,
+      directMemorySuppressionChecksumValid,
+      directMemorySuppressionLatest: directMemorySuppression,
+      directMemorySuppressionLastAt: String(cadence.lastDirectMemorySuppressedAt || directMemorySuppression?.suppressedAt || ""),
+      directMemorySuppressionProofCount: Number(directMemorySuppression?.directMemoryProofCount || 0),
+      directMemorySuppressionCursorBefore: String(directMemorySuppression?.cursorBefore || ""),
+      directMemorySuppressionCursorAfter: String(directMemorySuppression?.cursorAfter || ""),
+      directMemorySuppressionLedgerFence: Number(directMemorySuppression?.ledgerMutationFence || 0),
+      directMemorySuppressionReceiptChecksum: String(directMemorySuppression?.checksum || ""),
       extractionStatus: String(extractionState.status || "idle"),
       extractionActive,
       extractionFailed,
@@ -29937,6 +30106,42 @@ export function buildGroupSessionMemorySnapshotReport(options: any = {}) {
       modelInputDegradedEventCount: modelInputAuditEvents.filter((event: any) => event?.requestAudit?.inputBudgetStatus === "degraded_bounded").length,
       modelInputOverBudgetEventCount: modelInputAuditEvents.filter((event: any) => event?.requestAudit?.inputBudgetStatus === "over_budget").length,
       modelExecutionId: String(modelReceipt?.executionId || ""),
+      modelExtractionTypedMemoryArchive,
+      modelExtractionTypedMemoryArchivePresent: !!modelExtractionTypedMemoryArchive,
+      modelExtractionTypedMemoryArchiveValid,
+      modelExtractionTypedMemoryArchiveChecksum: String(modelExtractionTypedMemoryArchive?.checksum || ""),
+      modelExtractionTypedMemoryActiveFactCount: Number(modelExtractionTypedMemoryArchive?.activeFactCount || 0),
+      modelExtractionTypedMemorySupersededFactCount: Number(modelExtractionTypedMemoryArchive?.supersededFactCount || 0),
+      modelExtractionTypedMemoryActiveTopicCount: Number(modelExtractionTypedMemoryArchive?.activeTopicCount || 0),
+      modelExtractionTypedMemoryRetiredTopicCount: Number(modelExtractionTypedMemoryArchive?.retiredTopicCount || 0),
+      modelExtractionTypedMemoryMergedTopicCount: Number(modelExtractionTypedMemoryArchive?.mergedTopicCount || 0),
+      modelExtractionTypedMemoryConsolidatedFactCount: Number(modelExtractionTypedMemoryArchive?.consolidatedFactCount || 0),
+      modelExtractionTypedMemoryUnclassifiedFactCount: Number(modelExtractionTypedMemoryArchive?.unclassifiedFactCount || 0),
+      modelExtractionTypedMemoryLowConfidenceFactCount: Number(modelExtractionTypedMemoryArchive?.lowConfidenceFactCount || 0),
+      modelExtractionTypedMemoryRebalancedFactCount: Number(modelExtractionTypedMemoryArchive?.rebalancedFactCount || 0),
+      modelExtractionTypedMemoryCrossLanguageReuseCount: Number(modelExtractionTypedMemoryArchive?.crossLanguageReuseCount || 0),
+      modelExtractionTypedMemoryExecutionCount: Number(modelExtractionTypedMemoryArchive?.executions?.length || 0),
+      modelExtractionTypedMemoryProposalCount: Number(latestModelTypedExecution?.proposalCount || 0),
+      modelExtractionTypedMemoryAdmittedCount: Number(latestModelTypedExecution?.admittedCount || 0),
+      modelExtractionTypedMemoryRejectedCount: Number(latestModelTypedExecution?.rejectedCount || 0),
+      modelExtractionTypedMemoryDuplicateCount: Number(latestModelTypedExecution?.duplicateCount || 0),
+      modelExtractionTypedMemorySupersededThisRun: Number(latestModelTypedExecution?.supersededCount || 0),
+      modelExtractionTypedMemoryRetry,
+      modelExtractionTypedMemoryRetryPresent: modelExtractionTypedMemoryRetry.present === true,
+      modelExtractionTypedMemoryRetryValid: modelExtractionTypedMemoryRetry.valid === true,
+      modelExtractionTypedMemoryRetryPendingCount,
+      modelExtractionTypedMemoryRetryCompletedCount: Number(modelExtractionTypedMemoryRetry.completedCount || 0),
+      modelExtractionTypedMemoryRetryExhaustedCount,
+      manifestSelectorSummary,
+      manifestSelectorPresent: manifestSelectorSummary.present === true,
+      manifestSelectorValid: manifestSelectorSummary.valid === true,
+      manifestSelectorDecisionCount: Number(manifestSelectorSummary.decisionCount || 0),
+      manifestSelectorSelectedDecisionCount: Number(manifestSelectorSummary.selectedDecisionCount || 0),
+      manifestSelectorEmptyDecisionCount: Number(manifestSelectorSummary.emptyDecisionCount || 0),
+      manifestSelectorFailedDecisionCount: Number(manifestSelectorSummary.failedDecisionCount || 0),
+      manifestSelectorSelectedDocumentCount: Number(manifestSelectorSummary.selectedDocumentCount || 0),
+      manifestSelectorAverageSelectedDocuments: Number(manifestSelectorSummary.averageSelectedDocuments || 0),
+      manifestSelectorLatest: manifestSelectorSummary.latest || null,
       modelExtractorProject: String(modelReceipt?.extractorProject || ""),
       modelExtractorAgentType: String(modelReceipt?.extractorAgentType || ""),
       modelPromptChecksum: String(modelReceipt?.requestAudit?.promptChecksum || ""),
@@ -29984,6 +30189,11 @@ export function buildGroupSessionMemorySnapshotReport(options: any = {}) {
       modelReceiptVerifiedCount: rows.filter(row => row.modelReceiptChecksumValid).length,
       modelExtractionPendingCount: rows.filter(row => row.modelExtractionPending).length,
       modelExtractionBackoffCount: rows.filter(row => row.modelExtractionBackoff).length,
+      directMemorySuppressionCount: rows.reduce((sum, row) => sum + Number(row.directMemorySuppressionCount || 0), 0),
+      directMemorySuppressionSessionCount: rows.filter(row => row.directMemorySuppressionPresent).length,
+      directMemorySuppressionActiveCount: rows.filter(row => row.directMemorySuppressionActive).length,
+      directMemorySuppressionInvalidCount: rows.filter(row => row.directMemorySuppressionPresent && !row.directMemorySuppressionChecksumValid).length,
+      directMemorySuppressionProofCount: rows.reduce((sum, row) => sum + Number(row.directMemorySuppressionProofCount || 0), 0),
       modelReceiptInvalidCount: rows.filter(row => row.modelExtracted && !row.modelReceiptChecksumValid).length,
       modelFailureReceiptCount: rows.filter(row => row.modelFailureReceiptPresent).length,
       modelFailureReceiptVerifiedCount: rows.filter(row => row.modelFailureReceiptChecksumValid).length,
@@ -30010,12 +30220,39 @@ export function buildGroupSessionMemorySnapshotReport(options: any = {}) {
       modelExtractionArtifactCapacityExceededCount: rows.filter(row => row.modelExtractionArtifactCapacityExceeded).length,
       modelInputDegradedCount: rows.reduce((sum, row) => sum + Number(row.modelInputDegradedEventCount || 0), 0),
       modelInputOverBudgetCount: rows.reduce((sum, row) => sum + Number(row.modelInputOverBudgetEventCount || 0), 0),
+      modelExtractionTypedMemoryArchiveCount: rows.filter(row => row.modelExtractionTypedMemoryArchivePresent).length,
+      modelExtractionTypedMemoryArchiveInvalidCount: rows.filter(row => row.modelExtractionTypedMemoryArchivePresent && !row.modelExtractionTypedMemoryArchiveValid).length,
+      modelExtractionTypedMemoryActiveFactCount: rows.reduce((sum, row) => sum + Number(row.modelExtractionTypedMemoryActiveFactCount || 0), 0),
+      modelExtractionTypedMemorySupersededFactCount: rows.reduce((sum, row) => sum + Number(row.modelExtractionTypedMemorySupersededFactCount || 0), 0),
+      modelExtractionTypedMemoryActiveTopicCount: rows.reduce((sum, row) => sum + Number(row.modelExtractionTypedMemoryActiveTopicCount || 0), 0),
+      modelExtractionTypedMemoryRetiredTopicCount: rows.reduce((sum, row) => sum + Number(row.modelExtractionTypedMemoryRetiredTopicCount || 0), 0),
+      modelExtractionTypedMemoryMergedTopicCount: rows.reduce((sum, row) => sum + Number(row.modelExtractionTypedMemoryMergedTopicCount || 0), 0),
+      modelExtractionTypedMemoryConsolidatedFactCount: rows.reduce((sum, row) => sum + Number(row.modelExtractionTypedMemoryConsolidatedFactCount || 0), 0),
+      modelExtractionTypedMemoryUnclassifiedFactCount: rows.reduce((sum, row) => sum + Number(row.modelExtractionTypedMemoryUnclassifiedFactCount || 0), 0),
+      modelExtractionTypedMemoryLowConfidenceFactCount: rows.reduce((sum, row) => sum + Number(row.modelExtractionTypedMemoryLowConfidenceFactCount || 0), 0),
+      modelExtractionTypedMemoryRebalancedFactCount: rows.reduce((sum, row) => sum + Number(row.modelExtractionTypedMemoryRebalancedFactCount || 0), 0),
+      modelExtractionTypedMemoryCrossLanguageReuseCount: rows.reduce((sum, row) => sum + Number(row.modelExtractionTypedMemoryCrossLanguageReuseCount || 0), 0),
+      modelExtractionTypedMemoryProposalCount: rows.reduce((sum, row) => sum + Number(row.modelExtractionTypedMemoryProposalCount || 0), 0),
+      modelExtractionTypedMemoryAdmittedCount: rows.reduce((sum, row) => sum + Number(row.modelExtractionTypedMemoryAdmittedCount || 0), 0),
+      modelExtractionTypedMemoryRejectedCount: rows.reduce((sum, row) => sum + Number(row.modelExtractionTypedMemoryRejectedCount || 0), 0),
+      modelExtractionTypedMemoryRetryPendingCount: rows.reduce((sum, row) => sum + Number(row.modelExtractionTypedMemoryRetryPendingCount || 0), 0),
+      modelExtractionTypedMemoryRetryCompletedCount: rows.reduce((sum, row) => sum + Number(row.modelExtractionTypedMemoryRetryCompletedCount || 0), 0),
+      modelExtractionTypedMemoryRetryExhaustedCount: rows.reduce((sum, row) => sum + Number(row.modelExtractionTypedMemoryRetryExhaustedCount || 0), 0),
+      modelExtractionTypedMemoryRetryInvalidCount: rows.filter(row => row.modelExtractionTypedMemoryRetryPresent && !row.modelExtractionTypedMemoryRetryValid).length,
+      manifestSelectorDecisionCount: rows.reduce((sum, row) => sum + Number(row.manifestSelectorDecisionCount || 0), 0),
+      manifestSelectorSelectedDecisionCount: rows.reduce((sum, row) => sum + Number(row.manifestSelectorSelectedDecisionCount || 0), 0),
+      manifestSelectorEmptyDecisionCount: rows.reduce((sum, row) => sum + Number(row.manifestSelectorEmptyDecisionCount || 0), 0),
+      manifestSelectorFailedDecisionCount: rows.reduce((sum, row) => sum + Number(row.manifestSelectorFailedDecisionCount || 0), 0),
+      manifestSelectorSelectedDocumentCount: rows.reduce((sum, row) => sum + Number(row.manifestSelectorSelectedDocumentCount || 0), 0),
+      manifestSelectorInvalidSessionCount: rows.filter(row => row.manifestSelectorPresent && !row.manifestSelectorValid).length,
       postTurnSummaryCount: rows.reduce((sum, row) => sum + Number(row.postTurnSummaryCount || 0), 0),
       postTurnSummaryEventCount: rows.reduce((sum, row) => sum + Number(row.postTurnSummaryEventCount || 0), 0),
       postTurnSummaryMissingCount: rows.reduce((sum, row) => sum + Number(row.postTurnSummaryMissingCount || 0), 0),
       postTurnSummaryInvalidLedgerCount: rows.filter(row => row.postTurnSummaryLedgerValid === false).length,
       postTurnSummaryArchiveCount: rows.reduce((sum, row) => sum + Number(row.postTurnSummaryArchiveCount || 0), 0),
       legacyDefaultSessionCount: rows.filter(row => row.groupSessionId === "default").length,
+      autoCompactionScopeObservedCount: rows.filter(row => row.autoCompactionScopeEvidencePresent).length,
+      autoCompactionScopeInvalidCount: rows.filter(row => !row.autoCompactionTypedMemoryScopeValid).length,
       totalMarkdownTokens: rows.reduce((sum, row) => sum + Number(row.markdownTokens || 0), 0),
       maxObservedSessionTokens: rows.reduce((max, row) => Math.max(max, Number(row.markdownTokens || 0)), 0),
       ccMaxTotalTokens: 12_000,
@@ -32644,6 +32881,82 @@ export function buildMemoryQualityReport(options: any = {}) {
   return report;
 }
 
+export function buildGroupSessionLifecycleIntegrityReport() {
+  const rows: any[] = [];
+  const files = fs.existsSync(GROUP_SESSION_LIFECYCLE_HEAD_DIR)
+    ? fs.readdirSync(GROUP_SESSION_LIFECYCLE_HEAD_DIR).filter(name => name.endsWith(".json")).map(name => path.join(GROUP_SESSION_LIFECYCLE_HEAD_DIR, name))
+    : [];
+  for (const file of files) {
+    let raw: any = null;
+    let identitySource = "primary";
+    for (const candidate of [file, `${file}.committed`, `${file}.bak`]) {
+      try {
+        raw = JSON.parse(fs.readFileSync(candidate, "utf-8"));
+        if (raw?.group_id && raw?.group_session_id) {
+          identitySource = candidate === file ? "primary" : candidate.endsWith(".committed") ? "committed" : "backup";
+          break;
+        }
+      } catch {}
+    }
+    if (!raw?.group_id || !raw?.group_session_id) {
+      try {
+        const first = fs.readFileSync(`${file}.journal.jsonl`, "utf-8").split(/\r?\n/).find(line => line.trim());
+        raw = first ? JSON.parse(first) : null;
+        identitySource = "journal";
+      } catch {}
+    }
+    const groupId = String(raw?.group_id || "");
+    const groupSessionId = String(raw?.group_session_id || "");
+    if (!groupId || !groupSessionId.startsWith("gcs_")) {
+      rows.push({ file, status: "fail", anchored: false, identitySource, issues: ["session_lifecycle_identity_unreadable"] });
+      continue;
+    }
+    const primaryVerification = (() => {
+      try { return verifyGroupSessionLifecycleHead(JSON.parse(fs.readFileSync(file, "utf-8")), { groupId, groupSessionId }); }
+      catch { return { valid: false, issues: ["session_lifecycle_primary_unreadable"] }; }
+    })();
+    const journal = readGroupSessionLifecycleJournal(groupId, groupSessionId);
+    const commits = readGroupSessionLifecycleCommitChain(groupId, groupSessionId);
+    const head = readGroupSessionLifecycleHead(groupId, groupSessionId);
+    const issues = [
+      ...(!primaryVerification.valid ? primaryVerification.issues : []),
+      ...(!journal.valid ? journal.issues : []),
+      ...(!commits.valid ? commits.issues : []),
+      ...(!head ? ["session_lifecycle_authoritative_head_unavailable"] : []),
+    ];
+    rows.push({
+      file,
+      groupId,
+      groupSessionId,
+      identitySource,
+      status: head ? (head.recovered_from_backup ? "warn" : "ok") : "fail",
+      anchored: !!head,
+      recovered: head?.recovered_from_backup === true,
+      recoveredFrom: String(head?.recovered_from || ""),
+      lifecycleStatus: String(head?.status || journal.latest?.status || commits.latest?.status || "unknown"),
+      generation: Number(head?.generation || journal.latest?.generation || commits.latest?.generation || 0),
+      journalGeneration: Number(journal.latest?.generation || 0),
+      commitGeneration: Number(commits.latest?.generation || 0),
+      journalValid: journal.valid,
+      commitChainValid: commits.valid,
+      primaryValid: primaryVerification.valid,
+      issues: Array.from(new Set(issues)),
+    });
+  }
+  const overall = {
+    status: rows.some(row => row.status === "fail") ? "fail" : rows.some(row => row.status === "warn") ? "warn" : rows.length ? "ok" : "empty",
+    headCount: rows.length,
+    anchoredCount: rows.filter(row => row.anchored).length,
+    recoveredCount: rows.filter(row => row.recovered).length,
+    failClosedCount: rows.filter(row => row.status === "fail").length,
+    journalInvalidCount: rows.filter(row => row.journalValid === false).length,
+    commitInvalidCount: rows.filter(row => row.commitChainValid === false).length,
+    primaryInvalidCount: rows.filter(row => row.primaryValid === false).length,
+    deletedCount: rows.filter(row => row.lifecycleStatus === "deleted").length,
+  };
+  return { schema: "ccm-group-session-lifecycle-integrity-report-v1", generatedAt: now(), overall, rows };
+}
+
 export function buildMemoryCenterOverview() {
   const groupScopes = listGroupMemoryScopes();
   const groups = listMemoryCenterGroupSessionScopes();
@@ -32762,6 +33075,14 @@ export function buildMemoryCenterOverview() {
   const compactFileReferenceUsageDisciplineReport = buildCompactFileReferenceUsageDisciplineReport({});
   const childGlobalAgentMemoryBridgeReport = buildChildGlobalAgentMemoryBridgeReport({ groupLimit: 12 });
   const taskAgentMemoryContextSnapshotReport = buildTaskAgentMemoryContextSnapshotReport({});
+  const groupSessionLifecycleIntegrityReport = buildGroupSessionLifecycleIntegrityReport();
+  if (groupSessionLifecycleIntegrityReport.overall.status === "fail") {
+    addSystemAlert(
+      "critical",
+      "group_session_lifecycle_integrity",
+      `群聊会话生命周期完整性失败关闭 ${groupSessionLifecycleIntegrityReport.overall.failClosedCount} 个；journal 异常 ${groupSessionLifecycleIntegrityReport.overall.journalInvalidCount}，commit 异常 ${groupSessionLifecycleIntegrityReport.overall.commitInvalidCount}`
+    );
+  }
   if (taskAgentMemoryContextSnapshotReport.overall?.status === "fail" || taskAgentMemoryContextSnapshotReport.overall?.status === "warn") {
     addSystemAlert(
       taskAgentMemoryContextSnapshotReport.overall.status === "fail" ? "critical" : "warning",
@@ -34400,6 +34721,7 @@ export function buildMemoryCenterOverview() {
     compactFileReferenceUsageDisciplineReport,
     childGlobalAgentMemoryBridgeReport,
     taskAgentMemoryContextSnapshotReport,
+    groupSessionLifecycleIntegrityReport,
   };
 }
 
@@ -60669,6 +60991,46 @@ export function handleMemoryCenterApi(pathname: string, req: any, res: any, pars
             archivedThisRun: result.archivedThisRun || 0,
             archivedBytesThisRun: result.archivedBytesThisRun || 0,
             manifestValid: result.manifest?.valid === true,
+          });
+        }
+        else if (scope === "group" && operation === "retry_model_extraction_typed_memory") {
+          if (!groupId || !groupSessionId || groupSessionId === "default") throw new Error("typed-memory 重试只支持独立群聊会话");
+          if (data.explicitExecution !== true && data.explicit_execution !== true) throw new Error("执行 typed-memory artifact-only 重试需要显式确认");
+          const typedScopeId = `${groupId}--${groupSessionId}`;
+          const retryState = readGroupSessionMemoryTypedMemoryRetryState(typedScopeId);
+          if (retryState.valid !== true) throw new Error("typed-memory retry ledger 无效，拒绝执行");
+          const requestedExecutionId = String(data.executionId || data.execution_id || "");
+          const targets = (retryState.entries || []).filter((entry: any) => requestedExecutionId
+            ? String(entry.executionId || "") === requestedExecutionId
+            : ["pending", "exhausted"].includes(String(entry.status || "")));
+          if (!targets.length) throw new Error("没有可重试的 typed-memory extraction 提交");
+          const results = targets.map((entry: any) => retryGroupSessionModelExtractionTypedMemory(typedScopeId, entry.executionId, {
+            force: true,
+            schedule: false,
+            reason: `memory_center_manual_retry:${data.reason}`,
+          }));
+          result = {
+            schema: "ccm-memory-center-model-extraction-typed-memory-retry-v1",
+            scopeId: typedScopeId,
+            attemptedCount: results.length,
+            recoveredCount: results.filter((row: any) => row.committed === true).length,
+            failedCount: results.filter((row: any) => row.committed !== true).length,
+            results,
+            retryState: readGroupSessionMemoryTypedMemoryRetryState(typedScopeId),
+          };
+          appendAudit({
+            type: "memory_operation",
+            action: operation,
+            scope,
+            scopeId,
+            groupId,
+            groupSessionId,
+            actor: data.actor || "local-user",
+            reason: data.reason,
+            attemptedCount: result.attemptedCount,
+            recoveredCount: result.recoveredCount,
+            failedCount: result.failedCount,
+            modelInvoked: false,
           });
         }
         else if (scope === "group" && (operation === "compact" || operation === "rebuild")) {

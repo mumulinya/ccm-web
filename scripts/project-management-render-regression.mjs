@@ -20,7 +20,10 @@ const detailFixture = { id: 's1', history: [
   { id: 'a1', role: 'assistant', content: '可以，项目当前运行正常。\n关键服务已经就绪。', timestamp: '2026-07-14T04:00:00.000Z', workEvents: [{ id: 'w1', kind: 'status', text: 'internal status payload trace_id=hidden' }] },
 ] }
 
+const sseEvent = payload => `data: ${JSON.stringify(payload)}\n\n`
+
 const prepare = async page => {
+  let sendRequestCount = 0
   page.on('pageerror', error => report.errors.push(`page: ${error.message}`))
   page.on('console', message => { if (message.type() === 'error') report.errors.push(`console: ${message.text()}`) })
   await page.route('**/api/projects', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(projectsFixture) }))
@@ -29,11 +32,35 @@ const prepare = async page => {
   await page.route('**/api/projects/ccm-demo/sessions/s1', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(detailFixture) }))
   await page.route('**/api/projects/archived', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, projects: [{ name: 'old-demo', archived_at: '2026-07-13T08:00:00.000Z' }] }) }))
   await page.route('**/api/projects/lifecycle-audit**', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, records: [] }) }))
+  await page.route('**/api/sessions/message', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true }) }))
+  await page.route('**/api/send-stream', async route => {
+    sendRequestCount += 1
+    const isTask = sendRequestCount === 2
+    const body = isTask
+      ? [
+          sseEvent({ type: 'presentation', message_mode: 'task', show_task_card: true }),
+          sseEvent({ type: 'task_runtime', run: { id: 'pchat_task_1' }, taskExperience: { task_id: 'pchat_task_1', title: '修改登录页并运行测试', goal: '修改登录页并运行测试', status: 'in_progress', phase: 'executing', requires_card: true } }),
+          sseEvent({ type: 'work_event', event: { id: 'task-status', kind: 'status', text: '正在修改' } }),
+          sseEvent({ type: 'chunk', text: '已完成登录页修改，并通过测试。' }),
+          sseEvent({ type: 'done', run: { id: 'pchat_task_1' }, taskExperience: { task_id: 'pchat_task_1', title: '修改登录页并运行测试', goal: '修改登录页并运行测试', status: 'done', phase: 'completed', requires_card: true, verification: ['npm test 通过'] }, fileChanges: { count: 1, files: [{ path: 'src/login.vue', statusText: '已修改', statusColor: '#16a34a' }] }, workEvents: [{ id: 'task-done', kind: 'done', text: '执行完成' }] }),
+        ].join('')
+      : [
+          sseEvent({ type: 'presentation', message_mode: 'conversation', show_task_card: false }),
+          sseEvent({ type: 'status', text: 'Agent 正在思考...' }),
+          sseEvent({ type: 'task_runtime', run: { id: 'legacy-noisy-run' }, taskExperience: { task_id: 'legacy-noisy-run', title: '你是什么模型', status: 'in_progress', phase: 'executing' } }),
+          sseEvent({ type: 'work_event', event: { id: 'hidden-internal', kind: 'status', text: '正在修改 trace_id=hidden' } }),
+          sseEvent({ type: 'chunk', text: '我是当前项目配置的 Codex Agent，可以回答问题，也可以在你明确要求时处理代码任务。' }),
+          sseEvent({ type: 'done', taskExperience: { task_id: 'legacy-noisy-run', title: '你是什么模型', status: 'done', phase: 'completed' }, workEvents: [{ id: 'hidden-done', kind: 'done', text: '内部执行完成' }] }),
+        ].join('')
+    await route.fulfill({ status: 200, contentType: 'text/event-stream', body })
+  })
   await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 })
-  const nav = (page.viewportSize()?.width || 1000) <= 768
-    ? page.locator('.bottom-item').filter({ hasText: '项目' }).first()
-    : page.locator('.nav-item').filter({ hasText: '项目管理' }).first()
-  await nav.click()
+  if ((page.viewportSize()?.width || 1000) <= 768) {
+    await page.getByRole('button', { name: '更多', exact: true }).click()
+    await page.locator('.mobile-more-grid').getByRole('button', { name: '项目管理', exact: true }).click()
+  } else {
+    await page.locator('.nav-item').filter({ hasText: '项目管理' }).first().click()
+  }
   await page.locator('.project-manager').waitFor({ state: 'visible' })
   await page.getByText('可以，项目当前运行正常。', { exact: false }).waitFor()
 }
@@ -72,6 +99,25 @@ try {
   assert.match(await desktop.locator('.message.assistant .bubble').innerText(), /正常。\n关键服务/)
   report.checks.push({ name: 'desktop keeps readable session and conversation columns, hides internal session id and preserves line breaks', pass: true })
   await capture(desktop, 'desktop-project-workspace')
+  await desktop.locator('#projectChatInput').fill('你是什么模型')
+  await desktop.locator('.project-manager .send-button').click()
+  await desktop.getByText('我是当前项目配置的 Codex Agent', { exact: false }).waitFor()
+  assert.equal(await desktop.locator('.task-experience-card').count(), 0)
+  assert.equal((await desktop.locator('.messages').innerText()).includes('项目执行任务'), false)
+  assert.equal((await desktop.locator('.messages').innerText()).includes('正在修改 trace_id=hidden'), false)
+  report.checks.push({ name: 'ordinary project question renders only the friendly answer without task card or internal work details', pass: true })
+  await desktop.getByText('我是当前项目配置的 Codex Agent', { exact: false }).scrollIntoViewIfNeeded()
+  await capture(desktop, 'desktop-ordinary-conversation')
+
+  await desktop.waitForFunction(() => document.querySelector('.project-manager .send-button')?.textContent?.trim() === '发送')
+  await desktop.locator('#projectChatInput').fill('修改登录页并运行测试')
+  await desktop.locator('.project-manager .send-button').click()
+  await desktop.locator('.task-experience-card').waitFor()
+  assert.equal(await desktop.locator('.task-experience-card').count(), 1)
+  assert.equal((await desktop.locator('.messages').innerText()).includes('项目执行任务'), true)
+  report.checks.push({ name: 'explicit implementation request keeps the project task card and delivery progress', pass: true })
+  await capture(desktop, 'desktop-explicit-task')
+
   await desktop.getByTitle('归档项目管理').click()
   await desktop.getByText('old-demo', { exact: true }).waitFor()
   await capture(desktop, 'desktop-archive-manager')

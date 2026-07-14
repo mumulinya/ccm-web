@@ -1772,6 +1772,7 @@ export type GroupOrchestratorInput = {
     execution_id?: string;
 };
 export declare function runGroupOrchestrator(input: GroupOrchestratorInput): Promise<{
+    selectedRoleSkills: string[];
     usage: LlmTokenUsage;
     agent: any;
     delegated: any[];
@@ -1797,6 +1798,7 @@ export declare function runGroupOrchestrator(input: GroupOrchestratorInput): Pro
     executionOrder?: undefined;
     coordinationStrategy?: undefined;
 } | {
+    selectedRoleSkills: string[];
     usage: LlmTokenUsage;
     agent: any;
     delegated: any[];
@@ -1829,6 +1831,7 @@ export declare function runGroupOrchestrator(input: GroupOrchestratorInput): Pro
     coordinationStrategy: string;
     content: string;
 } | {
+    selectedRoleSkills: string[];
     runtime: string;
     agentBoundary: {
         layer: string;
@@ -1873,6 +1876,7 @@ export declare function runGroupOrchestrator(input: GroupOrchestratorInput): Pro
     coordinationPlan?: undefined;
     usage?: undefined;
 } | {
+    selectedRoleSkills: string[];
     runtime: string;
     agentBoundary: {
         layer: string;
@@ -1924,6 +1928,7 @@ export declare function runGroupOrchestrator(input: GroupOrchestratorInput): Pro
     };
     usage?: undefined;
 } | {
+    selectedRoleSkills: string[];
     agent: any;
     delegated: any[];
     assignments: any[];
@@ -1937,6 +1942,7 @@ export declare function runGroupOrchestrator(input: GroupOrchestratorInput): Pro
     content: string;
     usage?: undefined;
 } | {
+    selectedRoleSkills: string[];
     usage: LlmTokenUsage;
     contextRecovery: {
         type: string;
@@ -1967,6 +1973,7 @@ export declare function runGroupOrchestrator(input: GroupOrchestratorInput): Pro
     executionOrder?: undefined;
     coordinationStrategy?: undefined;
 } | {
+    selectedRoleSkills: string[];
     usage: LlmTokenUsage;
     contextRecovery: {
         type: string;
@@ -2004,6 +2011,7 @@ export declare function runGroupOrchestrator(input: GroupOrchestratorInput): Pro
     coordinationStrategy: string;
     content: string;
 } | {
+    selectedRoleSkills: string[];
     runtime: string;
     usage: any;
     agentBoundary: {
@@ -2048,6 +2056,7 @@ export declare function runGroupOrchestrator(input: GroupOrchestratorInput): Pro
     coordinationStrategy?: undefined;
     coordinationPlan?: undefined;
 } | {
+    selectedRoleSkills: string[];
     runtime: string;
     usage: any;
     agentBoundary: {
@@ -2099,6 +2108,7 @@ export declare function runGroupOrchestrator(input: GroupOrchestratorInput): Pro
         confidence: any;
     };
 } | {
+    selectedRoleSkills: string[];
     agent: any;
     delegated: any[];
     assignments: any[];

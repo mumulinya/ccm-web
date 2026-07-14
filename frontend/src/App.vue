@@ -30,6 +30,12 @@ import {
   X,
 } from '@lucide/vue'
 import UsabilityWorkbench from './components/common/UsabilityWorkbench.vue'
+import {
+  MENU_CONFIG_EVENT,
+  MENU_CONFIG_KEY,
+  buildConfiguredTabs,
+  loadMenuConfiguration,
+} from './utils/menuConfiguration.js'
 
 const ProjectManager = defineAsyncComponent(() => import('./components/projects/ProjectManager.vue'))
 const GroupChat = defineAsyncComponent(() => import('./components/collaboration/GroupChat.vue'))
@@ -124,7 +130,7 @@ let petNavigationReconnectTimer = null
 
 const cleanNavigationUrl = () => {
   const url = new URL(window.location.href)
-  const navigationKeys = ['tab', 'project', 'sessionId', 'groupId', 'keyword', 'task_id', 'taskId', 'trace_id', 'traceId', 'scope']
+  const navigationKeys = ['project', 'sessionId', 'groupId', 'keyword', 'task_id', 'taskId', 'trace_id', 'traceId', 'scope']
   let changed = false
   for (const key of navigationKeys) {
     if (url.searchParams.has(key)) {
@@ -331,6 +337,7 @@ watch(currentTab, () => {
 })
 
 const handleSettingsStorage = (e) => {
+  if (e?.key === MENU_CONFIG_KEY) handleMenuConfigurationEvent(loadMenuConfiguration(DEFAULT_TABS))
   if (!e || e.key === 'theme') {
     isDark.value = localStorage.getItem('theme') === 'dark'
     document.documentElement.setAttribute('data-theme', isDark.value ? 'dark' : 'light')
@@ -355,6 +362,7 @@ onMounted(async () => {
   const lowPerf = localStorage.getItem('app-low-perf') === 'true'
   document.documentElement.classList.toggle('low-perf', lowPerf)
   window.addEventListener('storage', handleSettingsStorage)
+  window.addEventListener(MENU_CONFIG_EVENT, handleMenuConfigurationEvent)
 
   try {
     const res = await fetch('/api/projects')
@@ -381,6 +389,7 @@ onUnmounted(() => {
   }
   window.removeEventListener('scroll', preventPageScroll)
   window.removeEventListener('storage', handleSettingsStorage)
+  window.removeEventListener(MENU_CONFIG_EVENT, handleMenuConfigurationEvent)
 })
 
 const DEFAULT_TABS = [
@@ -438,137 +447,56 @@ const GROUP_ICONS = {
   ungrouped: Menu,
 }
 
-const MOBILE_PRIMARY_TAB_IDS = ['dashboard', 'global-agent', 'groups', 'tasks']
-
-function getMergedTabs() {
-  let custom = []
-  try {
-    const saved = localStorage.getItem('menu-custom-links')
-    if (saved) custom = JSON.parse(saved)
-  } catch {}
-  return [...DEFAULT_TABS, ...custom]
-}
-
-const tabs = ref(loadTabOrder())
-currentTab.value = tabs.value.find(tab => tab.id === 'dashboard')?.id || tabs.value[0]?.id || 'projects'
-
-function loadTabOrder() {
-  const merged = getMergedTabs()
-  try {
-    const saved = localStorage.getItem('tab-order')
-    if (saved) {
-      const order = JSON.parse(saved)
-      if (Array.isArray(order)) {
-        const ordered = order.map((id) => merged.find(t => t.id === id)).filter(Boolean)
-        const remaining = merged.filter(t => !ordered.find(o => o.id === t.id))
-        const result = [...ordered, ...remaining]
-        if (result.length > 0) return result
-      }
-    }
-  } catch {}
-  return merged.map(t => ({ ...t }))
-}
-
-function saveTabOrder() {
-  localStorage.setItem('tab-order', JSON.stringify(tabs.value.map(t => t.id)))
-}
+const menuConfig = ref(loadMenuConfiguration(DEFAULT_TABS))
+const tabs = ref(buildConfiguredTabs(DEFAULT_TABS, menuConfig.value))
+const startupNavigationTarget = readNavigationTargetFromUrl()
+const startupTabId = RETIRED_TAB_REDIRECTS[startupNavigationTarget?.tab] || startupNavigationTarget?.tab
+const startupTab = tabs.value.find(tab => tab.id === startupTabId && !tab.isExternal)
+  || tabs.value.find(tab => tab.id === 'dashboard')
+  || tabs.value[0]
+currentTab.value = startupTab?.id || 'projects'
 
 const currentTabInfo = () => tabs.value.find(t => t.id === currentTab.value)
 const getTabIcon = (tabId) => TAB_ICONS[tabId] || Link
 const getGroupIcon = (groupId) => GROUP_ICONS[groupId] || Menu
-const mobilePrimaryTabs = computed(() => MOBILE_PRIMARY_TAB_IDS
-  .map(id => tabs.value.find(tab => tab.id === id))
-  .filter(Boolean))
+const mobilePrimaryTabs = computed(() => tabs.value.filter(tab => tab.mobilePrimary && !tab.hiddenFromMenu).slice(0, 4))
 const mobileMoreTabs = computed(() => tabs.value.filter(tab => (
-  !tab.hiddenFromMenu && !MOBILE_PRIMARY_TAB_IDS.includes(tab.id)
+  !tab.hiddenFromMenu && !tab.mobilePrimary
 )))
-const mobileMoreActive = computed(() => !MOBILE_PRIMARY_TAB_IDS.includes(currentTab.value))
+const mobileMoreActive = computed(() => !mobilePrimaryTabs.value.some(tab => tab.id === currentTab.value))
 
 const openMobileTab = (tabId) => {
   showMobileMenu.value = false
   switchTab(tabId)
 }
 
-// 菜单分组（始终从 localStorage 读取，保证刷新后生效）
-const DEFAULT_GROUPS = [
-  { id: 'core', label: '核心功能', icon: '⭐' },
-  { id: 'dev', label: '开发工具', icon: '🛠️' },
-  { id: 'collab', label: '协作管理', icon: '🤝' },
-  { id: 'data', label: '数据监控', icon: '📊' },
-  { id: 'system', label: '系统', icon: '⚙️' },
-]
-const DEFAULT_TAB_GROUPS = {
-  dashboard: 'core', projects: 'core', groups: 'collab', tasks: 'collab', 'trace-replay': 'collab', autodev: 'collab', 'global-agent': 'core',
-  tools: 'dev', changes: 'dev', terminal: 'dev',
-  metrics: 'data', search: 'data', 'memory-center': 'data', knowledge: 'data',
-  cron: 'system', pets: 'system', music: 'system', settings: 'system',
-}
-
 const collapsedGroups = ref({})
-const dragGroupIndex = ref(-1)
-const menuVersion = ref(0) // 用于触发 computed 刷新
-
-function getMenuGroups() {
-  try {
-    const saved = localStorage.getItem('menu-groups')
-    if (saved) { const d = JSON.parse(saved); if (Array.isArray(d) && d.length > 0) return d }
-  } catch {}
-  return DEFAULT_GROUPS
-}
-function getMenuTabGroups() {
-  try {
-    const saved = localStorage.getItem('menu-tab-groups')
-    if (saved) { const d = JSON.parse(saved); if (d && typeof d === 'object') return d }
-  } catch {}
-  return DEFAULT_TAB_GROUPS
-}
-
-// 用 computed 保证每次渲染都从 localStorage 读取最新值
-const menuGroups = computed(() => { menuVersion.value; return getMenuGroups() })
-const menuTabGroups = computed(() => { menuVersion.value; return getMenuTabGroups() })
-
-const getGroupTabs = (groupId) => tabs.value.filter(t => !t.hiddenFromMenu && (menuTabGroups.value[t.id] || 'ungrouped') === groupId)
+const menuGroups = computed(() => menuConfig.value.groups || [])
+const pinnedTabs = computed(() => tabs.value.filter(tab => !tab.hiddenFromMenu && tab.pinned))
+const getGroupTabs = groupId => tabs.value.filter(tab => !tab.hiddenFromMenu && !tab.pinned && (tab.groupId || 'ungrouped') === groupId)
+const ungroupedTabs = computed(() => tabs.value.filter(tab => !tab.hiddenFromMenu && !tab.pinned && (!tab.groupId || tab.groupId === 'ungrouped' || !menuGroups.value.some(group => group.id === tab.groupId))))
 const toggleGroup = (groupId) => { collapsedGroups.value[groupId] = !collapsedGroups.value[groupId] }
 
-const updateMenuGroups = (data) => {
-  localStorage.setItem('menu-groups', JSON.stringify(data.groups))
-  localStorage.setItem('menu-tab-groups', JSON.stringify(data.tabGroups))
-  menuVersion.value++
-  tabs.value = loadTabOrder() // 动态重新加载，以同步自定义外部 Tab
+const applyMenuConfiguration = config => {
+  menuConfig.value = config || loadMenuConfiguration(DEFAULT_TABS)
+  tabs.value = buildConfiguredTabs(DEFAULT_TABS, menuConfig.value)
+  if (typeof openTabs !== 'undefined') {
+    openTabs.value = openTabs.value.map(open => tabs.value.find(tab => tab.id === open.id)).filter(Boolean)
+    if (!openTabs.value.length) openTabs.value = [tabs.value.find(tab => tab.id === 'dashboard') || tabs.value[0]]
+  }
 }
 
-// 父菜单拖拽排序
-const groupDragIndex = ref(-1)
-const startGroupDrag = (index) => { groupDragIndex.value = index }
-const onGroupDragOver = (e, index) => {
-  e.preventDefault()
-  if (groupDragIndex.value === -1 || groupDragIndex.value === index) return
-  const groups = getMenuGroups()
-  const item = groups.splice(groupDragIndex.value, 1)[0]
-  groups.splice(index, 0, item)
-  localStorage.setItem('menu-groups', JSON.stringify(groups))
-  groupDragIndex.value = index
-  menuVersion.value++ // 触发 computed 刷新
+const syncNavigationTabUrl = tabId => {
+  const url = new URL(window.location.href)
+  if (url.searchParams.get('tab') === tabId) return
+  url.searchParams.set('tab', tabId)
+  window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`)
 }
-const endGroupDrag = () => { groupDragIndex.value = -1 }
-
-// 菜单管理
-const showMenuManager = ref(false)
-const dragIndex = ref(-1)
-
-const startDrag = (index) => { dragIndex.value = index }
-const onDragOver = (e, index) => {
-  e.preventDefault()
-  if (dragIndex.value === -1 || dragIndex.value === index) return
-  const item = tabs.value.splice(dragIndex.value, 1)[0]
-  tabs.value.splice(index, 0, item)
-  dragIndex.value = index
-}
-const endDrag = () => { dragIndex.value = null; saveTabOrder() }
-const resetTabOrder = () => { tabs.value = [...DEFAULT_TABS]; saveTabOrder() }
+const handleMenuConfigurationEvent = event => applyMenuConfiguration(event?.detail || loadMenuConfiguration(DEFAULT_TABS))
+const updateMenuConfiguration = config => applyMenuConfiguration(config)
 
 // 浏览器风格标签页管理
-const openTabs = ref([tabs.value.find(tab => tab.id === 'dashboard') || tabs.value[0]])
+const openTabs = ref([startupTab])
 
 const handleWorkbenchNavigate = (target = {}) => {
   navigateTo.value = target
@@ -581,10 +509,15 @@ const switchTab = (tabId) => {
   tabId = RETIRED_TAB_REDIRECTS[tabId] || tabId
   const tabInfo = tabs.value.find(t => t.id === tabId)
   if (!tabInfo) return
+  if (tabInfo.isExternal) {
+    window.open(tabInfo.url, '_blank', 'noopener,noreferrer')
+    return
+  }
   if (!openTabs.value.find(t => t.id === tabId)) {
     openTabs.value.push(tabInfo)
   }
   currentTab.value = tabId
+  syncNavigationTabUrl(tabId)
 }
 
 const isTabOpen = (tabId) => openTabs.value.some(tab => tab?.id === tabId)
@@ -598,6 +531,7 @@ const closeTab = (tabId, event) => {
   // 如果关闭的是当前标签，切换到最后一个打开的标签
   if (currentTab.value === tabId) {
     currentTab.value = openTabs.value[Math.min(idx, openTabs.value.length - 1)].id
+    syncNavigationTabUrl(currentTab.value)
   }
 }
 </script>
@@ -608,16 +542,24 @@ const closeTab = (tabId, event) => {
     <nav class="nav-sidebar">
       <div class="nav-logo">
         <h1>cc-web</h1>
-        <div class="info">v1.0.0 <button class="menu-edit-btn" @click="showMenuManager = true" title="管理菜单">✏️</button></div>
+        <div class="info">v1.0.0 <button class="menu-edit-btn" @click="switchTab('menumanager')" title="打开导航配置中心"><Menu :size="13" /></button></div>
       </div>
       <div class="nav-menu">
-        <template v-for="(group, gi) in menuGroups" :key="group.id">
-          <div class="nav-group-header"
-            draggable="true"
-            @dragstart="startGroupDrag(gi)"
-            @dragover.prevent="onGroupDragOver($event, gi)"
-            @dragend="endGroupDrag"
-            @click="toggleGroup(group.id)">
+        <template v-if="pinnedTabs.length">
+          <div class="nav-group-header" @click="toggleGroup('pinned')">
+            <ChevronDown class="group-arrow" :class="{ collapsed: collapsedGroups.pinned }" :size="13" />
+            <Sparkles class="group-icon" :size="15" />
+            <span>常用</span>
+          </div>
+          <div v-show="!collapsedGroups.pinned" class="nav-group-items">
+            <div v-for="tab in pinnedTabs" :key="tab.id" class="nav-item" :class="{ active: currentTab === tab.id }" @click="switchTab(tab.id)">
+              <component :is="getTabIcon(tab.id)" class="nav-icon" :size="16" />
+              <span>{{ tab.label }}</span>
+            </div>
+          </div>
+        </template>
+        <template v-for="group in menuGroups" :key="group.id">
+          <div class="nav-group-header" @click="toggleGroup(group.id)">
             <ChevronDown class="group-arrow" :class="{ collapsed: collapsedGroups[group.id] }" :size="13" />
             <component :is="getGroupIcon(group.id)" class="group-icon" :size="15" />
             <span>{{ group.label }}</span>
@@ -636,7 +578,7 @@ const closeTab = (tabId, event) => {
           </div>
         </template>
         <!-- 未分组 -->
-        <template v-if="tabs.filter(t => !t.hiddenFromMenu && (!menuTabGroups[t.id] || !menuGroups.find(g => g.id === menuTabGroups[t.id]))).length > 0">
+        <template v-if="ungroupedTabs.length > 0">
           <div class="nav-group-header" @click="toggleGroup('ungrouped')">
             <ChevronDown class="group-arrow" :class="{ collapsed: collapsedGroups['ungrouped'] }" :size="13" />
             <Menu class="group-icon" :size="15" />
@@ -644,7 +586,7 @@ const closeTab = (tabId, event) => {
           </div>
           <div v-show="!collapsedGroups['ungrouped']" class="nav-group-items">
             <div
-              v-for="tab in tabs.filter(t => !t.hiddenFromMenu && (!menuTabGroups[t.id] || !menuGroups.find(g => g.id === menuTabGroups[t.id])))"
+              v-for="tab in ungroupedTabs"
               :key="tab.id"
               class="nav-item"
               :class="{ active: currentTab === tab.id }"
@@ -701,12 +643,7 @@ const closeTab = (tabId, event) => {
         <div v-if="isTabOpen('search')" v-show="currentTab === 'search'" class="tab-pane"><SearchHistory @go-to="goToResult" /></div>
         <div v-if="isTabOpen('music')" v-show="currentTab === 'music'" class="tab-pane"><MusicPlayer :agent-label="musicPetLabel" /></div>
         <div v-if="isTabOpen('settings')" v-show="currentTab === 'settings'" class="tab-pane"><Settings /></div>
-        <div v-if="isTabOpen('menumanager')" v-show="currentTab === 'menumanager'" class="tab-pane"><MenuManager :tabs="tabs" @update-groups="updateMenuGroups" /></div>
-        
-        <!-- 动态渲染自定义外部链接的 iframe 面板 -->
-        <div v-for="tab in tabs.filter(t => t.isExternal && isTabOpen(t.id))" :key="tab.id" v-show="currentTab === tab.id" class="tab-pane">
-          <iframe :src="tab.url" style="width: 100%; height: 100%; border: none; background: var(--bg-secondary); border-radius: 8px;"></iframe>
-        </div>
+        <div v-if="isTabOpen('menumanager')" v-show="currentTab === 'menumanager'" class="tab-pane"><MenuManager :tabs="tabs" :config="menuConfig" @update-config="updateMenuConfiguration" /></div>
       </div>
     </main>
 
@@ -752,36 +689,6 @@ const closeTab = (tabId, event) => {
       </button>
     </nav>
 
-    <!-- 菜单管理弹窗 -->
-    <div v-if="showMenuManager" class="menu-mgr-overlay" @click.self="showMenuManager = false">
-      <div class="menu-mgr-modal">
-        <div class="menu-mgr-header">
-          <span>📋 菜单管理</span>
-          <button class="close-btn" @click="showMenuManager = false">&times;</button>
-        </div>
-        <div class="menu-mgr-body">
-          <p class="menu-mgr-hint">拖拽排序菜单项，修改后自动保存</p>
-          <div class="menu-mgr-list">
-            <div v-for="(tab, i) in tabs" :key="tab.id"
-              class="menu-mgr-item"
-              :class="{ dragging: dragIndex === i }"
-              draggable="true"
-              @dragstart="startDrag(i)"
-              @dragover.prevent="onDragOver($event, i)"
-              @dragend="endDrag">
-              <span class="drag-handle">⠿</span>
-              <span class="mgr-icon">{{ tab.icon }}</span>
-              <span class="mgr-label">{{ tab.label }}</span>
-              <span class="mgr-id">{{ tab.id }}</span>
-            </div>
-          </div>
-        </div>
-        <div class="menu-mgr-footer">
-          <button class="btn btn-outline" @click="resetTabOrder">恢复默认</button>
-          <button class="btn btn-primary" @click="showMenuManager = false">完成</button>
-        </div>
-      </div>
-    </div>
   </div>
 </template>
 
@@ -933,7 +840,7 @@ const closeTab = (tabId, event) => {
 
 .header h2 {
   min-width: 142px;
-  display: flex;
+  display: none;
   align-items: center;
   gap: 8px;
   font-size: 15px;
@@ -1212,6 +1119,7 @@ const closeTab = (tabId, event) => {
   .header h2 {
     min-width: 0;
     flex: 1;
+    display: flex;
     font-size: 14px;
   }
   .tab-bar {
@@ -1241,8 +1149,6 @@ const closeTab = (tabId, event) => {
   border: 1px solid transparent;
 }
 .nav-group-header:hover { color: var(--text-primary); background: var(--control-hover); }
-.nav-group-header[draggable="true"] { cursor: grab; }
-.nav-group-header[draggable="true"]:active { cursor: grabbing; opacity: 0.7; border-left-color: var(--accent-blue); }
 .group-arrow { flex: 0 0 auto; transition: transform 0.2s; }
 .group-arrow.collapsed { transform: rotate(-90deg); }
 .group-icon { flex: 0 0 auto; opacity: 0.82; }
@@ -1262,44 +1168,4 @@ const closeTab = (tabId, event) => {
   padding: 0;
 }
 .menu-edit-btn:hover { color: var(--text-primary); border-color: var(--accent-blue); }
-.menu-mgr-overlay {
-  position: fixed; inset: 0; background: rgba(18, 23, 20, 0.38);
-  display: flex; align-items: center; justify-content: center;
-  z-index: 10000; backdrop-filter: blur(6px);
-}
-.menu-mgr-modal {
-  background: var(--surface); border: 1px solid var(--border-color);
-  border-radius: 8px; width: 420px; max-height: 80vh;
-  display: flex; flex-direction: column; overflow: hidden;
-  box-shadow: var(--shadow-lg);
-}
-.menu-mgr-header {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 16px 20px; border-bottom: 1px solid var(--border-color);
-  font-size: 16px; font-weight: 760;
-}
-.close-btn {
-  width: 28px; height: 28px; border-radius: 6px; border: none;
-  background: var(--bg-secondary); color: var(--text-secondary);
-  cursor: pointer; font-size: 18px;
-}
-.menu-mgr-body { padding: 16px; flex: 1; overflow-y: auto; }
-.menu-mgr-hint { font-size: 12px; color: var(--text-muted); margin-bottom: 12px; }
-.menu-mgr-list { display: flex; flex-direction: column; gap: 4px; }
-.menu-mgr-item {
-  display: flex; align-items: center; gap: 10px;
-  padding: 10px 12px; border-radius: 6px;
-  background: var(--surface); border: 1px solid var(--border-color);
-  cursor: grab; transition: all 0.15s; user-select: none;
-}
-.menu-mgr-item:hover { border-color: var(--accent-blue); background: var(--control-hover); }
-.menu-mgr-item.dragging { opacity: 0.5; border-color: var(--accent-blue); }
-.drag-handle { color: var(--text-muted); cursor: grab; font-size: 14px; }
-.mgr-icon { font-size: 16px; }
-.mgr-label { flex: 1; font-size: 13px; color: var(--text-primary); }
-.mgr-id { font-size: 10px; color: var(--text-muted); font-family: monospace; }
-.menu-mgr-footer {
-  display: flex; gap: 8px; justify-content: flex-end;
-  padding: 12px 20px; border-top: 1px solid var(--border-color);
-}
 </style>

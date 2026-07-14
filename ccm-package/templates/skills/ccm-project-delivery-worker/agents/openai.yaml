@@ -1,0 +1,4 @@
+interface:
+  display_name: "CCM Project Delivery Worker"
+  short_description: "Implement scoped project work and return verified evidence"
+  default_prompt: "Use $ccm-project-delivery-worker to complete this scoped project task."

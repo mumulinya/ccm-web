@@ -68,6 +68,8 @@ try {
     memoryContextSnapshotId: snapshot.snapshot.snapshot_id,
     memoryContextSnapshotChecksum: snapshot.snapshot.checksum,
     summaryCapsuleChecksum: bundle.post_turn_summary_delivery_capsule?.capsule_checksum || "",
+    groupSessionMemoryBinding: snapshot.snapshot.context.group_session_memory_binding,
+    typedMemoryDeliveryCapsule: bundle.typed_memory_delivery_capsule || bundle.typedMemoryDeliveryCapsule,
     renderedPrompt: prompt,
   });
   rootCurrent = lineage.dispatchTaskAgentInvocationEdge(rootCurrent, { transport: "codex" });
@@ -79,7 +81,7 @@ try {
     groupId, groupSessionId, taskId: "task-254", targetProject: "api", taskAgentSessionId: taskSession.id,
     executionId: "exec-2", attemptSequence: 2, providerAttempt: 1, invocationKind: "resume", branchKind: "main", parentInvocationEdge: rootCurrent,
   });
-  let resumeCurrent = lineage.bindTaskAgentInvocationContext(resumeEdge, { workerContextPacketId: "wcp_resume", memoryContextSnapshotId: "tams_resume", renderedPrompt: "edge prompt resume" });
+  let resumeCurrent = lineage.bindTaskAgentInvocationContext(resumeEdge, { workerContextPacketId: "wcp_resume", memoryContextSnapshotId: "tams_resume", groupSessionMemoryBinding: snapshot.snapshot.context.group_session_memory_binding, renderedPrompt: "edge prompt resume" });
   resumeCurrent = lineage.dispatchTaskAgentInvocationEdge(resumeCurrent, { transport: "codex" });
   resumeCurrent = lineage.bindTaskAgentInvocationRunnerRequest(resumeCurrent, "adr_phase254_resume");
   resumeCurrent = lineage.completeTaskAgentInvocationEdge(resumeCurrent, { success: false, runnerRequestId: "adr_phase254_resume", output: "native session failed", reason: "native_session_recovery" });
@@ -105,7 +107,7 @@ try {
     groupId, groupSessionId, taskId: "task-254-stale", targetProject: "web", taskAgentSessionId: "tas_stale_phase254",
     executionId: "exec-stale", attemptSequence: 1, invocationKind: "spawn", branchKind: "main",
   });
-  let staleParent = lineage.bindTaskAgentInvocationContext(staleChild, { workerContextPacketId: "wcp_stale", memoryContextSnapshotId: "tams_stale", renderedPrompt: "stale parent" });
+  let staleParent = lineage.bindTaskAgentInvocationContext(staleChild, { workerContextPacketId: "wcp_stale", memoryContextSnapshotId: "tams_stale", groupSessionMemoryBinding: snapshot.snapshot.context.group_session_memory_binding, renderedPrompt: "stale parent" });
   staleParent = lineage.dispatchTaskAgentInvocationEdge(staleParent, { transport: "codex" });
   staleParent = lineage.completeTaskAgentInvocationEdge(staleParent, { success: true, runnerRequestId: "adr_stale", output: "v1" });
   const staleGrandchild = lineage.prepareTaskAgentInvocationEdge({
@@ -160,7 +162,7 @@ try {
     missingParentRejected: missingParent.issues.includes("parent_edge_missing"),
     selfParentRejected: selfParent.issues.includes("self_parent_cycle"),
     reportExposesBranches: report.overall.edgeCount >= 5 && report.overall.branchCount >= 3 && report.overall.providerSwitchCount >= 1,
-    fallbackRebuildsFullContext: /groupMemoryBundle = buildAgentMemoryContextBundle[\s\S]{0,5000}workerHandoff = buildChildAgentWorkerHandoff[\s\S]{0,5000}tPrompt = renderCrossAgentPrompt\(\)/.test(collaborationSource),
+    fallbackRebuildsFullContext: /groupMemoryBundle = await buildAgentMemoryContextBundleWithManifestSelection[\s\S]{0,5000}workerHandoff = buildChildAgentWorkerHandoff[\s\S]{0,5000}tPrompt = renderCrossAgentPrompt\(\)/.test(collaborationSource),
     ignoreAndGlobalHaveNoLineage: !JSON.stringify(ignoredBundle).includes("ccm-task-agent-invocation-lineage-binding-v1") && !JSON.stringify(globalBundle).includes("ccm-task-agent-invocation-lineage-binding-v1"),
     deletingGroupSessionDeletesLineage: deletionReportBefore.overall.edgeCount === 1 && deletedArtifacts.invocationLineageArtifacts?.deleted === 1 && deletionReportAfter.overall.edgeCount === 0,
     rawTranscriptUnchanged: digest(storage.getGroupMessages(groupId, groupSessionId)) === transcriptBefore,

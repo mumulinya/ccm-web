@@ -97,7 +97,7 @@ const emit = defineEmits(['update:actionPetType', 'reset-errors', 'image-error',
 .btn { padding: 8px 16px; border-radius: 8px; border: none; cursor: pointer; font-size: 13px; transition: all 0.2s; }
 .btn-sm { padding: 5px 10px; font-size: 12px; }
 .btn-outline { background: transparent; border: 1px solid rgba(0, 0, 0, 0.08); color: var(--text-secondary); }
-:global([data-theme="dark"]) .asset-toolbar, :global([data-theme="dark"]) .asset-card, :global([data-theme="dark"]) .asset-preview { background: rgba(10, 10, 20, 0.38); border-color: rgba(255,255,255,0.06); }
+:global([data-theme="dark"] .asset-toolbar), :global([data-theme="dark"] .asset-card), :global([data-theme="dark"] .asset-preview){ background: rgba(10, 10, 20, 0.38); border-color: rgba(255,255,255,0.06); }
 @media (max-width: 768px) {
   .asset-toolbar { align-items: stretch; flex-direction: column; }
   .asset-select-wrap, .asset-select-wrap select { width: 100%; }

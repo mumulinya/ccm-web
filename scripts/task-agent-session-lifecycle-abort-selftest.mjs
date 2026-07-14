@@ -129,6 +129,15 @@ try {
   equal(revokedRequest.status, "cancel_requested", "the queued Runner request must remain cancelled across restart");
   equal(revokedRequest.session_lifecycle_stale, true, "the request must record lifecycle-stale provenance");
 
+  const handledByIndependentRunner = await runner.runAgentRunnerRequestFile(runnerRequestFile);
+  equal(handledByIndependentRunner, true, "an independent Runner restart must handle the revoked request");
+  const runnerResultFile = path.join(tempRoot, ".cc-connect", "agent-runner", "results", `ar_phase266_${nonce}.json`);
+  const runnerResult = JSON.parse(fs.readFileSync(runnerResultFile, "utf-8"));
+  equal(runnerResult.success, false, "the independent Runner must not launch a deleted-session request");
+  equal(runnerResult.cancelled, true, "the independent Runner result must be terminally cancelled");
+  equal(runnerResult.session_lifecycle_stale, true, "the independent Runner result must retain lifecycle-stale evidence");
+  ok(runnerResult.sessionLifecycleValidation.issues.includes("session_lifecycle_deleted"), "the Runner result must identify the deletion tombstone");
+
   const tombstone = lifecycle.readGroupSessionLifecycleHead(groupId, session.id);
   equal(tombstone.status, "deleted", "the deleted lifecycle tombstone must remain readable");
   equal(tombstone.generation, 2, "deletion must advance the lifecycle generation");

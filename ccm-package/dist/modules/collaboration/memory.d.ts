@@ -167,6 +167,20 @@ export declare function distillGroupGlobalMemoryArbitrationToTypedMemory(groupId
         changed: boolean;
         lineCount: number;
         bytes: number;
+        entrypointTruncation: {
+            content: any;
+            schema: string;
+            version: number;
+            lineCount: number;
+            byteCount: number;
+            loadedLineCount: number;
+            loadedByteCount: number;
+            wasLineTruncated: boolean;
+            wasByteTruncated: boolean;
+            truncated: boolean;
+            maxLines: number;
+            maxBytes: number;
+        };
     };
     ledgerFile: any;
     summary: {
@@ -944,6 +958,12 @@ export declare function scheduleGroupMemoryAutoCompaction(groupId: string, optio
     delayMs?: undefined;
 } | {
     scheduled: boolean;
+    reason: string;
+    groupId: string;
+    sessionId: string;
+    delayMs?: undefined;
+} | {
+    scheduled: boolean;
     groupId: string;
     sessionId: string;
     delayMs: number;
@@ -953,23 +973,46 @@ export declare function runGroupMemoryAutoCompactionNow(groupId: string, options
     success: boolean;
     compacted: boolean;
     reason: string;
+    groupId?: undefined;
+    sessionId?: undefined;
     scheduled?: undefined;
     boundary?: undefined;
     keepIndex?: undefined;
     background?: undefined;
     memory?: undefined;
     compactHead?: undefined;
+    typedMemoryScopeId?: undefined;
+    logDistillation?: undefined;
+    error?: undefined;
+} | {
+    success: boolean;
+    compacted: boolean;
+    reason: string;
+    groupId: string;
+    sessionId: string;
+    scheduled?: undefined;
+    boundary?: undefined;
+    keepIndex?: undefined;
+    background?: undefined;
+    memory?: undefined;
+    compactHead?: undefined;
+    typedMemoryScopeId?: undefined;
+    logDistillation?: undefined;
     error?: undefined;
 } | {
     success: boolean;
     compacted: boolean;
     scheduled: boolean;
     reason: string;
+    groupId?: undefined;
+    sessionId?: undefined;
     boundary?: undefined;
     keepIndex?: undefined;
     background?: undefined;
     memory?: undefined;
     compactHead?: undefined;
+    typedMemoryScopeId?: undefined;
+    logDistillation?: undefined;
     error?: undefined;
 } | {
     success: boolean;
@@ -988,6 +1031,7 @@ export declare function runGroupMemoryAutoCompactionNow(groupId: string, options
         summarizedThroughMessageId: string;
         keepIndex: number;
         messageCount: number;
+        typedMemoryScopeId: string;
         error: string;
         startedAt: string;
         completedAt: string;
@@ -999,7 +1043,11 @@ export declare function runGroupMemoryAutoCompactionNow(groupId: string, options
         head: any;
         file: any;
     };
+    typedMemoryScopeId: string;
+    logDistillation: any;
     reason?: undefined;
+    groupId?: undefined;
+    sessionId?: undefined;
     scheduled?: undefined;
     error?: undefined;
 } | {
@@ -1018,16 +1066,21 @@ export declare function runGroupMemoryAutoCompactionNow(groupId: string, options
         summarizedThroughMessageId: string;
         keepIndex: number;
         messageCount: number;
+        typedMemoryScopeId: string;
         error: string;
         startedAt: string;
         completedAt: string;
     };
     reason?: undefined;
+    groupId?: undefined;
+    sessionId?: undefined;
     scheduled?: undefined;
     boundary?: undefined;
     keepIndex?: undefined;
     memory?: undefined;
     compactHead?: undefined;
+    typedMemoryScopeId?: undefined;
+    logDistillation?: undefined;
 }>;
 export declare function ensureGroupMemoryAutoCompactionHook(): {
     registered: boolean;
@@ -1045,6 +1098,8 @@ export declare function runGroupMemoryAutoCompactionSelfTest(): Promise<{
         postCompactReinjectRecorded: boolean;
         postCompactRecoveryAuditRecorded: boolean;
         logDistillationRecorded: boolean;
+        typedMemoryBoundToSession: boolean;
+        noBareGroupTypedMemoryCreated: boolean;
         contextPressureWarningRecorded: boolean;
         summaryPreservesSentinel: boolean;
         rawTranscriptUntouched: any;
@@ -1068,6 +1123,7 @@ export declare function buildChildTypedMemoryRecallLedgerScope(targetProject: st
 };
 export declare function buildChildTypedMemoryDeliveryCapsule(input?: any, options?: any): any;
 export declare function buildAgentMemoryContextBundle(groupId: string, targetProject: string, task?: string, options?: any): any;
+export declare function buildAgentMemoryContextBundleWithManifestSelection(groupId: string, targetProject: string, task?: string, options?: any): Promise<any>;
 export declare function admitChildPostTurnSummaryDelivery(memoryBundle: any, options?: any): any;
 export declare function admitChildTypedMemoryDelivery(memoryBundle: any, options?: any): any;
 export declare function commitChildTypedMemoryDelivery(memoryBundle: any, options?: any): {

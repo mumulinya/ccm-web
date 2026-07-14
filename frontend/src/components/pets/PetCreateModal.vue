@@ -99,8 +99,8 @@ const emit = defineEmits(['close', 'submit', 'update:label', 'update:type'])
   gap: 12px;
   margin-top: 8px;
 }
-:global([data-theme="dark"]) .form-input,
-:global([data-theme="dark"]) .form-select {
+:global([data-theme="dark"] .form-input),
+:global([data-theme="dark"] .form-select){
   background: var(--bg-secondary, #0f172a) !important;
   border-color: var(--border-color, rgba(255, 255, 255, 0.08)) !important;
   color: var(--text-primary, #f8fafc) !important;

@@ -25,6 +25,7 @@ import { appendGroupMessage, getActiveGroupChatSessionId, getGroupMessages, list
 import { acquireIdempotency, completeIdempotency, failIdempotency } from "../../system/reliability-ledger";
 import { sanitizeMainAgentRoleLanguage } from "../../agents/user-facing-text";
 import { ingestRequirementSources } from "../requirements/source-ingestion";
+import { buildGroupDirectMemoryAction, commitGroupDirectMemoryAction } from "./group-memory-index";
 
 type GroupLiveRoutesDeps = {
   writeSse: (res: ServerResponse, data: any) => void;
@@ -59,6 +60,7 @@ type GroupLiveRoutesDeps = {
   prepareAgentRuntimeTools: (groupId: string, project: string, workDir: string, agentType: string, allowedTools: any, streamRes?: ServerResponse | null, options?: any) => any;
   getProjectExtraConfig: (project: string) => any;
   buildAgentMemoryContextBundle: (groupId: string, project: string, message: string, options?: any) => any;
+  buildAgentMemoryContextBundleWithManifestSelection: (groupId: string, project: string, message: string, options?: any) => Promise<any>;
   buildAgentMemoryPacket: (groupId: string, project: string, message: string, options?: any) => string;
   buildChildAgentDevelopmentContract: (project: string, message: string, options?: any) => string;
   buildProjectVerificationHints: (project: string, workDir: string) => any;
@@ -403,6 +405,73 @@ export function handleGroupLiveRoutes(
         if (!groupSession) return sendJson(res, { error: "群聊会话不存在" }, 404);
         if (groupSession.archived === true) return sendJson(res, { error: "归档会话为只读状态，请恢复或新建会话后继续" }, 409);
         normalizeGroupOrchestrator(group);
+
+        const directMemoryActionName = String(payload.memory_action || payload.memoryAction || "").trim().toLowerCase();
+        if (directMemoryActionName) {
+          if (!["remember", "forget"].includes(directMemoryActionName)) return sendJson(res, { error: "不支持的记忆操作" }, 400);
+          if (!groupSessionId.startsWith("gcs_")) return sendJson(res, { error: "旧群聊会话不再接收记忆写入，请新建会话" }, 409);
+          if (uploadedFiles.length) return sendJson(res, { error: "记忆命令暂不接收附件，请输入明确文本" }, 400);
+          const messageTraceId = ensureTraceId(payload.trace_id || payload.traceId, "group-memory");
+          const messageId = client_message_id ? String(client_message_id) : `m${Date.now().toString(36)}`;
+          const typedMemoryScopeId = `${group_id}--${groupSessionId}`;
+          const action = buildGroupDirectMemoryAction(typedMemoryScopeId, {
+            action: directMemoryActionName,
+            messageId,
+            content: String(payload.memory_content || payload.memoryContent || userMessage).trim(),
+            memoryType: payload.memory_type || payload.memoryType || "user",
+            targetMemoryId: payload.target_memory_id || payload.targetMemoryId || "",
+          });
+          const userMsg = {
+            id: messageId,
+            role: "user",
+            target: "coordinator",
+            content: userMessageForHistory,
+            timestamp: new Date().toISOString(),
+            trace_id: messageTraceId,
+            group_session_id: groupSessionId,
+            memory_direct_action: action,
+          };
+          appendGroupMessage(group_id, userMsg);
+          const commit = commitGroupDirectMemoryAction(typedMemoryScopeId, getGroupMessages(group_id, groupSessionId), {
+            requestId: action.requestId,
+            reason: `group-chat-${directMemoryActionName}`,
+          });
+          const receipt = commit.receipt || {};
+          const candidateHint = Array.isArray(receipt.candidates) && receipt.candidates.length
+            ? ` 可选记忆：${receipt.candidates.map((item: any) => `${item.memoryId}（${compactGroupLiveText(item.text, 80)}）`).join("；")}`
+            : "";
+          const responseText = receipt.status === "committed" && directMemoryActionName === "remember"
+            ? `已记入当前群聊会话，记忆 ID：${receipt.memoryId}。`
+            : receipt.status === "duplicate"
+              ? `当前群聊会话已经有这条记忆，记忆 ID：${receipt.memoryId}。`
+              : receipt.status === "committed" && directMemoryActionName === "forget"
+                ? `已从当前群聊会话忘记记忆 ${receipt.memoryId}。`
+                : `没有修改记忆：${receipt.reason || "记忆操作未通过校验"}。${candidateHint}`;
+          const responseMessageId = `${messageId}-memory-receipt`;
+          appendGroupMessage(group_id, {
+            id: responseMessageId,
+            role: "assistant",
+            agent: "coordinator",
+            type: "group_memory_receipt",
+            content: responseText,
+            timestamp: new Date().toISOString(),
+            trace_id: messageTraceId,
+            group_session_id: groupSessionId,
+            memory_receipt: receipt,
+          });
+          addGroupLog(group_id, receipt.status === "rejected" ? "warning" : "info", "direct_memory", responseText, {
+            group_session_id: groupSessionId,
+            typed_memory_scope_id: typedMemoryScopeId,
+            action: directMemoryActionName,
+            request_id: action.requestId,
+            receipt,
+          });
+          res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "Connection": "keep-alive", "Access-Control-Allow-Origin": "*" });
+          writeSse(res, { type: "agent_done", agent: "coordinator", messageId: responseMessageId, text: responseText, memoryReceipt: receipt });
+          writeSse(res, { type: "done", messageId: responseMessageId, memoryReceipt: receipt });
+          res.end();
+          return;
+        }
 
         const explicitContinuationTaskId = String(payload.continuation_task_id || payload.continuationTaskId || "").trim();
         const explicitContinuationResolution = resolveExplicitGroupContinuationTask(loadTasks(), group_id, explicitContinuationTaskId);
@@ -1165,7 +1234,7 @@ export function handleGroupLiveRoutes(
             ctx.broadcastPetSpeech(member.project, { role: "status", text: "群聊协作中，正在思考...", source: "group" });
           }
 
-          const getAgentPrompt = (member: any) => {
+          const getAgentPrompt = async (member: any) => {
             const context = buildGroupContextPacket(group_id, { recentLimit: 10, olderLimit: 24, fullCount: 5, groupSessionId });
 
             const memberList = group.members.map((m: any) => m.project).filter((p: string) => p !== member.project && p !== "coordinator").join(", ");
@@ -1176,7 +1245,7 @@ export function handleGroupLiveRoutes(
             const memberConfig = configs.find(c => c.name === member.project);
             const memberWorkDir = memberConfig ? getConfigInfo(memberConfig.path)[0]?.workDir : "";
             const memberAgentType = memberConfig ? (getConfigInfo(memberConfig.path)[0]?.agent || member.agent || "claudecode") : (member.agent || "claudecode");
-            const memoryBundle = buildAgentMemoryContextBundle(group_id, member.project, messageForAgent, {
+            const memoryBundle = await deps.buildAgentMemoryContextBundleWithManifestSelection(group_id, member.project, messageForAgent, {
               workDir: memberWorkDir,
               groupSessionId,
             });
@@ -1210,7 +1279,7 @@ export function handleGroupLiveRoutes(
               const info = getConfigInfo(config.path);
               const workDir = info[0]?.workDir;
               const agentType = info[0]?.agent || "claudecode";
-              const agentPrompt = getAgentPrompt(member);
+              const agentPrompt = await getAgentPrompt(member);
 
               try {
                 const runtimeToolContext = prepareAgentRuntimeTools(group_id, member.project, workDir, agentType, agentPrompt.allowedTools, res, {
@@ -1420,7 +1489,7 @@ export function handleGroupLiveRoutes(
           sharedFilesContext += ctx.buildFilesContext(projectConfig.shared_files, "[项目共享文件]");
         }
 
-        const memoryBundle = buildAgentMemoryContextBundle(group_id, target_project_actual, messageForAgent, {
+        const memoryBundle = await deps.buildAgentMemoryContextBundleWithManifestSelection(group_id, target_project_actual, messageForAgent, {
           workDir,
           groupSessionId,
         });
@@ -1621,7 +1690,7 @@ export function handleGroupLiveRoutes(
 
           const memberList = group.members.map((m: any) => m.project).filter((p: string) => p !== member.project && p !== "coordinator").join(", ");
           const memberInstructions = buildMemberCollaborationInstructions(member.project, memberList);
-          const memoryBundle = buildAgentMemoryContextBundle(group_id, member.project, message, {
+          const memoryBundle = await deps.buildAgentMemoryContextBundleWithManifestSelection(group_id, member.project, message, {
             workDir,
             groupSessionId,
           });

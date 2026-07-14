@@ -19,12 +19,29 @@ import { TestAgentReport, TestAgentRuntimeOptions, TestAgentWorkOrder } from "./
 import { nowIso } from "./utils";
 import { normalizeTestAgentWorkOrder } from "./work-order";
 import { pruneTestAgentArtifacts } from "./artifact-retention";
+import { selectRoleSkills } from "../skills/role-skills";
 
 export async function runTestAgent(input: TestAgentWorkOrder, options: TestAgentRuntimeOptions = {}): Promise<TestAgentReport> {
   const startedAt = nowIso();
   const normalized = normalizeTestAgentWorkOrder(input, options);
   const planned = planVerificationCommands(normalized.workOrder, normalized.issues);
   const { workOrder, issues } = planned;
+  const roleSkills = selectRoleSkills("test-agent", [
+    workOrder.originalUserGoal,
+    ...(workOrder.acceptanceCriteria || []),
+    ...(workOrder.requiredChecks || []),
+  ].join("\n"), { forceWork: true, phase: "verification" });
+  workOrder.metadata = {
+    ...workOrder.metadata,
+    roleSkills: {
+      schema: "ccm-role-skill-selection-v1",
+      role: "test-agent",
+      phase: "verification",
+      applied: true,
+      appliedBy: "ccm-native-test-agent-engine",
+      selected: roleSkills.map(skill => ({ name: skill.name, kind: skill.kind, reason: skill.reason })),
+    },
+  };
   if (wantsBrowser(workOrder)) {
     workOrder.metadata = {
       ...workOrder.metadata,

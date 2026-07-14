@@ -1,0 +1,4 @@
+interface:
+  display_name: "CCM Group Coordination Lead"
+  short_description: "Plan, dispatch, review, and close coordinated group work"
+  default_prompt: "Use $ccm-group-coordination-lead to coordinate this group task."

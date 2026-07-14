@@ -114,5 +114,5 @@ const getPetType = (petTypes, type) => petTypes.find(pet => pet.id === type) || 
 .btn-sm { padding: 5px 10px; font-size: 12px; }
 .btn-primary { background: var(--gradient-blue); color: white; }
 .btn-outline { background: transparent; border: 1px solid rgba(0, 0, 0, 0.08); color: var(--text-secondary); }
-:global([data-theme="dark"]) .glass-panel, :global([data-theme="dark"]) .pet-list-item { background: rgba(10, 10, 20, 0.38); border-color: rgba(255,255,255,0.06); }
+:global([data-theme="dark"] .glass-panel), :global([data-theme="dark"] .pet-list-item){ background: rgba(10, 10, 20, 0.38); border-color: rgba(255,255,255,0.06); }
 </style>

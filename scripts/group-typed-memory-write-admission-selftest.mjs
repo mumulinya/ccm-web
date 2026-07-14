@@ -153,7 +153,10 @@ try {
     rejectionAuditDoesNotStoreBodies: (ledger.admission?.observations || []).every(row => row.text === undefined && row.content === undefined),
     whyAndHowRendered: generatedText.includes("**Why:**") && generatedText.includes("**How to apply:**"),
     fourTypedDocumentsWritten: ["user", "project", "feedback", "reference"].every(type => generatedDocs.some(row => row.type === type)),
-    idempotentRepeat: second.newFactCount === 0 && second.updatedFactCount === first.newFactCount,
+    idempotentRepeat: second.skipped === true
+      && second.reason === "no_new_messages_after_committed_cursor"
+      && second.newFactCount === 0
+      && second.updatedFactCount === 0,
     qualityAdmissionGatePasses: first.quality?.checks?.some(check => check.id === "long_term_write_admission" && check.pass === true),
     crossSessionBDoesNotSeeA: !scopeBFacts.includes("PHASE238_DURABLE_RULE") && scopeBFacts.includes("PHASE238_SCOPE_B_ONLY"),
     crossSessionADoesNotSeeB: !serializedFacts.includes("PHASE238_SCOPE_B_ONLY"),

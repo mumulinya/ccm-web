@@ -17,6 +17,7 @@ const spool = require(path.join(root, "ccm-package", "dist", "agents", "direct-d
 const nativeContinuation = require(path.join(root, "ccm-package", "dist", "agents", "native-continuation.js"));
 const runtime = require(path.join(root, "ccm-package", "dist", "agents", "runtime.js"));
 const memory = require(path.join(root, "ccm-package", "dist", "modules", "collaboration", "memory.js"));
+const lifecycle = require(path.join(root, "ccm-package", "dist", "modules", "collaboration", "group-session-lifecycle-head.js"));
 
 const nonce = `${process.pid}-${Date.now().toString(36)}`;
 const sha = (value, length = 64) => crypto.createHash("sha256").update(typeof value === "string" ? value : JSON.stringify(value)).digest("hex").slice(0, length);
@@ -30,6 +31,7 @@ function boundEdge(label, options = {}) {
   const taskId = options.taskId || `task-phase256-${label}-${nonce}`;
   const taskAgentSessionId = options.taskAgentSessionId || `tas_phase256_${label}_${nonce}`;
   const prompt = options.prompt || `phase256 ${label} prompt`;
+  const lifecycleHead = lifecycle.ensureGroupSessionLifecycleHead(groupId, groupSessionId, { reason: "phase256 invocation adoption fixture" }).head;
   let edge = lineage.prepareTaskAgentInvocationEdge({
     groupId,
     groupSessionId,
@@ -50,6 +52,13 @@ function boundEdge(label, options = {}) {
     workerContextPacketId: `wcp_${label}_${nonce}`,
     memoryContextSnapshotId: `tams_${label}_${nonce}`,
     memoryContextSnapshotChecksum: sha(`snapshot-${label}`, 24),
+    groupSessionMemoryBinding: {
+      sessionLifecycleFenceRequired: true,
+      sessionLifecycleHeadId: lifecycleHead.lifecycle_head_id,
+      sessionLifecycleGeneration: lifecycleHead.generation,
+      sessionLifecycleStatus: lifecycleHead.status,
+      sessionLifecycleHeadChecksum: lifecycleHead.head_checksum,
+    },
     renderedPrompt: prompt,
   });
   return { groupId, groupSessionId, taskId, taskAgentSessionId, prompt, edge };
@@ -69,12 +78,19 @@ function completedRoot(label, options = {}) {
 }
 
 function deliveryReceipt(fixture, edge, overrides = {}) {
+  const lifecycleHead = lifecycle.readGroupSessionLifecycleHead(fixture.groupId, fixture.groupSessionId);
   const bindingCore = {
     groupId: fixture.groupId,
     groupSessionId: fixture.groupSessionId,
     scopeId: `${fixture.groupId}--${fixture.groupSessionId}`,
     checksum: sha(`binding-${fixture.groupId}-${fixture.groupSessionId}`, 24),
     deliveryReady: true,
+    sessionLifecycleFenceRequired: true,
+    sessionLifecycleFenceValid: true,
+    sessionLifecycleHeadId: lifecycleHead.lifecycle_head_id,
+    sessionLifecycleGeneration: lifecycleHead.generation,
+    sessionLifecycleStatus: lifecycleHead.status,
+    sessionLifecycleHeadChecksum: lifecycleHead.head_checksum,
   };
   const payload = {
     schema: "ccm-task-agent-memory-context-delivery-receipt-v2",
@@ -100,6 +116,11 @@ function deliveryReceipt(fixture, edge, overrides = {}) {
     workerContextPacketId: edge.worker_context_packet_id,
     groupSessionMemoryBinding: bindingCore,
     groupSessionMemoryBindingChecksum: bindingCore.checksum,
+    sessionLifecycleFenceValid: true,
+    sessionLifecycleHeadId: lifecycleHead.lifecycle_head_id,
+    sessionLifecycleGeneration: lifecycleHead.generation,
+    sessionLifecycleStatus: lifecycleHead.status,
+    sessionLifecycleHeadChecksum: lifecycleHead.head_checksum,
     modelExtractionEvidenceValid: true,
     snapshotRenderedPromptChecksum: edge.prompt_checksum,
     actualRenderedPromptChecksum: edge.prompt_checksum,

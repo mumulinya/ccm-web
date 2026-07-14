@@ -1,0 +1,4 @@
+interface:
+  display_name: "CCM Acceptance Evidence"
+  short_description: "Map acceptance criteria to reproducible verification proof"
+  default_prompt: "Use $ccm-acceptance-evidence to collect criterion-linked verification evidence."

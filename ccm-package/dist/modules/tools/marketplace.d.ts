@@ -1,3 +1,129 @@
+interface MarketplaceSource {
+    id: string;
+    label: string;
+    kind: "builtin" | "skills-sh" | "smithery" | "catalog" | "github" | "direct";
+    url?: string;
+    trust: "official" | "community" | "custom";
+}
+interface InstallationRecord {
+    key: string;
+    name: string;
+    type: "mcp" | "skill";
+    version: string;
+    checksum: string;
+    source: MarketplaceSource;
+    sourceProof?: any;
+    packagePath?: string;
+    installedAt: string;
+    updatedAt: string;
+}
+interface MarketplaceInstallStore {
+    skillPackagesDir?: string;
+    loadInstallations?: () => InstallationRecord[];
+    saveInstallations?: (items: InstallationRecord[]) => void;
+    saveMcpTool?: (tool: any) => void;
+    saveSkill?: (skill: any) => void;
+    deleteMcpTool?: (name: string) => void;
+    deleteSkill?: (name: string) => void;
+    reloadTools?: () => void | Promise<void>;
+    appendAudit?: (entry: any) => void;
+    loadAudit?: () => any[];
+    loadRuntimeAudits?: () => any[];
+    loadMcpTools?: () => any[];
+    loadSkills?: () => any[];
+    loadProjectConfigs?: () => any;
+    loadGroups?: () => any[];
+}
+export declare function previewToolCatalogMutationImpact(input: {
+    action: string;
+    type: string;
+    name: string;
+}, store?: MarketplaceInstallStore): {
+    authorizationImpact: {
+        schema: string;
+        action: string;
+        type: string;
+        name: string;
+        summary: {
+            scopeCount: number;
+            projects: number;
+            groups: number;
+            mcpGrants: number;
+            skillGrants: number;
+        };
+        scopes: any;
+        truncated: boolean;
+    };
+    runtimeImpact: {
+        schema: string;
+        action: string;
+        type: string;
+        name: string;
+        summary: {
+            runtimeSnapshots: number;
+            catalogStale: number;
+            dispatchBlocked: number;
+            deliveryBlocked: number;
+            affectedProjects: number;
+            affectedGroups: number;
+        };
+        snapshots: any;
+        truncated: boolean;
+    };
+};
+export declare function completeToolCatalogMutationLifecycle(input: {
+    action: string;
+    type: string;
+    name: string;
+    autoResync?: any;
+}, store?: MarketplaceInstallStore): {
+    authorizationImpact: {
+        schema: string;
+        action: string;
+        type: string;
+        name: string;
+        summary: {
+            scopeCount: number;
+            projects: number;
+            groups: number;
+            mcpGrants: number;
+            skillGrants: number;
+        };
+        scopes: any;
+        truncated: boolean;
+    };
+    runtimeImpact: {
+        schema: string;
+        action: string;
+        type: string;
+        name: string;
+        summary: {
+            runtimeSnapshots: number;
+            catalogStale: number;
+            dispatchBlocked: number;
+            deliveryBlocked: number;
+            affectedProjects: number;
+            affectedGroups: number;
+        };
+        snapshots: any;
+        truncated: boolean;
+    };
+    runtimeResync: {
+        schema: string;
+        success: boolean;
+        requestedAt: string;
+        error: string;
+        summary: {
+            scanned: number;
+            selected: number;
+            created: number;
+            resynced: number;
+            skipped: number;
+            failed: number;
+        };
+        items: any;
+    };
+};
 export declare function runMarketplaceSelfTest(): Promise<{
     pass: boolean;
     checks: {
@@ -26,6 +152,11 @@ export declare function runMarketplaceSelfTest(): Promise<{
         sourceBoundInstallUsesCatalogMaterial: boolean;
         sourceBoundInstallRejectsUnsavedSource: boolean;
         sourceBoundUpdateUsesCatalogMaterial: boolean;
+        onlineMarketplaceQueryIsSanitized: boolean;
+        onlineMarketplacePaginationIsBounded: boolean;
+        skillsShIdentityIsSourceBound: boolean;
+        smitheryIdentityIsSourceBound: boolean;
+        anonymousSourceStatusHidesCredentials: boolean;
         marketplaceInstallE2E: boolean;
     };
     localItems: any[];
@@ -73,3 +204,4 @@ export declare function runMarketplaceSelfTest(): Promise<{
     };
 }>;
 export declare function handleMarketplaceApi(pathname: string, req: any, res: any, parsed: any): boolean;
+export {};

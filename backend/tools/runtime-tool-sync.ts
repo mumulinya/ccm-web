@@ -1826,7 +1826,9 @@ export function resyncMissingRuntimeToolSnapshots(options: any = {}): RuntimeMis
   const limit = Math.max(1, Math.min(30, Number(options.missingLimit || options.limit || 20) || 20));
   const runtimeReadiness = Array.isArray(options.runtimeReadiness)
     ? options.runtimeReadiness
-    : listRecentRuntimeToolAudits(120).map(audit => probeRuntimeToolReadiness(audit, { record: false, catalog: options.catalog || {} }));
+    : listRecentRuntimeToolAudits(120)
+      .map(audit => probeRuntimeToolReadiness(audit, { record: false, catalog: options.catalog || {} }))
+      .filter(readiness => !!readiness.projectName || !!readiness.groupId);
   const groups = Array.isArray(options.groups) ? options.groups : loadGroups();
   const projects = options.projects || loadProjectConfigs();
   const inventory = buildToolAuthorizationInventory({
@@ -1921,7 +1923,10 @@ export function resyncRecentRuntimeToolSnapshots(options: any = {}): RuntimeTool
   const requestedLimit = Number(options.limit || 30);
   const limit = Math.max(1, Math.min(50, Number.isFinite(requestedLimit) ? requestedLimit : 30));
   const staleOnly = options.staleOnly !== false;
-  const audits = Array.isArray(options.audits) ? options.audits : listRecentRuntimeToolAudits(Math.max(limit * 2, 30));
+  const requestedSnapshotIds = Array.isArray(options.snapshotIds) ? options.snapshotIds.filter(Boolean) : [];
+  const audits = Array.isArray(options.audits)
+    ? options.audits
+    : listRecentRuntimeToolAudits(requestedSnapshotIds.length ? 240 : Math.max(limit * 2, 30));
   const items: any[] = [];
   const seen = new Set<string>();
   let scanned = 0;

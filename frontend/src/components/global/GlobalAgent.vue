@@ -31,7 +31,7 @@ const DEFAULT_WELCOME = {
   timestamp: new Date().toISOString()
 }
 
-const isSidebarOpen = ref(true)
+const isSidebarOpen = ref(window.innerWidth > 768)
 const {
   codeChangeDrawer,
   openCodeChangeDrawer,
@@ -3894,7 +3894,7 @@ const handleGitCommitCardSubmit = async (msg) => {
   transition: background 0.2s ease;
 }
 
-:global([data-theme="dark"]) .global-assistant-panel {
+:global([data-theme="dark"] .global-assistant-panel){
   background: var(--surface);
 }
 
@@ -3910,7 +3910,7 @@ const handleGitCommitCardSubmit = async (msg) => {
   min-width: 0;
   transition: background 0.3s;
 }
-:global([data-theme="dark"]) .chat-container {
+:global([data-theme="dark"] .chat-container){
   background: var(--surface);
 }
 
@@ -3925,7 +3925,7 @@ const handleGitCommitCardSubmit = async (msg) => {
   z-index: 4;
   transition: background 0.3s;
 }
-:global([data-theme="dark"]) .chat-header {
+:global([data-theme="dark"] .chat-header){
   background: var(--surface);
   border-bottom-color: var(--border-color);
 }
@@ -3998,7 +3998,7 @@ const handleGitCommitCardSubmit = async (msg) => {
   font-size: 20px;
   box-shadow: 0 4px 12px rgba(99, 102, 241, 0.04);
 }
-:global([data-theme="dark"]) .avatar {
+:global([data-theme="dark"] .avatar){
   background: rgba(255, 255, 255, 0.03);
   border-color: rgba(255, 255, 255, 0.06);
 }
@@ -4024,7 +4024,7 @@ const handleGitCommitCardSubmit = async (msg) => {
   gap: 8px;
   transition: background 0.3s;
 }
-:global([data-theme="dark"]) .chat-bubble {
+:global([data-theme="dark"] .chat-bubble){
   background: rgba(20, 20, 30, 0.7);
   border-color: rgba(255, 255, 255, 0.05);
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
@@ -4553,88 +4553,88 @@ const handleGitCommitCardSubmit = async (msg) => {
   margin-top: 10px;
 }
 
-:global([data-theme="dark"]) .global-stream-dispatch {
+:global([data-theme="dark"] .global-stream-dispatch){
   border-color: rgba(56, 189, 248, 0.24);
   background: rgba(15, 23, 42, 0.72);
 }
 
-:global([data-theme="dark"]) .global-stream-current-todo {
+:global([data-theme="dark"] .global-stream-current-todo){
   border-color: rgba(96, 165, 250, 0.24);
   background: rgba(30, 41, 59, 0.72);
 }
 
-:global([data-theme="dark"]) .global-stream-current-todo.done {
+:global([data-theme="dark"] .global-stream-current-todo.done){
   border-color: rgba(34, 197, 94, 0.26);
   background: rgba(20, 83, 45, 0.28);
 }
 
-:global([data-theme="dark"]) .global-stream-current-todo.waiting {
+:global([data-theme="dark"] .global-stream-current-todo.waiting){
   border-color: rgba(245, 158, 11, 0.3);
   background: rgba(120, 53, 15, 0.28);
 }
 
-:global([data-theme="dark"]) .global-stream-current-todo.failed {
+:global([data-theme="dark"] .global-stream-current-todo.failed){
   border-color: rgba(248, 113, 113, 0.28);
   background: rgba(127, 29, 29, 0.28);
 }
 
-:global([data-theme="dark"]) .stream-todo-progress b {
+:global([data-theme="dark"] .stream-todo-progress b){
   background: rgba(15, 23, 42, 0.72);
 }
 
-:global([data-theme="dark"]) .stream-todo-verification {
+:global([data-theme="dark"] .stream-todo-verification){
   border-color: rgba(245, 158, 11, 0.32);
   background: rgba(120, 53, 15, 0.34);
   color: #fde68a;
 }
 
-:global([data-theme="dark"]) .global-stream-progress-refresh {
+:global([data-theme="dark"] .global-stream-progress-refresh){
   border-color: rgba(245, 158, 11, 0.3);
   background: rgba(120, 53, 15, 0.28);
 }
 
-:global([data-theme="dark"]) .global-stream-progress-refresh.active {
+:global([data-theme="dark"] .global-stream-progress-refresh.active){
   border-color: rgba(96, 165, 250, 0.24);
   background: rgba(30, 41, 59, 0.72);
 }
 
-:global([data-theme="dark"]) .global-stream-progress-refresh.failed {
+:global([data-theme="dark"] .global-stream-progress-refresh.failed){
   border-color: rgba(248, 113, 113, 0.28);
   background: rgba(127, 29, 29, 0.28);
 }
 
-:global([data-theme="dark"]) .global-stream-progress-refresh :is(strong, .stream-refresh-next) {
+:global([data-theme="dark"] .global-stream-progress-refresh :is(strong, .stream-refresh-next)){
   color: #93c5fd;
 }
 
-:global([data-theme="dark"]) .global-stream-progress-refresh :is(.stream-refresh-label, em, .stream-refresh-items span) {
+:global([data-theme="dark"] .global-stream-progress-refresh :is(.stream-refresh-label, em, .stream-refresh-items span)){
   color: #cbd5e1;
 }
 
-:global([data-theme="dark"]) .global-stream-tool-summary {
+:global([data-theme="dark"] .global-stream-tool-summary){
   border-color: rgba(45, 212, 191, 0.24);
   background: rgba(20, 83, 45, 0.18);
 }
 
-:global([data-theme="dark"]) .stream-tool-counts span {
+:global([data-theme="dark"] .stream-tool-counts span){
   background: rgba(15, 23, 42, 0.72);
   color: #5eead4;
 }
 
-:global([data-theme="dark"]) .stream-tool-counts span.failed {
+:global([data-theme="dark"] .stream-tool-counts span.failed){
   color: #fca5a5;
 }
 
-:global([data-theme="dark"]) .global-stream-dispatch article {
+:global([data-theme="dark"] .global-stream-dispatch article){
   border-color: rgba(56, 189, 248, 0.18);
   background: rgba(2, 6, 23, 0.62);
 }
 
-:global([data-theme="dark"]) .global-stream-dispatch :is(summary strong, article strong, .global-stream-dispatch-next) {
+:global([data-theme="dark"] .global-stream-dispatch :is(summary strong, article strong, .global-stream-dispatch-next)){
   color: #93c5fd;
 }
 
-:global([data-theme="dark"]) .global-stream-dispatch :is(summary small, p, article span, article small, article em) {
+:global([data-theme="dark"] .global-stream-dispatch :is(summary small, p, article span, article small, article em)){
   color: #cbd5e1;
 }
 
@@ -4725,7 +4725,7 @@ const handleGitCommitCardSubmit = async (msg) => {
   border-color: rgba(99, 102, 241, 0.25);
   transform: translateY(-1px);
 }
-:global([data-theme="dark"]) .attachment-card {
+:global([data-theme="dark"] .attachment-card){
   background: rgba(255, 255, 255, 0.03);
 }
 
@@ -4789,7 +4789,7 @@ const handleGitCommitCardSubmit = async (msg) => {
   max-width: 450px;
   box-shadow: 0 4px 15px rgba(0,0,0,0.01);
 }
-:global([data-theme="dark"]) .system-receipt-card {
+:global([data-theme="dark"] .system-receipt-card){
   background: rgba(99, 102, 241, 0.05);
 }
 
@@ -5209,7 +5209,7 @@ const handleGitCommitCardSubmit = async (msg) => {
   backdrop-filter: blur(10px);
   box-shadow: 0 4px 20px rgba(99, 102, 241, 0.03);
 }
-:global([data-theme="dark"]) .input-wrapper {
+:global([data-theme="dark"] .input-wrapper){
   background: rgba(20, 20, 30, 0.75);
   border-color: rgba(255, 255, 255, 0.08);
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
@@ -5223,7 +5223,7 @@ const handleGitCommitCardSubmit = async (msg) => {
   border-color: rgba(14, 116, 144, 0.48);
   box-shadow: 0 0 0 3px rgba(6, 182, 212, 0.12);
 }
-:global([data-theme="dark"]) .input-wrapper:focus-within {
+:global([data-theme="dark"] .input-wrapper:focus-within){
   background: rgba(20, 20, 30, 0.88);
 }
 
@@ -5346,7 +5346,7 @@ const handleGitCommitCardSubmit = async (msg) => {
   font-size: 12px;
   color: #0891b2;
 }
-:global([data-theme="dark"]) .runner-text {
+:global([data-theme="dark"] .runner-text){
   color: #22d3ee;
 }
 .runner-spinner {
@@ -5452,6 +5452,7 @@ const handleGitCommitCardSubmit = async (msg) => {
 .agentic-run-metrics span { padding: 4px 7px; border-radius: 5px; background: rgba(255,255,255,.05); }
 .agentic-decision-summary{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;padding:9px;border-radius:7px;background:rgba(59,130,246,.07)}.agentic-decision-summary span{font-size:10px;color:var(--text-muted)}.agentic-decision-summary p{width:100%;margin:2px 0 0;font-size:11px;color:var(--text-secondary)}.agentic-clarification{margin-top:10px;padding:10px;border-radius:7px;background:rgba(245,158,11,.1);color:#f59e0b;font-size:12px;line-height:1.5}
 @media (max-width:1100px){.quality-metrics,.control-metrics{grid-template-columns:repeat(2,minmax(90px,1fr))}.control-grid{grid-template-columns:1fr}.governance-form{grid-template-columns:1fr 1fr}.supervision-row{grid-template-columns:1fr}.supervision-actions{justify-content:flex-start}}
+@media (max-width:768px){.chat-header{min-height:52px;padding:7px 8px}.header-logo{width:34px;height:34px}.header-title{min-width:0;flex:1}.header-title h3{font-size:14px}.header-title p{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.message-count{display:none}.quality-header-actions{gap:5px}.quality-header-actions>.btn{width:34px;padding:0;font-size:0}.quality-header-actions>.btn svg{width:15px;height:15px}.quality-mode{display:none}.chat-body{padding:14px;gap:16px}}
 .agentic-run-actions { justify-content: flex-end; margin-top: 14px; }
 .global-runtime-debug {
   width: 100%;

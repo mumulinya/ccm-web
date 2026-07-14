@@ -1,0 +1,33 @@
+{
+  "pass": true,
+  "generatedAt": "2026-07-14T09:03:24.215Z",
+  "baseUrl": "http://127.0.0.1:3082",
+  "checks": [
+    {
+      "name": "desktop overview has no horizontal overflow",
+      "pass": true
+    },
+    {
+      "name": "desktop overview shows verified scopes and completed goal with technical details closed",
+      "pass": true
+    },
+    {
+      "name": "MCP editor exposes credential names but never returns credential values",
+      "pass": true
+    },
+    {
+      "name": "mobile overview has no horizontal overflow",
+      "pass": true
+    },
+    {
+      "name": "mobile overview stays usable and keeps the verified status visible",
+      "pass": true
+    }
+  ],
+  "screenshots": [
+    "C:\\Users\\admin\\.cc-connect\\ccm\\docs\\mcp-skill-goal-docs\\evidence\\tool-control-center-2026-07-14\\desktop-overview.png",
+    "C:\\Users\\admin\\.cc-connect\\ccm\\docs\\mcp-skill-goal-docs\\evidence\\tool-control-center-2026-07-14\\desktop-mcp-editor.png",
+    "C:\\Users\\admin\\.cc-connect\\ccm\\docs\\mcp-skill-goal-docs\\evidence\\tool-control-center-2026-07-14\\mobile-overview.png"
+  ],
+  "errors": []
+}

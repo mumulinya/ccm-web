@@ -1,14 +1,18 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
+import { ChevronLeft, ChevronRight, ExternalLink, Package, RefreshCw, Search, Server, ShieldCheck } from '@lucide/vue'
 import { toolsApi } from '../../api/index.js'
 import { toast, confirmDialog } from '../../utils/toast.js'
+import ToolControlOverview from './ToolControlOverview.vue'
+import McpServerEditor from './McpServerEditor.vue'
+import SkillMarkdownViewer from './SkillMarkdownViewer.vue'
 
 const emit = defineEmits(['navigate'])
 
 const mcpTools = ref([])
 const skills = ref([])
 const customSkills = ref([]) // 本地物理加载的高级 Customization Skills
-const currentFilter = ref('core') // 默认展示 'core' 内置工具
+const currentFilter = ref('overview')
 const toolStatus = ref({ mcp: [], skills: [], servers: [] })
 const authorizationInventory = ref({ summary: { totalScopes: 0, projects: 0, groups: 0, configuredScopes: 0, ready: 0, needsAttention: 0, requestedMcp: 0, requestedSkill: 0, missingMcpServers: 0, missingMcpTools: 0, missingSkills: 0, invalidMcpGrants: 0, scopesWithRuntime: 0, scopesWithoutRuntime: 0, runtimeSnapshots: 0, runtimeOverallReady: 0, runtimeDeliveryReady: 0, runtimeCliReady: 0, runtimeCatalogStale: 0, runtimeDispatchBlocked: 0, runtimeNeedsResync: 0 }, scopes: [] })
 const authorizationInventoryLoading = ref(false)
@@ -23,6 +27,8 @@ const toolChainVerification = ref({ summary: { totalScopes: 0, configuredScopes:
 const toolChainVerificationLoading = ref(false)
 const realCliMatrix = ref({ status: 'not_run', complete: false, running: false, results: [] })
 const realCliMatrixLoading = ref(false)
+const goalAudit = ref({ status: 'loading', complete: false, requirements: [] })
+const goalAuditLoading = ref(false)
 
 // 抽屉状态
 const showDrawer = ref(false)
@@ -40,9 +46,6 @@ const customSourceUrl = ref('')
 const customSourceLabel = ref('')
 const loadedCustomSourceUrl = ref('')
 const loadedCustomSourceLabel = ref('')
-const smitheryKey = ref('')
-const needSmitheryKey = ref(false)
-const isSavingKey = ref(false)
 const isSavingSource = ref(false)
 const showMarketplacePreview = ref(false)
 const marketplacePreview = ref(null)
@@ -53,13 +56,21 @@ const marketplaceLastRuntimeResync = ref(null)
 const marketplaceOperations = ref([])
 const marketplaceOperationsSummary = ref({ totalReturned: 0, actionCounts: {}, impactedScopes: 0, impactedRuntimeSnapshots: 0, runtimeResynced: 0, runtimeResyncFailed: 0, truncated: false })
 const marketplaceOperationsLoading = ref(false)
+const marketplaceLoading = ref(false)
+const marketplaceError = ref('')
+const marketplaceQuery = ref('')
+const marketplaceCategory = ref('all')
+const marketplaceSort = ref('popular')
+const marketplacePagination = ref({ page: 1, pageSize: 12, total: 0, totalPages: 1, hasPrevious: false, hasNext: false })
+const marketplaceSourceStatus = ref(null)
+let marketplaceRequestSequence = 0
 
 // 弹窗状态
 const showAddMcp = ref(false)
 const showAddSkill = ref(false)
+const editingMcp = ref(null)
 
 // 新建表单
-const newMcp = ref({ name: '', description: '', command: '', env: '' })
 const newSkill = ref({ name: '', description: '', prompt: '' })
 
 // 静态定义的系统核心内置工具列表
@@ -160,19 +171,21 @@ const loadTools = async () => {
     loadAuthorizationInventory(),
     loadToolInvocationAudit(),
     loadToolChainVerification(),
-    loadRealCliMatrix()
+    loadRealCliMatrix(),
+    loadGoalAudit()
   ])
 
-  // 重置激活状态
-  needSmitheryKey.value = false
   await loadMarketplaceSources()
   await loadMarketplaceOperations()
-  if (!['local', 'github', 'smithery', 'custom'].includes(selectedSource.value)
+  if (!['local', 'github', 'skills-sh', 'smithery', 'custom'].includes(selectedSource.value)
     && !marketplaceSources.value.some(source => source.id === selectedSource.value)) {
     selectedSource.value = 'local'
   }
+  await loadMarketplace()
+}
 
-  // 加载外部商城资源
+const loadMarketplace = async () => {
+  const requestId = ++marketplaceRequestSequence
   const sourceForLoad = selectedSource.value
   const customUrlForLoad = customSourceUrl.value.trim()
   const customLabelForLoad = customSourceLabel.value.trim()
@@ -182,44 +195,55 @@ const loadTools = async () => {
   }
   if (sourceForLoad === 'custom' && !customUrlForLoad) {
     marketplaceItems.value = []
+    marketplaceError.value = ''
+    marketplaceSourceStatus.value = null
+    marketplacePagination.value = { page: 1, pageSize: 12, total: 0, totalPages: 1, hasPrevious: false, hasNext: false }
     return
   }
+  marketplaceLoading.value = true
+  marketplaceError.value = ''
   try {
-    const res = await toolsApi.marketplace.list(sourceForLoad, customUrlForLoad)
-    if (res.success) {
-      if (res.needKey) {
-        needSmitheryKey.value = true
-        marketplaceItems.value = []
-        try {
-          const cfg = await toolsApi.smithery.getKey()
-          if (cfg.key) smitheryKey.value = cfg.key
-        } catch {}
-      } else {
-        if (sourceForLoad === 'custom' && customUrlForLoad) {
-          loadedCustomSourceUrl.value = customUrlForLoad
-          loadedCustomSourceLabel.value = customLabelForLoad
-        }
-        marketplaceItems.value = (res.items || []).map(item => ({
-          ...item,
-          installing: false,
-          uninstalling: false,
-          impactLoading: false,
-          authorizationImpact: null,
-          runtimeImpact: null,
-          runtimeResync: null,
-          previewing: false,
-          sourceNeedsSave: sourceForLoad === 'custom' && !!customUrlForLoad
-        }))
-        if (res.error) {
-          toast.warning(res.error)
-        }
-      }
-    } else {
-      toast.error(res.error || '获取商城列表失败')
+    const res = await toolsApi.marketplace.list(sourceForLoad, customUrlForLoad, {
+      query: marketplaceQuery.value.trim(),
+      page: marketplacePagination.value.page,
+      pageSize: marketplacePagination.value.pageSize,
+      category: marketplaceCategory.value,
+      sort: marketplaceSort.value
+    })
+    if (requestId !== marketplaceRequestSequence) return
+    if (!res.success) throw new Error(res.error || '商城暂时不可用')
+    if (sourceForLoad === 'custom' && customUrlForLoad) {
+      loadedCustomSourceUrl.value = customUrlForLoad
+      loadedCustomSourceLabel.value = customLabelForLoad
     }
+    marketplaceItems.value = (res.items || []).map(item => ({
+      ...item,
+      installing: false,
+      uninstalling: false,
+      impactLoading: false,
+      authorizationImpact: null,
+      runtimeImpact: null,
+      runtimeResync: null,
+      previewing: false,
+      sourceNeedsSave: sourceForLoad === 'custom' && !!customUrlForLoad
+    }))
+    marketplacePagination.value = res.pagination || { page: 1, pageSize: 12, total: marketplaceItems.value.length, totalPages: 1, hasPrevious: false, hasNext: false }
+    marketplaceSourceStatus.value = res.sourceStatus || null
   } catch (e) {
-    toast.error('获取商城列表失败: ' + e.message)
+    if (requestId !== marketplaceRequestSequence) return
+    marketplaceItems.value = []
+    marketplaceError.value = e.message || '商城暂时不可用，请稍后重试'
+    marketplaceSourceStatus.value = null
+  } finally {
+    if (requestId === marketplaceRequestSequence) marketplaceLoading.value = false
   }
+}
+
+const loadGoalAudit = async () => {
+  goalAuditLoading.value = true
+  try { goalAudit.value = await toolsApi.goalAudit() }
+  catch (error) { console.error('加载工具目标验收失败:', error) }
+  finally { goalAuditLoading.value = false }
 }
 
 const loadMarketplaceSources = async () => {
@@ -535,6 +559,13 @@ const clearToolInvocationAuditFilter = async () => {
 const chainVerificationSummary = computed(() => toolChainVerification.value.summary || {})
 const chainVerificationGate = computed(() => toolChainVerification.value.gate || {})
 const chainVerificationRows = computed(() => toolChainVerification.value.rows || [])
+const authorizationConfiguredReady = computed(() => Math.max(0, Number(authorizationSummary.value.configuredScopes || 0) - Number(authorizationSummary.value.needsAttention || 0)))
+const businessRuntimeSummary = computed(() => chainVerificationRows.value
+  .filter(row => Number(row?.counts?.mcp || 0) + Number(row?.counts?.skill || 0) > 0)
+  .reduce((summary, row) => ({
+    total: summary.total + Number(row?.runtime?.summary?.total || 0),
+    ready: summary.ready + Number(row?.runtime?.summary?.overallReady || 0),
+  }), { total: 0, ready: 0 }))
 
 const chainVerificationGateLabel = computed(() => {
   const status = chainVerificationGate.value?.status || 'not_configured'
@@ -707,33 +738,72 @@ const runtimeStatusLabel = (item) => {
   return '待检查'
 }
 
-const saveSmitheryKey = async () => {
-  if (!smitheryKey.value.trim()) {
-    toast.warning('请输入有效的 API Key')
-    return
-  }
-  isSavingKey.value = true
-  try {
-    const res = await toolsApi.smithery.saveKey(smitheryKey.value.trim())
-    if (res.success) {
-      toast.success('Smithery API Key 保存成功，官方商城已激活！')
-      needSmitheryKey.value = false
-      await loadTools()
-    } else {
-      toast.error('保存失败: ' + res.error)
-    }
-  } catch (e) {
-    toast.error('保存失败: ' + e.message)
-  } finally {
-    isSavingKey.value = false
-  }
-}
+const marketplaceOnlineSource = computed(() => ['skills-sh', 'smithery'].includes(selectedSource.value))
+
+const marketplaceCategories = computed(() => selectedSource.value === 'skills-sh'
+  ? [
+      { id: 'all', label: '热门' },
+      { id: 'development', label: '开发' },
+      { id: 'design', label: '设计' },
+      { id: 'data', label: '数据' },
+      { id: 'writing', label: '写作' },
+      { id: 'productivity', label: '效率' }
+    ]
+  : [
+      { id: 'all', label: '全部' },
+      { id: 'development', label: '开发' },
+      { id: 'data', label: '数据' },
+      { id: 'automation', label: '自动化' },
+      { id: 'productivity', label: '效率' },
+      { id: 'communication', label: '沟通' }
+    ])
+
+const marketplaceSearchPlaceholder = computed(() => selectedSource.value === 'skills-sh'
+  ? '搜索 Skill，例如 React、测试、文档'
+  : '搜索 MCP，例如 GitHub、浏览器、飞书')
 
 const onSourceChange = () => {
-  if (selectedSource.value !== 'custom' || customSourceUrl.value) {
-    loadTools()
-  }
+  marketplaceQuery.value = ''
+  marketplaceCategory.value = 'all'
+  marketplaceSort.value = 'popular'
+  marketplacePagination.value.page = 1
+  if (selectedSource.value !== 'custom' || customSourceUrl.value) loadMarketplace()
 }
+
+const searchMarketplace = () => {
+  marketplacePagination.value.page = 1
+  loadMarketplace()
+}
+
+const selectMarketplaceCategory = (category) => {
+  if (marketplaceCategory.value === category) return
+  marketplaceCategory.value = category
+  marketplacePagination.value.page = 1
+  loadMarketplace()
+}
+
+const changeMarketplaceSort = () => {
+  marketplacePagination.value.page = 1
+  loadMarketplace()
+}
+
+const changeMarketplacePage = (page) => {
+  const next = Math.max(1, Math.min(Number(page || 1), Number(marketplacePagination.value.totalPages || 1)))
+  if (next === marketplacePagination.value.page) return
+  marketplacePagination.value.page = next
+  loadMarketplace()
+}
+
+const formatMarketplaceCount = (value) => {
+  const count = Number(value || 0)
+  if (count >= 1000000) return `${(count / 1000000).toFixed(count >= 10000000 ? 0 : 1)}m`
+  if (count >= 1000) return `${(count / 1000).toFixed(count >= 10000 ? 0 : 1)}k`
+  return String(count)
+}
+
+const marketplaceDisplayName = (item) => item?.displayName || item?.name || '未命名工具'
+
+const marketplaceCanRefresh = (item) => marketplaceOnlineSource.value && isInstalled(item)
 
 const selectedSavedSource = computed(() => {
   return marketplaceSources.value.find(source => source.id === selectedSource.value) || null
@@ -788,7 +858,9 @@ const sameMarketplaceItem = (left, right) => {
 const installButtonText = (item) => {
   if (item.installing) return item.sourceNeedsSave || customSourceNeedsSave.value ? '保存中' : '处理中'
   if (item.sourceNeedsSave || customSourceNeedsSave.value) return item.updateAvailable ? '保存来源并更新' : '保存来源并安装'
-  return item.updateAvailable ? '更新' : '安装'
+  if (item.updateAvailable) return '更新'
+  if (marketplaceCanRefresh(item)) return '重新同步'
+  return '安装'
 }
 
 const marketplaceImpactGrantCount = (impact) => {
@@ -1022,7 +1094,7 @@ const installMarketTool = async (item) => {
   }
   item.installing = true
   try {
-    const isUpdate = item.updateAvailable === true
+    const isUpdate = item.updateAvailable === true || marketplaceCanRefresh(item)
     const preflightImpact = isUpdate ? await fetchMarketplaceAuthorizationImpact(item, 'update') : null
     if (isUpdate && !(await confirmMarketplaceActionWithImpact(item, 'update', preflightImpact))) return
     const res = isUpdate
@@ -1165,48 +1237,62 @@ const toggleMcpExpanded = (name) => {
 }
 
 const toggleEnabled = async (type, tool) => {
-  tool.enabled = !tool.enabled
-  if (type === 'mcp') await toolsApi.mcp.create(tool)
-  else await toolsApi.skills.create(tool)
+  const previous = tool.enabled
+  tool.enabled = !previous
+  try {
+    if (type === 'mcp') await toolsApi.mcp.create({ name: tool.name, enabled: tool.enabled })
+    else await toolsApi.skills.create({ name: tool.name, enabled: tool.enabled })
+    toast.success(tool.enabled ? '已启用并同步到运行时' : '已停用并同步到运行时')
+    await loadTools()
+  } catch (error) {
+    tool.enabled = previous
+    toast.error(`操作失败，已恢复原状态：${error.message}`)
+  }
 }
 
 const deleteTool = async (type, name) => {
-  const confirmed = await confirmDialog(`确定删除工具 "${name}"？删除后无法恢复。`)
-  if (!confirmed) return
-  if (type === 'mcp') await toolsApi.mcp.delete(name)
-  else await toolsApi.skills.delete(name)
-  loadTools()
-  toast.success('工具已删除')
+  try {
+    const preview = await toolsApi.catalogImpact({ action: 'delete', type, name })
+    const count = Number(preview.authorizationImpact?.summary?.scopeCount || 0)
+    const impactText = count ? `当前有 ${count} 个项目或群聊正在使用它，删除后相关 Agent 将暂时无法调用。` : '当前没有项目或群聊依赖它。'
+    const confirmed = await confirmDialog(`确定删除 "${name}"？${impactText}`)
+    if (!confirmed) return
+    if (type === 'mcp') await toolsApi.mcp.delete(name)
+    else await toolsApi.skills.delete(name)
+    await loadTools()
+    toast.success('已删除并同步相关运行时')
+  } catch (error) { toast.error(`删除失败，原配置已保留：${error.message}`) }
 }
 
-const submitAddMcp = async () => {
-  if (!newMcp.value.name) { toast.warning('请输入名称'); return }
-  if (!newMcp.value.command) { toast.warning('请输入启动命令'); return }
-  await toolsApi.mcp.create({ ...newMcp.value, enabled: true })
+const openMcpEditor = (tool = null) => {
+  editingMcp.value = tool ? { ...tool } : null
+  showAddMcp.value = true
+}
+
+const closeMcpEditor = () => {
   showAddMcp.value = false
-  newMcp.value = { name: '', description: '', command: '', env: '' }
-  loadTools()
-  toast.success('MCP 服务器添加成功')
+  editingMcp.value = null
+}
+
+const handleMcpSaved = async () => {
+  await loadTools()
 }
 
 const submitAddSkill = async () => {
   if (!newSkill.value.name) { toast.warning('请输入名称'); return }
-  await toolsApi.skills.create({ ...newSkill.value, enabled: true })
-  showAddSkill.value = false
-  newSkill.value = { name: '', description: '', prompt: '' }
-  loadTools()
-  toast.success('Skill 添加成功')
+  try {
+    await toolsApi.skills.create({ ...newSkill.value, enabled: true, createOnly: true })
+    showAddSkill.value = false
+    newSkill.value = { name: '', description: '', prompt: '' }
+    await loadTools()
+    toast.success('Skill 已添加并同步')
+  } catch (error) { toast.error(`添加失败：${error.message}`) }
 }
 
 const testMcp = async (tool) => {
   toast.info('正在测试连接...')
   try {
-    const res = await fetch('/api/tools/test', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ command: tool.command, args: tool.args || [], env: tool.env || '' })
-    })
-    const data = await res.json()
+    const data = await toolsApi.mcp.test({ name: tool.name })
     if (data.success) {
       toast.success(`连接成功！发现 ${data.tools.length} 个工具: ${data.tools.join(', ')}`)
     } else {
@@ -1237,55 +1323,6 @@ const openSkillManual = (skill) => {
   showDrawer.value = true
 }
 
-// 极其简单且高性能的 Markdown 渲染器，支持 SKILL.md 文档展示
-const renderMarkdown = (md) => {
-  if (!md) return ''
-  let html = md.replace(/^---\r?\n[\s\S]*?\r?\n---/, '') // 去除 YAML header
-  html = html.replace(/\r\n/g, '\n')
-  html = html
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-  
-  // 渲染代码块
-  html = html.replace(/```([\s\S]*?)```/g, (match, code) => {
-    const lines = code.trim().split('\n')
-    let lang = 'code'
-    if (lines[0] && lines[0].length < 10 && !lines[0].includes(' ') && !lines[0].includes('(')) {
-      lang = lines.shift()
-    }
-    return `<pre class="md-code font-mono"><code class="language-${lang}">${lines.join('\n')}</code></pre>`
-  })
-
-  // 渲染行内代码
-  html = html.replace(/`([^`]+)`/g, '<code class="md-inline-code font-mono">$1</code>')
-  
-  // 渲染标题
-  html = html.replace(/^### (.*$)/gim, '<h4 class="md-h3">$1</h4>')
-  html = html.replace(/^## (.*$)/gim, '<h3 class="md-h2">$1</h3>')
-  html = html.replace(/^# (.*$)/gim, '<h2 class="md-h1">$1</h2>')
-  
-  // 渲染粗体
-  html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-  
-  // 渲染列表项
-  html = html.replace(/^\s*-\s+(.*$)/gim, '<li class="md-li">$1</li>')
-  
-  // 渲染链接
-  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" class="md-link">$1</a>')
-  
-  // 渲染段落
-  html = html.split('\n\n').map(p => {
-    const trimmed = p.trim()
-    if (trimmed.startsWith('<h') || trimmed.startsWith('<pre') || trimmed.startsWith('<li') || trimmed.startsWith('<ul')) {
-      return p
-    }
-    return `<p class="md-p">${p.replace(/\n/g, '<br>')}</p>`
-  }).join('\n')
-
-  return html
-}
-
 onMounted(loadTools)
 </script>
 
@@ -1294,7 +1331,7 @@ onMounted(loadTools)
     <!-- 顶部玻璃工具栏 -->
     <div class="toolbar">
       <div style="display:flex;gap:12px">
-        <button v-if="currentFilter === 'mcp'" class="btn btn-primary btn-sm" @click="showAddMcp = true">+ MCP 服务器</button>
+        <button v-if="currentFilter === 'mcp'" class="btn btn-primary btn-sm" @click="openMcpEditor()">+ MCP 服务器</button>
         <button v-if="currentFilter === 'custom-prompt'" class="btn btn-outline btn-sm" @click="showAddSkill = true">+ Prompt 技能</button>
         <button class="btn btn-outline btn-sm" @click="reloadTools">🔄 重载工具</button>
       </div>
@@ -1308,6 +1345,10 @@ onMounted(loadTools)
       <div class="sidebar">
         <div class="sidebar-header">🛠️ 工具与技能中心</div>
         <div class="category-list">
+          <div class="category-item" :class="{ active: currentFilter === 'overview' }" @click="currentFilter = 'overview'">
+            <span>▦</span><span>运行概况</span>
+            <span class="badge">{{ chainVerificationSummary.verified || 0 }}/{{ chainVerificationSummary.configuredScopes || 0 }}</span>
+          </div>
           <div class="category-item" :class="{ active: currentFilter === 'core' }" @click="currentFilter = 'core'">
             <span>⚙️</span><span>内置核心工具</span>
             <span class="badge">{{ coreToolsList.length }}</span>
@@ -1318,7 +1359,7 @@ onMounted(loadTools)
           </div>
           <div class="category-item" :class="{ active: currentFilter === 'authorization' }" @click="currentFilter = 'authorization'">
             <span>◈</span><span>授权总览</span>
-            <span class="badge">{{ authorizationSummary.ready || 0 }}/{{ authorizationSummary.totalScopes || 0 }}</span>
+            <span class="badge">{{ authorizationConfiguredReady }}/{{ authorizationSummary.configuredScopes || 0 }}</span>
           </div>
           <div class="category-item" :class="{ active: currentFilter === 'chain-verification' }" @click="currentFilter = 'chain-verification'">
             <span>◆</span><span>链路验收</span>
@@ -1330,7 +1371,7 @@ onMounted(loadTools)
           </div>
           <div class="category-item" :class="{ active: currentFilter === 'runtime' }" @click="currentFilter = 'runtime'">
             <span>◎</span><span>Agent 运行时</span>
-            <span class="badge">{{ runtimeReadiness.summary.ready }}/{{ runtimeReadiness.summary.total }}</span>
+            <span class="badge">{{ businessRuntimeSummary.ready }}/{{ businessRuntimeSummary.total }}</span>
           </div>
           <div class="category-item" :class="{ active: currentFilter === 'custom-skills' }" @click="currentFilter = 'custom-skills'">
             <span>🔮</span><span>系统高级技能书</span>
@@ -1351,6 +1392,7 @@ onMounted(loadTools)
         <div class="content-header">
           <span>
             {{ 
+              currentFilter === 'overview' ? '工具运行概况' :
               currentFilter === 'core' ? '⚙️ 系统内置核心工具' : 
               currentFilter === 'mcp' ? '🔌 MCP 服务与客户端连接中心' : 
               currentFilter === 'authorization' ? '◈ 项目 / 群聊 MCP 与 Skill 授权总览' :
@@ -1366,6 +1408,18 @@ onMounted(loadTools)
         </div>
 
         <div class="tool-list">
+          <ToolControlOverview
+            v-if="currentFilter === 'overview'"
+            :tool-status="toolStatus"
+            :authorization="authorizationInventory"
+            :verification="toolChainVerification"
+            :runtime="runtimeReadiness"
+            :goal-audit="goalAudit"
+            :loading="authorizationInventoryLoading || toolChainVerificationLoading || runtimeReadinessLoading || goalAuditLoading"
+            @open="currentFilter = $event"
+            @refresh="loadTools"
+          />
+
           <!-- 1. ⚙️ 系统内置核心工具 -->
           <template v-if="currentFilter === 'core'">
             <div v-for="tool in coreToolsList" :key="tool.name" class="tool-card">
@@ -1408,7 +1462,7 @@ onMounted(loadTools)
           <!-- 2. 项目 / 群聊授权总览 -->
           <template v-if="currentFilter === 'authorization'">
             <div class="runtime-summary authorization-summary">
-              <div><strong>{{ authorizationSummary.ready || 0 }}</strong><span>可派发范围</span></div>
+              <div><strong>{{ authorizationConfiguredReady }}</strong><span>已配置且可派发</span></div>
               <div><strong>{{ authorizationSummary.needsAttention || 0 }}</strong><span>需处理范围</span></div>
               <div><strong>{{ authorizationSummary.requestedMcp || 0 }}</strong><span>MCP 授权</span></div>
               <div><strong>{{ authorizationSummary.requestedSkill || 0 }}</strong><span>Skill 授权</span></div>
@@ -1732,6 +1786,7 @@ onMounted(loadTools)
                   
                   <div style="display:flex;gap:8px">
                     <button class="btn btn-outline btn-sm" @click="testMcp(tool)">测试连接</button>
+                    <button class="btn btn-outline btn-sm" @click="openMcpEditor(tool)">编辑</button>
                     <label class="toggle">
                       <input type="checkbox" :checked="tool.enabled" @change="toggleEnabled('mcp', tool)">
                       <span>启用</span>
@@ -1810,11 +1865,12 @@ onMounted(loadTools)
           <!-- 7. 🛒 技能与 MCP 一键安装市场 -->
           <template v-if="currentFilter === 'marketplace'">
             <div class="marketplace-source-selector">
-              <span class="marketplace-source-label">🛒 商城数据源:</span>
+              <span class="marketplace-source-label">商城频道</span>
               <select v-model="selectedSource" @change="onSourceChange">
-                <option value="local">本地官方精选 (CCM Local)</option>
-                <option value="github">社区精选源 (GitHub Remote)</option>
-                <option value="smithery">Smithery 官方商店 (Smithery.ai)</option>
+                <option value="skills-sh">Skills.sh · 全网 Skill</option>
+                <option value="smithery">Smithery · MCP 注册表</option>
+                <option value="local">CCM 本地精选</option>
+                <option value="github">CCM 社区精选</option>
                 <option v-for="source in marketplaceSources" :key="source.id" :value="source.id">
                   已保存：{{ source.label }}
                 </option>
@@ -1822,8 +1878,8 @@ onMounted(loadTools)
               </select>
               <button v-if="selectedSavedSource" class="btn btn-danger btn-sm" @click="deleteSelectedMarketplaceSource">删除来源</button>
 
-              <span class="marketplace-filter-label">🛠️ 类型筛选:</span>
-              <div class="mfilter-tab">
+              <span v-if="!marketplaceOnlineSource" class="marketplace-filter-label">类型</span>
+              <div v-if="!marketplaceOnlineSource" class="mfilter-tab">
                 <button type="button" @click="marketplaceFilter = 'all'" :class="{ active: marketplaceFilter === 'all' }">全部</button>
                 <button type="button" @click="marketplaceFilter = 'mcp'" :class="{ active: marketplaceFilter === 'mcp' }">MCP 服务器</button>
                 <button type="button" @click="marketplaceFilter = 'skill'" :class="{ active: marketplaceFilter === 'skill' }">Skills</button>
@@ -1841,6 +1897,43 @@ onMounted(loadTools)
               </div>
               <div v-if="customSourceNeedsSave" class="marketplace-source-gate">
                 <span>当前列表来自未保存的外部 URL。安装时会先保存来源，再由后端从该来源重新读取并校验条目。</span>
+              </div>
+            </div>
+
+            <div v-if="marketplaceOnlineSource" class="marketplace-online-browser">
+              <div class="marketplace-search-row">
+                <div class="marketplace-search-box">
+                  <Search :size="16" aria-hidden="true" />
+                  <input v-model="marketplaceQuery" :placeholder="marketplaceSearchPlaceholder" @keyup.enter="searchMarketplace">
+                  <button type="button" class="btn btn-primary btn-sm" :disabled="marketplaceLoading" @click="searchMarketplace">
+                    {{ marketplaceLoading ? '搜索中' : '搜索' }}
+                  </button>
+                </div>
+                <select v-model="marketplaceSort" class="marketplace-sort" aria-label="商城排序" @change="changeMarketplaceSort">
+                  <option value="popular">按热度</option>
+                  <option value="relevance">按相关度</option>
+                  <option value="name">按名称</option>
+                </select>
+                <button type="button" class="marketplace-icon-button" title="刷新当前结果" :disabled="marketplaceLoading" @click="loadMarketplace">
+                  <RefreshCw :size="16" :class="{ spinning: marketplaceLoading }" aria-hidden="true" />
+                </button>
+              </div>
+              <div class="marketplace-category-tabs" aria-label="商城分类">
+                <button
+                  v-for="category in marketplaceCategories"
+                  :key="category.id"
+                  type="button"
+                  :class="{ active: marketplaceCategory === category.id }"
+                  @click="selectMarketplaceCategory(category.id)"
+                >{{ category.label }}</button>
+              </div>
+              <div class="marketplace-source-status">
+                <span class="status-dot" :class="{ online: marketplaceSourceStatus?.online !== false }"></span>
+                <span>{{ marketplaceSourceStatus?.message || '正在连接官方注册表' }}</span>
+                <span v-if="marketplacePagination.total">共 {{ marketplacePagination.total }} 条</span>
+                <a v-if="marketplaceSourceStatus?.upstream" :href="marketplaceSourceStatus.upstream" target="_blank" rel="noreferrer">
+                  官方来源 <ExternalLink :size="12" aria-hidden="true" />
+                </a>
               </div>
             </div>
 
@@ -1881,81 +1974,45 @@ onMounted(loadTools)
               </div>
             </div>
 
-            <div v-if="marketplaceOperations.length || marketplaceOperationsLoading" class="marketplace-operations-panel">
-              <div class="marketplace-operations-header">
-                <div>
-                  <strong>最近商城操作</strong>
-                  <span>{{ marketplaceOperationsSummary.totalReturned || 0 }} 条记录 · 影响授权 {{ marketplaceOperationsSummary.impactedScopes || 0 }} 个范围 · 运行时快照 {{ marketplaceOperationsSummary.impactedRuntimeSnapshots || 0 }} 个 · 自动同步 {{ marketplaceOperationsSummary.runtimeResynced || 0 }} 个</span>
-                </div>
-                <div class="marketplace-operations-actions">
-                  <button v-if="marketplaceOperationsSummary.impactedRuntimeSnapshots" class="btn btn-outline btn-sm" :disabled="runtimeResyncing" @click="resyncRuntimeTools">
-                    {{ runtimeResyncing ? '同步中' : '重同步运行时' }}
-                  </button>
-                  <button class="btn btn-outline btn-sm" :disabled="marketplaceOperationsLoading" @click="loadMarketplaceOperations">
-                    {{ marketplaceOperationsLoading ? '刷新中' : '刷新' }}
-                  </button>
-                </div>
-              </div>
-              <div class="marketplace-operation-list">
-                <div v-for="operation in marketplaceOperations.slice(0, 5)" :key="`${operation.at}:${operation.key}:${operation.action}`" class="marketplace-operation-row">
-                  <div class="marketplace-operation-main">
-                    <span class="marketplace-operation-title">{{ marketplaceOperationTitle(operation) }}</span>
-                    <span class="marketplace-operation-time">{{ marketplaceOperationTime(operation) }}</span>
-                  </div>
-                  <div class="marketplace-operation-meta">
-                    <span v-if="marketplaceOperationVersionText(operation)">v{{ marketplaceOperationVersionText(operation) }}</span>
-                    <span v-if="operation.source?.label">{{ operation.source.label }}</span>
-                    <span :class="{ warn: hasMarketplaceImpact(operation.authorizationImpact) }">{{ marketplaceImpactSummaryText(operation.authorizationImpact) }}</span>
-                    <span :class="{ warn: hasMarketplaceRuntimeImpact(operation.runtimeImpact) }">{{ marketplaceRuntimeImpactSummaryText(operation.runtimeImpact) }}</span>
-                    <span v-if="operation.runtimeResync" :class="{ warn: operation.runtimeResync.success === false || (operation.runtimeResync.summary?.failed || 0) > 0 }">{{ marketplaceRuntimeResyncSummaryText(operation.runtimeResync) }}</span>
-                  </div>
-                  <div v-if="hasMarketplaceImpact(operation.authorizationImpact)" class="marketplace-impact-scopes">
-                    <span v-for="scope in operation.authorizationImpact.scopes.slice(0, 3)" :key="`${scope.scope}:${scope.id}`" :title="marketplaceImpactScopeGrants(scope)">
-                      {{ marketplaceImpactScopeLabel(scope) }} · {{ scope.name || scope.id }}
-                    </span>
-                    <span v-if="operation.authorizationImpact.scopes.length > 3">+{{ operation.authorizationImpact.scopes.length - 3 }}</span>
-                  </div>
-                </div>
-              </div>
+            <div v-if="marketplaceLoading" class="empty marketplace-loading-state">
+              <RefreshCw :size="22" class="spinning" aria-hidden="true" />
+              <span>正在从官方注册表获取结果...</span>
             </div>
-
-            <!-- Smithery API Key 激活浮窗 -->
-            <div v-if="selectedSource === 'smithery' && needSmitheryKey" class="smithery-activation-card">
-              <div style="font-size:14px;font-weight:600;color:var(--text-primary);display:flex;align-items:center;gap:6px">
-                <span>🔑</span><span>激活 Smithery 官方应用商店</span>
+            <div v-else-if="marketplaceError" class="marketplace-error-state">
+              <div>
+                <strong>商城暂时没有加载成功</strong>
+                <span>{{ marketplaceError }}</span>
               </div>
-              <div style="font-size:12px;color:var(--text-muted);margin-top:6px;line-height:1.5">
-                本地未检测到有效的 Smithery 密钥。请配置您的 API Key 以安全接入其官方注册中心。
-                <a href="https://smithery.ai/account/api-keys" target="_blank">免费申请 API Key ↗</a>
-              </div>
-              <div style="display:flex;gap:8px;margin-top:14px;max-width:480px">
-                <input v-model="smitheryKey" type="password" placeholder="请输入您的 Smithery Bearer API Key..." @keyup.enter="saveSmitheryKey">
-                <button class="btn btn-primary btn-sm" :disabled="isSavingKey" @click="saveSmitheryKey">
-                  {{ isSavingKey ? '正在激活...' : '激活并加载' }}
-                </button>
-              </div>
+              <button type="button" class="btn btn-outline btn-sm" @click="loadMarketplace">重试</button>
             </div>
-
-            <div v-if="filteredTools().length === 0" class="empty">
-              <span class="icon">📦</span>
-              <span>暂无商城工具</span>
+            <div v-else-if="filteredTools().length === 0" class="empty">
+              <Package :size="24" aria-hidden="true" />
+              <span>{{ marketplaceQuery ? '没有找到匹配结果，请换个关键词' : '当前频道暂无可用工具' }}</span>
             </div>
-            <div v-for="tool in filteredTools()" :key="tool.id || `${tool.type}:${tool.name}`" class="tool-card marketplace-tool">
+            <div v-for="tool in (!marketplaceLoading && !marketplaceError ? filteredTools() : [])" :key="tool.id || `${tool.type}:${tool.name}`" class="tool-card marketplace-tool">
               <div class="tool-header">
                 <div class="marketplace-tool-main">
-                  <span style="font-size:20px">{{ tool.type === 'mcp' ? '🔌' : '⚡' }}</span>
+                  <span class="marketplace-tool-icon">
+                    <Server v-if="tool.type === 'mcp'" :size="18" aria-hidden="true" />
+                    <Package v-else :size="18" aria-hidden="true" />
+                  </span>
                   <div class="marketplace-tool-copy">
                     <div class="tool-name">
-                      {{ tool.name }}
+                      {{ marketplaceDisplayName(tool) }}
                       <span v-if="tool.author" style="font-size:11px;color:var(--text-muted);font-weight:normal;margin-left:6px">by {{ tool.author }}</span>
                     </div>
                     <div class="tool-desc">{{ tool.description || '' }}</div>
                     <div class="marketplace-meta">
                       <span>{{ tool.type === 'mcp' ? 'MCP' : 'Skill' }}</span>
-                      <span>v{{ tool.version || '0.0.0' }}</span>
+                      <span v-if="tool.verified" class="marketplace-verified"><ShieldCheck :size="12" aria-hidden="true" /> 已验证</span>
+                      <span v-if="tool.installs">{{ formatMarketplaceCount(tool.installs) }} 次安装</span>
+                      <span v-if="tool.useCount">{{ formatMarketplaceCount(tool.useCount) }} 次使用</span>
                       <span :class="`trust-${tool.source?.trust || 'custom'}`">{{ sourceTrustLabel(tool) }}来源</span>
-                      <span v-if="tool.installedVersion">已装 v{{ tool.installedVersion }}</span>
+                      <span v-if="tool.installedVersion">已安装</span>
                       <span v-if="tool.updateAvailable" class="update-ready">可更新</span>
+                      <a v-if="tool.homepage || tool.sourceUrl" :href="tool.homepage || tool.sourceUrl" target="_blank" rel="noreferrer">
+                        查看来源 <ExternalLink :size="11" aria-hidden="true" />
+                      </a>
                     </div>
                   </div>
                 </div>
@@ -1963,7 +2020,7 @@ onMounted(loadTools)
                   <button class="btn btn-outline btn-sm" :disabled="tool.previewing" @click="previewMarketTool(tool)">
                     {{ tool.previewing ? '读取中' : '预览' }}
                   </button>
-                  <button v-if="!isInstalled(tool) || tool.updateAvailable" class="btn btn-primary btn-sm" :disabled="tool.installing" @click="installMarketTool(tool)">
+                  <button v-if="!isInstalled(tool) || tool.updateAvailable || marketplaceCanRefresh(tool)" class="btn btn-primary btn-sm" :disabled="tool.installing" @click="installMarketTool(tool)">
                     {{ installButtonText(tool) }}
                   </button>
                   <button v-if="isInstalled(tool)" class="btn btn-danger btn-sm" :disabled="tool.uninstalling" @click="uninstallMarketTool(tool)">
@@ -2000,6 +2057,53 @@ onMounted(loadTools)
                 </div>
               </div>
             </div>
+            <div v-if="marketplaceOnlineSource && !marketplaceLoading && !marketplaceError && marketplacePagination.totalPages > 1" class="marketplace-pagination">
+              <button type="button" class="marketplace-icon-button" title="上一页" :disabled="!marketplacePagination.hasPrevious" @click="changeMarketplacePage(marketplacePagination.page - 1)">
+                <ChevronLeft :size="16" aria-hidden="true" />
+              </button>
+              <span>第 {{ marketplacePagination.page }} / {{ marketplacePagination.totalPages }} 页</span>
+              <button type="button" class="marketplace-icon-button" title="下一页" :disabled="!marketplacePagination.hasNext" @click="changeMarketplacePage(marketplacePagination.page + 1)">
+                <ChevronRight :size="16" aria-hidden="true" />
+              </button>
+            </div>
+            <details v-if="marketplaceOperations.length || marketplaceOperationsLoading" class="marketplace-operations-panel marketplace-operations-after-results">
+              <summary class="marketplace-operations-header">
+                <div>
+                  <strong>最近商城操作</strong>
+                  <span>{{ marketplaceOperationsSummary.totalReturned || 0 }} 条记录 · 影响授权 {{ marketplaceOperationsSummary.impactedScopes || 0 }} 个范围 · 运行时快照 {{ marketplaceOperationsSummary.impactedRuntimeSnapshots || 0 }} 个 · 自动同步 {{ marketplaceOperationsSummary.runtimeResynced || 0 }} 个</span>
+                </div>
+                <span class="marketplace-operations-toggle">查看记录</span>
+              </summary>
+              <div class="marketplace-operations-actions">
+                <button v-if="marketplaceOperationsSummary.impactedRuntimeSnapshots" class="btn btn-outline btn-sm" :disabled="runtimeResyncing" @click="resyncRuntimeTools">
+                  {{ runtimeResyncing ? '同步中' : '重同步运行时' }}
+                </button>
+                <button class="btn btn-outline btn-sm" :disabled="marketplaceOperationsLoading" @click="loadMarketplaceOperations">
+                  {{ marketplaceOperationsLoading ? '刷新中' : '刷新' }}
+                </button>
+              </div>
+              <div class="marketplace-operation-list">
+                <div v-for="operation in marketplaceOperations.slice(0, 5)" :key="`${operation.at}:${operation.key}:${operation.action}`" class="marketplace-operation-row">
+                  <div class="marketplace-operation-main">
+                    <span class="marketplace-operation-title">{{ marketplaceOperationTitle(operation) }}</span>
+                    <span class="marketplace-operation-time">{{ marketplaceOperationTime(operation) }}</span>
+                  </div>
+                  <div class="marketplace-operation-meta">
+                    <span v-if="marketplaceOperationVersionText(operation)">v{{ marketplaceOperationVersionText(operation) }}</span>
+                    <span v-if="operation.source?.label">{{ operation.source.label }}</span>
+                    <span :class="{ warn: hasMarketplaceImpact(operation.authorizationImpact) }">{{ marketplaceImpactSummaryText(operation.authorizationImpact) }}</span>
+                    <span :class="{ warn: hasMarketplaceRuntimeImpact(operation.runtimeImpact) }">{{ marketplaceRuntimeImpactSummaryText(operation.runtimeImpact) }}</span>
+                    <span v-if="operation.runtimeResync" :class="{ warn: operation.runtimeResync.success === false || (operation.runtimeResync.summary?.failed || 0) > 0 }">{{ marketplaceRuntimeResyncSummaryText(operation.runtimeResync) }}</span>
+                  </div>
+                  <div v-if="hasMarketplaceImpact(operation.authorizationImpact)" class="marketplace-impact-scopes">
+                    <span v-for="scope in operation.authorizationImpact.scopes.slice(0, 3)" :key="`${scope.scope}:${scope.id}`" :title="marketplaceImpactScopeGrants(scope)">
+                      {{ marketplaceImpactScopeLabel(scope) }} · {{ scope.name || scope.id }}
+                    </span>
+                    <span v-if="operation.authorizationImpact.scopes.length > 3">+{{ operation.authorizationImpact.scopes.length - 3 }}</span>
+                  </div>
+                </div>
+              </div>
+            </details>
           </template>
         </div>
       </div>
@@ -2008,7 +2112,7 @@ onMounted(loadTools)
     <div v-if="showMarketplacePreview" class="modal-overlay" @click.self="showMarketplacePreview = false">
       <div class="modal marketplace-preview-modal">
         <button class="modal-close" @click="showMarketplacePreview = false">&times;</button>
-        <h3>{{ marketplacePreview?.item?.name || '工具预览' }}</h3>
+        <h3>{{ marketplacePreview?.item?.displayName || marketplacePreview?.item?.name || '工具预览' }}</h3>
         <div v-if="previewLoading" class="empty-sm">正在读取并校验来源...</div>
         <template v-else>
           <div class="preview-summary">
@@ -2035,8 +2139,8 @@ onMounted(loadTools)
     </div>
 
     <!-- 侧拉抽屉：用于展示高级技能手册 SKILL.md -->
-    <div class="drawer-overlay" :class="{ show: showDrawer }" @click.self="showDrawer = false">
-      <div class="drawer" :class="{ show: showDrawer }">
+    <div v-if="showDrawer" class="drawer-overlay show" @click.self="showDrawer = false">
+      <div class="drawer show" role="dialog" aria-modal="true" aria-label="Skill 使用手册">
         <div class="drawer-header">
           <div style="display:flex;align-items:center;gap:8px">
             <span style="font-size:20px">📖</span>
@@ -2048,40 +2152,12 @@ onMounted(loadTools)
           <button class="drawer-close" @click="showDrawer = false">&times;</button>
         </div>
         <div class="drawer-body">
-          <div class="markdown-body" v-html="renderMarkdown(drawerSkill?.content)"></div>
+          <SkillMarkdownViewer :content="drawerSkill?.content || ''" />
         </div>
       </div>
     </div>
 
-    <!-- 添加 MCP 弹窗 -->
-    <div v-if="showAddMcp" class="modal-overlay" @click.self="showAddMcp = false">
-      <div class="modal">
-        <button class="modal-close" @click="showAddMcp = false">&times;</button>
-        <h3>添加 MCP 服务器</h3>
-        <div class="form-group">
-          <label>名称</label>
-          <input v-model="newMcp.name" placeholder="如 mcp-feishu">
-        </div>
-        <div class="form-group">
-          <label>描述</label>
-          <input v-model="newMcp.description" placeholder="简要描述功能">
-        </div>
-        <div class="form-group">
-          <label>启动命令</label>
-          <input v-model="newMcp.command" placeholder="如 npx @modelcontextprotocol/server-filesystem /path">
-          <div class="form-hint">MCP 服务器的启动命令，会通过 stdio 通信</div>
-        </div>
-        <div class="form-group">
-          <label>环境变量（可选）</label>
-          <textarea v-model="newMcp.env" placeholder="KEY=value&#10;ANOTHER_KEY=value2" rows="3"></textarea>
-          <div class="form-hint">每行一个 KEY=value 格式的环境变量</div>
-        </div>
-        <div class="form-actions">
-          <button class="btn btn-cancel" @click="showAddMcp = false">取消</button>
-          <button class="btn btn-primary" @click="submitAddMcp">添加</button>
-        </div>
-      </div>
-    </div>
+    <McpServerEditor :open="showAddMcp" :tool="editingMcp" @close="closeMcpEditor" @saved="handleMcpSaved" />
 
     <!-- 添加 Skill 弹窗 -->
     <div v-if="showAddSkill" class="modal-overlay" @click.self="showAddSkill = false">
@@ -2267,7 +2343,7 @@ onMounted(loadTools)
 .btn-block { width: 100%; display: block; text-align: center; }
 
 /* 在线商城高级数据源选择器 */
-.marketplace-source-selector { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; background: rgba(255,255,255,0.45); padding: 10px 16px; border-radius: 12px; border: 1px solid rgba(0,0,0,0.04); flex-wrap: wrap; }
+.marketplace-source-selector { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; background: rgba(255,255,255,0.45); padding: 10px 12px; border-radius: 8px; border: 1px solid rgba(0,0,0,0.06); flex-wrap: wrap; }
 .marketplace-source-label, .marketplace-filter-label { font-size:12.5px; color:var(--text-secondary); font-weight:600; white-space:nowrap; }
 .marketplace-source-selector select { min-width:0; max-width:100%; flex:1 1 240px; padding: 6px 12px; border-radius: 8px; border: 1px solid rgba(0,0,0,0.08); background: #ffffff; font-size: 12px; color: var(--text-primary); outline: none; cursor: pointer; font-weight: 500; }
 .marketplace-source-selector input { padding: 6px 10px; border-radius: 8px; border: 1px solid rgba(0,0,0,0.08); background: #ffffff; font-size: 12px; outline: none; }
@@ -2276,11 +2352,33 @@ onMounted(loadTools)
 .marketplace-custom-source input:nth-child(2) { flex:3 1 320px; min-width:0; }
 .marketplace-saved-source { flex:1 1 100%; min-width:0; font-size:11px; color:var(--text-muted); padding:6px 8px; border-radius:8px; background:rgba(148,163,184,.12); overflow-wrap:anywhere; }
 .marketplace-source-gate { flex:1 1 100%; padding:7px 9px; border-radius:8px; background:rgba(59,130,246,.08); color:var(--text-secondary); font-size:11.5px; line-height:1.45; border:1px solid rgba(59,130,246,.12); }
+.marketplace-online-browser { margin-bottom:14px; padding:12px; border:1px solid rgba(0,0,0,.06); border-radius:8px; background:rgba(255,255,255,.34); }
+.marketplace-search-row { display:grid; grid-template-columns:minmax(0,1fr) 124px 32px; gap:8px; align-items:center; }
+.marketplace-search-box { min-width:0; display:grid; grid-template-columns:18px minmax(0,1fr) auto; align-items:center; gap:7px; padding:5px 5px 5px 10px; border:1px solid rgba(0,0,0,.09); border-radius:7px; background:#fff; color:var(--text-muted); }
+.marketplace-search-box:focus-within { border-color:rgba(37,99,235,.42); box-shadow:0 0 0 2px rgba(37,99,235,.08); }
+.marketplace-search-box input { min-width:0; width:100%; border:0; outline:0; padding:3px 0; background:transparent; color:var(--text-primary); font-size:12px; }
+.marketplace-sort { width:100%; min-width:0; height:32px; padding:0 8px; border:1px solid rgba(0,0,0,.09); border-radius:7px; background:#fff; color:var(--text-primary); font-size:11.5px; }
+.marketplace-icon-button { width:32px; height:32px; display:inline-flex; align-items:center; justify-content:center; flex:0 0 auto; padding:0; border:1px solid rgba(0,0,0,.09); border-radius:7px; background:#fff; color:var(--text-secondary); cursor:pointer; }
+.marketplace-icon-button:hover:not(:disabled) { color:#1d4ed8; border-color:rgba(37,99,235,.25); background:rgba(239,246,255,.9); }
+.marketplace-icon-button:disabled { cursor:not-allowed; opacity:.45; }
+.marketplace-category-tabs { display:flex; align-items:center; gap:5px; margin-top:10px; overflow-x:auto; scrollbar-width:none; }
+.marketplace-category-tabs::-webkit-scrollbar { display:none; }
+.marketplace-category-tabs button { flex:0 0 auto; padding:5px 10px; border:1px solid transparent; border-radius:6px; background:rgba(148,163,184,.10); color:var(--text-secondary); font-size:11px; font-weight:600; cursor:pointer; }
+.marketplace-category-tabs button.active { color:#1d4ed8; border-color:rgba(37,99,235,.16); background:rgba(219,234,254,.72); }
+.marketplace-source-status { display:flex; align-items:center; gap:7px; flex-wrap:wrap; margin-top:10px; color:var(--text-muted); font-size:10.5px; line-height:1.4; }
+.marketplace-source-status > span + span { padding-left:7px; border-left:1px solid rgba(148,163,184,.32); }
+.marketplace-source-status .status-dot { width:6px; height:6px; flex:0 0 auto; border-radius:50%; background:#f59e0b; }
+.marketplace-source-status .status-dot.online { background:#16a34a; }
+.marketplace-source-status a, .marketplace-meta a { display:inline-flex; align-items:center; gap:3px; color:#2563eb; text-decoration:none; }
+.marketplace-source-status a { margin-left:auto; }
+.marketplace-tool { border-radius:8px; }
 .marketplace-tool-main { display:flex; align-items:flex-start; gap:10px; min-width:0; flex:1; }
 .marketplace-tool-copy { min-width:0; }
+.marketplace-tool-icon { width:30px; height:30px; display:flex; align-items:center; justify-content:center; flex:0 0 auto; border-radius:7px; color:#0f766e; background:rgba(13,148,136,.10); border:1px solid rgba(13,148,136,.12); }
 .marketplace-actions { display:flex; align-items:center; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
 .marketplace-meta { display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-top:8px; font-size:10.5px; color:var(--text-muted); }
 .marketplace-meta span { padding:2px 6px; border-radius:4px; background:rgba(148,163,184,.12); }
+.marketplace-meta .marketplace-verified { display:inline-flex; align-items:center; gap:3px; color:#047857; background:rgba(16,185,129,.10); }
 .marketplace-meta .trust-official { color:#047857; background:rgba(16,185,129,.10); }
 .marketplace-meta .trust-community { color:#1d4ed8; background:rgba(59,130,246,.10); }
 .marketplace-meta .trust-custom { color:#a16207; background:rgba(245,158,11,.12); }
@@ -2298,9 +2396,13 @@ onMounted(loadTools)
 .marketplace-impact-scopes { display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-top:7px; min-width:0; }
 .marketplace-impact-scopes span { max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding:2px 6px; border-radius:4px; background:rgba(255,255,255,.55); color:var(--text-secondary); }
 .marketplace-operations-panel { margin-bottom:16px; padding:12px; border-radius:8px; border:1px solid rgba(0,0,0,.06); background:rgba(255,255,255,.42); }
-.marketplace-operations-header { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:10px; }
+.marketplace-operations-after-results { margin-top:16px; margin-bottom:0; }
+.marketplace-operations-header { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:0; list-style:none; cursor:pointer; }
+.marketplace-operations-header::-webkit-details-marker { display:none; }
+.marketplace-operations-panel[open] .marketplace-operations-header { margin-bottom:10px; }
 .marketplace-operations-header > div { display:flex; flex-direction:column; gap:2px; min-width:0; }
-.marketplace-operations-actions { display:flex; align-items:center; flex-direction:row !important; gap:8px; flex:0 0 auto; }
+.marketplace-operations-actions { display:flex; align-items:center; justify-content:flex-end; flex-direction:row !important; gap:8px; margin-bottom:10px; flex:0 0 auto; }
+.marketplace-operations-toggle { flex:0 0 auto; padding:3px 7px; border-radius:5px; background:rgba(148,163,184,.12); color:var(--text-secondary) !important; font-size:10.5px !important; font-weight:600; }
 .marketplace-operations-header strong { font-size:12.5px; color:var(--text-primary); }
 .marketplace-operations-header span { font-size:11px; color:var(--text-muted); }
 .marketplace-operation-list { display:grid; gap:8px; }
@@ -2311,6 +2413,14 @@ onMounted(loadTools)
 .marketplace-operation-meta { display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-top:6px; font-size:10.5px; color:var(--text-muted); min-width:0; }
 .marketplace-operation-meta span { max-width:260px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding:2px 6px; border-radius:4px; background:rgba(148,163,184,.12); }
 .marketplace-operation-meta .warn { color:#b45309; background:rgba(245,158,11,.13); }
+.marketplace-loading-state { height:180px; }
+.marketplace-error-state { min-height:96px; display:flex; align-items:center; justify-content:space-between; gap:14px; margin:12px 0; padding:14px; border:1px solid rgba(220,38,38,.16); border-radius:8px; background:rgba(254,242,242,.7); }
+.marketplace-error-state > div { display:flex; flex-direction:column; gap:4px; min-width:0; }
+.marketplace-error-state strong { color:#991b1b; font-size:12.5px; }
+.marketplace-error-state span { color:var(--text-secondary); font-size:11px; overflow-wrap:anywhere; }
+.marketplace-pagination { display:flex; align-items:center; justify-content:center; gap:10px; margin-top:14px; color:var(--text-secondary); font-size:11.5px; }
+.spinning { animation:marketplace-spin .85s linear infinite; }
+@keyframes marketplace-spin { to { transform:rotate(360deg); } }
 .marketplace-preview-modal { max-width:680px; }
 .preview-summary { display:flex; gap:6px; margin-bottom:14px; font-size:11px; color:var(--text-muted); }
 .preview-summary span { padding:3px 7px; border-radius:4px; background:rgba(148,163,184,.12); }
@@ -2331,11 +2441,10 @@ onMounted(loadTools)
   .marketplace-custom-source .btn { flex:1 1 120px; }
   .marketplace-tool .tool-header { display:grid; grid-template-columns:minmax(0,1fr); }
   .marketplace-actions { justify-content:flex-start; }
+  .marketplace-search-row { grid-template-columns:minmax(0,1fr) 32px; }
+  .marketplace-sort { grid-column:1 / -1; grid-row:2; }
+  .marketplace-source-status a { margin-left:0; }
 }
-
-.smithery-activation-card { margin-bottom: 16px; background: rgba(255,255,255,0.45); backdrop-filter: blur(25px); border: 1px solid rgba(59,130,246,0.18); border-radius: 12px; padding: 20px; box-shadow: 0 8px 30px rgba(59,130,246,0.04); }
-.smithery-activation-card a { color: var(--accent-blue); text-decoration: none; margin-left: 4px; font-weight: 600; }
-.smithery-activation-card input { padding: 8px 12px; border-radius: 10px; border: 1px solid rgba(0,0,0,0.08); background: #ffffff; font-size: 12.5px; outline: none; }
 
 /* 侧滑抽屉样式 (Slide-out Drawer) */
 .drawer-overlay { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.12); z-index: 10002; opacity: 0; pointer-events: none; transition: opacity 0.3s ease; backdrop-filter: blur(4px); }
@@ -2401,7 +2510,7 @@ onMounted(loadTools)
   transition: background 0.25s cubic-bezier(0.25, 0.8, 0.25, 1);
   margin: 0;
 }
-:global([data-theme="dark"]) .toggle input {
+:global([data-theme="dark"] .toggle input){
   background: rgba(255, 255, 255, 0.08);
 }
 .toggle input::before {
@@ -2443,6 +2552,9 @@ onMounted(loadTools)
 [data-theme="dark"] .authorization-status-strip,
 [data-theme="dark"] .authorization-grants > div,
 [data-theme="dark"] .marketplace-source-selector,
+[data-theme="dark"] .marketplace-online-browser,
+[data-theme="dark"] .marketplace-search-box,
+[data-theme="dark"] .marketplace-icon-button,
 [data-theme="dark"] .marketplace-saved-source,
 [data-theme="dark"] .marketplace-source-gate,
 [data-theme="dark"] .marketplace-impact-banner,
@@ -2452,7 +2564,6 @@ onMounted(loadTools)
 [data-theme="dark"] .invocation-audit-meta span,
 [data-theme="dark"] .chain-verification-grid > div,
 [data-theme="dark"] .chain-verification-recent > div,
-[data-theme="dark"] .smithery-activation-card,
 [data-theme="dark"] .drawer,
 [data-theme="dark"] .params-grid,
 [data-theme="dark"] .mcp-tools-expand-box {
@@ -2467,13 +2578,16 @@ onMounted(loadTools)
 }
 [data-theme="dark"] .marketplace-source-selector select,
 [data-theme="dark"] .marketplace-source-selector input,
-[data-theme="dark"] .smithery-activation-card input,
+[data-theme="dark"] .marketplace-search-box input,
+[data-theme="dark"] .marketplace-sort,
 [data-theme="dark"] .form-group input,
 [data-theme="dark"] .form-group textarea {
   background: var(--bg-primary) !important;
   border-color: var(--border-color) !important;
   color: var(--text-primary) !important;
 }
+[data-theme="dark"] .marketplace-error-state { background:rgba(127,29,29,.16); border-color:rgba(248,113,113,.24); }
+[data-theme="dark"] .marketplace-error-state strong { color:#fca5a5; }
 [data-theme="dark"] .markdown-body :deep(.md-code),
 [data-theme="dark"] .tool-cmd {
   background: rgba(0, 0, 0, 0.25) !important;

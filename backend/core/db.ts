@@ -1,7 +1,8 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
-import { protectObjectSecrets, resolveObjectSecrets } from "./credential-store";
+import { isCredentialReference, protectCredential, protectObjectSecrets, resolveObjectSecrets } from "./credential-store";
+import { normalizeMcpEnvironment } from "../tools/tool-catalog-management";
 
 const CCM_DIR = path.join(os.homedir(), ".cc-connect");
 const CONFIGS_DIR = path.join(CCM_DIR, "configs");
@@ -154,7 +155,32 @@ export function loadMcpTools(): any[] {
     const files = fs.readdirSync(MCP_DIR).filter(f => f.endsWith('.json'));
     return files.map(f => {
       try {
-        const content = resolveObjectSecrets(JSON.parse(fs.readFileSync(path.join(MCP_DIR, f), 'utf-8')));
+        const file = path.join(MCP_DIR, f);
+        const stored = JSON.parse(fs.readFileSync(file, 'utf-8'));
+        const storedEnvironment = normalizeMcpEnvironment(stored?.env);
+        const environment = normalizeMcpEnvironment(resolveObjectSecrets(storedEnvironment));
+        let credentialBindingChanged = false;
+        if (String(stored?.name || "") === "mcp-feishu") {
+          const feishu = loadFeishuConfig();
+          const appId = String(feishu?.control_bot_app_id || feishu?.app_id || "").trim();
+          const appSecret = String(feishu?.control_bot_app_secret || feishu?.app_secret || "").trim();
+          const isPlaceholder = (value: any) => /^(?:your[_-]|placeholder|change[_-]?me|x{3,})/i.test(String(value || "").trim());
+          if ((!environment.FEISHU_APP_ID || isPlaceholder(environment.FEISHU_APP_ID)) && appId) {
+            environment.FEISHU_APP_ID = appId;
+            credentialBindingChanged = true;
+          }
+          if ((!environment.FEISHU_APP_SECRET || isPlaceholder(environment.FEISHU_APP_SECRET)) && appSecret) {
+            environment.FEISHU_APP_SECRET = appSecret;
+            credentialBindingChanged = true;
+          }
+        }
+        const hasPlainStoredEnvironment = Object.values(storedEnvironment).some(value => value && !isCredentialReference(value));
+        if (hasPlainStoredEnvironment || credentialBindingChanged) {
+          saveMcpTool({ ...stored, env: environment });
+        }
+        const content = resolveObjectSecrets(hasPlainStoredEnvironment || credentialBindingChanged
+          ? JSON.parse(fs.readFileSync(file, 'utf-8'))
+          : stored);
         return { ...content, filename: f };
       } catch { return null; }
     }).filter(Boolean) as any[];
@@ -163,7 +189,13 @@ export function loadMcpTools(): any[] {
 
 export function saveMcpTool(tool: any) {
   const filename = tool.name.replace(/[^a-zA-Z0-9-_]/g, '_') + '.json';
-  const protectedTool = protectObjectSecrets(tool, `mcp-${filename.replace(/\.json$/i, "")}`);
+  const scope = `mcp-${filename.replace(/\.json$/i, "")}`;
+  const environment = normalizeMcpEnvironment(tool?.env, { strict: true });
+  const protectedEnvironment = Object.fromEntries(Object.entries(environment).map(([key, value]) => [
+    key,
+    protectCredential(scope, `env.${key}`, value),
+  ]));
+  const protectedTool = protectObjectSecrets({ ...tool, env: protectedEnvironment }, scope);
   writeJsonAtomic(path.join(MCP_DIR, filename), protectedTool);
 }
 

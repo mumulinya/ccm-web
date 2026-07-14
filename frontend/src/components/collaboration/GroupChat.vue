@@ -160,14 +160,22 @@ const runGroupClientCommand = createSlashCommandClientActions({
     return { success: true, summary: `当前群聊会话已重命名为“${name}”。`, metrics: { 群聊: currentGroup.value.name, 会话: currentGroupSessionId.value } }
   },
 })
+const pendingDirectMemoryCommand = ref(null)
 const slash = useSlashCommands({
   scope: 'group',
   input: newMessage,
-  context: () => ({ group: currentGroup.value?.name || '', groupId: currentGroup.value?.id || '', target: targetAgent.value }),
+  context: () => ({ group: currentGroup.value?.name || '', groupId: currentGroup.value?.id || '', sessionId: currentGroupSessionId.value || '', target: targetAgent.value }),
   focus: () => nextTick(() => document.getElementById('groupChatInput')?.focus()),
   onNavigate: (tab) => slashNavigate(tab),
-  onPrompt: async (prompt) => {
-    newMessage.value = prompt
+  onPrompt: async (prompt, command, result) => {
+    const commandName = String(command?.name || '').toLowerCase()
+    if (['remember', 'forget'].includes(commandName)) {
+      pendingDirectMemoryCommand.value = { action: commandName, content: String(result?.args || '').trim() }
+      newMessage.value = pendingDirectMemoryCommand.value.content
+    } else {
+      pendingDirectMemoryCommand.value = null
+      newMessage.value = prompt
+    }
     await nextTick()
     await sendMessage()
   },
@@ -1537,6 +1545,8 @@ const groupSendRetrySignature = ({ groupId, target, mode, message, files, direct
   files: (files || []).map(file => [file.name, file.size]),
   continuationTaskId: directed?.continuation_task_id || '',
   clarificationRequestId: directed?.clarification_request_id || '',
+  memoryAction: directed?.memory_action || '',
+  memoryContent: directed?.memory_content || '',
 })
 
 const sendMessage = async () => {
@@ -1547,13 +1557,20 @@ const sendMessage = async () => {
   const clarificationResponseTarget = !taskSupplementTarget && isClarificationResponseMode.value
     ? { ...pendingGroupClarificationInput.value }
     : null
+  const directMemoryCommand = !taskSupplementTarget && !clarificationResponseTarget && pendingDirectMemoryCommand.value
+    ? { ...pendingDirectMemoryCommand.value }
+    : null
   const taskContinuationFields = taskSupplementTarget
     ? buildWaitingUserTaskContinuationFields(taskSupplementTarget)
     : null
   const clarificationResponseFields = clarificationResponseTarget
     ? buildGroupClarificationResponseFields(clarificationResponseTarget)
     : null
-  const directedInputFields = taskContinuationFields || clarificationResponseFields
+  const directedInputFields = taskContinuationFields || clarificationResponseFields || (directMemoryCommand ? {
+    memory_action: directMemoryCommand.action,
+    memory_content: directMemoryCommand.content,
+    message_mode: 'conversation',
+  } : null)
   const retrySignature = groupSendRetrySignature({
     groupId: currentGroup.value.id,
     target: targetAgent.value,
@@ -1981,6 +1998,10 @@ ${filesToSend.map(f => `- ${f.name}（${formatFileSize(f.size)}）`).join('\n')}
   }
   if (!streamFailed && pendingGroupSendRetry.value?.clientMessageId === clientMessageId) {
     pendingGroupSendRetry.value = null
+    if (directMemoryCommand && pendingDirectMemoryCommand.value?.action === directMemoryCommand.action
+      && pendingDirectMemoryCommand.value?.content === directMemoryCommand.content) {
+      pendingDirectMemoryCommand.value = null
+    }
   } else if (streamFailed && !newMessage.value.trim()) {
     newMessage.value = msg
     messageFiles.value = filesToSend

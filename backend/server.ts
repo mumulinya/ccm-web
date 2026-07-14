@@ -44,7 +44,7 @@ import {
   listActiveAgentRuns,
   cancelActiveAgentRun,
 } from "./agents/execution-kernel";
-import { buildProjectExecutionBrief } from "./projects/memory";
+import { buildProjectConversationBrief, buildProjectExecutionBrief } from "./projects/memory";
 import {
   appendDirectAgentDispatchTranscript,
   completeDirectAgentDispatch,
@@ -106,6 +106,7 @@ import {
 
 // 导入子模块控制器
 import { handleProjectsApi, startControlBotConnection } from "./modules/projects/projects";
+import { classifyProjectChatIntent } from "./modules/projects/project-chat-intent";
 import { handleSessionsApi } from "./modules/projects/sessions";
 import { handleConversationSearchApi } from "./modules/search/conversation-search";
 import { handleGitApi } from "./modules/tools/git";
@@ -113,15 +114,18 @@ import { handleMarketplaceApi } from "./modules/tools/marketplace";
 import { handleTemplatesApi } from "./modules/templates/templates";
 import { handleCronApi, startCronScheduler, stopCronScheduler, syncCronTaskStatus } from "./modules/scheduling/cron";
 import { handleToolsAndMetricsApi } from "./modules/tools/tools";
+import { stopAllTerminalRuns } from "./modules/tools/terminal";
 import { handlePetsApi } from "./modules/pets/pets";
 import { GlobalPetActivityCoordinator } from "./modules/pets/pet-activity-coordinator";
 import { recoverPetGenerationJobs, setPetGenerationLifecycleNotifier } from "./modules/pets/pet-generation";
 import { handleMusicApi } from "./modules/music/music";
 import { handleCollaborationApi, resumeTaskQueues, startAgentRecoveryMonitor, startTaskWatchdog, stopAgentRecoveryMonitor, stopTaskWatchdog } from "./modules/collaboration/collaboration";
 import { reconcileGroupSessionLifecycleAgentCancellations } from "./modules/collaboration/storage";
+import { bootstrapGroupSessionLifecycleJournals } from "./modules/collaboration/group-session-lifecycle-head";
 import { notifyFeishuTaskStatus } from "./modules/collaboration/feishu-channel";
 import { startGroupSessionRetentionMaintenanceScheduler, stopGroupSessionRetentionMaintenanceScheduler } from "./modules/collaboration/group-session-maintenance";
 import { recoverChildTypedMemoryDispatchWal } from "./modules/collaboration/memory";
+import { recoverGroupTypedMemoryArtifactTransactionsFleet } from "./modules/collaboration/group-memory-index";
 import { listTaskAgentInvocationEdges, reconcileTaskAgentInvocationRecovery } from "./tasks/task-agent-invocation-lineage";
 import { reconcileTaskAgentContinuationSoak } from "./tasks/task-agent-continuation-soak";
 import { startReliabilityDrillScheduler, stopReliabilityDrillScheduler } from "./system/reliability-drills";
@@ -133,6 +137,7 @@ import { handleSlashCommandsApi } from "./modules/tools/slash-commands";
 import { migrateConfigDirectory, migrateTomlCredentials } from "./core/credential-store";
 import { handleUsabilityApi, startUsabilityArchiveScheduler, stopUsabilityArchiveScheduler } from "./modules/system/usability";
 import { handleSystemSettingsApi } from "./modules/system/settings";
+import { ensureRoleSkillsInstalled } from "./skills/role-skills";
 import {
   PROJECT_CHAT_RUNS_FILE,
   archiveProjectChatRun,
@@ -1871,16 +1876,22 @@ function callAgentForGroupStream(projectName: string, message: string, workDir: 
 // 流式调用 Agent（SSE）
 function callAgentStream(projectName: string, message: string, workDir: string, agentType: string, res: any, options: any = {}) {
   const startedAt = Date.now();
+  const messageMode = String(options.messageMode || options.message_mode || "task");
+  const showTaskExperience = messageMode === "task";
   const changeSnapshot = workDir ? createFileChangeSnapshot(workDir) : null;
   const projectRun = createProjectChatRun(projectName, options.userMessage || message, workDir, String(options.parentRunId || options.parent_run_id || ""));
   const { session: taskAgentSession, options: taskAgentSessionOptions } = bindProjectRunAgentSession(projectRun, projectName, agentType);
   const safeCwd = (workDir || process.cwd()).replace(/\\/g, "/");
   const tmpMsg = path.join(UPLOAD_DIR, `_msg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.txt`);
-  const executionBrief = buildProjectExecutionBrief(projectName, options.userMessage || message, {
-    workDir,
-    query: options.userMessage || message,
-    verificationHints: getProjectVerificationCommandsForRunner(projectName),
-  });
+  const executionBrief = showTaskExperience
+    ? buildProjectExecutionBrief(projectName, options.userMessage || message, {
+        workDir,
+        query: options.userMessage || message,
+        verificationHints: getProjectVerificationCommandsForRunner(projectName),
+      })
+    : buildProjectConversationBrief(projectName, options.userMessage || message, {
+        analysis: messageMode === "project_analysis",
+      });
   fs.writeFileSync(tmpMsg, executionBrief, "utf-8");
 
   const cmd = buildAgentCommand(agentType, tmpMsg, { mcpConfigPath: options.mcpConfigPath, ...taskAgentSessionOptions });
@@ -1898,7 +1909,7 @@ function callAgentStream(projectName: string, message: string, workDir: string, 
     };
     workEvents.push(event);
     if (workEvents.length > 80) workEvents.splice(0, workEvents.length - 80);
-    send({ type: "work_event", event });
+    if (showTaskExperience) send({ type: "work_event", event });
     return event;
   };
 
@@ -1911,7 +1922,8 @@ function callAgentStream(projectName: string, message: string, workDir: string, 
     "X-Accel-Buffering": "no",
   });
   if (typeof res.flushHeaders === "function") res.flushHeaders();
-  send({ type: "task_runtime", run: publicProjectChatRun(projectRun), taskExperience: {
+  send({ type: "presentation", message_mode: messageMode, show_task_card: showTaskExperience });
+  if (showTaskExperience) send({ type: "task_runtime", run: publicProjectChatRun(projectRun), taskExperience: {
     task_id: projectRun.id,
     trace_id: projectRun.trace_id,
     title: String(options.userMessage || "项目 Agent 执行").slice(0, 90),
@@ -1922,13 +1934,13 @@ function callAgentStream(projectName: string, message: string, workDir: string, 
     parent_run_id: projectRun.parent_run_id || "",
     rollback_available: !!projectRun.checkpoint_id,
   } });
-  for (const event of workEvents) send({ type: "work_event", event });
+  if (showTaskExperience) for (const event of workEvents) send({ type: "work_event", event });
 
   // 发送状态事件
   pushProjectWorkEvent("status", "Agent 正在思考...");
   send({ type: "status", text: "Agent 正在思考..." });
   broadcastPetSpeech(projectName, { role: "status", text: "Agent 正在思考...", source: "project" });
-  setAgentActivity(projectName, "working", "正在处理消息", null, getAgentRunActivityDuration(300000));
+  setAgentActivity(projectName, "working", showTaskExperience ? "正在处理任务" : "正在回复", null, getAgentRunActivityDuration(300000));
 
   const child = spawn(cmd, [], {
     shell: true,
@@ -2595,6 +2607,7 @@ function handleRequest(req: any, res: any) {
       const configuredAgentType = info[0]?.agent || "claudecode";
       const resolvedRuntime = resolveAvailableAgentRuntime(configuredAgentType);
       const agentType = resolvedRuntime.selected;
+      const chatIntent = classifyProjectChatIntent(message, files, { forceTask: !!parentRunId });
       const toolContext = buildProjectToolContext(project, workDir, agentType);
       if (toolContext.dispatchGate?.dispatchReady === false) return sendRuntimeToolDispatchBlocked(res, toolContext);
       if (resolvedRuntime.switched) {
@@ -2610,6 +2623,7 @@ function handleRequest(req: any, res: any) {
         initialWorkEvents: [toolContext.workEvent],
         userMessage: finalMessage,
         parentRunId,
+        messageMode: chatIntent.mode,
       });
     };
 
@@ -2740,6 +2754,8 @@ function bootstrapServerRuntime(startupCollabCtx: any, port: number) {
   const petGenerationRecovery = recoverPetGenerationJobs();
   if (petGenerationRecovery.recovered > 0) console.log(`[宠物生成] 标记 ${petGenerationRecovery.recovered} 个中断任务等待重试`);
   refreshEnvPath();
+  const roleSkills = ensureRoleSkillsInstalled({ force: true });
+  console.log(`[角色 Skill] 已就绪 ${roleSkills.available.length} 个${roleSkills.installed.length ? `，更新 ${roleSkills.installed.length} 个` : ""}`);
   const credentialMigration = migrateConfigDirectory(CONFIGS_DIR);
   const controlBotMigration = migrateTomlCredentials(path.join(CCM_DIR, "control-bot", "config.toml"));
   const protectedFeishuConfig = loadFeishuConfig();
@@ -2747,6 +2763,14 @@ function bootstrapServerRuntime(startupCollabCtx: any, port: number) {
   const migratedCredentials = credentialMigration.credentials + controlBotMigration.count;
   if (migratedCredentials > 0) console.log(`[凭据安全] 已迁移 ${migratedCredentials} 个明文凭据到本机加密存储；建议轮换曾以明文保存的密钥`);
   toolManager.loadTools().catch((e: any) => console.error("[ToolManager]", e.message));
+  const typedMemoryArtifactRecovery = recoverGroupTypedMemoryArtifactTransactionsFleet();
+  if (typedMemoryArtifactRecovery.checked > 0) {
+    console.log(`[记忆多工件事务] 检查 ${typedMemoryArtifactRecovery.checked} 个会话：恢复 ${typedMemoryArtifactRecovery.recovered}，清理 ${typedMemoryArtifactRecovery.cleaned}，当前 ${typedMemoryArtifactRecovery.current}，失败 ${typedMemoryArtifactRecovery.failed}`);
+  }
+  const lifecycleJournalBootstrap = bootstrapGroupSessionLifecycleJournals();
+  if (lifecycleJournalBootstrap.checked > 0) {
+    console.log(`[会话生命周期日志] 检查 ${lifecycleJournalBootstrap.checked} 个头：锚定 ${lifecycleJournalBootstrap.adopted}，有效 ${lifecycleJournalBootstrap.current}，失败 ${lifecycleJournalBootstrap.failed}`);
+  }
   const lifecycleAgentReconciliation = reconcileGroupSessionLifecycleAgentCancellations();
   if (lifecycleAgentReconciliation.checked > 0) {
     console.log(`[会话生命周期撤销] 检查 ${lifecycleAgentReconciliation.checked} 个会话作用域：有效 ${lifecycleAgentReconciliation.active}，撤销 ${lifecycleAgentReconciliation.revoked}，停止任务 ${lifecycleAgentReconciliation.taskCount}`);
@@ -2799,6 +2823,7 @@ function startServer(port: number) {
   const startupCollabCtx = createCollabCtx();
   const server = http.createServer(handleRequest);
   server.on("close", () => {
+    stopAllTerminalRuns();
     stopCronScheduler();
     stopTaskWatchdog();
     stopAgentRecoveryMonitor();

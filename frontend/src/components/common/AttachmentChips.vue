@@ -76,7 +76,7 @@ const formatFileSize = (size) => {
   color: var(--accent-red);
 }
 
-:global([data-theme="dark"]) .attachment-chip {
+:global([data-theme="dark"] .attachment-chip){
   background: rgba(15, 23, 42, 0.92);
   border-color: rgba(255, 255, 255, 0.08);
 }

@@ -278,7 +278,7 @@ export function useSlashCommands(options) {
       recent.value = readRecent()
       options.input.value = ''
       if (data.result?.type === 'navigate') await options.onNavigate?.(data.result.tab)
-      if (data.result?.type === 'prompt') await options.onPrompt?.(data.result.prompt, data.command)
+      if (data.result?.type === 'prompt') await options.onPrompt?.(data.result.prompt, data.command, data.result)
       if (['query', 'mutation'].includes(data.result?.type)) {
         const started = Date.now()
         const request = { method: data.result.method || 'GET', headers: {} }

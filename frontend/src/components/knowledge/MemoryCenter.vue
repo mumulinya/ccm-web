@@ -41,6 +41,7 @@ const sessionRetentionRunning = ref(false)
 const sessionMemoryReplayLoading = ref('')
 const sessionMemoryReplayResult = ref(null)
 const sessionMemoryArtifactRetentionRunning = ref('')
+const sessionMemoryTypedRetryRunning = ref('')
 const sessionMemoryArtifactRetentionResult = ref(null)
 const dispatchRecovery = ref({ summary: {}, rows: [] })
 const dispatchRecoveryLoading = ref(false)
@@ -123,6 +124,7 @@ const sessionMemoryFleetCards = computed(() => {
     { label: 'max session', value: overall.maxObservedSessionTokens || 0, note: `/ ${overall.ccMaxTotalTokens || 12000}` },
     { label: 'over budget', value: overall.budgetExceededCount || 0, note: `near ${overall.budgetNearLimitCount || 0}` },
     { label: 'legacy default', value: overall.legacyDefaultSessionCount || 0, note: 'expected 0' },
+    { label: 'compact scope', value: overall.autoCompactionScopeObservedCount || 0, note: `invalid ${overall.autoCompactionScopeInvalidCount || 0}` },
     { label: 'turn summaries', value: overall.postTurnSummaryCount || 0, note: `${overall.postTurnSummaryEventCount || 0} events` },
     { label: 'missing turns', value: overall.postTurnSummaryMissingCount || 0, note: 'expected 0' },
     { label: 'invalid ledgers', value: overall.postTurnSummaryInvalidLedgerCount || 0, note: 'expected 0' },
@@ -131,6 +133,7 @@ const sessionMemoryFleetCards = computed(() => {
     { label: 'extractions', value: overall.totalSessionMemoryExtractionCount || 0, note: `active ${overall.activeExtractionCount || 0} · failed ${overall.failedExtractionSessionCount || 0}` },
     { label: 'model extracted', value: overall.modelExtractedSessionCount || 0, note: `verified ${overall.modelReceiptVerifiedCount || 0}` },
     { label: 'model pending', value: overall.modelExtractionPendingCount || 0, note: `backoff ${overall.modelExtractionBackoffCount || 0}` },
+    { label: 'direct skips', value: overall.directMemorySuppressionCount || 0, note: `active ${overall.directMemorySuppressionActiveCount || 0} · invalid ${overall.directMemorySuppressionInvalidCount || 0}` },
     { label: 'invalid receipt', value: overall.modelReceiptInvalidCount || 0, note: 'expected 0' },
     { label: 'history events', value: overall.modelExtractionHistoryEventCount || 0, note: `invalid ${overall.modelExtractionHistoryInvalidCount || 0}` },
     { label: 'history chain', value: overall.modelExtractionHistoryChainInvalidCount || 0, note: 'broken links' },
@@ -142,6 +145,12 @@ const sessionMemoryFleetCards = computed(() => {
     { label: 'input bounded', value: overall.modelInputDegradedCount || 0, note: `over ${overall.modelInputOverBudgetCount || 0}` },
     { label: 'merge quality', value: overall.modelMergeQualityObservedCount || 0, note: `failed ${overall.modelMergeQualityFailedCount || 0}` },
     { label: 'supersession', value: overall.factSupersessionEdgeCount || 0, note: `graphs ${overall.factSupersessionGraphObservedCount || 0}` },
+    { label: 'typed proposals', value: overall.modelExtractionTypedMemoryProposalCount || 0, note: `admitted ${overall.modelExtractionTypedMemoryAdmittedCount || 0} · rejected ${overall.modelExtractionTypedMemoryRejectedCount || 0}` },
+    { label: 'typed active', value: overall.modelExtractionTypedMemoryActiveFactCount || 0, note: `superseded ${overall.modelExtractionTypedMemorySupersededFactCount || 0} · invalid ${overall.modelExtractionTypedMemoryArchiveInvalidCount || 0}` },
+    { label: 'semantic topics', value: overall.modelExtractionTypedMemoryActiveTopicCount || 0, note: `retired ${overall.modelExtractionTypedMemoryRetiredTopicCount || 0} · merged ${overall.modelExtractionTypedMemoryMergedTopicCount || 0}` },
+    { label: 'topic quality', value: overall.modelExtractionTypedMemoryCrossLanguageReuseCount || 0, note: `unclassified ${overall.modelExtractionTypedMemoryUnclassifiedFactCount || 0} · rebalanced ${overall.modelExtractionTypedMemoryRebalancedFactCount || 0}` },
+    { label: 'memory selector', value: overall.manifestSelectorDecisionCount || 0, note: `selected ${overall.manifestSelectorSelectedDocumentCount || 0} · empty ${overall.manifestSelectorEmptyDecisionCount || 0} · failed ${overall.manifestSelectorFailedDecisionCount || 0}` },
+    { label: 'typed retry', value: overall.modelExtractionTypedMemoryRetryPendingCount || 0, note: `recovered ${overall.modelExtractionTypedMemoryRetryCompletedCount || 0} · exhausted ${overall.modelExtractionTypedMemoryRetryExhaustedCount || 0}` },
     { label: 'unjustified loss', value: overall.factSupersessionUnjustifiedLostCount || 0, note: `invalid ${overall.factSupersessionGraphInvalidCount || 0}` }
   ]
 })
@@ -250,6 +259,7 @@ const taskAgentSnapshotReport = computed(() => overview.value.taskAgentMemoryCon
 const taskAgentSnapshotState = computed(() => taskAgentSnapshotReport.value?.overall?.status || taskAgentMemoryContextSnapshotCheck.value?.status || 'empty')
 const taskAgentSnapshotCards = computed(() => {
   const overall = taskAgentSnapshotReport.value?.overall || {}
+  const lifecycleIntegrity = overview.value.groupSessionLifecycleIntegrityReport?.overall || {}
   const retention = taskAgentSnapshotReport.value?.retention || {}
   const result = taskAgentSnapshotRetentionResult.value || {}
   return [
@@ -266,6 +276,7 @@ const taskAgentSnapshotCards = computed(() => {
     { label: 're-budget', value: overall.invocationContextRebudgetVerifiedCount || 0, note: `drift ${overall.invocationContextRebudgetDriftCount || 0} · unavailable ${overall.invocationContextRebudgetUnavailableCount || 0}` },
     { label: 'compact epoch fence', value: overall.invocationCompactHeadFenceValidatedCount || 0, note: `required ${overall.invocationCompactHeadFenceRequiredCount || 0} · dispatch stale ${overall.invocationCompactHeadFenceStaleCount || 0} · delivery stale ${overall.compactHeadFenceStaleCount || 0}` },
     { label: 'session lifecycle fence', value: overall.invocationSessionLifecycleFenceValidatedCount || 0, note: `required ${overall.invocationSessionLifecycleFenceRequiredCount || 0} · dispatch stale ${overall.invocationSessionLifecycleFenceStaleCount || 0} · delivery stale ${overall.sessionLifecycleFenceStaleCount || 0}` },
+    { label: 'lifecycle anchors', value: lifecycleIntegrity.anchoredCount || 0, note: `heads ${lifecycleIntegrity.headCount || 0} · recovered ${lifecycleIntegrity.recoveredCount || 0} · fail-closed ${lifecycleIntegrity.failClosedCount || 0}` },
     { label: 'capacity commit', value: overall.capacityRevalidationCommittedCount || 0, note: `prepared ${overall.capacityRevalidationPreparedCount || 0} · pending ${overall.capacityRevalidationPendingCount || 0} · invalid ${overall.capacityRevalidationInvalidCount || 0}` },
     { label: 'soak health', value: overall.continuationSoakHealthyChainCount || 0, note: `chains ${overall.continuationSoakChainCount || 0} · multi-turn ${overall.continuationSoakMultiTurnChainCount || 0} · restart ${overall.continuationSoakRestartObservedChainCount || 0}` },
     { label: 'evidence chain', value: overall.continuationSoakValidChainCount || 0, note: `invalid ${overall.continuationSoakInvalidChainCount || 0} · recovered ${overall.continuationSoakRecoveredEventCount || 0} · drift ${overall.continuationSoakOutputFormatDriftCount || 0}` },
@@ -1072,6 +1083,22 @@ const typedMemoryStaleCandidateLedger = computed(() => postCompactUsage.value?.t
 const typedMemoryStaleCandidates = computed(() => typedMemoryStaleCandidateLedger.value?.candidates || [])
 const pendingTypedMemoryStaleCandidates = computed(() => typedMemoryStaleCandidates.value.filter(candidate => candidate.status === 'pending'))
 const typedMemoryWriteAdmission = computed(() => postCompactUsage.value?.typedMemory?.writeAdmission || null)
+const typedMemoryDirectOperations = computed(() => postCompactUsage.value?.typedMemory?.directOperations || null)
+const typedMemoryDistillationTransaction = computed(() => postCompactUsage.value?.typedMemory?.distillationTransaction || null)
+const typedMemoryDistillationPreflight = computed(() => postCompactUsage.value?.typedMemory?.distillationPreflight || null)
+const typedMemoryArtifactTransaction = computed(() => postCompactUsage.value?.typedMemory?.artifactTransaction || null)
+const typedMemoryEntrypoint = computed(() => postCompactUsage.value?.typedMemory?.entrypoint || null)
+const typedMemoryDirectOperationCards = computed(() => {
+  const direct = typedMemoryDirectOperations.value || {}
+  return [
+    { label: '当前有效', value: direct.activeDirectMemoryCount || 0, note: '当前 gcs 会话' },
+    { label: '本轮记住', value: direct.rememberedThisRun || 0, note: '确定性提交' },
+    { label: '本轮忘记', value: direct.forgottenThisRun || 0, note: `tombstone ${direct.tombstoneCount || 0}` },
+    { label: '重复请求', value: direct.duplicateThisRun || 0, note: '复用稳定记忆 ID' },
+    { label: '拒绝操作', value: direct.rejectedThisRun || 0, note: '歧义或证明失败' },
+    { label: '阻止复活', value: direct.tombstoneSuppressedFactCountThisRun || 0, note: '后台重扫已跳过' },
+  ]
+})
 const typedMemoryWriteAdmissionCards = computed(() => {
   const admission = typedMemoryWriteAdmission.value || {}
   return [
@@ -1422,6 +1449,32 @@ const runSessionMemoryArtifactRetention = async (row, execute) => {
     toast.error(error.message || '模型抽取制品维护失败')
   } finally {
     sessionMemoryArtifactRetentionRunning.value = ''
+  }
+}
+
+const retrySessionMemoryTypedCommit = async row => {
+  const scopeId = `${row.groupId}::${row.groupSessionId}`
+  if (sessionMemoryTypedRetryRunning.value) return
+  if (!await confirmDialog(`立即重试会话 ${row.groupSessionId} 的 typed-memory 提交？只会重放已签名抽取制品，不会重新调用模型。`)) return
+  sessionMemoryTypedRetryRunning.value = scopeId
+  try {
+    const data = await requestJson('/api/memory-center/operation', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        scope: 'group',
+        scope_id: scopeId,
+        operation: 'retry_model_extraction_typed_memory',
+        reason: '用户在记忆中心手动重试模型 extraction typed-memory 提交',
+        explicitExecution: true
+      })
+    })
+    toast.success(`重试完成：恢复 ${data.result?.recoveredCount || 0}，失败 ${data.result?.failedCount || 0}`)
+    await loadOverview(true)
+  } catch (error) {
+    toast.error(error.message || 'typed-memory 提交重试失败')
+  } finally {
+    sessionMemoryTypedRetryRunning.value = ''
   }
 }
 
@@ -2218,9 +2271,11 @@ onMounted(() => loadOverview(false))
         <article v-for="row in sessionMemoryFleetRows" :key="row.scopeId" :class="row.status">
           <span :class="['usage-state', row.status === 'ok' ? 'used' : row.status === 'empty' ? 'waiting' : row.status]">{{ row.status }}</span>
           <strong>{{ row.groupSessionId || 'default' }}</strong>
-          <p>{{ row.groupId }} · turns {{ formatNumber(row.postTurnSummaryCount || 0) }}/{{ formatNumber(row.postTurnSummaryAssistantMessageCount || 0) }} · missing {{ formatNumber(row.postTurnSummaryMissingCount || 0) }} · ledger {{ row.postTurnSummaryLedgerValid ? 'verified' : 'invalid' }} · archives {{ formatNumber(row.postTurnSummaryArchiveCount || 0) }} · {{ row.extractionMethod || 'deterministic_structured_fallback' }} · receipt {{ row.modelReceiptChecksumValid ? 'verified' : row.modelExtracted ? 'invalid' : row.modelExtractionBackoff ? 'backoff' : 'pending' }} · delivery {{ row.modelExtracted ? row.modelExtractionDeliveryEvidenceValid ? 'verified' : 'invalid' : 'unobserved' }} · quality {{ row.modelMergeQualityStatus || 'unobserved' }} {{ formatNumber(row.modelMergeQualityScore || 0) }} · facts {{ row.factSupersessionGraphPresent ? row.factSupersessionGraphValid ? 'verified' : 'invalid' : 'unobserved' }} {{ formatNumber(row.factSupersessionEdgeCount || 0) }}/{{ formatNumber(row.factSupersessionUnjustifiedLostCount || 0) }} · chain {{ row.modelExtractionHistoryChainValid && row.modelExtractionHistoryHeadMatches ? 'verified' : row.modelExtractionHistoryTotalCount ? 'invalid' : 'empty' }} · replay {{ row.modelExtractionReplayStatus || 'unobserved' }} · artifacts {{ row.modelExtractionArtifactRetentionStatus || 'empty' }} hot {{ formatBytes(row.modelExtractionArtifactHotBytes) }} / cold {{ formatBytes(row.modelExtractionArtifactArchivedBytes) }} / due {{ formatNumber(row.modelExtractionArtifactCandidateExecutionCount || 0) }} · input {{ row.modelInputBudgetStatus || 'unobserved' }} {{ formatNumber(row.modelInputEstimatedTokens || 0) }}/{{ formatNumber(row.modelInputMaxTokens || 0) }} · omitted {{ formatNumber(row.modelInputOmittedMessageCount || 0) }}{{ row.modelInputClipped ? ' · clipped' : '' }} · {{ row.cadenceStatus || 'unobserved' }} · tx {{ row.extractionStatus || 'idle' }} · Δ {{ formatNumber(row.cadenceTokensSinceLastExtraction || 0) }}</p>
+          <p>{{ row.groupId }} · turns {{ formatNumber(row.postTurnSummaryCount || 0) }}/{{ formatNumber(row.postTurnSummaryAssistantMessageCount || 0) }} · missing {{ formatNumber(row.postTurnSummaryMissingCount || 0) }} · ledger {{ row.postTurnSummaryLedgerValid ? 'verified' : 'invalid' }} · archives {{ formatNumber(row.postTurnSummaryArchiveCount || 0) }} · compact scope {{ row.autoCompactionScopeEvidencePresent ? row.autoCompactionTypedMemoryScopeValid ? 'verified' : 'invalid' : 'unobserved' }} · {{ row.extractionMethod || 'deterministic_structured_fallback' }} · receipt {{ row.modelReceiptChecksumValid ? 'verified' : row.modelExtracted ? 'invalid' : row.modelExtractionBackoff ? 'backoff' : row.directMemorySuppressionActive ? 'suppressed' : 'pending' }} · direct skip {{ formatNumber(row.directMemorySuppressionCount || 0) }} {{ row.directMemorySuppressionPresent ? row.directMemorySuppressionChecksumValid ? 'verified' : 'invalid' : 'none' }} / proofs {{ formatNumber(row.directMemorySuppressionProofCount || 0) }} / fence {{ formatNumber(row.directMemorySuppressionLedgerFence || 0) }} / cursor {{ row.directMemorySuppressionCursorBefore || 'start' }}→{{ row.directMemorySuppressionCursorAfter || 'none' }} · delivery {{ row.modelExtracted ? row.modelExtractionDeliveryEvidenceValid ? 'verified' : 'invalid' : 'unobserved' }} · quality {{ row.modelMergeQualityStatus || 'unobserved' }} {{ formatNumber(row.modelMergeQualityScore || 0) }} · facts {{ row.factSupersessionGraphPresent ? row.factSupersessionGraphValid ? 'verified' : 'invalid' : 'unobserved' }} {{ formatNumber(row.factSupersessionEdgeCount || 0) }}/{{ formatNumber(row.factSupersessionUnjustifiedLostCount || 0) }} · typed {{ row.modelExtractionTypedMemoryArchivePresent ? row.modelExtractionTypedMemoryArchiveValid ? 'verified' : 'invalid' : 'empty' }} {{ formatNumber(row.modelExtractionTypedMemoryAdmittedCount || 0) }}/{{ formatNumber(row.modelExtractionTypedMemoryRejectedCount || 0) }}/{{ formatNumber(row.modelExtractionTypedMemorySupersededThisRun || 0) }} · retry {{ formatNumber(row.modelExtractionTypedMemoryRetryPendingCount || 0) }}/{{ formatNumber(row.modelExtractionTypedMemoryRetryCompletedCount || 0) }}/{{ formatNumber(row.modelExtractionTypedMemoryRetryExhaustedCount || 0) }} · chain {{ row.modelExtractionHistoryChainValid && row.modelExtractionHistoryHeadMatches ? 'verified' : row.modelExtractionHistoryTotalCount ? 'invalid' : 'empty' }} · replay {{ row.modelExtractionReplayStatus || 'unobserved' }} · artifacts {{ row.modelExtractionArtifactRetentionStatus || 'empty' }} hot {{ formatBytes(row.modelExtractionArtifactHotBytes) }} / cold {{ formatBytes(row.modelExtractionArtifactArchivedBytes) }} / due {{ formatNumber(row.modelExtractionArtifactCandidateExecutionCount || 0) }} · input {{ row.modelInputBudgetStatus || 'unobserved' }} {{ formatNumber(row.modelInputEstimatedTokens || 0) }}/{{ formatNumber(row.modelInputMaxTokens || 0) }} · omitted {{ formatNumber(row.modelInputOmittedMessageCount || 0) }}{{ row.modelInputClipped ? ' · clipped' : '' }} · {{ row.cadenceStatus || 'unobserved' }} · tx {{ row.extractionStatus || 'idle' }} · Δ {{ formatNumber(row.cadenceTokensSinceLastExtraction || 0) }}</p>
+          <p v-if="row.manifestSelectorPresent">selector {{ row.manifestSelectorLatest?.status || 'empty' }} · decisions {{ formatNumber(row.manifestSelectorDecisionCount || 0) }} · selected {{ formatNumber(row.manifestSelectorSelectedDocumentCount || 0) }} · empty {{ formatNumber(row.manifestSelectorEmptyDecisionCount || 0) }} · failed {{ formatNumber(row.manifestSelectorFailedDecisionCount || 0) }} · integrity {{ row.manifestSelectorValid ? 'verified' : 'invalid' }}</p>
           <code>{{ formatNumber(row.markdownTokens || 0) }} / {{ formatNumber(row.totalTokenBudget || 12000) }}</code>
           <div class="session-memory-artifact-actions">
+            <button v-if="row.modelExtractionTypedMemoryRetryPendingCount || row.modelExtractionTypedMemoryRetryExhaustedCount" class="btn btn-outline" :disabled="!!sessionMemoryTypedRetryRunning" title="使用已签名抽取制品立即重试 typed-memory 提交，不重新调用模型" @click="retrySessionMemoryTypedCommit(row)">立即重试</button>
             <button class="btn btn-outline" :disabled="!!sessionMemoryArtifactRetentionRunning" title="预览该会话的抽取制品归档" @click="runSessionMemoryArtifactRetention(row, false)">预览归档</button>
             <button class="btn btn-outline" :disabled="!!sessionMemoryArtifactRetentionRunning || !row.modelExtractionArtifactCandidateExecutionCount" title="执行该会话的抽取制品归档" @click="runSessionMemoryArtifactRetention(row, true)">执行归档</button>
           </div>
@@ -3487,6 +3542,90 @@ onMounted(() => loadOverview(false))
                     <strong :title="(row.concepts || []).join(', ')">{{ row.relPath }}<template v-if="row.duplicateOf"> → {{ row.duplicateOf }}</template></strong>
                     <code>{{ formatSigned(row.adjustment) }}</code>
                   </article>
+                </div>
+                <div v-if="typedMemoryDistillationTransaction" :class="['discipline-panel', !typedMemoryDistillationTransaction.stateValid || !typedMemoryDistillationTransaction.lockValid || typedMemoryDistillationTransaction.lockStale || typedMemoryDistillationTransaction.status === 'failed' ? 'fail' : typedMemoryDistillationTransaction.lockActive ? 'warn' : 'ok']">
+                  <div class="discipline-head">
+                    <div>
+                      <strong>长期记忆提交事务</strong>
+                      <span>会话级租约 · fencing token · 崩溃接管</span>
+                    </div>
+                    <code>{{ typedMemoryDistillationTransaction.status }}</code>
+                  </div>
+                  <div class="discipline-cards">
+                    <article><span>Fencing</span><strong>{{ typedMemoryDistillationTransaction.fencingToken || 0 }}</strong><small>提交 {{ typedMemoryDistillationTransaction.lastCommittedFencingToken || 0 }}</small></article>
+                    <article><span>锁状态</span><strong>{{ typedMemoryDistillationTransaction.lockActive ? 'active' : typedMemoryDistillationTransaction.lockStale ? 'stale' : 'released' }}</strong><small>{{ typedMemoryDistillationTransaction.lockValid ? 'checksum valid' : 'checksum failed' }}</small></article>
+                    <article><span>崩溃接管</span><strong>{{ typedMemoryDistillationTransaction.recoveredLeaseCount || 0 }}</strong><small>abandoned lease</small></article>
+                    <article><span>竞争等待</span><strong>{{ formatNumber(typedMemoryDistillationTransaction.waitedMs || 0) }} ms</strong><small>{{ formatTime(typedMemoryDistillationTransaction.committedAt) }}</small></article>
+                  </div>
+                  <div v-if="typedMemoryDistillationTransaction.error" class="post-compact-error">{{ typedMemoryDistillationTransaction.error }}</div>
+                </div>
+                <div v-if="typedMemoryDistillationPreflight" :class="['discipline-panel', typedMemoryDistillationPreflight.recoveryRequired ? 'warn' : typedMemoryDistillationPreflight.runRequired ? 'warn' : 'ok']">
+                  <div class="discipline-head">
+                    <div>
+                      <strong>蒸馏增量探针</strong>
+                      <span>当前群聊会话游标 · 锁前只读检查</span>
+                    </div>
+                    <code>{{ typedMemoryDistillationPreflight.runRequired ? 'work pending' : 'caught up' }}</code>
+                  </div>
+                  <div class="discipline-cards">
+                    <article><span>待处理消息</span><strong>{{ formatNumber(typedMemoryDistillationPreflight.pendingMessageCount || 0) }}</strong><small>本批 {{ formatNumber(typedMemoryDistillationPreflight.selectedMessageCount || 0) }}</small></article>
+                    <article><span>事务锁</span><strong>{{ typedMemoryDistillationPreflight.lockRequired ? 'required' : 'skipped' }}</strong><small>{{ typedMemoryDistillationPreflight.reason || 'caught up' }}</small></article>
+                    <article><span>维护任务</span><strong>{{ typedMemoryDistillationPreflight.maintenanceRequired ? 'pending' : 'none' }}</strong><small>{{ typedMemoryDistillationPreflight.maintenanceReasons?.join(' · ') || 'no maintenance' }}</small></article>
+                    <article><span>恢复任务</span><strong>{{ typedMemoryDistillationPreflight.recoveryRequired ? 'pending' : 'none' }}</strong><small>{{ typedMemoryDistillationPreflight.recoveryReasons?.join(' · ') || 'clean' }}</small></article>
+                  </div>
+                </div>
+                <div v-if="typedMemoryArtifactTransaction" :class="['discipline-panel', !typedMemoryArtifactTransaction.valid || typedMemoryArtifactTransaction.corrupt ? 'fail' : typedMemoryArtifactTransaction.status === 'prepared' ? 'warn' : 'ok']">
+                  <div class="discipline-head">
+                    <div>
+                      <strong>记忆多工件提交</strong>
+                      <span>topic Markdown · MEMORY.md · ledger</span>
+                    </div>
+                    <code>{{ typedMemoryArtifactTransaction.status }}</code>
+                  </div>
+                  <div class="discipline-cards">
+                    <article><span>提交工件</span><strong>{{ typedMemoryArtifactTransaction.artifactCount || 0 }}</strong><small>{{ typedMemoryArtifactTransaction.mutationKind || 'memory mutation' }}</small></article>
+                    <article><span>Journal</span><strong>{{ typedMemoryArtifactTransaction.valid ? 'valid' : 'invalid' }}</strong><small>{{ typedMemoryArtifactTransaction.checksumValid ? 'checksum valid' : 'checksum failed' }}</small></article>
+                    <article><span>恢复动作</span><strong>{{ typedMemoryArtifactTransaction.recoveryAction ? (typedMemoryArtifactTransaction.recoveryAction.includes('rollforward') ? 'rollforward' : 'rollback') : 'none' }}</strong><small>{{ formatTime(typedMemoryArtifactTransaction.recoveredAt || typedMemoryArtifactTransaction.committedAt) }}</small></article>
+                    <article><span>Artifact Fence</span><strong>{{ typedMemoryArtifactTransaction.fencingToken || 0 }}</strong><small>{{ typedMemoryArtifactTransaction.targets?.slice(0, 2).join(' · ') || 'no targets' }}</small></article>
+                  </div>
+                </div>
+                <div v-if="typedMemoryEntrypoint" :class="['discipline-panel', typedMemoryEntrypoint.injectionTruncated ? 'warn' : 'ok']">
+                  <div class="discipline-head">
+                    <div>
+                      <strong>MEMORY.md 索引容量</strong>
+                      <span>磁盘保持完整 · 子 Agent 注入按 Claude Code 容量投影</span>
+                    </div>
+                    <code>{{ typedMemoryEntrypoint.injectionTruncated ? 'bounded' : 'full' }}</code>
+                  </div>
+                  <div class="discipline-cards">
+                    <article><span>主题文件</span><strong>{{ formatNumber(typedMemoryEntrypoint.documentCount || 0) }}</strong><small>完整可发现</small></article>
+                    <article><span>磁盘索引</span><strong>{{ formatNumber(typedMemoryEntrypoint.diskLineCount || 0) }} 行</strong><small>{{ formatBytes(typedMemoryEntrypoint.diskBytes || 0) }}</small></article>
+                    <article><span>注入投影</span><strong>{{ formatNumber(typedMemoryEntrypoint.injectionLineCount || 0) }} 行</strong><small>{{ formatBytes(typedMemoryEntrypoint.injectionBytes || 0) }}</small></article>
+                    <article><span>容量上限</span><strong>{{ formatNumber(typedMemoryEntrypoint.maxInjectionLines || 200) }} 行</strong><small>{{ formatBytes(typedMemoryEntrypoint.maxInjectionBytes || 25000) }}</small></article>
+                  </div>
+                </div>
+                <div v-if="typedMemoryDirectOperations" :class="['discipline-panel', typedMemoryDirectOperations.rejectedThisRun ? 'warn' : 'ok']">
+                  <div class="discipline-head">
+                    <div>
+                      <strong>会话直接记忆事务</strong>
+                      <span>remember / forget · 唯一目标绑定 · 删除 tombstone</span>
+                    </div>
+                    <code>{{ typedMemoryDirectOperations.receiptCount || 0 }} receipts</code>
+                  </div>
+                  <div class="discipline-cards">
+                    <article v-for="card in typedMemoryDirectOperationCards" :key="`direct-memory:${card.label}`">
+                      <span>{{ card.label }}</span>
+                      <strong>{{ formatNumber(card.value) }}</strong>
+                      <small>{{ card.note }}</small>
+                    </article>
+                  </div>
+                  <div v-if="typedMemoryDirectOperations.recentReceipts?.length" class="discipline-gap-list">
+                    <article v-for="row in typedMemoryDirectOperations.recentReceipts" :key="row.requestId">
+                      <span :class="['usage-state', row.status === 'committed' ? 'verified' : row.status === 'duplicate' ? 'used' : 'ignored']">{{ row.status }}</span>
+                      <strong>{{ row.memoryId || row.requestId }}</strong>
+                      <p>{{ row.action }} · {{ row.reason }}</p>
+                    </article>
+                  </div>
                 </div>
                 <div v-if="typedMemoryWriteAdmission" class="discipline-panel ok">
                   <div class="discipline-head">

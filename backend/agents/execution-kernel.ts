@@ -757,7 +757,7 @@ export function persistBoundedOutput(taskId: string, content: string, maxBytes =
 export function classifyExecutionFailure(value: any): { failureClass: FailureClass; recoverable: boolean; recovery: string[]; message: string } {
   const message = String(value?.message || value?.error || value || "未知错误");
   const rules: Array<[RegExp, FailureClass, boolean, string[]]> = [
-    [/CCM_CANCELLED|任务已取消|cancelled/i, "cancelled", false, []],
+    [/CCM_CANCELLED|CCM_SESSION_LIFECYCLE_STALE|任务已取消|会话生命周期已变化|cancelled/i, "cancelled", false, []],
     [/CCM_TIMEOUT|响应超时|timed?\s*out|ETIMEDOUT/i, "timeout", true, ["终止残留进程", "缩小任务范围后重试一次"]],
     [/trust|required.*trust|信任目录/i, "trust_gate", true, ["确认工作目录在允许列表", "重新启动 Agent"]],
     [/prompt.*misdeliver|提示.*投递|shell.*prompt/i, "prompt_delivery", true, ["等待 ready 握手后重新投递"]],

@@ -124,6 +124,7 @@ const group_orchestrator_llm_client_1 = require("./group-orchestrator-llm-client
 const agent_notifications_1 = require("./agent-notifications");
 const group_memory_index_1 = require("./group-memory-index");
 const model_capability_cache_1 = require("./model-capability-cache");
+const role_skills_1 = require("../../skills/role-skills");
 exports.COORDINATOR_PROJECT = "coordinator";
 exports.DEFAULT_GROUP_ORCHESTRATOR = {
     enabled: true,
@@ -6881,6 +6882,7 @@ async function runLlmCoordinatorSummary(group, userMessage, outputs) {
     let tokenUsage = null;
     const captureTokenUsage = (usage) => { tokenUsage = mergeLlmTokenUsage(tokenUsage, usage); };
     const childReplies = validOutputs.map((text, i) => `--- 子 Agent task-notification ${i + 1} ---\n${String(text).slice(0, 2000)}`).join("\n\n");
+    const roleSkills = (0, role_skills_1.buildRoleSkillPrompt)("group-main-agent", userMessage, { forceWork: true, phase: "summary" });
     const system = `你是 CCM 群聊的主 Agent（协调者）。子 Agent 已经以 <task-notification> 形式回复了用户的需求，请你做一个简洁的汇总。
 
 要求：
@@ -6891,7 +6893,7 @@ async function runLlmCoordinatorSummary(group, userMessage, outputs) {
 5. 语气友好自然，像团队 leader 做总结
 6. <task-notification>、CCM_AGENT_RECEIPT、trace、session、scratchpad 等是内部技术信号，不要出现在给用户的正文里；请改写成“子 Agent 结果、结果说明、验证证据、技术详情”等用户能看懂的说法
 
-直接输出汇总文本，不要输出 JSON。`;
+直接输出汇总文本，不要输出 JSON。${roleSkills.prompt ? `\n\n${roleSkills.prompt}` : ""}`;
     const user = `用户原始需求：${String(userMessage).slice(0, 500)}\n\n以下是各子 Agent 的 task-notification / 回复：\n${childReplies}\n\n请输出汇总。`;
     try {
         const messages = [
@@ -6940,22 +6942,18 @@ async function runLlmCoordinatorReview(group, userMessage, coordinatorPlan, outp
     const childReplies = validOutputs
         .map((text, i) => `--- 子 Agent task-notification ${i + 1} ---\n${String(text).slice(0, 2400)}`)
         .join("\n\n");
+    const roleSkills = (0, role_skills_1.buildRoleSkillPrompt)("group-main-agent", userMessage, { forceWork: true, phase: "review" });
     const system = `你是 CCM 群聊的主 Agent（工作协调者）。你已经把用户需求分派给项目 Agent，现在要像项目负责人一样复盘子 Agent 的回复。
 
-当前是第 ${round}/${maxRounds} 轮验收；${allowFollowUps ? "如果证据不足，可以继续派发返工任务。" : "本轮不能再派发返工任务，必须给出最终结论或向用户提出具体问题。"}
+当前是第 ${round}/${maxRounds} 轮验收；${allowFollowUps ? "如果证据不足，可以继续派发返工任务。" : "本轮不能再派发返工任务，必须给出最终结论或向用户提出具体问题。"}${roleSkills.prompt ? `\n\n${roleSkills.prompt}` : ""}
 
 本任务的最新门禁配置（优先级高于历史会话中的旧要求）：
 - 必须产生代码/文件变更：${requiresCodeChanges ? "是" : "否；不得因为 filesChanged 为空判定缺口"}
 - 必须执行项目验证命令：${requiresVerification ? "是" : "否；不得因为未运行、无法运行或缺少 npm test/build 等命令判定缺口"}
 
-你不是代码执行 Agent，不写代码，不假装完成没有证据的工作。你要做的是：
-1. 判断子 Agent 是否真正回答了任务、是否完成修改/验证、是否有缺口。
-2. 找出前后端/多项目之间的冲突、依赖、遗漏。
-3. 如果还需要某个项目 Agent 继续补充，只能在 followUps 里给出明确任务。
-4. 如果已经足够，输出给用户的最终协调结论。
-5. 如果需要用户决策或补充信息，明确指出。
-6. 给用户看的 summary、gaps、conflicts、checks.detail/evidence、userQuestion 不得出现 <task-notification>、CCM_AGENT_RECEIPT、trace、session、scratchpad 等内部协议词；这些只用于你判断，输出时改写成“子 Agent 结果、结构化结果说明、验证证据、技术详情”。
-7. followUps.task 必须是主 Agent 综合后的自包含指令，包含具体文件/接口/错误/验证命令/业务字段/缺口之一，并写清完成标准；禁止写“基于你的发现继续”“based on your findings”“继续处理一下”这类空泛交接。
+你不是代码执行 Agent，不写代码，不假装完成没有证据的工作。按本轮注入的复核与返工 Skill 判断完成度、冲突、缺口和后续动作。
+- 需要补充时只能在 followUps 中派发自包含返工工作单；已经满足时给出最终协调结论；需要用户决策时提出一个具体问题。
+- 给用户看的 summary、gaps、conflicts、checks.detail/evidence、userQuestion 不得出现 <task-notification>、CCM_AGENT_RECEIPT、trace、session、scratchpad 等内部协议词；这些只用于内部判断，输出时改写成“子 Agent 结果、结构化结果说明、验证证据、技术详情”。
 
 验收门禁：
 - 优先读取每个 Worker 的 <task-notification>：task-id 表示 Worker，status 表示 completed/failed/blocked/partial/missing_receipt，receipt-status 表示 CCM_AGENT_RECEIPT 状态，result 是 Worker 结果摘要。
@@ -14090,6 +14088,8 @@ function buildLlmCoordinatorMessages(input) {
     const sharedFilesPart = input.sharedFilesContext ? `\n\n当前群聊共享文件：\n${input.sharedFilesContext}` : "";
     const ragPart = input.ragContext ? `\n\n当前本地知识库参考（主 Agent 自动检索，仅用于理解需求、直接回答或提炼子 Agent 工作单；不要把它当作用户授权执行）：\n${input.ragContext}` : "";
     const extraInstructionsPart = input.extraInstructions ? `\n\n${input.extraInstructions}` : "";
+    const roleSkills = (0, role_skills_1.buildRoleSkillPrompt)("group-main-agent", input.message, { source: input.source || "", phase: "planning" });
+    const roleSkillsPart = roleSkills.prompt ? `\n\n${roleSkills.prompt}` : "";
     const system = `你是 CCM 群聊的主 Agent（工作协调者）。
 
 你可以使用大模型理解用户需求，但你不是项目开发 Agent：
@@ -14099,19 +14099,10 @@ function buildLlmCoordinatorMessages(input) {
 - 只做需求理解、任务拆分、路由分派、等待和汇总。
 - 你的输出会被系统直接执行，targets 不是建议，而是真实派单。
 - 不要为了显得忙而分派；只有需要项目上下文、代码确认、修改、验证或跨项目联调时才分派。
-- 像 Claude Code Coordinator 一样工作：先自己理解需求并形成计划，再把自包含工作单交给 Worker；不要把“理解需求”的责任转嫁给子 Agent。
 - Coordinator 不写代码、不读项目文件、不运行命令；Worker 才负责研究、实现、验证和回执。
 - 如果系统注入了“只读项目分析上下文”，你可以基于这些已提供的项目配置、项目记忆、目录摘要和知识库召回回答用户；这不代表用户授权修改、运行命令或派发子 Agent。
-- 子 Agent 看不到你和用户的完整对话，targets[].task 必须包含足够背景、文档依据、边界、交付物、验证要求和回执要求。
-- 不要写“根据上面的内容/根据你的发现去做”这种空任务；必须把你综合出的具体理解写进 task。
-- 研究、实现、验证要按阶段思考：可并行研究，写同一代码区域时谨慎串行，验证要独立检查证据。
-- 分派任务必须像工作单：说明背景、边界、要检查/修改的范围、交付物、验收/验证方式。
-- 复杂、跨项目、文档型或实现型需求默认采用 research_synthesis_implementation_verification：Worker 在各自项目研究/实现/验证，Coordinator 负责综合事实、判断缺口和继续返工。
-- Worker 失败、验证失败或回执证据不足时，优先继续同一个 Worker 补充，因为它保留了上下文；如果方向明显错误，再重新派给新的 Worker。
-- 如果一个项目依赖另一个项目的结论，在 dependsOn 写依赖项目名，并选择 sequential 或 backend_first。
-- 依赖关系必须来自接口契约、数据流、文件冲突或验收顺序等语义理由，不能只按“前端/后端”关键词机械排列。
-- 输出计划时区分已知事实、待 Worker 核验的假设和最终必须证明的断言；当前代码状态未知时明确要求 Worker 先读取真实状态。
-- 在 reasoning.replanTriggers 中写出何时必须停止旧计划并重新规划，例如接口契约变化、目标文件不存在、验证失败、依赖输出与假设不一致。
+- 按本轮注入的 Skill 完成需求提炼、任务拆解和文档条款追踪；Skill 是执行方法，不是可忽略的参考材料。
+- 子 Agent 看不到完整对话，targets[].task 必须是自包含工作单；依赖关系和重规划条件必须有业务或技术依据。
 - 如果用户需求太模糊，shouldDelegate=false，并用 questionForUser 问一个最关键的问题。
 - 普通聊天、知识问答、项目介绍、架构说明、原因分析和方案咨询必须 shouldDelegate=false、dispatchPolicy.action=direct_answer；不能为了满足代码变更门禁而把问答改造成修改 README 或开发任务。
 - 项目分析模式下必须 shouldDelegate=false、dispatchPolicy.action=direct_answer；只总结只读上下文、指出不确定点和下一步建议。
@@ -14132,21 +14123,15 @@ CCM 主 Agent 动作边界（必须按动作风险做决定）：
 - replan_from_observation：重新规划，安全决策；当回执缺证据、验证失败、事实变化或目标偏离时触发。
 - generate_final_reply：生成最终回复；必须基于验收证据，若未完成要明确说明风险和缺口。
 
-文档型需求处理规则：
-- 如果用户消息或共享文件包含接口文档、业务文档、需求文档、PRD、验收标准、字段表、API 示例或流程说明，你必须先读取这些内容再拆任务。
-- 如果系统提供了“本地知识库参考”，你必须先读取并提炼其中与当前消息相关的事实；知识库只能帮助你理解、回答或写任务简报，不能替代用户当前消息里的执行授权。
-- 子 Agent 默认不直接读取知识库；如果知识库内容对执行有用，你只能把必要摘要、引用文件和验收关注整理进 targets[].task，不要要求子 Agent “自己去查知识库”。
-- 先在 summary / deliverables / constraints 中提炼：业务目标、涉及模块、接口契约（方法/路径/入参/出参/错误码/鉴权）、数据字段、页面/交互、业务规则、验收标准、依赖顺序和不明确点。
-- 给子 Agent 的 task 不能只写“阅读文档并实现”。必须写清楚：引用的文档名称或附件来源、该 Agent 负责的文档条目/接口/字段/规则、需要检查或修改的代码范围、交付物、验证方式、与其他 Agent 的依赖。
-- 接口文档优先按“后端实现/校验 API 契约 -> 前端或客户端对接接口 -> 联调/验收”拆分，通常选择 backend_first 或 sequential。
-- 业务/需求文档优先按“业务规则/数据模型 -> API/服务 -> 页面/交互 -> 验收”拆分。
-- 如果文档内容缺少关键契约或验收标准，不要编造；shouldDelegate=false 或 requiresConfirmation=true，并在 questionForUser 写最关键的补充问题。
-- 如果共享文件或知识库正文里有具体字段、接口路径、状态流转、历史决策或验收项，相关子 Agent 工作单必须包含这些关键信息的摘要和来源引用。
+文档与知识边界：
+- 共享文档和知识库只能用于理解、回答和生成工作单，不能替代用户当前执行授权。
+- 文档中的关键契约、业务规则、来源和验收项必须进入 documentFindings 及相关工作单；缺失内容不得编造。
+- 子 Agent 默认不直接读取群聊知识库，执行所需摘要和来源必须由主 Agent 写入自包含工作单。
 
 你必须只返回 JSON 对象，不要 Markdown，不要解释。
 
 允许分派的项目 Agent 只有：
-${buildAllowedProjectBrief(group) || "- 无"}${sharedFilesPart}${ragPart}${extraInstructionsPart}
+${buildAllowedProjectBrief(group) || "- 无"}${sharedFilesPart}${ragPart}${extraInstructionsPart}${roleSkillsPart}
 
 JSON 格式：
 {
@@ -14523,6 +14508,7 @@ async function runGroupOrchestrator(input) {
     const coordinator = getCoordinatorMember(group);
     try {
         const result = await runGroupOrchestratorCore(input);
+        const selectedRoleSkills = (0, role_skills_1.buildRoleSkillPrompt)("group-main-agent", input.message, { source: input.source || "", phase: "planning" }).names;
         const runtime = String(result?.runtime || "");
         (0, db_1.recordMetric)(coordinator.project, {
             success: !["llm-error", "llm-not-configured"].includes(runtime),
@@ -14539,7 +14525,7 @@ async function runGroupOrchestrator(input) {
             usage: result?.usage || null,
             error: runtime === "llm-error" ? "群聊主 Agent 大模型调用失败" : runtime === "llm-not-configured" ? "群聊主 Agent 模型未配置" : "",
         });
-        return result;
+        return { ...result, selectedRoleSkills };
     }
     catch (error) {
         (0, db_1.recordMetric)(coordinator.project, {

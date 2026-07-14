@@ -50,6 +50,25 @@ export declare function deleteGroupChatSession(groupId: string, sessionId: strin
         idempotent: boolean;
         head: any;
         file: string;
+        journal?: undefined;
+        receipt?: undefined;
+    } | {
+        committed: boolean;
+        idempotent: boolean;
+        head: any;
+        journal: {
+            committed: boolean;
+            idempotent: boolean;
+            record: any;
+            file: string;
+        };
+        receipt: {
+            committed: boolean;
+            idempotent: boolean;
+            receipt: any;
+            file: string;
+        };
+        file: string;
     };
     lifecycleCancellation: {
         schema: string;
@@ -131,6 +150,25 @@ export declare function pruneArchivedGroupChatSessions(groupId: string, options?
                 committed: boolean;
                 idempotent: boolean;
                 head: any;
+                file: string;
+                journal?: undefined;
+                receipt?: undefined;
+            } | {
+                committed: boolean;
+                idempotent: boolean;
+                head: any;
+                journal: {
+                    committed: boolean;
+                    idempotent: boolean;
+                    record: any;
+                    file: string;
+                };
+                receipt: {
+                    committed: boolean;
+                    idempotent: boolean;
+                    receipt: any;
+                    file: string;
+                };
                 file: string;
             };
             lifecycleCancellation: {

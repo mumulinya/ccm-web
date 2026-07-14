@@ -84,7 +84,7 @@ const filteredLogs = computed(() => (
 .btn-clear-logs, .btn-close-logs { padding: 8px 12px; border-radius: 8px; cursor: pointer; font-size: 12px; }
 .btn-clear-logs { color: #dc2626; background: rgba(239,68,68,0.08); border: 1px solid rgba(239,68,68,0.18); }
 .btn-close-logs { color: white; background: var(--gradient-blue); border: none; }
-:global([data-theme="dark"]) .modal-logs-styled { background: rgba(18, 22, 33, 0.92) !important; }
-:global([data-theme="dark"]) .log-entry-card { background: rgba(255,255,255,0.04); }
-:global([data-theme="dark"]) .group-logs-content { color: var(--text-secondary); }
+:global([data-theme="dark"] .modal-logs-styled){ background: rgba(18, 22, 33, 0.92) !important; }
+:global([data-theme="dark"] .log-entry-card){ background: rgba(255,255,255,0.04); }
+:global([data-theme="dark"] .group-logs-content){ color: var(--text-secondary); }
 </style>

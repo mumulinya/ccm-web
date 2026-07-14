@@ -1,0 +1,158 @@
+{
+  "ok": true,
+  "generatedAt": "2026-07-14T11:12:05.565Z",
+  "selector": {
+    "pass": true,
+    "checks": {
+      "allPackagesInstalled": true,
+      "ordinaryGlobalLoadsNoWorkSkills": true,
+      "ordinaryGroupLoadsNoWorkSkills": true,
+      "globalGetsOnlyRelevantSkills": true,
+      "groupGetsCoordinatorAndReceipt": true,
+      "contextualExecutionLoadsGroupSkill": true,
+      "projectGetsWorkerReceiptAndEvidence": true,
+      "testAgentGetsVerifierAndEvidence": true,
+      "selectionBudgetBounded": true
+    },
+    "selections": {
+      "ordinaryGlobal": [],
+      "ordinaryGroup": [],
+      "globalWork": [
+        "ccm-global-mission-lead",
+        "ccm-acceptance-evidence"
+      ],
+      "groupWork": [
+        "ccm-group-coordination-lead",
+        "ccm-delivery-receipt"
+      ],
+      "contextualGroupWork": [
+        "ccm-group-coordination-lead",
+        "ccm-delivery-receipt"
+      ],
+      "projectWork": [
+        "ccm-project-delivery-worker",
+        "ccm-delivery-receipt",
+        "ccm-acceptance-evidence"
+      ],
+      "testWork": [
+        "ccm-test-acceptance-verifier",
+        "ccm-acceptance-evidence"
+      ]
+    },
+    "installation": {
+      "installed": [],
+      "available": [
+        "ccm-global-mission-lead",
+        "ccm-group-coordination-lead",
+        "ccm-project-delivery-worker",
+        "ccm-test-acceptance-verifier",
+        "ccm-delivery-receipt",
+        "ccm-acceptance-evidence"
+      ]
+    }
+  },
+  "projectSelection": [
+    {
+      "name": "ccm-project-delivery-worker",
+      "kind": "role",
+      "reason": "限定范围内实施与验证"
+    },
+    {
+      "name": "ccm-delivery-receipt",
+      "kind": "shared",
+      "reason": "向主 Agent 返回可复核回执"
+    },
+    {
+      "name": "ccm-acceptance-evidence",
+      "kind": "shared",
+      "reason": "任务要求验证或验收证据"
+    }
+  ],
+  "testAgentProfileSkills": [
+    "ccm-test-acceptance-verifier",
+    "ccm-acceptance-evidence"
+  ],
+  "testAgentWorkOrderSkills": {
+    "schema": "ccm-role-skill-selection-v1",
+    "role": "test-agent",
+    "selected": [
+      {
+        "name": "ccm-test-acceptance-verifier",
+        "kind": "role",
+        "reason": "独立验收与保守结论"
+      },
+      {
+        "name": "ccm-acceptance-evidence",
+        "kind": "shared",
+        "reason": "验收项与真实证据绑定"
+      }
+    ]
+  },
+  "testAgentProbe": {
+    "status": "partial",
+    "recommendation": "need_human",
+    "commandResults": [
+      {
+        "command": "node --version",
+        "status": "passed",
+        "exitCode": 0
+      }
+    ]
+  },
+  "runtimeResults": {
+    "claudecode": {
+      "snapshotId": "51b1d42a70a76da0",
+      "snapshotPath": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\role-skills-selftest\\latest-run\\agent-runtime\\claudecode\\51b1d42a70a76da0\\runtime-tool-snapshot.json",
+      "skillRoot": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\role-skills-selftest\\latest-run\\agent-runtime\\claudecode\\51b1d42a70a76da0\\plugin\\skills",
+      "requested": [
+        "ccm-project-delivery-worker",
+        "ccm-delivery-receipt",
+        "ccm-acceptance-evidence"
+      ],
+      "synced": [
+        "ccm-project-delivery-worker",
+        "ccm-delivery-receipt",
+        "ccm-acceptance-evidence"
+      ],
+      "missing": []
+    },
+    "cursor": {
+      "snapshotId": "05403108bc3cd269",
+      "snapshotPath": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\role-skills-selftest\\latest-run\\agent-runtime\\cursor\\05403108bc3cd269\\runtime-tool-snapshot.json",
+      "skillRoot": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\role-skills-selftest\\latest-run\\agent-runtime\\cursor\\05403108bc3cd269\\plugin\\skills",
+      "requested": [
+        "ccm-project-delivery-worker",
+        "ccm-delivery-receipt",
+        "ccm-acceptance-evidence"
+      ],
+      "synced": [
+        "ccm-project-delivery-worker",
+        "ccm-delivery-receipt",
+        "ccm-acceptance-evidence"
+      ],
+      "missing": []
+    },
+    "codex": {
+      "snapshotId": "965e398d17c6ff6d",
+      "snapshotPath": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\role-skills-selftest\\latest-run\\agent-runtime\\codex\\965e398d17c6ff6d\\runtime-tool-snapshot.json",
+      "skillRoot": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\role-skills-selftest\\latest-run\\agent-runtime\\codex\\965e398d17c6ff6d\\skills",
+      "requested": [
+        "ccm-project-delivery-worker",
+        "ccm-delivery-receipt",
+        "ccm-acceptance-evidence"
+      ],
+      "synced": [
+        "ccm-project-delivery-worker",
+        "ccm-delivery-receipt",
+        "ccm-acceptance-evidence"
+      ],
+      "missing": []
+    }
+  },
+  "sourceChecks": {
+    "globalPromptUsesDynamicRoleSkill": true,
+    "groupPromptUsesDynamicRoleSkill": true,
+    "projectRuntimeMergesRoleSkills": true,
+    "testWorkOrderRecordsRoleSkills": true
+  }
+}

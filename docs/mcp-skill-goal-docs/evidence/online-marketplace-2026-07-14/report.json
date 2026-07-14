@@ -1,0 +1,33 @@
+{
+  "pass": true,
+  "generatedAt": "2026-07-14T10:11:29.568Z",
+  "baseUrl": "http://127.0.0.1:3082",
+  "checks": [
+    {
+      "name": "desktop Skills.sh real search renders install counts without configuration card",
+      "pass": true
+    },
+    {
+      "name": "desktop Skills.sh marketplace no horizontal overflow",
+      "pass": true
+    },
+    {
+      "name": "desktop Smithery anonymous search and source-bound detail preview render",
+      "pass": true
+    },
+    {
+      "name": "mobile Smithery marketplace no horizontal overflow",
+      "pass": true
+    },
+    {
+      "name": "mobile search, categories, cards and actions stay inside viewport",
+      "pass": true
+    }
+  ],
+  "screenshots": [
+    "C:\\Users\\admin\\.cc-connect\\ccm\\docs\\mcp-skill-goal-docs\\evidence\\online-marketplace-2026-07-14\\desktop-skills-sh-search.png",
+    "C:\\Users\\admin\\.cc-connect\\ccm\\docs\\mcp-skill-goal-docs\\evidence\\online-marketplace-2026-07-14\\desktop-smithery-preview.png",
+    "C:\\Users\\admin\\.cc-connect\\ccm\\docs\\mcp-skill-goal-docs\\evidence\\online-marketplace-2026-07-14\\mobile-smithery-search.png"
+  ],
+  "errors": []
+}
