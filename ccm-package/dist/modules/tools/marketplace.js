@@ -36,6 +36,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.previewToolCatalogMutationImpact = previewToolCatalogMutationImpact;
 exports.completeToolCatalogMutationLifecycle = completeToolCatalogMutationLifecycle;
 exports.runMarketplaceSelfTest = runMarketplaceSelfTest;
+exports.installMarketplaceItemWithStore = installMarketplaceItemWithStore;
+exports.uninstallMarketplaceItemWithStore = uninstallMarketplaceItemWithStore;
 exports.handleMarketplaceApi = handleMarketplaceApi;
 const crypto = __importStar(require("crypto"));
 const dns = __importStar(require("dns/promises"));
@@ -51,6 +53,7 @@ const db_1 = require("../../core/db");
 const storage_1 = require("../collaboration/storage");
 const tool_authorization_1 = require("../../tools/tool-authorization");
 const runtime_tool_sync_1 = require("../../tools/runtime-tool-sync");
+const internal_skill_catalog_1 = require("../../skills/internal-skill-catalog");
 const { toolManager } = require("../../tools/tool-manager");
 const execFileAsync = (0, util_1.promisify)(child_process_1.execFile);
 const CCM_DIR = path.join(os.homedir(), ".cc-connect");
@@ -1236,6 +1239,7 @@ async function cloneGithubSkill(item, staging) {
     }
 }
 async function stageSkillPackage(item, skillPackagesDir = db_1.SKILL_PACKAGES_DIR) {
+    (0, internal_skill_catalog_1.assertCcmInternalSkillMutable)(item?.name, "从外部来源安装或覆盖");
     fs.mkdirSync(skillPackagesDir, { recursive: true });
     const staging = path.join(skillPackagesDir, `.staging-${safeSlug(item.name)}-${process.pid}-${Date.now()}`);
     fs.mkdirSync(staging, { recursive: true });
@@ -1269,6 +1273,7 @@ async function stageSkillPackage(item, skillPackagesDir = db_1.SKILL_PACKAGES_DI
     }
 }
 function installStagedPackage(staging, name, skillPackagesDir = db_1.SKILL_PACKAGES_DIR) {
+    (0, internal_skill_catalog_1.assertCcmInternalSkillMutable)(name, "从外部来源安装或覆盖");
     const target = path.join(skillPackagesDir, safeSlug(name));
     if (!isPathInside(skillPackagesDir, target))
         throw new Error("Skill 安装路径无效");
@@ -1973,6 +1978,15 @@ function buildMarketplaceSkillRecord(item, staged, packagePath, checksum, now) {
         skillFile: path.join(packagePath, "SKILL.md"),
         packageStats: staged.packageStats,
         contentHash: checksum.slice(0, 16),
+        origin: "external",
+        scope: "external",
+        sourceType: "marketplace",
+        immutable: false,
+        deletable: true,
+        editable: true,
+        disableable: true,
+        systemManaged: false,
+        roleSkill: false,
         marketplace: { source: item.source, itemId: item.id, homepage: item.homepage || item.sourceUrl || "" },
         updated_at: now,
     };
@@ -2340,6 +2354,8 @@ async function runMarketplaceInstallE2ESelfTest() {
 }
 async function installMarketplaceItemWithStore(rawItem, store = {}, mode = "install", options = {}) {
     const item = normalizeMarketplaceItem(rawItem, { id: "custom", label: "Custom source", kind: "direct", trust: "custom" });
+    if (item.type === "skill")
+        (0, internal_skill_catalog_1.assertCcmInternalSkillMutable)(item.name, mode === "update" ? "通过商城更新或覆盖" : "从商城安装或覆盖");
     const now = new Date().toISOString();
     let checksum = "";
     let packagePath = "";
@@ -2405,11 +2421,17 @@ async function installMarketplaceItemWithStore(rawItem, store = {}, mode = "inst
     return { item, record, action, updated: action === "update", authorizationImpact, runtimeImpact, runtimeResync, sourceProof };
 }
 async function installMarketplaceItem(rawItem) {
+    if (String(rawItem?.type || "").toLowerCase() === "skill") {
+        (0, internal_skill_catalog_1.assertCcmInternalSkillMutable)(rawItem?.name, "从商城安装或覆盖");
+    }
     const item = await resolveMarketplaceItemForInstall(rawItem, "install");
     const result = await installMarketplaceItemWithStore(item, {}, "install", { autoResync: rawItem?.autoResync });
     return { ...result, sourceVerified: true };
 }
 async function updateMarketplaceItem(rawItem) {
+    if (String(rawItem?.type || "").toLowerCase() === "skill") {
+        (0, internal_skill_catalog_1.assertCcmInternalSkillMutable)(rawItem?.name, "通过商城更新或覆盖");
+    }
     const item = await resolveMarketplaceItemForInstall(rawItem, "update");
     const result = await installMarketplaceItemWithStore(item, {}, "update", { autoResync: rawItem?.autoResync });
     return { ...result, sourceVerified: true };
@@ -2419,6 +2441,8 @@ async function uninstallMarketplaceItemWithStore(payload, store = {}, options = 
     const name = String(payload?.name || "").trim();
     if (!["mcp", "skill"].includes(type) || !name)
         throw new Error("卸载参数无效");
+    if (type === "skill")
+        (0, internal_skill_catalog_1.assertCcmInternalSkillMutable)(name, "通过商城卸载");
     const skillPackagesDir = store.skillPackagesDir || db_1.SKILL_PACKAGES_DIR;
     const loadRecords = store.loadInstallations || loadInstallations;
     const saveRecords = store.saveInstallations || saveInstallations;
@@ -2618,21 +2642,21 @@ function handleMarketplaceApi(pathname, req, res, parsed) {
         readJsonBody(req)
             .then(installMarketplaceItem)
             .then(result => (0, utils_1.sendJson)(res, { success: true, ...result }))
-            .catch(error => (0, utils_1.sendJson)(res, { success: false, error: error.message }, 400));
+            .catch(error => (0, utils_1.sendJson)(res, { success: false, error: error.message, code: error.code }, Number(error.statusCode || 400)));
         return true;
     }
     if (pathname === "/api/marketplace/update" && req.method === "POST") {
         readJsonBody(req)
             .then(updateMarketplaceItem)
             .then(result => (0, utils_1.sendJson)(res, { success: true, ...result }))
-            .catch(error => (0, utils_1.sendJson)(res, { success: false, error: error.message }, 400));
+            .catch(error => (0, utils_1.sendJson)(res, { success: false, error: error.message, code: error.code }, Number(error.statusCode || 400)));
         return true;
     }
     if (pathname === "/api/marketplace/uninstall" && req.method === "POST") {
         readJsonBody(req)
             .then(uninstallMarketplaceItem)
             .then(result => (0, utils_1.sendJson)(res, { success: true, ...result }))
-            .catch(error => (0, utils_1.sendJson)(res, { success: false, error: error.message }, 400));
+            .catch(error => (0, utils_1.sendJson)(res, { success: false, error: error.message, code: error.code }, Number(error.statusCode || 400)));
         return true;
     }
     return false;

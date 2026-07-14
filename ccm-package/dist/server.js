@@ -52,6 +52,7 @@ const runtime_tool_real_cli_matrix_1 = require("./tools/runtime-tool-real-cli-ma
 const execution_kernel_1 = require("./agents/execution-kernel");
 const memory_1 = require("./projects/memory");
 const direct_dispatch_spool_1 = require("./agents/direct-dispatch-spool");
+const conversation_turn_control_1 = require("./agents/conversation-turn-control");
 // 导入底座与持久层
 const utils_1 = require("./core/utils");
 const db_1 = require("./core/db");
@@ -2210,6 +2211,37 @@ function handleRequest(req, res) {
         });
         return;
     }
+    if (pathname === "/api/conversation-turns/self-test" && req.method === "GET") {
+        const result = (0, conversation_turn_control_1.runConversationTurnControlSelfTest)();
+        (0, utils_1.sendJson)(res, { success: result.pass, ...result }, result.pass ? 200 : 500);
+        return;
+    }
+    if (pathname === "/api/conversation-turns/stop" && req.method === "POST") {
+        let body = "";
+        req.on("data", (chunk) => body += chunk);
+        req.on("end", () => {
+            try {
+                const payload = body ? JSON.parse(body) : {};
+                const scope = String(payload.scope || "").trim();
+                if (scope !== "group")
+                    return (0, utils_1.sendJson)(res, { success: false, error: "该入口请使用对应 Agent 的停止接口" }, 400);
+                const cancellation = (0, execution_kernel_1.requestGroupSessionAgentCancellation)({
+                    groupId: payload.group_id || payload.groupId,
+                    groupSessionId: payload.group_session_id || payload.groupSessionId,
+                    taskIds: [payload.task_id || payload.taskId].filter(Boolean),
+                    reason: payload.reason || "用户停止群聊主 Agent 当前工作",
+                    actor: payload.actor || "conversation-turn-control",
+                });
+                (0, utils_1.sendJson)(res, { success: true, cancellation });
+            }
+            catch (error) {
+                (0, utils_1.sendJson)(res, { success: false, error: error?.message || String(error) }, 400);
+            }
+        });
+        return;
+    }
+    if ((0, conversation_turn_control_1.handleConversationTurnControlApi)(pathname, req, res, parsed))
+        return;
     // 1. SSE 实时状态数据管道单独拦截
     if (pathname === "/api/status/stream" && req.method === "GET") {
         const clientType = String(parsed.query.client || "").trim();
@@ -2695,6 +2727,10 @@ function handleRequest(req, res) {
 }
 // === 启动服务器 ===
 function bootstrapServerRuntime(startupCollabCtx, port) {
+    const recoveredConversationTurns = conversation_turn_control_1.conversationTurnControl.recoverInterrupted();
+    if (recoveredConversationTurns.recovered > 0) {
+        console.log(`[会话消息队列] 已恢复 ${recoveredConversationTurns.recovered} 条服务重启前发送中的消息`);
+    }
     const petGenerationRecovery = (0, pet_generation_1.recoverPetGenerationJobs)();
     if (petGenerationRecovery.recovered > 0)
         console.log(`[宠物生成] 标记 ${petGenerationRecovery.recovered} 个中断任务等待重试`);
@@ -2776,6 +2812,7 @@ function startServer(port) {
         (0, collaboration_1.stopTaskWatchdog)();
         (0, collaboration_1.stopAgentRecoveryMonitor)();
         (0, global_agent_1.stopGlobalMissionSupervisionForServer)();
+        (0, global_agent_1.stopFeishuConversationTurnRecoveryForServer)();
         (0, reliability_drills_1.stopReliabilityDrillScheduler)();
         (0, usability_1.stopUsabilityArchiveScheduler)();
         (0, group_session_maintenance_1.stopGroupSessionRetentionMaintenanceScheduler)();
@@ -2795,9 +2832,12 @@ function startServer(port) {
         console.log(`  地址: http://localhost:${port}`);
         console.log(`  按 Ctrl+C 停止\n`);
         void (0, global_agent_1.resumeGlobalAgentLoopsForServer)(startupCollabCtx, port)
-            .then(result => { if (result.total > 0)
-            console.log(`[全局 Agent] 启动恢复 ${result.resumed}/${result.total} 个运行`); })
-            .catch(error => console.warn(`[全局 Agent] 启动恢复失败：${error?.message || error}`));
+            .then(result => {
+            if (result.total > 0)
+                console.log(`[全局 Agent] 启动恢复 ${result.resumed}/${result.total} 个运行`);
+        })
+            .catch(error => console.warn(`[全局 Agent] 启动恢复失败：${error?.message || error}`))
+            .finally(() => (0, global_agent_1.startFeishuConversationTurnRecoveryForServer)(`http://127.0.0.1:${port}`, startupCollabCtx));
         try {
             const feishuConfig = (0, db_1.loadFeishuConfig)();
             const hasControlBotCredentials = !!((feishuConfig.control_bot_app_id || feishuConfig.app_id) && (feishuConfig.control_bot_app_secret || feishuConfig.app_secret));

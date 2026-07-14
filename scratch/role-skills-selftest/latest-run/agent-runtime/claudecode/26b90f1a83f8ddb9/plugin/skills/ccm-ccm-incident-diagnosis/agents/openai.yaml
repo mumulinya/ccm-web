@@ -1,4 +1,0 @@
-interface:
-  display_name: "CCM Incident Diagnosis"
-  short_description: "Reproduce failures, isolate causes, repair, and verify"
-  default_prompt: "Use $ccm-incident-diagnosis to reproduce and resolve this failure."

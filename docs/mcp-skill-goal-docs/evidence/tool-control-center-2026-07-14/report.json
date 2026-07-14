@@ -1,6 +1,6 @@
 {
   "pass": true,
-  "generatedAt": "2026-07-14T09:03:24.215Z",
+  "generatedAt": "2026-07-14T13:00:37.240Z",
   "baseUrl": "http://127.0.0.1:3082",
   "checks": [
     {
@@ -8,7 +8,7 @@
       "pass": true
     },
     {
-      "name": "desktop overview shows verified scopes and completed goal with technical details closed",
+      "name": "desktop menu groups MCP, Skill, and governance entries in stable order",
       "pass": true
     },
     {
@@ -20,7 +20,7 @@
       "pass": true
     },
     {
-      "name": "mobile overview stays usable and keeps the verified status visible",
+      "name": "mobile menu hides group labels and keeps all entries in horizontal navigation",
       "pass": true
     }
   ],

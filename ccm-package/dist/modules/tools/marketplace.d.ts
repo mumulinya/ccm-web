@@ -203,5 +203,110 @@ export declare function runMarketplaceSelfTest(): Promise<{
         };
     };
 }>;
+export declare function installMarketplaceItemWithStore(rawItem: any, store?: MarketplaceInstallStore, mode?: "install" | "update", options?: any): Promise<{
+    item: any;
+    record: InstallationRecord;
+    action: string;
+    updated: boolean;
+    authorizationImpact: {
+        schema: string;
+        action: string;
+        type: string;
+        name: string;
+        summary: {
+            scopeCount: number;
+            projects: number;
+            groups: number;
+            mcpGrants: number;
+            skillGrants: number;
+        };
+        scopes: any;
+        truncated: boolean;
+    };
+    runtimeImpact: {
+        schema: string;
+        action: string;
+        type: string;
+        name: string;
+        summary: {
+            runtimeSnapshots: number;
+            catalogStale: number;
+            dispatchBlocked: number;
+            deliveryBlocked: number;
+            affectedProjects: number;
+            affectedGroups: number;
+        };
+        snapshots: any;
+        truncated: boolean;
+    };
+    runtimeResync: {
+        schema: string;
+        success: boolean;
+        requestedAt: string;
+        error: string;
+        summary: {
+            scanned: number;
+            selected: number;
+            created: number;
+            resynced: number;
+            skipped: number;
+            failed: number;
+        };
+        items: any;
+    };
+    sourceProof: any;
+}>;
+export declare function uninstallMarketplaceItemWithStore(payload: any, store?: MarketplaceInstallStore, options?: any): Promise<{
+    name: string;
+    type: string;
+    action: string;
+    removed: boolean;
+    authorizationImpact: {
+        schema: string;
+        action: string;
+        type: string;
+        name: string;
+        summary: {
+            scopeCount: number;
+            projects: number;
+            groups: number;
+            mcpGrants: number;
+            skillGrants: number;
+        };
+        scopes: any;
+        truncated: boolean;
+    };
+    runtimeImpact: {
+        schema: string;
+        action: string;
+        type: string;
+        name: string;
+        summary: {
+            runtimeSnapshots: number;
+            catalogStale: number;
+            dispatchBlocked: number;
+            deliveryBlocked: number;
+            affectedProjects: number;
+            affectedGroups: number;
+        };
+        snapshots: any;
+        truncated: boolean;
+    };
+    runtimeResync: {
+        schema: string;
+        success: boolean;
+        requestedAt: string;
+        error: string;
+        summary: {
+            scanned: number;
+            selected: number;
+            created: number;
+            resynced: number;
+            skipped: number;
+            failed: number;
+        };
+        items: any;
+    };
+}>;
 export declare function handleMarketplaceApi(pathname: string, req: any, res: any, parsed: any): boolean;
 export {};

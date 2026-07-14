@@ -245,6 +245,16 @@ function getControlBotPid() {
         return null;
     }
 }
+function getConfiguredControlBotPort() {
+    try {
+        const content = fs.readFileSync(CONTROL_BOT_CONFIG_FILE, "utf-8");
+        const match = content.match(/--port=(\d{1,5})/);
+        return match ? Number(match[1]) : 0;
+    }
+    catch {
+        return 0;
+    }
+}
 function writeControlBotConfig(port = 3080) {
     const config = (0, db_1.loadFeishuConfig)();
     const appId = String(config.control_bot_app_id || config.app_id || "").trim();
@@ -286,10 +296,16 @@ function stopControlBotConnection() {
     return { success: true, running: false, message: "控制机器人已停止" };
 }
 function startControlBotConnection(port = 3080) {
+    const requestedPort = Number.isInteger(port) && port > 0 && port <= 65535 ? port : 3080;
     const existing = getControlBotPid();
+    const existingPort = getConfiguredControlBotPort();
+    if (existing && existingPort === requestedPort) {
+        return { success: true, running: true, pid: existing, target_port: existingPort, endpoint_current: true, config_path: CONTROL_BOT_CONFIG_FILE, message: "控制机器人已在运行" };
+    }
+    const rebound = !!existing;
     if (existing)
-        return { success: true, running: true, pid: existing, config_path: CONTROL_BOT_CONFIG_FILE, message: "控制机器人已在运行" };
-    const safeConfigPath = writeControlBotConfig(port);
+        stopControlBotConnection();
+    const safeConfigPath = writeControlBotConfig(requestedPort);
     const configPath = (0, credential_store_1.createPrivateRuntimeConfig)(CONTROL_BOT_NAME, fs.readFileSync(safeConfigPath, "utf-8"));
     fs.mkdirSync(utils_1.LOG_DIR, { recursive: true });
     const logStream = fs.openSync(CONTROL_BOT_LOG_FILE, "a");
@@ -300,11 +316,31 @@ function startControlBotConnection(port = 3080) {
     child.unref();
     (0, credential_store_1.schedulePrivateRuntimeConfigCleanup)(configPath);
     fs.writeFileSync(CONTROL_BOT_PID_FILE, String(child.pid));
-    return { success: true, running: true, pid: child.pid, config_path: safeConfigPath, log_file: CONTROL_BOT_LOG_FILE, message: "控制机器人长连接已启动" };
+    return {
+        success: true,
+        running: true,
+        pid: child.pid,
+        target_port: requestedPort,
+        endpoint_current: true,
+        rebound_from_port: rebound ? existingPort : 0,
+        config_path: safeConfigPath,
+        log_file: CONTROL_BOT_LOG_FILE,
+        message: rebound ? `控制机器人已切换到当前服务端口 ${requestedPort}` : "控制机器人长连接已启动",
+    };
 }
-function getControlBotConnectionStatus() {
+function getControlBotConnectionStatus(expectedPort = 3080) {
     const pid = getControlBotPid();
-    return { success: true, running: !!pid, pid, config_path: CONTROL_BOT_CONFIG_FILE, log_file: CONTROL_BOT_LOG_FILE };
+    const targetPort = getConfiguredControlBotPort();
+    return {
+        success: true,
+        running: !!pid,
+        pid,
+        target_port: targetPort,
+        expected_port: expectedPort,
+        endpoint_current: !!pid && targetPort === expectedPort,
+        config_path: CONTROL_BOT_CONFIG_FILE,
+        log_file: CONTROL_BOT_LOG_FILE,
+    };
 }
 function startProject(projectName, agentType, port) {
     projectName = (0, project_validation_1.validateProjectName)(projectName);
@@ -738,7 +774,7 @@ type = "${finalPlatform}"${platformOptionsToml}
         return true;
     }
     if (pathname === "/api/feishu/control-bot/status" && req.method === "GET") {
-        (0, utils_1.sendJson)(res, getControlBotConnectionStatus());
+        (0, utils_1.sendJson)(res, getControlBotConnectionStatus(Number(req.socket?.localPort || 3080)));
         return true;
     }
     if (pathname === "/api/feishu/control-bot/start" && req.method === "POST") {

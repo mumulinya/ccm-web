@@ -1,6 +1,6 @@
 {
   "ok": true,
-  "generatedAt": "2026-07-14T11:12:05.565Z",
+  "generatedAt": "2026-07-14T12:25:53.069Z",
   "selector": {
     "pass": true,
     "checks": {
@@ -8,35 +8,64 @@
       "ordinaryGlobalLoadsNoWorkSkills": true,
       "ordinaryGroupLoadsNoWorkSkills": true,
       "globalGetsOnlyRelevantSkills": true,
-      "groupGetsCoordinatorAndReceipt": true,
+      "groupGetsCoordinatorAndDecomposition": true,
+      "groupReviewGetsReviewAndReceipt": true,
       "contextualExecutionLoadsGroupSkill": true,
-      "projectGetsWorkerReceiptAndEvidence": true,
-      "testAgentGetsVerifierAndEvidence": true,
-      "selectionBudgetBounded": true
+      "projectGetsSourceReceiptAndMatchedWorkflows": true,
+      "incidentTaskGetsDiagnosis": true,
+      "releaseTaskGetsReadiness": true,
+      "testAgentGetsVerifierEvidenceAndVisualQa": true,
+      "selectionBudgetBounded": true,
+      "usageDirectiveRequiresApplicationAndReceipt": true
     },
     "selections": {
       "ordinaryGlobal": [],
       "ordinaryGroup": [],
       "globalWork": [
         "ccm-global-mission-lead",
-        "ccm-acceptance-evidence"
+        "ccm-requirement-intake",
+        "ccm-incident-diagnosis"
       ],
       "groupWork": [
         "ccm-group-coordination-lead",
-        "ccm-delivery-receipt"
+        "ccm-task-decomposition",
+        "ccm-requirement-intake"
       ],
-      "contextualGroupWork": [
+      "groupReview": [
         "ccm-group-coordination-lead",
-        "ccm-delivery-receipt"
-      ],
-      "projectWork": [
-        "ccm-project-delivery-worker",
+        "ccm-delivery-review-rework",
         "ccm-delivery-receipt",
         "ccm-acceptance-evidence"
       ],
+      "contextualGroupWork": [
+        "ccm-group-coordination-lead",
+        "ccm-task-decomposition"
+      ],
+      "projectWork": [
+        "ccm-project-delivery-worker",
+        "ccm-project-source-research",
+        "ccm-delivery-receipt",
+        "ccm-document-driven-delivery",
+        "ccm-incident-diagnosis",
+        "ccm-frontend-visual-qa"
+      ],
+      "incidentWork": [
+        "ccm-project-delivery-worker",
+        "ccm-project-source-research",
+        "ccm-delivery-receipt",
+        "ccm-incident-diagnosis",
+        "ccm-acceptance-evidence"
+      ],
+      "releaseWork": [
+        "ccm-project-delivery-worker",
+        "ccm-project-source-research",
+        "ccm-delivery-receipt",
+        "ccm-release-readiness"
+      ],
       "testWork": [
         "ccm-test-acceptance-verifier",
-        "ccm-acceptance-evidence"
+        "ccm-acceptance-evidence",
+        "ccm-frontend-visual-qa"
       ]
     },
     "installation": {
@@ -47,27 +76,69 @@
         "ccm-project-delivery-worker",
         "ccm-test-acceptance-verifier",
         "ccm-delivery-receipt",
-        "ccm-acceptance-evidence"
+        "ccm-acceptance-evidence",
+        "ccm-requirement-intake",
+        "ccm-task-decomposition",
+        "ccm-delivery-review-rework",
+        "ccm-project-source-research",
+        "ccm-document-driven-delivery",
+        "ccm-incident-diagnosis",
+        "ccm-frontend-visual-qa",
+        "ccm-release-readiness"
       ]
     }
   },
-  "projectSelection": [
+  "runtimeScenarios": [
     {
-      "name": "ccm-project-delivery-worker",
-      "kind": "role",
-      "reason": "限定范围内实施与验证"
+      "id": "document-ui",
+      "task": "根据 PRD 实现设置页面，并运行真实浏览器响应式截图验收",
+      "expected": [
+        "ccm-document-driven-delivery",
+        "ccm-frontend-visual-qa",
+        "ccm-acceptance-evidence"
+      ]
     },
     {
-      "name": "ccm-delivery-receipt",
-      "kind": "shared",
-      "reason": "向主 Agent 返回可复核回执"
+      "id": "incident",
+      "task": "修复 API 500 报错，定位根因并执行回归验证",
+      "expected": [
+        "ccm-incident-diagnosis",
+        "ccm-acceptance-evidence"
+      ]
     },
     {
-      "name": "ccm-acceptance-evidence",
-      "kind": "shared",
-      "reason": "任务要求验证或验收证据"
+      "id": "release",
+      "task": "完成版本升级、数据库迁移，运行构建并验证生产发布就绪",
+      "expected": [
+        "ccm-release-readiness",
+        "ccm-acceptance-evidence"
+      ]
     }
   ],
+  "nativePromptChecks": {
+    "global": [
+      "ccm-global-mission-lead",
+      "ccm-requirement-intake",
+      "ccm-incident-diagnosis"
+    ],
+    "groupPlanning": [
+      "ccm-group-coordination-lead",
+      "ccm-task-decomposition",
+      "ccm-requirement-intake",
+      "ccm-document-driven-delivery"
+    ],
+    "groupReview": [
+      "ccm-group-coordination-lead",
+      "ccm-delivery-review-rework",
+      "ccm-delivery-receipt",
+      "ccm-acceptance-evidence"
+    ],
+    "testVisual": [
+      "ccm-test-acceptance-verifier",
+      "ccm-acceptance-evidence",
+      "ccm-frontend-visual-qa"
+    ]
+  },
   "testAgentProfileSkills": [
     "ccm-test-acceptance-verifier",
     "ccm-acceptance-evidence"
@@ -75,6 +146,9 @@
   "testAgentWorkOrderSkills": {
     "schema": "ccm-role-skill-selection-v1",
     "role": "test-agent",
+    "phase": "verification",
+    "applied": true,
+    "appliedBy": "ccm-native-test-agent-engine",
     "selected": [
       {
         "name": "ccm-test-acceptance-verifier",
@@ -85,6 +159,30 @@
         "name": "ccm-acceptance-evidence",
         "kind": "shared",
         "reason": "验收项与真实证据绑定"
+      }
+    ]
+  },
+  "visualTestAgentWorkOrderSkills": {
+    "schema": "ccm-role-skill-selection-v1",
+    "role": "test-agent",
+    "phase": "verification",
+    "applied": true,
+    "appliedBy": "ccm-native-test-agent-engine",
+    "selected": [
+      {
+        "name": "ccm-test-acceptance-verifier",
+        "kind": "role",
+        "reason": "独立验收与保守结论"
+      },
+      {
+        "name": "ccm-acceptance-evidence",
+        "kind": "shared",
+        "reason": "验收项与真实证据绑定"
+      },
+      {
+        "name": "ccm-frontend-visual-qa",
+        "kind": "workflow",
+        "reason": "用户界面需要浏览器和截图验收"
       }
     ]
   },
@@ -101,58 +199,633 @@
   },
   "runtimeResults": {
     "claudecode": {
-      "snapshotId": "51b1d42a70a76da0",
-      "snapshotPath": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\role-skills-selftest\\latest-run\\agent-runtime\\claudecode\\51b1d42a70a76da0\\runtime-tool-snapshot.json",
-      "skillRoot": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\role-skills-selftest\\latest-run\\agent-runtime\\claudecode\\51b1d42a70a76da0\\plugin\\skills",
-      "requested": [
-        "ccm-project-delivery-worker",
+      "scenarios": {
+        "document-ui": {
+          "task": "根据 PRD 实现设置页面，并运行真实浏览器响应式截图验收",
+          "selected": [
+            "ccm-project-delivery-worker",
+            "ccm-project-source-research",
+            "ccm-delivery-receipt",
+            "ccm-document-driven-delivery",
+            "ccm-frontend-visual-qa",
+            "ccm-acceptance-evidence"
+          ],
+          "snapshotId": "de12ff00219614aa",
+          "snapshotPath": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\role-skills-selftest\\latest-run\\agent-runtime\\claudecode\\de12ff00219614aa\\runtime-tool-snapshot.json",
+          "skillRoot": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\role-skills-selftest\\latest-run\\agent-runtime\\claudecode\\de12ff00219614aa\\plugin\\skills",
+          "requested": [
+            "ccm-project-delivery-worker",
+            "ccm-project-source-research",
+            "ccm-delivery-receipt",
+            "ccm-document-driven-delivery",
+            "ccm-frontend-visual-qa",
+            "ccm-acceptance-evidence"
+          ],
+          "synced": [
+            "ccm-project-delivery-worker",
+            "ccm-project-source-research",
+            "ccm-delivery-receipt",
+            "ccm-document-driven-delivery",
+            "ccm-frontend-visual-qa",
+            "ccm-acceptance-evidence"
+          ],
+          "missing": [],
+          "usageDirective": "[CCM 本工作单已选择 Skill]\n以下 Skill 不是可选目录项，而是本工作单已匹配的执行方法。开始工作前读取并应用其 SKILL.md；只在需要细节时读取 references。\n- Skill:ccm-project-delivery-worker：限定范围内实施与验证\n- Skill:ccm-project-source-research：修改前确认当前源码和项目规范\n- Skill:ccm-delivery-receipt：向主 Agent 返回可复核回执\n- Skill:ccm-document-driven-delivery：按文档条款追踪实现覆盖\n- Skill:ccm-frontend-visual-qa：前端任务需要真实浏览器与视觉证据\n- Skill:ccm-acceptance-evidence：任务要求验证或验收证据\n完成后在 CCM_AGENT_RECEIPT 的 memoryUsed/Skill 使用记录中逐项报告实际使用的 Skill:<name>；未使用时说明原因，禁止虚报。",
+          "detectedUsage": [
+            {
+              "name": "ccm-acceptance-evidence",
+              "contentHash": "e3b0c44298fc1c14",
+              "invokedAt": "2026-07-14T12:25:52.055Z",
+              "source": "receipt"
+            },
+            {
+              "name": "ccm-delivery-receipt",
+              "contentHash": "e3b0c44298fc1c14",
+              "invokedAt": "2026-07-14T12:25:52.056Z",
+              "source": "receipt"
+            },
+            {
+              "name": "ccm-document-driven-delivery",
+              "contentHash": "e3b0c44298fc1c14",
+              "invokedAt": "2026-07-14T12:25:52.056Z",
+              "source": "receipt"
+            },
+            {
+              "name": "ccm-frontend-visual-qa",
+              "contentHash": "e3b0c44298fc1c14",
+              "invokedAt": "2026-07-14T12:25:52.056Z",
+              "source": "receipt"
+            },
+            {
+              "name": "ccm-project-delivery-worker",
+              "contentHash": "e3b0c44298fc1c14",
+              "invokedAt": "2026-07-14T12:25:52.056Z",
+              "source": "receipt"
+            },
+            {
+              "name": "ccm-project-source-research",
+              "contentHash": "e3b0c44298fc1c14",
+              "invokedAt": "2026-07-14T12:25:52.056Z",
+              "source": "receipt"
+            }
+          ]
+        },
+        "incident": {
+          "task": "修复 API 500 报错，定位根因并执行回归验证",
+          "selected": [
+            "ccm-project-delivery-worker",
+            "ccm-project-source-research",
+            "ccm-delivery-receipt",
+            "ccm-incident-diagnosis",
+            "ccm-acceptance-evidence"
+          ],
+          "snapshotId": "37453fb11e178e63",
+          "snapshotPath": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\role-skills-selftest\\latest-run\\agent-runtime\\claudecode\\37453fb11e178e63\\runtime-tool-snapshot.json",
+          "skillRoot": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\role-skills-selftest\\latest-run\\agent-runtime\\claudecode\\37453fb11e178e63\\plugin\\skills",
+          "requested": [
+            "ccm-project-delivery-worker",
+            "ccm-project-source-research",
+            "ccm-delivery-receipt",
+            "ccm-incident-diagnosis",
+            "ccm-acceptance-evidence"
+          ],
+          "synced": [
+            "ccm-project-delivery-worker",
+            "ccm-project-source-research",
+            "ccm-delivery-receipt",
+            "ccm-incident-diagnosis",
+            "ccm-acceptance-evidence"
+          ],
+          "missing": [],
+          "usageDirective": "[CCM 本工作单已选择 Skill]\n以下 Skill 不是可选目录项，而是本工作单已匹配的执行方法。开始工作前读取并应用其 SKILL.md；只在需要细节时读取 references。\n- Skill:ccm-project-delivery-worker：限定范围内实施与验证\n- Skill:ccm-project-source-research：修改前确认当前源码和项目规范\n- Skill:ccm-delivery-receipt：向主 Agent 返回可复核回执\n- Skill:ccm-incident-diagnosis：先复现并定位根因再修改\n- Skill:ccm-acceptance-evidence：任务要求验证或验收证据\n完成后在 CCM_AGENT_RECEIPT 的 memoryUsed/Skill 使用记录中逐项报告实际使用的 Skill:<name>；未使用时说明原因，禁止虚报。",
+          "detectedUsage": [
+            {
+              "name": "ccm-acceptance-evidence",
+              "contentHash": "e3b0c44298fc1c14",
+              "invokedAt": "2026-07-14T12:25:52.135Z",
+              "source": "receipt"
+            },
+            {
+              "name": "ccm-delivery-receipt",
+              "contentHash": "e3b0c44298fc1c14",
+              "invokedAt": "2026-07-14T12:25:52.135Z",
+              "source": "receipt"
+            },
+            {
+              "name": "ccm-incident-diagnosis",
+              "contentHash": "e3b0c44298fc1c14",
+              "invokedAt": "2026-07-14T12:25:52.135Z",
+              "source": "receipt"
+            },
+            {
+              "name": "ccm-project-delivery-worker",
+              "contentHash": "e3b0c44298fc1c14",
+              "invokedAt": "2026-07-14T12:25:52.135Z",
+              "source": "receipt"
+            },
+            {
+              "name": "ccm-project-source-research",
+              "contentHash": "e3b0c44298fc1c14",
+              "invokedAt": "2026-07-14T12:25:52.135Z",
+              "source": "receipt"
+            }
+          ]
+        },
+        "release": {
+          "task": "完成版本升级、数据库迁移，运行构建并验证生产发布就绪",
+          "selected": [
+            "ccm-project-delivery-worker",
+            "ccm-project-source-research",
+            "ccm-delivery-receipt",
+            "ccm-acceptance-evidence",
+            "ccm-release-readiness"
+          ],
+          "snapshotId": "f4657365042abcbe",
+          "snapshotPath": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\role-skills-selftest\\latest-run\\agent-runtime\\claudecode\\f4657365042abcbe\\runtime-tool-snapshot.json",
+          "skillRoot": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\role-skills-selftest\\latest-run\\agent-runtime\\claudecode\\f4657365042abcbe\\plugin\\skills",
+          "requested": [
+            "ccm-project-delivery-worker",
+            "ccm-project-source-research",
+            "ccm-delivery-receipt",
+            "ccm-acceptance-evidence",
+            "ccm-release-readiness"
+          ],
+          "synced": [
+            "ccm-project-delivery-worker",
+            "ccm-project-source-research",
+            "ccm-delivery-receipt",
+            "ccm-acceptance-evidence",
+            "ccm-release-readiness"
+          ],
+          "missing": [],
+          "usageDirective": "[CCM 本工作单已选择 Skill]\n以下 Skill 不是可选目录项，而是本工作单已匹配的执行方法。开始工作前读取并应用其 SKILL.md；只在需要细节时读取 references。\n- Skill:ccm-project-delivery-worker：限定范围内实施与验证\n- Skill:ccm-project-source-research：修改前确认当前源码和项目规范\n- Skill:ccm-delivery-receipt：向主 Agent 返回可复核回执\n- Skill:ccm-acceptance-evidence：任务要求验证或验收证据\n- Skill:ccm-release-readiness：任务涉及发布、升级或迁移\n完成后在 CCM_AGENT_RECEIPT 的 memoryUsed/Skill 使用记录中逐项报告实际使用的 Skill:<name>；未使用时说明原因，禁止虚报。",
+          "detectedUsage": [
+            {
+              "name": "ccm-acceptance-evidence",
+              "contentHash": "e3b0c44298fc1c14",
+              "invokedAt": "2026-07-14T12:25:52.181Z",
+              "source": "receipt"
+            },
+            {
+              "name": "ccm-delivery-receipt",
+              "contentHash": "e3b0c44298fc1c14",
+              "invokedAt": "2026-07-14T12:25:52.181Z",
+              "source": "receipt"
+            },
+            {
+              "name": "ccm-project-delivery-worker",
+              "contentHash": "e3b0c44298fc1c14",
+              "invokedAt": "2026-07-14T12:25:52.181Z",
+              "source": "receipt"
+            },
+            {
+              "name": "ccm-project-source-research",
+              "contentHash": "e3b0c44298fc1c14",
+              "invokedAt": "2026-07-14T12:25:52.181Z",
+              "source": "receipt"
+            },
+            {
+              "name": "ccm-release-readiness",
+              "contentHash": "e3b0c44298fc1c14",
+              "invokedAt": "2026-07-14T12:25:52.181Z",
+              "source": "receipt"
+            }
+          ]
+        }
+      },
+      "coveredSkills": [
+        "ccm-acceptance-evidence",
         "ccm-delivery-receipt",
-        "ccm-acceptance-evidence"
-      ],
-      "synced": [
+        "ccm-document-driven-delivery",
+        "ccm-frontend-visual-qa",
+        "ccm-incident-diagnosis",
         "ccm-project-delivery-worker",
-        "ccm-delivery-receipt",
-        "ccm-acceptance-evidence"
-      ],
-      "missing": []
+        "ccm-project-source-research",
+        "ccm-release-readiness"
+      ]
     },
     "cursor": {
-      "snapshotId": "05403108bc3cd269",
-      "snapshotPath": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\role-skills-selftest\\latest-run\\agent-runtime\\cursor\\05403108bc3cd269\\runtime-tool-snapshot.json",
-      "skillRoot": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\role-skills-selftest\\latest-run\\agent-runtime\\cursor\\05403108bc3cd269\\plugin\\skills",
-      "requested": [
-        "ccm-project-delivery-worker",
+      "scenarios": {
+        "document-ui": {
+          "task": "根据 PRD 实现设置页面，并运行真实浏览器响应式截图验收",
+          "selected": [
+            "ccm-project-delivery-worker",
+            "ccm-project-source-research",
+            "ccm-delivery-receipt",
+            "ccm-document-driven-delivery",
+            "ccm-frontend-visual-qa",
+            "ccm-acceptance-evidence"
+          ],
+          "snapshotId": "41bd216f93f30ebd",
+          "snapshotPath": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\role-skills-selftest\\latest-run\\agent-runtime\\cursor\\41bd216f93f30ebd\\runtime-tool-snapshot.json",
+          "skillRoot": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\role-skills-selftest\\latest-run\\agent-runtime\\cursor\\41bd216f93f30ebd\\plugin\\skills",
+          "requested": [
+            "ccm-project-delivery-worker",
+            "ccm-project-source-research",
+            "ccm-delivery-receipt",
+            "ccm-document-driven-delivery",
+            "ccm-frontend-visual-qa",
+            "ccm-acceptance-evidence"
+          ],
+          "synced": [
+            "ccm-project-delivery-worker",
+            "ccm-project-source-research",
+            "ccm-delivery-receipt",
+            "ccm-document-driven-delivery",
+            "ccm-frontend-visual-qa",
+            "ccm-acceptance-evidence"
+          ],
+          "missing": [],
+          "usageDirective": "[CCM 本工作单已选择 Skill]\n以下 Skill 不是可选目录项，而是本工作单已匹配的执行方法。开始工作前读取并应用其 SKILL.md；只在需要细节时读取 references。\n- Skill:ccm-project-delivery-worker：限定范围内实施与验证\n- Skill:ccm-project-source-research：修改前确认当前源码和项目规范\n- Skill:ccm-delivery-receipt：向主 Agent 返回可复核回执\n- Skill:ccm-document-driven-delivery：按文档条款追踪实现覆盖\n- Skill:ccm-frontend-visual-qa：前端任务需要真实浏览器与视觉证据\n- Skill:ccm-acceptance-evidence：任务要求验证或验收证据\n完成后在 CCM_AGENT_RECEIPT 的 memoryUsed/Skill 使用记录中逐项报告实际使用的 Skill:<name>；未使用时说明原因，禁止虚报。",
+          "detectedUsage": [
+            {
+              "name": "ccm-acceptance-evidence",
+              "contentHash": "e3b0c44298fc1c14",
+              "invokedAt": "2026-07-14T12:25:52.219Z",
+              "source": "receipt"
+            },
+            {
+              "name": "ccm-delivery-receipt",
+              "contentHash": "e3b0c44298fc1c14",
+              "invokedAt": "2026-07-14T12:25:52.219Z",
+              "source": "receipt"
+            },
+            {
+              "name": "ccm-document-driven-delivery",
+              "contentHash": "e3b0c44298fc1c14",
+              "invokedAt": "2026-07-14T12:25:52.219Z",
+              "source": "receipt"
+            },
+            {
+              "name": "ccm-frontend-visual-qa",
+              "contentHash": "e3b0c44298fc1c14",
+              "invokedAt": "2026-07-14T12:25:52.219Z",
+              "source": "receipt"
+            },
+            {
+              "name": "ccm-project-delivery-worker",
+              "contentHash": "e3b0c44298fc1c14",
+              "invokedAt": "2026-07-14T12:25:52.219Z",
+              "source": "receipt"
+            },
+            {
+              "name": "ccm-project-source-research",
+              "contentHash": "e3b0c44298fc1c14",
+              "invokedAt": "2026-07-14T12:25:52.219Z",
+              "source": "receipt"
+            }
+          ]
+        },
+        "incident": {
+          "task": "修复 API 500 报错，定位根因并执行回归验证",
+          "selected": [
+            "ccm-project-delivery-worker",
+            "ccm-project-source-research",
+            "ccm-delivery-receipt",
+            "ccm-incident-diagnosis",
+            "ccm-acceptance-evidence"
+          ],
+          "snapshotId": "a8d731d3808382c1",
+          "snapshotPath": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\role-skills-selftest\\latest-run\\agent-runtime\\cursor\\a8d731d3808382c1\\runtime-tool-snapshot.json",
+          "skillRoot": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\role-skills-selftest\\latest-run\\agent-runtime\\cursor\\a8d731d3808382c1\\plugin\\skills",
+          "requested": [
+            "ccm-project-delivery-worker",
+            "ccm-project-source-research",
+            "ccm-delivery-receipt",
+            "ccm-incident-diagnosis",
+            "ccm-acceptance-evidence"
+          ],
+          "synced": [
+            "ccm-project-delivery-worker",
+            "ccm-project-source-research",
+            "ccm-delivery-receipt",
+            "ccm-incident-diagnosis",
+            "ccm-acceptance-evidence"
+          ],
+          "missing": [],
+          "usageDirective": "[CCM 本工作单已选择 Skill]\n以下 Skill 不是可选目录项，而是本工作单已匹配的执行方法。开始工作前读取并应用其 SKILL.md；只在需要细节时读取 references。\n- Skill:ccm-project-delivery-worker：限定范围内实施与验证\n- Skill:ccm-project-source-research：修改前确认当前源码和项目规范\n- Skill:ccm-delivery-receipt：向主 Agent 返回可复核回执\n- Skill:ccm-incident-diagnosis：先复现并定位根因再修改\n- Skill:ccm-acceptance-evidence：任务要求验证或验收证据\n完成后在 CCM_AGENT_RECEIPT 的 memoryUsed/Skill 使用记录中逐项报告实际使用的 Skill:<name>；未使用时说明原因，禁止虚报。",
+          "detectedUsage": [
+            {
+              "name": "ccm-acceptance-evidence",
+              "contentHash": "e3b0c44298fc1c14",
+              "invokedAt": "2026-07-14T12:25:52.281Z",
+              "source": "receipt"
+            },
+            {
+              "name": "ccm-delivery-receipt",
+              "contentHash": "e3b0c44298fc1c14",
+              "invokedAt": "2026-07-14T12:25:52.281Z",
+              "source": "receipt"
+            },
+            {
+              "name": "ccm-incident-diagnosis",
+              "contentHash": "e3b0c44298fc1c14",
+              "invokedAt": "2026-07-14T12:25:52.281Z",
+              "source": "receipt"
+            },
+            {
+              "name": "ccm-project-delivery-worker",
+              "contentHash": "e3b0c44298fc1c14",
+              "invokedAt": "2026-07-14T12:25:52.281Z",
+              "source": "receipt"
+            },
+            {
+              "name": "ccm-project-source-research",
+              "contentHash": "e3b0c44298fc1c14",
+              "invokedAt": "2026-07-14T12:25:52.281Z",
+              "source": "receipt"
+            }
+          ]
+        },
+        "release": {
+          "task": "完成版本升级、数据库迁移，运行构建并验证生产发布就绪",
+          "selected": [
+            "ccm-project-delivery-worker",
+            "ccm-project-source-research",
+            "ccm-delivery-receipt",
+            "ccm-acceptance-evidence",
+            "ccm-release-readiness"
+          ],
+          "snapshotId": "de461a6988efa01b",
+          "snapshotPath": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\role-skills-selftest\\latest-run\\agent-runtime\\cursor\\de461a6988efa01b\\runtime-tool-snapshot.json",
+          "skillRoot": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\role-skills-selftest\\latest-run\\agent-runtime\\cursor\\de461a6988efa01b\\plugin\\skills",
+          "requested": [
+            "ccm-project-delivery-worker",
+            "ccm-project-source-research",
+            "ccm-delivery-receipt",
+            "ccm-acceptance-evidence",
+            "ccm-release-readiness"
+          ],
+          "synced": [
+            "ccm-project-delivery-worker",
+            "ccm-project-source-research",
+            "ccm-delivery-receipt",
+            "ccm-acceptance-evidence",
+            "ccm-release-readiness"
+          ],
+          "missing": [],
+          "usageDirective": "[CCM 本工作单已选择 Skill]\n以下 Skill 不是可选目录项，而是本工作单已匹配的执行方法。开始工作前读取并应用其 SKILL.md；只在需要细节时读取 references。\n- Skill:ccm-project-delivery-worker：限定范围内实施与验证\n- Skill:ccm-project-source-research：修改前确认当前源码和项目规范\n- Skill:ccm-delivery-receipt：向主 Agent 返回可复核回执\n- Skill:ccm-acceptance-evidence：任务要求验证或验收证据\n- Skill:ccm-release-readiness：任务涉及发布、升级或迁移\n完成后在 CCM_AGENT_RECEIPT 的 memoryUsed/Skill 使用记录中逐项报告实际使用的 Skill:<name>；未使用时说明原因，禁止虚报。",
+          "detectedUsage": [
+            {
+              "name": "ccm-acceptance-evidence",
+              "contentHash": "e3b0c44298fc1c14",
+              "invokedAt": "2026-07-14T12:25:52.337Z",
+              "source": "receipt"
+            },
+            {
+              "name": "ccm-delivery-receipt",
+              "contentHash": "e3b0c44298fc1c14",
+              "invokedAt": "2026-07-14T12:25:52.337Z",
+              "source": "receipt"
+            },
+            {
+              "name": "ccm-project-delivery-worker",
+              "contentHash": "e3b0c44298fc1c14",
+              "invokedAt": "2026-07-14T12:25:52.337Z",
+              "source": "receipt"
+            },
+            {
+              "name": "ccm-project-source-research",
+              "contentHash": "e3b0c44298fc1c14",
+              "invokedAt": "2026-07-14T12:25:52.337Z",
+              "source": "receipt"
+            },
+            {
+              "name": "ccm-release-readiness",
+              "contentHash": "e3b0c44298fc1c14",
+              "invokedAt": "2026-07-14T12:25:52.337Z",
+              "source": "receipt"
+            }
+          ]
+        }
+      },
+      "coveredSkills": [
+        "ccm-acceptance-evidence",
         "ccm-delivery-receipt",
-        "ccm-acceptance-evidence"
-      ],
-      "synced": [
+        "ccm-document-driven-delivery",
+        "ccm-frontend-visual-qa",
+        "ccm-incident-diagnosis",
         "ccm-project-delivery-worker",
-        "ccm-delivery-receipt",
-        "ccm-acceptance-evidence"
-      ],
-      "missing": []
+        "ccm-project-source-research",
+        "ccm-release-readiness"
+      ]
     },
     "codex": {
-      "snapshotId": "965e398d17c6ff6d",
-      "snapshotPath": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\role-skills-selftest\\latest-run\\agent-runtime\\codex\\965e398d17c6ff6d\\runtime-tool-snapshot.json",
-      "skillRoot": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\role-skills-selftest\\latest-run\\agent-runtime\\codex\\965e398d17c6ff6d\\skills",
-      "requested": [
-        "ccm-project-delivery-worker",
+      "scenarios": {
+        "document-ui": {
+          "task": "根据 PRD 实现设置页面，并运行真实浏览器响应式截图验收",
+          "selected": [
+            "ccm-project-delivery-worker",
+            "ccm-project-source-research",
+            "ccm-delivery-receipt",
+            "ccm-document-driven-delivery",
+            "ccm-frontend-visual-qa",
+            "ccm-acceptance-evidence"
+          ],
+          "snapshotId": "1894c3ddd78e7923",
+          "snapshotPath": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\role-skills-selftest\\latest-run\\agent-runtime\\codex\\1894c3ddd78e7923\\runtime-tool-snapshot.json",
+          "skillRoot": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\role-skills-selftest\\latest-run\\agent-runtime\\codex\\1894c3ddd78e7923\\skills",
+          "requested": [
+            "ccm-project-delivery-worker",
+            "ccm-project-source-research",
+            "ccm-delivery-receipt",
+            "ccm-document-driven-delivery",
+            "ccm-frontend-visual-qa",
+            "ccm-acceptance-evidence"
+          ],
+          "synced": [
+            "ccm-project-delivery-worker",
+            "ccm-project-source-research",
+            "ccm-delivery-receipt",
+            "ccm-document-driven-delivery",
+            "ccm-frontend-visual-qa",
+            "ccm-acceptance-evidence"
+          ],
+          "missing": [],
+          "usageDirective": "[CCM 本工作单已选择 Skill]\n以下 Skill 不是可选目录项，而是本工作单已匹配的执行方法。开始工作前读取并应用其 SKILL.md；只在需要细节时读取 references。\n- Skill:ccm-project-delivery-worker：限定范围内实施与验证\n- Skill:ccm-project-source-research：修改前确认当前源码和项目规范\n- Skill:ccm-delivery-receipt：向主 Agent 返回可复核回执\n- Skill:ccm-document-driven-delivery：按文档条款追踪实现覆盖\n- Skill:ccm-frontend-visual-qa：前端任务需要真实浏览器与视觉证据\n- Skill:ccm-acceptance-evidence：任务要求验证或验收证据\n完成后在 CCM_AGENT_RECEIPT 的 memoryUsed/Skill 使用记录中逐项报告实际使用的 Skill:<name>；未使用时说明原因，禁止虚报。",
+          "detectedUsage": [
+            {
+              "name": "ccm-acceptance-evidence",
+              "contentHash": "e3b0c44298fc1c14",
+              "invokedAt": "2026-07-14T12:25:52.388Z",
+              "source": "receipt"
+            },
+            {
+              "name": "ccm-delivery-receipt",
+              "contentHash": "e3b0c44298fc1c14",
+              "invokedAt": "2026-07-14T12:25:52.388Z",
+              "source": "receipt"
+            },
+            {
+              "name": "ccm-document-driven-delivery",
+              "contentHash": "e3b0c44298fc1c14",
+              "invokedAt": "2026-07-14T12:25:52.388Z",
+              "source": "receipt"
+            },
+            {
+              "name": "ccm-frontend-visual-qa",
+              "contentHash": "e3b0c44298fc1c14",
+              "invokedAt": "2026-07-14T12:25:52.388Z",
+              "source": "receipt"
+            },
+            {
+              "name": "ccm-project-delivery-worker",
+              "contentHash": "e3b0c44298fc1c14",
+              "invokedAt": "2026-07-14T12:25:52.388Z",
+              "source": "receipt"
+            },
+            {
+              "name": "ccm-project-source-research",
+              "contentHash": "e3b0c44298fc1c14",
+              "invokedAt": "2026-07-14T12:25:52.388Z",
+              "source": "receipt"
+            }
+          ]
+        },
+        "incident": {
+          "task": "修复 API 500 报错，定位根因并执行回归验证",
+          "selected": [
+            "ccm-project-delivery-worker",
+            "ccm-project-source-research",
+            "ccm-delivery-receipt",
+            "ccm-incident-diagnosis",
+            "ccm-acceptance-evidence"
+          ],
+          "snapshotId": "130e12641a431497",
+          "snapshotPath": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\role-skills-selftest\\latest-run\\agent-runtime\\codex\\130e12641a431497\\runtime-tool-snapshot.json",
+          "skillRoot": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\role-skills-selftest\\latest-run\\agent-runtime\\codex\\130e12641a431497\\skills",
+          "requested": [
+            "ccm-project-delivery-worker",
+            "ccm-project-source-research",
+            "ccm-delivery-receipt",
+            "ccm-incident-diagnosis",
+            "ccm-acceptance-evidence"
+          ],
+          "synced": [
+            "ccm-project-delivery-worker",
+            "ccm-project-source-research",
+            "ccm-delivery-receipt",
+            "ccm-incident-diagnosis",
+            "ccm-acceptance-evidence"
+          ],
+          "missing": [],
+          "usageDirective": "[CCM 本工作单已选择 Skill]\n以下 Skill 不是可选目录项，而是本工作单已匹配的执行方法。开始工作前读取并应用其 SKILL.md；只在需要细节时读取 references。\n- Skill:ccm-project-delivery-worker：限定范围内实施与验证\n- Skill:ccm-project-source-research：修改前确认当前源码和项目规范\n- Skill:ccm-delivery-receipt：向主 Agent 返回可复核回执\n- Skill:ccm-incident-diagnosis：先复现并定位根因再修改\n- Skill:ccm-acceptance-evidence：任务要求验证或验收证据\n完成后在 CCM_AGENT_RECEIPT 的 memoryUsed/Skill 使用记录中逐项报告实际使用的 Skill:<name>；未使用时说明原因，禁止虚报。",
+          "detectedUsage": [
+            {
+              "name": "ccm-acceptance-evidence",
+              "contentHash": "e3b0c44298fc1c14",
+              "invokedAt": "2026-07-14T12:25:52.445Z",
+              "source": "receipt"
+            },
+            {
+              "name": "ccm-delivery-receipt",
+              "contentHash": "e3b0c44298fc1c14",
+              "invokedAt": "2026-07-14T12:25:52.445Z",
+              "source": "receipt"
+            },
+            {
+              "name": "ccm-incident-diagnosis",
+              "contentHash": "e3b0c44298fc1c14",
+              "invokedAt": "2026-07-14T12:25:52.445Z",
+              "source": "receipt"
+            },
+            {
+              "name": "ccm-project-delivery-worker",
+              "contentHash": "e3b0c44298fc1c14",
+              "invokedAt": "2026-07-14T12:25:52.445Z",
+              "source": "receipt"
+            },
+            {
+              "name": "ccm-project-source-research",
+              "contentHash": "e3b0c44298fc1c14",
+              "invokedAt": "2026-07-14T12:25:52.445Z",
+              "source": "receipt"
+            }
+          ]
+        },
+        "release": {
+          "task": "完成版本升级、数据库迁移，运行构建并验证生产发布就绪",
+          "selected": [
+            "ccm-project-delivery-worker",
+            "ccm-project-source-research",
+            "ccm-delivery-receipt",
+            "ccm-acceptance-evidence",
+            "ccm-release-readiness"
+          ],
+          "snapshotId": "a946ca6e2cbeb159",
+          "snapshotPath": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\role-skills-selftest\\latest-run\\agent-runtime\\codex\\a946ca6e2cbeb159\\runtime-tool-snapshot.json",
+          "skillRoot": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\role-skills-selftest\\latest-run\\agent-runtime\\codex\\a946ca6e2cbeb159\\skills",
+          "requested": [
+            "ccm-project-delivery-worker",
+            "ccm-project-source-research",
+            "ccm-delivery-receipt",
+            "ccm-acceptance-evidence",
+            "ccm-release-readiness"
+          ],
+          "synced": [
+            "ccm-project-delivery-worker",
+            "ccm-project-source-research",
+            "ccm-delivery-receipt",
+            "ccm-acceptance-evidence",
+            "ccm-release-readiness"
+          ],
+          "missing": [],
+          "usageDirective": "[CCM 本工作单已选择 Skill]\n以下 Skill 不是可选目录项，而是本工作单已匹配的执行方法。开始工作前读取并应用其 SKILL.md；只在需要细节时读取 references。\n- Skill:ccm-project-delivery-worker：限定范围内实施与验证\n- Skill:ccm-project-source-research：修改前确认当前源码和项目规范\n- Skill:ccm-delivery-receipt：向主 Agent 返回可复核回执\n- Skill:ccm-acceptance-evidence：任务要求验证或验收证据\n- Skill:ccm-release-readiness：任务涉及发布、升级或迁移\n完成后在 CCM_AGENT_RECEIPT 的 memoryUsed/Skill 使用记录中逐项报告实际使用的 Skill:<name>；未使用时说明原因，禁止虚报。",
+          "detectedUsage": [
+            {
+              "name": "ccm-acceptance-evidence",
+              "contentHash": "e3b0c44298fc1c14",
+              "invokedAt": "2026-07-14T12:25:52.497Z",
+              "source": "receipt"
+            },
+            {
+              "name": "ccm-delivery-receipt",
+              "contentHash": "e3b0c44298fc1c14",
+              "invokedAt": "2026-07-14T12:25:52.497Z",
+              "source": "receipt"
+            },
+            {
+              "name": "ccm-project-delivery-worker",
+              "contentHash": "e3b0c44298fc1c14",
+              "invokedAt": "2026-07-14T12:25:52.497Z",
+              "source": "receipt"
+            },
+            {
+              "name": "ccm-project-source-research",
+              "contentHash": "e3b0c44298fc1c14",
+              "invokedAt": "2026-07-14T12:25:52.497Z",
+              "source": "receipt"
+            },
+            {
+              "name": "ccm-release-readiness",
+              "contentHash": "e3b0c44298fc1c14",
+              "invokedAt": "2026-07-14T12:25:52.497Z",
+              "source": "receipt"
+            }
+          ]
+        }
+      },
+      "coveredSkills": [
+        "ccm-acceptance-evidence",
         "ccm-delivery-receipt",
-        "ccm-acceptance-evidence"
-      ],
-      "synced": [
+        "ccm-document-driven-delivery",
+        "ccm-frontend-visual-qa",
+        "ccm-incident-diagnosis",
         "ccm-project-delivery-worker",
-        "ccm-delivery-receipt",
-        "ccm-acceptance-evidence"
-      ],
-      "missing": []
+        "ccm-project-source-research",
+        "ccm-release-readiness"
+      ]
     }
   },
   "sourceChecks": {
     "globalPromptUsesDynamicRoleSkill": true,
     "groupPromptUsesDynamicRoleSkill": true,
     "projectRuntimeMergesRoleSkills": true,
-    "testWorkOrderRecordsRoleSkills": true
+    "projectRuntimeRequiresSkillApplication": true,
+    "projectExecutionPromptsReceiveSkillDirective": true,
+    "projectExecutionRecordsInvokedSkills": true,
+    "testWorkOrderRecordsRoleSkills": true,
+    "testWorkOrderMarksNativeApplication": true,
+    "duplicateBrowserManualRemoved": true
   }
 }

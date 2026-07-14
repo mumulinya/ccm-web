@@ -14058,8 +14058,8 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             syntheticBlockedRuns: z.ZodArray<z.ZodNumber, "many">;
             status: z.ZodEnum<["complete", "incomplete", "invalid"]>;
         }, "strict", z.ZodTypeAny, {
-            name?: string;
             project?: string;
+            name?: string;
             status?: "complete" | "invalid" | "incomplete";
             checkId?: string;
             expectedRuns?: number;
@@ -14069,8 +14069,8 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             duplicateRuns?: number[];
             syntheticBlockedRuns?: number[];
         }, {
-            name?: string;
             project?: string;
+            name?: string;
             status?: "complete" | "invalid" | "incomplete";
             checkId?: string;
             expectedRuns?: number;
@@ -14083,8 +14083,8 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
     }, "strict", z.ZodTypeAny, {
         status?: "complete" | "invalid" | "incomplete";
         items?: {
-            name?: string;
             project?: string;
+            name?: string;
             status?: "complete" | "invalid" | "incomplete";
             checkId?: string;
             expectedRuns?: number;
@@ -14111,8 +14111,8 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
     }, {
         status?: "complete" | "invalid" | "incomplete";
         items?: {
-            name?: string;
             project?: string;
+            name?: string;
             status?: "complete" | "invalid" | "incomplete";
             checkId?: string;
             expectedRuns?: number;
@@ -14400,8 +14400,8 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             duplicateToolCallIds: z.ZodArray<z.ZodString, "many">;
             status: z.ZodEnum<["complete", "incomplete", "invalid"]>;
         }, "strict", z.ZodTypeAny, {
-            name?: string;
             project?: string;
+            name?: string;
             status?: "complete" | "invalid" | "incomplete";
             run?: number;
             checkId?: string;
@@ -14414,8 +14414,8 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             foreignToolCallIds?: string[];
             duplicateToolCallIds?: string[];
         }, {
-            name?: string;
             project?: string;
+            name?: string;
             status?: "complete" | "invalid" | "incomplete";
             run?: number;
             checkId?: string;
@@ -14431,8 +14431,8 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
     }, "strict", z.ZodTypeAny, {
         status?: "complete" | "invalid" | "incomplete";
         items?: {
-            name?: string;
             project?: string;
+            name?: string;
             status?: "complete" | "invalid" | "incomplete";
             run?: number;
             checkId?: string;
@@ -14467,8 +14467,8 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
     }, {
         status?: "complete" | "invalid" | "incomplete";
         items?: {
-            name?: string;
             project?: string;
+            name?: string;
             status?: "complete" | "invalid" | "incomplete";
             run?: number;
             checkId?: string;
@@ -18759,8 +18759,8 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             syntheticBlockedRuns: z.ZodArray<z.ZodNumber, "many">;
             status: z.ZodEnum<["complete", "incomplete", "invalid"]>;
         }, "strict", z.ZodTypeAny, {
-            name?: string;
             project?: string;
+            name?: string;
             status?: "complete" | "invalid" | "incomplete";
             checkId?: string;
             expectedRuns?: number;
@@ -18770,8 +18770,8 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             duplicateRuns?: number[];
             syntheticBlockedRuns?: number[];
         }, {
-            name?: string;
             project?: string;
+            name?: string;
             status?: "complete" | "invalid" | "incomplete";
             checkId?: string;
             expectedRuns?: number;
@@ -18784,8 +18784,8 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
     }, "strict", z.ZodTypeAny, {
         status?: "complete" | "invalid" | "incomplete";
         items?: {
-            name?: string;
             project?: string;
+            name?: string;
             status?: "complete" | "invalid" | "incomplete";
             checkId?: string;
             expectedRuns?: number;
@@ -18812,8 +18812,8 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
     }, {
         status?: "complete" | "invalid" | "incomplete";
         items?: {
-            name?: string;
             project?: string;
+            name?: string;
             status?: "complete" | "invalid" | "incomplete";
             checkId?: string;
             expectedRuns?: number;
@@ -19101,8 +19101,8 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             duplicateToolCallIds: z.ZodArray<z.ZodString, "many">;
             status: z.ZodEnum<["complete", "incomplete", "invalid"]>;
         }, "strict", z.ZodTypeAny, {
-            name?: string;
             project?: string;
+            name?: string;
             status?: "complete" | "invalid" | "incomplete";
             run?: number;
             checkId?: string;
@@ -19115,8 +19115,8 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             foreignToolCallIds?: string[];
             duplicateToolCallIds?: string[];
         }, {
-            name?: string;
             project?: string;
+            name?: string;
             status?: "complete" | "invalid" | "incomplete";
             run?: number;
             checkId?: string;
@@ -19132,8 +19132,8 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
     }, "strict", z.ZodTypeAny, {
         status?: "complete" | "invalid" | "incomplete";
         items?: {
-            name?: string;
             project?: string;
+            name?: string;
             status?: "complete" | "invalid" | "incomplete";
             run?: number;
             checkId?: string;
@@ -19168,8 +19168,8 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
     }, {
         status?: "complete" | "invalid" | "incomplete";
         items?: {
-            name?: string;
             project?: string;
+            name?: string;
             status?: "complete" | "invalid" | "incomplete";
             run?: number;
             checkId?: string;
@@ -23460,8 +23460,8 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             syntheticBlockedRuns: z.ZodArray<z.ZodNumber, "many">;
             status: z.ZodEnum<["complete", "incomplete", "invalid"]>;
         }, "strict", z.ZodTypeAny, {
-            name?: string;
             project?: string;
+            name?: string;
             status?: "complete" | "invalid" | "incomplete";
             checkId?: string;
             expectedRuns?: number;
@@ -23471,8 +23471,8 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             duplicateRuns?: number[];
             syntheticBlockedRuns?: number[];
         }, {
-            name?: string;
             project?: string;
+            name?: string;
             status?: "complete" | "invalid" | "incomplete";
             checkId?: string;
             expectedRuns?: number;
@@ -23485,8 +23485,8 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
     }, "strict", z.ZodTypeAny, {
         status?: "complete" | "invalid" | "incomplete";
         items?: {
-            name?: string;
             project?: string;
+            name?: string;
             status?: "complete" | "invalid" | "incomplete";
             checkId?: string;
             expectedRuns?: number;
@@ -23513,8 +23513,8 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
     }, {
         status?: "complete" | "invalid" | "incomplete";
         items?: {
-            name?: string;
             project?: string;
+            name?: string;
             status?: "complete" | "invalid" | "incomplete";
             checkId?: string;
             expectedRuns?: number;
@@ -23802,8 +23802,8 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             duplicateToolCallIds: z.ZodArray<z.ZodString, "many">;
             status: z.ZodEnum<["complete", "incomplete", "invalid"]>;
         }, "strict", z.ZodTypeAny, {
-            name?: string;
             project?: string;
+            name?: string;
             status?: "complete" | "invalid" | "incomplete";
             run?: number;
             checkId?: string;
@@ -23816,8 +23816,8 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             foreignToolCallIds?: string[];
             duplicateToolCallIds?: string[];
         }, {
-            name?: string;
             project?: string;
+            name?: string;
             status?: "complete" | "invalid" | "incomplete";
             run?: number;
             checkId?: string;
@@ -23833,8 +23833,8 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
     }, "strict", z.ZodTypeAny, {
         status?: "complete" | "invalid" | "incomplete";
         items?: {
-            name?: string;
             project?: string;
+            name?: string;
             status?: "complete" | "invalid" | "incomplete";
             run?: number;
             checkId?: string;
@@ -23869,8 +23869,8 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
     }, {
         status?: "complete" | "invalid" | "incomplete";
         items?: {
-            name?: string;
             project?: string;
+            name?: string;
             status?: "complete" | "invalid" | "incomplete";
             run?: number;
             checkId?: string;
@@ -28161,8 +28161,8 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             syntheticBlockedRuns: z.ZodArray<z.ZodNumber, "many">;
             status: z.ZodEnum<["complete", "incomplete", "invalid"]>;
         }, "strict", z.ZodTypeAny, {
-            name?: string;
             project?: string;
+            name?: string;
             status?: "complete" | "invalid" | "incomplete";
             checkId?: string;
             expectedRuns?: number;
@@ -28172,8 +28172,8 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             duplicateRuns?: number[];
             syntheticBlockedRuns?: number[];
         }, {
-            name?: string;
             project?: string;
+            name?: string;
             status?: "complete" | "invalid" | "incomplete";
             checkId?: string;
             expectedRuns?: number;
@@ -28186,8 +28186,8 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
     }, "strict", z.ZodTypeAny, {
         status?: "complete" | "invalid" | "incomplete";
         items?: {
-            name?: string;
             project?: string;
+            name?: string;
             status?: "complete" | "invalid" | "incomplete";
             checkId?: string;
             expectedRuns?: number;
@@ -28214,8 +28214,8 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
     }, {
         status?: "complete" | "invalid" | "incomplete";
         items?: {
-            name?: string;
             project?: string;
+            name?: string;
             status?: "complete" | "invalid" | "incomplete";
             checkId?: string;
             expectedRuns?: number;
@@ -28503,8 +28503,8 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             duplicateToolCallIds: z.ZodArray<z.ZodString, "many">;
             status: z.ZodEnum<["complete", "incomplete", "invalid"]>;
         }, "strict", z.ZodTypeAny, {
-            name?: string;
             project?: string;
+            name?: string;
             status?: "complete" | "invalid" | "incomplete";
             run?: number;
             checkId?: string;
@@ -28517,8 +28517,8 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             foreignToolCallIds?: string[];
             duplicateToolCallIds?: string[];
         }, {
-            name?: string;
             project?: string;
+            name?: string;
             status?: "complete" | "invalid" | "incomplete";
             run?: number;
             checkId?: string;
@@ -28534,8 +28534,8 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
     }, "strict", z.ZodTypeAny, {
         status?: "complete" | "invalid" | "incomplete";
         items?: {
-            name?: string;
             project?: string;
+            name?: string;
             status?: "complete" | "invalid" | "incomplete";
             run?: number;
             checkId?: string;
@@ -28570,8 +28570,8 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
     }, {
         status?: "complete" | "invalid" | "incomplete";
         items?: {
-            name?: string;
             project?: string;
+            name?: string;
             status?: "complete" | "invalid" | "incomplete";
             run?: number;
             checkId?: string;
@@ -32862,8 +32862,8 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             syntheticBlockedRuns: z.ZodArray<z.ZodNumber, "many">;
             status: z.ZodEnum<["complete", "incomplete", "invalid"]>;
         }, "strict", z.ZodTypeAny, {
-            name?: string;
             project?: string;
+            name?: string;
             status?: "complete" | "invalid" | "incomplete";
             checkId?: string;
             expectedRuns?: number;
@@ -32873,8 +32873,8 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             duplicateRuns?: number[];
             syntheticBlockedRuns?: number[];
         }, {
-            name?: string;
             project?: string;
+            name?: string;
             status?: "complete" | "invalid" | "incomplete";
             checkId?: string;
             expectedRuns?: number;
@@ -32887,8 +32887,8 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
     }, "strict", z.ZodTypeAny, {
         status?: "complete" | "invalid" | "incomplete";
         items?: {
-            name?: string;
             project?: string;
+            name?: string;
             status?: "complete" | "invalid" | "incomplete";
             checkId?: string;
             expectedRuns?: number;
@@ -32915,8 +32915,8 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
     }, {
         status?: "complete" | "invalid" | "incomplete";
         items?: {
-            name?: string;
             project?: string;
+            name?: string;
             status?: "complete" | "invalid" | "incomplete";
             checkId?: string;
             expectedRuns?: number;
@@ -33204,8 +33204,8 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             duplicateToolCallIds: z.ZodArray<z.ZodString, "many">;
             status: z.ZodEnum<["complete", "incomplete", "invalid"]>;
         }, "strict", z.ZodTypeAny, {
-            name?: string;
             project?: string;
+            name?: string;
             status?: "complete" | "invalid" | "incomplete";
             run?: number;
             checkId?: string;
@@ -33218,8 +33218,8 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             foreignToolCallIds?: string[];
             duplicateToolCallIds?: string[];
         }, {
-            name?: string;
             project?: string;
+            name?: string;
             status?: "complete" | "invalid" | "incomplete";
             run?: number;
             checkId?: string;
@@ -33235,8 +33235,8 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
     }, "strict", z.ZodTypeAny, {
         status?: "complete" | "invalid" | "incomplete";
         items?: {
-            name?: string;
             project?: string;
+            name?: string;
             status?: "complete" | "invalid" | "incomplete";
             run?: number;
             checkId?: string;
@@ -33271,8 +33271,8 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
     }, {
         status?: "complete" | "invalid" | "incomplete";
         items?: {
-            name?: string;
             project?: string;
+            name?: string;
             status?: "complete" | "invalid" | "incomplete";
             run?: number;
             checkId?: string;
@@ -35013,14 +35013,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             project: z.ZodOptional<z.ZodString>;
         }, "strict", z.ZodTypeAny, {
             message?: string;
-            path?: string;
             project?: string;
+            path?: string;
             severity?: "error" | "warning";
             code?: string;
         }, {
             message?: string;
-            path?: string;
             project?: string;
+            path?: string;
             severity?: "error" | "warning";
             code?: string;
         }>, "many">;
@@ -35032,14 +35032,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             project: z.ZodOptional<z.ZodString>;
         }, "strict", z.ZodTypeAny, {
             message?: string;
-            path?: string;
             project?: string;
+            path?: string;
             severity?: "error" | "warning";
             code?: string;
         }, {
             message?: string;
-            path?: string;
             project?: string;
+            path?: string;
             severity?: "error" | "warning";
             code?: string;
         }>, "many">;
@@ -35047,15 +35047,15 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         valid?: boolean;
         warnings?: {
             message?: string;
-            path?: string;
             project?: string;
+            path?: string;
             severity?: "error" | "warning";
             code?: string;
         }[];
         errors?: {
             message?: string;
-            path?: string;
             project?: string;
+            path?: string;
             severity?: "error" | "warning";
             code?: string;
         }[];
@@ -35063,15 +35063,15 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         valid?: boolean;
         warnings?: {
             message?: string;
-            path?: string;
             project?: string;
+            path?: string;
             severity?: "error" | "warning";
             code?: string;
         }[];
         errors?: {
             message?: string;
-            path?: string;
             project?: string;
+            path?: string;
             severity?: "error" | "warning";
             code?: string;
         }[];
@@ -35086,14 +35086,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             project: z.ZodOptional<z.ZodString>;
         }, "strict", z.ZodTypeAny, {
             message?: string;
-            path?: string;
             project?: string;
+            path?: string;
             severity?: "error" | "warning";
             code?: string;
         }, {
             message?: string;
-            path?: string;
             project?: string;
+            path?: string;
             severity?: "error" | "warning";
             code?: string;
         }>, "many">;
@@ -35105,14 +35105,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             project: z.ZodOptional<z.ZodString>;
         }, "strict", z.ZodTypeAny, {
             message?: string;
-            path?: string;
             project?: string;
+            path?: string;
             severity?: "error" | "warning";
             code?: string;
         }, {
             message?: string;
-            path?: string;
             project?: string;
+            path?: string;
             severity?: "error" | "warning";
             code?: string;
         }>, "many">;
@@ -35120,15 +35120,15 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         valid?: boolean;
         warnings?: {
             message?: string;
-            path?: string;
             project?: string;
+            path?: string;
             severity?: "error" | "warning";
             code?: string;
         }[];
         errors?: {
             message?: string;
-            path?: string;
             project?: string;
+            path?: string;
             severity?: "error" | "warning";
             code?: string;
         }[];
@@ -35136,15 +35136,15 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         valid?: boolean;
         warnings?: {
             message?: string;
-            path?: string;
             project?: string;
+            path?: string;
             severity?: "error" | "warning";
             code?: string;
         }[];
         errors?: {
             message?: string;
-            path?: string;
             project?: string;
+            path?: string;
             severity?: "error" | "warning";
             code?: string;
         }[];
@@ -37735,8 +37735,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 syntheticBlockedRuns: z.ZodArray<z.ZodNumber, "many">;
                 status: z.ZodEnum<["complete", "incomplete", "invalid"]>;
             }, "strict", z.ZodTypeAny, {
-                name?: string;
                 project?: string;
+                name?: string;
                 status?: "complete" | "invalid" | "incomplete";
                 checkId?: string;
                 expectedRuns?: number;
@@ -37746,8 +37746,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 duplicateRuns?: number[];
                 syntheticBlockedRuns?: number[];
             }, {
-                name?: string;
                 project?: string;
+                name?: string;
                 status?: "complete" | "invalid" | "incomplete";
                 checkId?: string;
                 expectedRuns?: number;
@@ -37760,8 +37760,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         }, "strict", z.ZodTypeAny, {
             status?: "complete" | "invalid" | "incomplete";
             items?: {
-                name?: string;
                 project?: string;
+                name?: string;
                 status?: "complete" | "invalid" | "incomplete";
                 checkId?: string;
                 expectedRuns?: number;
@@ -37788,8 +37788,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         }, {
             status?: "complete" | "invalid" | "incomplete";
             items?: {
-                name?: string;
                 project?: string;
+                name?: string;
                 status?: "complete" | "invalid" | "incomplete";
                 checkId?: string;
                 expectedRuns?: number;
@@ -38077,8 +38077,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 duplicateToolCallIds: z.ZodArray<z.ZodString, "many">;
                 status: z.ZodEnum<["complete", "incomplete", "invalid"]>;
             }, "strict", z.ZodTypeAny, {
-                name?: string;
                 project?: string;
+                name?: string;
                 status?: "complete" | "invalid" | "incomplete";
                 run?: number;
                 checkId?: string;
@@ -38091,8 +38091,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 foreignToolCallIds?: string[];
                 duplicateToolCallIds?: string[];
             }, {
-                name?: string;
                 project?: string;
+                name?: string;
                 status?: "complete" | "invalid" | "incomplete";
                 run?: number;
                 checkId?: string;
@@ -38108,8 +38108,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         }, "strict", z.ZodTypeAny, {
             status?: "complete" | "invalid" | "incomplete";
             items?: {
-                name?: string;
                 project?: string;
+                name?: string;
                 status?: "complete" | "invalid" | "incomplete";
                 run?: number;
                 checkId?: string;
@@ -38144,8 +38144,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         }, {
             status?: "complete" | "invalid" | "incomplete";
             items?: {
-                name?: string;
                 project?: string;
+                name?: string;
                 status?: "complete" | "invalid" | "incomplete";
                 run?: number;
                 checkId?: string;
@@ -42436,8 +42436,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 syntheticBlockedRuns: z.ZodArray<z.ZodNumber, "many">;
                 status: z.ZodEnum<["complete", "incomplete", "invalid"]>;
             }, "strict", z.ZodTypeAny, {
-                name?: string;
                 project?: string;
+                name?: string;
                 status?: "complete" | "invalid" | "incomplete";
                 checkId?: string;
                 expectedRuns?: number;
@@ -42447,8 +42447,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 duplicateRuns?: number[];
                 syntheticBlockedRuns?: number[];
             }, {
-                name?: string;
                 project?: string;
+                name?: string;
                 status?: "complete" | "invalid" | "incomplete";
                 checkId?: string;
                 expectedRuns?: number;
@@ -42461,8 +42461,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         }, "strict", z.ZodTypeAny, {
             status?: "complete" | "invalid" | "incomplete";
             items?: {
-                name?: string;
                 project?: string;
+                name?: string;
                 status?: "complete" | "invalid" | "incomplete";
                 checkId?: string;
                 expectedRuns?: number;
@@ -42489,8 +42489,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         }, {
             status?: "complete" | "invalid" | "incomplete";
             items?: {
-                name?: string;
                 project?: string;
+                name?: string;
                 status?: "complete" | "invalid" | "incomplete";
                 checkId?: string;
                 expectedRuns?: number;
@@ -42778,8 +42778,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 duplicateToolCallIds: z.ZodArray<z.ZodString, "many">;
                 status: z.ZodEnum<["complete", "incomplete", "invalid"]>;
             }, "strict", z.ZodTypeAny, {
-                name?: string;
                 project?: string;
+                name?: string;
                 status?: "complete" | "invalid" | "incomplete";
                 run?: number;
                 checkId?: string;
@@ -42792,8 +42792,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 foreignToolCallIds?: string[];
                 duplicateToolCallIds?: string[];
             }, {
-                name?: string;
                 project?: string;
+                name?: string;
                 status?: "complete" | "invalid" | "incomplete";
                 run?: number;
                 checkId?: string;
@@ -42809,8 +42809,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         }, "strict", z.ZodTypeAny, {
             status?: "complete" | "invalid" | "incomplete";
             items?: {
-                name?: string;
                 project?: string;
+                name?: string;
                 status?: "complete" | "invalid" | "incomplete";
                 run?: number;
                 checkId?: string;
@@ -42845,8 +42845,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         }, {
             status?: "complete" | "invalid" | "incomplete";
             items?: {
-                name?: string;
                 project?: string;
+                name?: string;
                 status?: "complete" | "invalid" | "incomplete";
                 run?: number;
                 checkId?: string;
@@ -47137,8 +47137,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 syntheticBlockedRuns: z.ZodArray<z.ZodNumber, "many">;
                 status: z.ZodEnum<["complete", "incomplete", "invalid"]>;
             }, "strict", z.ZodTypeAny, {
-                name?: string;
                 project?: string;
+                name?: string;
                 status?: "complete" | "invalid" | "incomplete";
                 checkId?: string;
                 expectedRuns?: number;
@@ -47148,8 +47148,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 duplicateRuns?: number[];
                 syntheticBlockedRuns?: number[];
             }, {
-                name?: string;
                 project?: string;
+                name?: string;
                 status?: "complete" | "invalid" | "incomplete";
                 checkId?: string;
                 expectedRuns?: number;
@@ -47162,8 +47162,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         }, "strict", z.ZodTypeAny, {
             status?: "complete" | "invalid" | "incomplete";
             items?: {
-                name?: string;
                 project?: string;
+                name?: string;
                 status?: "complete" | "invalid" | "incomplete";
                 checkId?: string;
                 expectedRuns?: number;
@@ -47190,8 +47190,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         }, {
             status?: "complete" | "invalid" | "incomplete";
             items?: {
-                name?: string;
                 project?: string;
+                name?: string;
                 status?: "complete" | "invalid" | "incomplete";
                 checkId?: string;
                 expectedRuns?: number;
@@ -47479,8 +47479,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 duplicateToolCallIds: z.ZodArray<z.ZodString, "many">;
                 status: z.ZodEnum<["complete", "incomplete", "invalid"]>;
             }, "strict", z.ZodTypeAny, {
-                name?: string;
                 project?: string;
+                name?: string;
                 status?: "complete" | "invalid" | "incomplete";
                 run?: number;
                 checkId?: string;
@@ -47493,8 +47493,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 foreignToolCallIds?: string[];
                 duplicateToolCallIds?: string[];
             }, {
-                name?: string;
                 project?: string;
+                name?: string;
                 status?: "complete" | "invalid" | "incomplete";
                 run?: number;
                 checkId?: string;
@@ -47510,8 +47510,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         }, "strict", z.ZodTypeAny, {
             status?: "complete" | "invalid" | "incomplete";
             items?: {
-                name?: string;
                 project?: string;
+                name?: string;
                 status?: "complete" | "invalid" | "incomplete";
                 run?: number;
                 checkId?: string;
@@ -47546,8 +47546,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         }, {
             status?: "complete" | "invalid" | "incomplete";
             items?: {
-                name?: string;
                 project?: string;
+                name?: string;
                 status?: "complete" | "invalid" | "incomplete";
                 run?: number;
                 checkId?: string;
@@ -51838,8 +51838,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 syntheticBlockedRuns: z.ZodArray<z.ZodNumber, "many">;
                 status: z.ZodEnum<["complete", "incomplete", "invalid"]>;
             }, "strict", z.ZodTypeAny, {
-                name?: string;
                 project?: string;
+                name?: string;
                 status?: "complete" | "invalid" | "incomplete";
                 checkId?: string;
                 expectedRuns?: number;
@@ -51849,8 +51849,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 duplicateRuns?: number[];
                 syntheticBlockedRuns?: number[];
             }, {
-                name?: string;
                 project?: string;
+                name?: string;
                 status?: "complete" | "invalid" | "incomplete";
                 checkId?: string;
                 expectedRuns?: number;
@@ -51863,8 +51863,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         }, "strict", z.ZodTypeAny, {
             status?: "complete" | "invalid" | "incomplete";
             items?: {
-                name?: string;
                 project?: string;
+                name?: string;
                 status?: "complete" | "invalid" | "incomplete";
                 checkId?: string;
                 expectedRuns?: number;
@@ -51891,8 +51891,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         }, {
             status?: "complete" | "invalid" | "incomplete";
             items?: {
-                name?: string;
                 project?: string;
+                name?: string;
                 status?: "complete" | "invalid" | "incomplete";
                 checkId?: string;
                 expectedRuns?: number;
@@ -52180,8 +52180,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 duplicateToolCallIds: z.ZodArray<z.ZodString, "many">;
                 status: z.ZodEnum<["complete", "incomplete", "invalid"]>;
             }, "strict", z.ZodTypeAny, {
-                name?: string;
                 project?: string;
+                name?: string;
                 status?: "complete" | "invalid" | "incomplete";
                 run?: number;
                 checkId?: string;
@@ -52194,8 +52194,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 foreignToolCallIds?: string[];
                 duplicateToolCallIds?: string[];
             }, {
-                name?: string;
                 project?: string;
+                name?: string;
                 status?: "complete" | "invalid" | "incomplete";
                 run?: number;
                 checkId?: string;
@@ -52211,8 +52211,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         }, "strict", z.ZodTypeAny, {
             status?: "complete" | "invalid" | "incomplete";
             items?: {
-                name?: string;
                 project?: string;
+                name?: string;
                 status?: "complete" | "invalid" | "incomplete";
                 run?: number;
                 checkId?: string;
@@ -52247,8 +52247,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         }, {
             status?: "complete" | "invalid" | "incomplete";
             items?: {
-                name?: string;
                 project?: string;
+                name?: string;
                 status?: "complete" | "invalid" | "incomplete";
                 run?: number;
                 checkId?: string;
@@ -56539,8 +56539,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 syntheticBlockedRuns: z.ZodArray<z.ZodNumber, "many">;
                 status: z.ZodEnum<["complete", "incomplete", "invalid"]>;
             }, "strict", z.ZodTypeAny, {
-                name?: string;
                 project?: string;
+                name?: string;
                 status?: "complete" | "invalid" | "incomplete";
                 checkId?: string;
                 expectedRuns?: number;
@@ -56550,8 +56550,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 duplicateRuns?: number[];
                 syntheticBlockedRuns?: number[];
             }, {
-                name?: string;
                 project?: string;
+                name?: string;
                 status?: "complete" | "invalid" | "incomplete";
                 checkId?: string;
                 expectedRuns?: number;
@@ -56564,8 +56564,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         }, "strict", z.ZodTypeAny, {
             status?: "complete" | "invalid" | "incomplete";
             items?: {
-                name?: string;
                 project?: string;
+                name?: string;
                 status?: "complete" | "invalid" | "incomplete";
                 checkId?: string;
                 expectedRuns?: number;
@@ -56592,8 +56592,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         }, {
             status?: "complete" | "invalid" | "incomplete";
             items?: {
-                name?: string;
                 project?: string;
+                name?: string;
                 status?: "complete" | "invalid" | "incomplete";
                 checkId?: string;
                 expectedRuns?: number;
@@ -56881,8 +56881,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 duplicateToolCallIds: z.ZodArray<z.ZodString, "many">;
                 status: z.ZodEnum<["complete", "incomplete", "invalid"]>;
             }, "strict", z.ZodTypeAny, {
-                name?: string;
                 project?: string;
+                name?: string;
                 status?: "complete" | "invalid" | "incomplete";
                 run?: number;
                 checkId?: string;
@@ -56895,8 +56895,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 foreignToolCallIds?: string[];
                 duplicateToolCallIds?: string[];
             }, {
-                name?: string;
                 project?: string;
+                name?: string;
                 status?: "complete" | "invalid" | "incomplete";
                 run?: number;
                 checkId?: string;
@@ -56912,8 +56912,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         }, "strict", z.ZodTypeAny, {
             status?: "complete" | "invalid" | "incomplete";
             items?: {
-                name?: string;
                 project?: string;
+                name?: string;
                 status?: "complete" | "invalid" | "incomplete";
                 run?: number;
                 checkId?: string;
@@ -56948,8 +56948,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         }, {
             status?: "complete" | "invalid" | "incomplete";
             items?: {
-                name?: string;
                 project?: string;
+                name?: string;
                 status?: "complete" | "invalid" | "incomplete";
                 run?: number;
                 checkId?: string;
@@ -58902,8 +58902,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         browserCheckExecutionCoverage?: {
             status?: "complete" | "invalid" | "incomplete";
             items?: {
-                name?: string;
                 project?: string;
+                name?: string;
                 status?: "complete" | "invalid" | "incomplete";
                 checkId?: string;
                 expectedRuns?: number;
@@ -59273,8 +59273,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         browserToolEvidenceLineage?: {
             status?: "complete" | "invalid" | "incomplete";
             items?: {
-                name?: string;
                 project?: string;
+                name?: string;
                 status?: "complete" | "invalid" | "incomplete";
                 run?: number;
                 checkId?: string;
@@ -59631,15 +59631,15 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         valid?: boolean;
         warnings?: {
             message?: string;
-            path?: string;
             project?: string;
+            path?: string;
             severity?: "error" | "warning";
             code?: string;
         }[];
         errors?: {
             message?: string;
-            path?: string;
             project?: string;
+            path?: string;
             severity?: "error" | "warning";
             code?: string;
         }[];
@@ -59648,15 +59648,15 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         valid?: boolean;
         warnings?: {
             message?: string;
-            path?: string;
             project?: string;
+            path?: string;
             severity?: "error" | "warning";
             code?: string;
         }[];
         errors?: {
             message?: string;
-            path?: string;
             project?: string;
+            path?: string;
             severity?: "error" | "warning";
             code?: string;
         }[];
@@ -59807,8 +59807,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         browserCheckExecutionCoverage?: {
             status?: "complete" | "invalid" | "incomplete";
             items?: {
-                name?: string;
                 project?: string;
+                name?: string;
                 status?: "complete" | "invalid" | "incomplete";
                 checkId?: string;
                 expectedRuns?: number;
@@ -60178,8 +60178,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         browserToolEvidenceLineage?: {
             status?: "complete" | "invalid" | "incomplete";
             items?: {
-                name?: string;
                 project?: string;
+                name?: string;
                 status?: "complete" | "invalid" | "incomplete";
                 run?: number;
                 checkId?: string;
@@ -60536,15 +60536,15 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         valid?: boolean;
         warnings?: {
             message?: string;
-            path?: string;
             project?: string;
+            path?: string;
             severity?: "error" | "warning";
             code?: string;
         }[];
         errors?: {
             message?: string;
-            path?: string;
             project?: string;
+            path?: string;
             severity?: "error" | "warning";
             code?: string;
         }[];
@@ -60553,15 +60553,15 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         valid?: boolean;
         warnings?: {
             message?: string;
-            path?: string;
             project?: string;
+            path?: string;
             severity?: "error" | "warning";
             code?: string;
         }[];
         errors?: {
             message?: string;
-            path?: string;
             project?: string;
+            path?: string;
             severity?: "error" | "warning";
             code?: string;
         }[];
@@ -60712,8 +60712,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         browserCheckExecutionCoverage?: {
             status?: "complete" | "invalid" | "incomplete";
             items?: {
-                name?: string;
                 project?: string;
+                name?: string;
                 status?: "complete" | "invalid" | "incomplete";
                 checkId?: string;
                 expectedRuns?: number;
@@ -61083,8 +61083,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         browserToolEvidenceLineage?: {
             status?: "complete" | "invalid" | "incomplete";
             items?: {
-                name?: string;
                 project?: string;
+                name?: string;
                 status?: "complete" | "invalid" | "incomplete";
                 run?: number;
                 checkId?: string;
@@ -61441,15 +61441,15 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         valid?: boolean;
         warnings?: {
             message?: string;
-            path?: string;
             project?: string;
+            path?: string;
             severity?: "error" | "warning";
             code?: string;
         }[];
         errors?: {
             message?: string;
-            path?: string;
             project?: string;
+            path?: string;
             severity?: "error" | "warning";
             code?: string;
         }[];
@@ -61458,15 +61458,15 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         valid?: boolean;
         warnings?: {
             message?: string;
-            path?: string;
             project?: string;
+            path?: string;
             severity?: "error" | "warning";
             code?: string;
         }[];
         errors?: {
             message?: string;
-            path?: string;
             project?: string;
+            path?: string;
             severity?: "error" | "warning";
             code?: string;
         }[];
@@ -61617,8 +61617,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         browserCheckExecutionCoverage?: {
             status?: "complete" | "invalid" | "incomplete";
             items?: {
-                name?: string;
                 project?: string;
+                name?: string;
                 status?: "complete" | "invalid" | "incomplete";
                 checkId?: string;
                 expectedRuns?: number;
@@ -61988,8 +61988,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         browserToolEvidenceLineage?: {
             status?: "complete" | "invalid" | "incomplete";
             items?: {
-                name?: string;
                 project?: string;
+                name?: string;
                 status?: "complete" | "invalid" | "incomplete";
                 run?: number;
                 checkId?: string;
@@ -62346,15 +62346,15 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         valid?: boolean;
         warnings?: {
             message?: string;
-            path?: string;
             project?: string;
+            path?: string;
             severity?: "error" | "warning";
             code?: string;
         }[];
         errors?: {
             message?: string;
-            path?: string;
             project?: string;
+            path?: string;
             severity?: "error" | "warning";
             code?: string;
         }[];
@@ -62363,15 +62363,15 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         valid?: boolean;
         warnings?: {
             message?: string;
-            path?: string;
             project?: string;
+            path?: string;
             severity?: "error" | "warning";
             code?: string;
         }[];
         errors?: {
             message?: string;
-            path?: string;
             project?: string;
+            path?: string;
             severity?: "error" | "warning";
             code?: string;
         }[];

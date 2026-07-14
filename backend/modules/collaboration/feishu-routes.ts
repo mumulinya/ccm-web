@@ -200,13 +200,13 @@ export function handleFeishuRoutes(
   }
 
   if (pathname === "/api/feishu/health" && req.method === "GET") {
-    sendJson(res, getFeishuChannelHealth());
+    sendJson(res, getFeishuChannelHealth(Number(req.socket?.localPort || 3080)));
     return true;
   }
 
   if (pathname === "/api/feishu/health/probe" && req.method === "POST") {
     probeFeishuControlBotApi().then((probe) => {
-      const health = getFeishuChannelHealth();
+      const health = getFeishuChannelHealth(Number(req.socket?.localPort || 3080));
       sendJson(res, { ...health, healthy: health.healthy && probe.success === true, api_probe: probe }, probe.success ? 200 : 503);
     }).catch((error: any) => sendJson(res, { success: false, error: error?.message || "飞书健康探针失败" }, 503));
     return true;

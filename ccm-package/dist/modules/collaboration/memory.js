@@ -84,6 +84,9 @@ exports.latestGroupCompactFileReferenceReadPlanRevalidationGate = latestGroupCom
 exports.buildGroupCompactFileReferenceReadPlanRevalidationGate = buildGroupCompactFileReferenceReadPlanRevalidationGate;
 exports.buildGroupMemoryContext = buildGroupMemoryContext;
 exports.deleteGroupSessionMemoryArtifacts = deleteGroupSessionMemoryArtifacts;
+exports.appendGroupMemorySnipBoundaryMarker = appendGroupMemorySnipBoundaryMarker;
+exports.buildGroupMemoryResumeEffectiveTokenBaseline = buildGroupMemoryResumeEffectiveTokenBaseline;
+exports.validateGroupMemoryResumeEffectiveTokenBaseline = validateGroupMemoryResumeEffectiveTokenBaseline;
 exports.prepareGroupMemoryResumeProjection = prepareGroupMemoryResumeProjection;
 exports.buildGroupMemorySourceManifest = buildGroupMemorySourceManifest;
 exports.readGroupPostCompactDispatchLedger = readGroupPostCompactDispatchLedger;
@@ -163,6 +166,9 @@ const group_post_turn_summary_1 = require("./group-post-turn-summary");
 const task_agent_invocation_lineage_1 = require("../../tasks/task-agent-invocation-lineage");
 const task_agent_continuation_soak_1 = require("../../tasks/task-agent-continuation-soak");
 const group_compact_head_1 = require("./group-compact-head");
+const provider_native_compact_execution_receipt_1 = require("./provider-native-compact-execution-receipt");
+const provider_native_compact_session_capacity_1 = require("./provider-native-compact-session-capacity");
+const group_memory_auto_compact_circuit_breaker_1 = require("./group-memory-auto-compact-circuit-breaker");
 const GROUP_MEMORY_DIR = path.join(utils_1.CCM_DIR, "group-memory");
 const GROUP_SESSION_SCOPED_MEMORY_DIR = path.join(utils_1.CCM_DIR, "group-memory-sessions");
 exports.GROUP_MEMORY_SOURCE_MANIFEST_VERSION = 1;
@@ -3893,6 +3899,10 @@ function buildGroupMemoryContext(memory) {
     }
     if (memory.messageCompression?.compressedMessages)
         lines.push(`- 压缩状态：共 ${memory.messageCompression.totalMessages || 0} 条消息，旧消息压缩 ${memory.messageCompression.compressedMessages || 0} 条，近期原文 ${memory.messageCompression.recentLimit || 0} 条。`);
+    const resumeBaseline = memory.compaction?.resumeEffectiveTokenBaseline || memory.messageCompression?.resumeEffectiveTokenBaseline;
+    if (resumeBaseline?.schema && validateGroupMemoryResumeEffectiveTokenBaseline(resumeBaseline)) {
+        lines.push(`- 恢复后有效上下文：raw ${resumeBaseline.rawTranscriptTokens || 0} tokens；省略旧正文 ${resumeBaseline.omittedRawTokens || 0}；重放 snip 删除 ${resumeBaseline.snipRemovedMessageCount || 0} 条 / 约 ${resumeBaseline.snipRemovedTokenEstimate || 0} tokens；摘要 ${resumeBaseline.summaryTokens || 0} + 投影 ${resumeBaseline.projectedMessageTokens || 0} = effective ${resumeBaseline.effectiveContextTokens || 0}；排除旧 provider usage ${resumeBaseline.staleProviderUsageTokensExcluded || 0}。`);
+    }
     const pressureWarning = memory.compaction?.contextPressureWarning || memory.compaction?.compactWarning || memory.messageCompression?.contextPressureWarning;
     if (pressureWarning?.schema) {
         lines.push(`- 上下文压力：${pressureWarning.level || "unknown"}；使用约 ${pressureWarning.tokenUsage || 0} tokens，距 auto-compact ${pressureWarning.percentLeft ?? "unknown"}%；建议 ${pressureWarning.recommendation || "continue"}${pressureWarning.suppressed ? "；压缩后预警暂时抑制" : ""}。`);
@@ -4040,6 +4050,8 @@ function deleteGroupSessionMemoryArtifacts(groupId, sessionId) {
         `${getGroupApiMicrocompactNativeApplyProofLedgerFile(groupId, cleanSessionId)}.bak`,
         getGroupApiMicrocompactNativeApplyRequestTelemetryLedgerFile(groupId, cleanSessionId),
         `${getGroupApiMicrocompactNativeApplyRequestTelemetryLedgerFile(groupId, cleanSessionId)}.bak`,
+        (0, provider_native_compact_execution_receipt_1.getProviderNativeCompactExecutionReceiptLedgerFile)(groupId, cleanSessionId),
+        `${(0, provider_native_compact_execution_receipt_1.getProviderNativeCompactExecutionReceiptLedgerFile)(groupId, cleanSessionId)}.bak`,
         getGroupReplayRepairLedgerFile(groupId, cleanSessionId),
         `${getGroupReplayRepairLedgerFile(groupId, cleanSessionId)}.bak`,
         getGroupReplayRepairWorkItemsFile(groupId, cleanSessionId),
@@ -4091,6 +4103,12 @@ function deleteGroupSessionMemoryArtifacts(groupId, sessionId) {
         ? (0, group_compact_head_1.deleteGroupCompactHead)(groupId, cleanSessionId)
         : { deleted: 0 };
     deletedFiles += Number(compactHeadArtifacts.deleted || 0);
+    const providerNativeCompactSessionCapacityArtifacts = (0, provider_native_compact_session_capacity_1.deleteProviderNativeCompactSessionCapacity)(groupId, cleanSessionId);
+    deletedFiles += Number(providerNativeCompactSessionCapacityArtifacts.deleted || 0);
+    const autoCompactCircuitBreakerArtifacts = cleanSessionId.startsWith("gcs_")
+        ? (0, group_memory_auto_compact_circuit_breaker_1.deleteGroupMemoryAutoCompactCircuitBreaker)(groupId, cleanSessionId)
+        : { deleted: 0 };
+    deletedFiles += Number(autoCompactCircuitBreakerArtifacts.deleted || 0);
     return {
         schema: "ccm-group-session-memory-artifact-delete-v1",
         groupId,
@@ -4102,6 +4120,8 @@ function deleteGroupSessionMemoryArtifacts(groupId, sessionId) {
         invocationLineageArtifacts,
         continuationSoakArtifacts,
         compactHeadArtifacts,
+        providerNativeCompactSessionCapacityArtifacts,
+        autoCompactCircuitBreakerArtifacts,
         deletedAt: new Date().toISOString(),
     };
 }
@@ -4206,6 +4226,157 @@ function clearUntrustedGroupCompactionState(memory, reason) {
         },
     };
 }
+function appendGroupMemorySnipBoundaryMarker(groupId, groupSessionId, removedMessageIds, options = {}) {
+    const id = String(groupId || "").trim();
+    const sessionId = String(groupSessionId || "").trim();
+    if (!id || !sessionId.startsWith("gcs_"))
+        throw new Error("exact_group_session_required_for_snip_boundary_append");
+    const messages = (0, storage_1.getGroupMessages)(id, sessionId).filter((message) => !String(message?.content || "").startsWith("📤"));
+    const existingIds = new Set(messages.map((message, index) => getMemoryMessageIdentity(message, index)));
+    const requestedIds = [...new Set((Array.isArray(removedMessageIds) ? removedMessageIds : [])
+            .map(item => String(item || "").trim()).filter(Boolean))];
+    const missingIds = requestedIds.filter(messageId => !existingIds.has(messageId));
+    if (!requestedIds.length)
+        throw new Error("snip_boundary_removed_message_ids_required");
+    if (missingIds.length && options.allowMissing !== true && options.allow_missing !== true) {
+        throw new Error(`snip_boundary_message_ids_not_found:${missingIds.slice(0, 8).join(",")}`);
+    }
+    const effectiveIds = options.allowMissing === true || options.allow_missing === true
+        ? requestedIds.filter(messageId => existingIds.has(messageId))
+        : requestedIds;
+    if (!effectiveIds.length)
+        throw new Error("snip_boundary_has_no_existing_message_ids");
+    const parentMessage = messages[messages.length - 1] || null;
+    const marker = (0, group_memory_boundary_journal_1.buildGroupMemorySnipBoundaryMarker)({
+        ...options,
+        groupId: id,
+        groupSessionId: sessionId,
+        removedMessageIds: effectiveIds,
+        parentUuid: options.parentUuid
+            || options.parent_uuid
+            || (parentMessage ? getMemoryMessageIdentity(parentMessage, messages.length - 1) : null),
+    });
+    const appended = (0, storage_1.appendGroupMessage)(id, marker);
+    return {
+        schema: "ccm-group-history-snip-boundary-append-v1",
+        version: 1,
+        groupId: id,
+        groupSessionId: sessionId,
+        appended: true,
+        marker: appended,
+        removedMessageCount: effectiveIds.length,
+        missingMessageCount: missingIds.length,
+        removalChecksum: marker.snipMetadata.removedUuidsChecksum,
+    };
+}
+function buildGroupMemoryResumeEffectiveTokenBaseline(projection, memory, allMessages, options = {}) {
+    if (projection?.status !== "verified" || projection?.useProjection !== true)
+        return null;
+    const rawMessages = (allMessages || []).filter((message) => !String(message?.content || "").startsWith("📤"));
+    const projectedMessages = Array.isArray(projection.projectedMessages) ? projection.projectedMessages : [];
+    const omittedMessageCount = Math.max(0, Math.min(rawMessages.length, Number(projection.omittedMessageCount || 0)));
+    const rawTranscriptTokens = rawMessages.reduce((sum, message) => sum + (0, group_memory_compaction_1.estimateGroupMessageTokens)(message), 0);
+    const omittedRawTokens = rawMessages.slice(0, omittedMessageCount)
+        .reduce((sum, message) => sum + (0, group_memory_compaction_1.estimateGroupMessageTokens)(message), 0);
+    const projectedMessageTokens = projectedMessages
+        .reduce((sum, message) => sum + (0, group_memory_compaction_1.estimateGroupMessageTokens)(message), 0);
+    const summaryText = String(memory?.messageDigest || (0, group_memory_compaction_1.renderConversationSummary)(memory?.conversationSummary || null) || "");
+    const summaryTokens = (0, group_memory_compaction_1.estimateGroupTextTokens)(summaryText);
+    const effectiveContextTokens = summaryTokens + projectedMessageTokens;
+    const pressureWarning = (0, group_memory_compaction_1.calculateGroupCompactWarningState)({
+        activeTokens: effectiveContextTokens,
+        activeMessageCount: projectedMessages.length,
+        autoCompactThreshold: options.autoCompactThreshold || options.auto_compact_threshold,
+        config: options.config || options,
+    });
+    const core = {
+        schema: "ccm-group-memory-resume-effective-token-baseline-v1",
+        version: 1,
+        groupId: String(projection.groupId || memory?.groupId || ""),
+        groupSessionId: String(projection.sessionId || memory?.groupSessionId || ""),
+        boundaryId: String(projection.boundary?.boundaryId || ""),
+        summaryChecksum: String(projection.boundary?.summaryChecksum || memory?.compaction?.summaryChecksum || ""),
+        projectionChecksum: String(projection.projectionChecksum || ""),
+        rawMessageCount: rawMessages.length,
+        omittedMessageCount,
+        snipOmittedMessageCount: Math.max(0, Number(projection.snipOmittedMessageCount || 0)),
+        totalOmittedMessageCount: Math.max(0, Number(projection.totalOmittedMessageCount || omittedMessageCount)),
+        projectedMessageCount: projectedMessages.length,
+        rawTranscriptTokens,
+        omittedRawTokens,
+        projectedMessageTokens,
+        summaryTokens,
+        effectiveContextTokens,
+        tokenSavings: Math.max(0, rawTranscriptTokens - effectiveContextTokens),
+        staleProviderUsageTokensExcluded: Math.max(0, Number(projection.staleProviderUsageTokensExcluded || 0)),
+        usageSanitizedMessageCount: Math.max(0, Number(projection.usageSanitizedMessageCount || 0)),
+        snipRemovedMessageCount: Math.max(0, Number(projection.snipReplay?.removedMessageCount || 0)),
+        snipRemovedTokenEstimate: Math.max(0, Number(projection.snipReplay?.removedTokenEstimate || 0)),
+        snipRelinkedMessageCount: Math.max(0, Number(projection.snipReplay?.relinkedMessageCount || 0)),
+        snipRemovalChecksum: String(projection.snipReplay?.removalChecksum || ""),
+        resumeConsistencyDelta: Number(projection.roundTripConsistency?.delta || 0),
+        resumeConsistencyChecksum: String(projection.roundTripConsistency?.checksum || ""),
+        calculation: "effective_context_tokens=summary_tokens+projected_message_tokens; committed_prefix_raw_tokens, replayed_snip_ranges, and preserved_provider_usage_are_excluded",
+        pressureWarning,
+    };
+    const baselineChecksum = crypto.createHash("sha256").update(JSON.stringify(core)).digest("hex").slice(0, 32);
+    return {
+        ...core,
+        baselineId: `gmrb_${baselineChecksum.slice(0, 20)}`,
+        baselineChecksum,
+        observedAt: String(options.now || new Date().toISOString()),
+    };
+}
+function validateGroupMemoryResumeEffectiveTokenBaseline(baseline) {
+    if (baseline?.schema !== "ccm-group-memory-resume-effective-token-baseline-v1")
+        return false;
+    const { baselineId, baselineChecksum, observedAt, ...core } = baseline || {};
+    const calculated = crypto.createHash("sha256").update(JSON.stringify(core)).digest("hex").slice(0, 32);
+    return String(baselineChecksum || "") === calculated
+        && String(baselineId || "") === `gmrb_${calculated.slice(0, 20)}`;
+}
+function persistGroupMemoryResumeEffectiveTokenBaseline(groupId, groupSessionId, allMessages, memory, projection, options = {}) {
+    const baseline = buildGroupMemoryResumeEffectiveTokenBaseline(projection, memory, allMessages, options);
+    if (!baseline || !validateGroupMemoryResumeEffectiveTokenBaseline(baseline))
+        return { memory, baseline: null, cadenceDecision: null };
+    const sessionMemoryScopeId = groupSessionId === "default" ? groupId : `${groupId}--${groupSessionId}`;
+    const previousSessionMemory = readGroupSessionMemorySnapshotSummary(sessionMemoryScopeId) || memory?.sessionMemory || {};
+    const previousCadence = previousSessionMemory?.updateCadence || previousSessionMemory?.update_cadence || {};
+    const previousTokensAtLastExtraction = Math.max(0, Number(previousCadence.tokensAtLastExtraction || 0));
+    const cadenceRebased = previousTokensAtLastExtraction > baseline.effectiveContextTokens;
+    const cadenceDecision = {
+        ...evaluateGroupSessionMemoryUpdateCadence(projection.projectedMessages || [], {
+            ...previousSessionMemory,
+            updateCadence: {
+                ...previousCadence,
+                tokensAtLastExtraction: cadenceRebased ? baseline.effectiveContextTokens : previousTokensAtLastExtraction,
+            },
+        }, { ...options, currentContextTokens: baseline.effectiveContextTokens }),
+        tokenBasis: "verified_resume_effective_context",
+        resumeBaselineId: baseline.baselineId,
+        resumeBaselineChecksum: baseline.baselineChecksum,
+        rawTranscriptTokens: baseline.rawTranscriptTokens,
+        effectiveContextTokens: baseline.effectiveContextTokens,
+        cadenceRebased,
+        previousTokensAtLastExtraction,
+    };
+    const saved = saveGroupMemory(groupId, {
+        ...memory,
+        compaction: {
+            ...(memory?.compaction || {}),
+            resumeEffectiveTokenBaseline: baseline,
+            contextPressureWarning: baseline.pressureWarning,
+            compactWarning: baseline.pressureWarning,
+            lastPressureSampleAt: baseline.observedAt,
+        },
+        messageCompression: {
+            ...(memory?.messageCompression || {}),
+            resumeEffectiveTokenBaseline: baseline,
+            contextPressureWarning: baseline.pressureWarning,
+        },
+    }, groupSessionId, { sessionMemoryCadenceDecision: cadenceDecision });
+    return { memory: saved, baseline, cadenceDecision };
+}
 function prepareGroupMemoryResumeProjection(groupId, groupSessionId, allMessages, storedMemory, options = {}) {
     const projectionOptions = {
         groupId,
@@ -4226,16 +4397,41 @@ function prepareGroupMemoryResumeProjection(groupId, groupSessionId, allMessages
         }
         memoryBase = clearUntrustedGroupCompactionState(storedMemory, before.reason);
     }
-    const memory = refreshGroupConversationMemorySnapshot(groupId, allMessages, memoryBase, {
-        ...options,
-        groupSessionId,
-    });
-    let projection = (0, group_memory_boundary_journal_1.buildGroupMemoryResumeProjection)({
-        groupId,
-        sessionId: groupSessionId,
-        messages: allMessages,
-        memory,
-    });
+    const beforeBaseline = buildGroupMemoryResumeEffectiveTokenBaseline(before, memoryBase, allMessages, options);
+    const canReuseVerifiedProjection = beforeBaseline
+        && validateGroupMemoryResumeEffectiveTokenBaseline(beforeBaseline)
+        && beforeBaseline.pressureWarning?.flags?.isAboveAutoCompactThreshold !== true;
+    let memory;
+    let projection;
+    let resumeBaseline = null;
+    let sessionMemoryCadenceDecision = null;
+    let skippedFullSnapshotRefresh = false;
+    if (canReuseVerifiedProjection) {
+        const persisted = persistGroupMemoryResumeEffectiveTokenBaseline(groupId, groupSessionId, allMessages, memoryBase, before, options);
+        memory = persisted.memory;
+        projection = before;
+        resumeBaseline = persisted.baseline;
+        sessionMemoryCadenceDecision = persisted.cadenceDecision;
+        skippedFullSnapshotRefresh = true;
+    }
+    else {
+        memory = refreshGroupConversationMemorySnapshot(groupId, allMessages, memoryBase, {
+            ...options,
+            groupSessionId,
+        });
+        projection = (0, group_memory_boundary_journal_1.buildGroupMemoryResumeProjection)({
+            groupId,
+            sessionId: groupSessionId,
+            messages: allMessages,
+            memory,
+        });
+        if (projection.status === "verified") {
+            const persisted = persistGroupMemoryResumeEffectiveTokenBaseline(groupId, groupSessionId, allMessages, memory, projection, options);
+            memory = persisted.memory;
+            resumeBaseline = persisted.baseline;
+            sessionMemoryCadenceDecision = persisted.cadenceDecision;
+        }
+    }
     if (!memory?.compactBoundary && projection.status === "fail_closed_rebuild_required") {
         recoveryRotation = (0, group_memory_boundary_journal_1.retireGroupMemoryBoundaryJournal)(groupId, groupSessionId);
         projection = (0, group_memory_boundary_journal_1.buildGroupMemoryResumeProjection)({
@@ -4245,11 +4441,57 @@ function prepareGroupMemoryResumeProjection(groupId, groupSessionId, allMessages
             memory,
         });
     }
+    let compactHeadRecovery = null;
+    if (projection.status === "verified" && memory?.compactBoundary?.id) {
+        try {
+            compactHeadRecovery = (0, group_compact_head_1.reconcileGroupCompactHeadFromMemory)({ groupId, groupSessionId, memory });
+        }
+        catch (error) {
+            compactHeadRecovery = {
+                schema: "ccm-group-compact-head-restart-recovery-v1",
+                version: 1,
+                groupId,
+                groupSessionId,
+                boundaryId: String(memory?.compactBoundary?.id || ""),
+                status: "failed",
+                recovered: false,
+                issues: [compactMemoryText(error?.message || error, 300)],
+            };
+        }
+    }
+    const compactHeadIsCurrent = ["current", "recovered"].includes(String(compactHeadRecovery?.status || ""));
+    const recoveredCompactHead = compactHeadIsCurrent
+        ? compactHeadRecovery?.head || (groupSessionId.startsWith("gcs_") ? (0, group_compact_head_1.readGroupCompactHead)(groupId, groupSessionId) : null)
+        : null;
+    const providerNativeCompactSessionCapacityReconciliation = recoveredCompactHead
+        ? (0, provider_native_compact_session_capacity_1.reconcileProviderNativeCompactSessionCapacityReset)({
+            groupId,
+            groupSessionId,
+            compactHead: recoveredCompactHead,
+            reason: compactHeadRecovery?.status === "recovered"
+                ? "restart_reconcile_recovered_compact_head"
+                : "resume_reconcile_current_compact_head",
+        })
+        : compactHeadRecovery && !compactHeadIsCurrent
+            ? {
+                schema: "ccm-provider-native-compact-session-capacity-reconciliation-v1",
+                version: 1,
+                group_id: groupId,
+                group_session_id: groupSessionId,
+                status: "fail_closed",
+                recovered: false,
+                idempotent: false,
+                issues: Array.isArray(compactHeadRecovery.issues) ? compactHeadRecovery.issues.slice(0, 8) : ["compact_head_not_current"],
+            }
+            : null;
     const proof = (0, group_memory_boundary_journal_1.recordGroupMemoryResumeProjectionProof)(projection, {
         recovered: recoveryRequired,
         recoveryReason: recoveryRequired ? before.reason : "",
         priorStatus: before.status,
         priorReason: before.reason,
+        resumeBaseline,
+        compactHeadRecovery,
+        providerNativeCompactSessionCapacityReconciliation,
     });
     return {
         schema: "ccm-group-memory-resume-preparation-v1",
@@ -4258,6 +4500,11 @@ function prepareGroupMemoryResumeProjection(groupId, groupSessionId, allMessages
         memory,
         projection,
         proof,
+        resumeBaseline,
+        sessionMemoryCadenceDecision,
+        skippedFullSnapshotRefresh,
+        compactHeadRecovery,
+        providerNativeCompactSessionCapacityReconciliation,
         recovered: recoveryRequired,
         recoveryReason: recoveryRequired ? before.reason : "",
         recoveryRotation,
@@ -4541,6 +4788,7 @@ function refreshGroupConversationMemorySnapshot(groupId, allMessages, memory, op
     boundary.post_compact_restore.recoveryAudit = postCompactRecoveryAudit;
     const postCompactCleanupAudit = (0, group_memory_compaction_1.buildGroupPostCompactCleanupAudit)({
         groupId,
+        groupSessionId,
         boundary,
         compactStrategyDecision,
         apiMicroCompactEditPlan,
@@ -5465,6 +5713,7 @@ function buildGroupApiMicrocompactNativeApplyAdapterTelemetryRow(input = {}) {
         nativeSessionId: String(input.nativeSessionId || input.native_session_id || plan.nativeSessionId || plan.native_session_id || "").trim(),
         memoryContextSnapshotId: String(input.memoryContextSnapshotId || input.memory_context_snapshot_id || plan.memoryContextSnapshotId || plan.memory_context_snapshot_id || "").trim(),
         memoryContextSnapshotChecksum: String(input.memoryContextSnapshotChecksum || input.memory_context_snapshot_checksum || plan.memoryContextSnapshotChecksum || plan.memory_context_snapshot_checksum || "").trim(),
+        groupSessionId: String(input.groupSessionId || input.group_session_id || plan.groupSessionId || plan.group_session_id || "default").trim() || "default",
         targetProject: String(input.targetProject || input.target_project || plan.targetProject || plan.target_project || "").trim(),
         agent: String(input.agent || input.targetProject || input.target_project || plan.targetProject || plan.target_project || "").trim(),
         taskId: String(input.taskId || input.task_id || "").trim(),
@@ -5502,6 +5751,7 @@ function recordGroupApiMicrocompactNativeApplyAdapterTelemetry(input = {}) {
         };
     }
     return recordGroupApiMicrocompactNativeApplyRequestTelemetryLedger(groupId, {
+        groupSessionId: row.groupSessionId,
         targetProject: row.targetProject,
         taskId: row.taskId,
         executionId: row.executionId,
@@ -5944,6 +6194,7 @@ function buildGroupApiMicrocompactNativeApplyProofSummary(groupId, options = {})
     const groupSessionId = String(options.groupSessionId || options.group_session_id || "default");
     const ledger = readGroupApiMicrocompactNativeApplyProofLedger(groupId, groupSessionId);
     const telemetrySummary = buildGroupApiMicrocompactNativeApplyRequestTelemetrySummary(groupId, options);
+    const platformExecutionReceipts = (0, provider_native_compact_execution_receipt_1.buildProviderNativeCompactExecutionReceiptSummary)(groupId, options);
     const telemetryEntries = [
         ...(Array.isArray(telemetrySummary.matched_entries) ? telemetrySummary.matched_entries : []),
         ...(Array.isArray(telemetrySummary.failed_entries) ? telemetrySummary.failed_entries : []),
@@ -5953,14 +6204,79 @@ function buildGroupApiMicrocompactNativeApplyProofSummary(groupId, options = {})
     const planChecksums = new Set((Array.isArray(options.planChecksums || options.plan_checksums) ? (options.planChecksums || options.plan_checksums) : [])
         .map((item) => String(item || "").trim())
         .filter(Boolean));
-    const entries = (Array.isArray(ledger.entries) ? ledger.entries : [])
+    const legacyEntries = (Array.isArray(ledger.entries) ? ledger.entries : [])
         .filter((entry) => !targetProject || String(entry.target_project || "").toLowerCase() === targetProject)
         .filter((entry) => !planChecksums.size || planChecksums.has(String(entry.plan_checksum || "").trim()));
+    const platformEntries = (Array.isArray(platformExecutionReceipts.entries) ? platformExecutionReceipts.entries : platformExecutionReceipts.recent_entries || []).map((receipt) => ({
+        schema: "ccm-group-api-microcompact-native-apply-proof-entry-v1",
+        entry_id: receipt.receipt_id,
+        group_id: receipt.group_id,
+        group_session_id: receipt.group_session_id,
+        target_project: receipt.target_project,
+        agent: receipt.target_project,
+        task_id: receipt.task_id,
+        execution_id: receipt.execution_id,
+        runner_request_id: receipt.runner_request_id,
+        external_runner_request_id: receipt.runner_request_id,
+        plan_checksum: receipt.plan_checksum,
+        apply_plan_checksum: receipt.apply_plan_checksum,
+        request_patch_checksum: receipt.request_patch_checksum,
+        receipt_apply_plan_checksum: receipt.apply_plan_checksum,
+        receipt_request_patch_checksum: receipt.request_patch_checksum,
+        task_agent_session_id: receipt.task_agent_session_id,
+        native_session_id: receipt.native_session_id,
+        memory_context_snapshot_id: receipt.memory_context_snapshot_id,
+        memory_context_snapshot_checksum: receipt.memory_context_snapshot_checksum,
+        usage_state: receipt.status === "native_applied" ? "native_applied" : ["advisory_only", "request_accepted", "no_edits_applied"].includes(receipt.status) ? "advisory" : receipt.status === "not_supported" ? "not_supported" : "native_applied",
+        native_applied: receipt.status === "native_applied",
+        proof_status: receipt.status === "native_applied" && receipt.strong_proof === true
+            ? "verified"
+            : ["advisory_only", "request_accepted", "no_edits_applied"].includes(receipt.status)
+                ? "advisory"
+                : receipt.status === "not_supported"
+                    ? "not_supported"
+                    : "failed",
+        pass: receipt.status === "native_applied" && receipt.strong_proof === true,
+        strong_proof: receipt.status === "native_applied" && receipt.strong_proof === true,
+        proof_source: "platform_execution_receipt",
+        platform_execution_receipt_id: receipt.receipt_id,
+        platform_execution_receipt_checksum: receipt.receipt_checksum,
+        generated_at: receipt.accepted_at || receipt.sent_at || receipt.created_at,
+        reason: receipt.failure_reason || `platform request adapter status=${receipt.status}`,
+    }));
+    const proofKey = (entry) => [
+        entry.plan_checksum,
+        entry.apply_plan_checksum || entry.receipt_apply_plan_checksum,
+        entry.request_patch_checksum || entry.receipt_request_patch_checksum,
+        entry.task_agent_session_id || entry.receipt_task_agent_session_id,
+        entry.execution_id,
+        entry.runner_request_id || entry.external_runner_request_id,
+    ].map(value => String(value || "")).join("|");
+    const platformKeys = new Set(platformEntries.map(proofKey));
+    const entries = [...platformEntries, ...legacyEntries.filter((entry) => !platformKeys.has(proofKey(entry)))];
     const totals = apiMicrocompactNativeApplyProofTotals(entries);
     const proofCoverage = Number(totals.native_claims || 0) > 0
         ? Math.round(Number(totals.verified || 0) / Number(totals.native_claims || 1) * 1000) / 10
         : null;
-    const enrichedEntries = entries.map((entry) => enrichApiMicrocompactNativeApplyProofWithTelemetry(entry, telemetryEntries, options));
+    const enrichedEntries = entries.map((entry) => {
+        const enriched = enrichApiMicrocompactNativeApplyProofWithTelemetry(entry, telemetryEntries, options);
+        if (entry.proof_source !== "platform_execution_receipt" || entry.proof_status !== "verified")
+            return enriched;
+        return {
+            ...enriched,
+            request_telemetry_matched: true,
+            request_telemetry_fresh: true,
+            request_telemetry_status: "matched",
+            request_telemetry_source: "native_request_adapter",
+            request_telemetry_adapter_captured: true,
+            request_telemetry_strong: true,
+            request_telemetry_weak_reason: "",
+            request_telemetry_runner_request_id: entry.runner_request_id,
+            request_telemetry_runner_matched: true,
+            request_telemetry_session_bound: true,
+            request_telemetry_dispatch_bound: true,
+        };
+    });
     const telemetryMatchedCount = enrichedEntries.filter((entry) => entry.proof_status === "verified" && entry.request_telemetry_matched === true).length;
     const telemetryAdapterMatchedCount = enrichedEntries.filter((entry) => entry.proof_status === "verified" && entry.request_telemetry_matched === true && entry.request_telemetry_source === "native_request_adapter").length;
     const telemetryReceiptMatchedCount = enrichedEntries.filter((entry) => entry.proof_status === "verified" && entry.request_telemetry_matched === true && entry.request_telemetry_source !== "native_request_adapter").length;
@@ -5970,9 +6286,9 @@ function buildGroupApiMicrocompactNativeApplyProofSummary(groupId, options = {})
     const telemetryStaleCount = enrichedEntries.filter((entry) => entry.proof_status === "verified" && entry.request_telemetry_status === "stale").length;
     const status = entries.length === 0
         ? "empty"
-        : Number(totals.failed || 0) > 0
+        : Number(totals.failed || 0) > 0 || platformExecutionReceipts.status === "fail"
             ? "fail"
-            : telemetryMissingCount > 0 || telemetryStaleCount > 0
+            : telemetryMissingCount > 0 || telemetryStaleCount > 0 || platformExecutionReceipts.status === "warn"
                 ? "warn"
                 : Number(totals.verified || 0) > 0
                     ? "ok"
@@ -5999,6 +6315,7 @@ function buildGroupApiMicrocompactNativeApplyProofSummary(groupId, options = {})
             stale_verified_count: telemetryStaleCount,
             max_age_ms: Number(options.telemetryMaxAgeMs || options.telemetry_max_age_ms || exports.GROUP_API_MICROCOMPACT_NATIVE_APPLY_TELEMETRY_MAX_AGE_MS),
         },
+        platform_execution_receipts: platformExecutionReceipts,
         totals,
         verified_entries: enrichedEntries.filter((entry) => entry.proof_status === "verified").slice(-12).reverse(),
         failed_entries: enrichedEntries.filter((entry) => entry.proof_status === "failed").slice(-12).reverse(),
@@ -6561,6 +6878,10 @@ function scheduleGroupMemoryAutoCompaction(groupId, options = {}) {
     const sessionId = String(options.sessionId || options.session_id || (0, storage_1.getActiveGroupChatSessionId)(id));
     if (!sessionId.startsWith("gcs_"))
         return { scheduled: false, reason: "legacy_default_session_rejected", groupId: id, sessionId };
+    const circuitBreaker = (0, group_memory_auto_compact_circuit_breaker_1.readGroupMemoryAutoCompactCircuitBreaker)(id, sessionId);
+    if (circuitBreaker.blocked === true && options.force !== true) {
+        return { scheduled: false, reason: "auto_compact_circuit_breaker_open", groupId: id, sessionId, circuitBreaker };
+    }
     const scopeKey = `${id}::${sessionId}`;
     if (groupMemoryAutoCompactTimers.has(scopeKey)) {
         clearTimeout(groupMemoryAutoCompactTimers.get(scopeKey));
@@ -6580,6 +6901,10 @@ async function runGroupMemoryAutoCompactionNow(groupId, options = {}) {
     const sessionId = String(options.sessionId || options.session_id || (0, storage_1.getActiveGroupChatSessionId)(id));
     if (!sessionId.startsWith("gcs_"))
         return { success: false, compacted: false, reason: "legacy_default_session_rejected", groupId: id, sessionId };
+    const initialCircuitBreaker = (0, group_memory_auto_compact_circuit_breaker_1.readGroupMemoryAutoCompactCircuitBreaker)(id, sessionId);
+    if (initialCircuitBreaker.blocked === true && options.force !== true) {
+        return { success: true, compacted: false, skipped: true, reason: "auto_compact_circuit_breaker_open", groupId: id, sessionId, circuitBreaker: initialCircuitBreaker };
+    }
     const typedMemoryScopeId = `${id}--${sessionId}`;
     const scopeKey = `${id}::${sessionId}`;
     if (groupMemoryAutoCompactTimers.has(scopeKey)) {
@@ -6592,6 +6917,7 @@ async function runGroupMemoryAutoCompactionNow(groupId, options = {}) {
     }
     groupMemoryAutoCompactRunning.add(scopeKey);
     const startedAt = new Date().toISOString();
+    const autoCompactAttemptId = `acba_${crypto.createHash("sha256").update(`${id}\0${sessionId}\0${startedAt}\0${options.messageId || ""}\0${options.reason || ""}`).digest("hex").slice(0, 24)}`;
     try {
         const messages = (0, storage_1.getGroupMessages)(id, sessionId).filter((message) => !String(message?.content || "").startsWith("📤"));
         const memory = loadGroupMemory(id, sessionId);
@@ -6611,6 +6937,21 @@ async function runGroupMemoryAutoCompactionNow(groupId, options = {}) {
             rebuild,
         });
         const nextMemory = result.memory || memory;
+        const providerCapacityResetReason = force
+            ? `explicit_group_compact:${options.reason || "manual"}`
+            : `automatic_group_compact:${options.reason || "message_append"}`;
+        const providerNativeCompactSessionCapacityResetIntent = result.compacted === true && !!result.boundary?.id
+            ? {
+                schema: "ccm-provider-native-compact-session-capacity-reset-intent-v1",
+                version: 1,
+                group_id: id,
+                group_session_id: sessionId,
+                boundary_id: String(result.boundary.id || ""),
+                compact_transaction_receipt_checksum: String(result.compactTransactionReceipt?.receipt_checksum || ""),
+                reason: providerCapacityResetReason,
+                requested_at: String(result.boundary.createdAt || new Date().toISOString()),
+            }
+            : null;
         const background = buildBackgroundCompactionState({
             status: result.compacted ? "compacted" : "skipped",
             reason: options.reason || "message_append",
@@ -6639,12 +6980,60 @@ async function runGroupMemoryAutoCompactionNow(groupId, options = {}) {
                 ...(nextMemory?.compaction || {}),
                 background,
                 logDistillation,
+                providerNativeCompactSessionCapacityResetIntent,
             },
         }, sessionId);
         const compactHead = sessionId.startsWith("gcs_") && result.compacted && result.compactTransactionReceipt
             ? (0, group_compact_head_1.commitGroupCompactHead)({ groupId: id, groupSessionId: sessionId, compactTransactionReceipt: result.compactTransactionReceipt })
             : null;
-        return { success: true, compacted: !!result.compacted, boundary: result.boundary || null, keepIndex: result.keepIndex, background, memory: saved, compactHead, typedMemoryScopeId, logDistillation };
+        let providerNativeCompactSessionCapacityReset = null;
+        if (result.compacted === true && !!result.boundary?.id && compactHead?.head) {
+            try {
+                providerNativeCompactSessionCapacityReset = (0, provider_native_compact_session_capacity_1.resetProviderNativeCompactSessionCapacity)({
+                    groupId: id,
+                    groupSessionId: sessionId,
+                    compactHead: compactHead.head,
+                    boundaryId: result.boundary.id,
+                    compactTransactionReceiptChecksum: result.compactTransactionReceipt?.receipt_checksum || "",
+                    reason: providerCapacityResetReason,
+                    resetAt: result.boundary.createdAt || new Date().toISOString(),
+                });
+            }
+            catch (error) {
+                providerNativeCompactSessionCapacityReset = {
+                    schema: "ccm-provider-native-compact-session-capacity-reset-v1",
+                    reset: false,
+                    idempotent: false,
+                    status: "pending_reconciliation",
+                    group_id: id,
+                    group_session_id: sessionId,
+                    boundary_id: String(result.boundary.id || ""),
+                    compact_head_id: String(compactHead.head?.head_id || ""),
+                    compact_head_generation: Number(compactHead.head?.generation || 0),
+                    reason: compactMemoryText(error?.message || error, 300),
+                };
+            }
+        }
+        const returnedMemory = providerNativeCompactSessionCapacityReset
+            ? {
+                ...saved,
+                compaction: {
+                    ...(saved?.compaction || {}),
+                    providerNativeCompactSessionCapacityReset,
+                },
+            }
+            : saved;
+        const circuitBreaker = result.compacted === true && !!result.boundary?.id && !!compactHead?.head
+            ? (0, group_memory_auto_compact_circuit_breaker_1.recordGroupMemoryAutoCompactCircuitBreakerOutcome)({
+                groupId: id,
+                groupSessionId: sessionId,
+                attemptId: autoCompactAttemptId,
+                outcome: "success",
+                reason: options.force === true ? "manual_compact_succeeded" : "auto_compact_succeeded",
+                at: background.completedAt,
+            })
+            : (0, group_memory_auto_compact_circuit_breaker_1.readGroupMemoryAutoCompactCircuitBreaker)(id, sessionId);
+        return { success: true, compacted: !!result.compacted, boundary: result.boundary || null, keepIndex: result.keepIndex, background, memory: returnedMemory, compactHead, typedMemoryScopeId, logDistillation, providerNativeCompactSessionCapacityReset, circuitBreaker };
     }
     catch (error) {
         const memory = loadGroupMemory(id, sessionId);
@@ -6657,18 +7046,37 @@ async function runGroupMemoryAutoCompactionNow(groupId, options = {}) {
             startedAt,
             completedAt: new Date().toISOString(),
         });
+        const circuitBreaker = options.force === true
+            ? (0, group_memory_auto_compact_circuit_breaker_1.readGroupMemoryAutoCompactCircuitBreaker)(id, sessionId)
+            : (0, group_memory_auto_compact_circuit_breaker_1.recordGroupMemoryAutoCompactCircuitBreakerOutcome)({
+                groupId: id,
+                groupSessionId: sessionId,
+                attemptId: autoCompactAttemptId,
+                outcome: "failure",
+                reason: "auto_compact_failed",
+                errorClass: error?.name || error?.code || "Error",
+                error: error?.message || String(error),
+                at: background.completedAt,
+            });
         saveGroupMemory(id, {
             ...memory,
             compaction: {
                 ...(memory?.compaction || {}),
                 background,
-                consecutiveFailures: Number(memory?.compaction?.consecutiveFailures || 0) + 1,
+                autoCompactCircuitBreaker: {
+                    schema: circuitBreaker.schema,
+                    state: circuitBreaker.state,
+                    consecutiveFailures: Number(circuitBreaker.consecutive_failures || 0),
+                    maxConsecutiveFailures: Number(circuitBreaker.max_consecutive_failures || 3),
+                    openedAt: circuitBreaker.opened_at || "",
+                    ledgerChecksum: circuitBreaker.ledger_checksum || "",
+                },
                 health: "degraded",
                 lastFailure: background.error,
                 lastFailureAt: background.completedAt,
             },
         }, sessionId);
-        return { success: false, compacted: false, error: background.error, background };
+        return { success: false, compacted: false, error: background.error, background, circuitBreaker };
     }
     finally {
         groupMemoryAutoCompactRunning.delete(scopeKey);
@@ -7717,7 +8125,7 @@ function buildAgentMemoryContextBundle(groupId, targetProject, task = "", option
     const ignoreMemory = (0, group_memory_index_1.shouldIgnoreGroupMemoryRequest)(task, options);
     const generatedAt = new Date().toISOString();
     const sessionBinding = buildChildAgentSessionBinding(groupId, project, task, { ...options, generatedAt });
-    const compactHead = groupSessionId.startsWith("gcs_") ? (0, group_compact_head_1.readGroupCompactHead)(groupId, groupSessionId) : null;
+    let compactHead = groupSessionId.startsWith("gcs_") ? (0, group_compact_head_1.readGroupCompactHead)(groupId, groupSessionId) : null;
     if (ignoreMemory) {
         const bundle = {
             schema: "ccm-group-memory-context-v1",
@@ -7795,6 +8203,7 @@ function buildAgentMemoryContextBundle(groupId, targetProject, task = "", option
         apiMicrocompactMaxInputTokens: options.apiMicrocompactMaxInputTokens || options.api_microcompact_max_input_tokens,
     });
     const memory = resumePreparation.memory;
+    compactHead = resumePreparation.compactHeadRecovery?.head || (groupSessionId.startsWith("gcs_") ? (0, group_compact_head_1.readGroupCompactHead)(groupId, groupSessionId) : null);
     const typedMemoryRecallLedgerScope = buildChildTypedMemoryRecallLedgerScope(project, sessionBinding, memory, options);
     const postTurnSummaryDeliveryCapsule = (0, group_post_turn_summary_1.buildGroupPostTurnSummaryDeliveryCapsule)({
         groupId,
@@ -8279,8 +8688,30 @@ function buildAgentMemoryContextBundle(groupId, targetProject, task = "", option
         || options.task?.runtime_capabilities
         || options.task?.workflow_meta?.runtime_capabilities
         || {};
+    const providerNativeCompactSessionCapacityReconciliation = resumePreparation.providerNativeCompactSessionCapacityReconciliation || null;
+    const providerNativeCompactSessionCapacityReady = !providerNativeCompactSessionCapacityReconciliation
+        || ["current", "recovered", "not_applicable"].includes(String(providerNativeCompactSessionCapacityReconciliation.status || ""));
+    const providerNativeCompactSessionCapacity = providerNativeCompactSessionCapacityReady
+        ? (0, provider_native_compact_session_capacity_1.consumeProviderNativeCompactSessionCapacity)({
+            groupId,
+            groupSessionId,
+            taskAgentSessionId: sessionBinding?.task_agent_session_id || "",
+            nativeSessionId: sessionBinding?.native_session_id || "",
+            rawActiveTokens: Number(storedApiMicroCompactEditPlan?.activeTokens || storedApiMicroCompactEditPlan?.active_tokens || 0),
+            consumedAt: generatedAt,
+        })
+        : null;
+    const providerNativeCompactSessionGenerationFence = providerNativeCompactSessionCapacityReady
+        ? (0, provider_native_compact_session_capacity_1.getProviderNativeCompactSessionGenerationFence)({
+            groupId,
+            groupSessionId,
+            taskAgentSessionId: sessionBinding?.task_agent_session_id || "",
+            nativeSessionId: sessionBinding?.native_session_id || "",
+        })
+        : null;
     const apiMicrocompactNativeApplyPlan = (0, group_memory_compaction_1.buildGroupApiMicrocompactNativeApplyPlan)(storedApiMicroCompactEditPlan || {}, {
         groupId,
+        groupSessionId,
         targetProject: project,
         agentType: options.agentType || options.agent_type || "unknown",
         transport: options.agentTransport || options.agent_transport || options.transport || runtimeCapabilities.transport,
@@ -8298,8 +8729,16 @@ function buildAgentMemoryContextBundle(groupId, targetProject, task = "", option
             || runtimeCapabilities.contextManagementBetaHeaderEnabled === true
             || runtimeCapabilities.context_management_beta_header_enabled === true,
         betaHeaders: options.betaHeaders || options.beta_headers || runtimeCapabilities.betaHeaders || runtimeCapabilities.beta_headers,
-        featureEnabled: options.apiMicrocompactNativeApplyEnabled !== false && options.api_microcompact_native_apply_enabled !== false,
+        featureEnabled: providerNativeCompactSessionCapacityReady
+            && options.apiMicrocompactNativeApplyEnabled !== false
+            && options.api_microcompact_native_apply_enabled !== false,
         sessionBinding,
+        executionId: options.executionId || options.execution_id || sessionBinding?.execution_id || "",
+        runnerRequestId: options.runnerRequestId || options.runner_request_id || options.externalRunnerRequestId || options.external_runner_request_id || "",
+        memoryContextSnapshotId: options.memoryContextSnapshotId || options.memory_context_snapshot_id || "",
+        memoryContextSnapshotChecksum: options.memoryContextSnapshotChecksum || options.memory_context_snapshot_checksum || "",
+        providerNativeCompactSessionCapacity,
+        providerNativeCompactSessionGenerationFence,
         now: generatedAt,
     });
     const apiMicrocompactNativeApplyProofLedger = buildGroupApiMicrocompactNativeApplyProofSummary(groupId, {
@@ -8354,6 +8793,9 @@ function buildAgentMemoryContextBundle(groupId, targetProject, task = "", option
             apiMicroCompactEditPlan: storedApiMicroCompactEditPlan,
             apiMicrocompactNativeApplyPlan,
             apiMicrocompactNativeApplyProofLedger,
+            providerNativeCompactSessionCapacity,
+            providerNativeCompactSessionGenerationFence,
+            providerNativeCompactSessionCapacityReconciliation,
             compactedMessageCount: Number(memory.compaction?.compactedMessageCount || memory.messageCompression?.compressedMessages || 0),
             preservedRecentMessages: Number(memory.compaction?.preservedRecentMessages || memory.messageCompression?.recentMessages || 0),
             lastCompactedMessageId: memory.compaction?.lastCompactedMessageId || memory.compactBoundary?.summarizedThroughMessageId || "",
@@ -8392,9 +8834,15 @@ function buildAgentMemoryContextBundle(groupId, targetProject, task = "", option
                 proof: resumePreparation.proof || null,
                 rawMessageCount: Number(resumeProjection.rawMessageCount ?? allMessages.length),
                 omittedMessageCount: Number(resumeProjection.omittedMessageCount || 0),
+                snipOmittedMessageCount: Number(resumeProjection.snipOmittedMessageCount || 0),
+                totalOmittedMessageCount: Number(resumeProjection.totalOmittedMessageCount || resumeProjection.omittedMessageCount || 0),
                 preservedMessageCount: Number(resumeProjection.preservedMessageCount || resumeProjection.preservedMessages?.length || 0),
                 messagesAfterBoundaryCount: Number(resumeProjection.messagesAfterBoundaryCount || resumeProjection.messagesAfterBoundary?.length || 0),
                 projectedMessageCount: Number(resumeProjection.projectedMessageCount || projectedMessages.length),
+                snipReplay: resumeProjection.snipReplay || null,
+                roundTripConsistency: resumeProjection.roundTripConsistency || null,
+                compactHeadRecovery: resumePreparation.compactHeadRecovery || null,
+                effectiveTokenBaseline: resumePreparation.resumeBaseline || memory.compaction?.resumeEffectiveTokenBaseline || null,
                 projectionChecksum: resumeProjection.projectionChecksum || "",
             },
         },
@@ -8532,6 +8980,7 @@ function buildAgentMemoryContextBundle(groupId, targetProject, task = "", option
             group_post_compact_candidate_usage_ledger_file: postCompactCandidateUsage.ledger_file || getGroupPostCompactCandidateUsageLedgerFile(groupId, groupSessionId),
             group_api_microcompact_native_apply_proof_ledger_file: apiMicrocompactNativeApplyProofLedger.ledger_file || getGroupApiMicrocompactNativeApplyProofLedgerFile(groupId, groupSessionId),
             group_api_microcompact_native_apply_request_telemetry_ledger_file: apiMicrocompactNativeApplyProofLedger.request_telemetry?.ledger_file || getGroupApiMicrocompactNativeApplyRequestTelemetryLedgerFile(groupId, groupSessionId),
+            provider_native_compact_execution_receipt_ledger_file: apiMicrocompactNativeApplyProofLedger.platform_execution_receipts?.ledger_file || (0, provider_native_compact_execution_receipt_1.getProviderNativeCompactExecutionReceiptLedgerFile)(groupId, groupSessionId),
             group_replay_repair_ledger_file: replayRepairLedger?.file || getGroupReplayRepairLedgerFile(groupId, groupSessionId),
             group_replay_repair_work_items_file: replayRepairWorkItems?.file || getGroupReplayRepairWorkItemsFile(groupId, groupSessionId),
             group_session_memory_snapshot_file: sessionMemorySnapshot?.snapshotFile || getGroupSessionMemorySnapshotFile(typedMemoryScopeId),
@@ -8635,8 +9084,27 @@ async function buildAgentMemoryContextBundleWithManifestSelection(groupId, targe
         ...options,
         typedMemoryManifestSelection: selection,
     });
+    const recall = bundle.typedMemoryRecall || bundle.typed_memory_recall || bundle.group_state?.typedMemory?.recall || null;
+    const capsule = bundle.typedMemoryDeliveryCapsule || bundle.typed_memory_delivery_capsule || bundle.group_state?.typedMemory?.deliveryCapsule || null;
+    const recalledBeforeDeliveryBudget = [...new Set([
+            ...(recall?.recalled || []).map((row) => row.relPath),
+            ...(capsule?.skipped_rel_paths || []),
+        ].map((item) => String(item || "")).filter(Boolean))];
+    const selectorOutcome = (0, group_memory_index_1.recordGroupTypedMemoryManifestSelectorOutcome)(scopeId, selection, {
+        stage: "attached",
+        recalledRelPaths: recalledBeforeDeliveryBudget,
+        attachedRelPaths: capsule?.delivered_rel_paths || [],
+        capsuleChecksum: capsule?.capsule_checksum || "",
+        deliveryLeaseId: bundle.typedMemoryDeliveryLease?.lease_id || bundle.typed_memory_delivery_lease?.lease_id || "",
+        taskId: options.taskId || options.task_id || "",
+        taskAgentSessionId: options.taskAgentSessionId || options.task_agent_session_id || "",
+        targetProject,
+        recordOutcome: options.recordManifestSelectorDecision !== false && options.record_manifest_selector_decision !== false,
+    });
     bundle.typed_memory_manifest_selection = selection;
     bundle.typedMemoryManifestSelection = selection;
+    bundle.typed_memory_manifest_selector_outcome = selectorOutcome;
+    bundle.typedMemoryManifestSelectorOutcome = selectorOutcome;
     return bundle;
 }
 function findMemoryArtifactBySchema(value, schema, seen = new Set()) {
@@ -8912,6 +9380,46 @@ function commitChildTypedMemoryDelivery(memoryBundle, options = {}) {
     const ledger = (0, group_memory_index_1.recordGroupTypedMemoryRecall)(typedMemoryScopeId, scopeMetadata.scope, recall, String(lease.query_checksum || ""), { scopeMetadata, deliveryCapsule: packetCapsule, deliveryLease: lease });
     const committedLease = ledger.scopes?.[scopeMetadata.scope]?.deliveryLeases?.[lease.lease_id] || null;
     const stats = (0, group_memory_index_1.getGroupTypedMemoryRecallScopeStats)(typedMemoryScopeId, scopeMetadata.scope);
+    let manifestSelectorOutcome = null;
+    const manifestSelection = memoryBundle.typedMemoryManifestSelection
+        || memoryBundle.typed_memory_manifest_selection
+        || findMemoryArtifactBySchema(packetMemory, "ccm-group-typed-memory-manifest-selection-v1")
+        || findMemoryArtifactBySchema(memoryBundle, "ccm-group-typed-memory-manifest-selection-v1");
+    if (committedLease?.status === "committed" && manifestSelection?.schema) {
+        const attachedOutcome = memoryBundle.typedMemoryManifestSelectorOutcome
+            || memoryBundle.typed_memory_manifest_selector_outcome
+            || findMemoryArtifactBySchema(packetMemory, "ccm-group-typed-memory-manifest-selector-outcome-v1")
+            || findMemoryArtifactBySchema(memoryBundle, "ccm-group-typed-memory-manifest-selector-outcome-v1");
+        try {
+            manifestSelectorOutcome = (0, group_memory_index_1.recordGroupTypedMemoryManifestSelectorOutcome)(typedMemoryScopeId, manifestSelection, {
+                stage: "committed",
+                attachedOutcome,
+                recalledRelPaths: (recall.recalled || []).map((row) => row.relPath),
+                attachedRelPaths: packetCapsule.delivered_rel_paths || [],
+                capsuleChecksum: packetCapsule.capsule_checksum || "",
+                deliveryLeaseId: lease.lease_id || "",
+                dispatchTicketChecksum: dispatchTicket.checksum || dispatchTicket.ticket_checksum || "",
+                deliveryReceiptChecksum: receipt?.checksum || receipt?.receipt_checksum || "",
+                memoryContextSnapshotId: receipt?.snapshotId || receipt?.snapshot_id || receipt?.memoryContextSnapshotId || receipt?.memory_context_snapshot_id || "",
+                memoryContextSnapshotChecksum: receipt?.snapshotChecksum || receipt?.snapshot_checksum || receipt?.memoryContextSnapshotChecksum || receipt?.memory_context_snapshot_checksum || "",
+                workerContextPacketId: receipt?.workerContextPacketId || receipt?.worker_context_packet_id || workerContextPacket.packet_id || "",
+                taskId: scopeMetadata.taskId,
+                taskAgentSessionId,
+                targetProject,
+                recordOutcome: attachedOutcome?.recorded !== false,
+            });
+        }
+        catch (error) {
+            return {
+                committed: false,
+                reason: "manifest_selector_outcome_commit_failed",
+                error: compactMemoryText(error?.message || error, 240),
+                lease: committedLease,
+                stats,
+                ledger_file: ledger.file,
+            };
+        }
+    }
     return {
         committed: committedLease?.status === "committed",
         idempotent: committedLease?.commitCount === 1 && committedLease?.lastCommitDuplicate === true,
@@ -8919,6 +9427,7 @@ function commitChildTypedMemoryDelivery(memoryBundle, options = {}) {
         lease: committedLease,
         stats,
         ledger_file: ledger.file,
+        manifest_selector_outcome: manifestSelectorOutcome,
     };
 }
 function createChildTypedMemoryDispatchWal(admission, input = {}) {
@@ -9213,6 +9722,21 @@ function renderGroupMemoryContextBundle(bundle) {
         || bundle.api_microcompact_native_apply_proof_ledger
         || bundle.apiMicrocompactNativeApplyProofLedger
         || {};
+    const providerNativeCompactSessionCapacity = compaction.providerNativeCompactSessionCapacity
+        || compaction.provider_native_compact_session_capacity
+        || bundle.providerNativeCompactSessionCapacity
+        || bundle.provider_native_compact_session_capacity
+        || {};
+    const providerNativeCompactSessionGenerationFence = compaction.providerNativeCompactSessionGenerationFence
+        || compaction.provider_native_compact_session_generation_fence
+        || bundle.providerNativeCompactSessionGenerationFence
+        || bundle.provider_native_compact_session_generation_fence
+        || {};
+    const providerNativeCompactSessionCapacityReconciliation = compaction.providerNativeCompactSessionCapacityReconciliation
+        || compaction.provider_native_compact_session_capacity_reconciliation
+        || bundle.providerNativeCompactSessionCapacityReconciliation
+        || bundle.provider_native_compact_session_capacity_reconciliation
+        || {};
     const compactFileReferences = bundle.compact_file_references || bundle.compactFileReferences || {};
     const compactFileReferenceReadPlan = bundle.compact_file_reference_read_plan || bundle.compactFileReferenceReadPlan || {};
     const compactFileReferenceReadPlanAccess = bundle.compact_file_reference_read_plan_access || bundle.compactFileReferenceReadPlanAccess || {};
@@ -9254,6 +9778,15 @@ function renderGroupMemoryContextBundle(bundle) {
         "- 记忆边界：你每轮执行都可能是新的第三方 CLI 会话；必须把本包当作当前任务上下文，不要假定 Claude Code/Cursor/Codex 内部 session 记得旧群聊。",
         "- 上下文策略：旧消息已被 CCM 压缩为摘要；近期消息保留原文窗口；本包如附带“压缩前原文证据”，该证据优先于摘要。",
     ];
+    if (providerNativeCompactSessionCapacityReconciliation.schema) {
+        lines.push(`- Provider compact generation 对账：status=${providerNativeCompactSessionCapacityReconciliation.status || "unknown"}；boundary=${providerNativeCompactSessionCapacityReconciliation.boundary_id || "none"}；compactHeadGeneration=${providerNativeCompactSessionCapacityReconciliation.compact_head_generation || 0}；capacityGeneration=${providerNativeCompactSessionCapacityReconciliation.generation || 0}；recovered=${providerNativeCompactSessionCapacityReconciliation.recovered === true}。`);
+        if (["failed", "fail_closed"].includes(String(providerNativeCompactSessionCapacityReconciliation.status || ""))) {
+            lines.push("- Provider compact 安全门禁：generation 对账未通过，本轮不得应用 provider-native context_management；只能按 advisory 执行并等待下一次有效对账。");
+        }
+    }
+    if (providerNativeCompactSessionGenerationFence.schema) {
+        lines.push(`- Provider compact generation fence：generation=${providerNativeCompactSessionGenerationFence.generation || 1}；lastReset=${providerNativeCompactSessionGenerationFence.last_reset_id || "none"}；旧 generation 的晚到 Provider outcome 不得恢复容量信用或 sticky beta。`);
+    }
     if (postTurnSummaries.schema) {
         if (postTurnSummaries.valid !== true) {
             lines.push("- 最近逐轮摘要账本：完整性校验失败，本轮不得使用该账本；仅使用原始会话窗口、Session Memory 和当前源码证据。");
@@ -9283,7 +9816,16 @@ function renderGroupMemoryContextBundle(bundle) {
         lines.push("- 本轮回执与 runner request 只能提交到上述 invocation edge；不得跨 group、gcs_*、tas_* 或 branch 复用。 ");
     }
     if (resumeProjection.schema) {
-        lines.push(`- durable resume projection：status=${resumeProjection.status || "unknown"}；verified=${resumeProjection.verified === true}；recovered=${resumeProjection.recovered === true}；raw=${resumeProjection.rawMessageCount || 0}；omitted=${resumeProjection.omittedMessageCount || 0}；projected=${resumeProjection.projectedMessageCount || 0}；boundary=${resumeProjection.boundary?.boundaryId || "none"}；proof=${resumeProjection.proof?.proofId || "none"}。`);
+        lines.push(`- durable resume projection：status=${resumeProjection.status || "unknown"}；verified=${resumeProjection.verified === true}；recovered=${resumeProjection.recovered === true}；raw=${resumeProjection.rawMessageCount || 0}；prefix_omitted=${resumeProjection.omittedMessageCount || 0}；snip_omitted=${resumeProjection.snipOmittedMessageCount || 0}；projected=${resumeProjection.projectedMessageCount || 0}；boundary=${resumeProjection.boundary?.boundaryId || "none"}；proof=${resumeProjection.proof?.proofId || "none"}。`);
+        if (resumeProjection.snipReplay?.applied) {
+            lines.push(`- durable snip replay：markers=${resumeProjection.snipReplay.markerCount || 0}；removed=${resumeProjection.snipReplay.removedMessageCount || 0}；relinked=${resumeProjection.snipReplay.relinkedMessageCount || 0}；tokens_freed~${resumeProjection.snipReplay.removedTokenEstimate || 0}；checksum=${resumeProjection.snipReplay.removalChecksum || "none"}；原始 transcript 未修改。`);
+        }
+        if (resumeProjection.roundTripConsistency?.schema) {
+            lines.push(`- resume round-trip consistency：status=${resumeProjection.roundTripConsistency.status || "unknown"}；expected=${resumeProjection.roundTripConsistency.expectedActiveMessageCount || 0}；actual=${resumeProjection.roundTripConsistency.actualActiveMessageCount || 0}；delta=${resumeProjection.roundTripConsistency.delta || 0}；checksum=${resumeProjection.roundTripConsistency.checksum || "none"}。`);
+        }
+        if (resumeProjection.compactHeadRecovery?.schema) {
+            lines.push(`- compact-head restart recovery：status=${resumeProjection.compactHeadRecovery.status || "unknown"}；recovered=${resumeProjection.compactHeadRecovery.recovered === true}；prior_generation=${resumeProjection.compactHeadRecovery.priorHeadGeneration || 0}；current_generation=${resumeProjection.compactHeadRecovery.head?.generation || 0}。`);
+        }
         if (resumeProjection.status === "fail_closed_rebuild_required") {
             lines.push("- 恢复门禁：压缩边界未通过验证，本轮只能使用当前会话完整 raw transcript 重建结果；不得按可疑旧边界剪枝。 ");
         }
@@ -9638,10 +10180,16 @@ function renderGroupMemoryContextBundle(bundle) {
             lines.push(`- Native apply 未就绪：${apiMicrocompactNativeApplyPlan.reason || "executor does not expose provider request body"}；本轮只能声明 advisory/ignored/not_supported，不能声称 native_applied。`);
         }
     }
+    if (providerNativeCompactSessionCapacity.schema) {
+        lines.push(`- Provider compact 会话容量：generation=${providerNativeCompactSessionCapacity.generation || 1}；taskSession=${providerNativeCompactSessionCapacity.task_agent_session_id || ""}；nativeSession=${providerNativeCompactSessionCapacity.native_session_id || ""}；basis=${providerNativeCompactSessionCapacity.token_basis || "unknown"}；raw=${providerNativeCompactSessionCapacity.raw_active_tokens || 0}；providerInput=${providerNativeCompactSessionCapacity.provider_response_input_tokens || 0}；latestCleared=${providerNativeCompactSessionCapacity.provider_cleared_input_tokens || 0}；effective=${providerNativeCompactSessionCapacity.effective_context_tokens || 0}；stickyBeta=${providerNativeCompactSessionCapacity.sticky_beta_latched === true}。`);
+        lines.push("- 容量反馈边界：只采用该精确 Provider 子会话最新一次强回执，不跨群聊/子会话累加 cleared_input_tokens，也不修改 CCM 原始 transcript 或 typed MEMORY.md。");
+    }
     if (apiMicrocompactNativeApplyProofLedger.schema && apiMicrocompactNativeApplyProofLedger.has_history) {
         const totals = apiMicrocompactNativeApplyProofLedger.totals || {};
         const telemetry = apiMicrocompactNativeApplyProofLedger.request_telemetry || {};
+        const providerOutcomes = apiMicrocompactNativeApplyProofLedger.platform_execution_receipts?.totals || {};
         lines.push(`- API microcompact native apply proof ledger：status=${apiMicrocompactNativeApplyProofLedger.status || "unknown"}；verified=${totals.verified || 0} failed=${totals.failed || 0} advisory=${totals.advisory || 0} not_supported=${totals.not_supported || 0}；coverage=${apiMicrocompactNativeApplyProofLedger.proof_coverage_rate ?? "n/a"}%；telemetry strong=${telemetry.strong_verified_count || 0} matched=${telemetry.matched_verified_count || 0} adapter=${telemetry.adapter_matched_verified_count || 0} receipt=${telemetry.receipt_matched_verified_count || 0} receiptOnly=${telemetry.receipt_only_verified_count || 0} missing=${telemetry.missing_verified_count || 0} stale=${telemetry.stale_verified_count || 0} sessionBound=${telemetry.session_bound_verified_count || telemetry.session_bound_count || 0} dispatchBound=${telemetry.dispatch_bound_verified_count || telemetry.dispatch_bound_count || 0} runnerBound=${telemetry.runner_bound_verified_count || telemetry.runner_bound_count || 0}；ledger=${apiMicrocompactNativeApplyProofLedger.ledger_file || "未记录"}；requestTelemetry=${telemetry.ledger_file || "未记录"}。`);
+        lines.push(`- Provider compact outcome：applied=${providerOutcomes.native_applied || 0} requestAcceptedOnly=${providerOutcomes.request_accepted || 0} noEdits=${providerOutcomes.no_edits_applied || 0} failed=${providerOutcomes.request_failed || 0} unverified=${providerOutcomes.unverified || 0}；只有 response.context_management.applied_edits 非空时才算 native_applied。`);
         for (const row of Array.isArray(apiMicrocompactNativeApplyProofLedger.verified_entries) ? apiMicrocompactNativeApplyProofLedger.verified_entries.slice(0, 3) : []) {
             lines.push(`  - verified native_applied plan=${row.plan_checksum || ""}；requestPatch=${row.request_patch_checksum || row.receipt_request_patch_checksum || ""}；session=${row.task_agent_session_id || "unbound"}；snapshot=${row.memory_context_snapshot_id || "unknown"}；requestTelemetry=${row.request_telemetry_status || "unknown"}；该证明只说明历史 provider request 已带 context_management，本轮仍需按当前执行器真实发送情况重新落账。`);
         }
@@ -9879,7 +10427,7 @@ function renderGroupMemoryContextBundle(bundle) {
         lines.push(bundle.relevant_historical_evidence);
     if (bundle.task_query)
         lines.push(`- 你本次任务：${bundle.task_query}`);
-    lines.push("- 回执要求：回复末尾必须包含 CCM_AGENT_RECEIPT；不能编造未执行的验证或文件修改；必须用 memoryUsed / memoryIgnored 声明本轮是否使用了本记忆包、项目记忆、历史结论、共享文档或知识库；如存在 global_memory_id，必须用 globalMemoryUsage 逐条声明 used / ignored / verified / background / advisory；如存在 API microcompact edit plan，必须用 apiMicrocompactUsage 或 memoryUsed/memoryIgnored 声明 planChecksum 和 native_applied/advisory/ignored/not_supported，并绑定本轮 taskAgentSessionId/nativeSessionId/memoryContextSnapshotId；如存在 compact read plan revalidation gate，必须声明 gate/read_plan_id 以及是否已 re-read/current source verified；如存在压缩重注入候选，必须用 postCompactCandidateUsage 逐条声明 used / ignored / verified。");
+    lines.push("- 回执要求：回复末尾必须包含 CCM_AGENT_RECEIPT；不能编造未执行的验证或文件修改；必须用 memoryUsed / memoryIgnored 声明本轮是否使用了本记忆包、项目记忆、历史结论、共享文档或知识库；如本轮 surfaced MEMORY.md，必须用 typedMemoryUsage 覆盖每个 relPath 并逐项声明 used / ignored / verified 和 reason，不能声明未下发路径；verified 必须附可复算的 currentSourceEvidence；如存在 global_memory_id，必须用 globalMemoryUsage 逐条声明 used / ignored / verified / background / advisory；如存在 API microcompact edit plan，必须用 apiMicrocompactUsage 或 memoryUsed/memoryIgnored 声明 planChecksum 和 native_applied/advisory/ignored/not_supported，并绑定本轮 taskAgentSessionId/nativeSessionId/memoryContextSnapshotId；如存在 compact read plan revalidation gate，必须声明 gate/read_plan_id 以及是否已 re-read/current source verified；如存在压缩重注入候选，必须用 postCompactCandidateUsage 逐条声明 used / ignored / verified。");
     return lines.join("\n");
 }
 function buildAgentMemoryPacket(groupId, targetProject, task = "", options = {}) {
@@ -12441,10 +12989,20 @@ function buildGroupContextPacket(groupId, options = {}) {
     });
     const sections = [buildGroupMemoryContext(memory)];
     if (resumeProjection.schema) {
+        const resumeBaseline = resumePreparation.resumeBaseline || snapshotMemory.compaction?.resumeEffectiveTokenBaseline || null;
         sections.push([
             "会话恢复投影：",
-            `- status=${resumeProjection.status || "unknown"}; verified=${resumeProjection.verified === true}; recovered=${resumePreparation.recovered === true}; raw=${allMessages.length}; omitted=${resumeProjection.omittedMessageCount || 0}; projected=${resumeProjection.projectedMessageCount || recentMessages.length}`,
+            `- status=${resumeProjection.status || "unknown"}; verified=${resumeProjection.verified === true}; recovered=${resumePreparation.recovered === true}; raw=${allMessages.length}; prefix_omitted=${resumeProjection.omittedMessageCount || 0}; snip_omitted=${resumeProjection.snipOmittedMessageCount || 0}; projected=${resumeProjection.projectedMessageCount || recentMessages.length}`,
             `- boundary=${resumeProjection.boundary?.boundaryId || "none"}; journal=${resumeProjection.journal?.file || "none"}; proof=${resumePreparation.proof?.proofId || "none"}`,
+            resumeProjection.roundTripConsistency?.schema
+                ? `- round_trip status=${resumeProjection.roundTripConsistency.status || "unknown"}; expected=${resumeProjection.roundTripConsistency.expectedActiveMessageCount || 0}; actual=${resumeProjection.roundTripConsistency.actualActiveMessageCount || 0}; delta=${resumeProjection.roundTripConsistency.delta || 0}; checksum=${resumeProjection.roundTripConsistency.checksum || "none"}`
+                : "",
+            resumePreparation.compactHeadRecovery?.schema
+                ? `- compact_head_recovery status=${resumePreparation.compactHeadRecovery.status || "unknown"}; recovered=${resumePreparation.compactHeadRecovery.recovered === true}; prior_generation=${resumePreparation.compactHeadRecovery.priorHeadGeneration || 0}; current_generation=${resumePreparation.compactHeadRecovery.head?.generation || 0}`
+                : "",
+            resumeBaseline?.schema
+                ? `- tokens raw=${resumeBaseline.rawTranscriptTokens || 0}; prefix_omitted=${resumeBaseline.omittedRawTokens || 0}; snip_removed=${resumeBaseline.snipRemovedMessageCount || 0}/${resumeBaseline.snipRemovedTokenEstimate || 0}; summary=${resumeBaseline.summaryTokens || 0}; projected=${resumeBaseline.projectedMessageTokens || 0}; effective=${resumeBaseline.effectiveContextTokens || 0}; stale_usage_excluded=${resumeBaseline.staleProviderUsageTokensExcluded || 0}; baseline=${resumeBaseline.baselineId || "none"}`
+                : "",
         ].join("\n"));
     }
     if (digest) {

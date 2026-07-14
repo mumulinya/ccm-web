@@ -52,10 +52,27 @@ export const groupsApi = {
   createSession: (id, title = '') => api('/api/groups/sessions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, action: 'create', title }) }),
   selectSession: (id, sessionId) => api('/api/groups/sessions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, action: 'select', session_id: sessionId }) }),
   sessionAction: (id, sessionId, action, extra = {}) => api('/api/groups/sessions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, session_id: sessionId, action, ...extra }) }),
-  send: (data) => data instanceof FormData
-    ? fetch('/api/groups/send?stream=1', { method: 'POST', body: data })
-    : fetch('/api/groups/send?stream=1', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
+  send: (data, options = {}) => data instanceof FormData
+    ? fetch('/api/groups/send?stream=1', { method: 'POST', body: data, signal: options.signal })
+    : fetch('/api/groups/send?stream=1', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data), signal: options.signal }),
   members: (data) => api('/api/groups/members', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
+};
+
+// Agent 工作中消息控制：后端持久化，刷新或重启后仍可恢复。
+export const conversationTurnsApi = {
+  list: ({ scope = '', conversationId = '', statuses = '', limit = 120 } = {}) => {
+    const params = new URLSearchParams()
+    if (scope) params.set('scope', scope)
+    if (conversationId) params.set('conversation_id', conversationId)
+    if (statuses) params.set('statuses', statuses)
+    params.set('limit', String(limit))
+    return api(`/api/conversation-turns?${params.toString()}`)
+  },
+  enqueue: (data) => api('/api/conversation-turns/enqueue', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
+  claim: (data) => api('/api/conversation-turns/claim', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
+  settle: (data) => api('/api/conversation-turns/settle', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
+  cancel: (id, reason = '') => api('/api/conversation-turns/cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, reason }) }),
+  retry: (id) => api('/api/conversation-turns/retry', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) }),
 };
 
 // 任务相关 API
@@ -118,6 +135,7 @@ export const toolsApi = {
   skills: {
     list: () => api('/api/skills'),
     listCustomizations: () => api('/api/skills/customizations'),
+    getManual: (name) => api(`/api/skills/manual?name=${encodeURIComponent(name)}`),
     create: (data) => api('/api/skills', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
     delete: (name) => api('/api/skills/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) }),
   },

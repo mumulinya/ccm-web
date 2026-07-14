@@ -86,6 +86,7 @@ import {
 } from "./group-session-memory-model-extraction";
 import {
   configureGroupTypedMemoryManifestSelector,
+  recordGroupTypedMemoryManifestSelectorConsumptionOutcomes,
   recordGroupTypedMemoryConsumptionLedger,
   recordGroupTypedMemoryStaleCandidates,
   readGroupTypedMemoryPressureRecallUsageLedger,
@@ -8894,6 +8895,7 @@ function buildChildAgentDevelopmentContract(targetProject: string, taskText = ""
     "- 复核交接不算阻塞：实现与验证完成后 status 写 done；等待 TestAgent、主 Agent 抽查或最终总结属于主 Agent 后续流程，不得写入 blockers/needs。",
     memoryFreshnessGateLine,
     "- 记忆使用要求：如果本轮使用了平台注入的群聊摘要、项目记忆、历史结论、共享文档或知识库，请在回执 memoryUsed 写明使用项；如果没有使用或无法判断，请在 memoryIgnored 写明原因。",
+    "- 类型化记忆逐项回执：如果 WorkerContextPacket 下发了 surfaced MEMORY.md 文档，回执必须在 typedMemoryUsage 中覆盖每个 relPath，并逐项填写 usageState（used/verified/ignored）和 reason；不得声明未下发的 relPath；verified 还必须提供可由平台复算的 currentSourceEvidence。",
     "- 全局记忆要求：如果上下文包含 global_memory_id、semantic_risk 或 cross_group_suppression，回执必须在 globalMemoryUsage 中逐条声明 globalMemoryId、usageState（used/ignored/verified/background/advisory）、currentSourceVerified、semanticRiskAcknowledged、crossGroupSuppression 和 reason。",
     "- 全局记忆健康门禁要求：如果上下文包含 global_memory_health_gate，回执 memoryUsed/memoryIgnored 必须引用 gate_id；status=fail 或 action=block_global_agent_memory_recall 时必须在 memoryIgnored 说明未使用全局记忆，且不得在 globalMemoryUsage 声明 used。",
     "- API microcompact 要求：如果上下文包含 API microcompact edit plan，回执 apiMicrocompactUsage 或 memoryUsed/memoryIgnored 必须引用 planChecksum，并声明 native_applied/advisory/ignored/not_supported；第三方 CLI 未实际调用 native API context-management 时不得声明 native_applied；声明 native_applied 时还必须填写 apiMicrocompactNativeApplyRequestTelemetry；强证明必须来自 fresh native_request_adapter telemetry，agent_receipt 来源只能算弱证据。",
@@ -8903,7 +8905,7 @@ function buildChildAgentDevelopmentContract(targetProject: string, taskText = ""
     "- ACK 结构要求：CCM_AGENT_RECEIPT 中必须包含 ack 对象，字段包括 understoodGoal、plannedScope、forbiddenScope、verificationPlan、unclear；如果不清楚，unclear 必须列出问题且 status 不得写 done。",
     "- contractChanges 结构要求：如果涉及接口、字段、schema、路由、类型、配置或前后端契约变化，CCM_AGENT_RECEIPT 中必须包含 contractChanges 数组，写明 type、endpoint/path、request、response、fields、consumers、note。",
     "- contract injection 消费要求：如果工作单包含 injection_id，回执必须写 consumedInjectionIds，并说明是否已适配、无需适配或仍阻塞。",
-    "- 回执要求：回复末尾必须包含 JSON 格式 CCM_AGENT_RECEIPT，写明 status、summary、actions、filesChanged、verification、blockers、needs、ack、contractChanges、consumedInjectionIds、memoryUsed、memoryIgnored、globalMemoryUsage、apiMicrocompactUsage、apiMicrocompactNativeApplyRequestTelemetry、postCompactCandidateUsage、providerSwitchExecution。",
+    "- 回执要求：回复末尾必须包含 JSON 格式 CCM_AGENT_RECEIPT，写明 status、summary、actions、filesChanged、verification、blockers、needs、ack、contractChanges、consumedInjectionIds、memoryUsed、memoryIgnored、typedMemoryUsage、globalMemoryUsage、apiMicrocompactUsage、apiMicrocompactNativeApplyRequestTelemetry、postCompactCandidateUsage、providerSwitchExecution。",
   ].filter(Boolean).join("\n");
 }
 
@@ -10823,6 +10825,17 @@ function buildDeliverySummary(task: any, execution: any, finalStatus: string) {
     rows: typedMemoryConsumptionRows,
     generatedAt: new Date().toISOString(),
   });
+  const typedMemorySelectorConsumption = recordGroupTypedMemoryManifestSelectorConsumptionOutcomes(getGroupSessionMemoryScopeId(
+    task?.group_id || task?.groupId || "",
+    task?.group_session_id || task?.groupSessionId || ""
+  ), {
+    targetProject: task?.target_project || task?.targetProject || "",
+    taskId: task?.id || "",
+    executionId: execution?.id || execution?.execution_id || "",
+    rows: typedMemoryConsumptionRows,
+    receipts: receiptEvidence,
+    generatedAt: new Date().toISOString(),
+  });
   const typedMemoryStaleCandidateLedger = recordGroupTypedMemoryStaleCandidates(getGroupSessionMemoryScopeId(
     task?.group_id || task?.groupId || "",
     task?.group_session_id || task?.groupSessionId || "default"
@@ -11053,6 +11066,10 @@ function buildDeliverySummary(task: any, execution: any, finalStatus: string) {
     typed_memory_consumption_count: typedMemoryConsumptionRows.length,
     typed_memory_consumption_ledger: typedMemoryConsumptionLedger,
     typed_memory_consumption_ledger_file: typedMemoryConsumptionLedger?.file || "",
+    typed_memory_selector_consumption: typedMemorySelectorConsumption,
+    typed_memory_selector_consumption_recorded_count: Number(typedMemorySelectorConsumption?.recordedCount || 0),
+    typed_memory_selector_consumption_idempotent_count: Number(typedMemorySelectorConsumption?.idempotentCount || 0),
+    typed_memory_selector_consumption_skipped_count: Number(typedMemorySelectorConsumption?.skippedCount || 0),
     typed_memory_stale_candidate_ledger: typedMemoryStaleCandidateLedger,
     typed_memory_stale_candidate_ledger_file: typedMemoryStaleCandidateLedger?.file || "",
     post_compact_dispatch_markers: postCompactDispatchMarkers,

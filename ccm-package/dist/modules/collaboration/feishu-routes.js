@@ -180,12 +180,12 @@ function handleFeishuRoutes(req, res, parsed) {
         return true;
     }
     if (pathname === "/api/feishu/health" && req.method === "GET") {
-        (0, utils_1.sendJson)(res, (0, feishu_channel_1.getFeishuChannelHealth)());
+        (0, utils_1.sendJson)(res, (0, feishu_channel_1.getFeishuChannelHealth)(Number(req.socket?.localPort || 3080)));
         return true;
     }
     if (pathname === "/api/feishu/health/probe" && req.method === "POST") {
         (0, feishu_1.probeFeishuControlBotApi)().then((probe) => {
-            const health = (0, feishu_channel_1.getFeishuChannelHealth)();
+            const health = (0, feishu_channel_1.getFeishuChannelHealth)(Number(req.socket?.localPort || 3080));
             (0, utils_1.sendJson)(res, { ...health, healthy: health.healthy && probe.success === true, api_probe: probe }, probe.success ? 200 : 503);
         }).catch((error) => (0, utils_1.sendJson)(res, { success: false, error: error?.message || "飞书健康探针失败" }, 503));
         return true;

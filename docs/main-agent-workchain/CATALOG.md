@@ -1,6 +1,6 @@
 # Main Agent Workchain 文档总目录
 
-> 共 285 篇功能与验收记录。该文件由 `node scripts/generate-main-agent-doc-catalog.mjs` 生成。
+> 共 296 篇功能与验收记录。该文件由 `node scripts/generate-main-agent-doc-catalog.mjs` 生成。
 
 ## global-agent/conversation-and-ui (21)
 
@@ -153,18 +153,42 @@
 - [群聊 TestAgent 复核计划兜底卡片 v1](./group-main-agent/test-agent-bridge/2026-07-09-group-test-agent-plan-fallback-card-v1.md)
 - [群聊状态追问复核摘要 v1](./group-main-agent/test-agent-bridge/2026-07-09-group-status-independent-review-followup-v1.md)
 
-## operations-and-integrations/feishu (2)
+## operations-and-integrations/cleanup-center (1)
 
+- [清理中心生产化升级 v1](./operations-and-integrations/cleanup-center/2026-07-14-cleanup-center-production-v1.md)
+
+## operations-and-integrations/code-changes (1)
+
+- [代码变更工作台生产化升级 v1](./operations-and-integrations/code-changes/2026-07-14-production-code-change-workbench-v1.md)
+
+## operations-and-integrations/feishu (3)
+
+- [飞书控制机器人可靠性 v2](./operations-and-integrations/feishu/2026-07-14-feishu-control-bot-reliability-v2.md)
 - [飞书生产工作链路 v1](./operations-and-integrations/feishu/2026-07-13-feishu-production-workchain-v1.md)
 - [飞书双通道命名与展示优化 v1](./operations-and-integrations/feishu/2026-07-13-feishu-channel-naming-clarity-v1.md)
 
-## operations-and-integrations/music (1)
+## operations-and-integrations/frontend-experience (1)
 
+- [CCM 全局视觉规范与响应式布局收口 v1](./operations-and-integrations/frontend-experience/2026-07-14-global-ui-responsive-layout-v1.md)
+
+## operations-and-integrations/music (2)
+
+- [Music Production Workflow v1](./operations-and-integrations/music/2026-07-14-music-production-workflow-v1.md)
 - [音乐 Agent 对话可靠性升级](./operations-and-integrations/music/2026-07-13-music-agent-chat-reliability.md)
 
-## operations-and-integrations/product-navigation (1)
+## operations-and-integrations/pets (1)
 
+- [全局工作伴侣与参考图宠物生成 v1](./operations-and-integrations/pets/2026-07-14-global-workspace-companion-and-image-generation-v1.md)
+
+## operations-and-integrations/product-navigation (2)
+
+- [生产级导航配置中心 v2](./operations-and-integrations/product-navigation/2026-07-14-production-navigation-configuration-center-v2.md)
 - [系统自检与对话模板页面下线 V1](./operations-and-integrations/product-navigation/2026-07-13-retire-diagnostics-and-template-pages-v1.md)
+
+## operations-and-integrations/project-management (2)
+
+- [项目管理生产化升级 v1](./operations-and-integrations/project-management/2026-07-14-project-management-production-v1.md)
+- [项目会话普通问答安静展示 v1](./operations-and-integrations/project-management/2026-07-14-project-chat-quiet-conversation-v1.md)
 
 ## operations-and-integrations/requirements-and-attachments (1)
 
@@ -181,6 +205,10 @@
 - [任务回放逐行代码变更 v1](./operations-and-integrations/task-replay/2026-07-13-task-replay-line-code-diff-v1.md)
 - [完整任务回放 v1](./operations-and-integrations/task-replay/2026-07-13-complete-task-replay-v1.md)
 
+## operations-and-integrations/terminal (1)
+
+- [生产级内置终端工作区 v1](./operations-and-integrations/terminal/2026-07-14-production-terminal-workbench-v1.md)
+
 ## shared-workchain/architecture-and-validation (7)
 
 - [第三方 Agent MCP / Skill 生产闭环验收 v1](./shared-workchain/architecture-and-validation/2026-07-13-third-party-agent-runtime-tool-production-closure-v1.md)
@@ -190,6 +218,10 @@
 - [自动开发工作台 V2](./shared-workchain/architecture-and-validation/2026-07-13-auto-dev-workbench-v2.md)
 - [主 Agent 严格重新验收矩阵 v1](./shared-workchain/architecture-and-validation/2026-07-12-main-agent-strict-revalidation-matrix-v1.md)
 - [2026-07-07 Unified Workchain V1](./shared-workchain/architecture-and-validation/2026-07-07-unified-workchain-v1.md)
+
+## shared-workchain/conversation-control (1)
+
+- [统一会话回合控制 v1](./shared-workchain/conversation-control/2026-07-14-unified-conversation-turn-control-v1.md)
 
 ## shared-workchain/delivery-and-acceptance (32)
 

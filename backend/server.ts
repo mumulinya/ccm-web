@@ -43,6 +43,7 @@ import {
   trackManagedChildProcess,
   listActiveAgentRuns,
   cancelActiveAgentRun,
+  requestGroupSessionAgentCancellation,
 } from "./agents/execution-kernel";
 import { buildProjectConversationBrief, buildProjectExecutionBrief } from "./projects/memory";
 import {
@@ -51,6 +52,11 @@ import {
   createDirectAgentDispatchRequest,
   markDirectAgentDispatchStarted,
 } from "./agents/direct-dispatch-spool";
+import {
+  conversationTurnControl,
+  handleConversationTurnControlApi,
+  runConversationTurnControlSelfTest,
+} from "./agents/conversation-turn-control";
 
 // 导入底座与持久层
 import {
@@ -131,7 +137,7 @@ import { reconcileTaskAgentContinuationSoak } from "./tasks/task-agent-continuat
 import { startReliabilityDrillScheduler, stopReliabilityDrillScheduler } from "./system/reliability-drills";
 import { resumeSoakTest, shutdownSoakMonitor } from "./system/soak-test";
 import { initializeProcessLifecycle, installProcessLifecycleFaultHandlers, markProcessShutdown, touchProcessLifecycle } from "./system/process-lifecycle";
-import { bootstrapGlobalAgentMemoryForServer, handleGlobalAgentApi, resumeGlobalAgentLoopsForServer, startGlobalMissionSupervisionForServer, stopGlobalMissionSupervisionForServer } from "./modules/global/global-agent";
+import { bootstrapGlobalAgentMemoryForServer, handleGlobalAgentApi, resumeGlobalAgentLoopsForServer, startFeishuConversationTurnRecoveryForServer, startGlobalMissionSupervisionForServer, stopFeishuConversationTurnRecoveryForServer, stopGlobalMissionSupervisionForServer } from "./modules/global/global-agent";
 import { handleRagApi } from "./modules/knowledge/rag";
 import { handleSlashCommandsApi } from "./modules/tools/slash-commands";
 import { migrateConfigDirectory, migrateTomlCredentials } from "./core/credential-store";
@@ -2312,6 +2318,37 @@ function handleRequest(req: any, res: any) {
     return;
   }
 
+  if (pathname === "/api/conversation-turns/self-test" && req.method === "GET") {
+    const result = runConversationTurnControlSelfTest();
+    sendJson(res, { success: result.pass, ...result }, result.pass ? 200 : 500);
+    return;
+  }
+
+  if (pathname === "/api/conversation-turns/stop" && req.method === "POST") {
+    let body = "";
+    req.on("data", (chunk: any) => body += chunk);
+    req.on("end", () => {
+      try {
+        const payload = body ? JSON.parse(body) : {};
+        const scope = String(payload.scope || "").trim();
+        if (scope !== "group") return sendJson(res, { success: false, error: "该入口请使用对应 Agent 的停止接口" }, 400);
+        const cancellation = requestGroupSessionAgentCancellation({
+          groupId: payload.group_id || payload.groupId,
+          groupSessionId: payload.group_session_id || payload.groupSessionId,
+          taskIds: [payload.task_id || payload.taskId].filter(Boolean),
+          reason: payload.reason || "用户停止群聊主 Agent 当前工作",
+          actor: payload.actor || "conversation-turn-control",
+        });
+        sendJson(res, { success: true, cancellation });
+      } catch (error: any) {
+        sendJson(res, { success: false, error: error?.message || String(error) }, 400);
+      }
+    });
+    return;
+  }
+
+  if (handleConversationTurnControlApi(pathname, req, res, parsed)) return;
+
   // 1. SSE 实时状态数据管道单独拦截
   if (pathname === "/api/status/stream" && req.method === "GET") {
     const clientType = String(parsed.query.client || "").trim();
@@ -2751,6 +2788,10 @@ function handleRequest(req: any, res: any) {
 
 // === 启动服务器 ===
 function bootstrapServerRuntime(startupCollabCtx: any, port: number) {
+  const recoveredConversationTurns = conversationTurnControl.recoverInterrupted();
+  if (recoveredConversationTurns.recovered > 0) {
+    console.log(`[会话消息队列] 已恢复 ${recoveredConversationTurns.recovered} 条服务重启前发送中的消息`);
+  }
   const petGenerationRecovery = recoverPetGenerationJobs();
   if (petGenerationRecovery.recovered > 0) console.log(`[宠物生成] 标记 ${petGenerationRecovery.recovered} 个中断任务等待重试`);
   refreshEnvPath();
@@ -2828,6 +2869,7 @@ function startServer(port: number) {
     stopTaskWatchdog();
     stopAgentRecoveryMonitor();
     stopGlobalMissionSupervisionForServer();
+    stopFeishuConversationTurnRecoveryForServer();
     stopReliabilityDrillScheduler();
     stopUsabilityArchiveScheduler();
     stopGroupSessionRetentionMaintenanceScheduler();
@@ -2847,8 +2889,11 @@ function startServer(port: number) {
     console.log(`  地址: http://localhost:${port}`);
     console.log(`  按 Ctrl+C 停止\n`);
     void resumeGlobalAgentLoopsForServer(startupCollabCtx, port)
-      .then(result => { if (result.total > 0) console.log(`[全局 Agent] 启动恢复 ${result.resumed}/${result.total} 个运行`); })
-      .catch(error => console.warn(`[全局 Agent] 启动恢复失败：${error?.message || error}`));
+      .then(result => {
+        if (result.total > 0) console.log(`[全局 Agent] 启动恢复 ${result.resumed}/${result.total} 个运行`);
+      })
+      .catch(error => console.warn(`[全局 Agent] 启动恢复失败：${error?.message || error}`))
+      .finally(() => startFeishuConversationTurnRecoveryForServer(`http://127.0.0.1:${port}`, startupCollabCtx));
     try {
       const feishuConfig = loadFeishuConfig();
       const hasControlBotCredentials = !!((feishuConfig.control_bot_app_id || feishuConfig.app_id) && (feishuConfig.control_bot_app_secret || feishuConfig.app_secret));

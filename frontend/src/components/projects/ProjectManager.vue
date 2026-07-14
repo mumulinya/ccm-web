@@ -3,6 +3,7 @@ import { ref, onMounted, onUnmounted, nextTick, computed, watch, inject } from '
 import { api, projectsApi, sessionsApi } from '../../api/index.js'
 import { toast, confirmDialog } from '../../utils/toast.js'
 import ChatComposer from '../common/ChatComposer.vue'
+import ConversationTurnControls from '../common/ConversationTurnControls.vue'
 import CommandResultCard from '../common/CommandResultCard.vue'
 import MessageNavigator from '../common/MessageNavigator.vue'
 import AgentCodeChangeDrawer from '../agents/AgentCodeChangeDrawer.vue'
@@ -25,6 +26,7 @@ import { useChatTemplates } from '../../composables/useChatTemplates.js'
 import { useCodeChangeDrawer } from '../../composables/useCodeChangeDrawer.js'
 import { useMessageNavigation } from '../../composables/useMessageNavigation.js'
 import { usePinnedScroll } from '../../composables/usePinnedScroll.js'
+import { useConversationTurnControl } from '../../composables/useConversationTurnControl.js'
 import { projectExecutionTaskCard } from '../../utils/taskExperience.js'
 import { shouldShowProjectTaskCard } from '../../utils/projectChatPresentation.js'
 import { buildProjectSessionKnowledgePayload, buildProjectTaskKnowledgePayload, postKnowledgeCapture } from '../../utils/knowledgeCapture.js'
@@ -609,20 +611,90 @@ const isStreaming = ref(false)
 const thinkingMessages = ref([]) // 存储思考过程消息
 const pendingProjectParentRunId = ref('')
 const streamController = ref(null)
+const activeProjectRunId = ref('')
+const stoppingProjectTurn = ref(false)
 const makeProjectMessageId = () => `pmsg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
-const stopStreaming = () => streamController.value?.abort()
 
-const sendMessage = async () => {
-  if (isStreaming.value || (!chatInput.value.trim() && chatFiles.value.length === 0) || !currentProject.value) return
+const projectTurnConversationId = computed(() => currentProject.value && currentSession.value
+  ? `${currentProject.value}:${currentSession.value}`
+  : '')
+const projectTurnControl = useConversationTurnControl({
+  scope: 'project',
+  conversationId: projectTurnConversationId,
+  busy: isStreaming,
+})
+const projectComposerSendLabel = computed(() => isStreaming.value
+  ? (projectTurnControl.mode.value === 'steer' ? '引导' : '排队')
+  : '发送')
+
+const stopStreaming = async () => {
+  if (!isStreaming.value || stoppingProjectTurn.value) return
+  stoppingProjectTurn.value = true
+  try {
+    if (activeProjectRunId.value) {
+      await postTaskAction('/api/project-runs/cancel', {
+        id: activeProjectRunId.value,
+        reason: '用户从项目会话停止当前工作',
+      }).catch((error) => toast.warning(error?.message || '后端停止请求未完成，正在中断当前连接'))
+    }
+    streamController.value?.abort()
+  } finally {
+    stoppingProjectTurn.value = false
+  }
+}
+
+const drainProjectTurnQueue = () => projectTurnControl.drain(async (turn) => {
+  const result = await sendMessage({ queueTurn: turn })
+  if (result?.success === false) throw new Error(result.error || '项目消息没有完成')
+  return { run_id: result?.runId || '' }
+})
+watch(
+  () => [projectTurnConversationId.value, isStreaming.value, projectTurnControl.turns.value.filter(turn => turn.status === 'queued').length],
+  ([conversationId, busy, queued]) => {
+    if (conversationId && !busy && queued) window.setTimeout(() => drainProjectTurnQueue().catch(() => {}), 0)
+  },
+  { flush: 'post' },
+)
+
+const submitProjectMessageWhileBusy = async () => {
+  const message = chatInput.value.trim()
+  if (!message) return
+  if (chatFiles.value.length) {
+    toast.info('工作中的排队消息暂不保存本地附件，请停止当前工作后连同附件发送')
+    return
+  }
+  const requestedMode = projectTurnControl.mode.value
+  const turn = await projectTurnControl.enqueue({
+    message,
+    mode: requestedMode,
+    activeRunId: activeProjectRunId.value,
+    metadata: {
+      project: currentProject.value,
+      session_id: currentSession.value,
+      parent_run_id: activeProjectRunId.value,
+      requested_mode: requestedMode,
+    },
+  })
+  chatInput.value = ''
+  toast.success(requestedMode === 'steer' ? '已接收引导，正在安全停止当前执行后继续' : '已加入队列，当前回复结束后会自动发送')
+  if (requestedMode === 'steer') await stopStreaming()
+  window.setTimeout(() => drainProjectTurnQueue().catch(() => {}), 0)
+  return turn
+}
+
+const sendMessage = async (options = {}) => {
+  const queuedTurn = options?.queueTurn || null
+  if (isStreaming.value && !queuedTurn) return submitProjectMessageWhileBusy()
+  if ((!queuedTurn && !chatInput.value.trim() && chatFiles.value.length === 0) || !currentProject.value) return
   if (!currentSession.value) {
     toast.info('请先新建或选择一个会话')
     return
   }
   const projectAtSend = currentProject.value
   const sessionAtSend = currentSession.value
-  const msg = chatInput.value.trim()
-  const filesToSend = [...chatFiles.value]
-  const parentRunId = pendingProjectParentRunId.value
+  const msg = queuedTurn ? String(queuedTurn.message || '').trim() : chatInput.value.trim()
+  const filesToSend = queuedTurn ? [] : [...chatFiles.value]
+  const parentRunId = queuedTurn?.metadata?.parent_run_id || pendingProjectParentRunId.value
   pendingProjectParentRunId.value = ''
   chatInput.value = ''
   chatFiles.value = []
@@ -652,6 +724,7 @@ const sendMessage = async () => {
   let responseAccepted = false
   let userPersisted = false
   let backendError = ''
+  let requestError = ''
 
   const addAgentMessage = () => {
     if (agentMsgAdded) return
@@ -682,6 +755,7 @@ const sendMessage = async () => {
         scrollToBottom()
       } else if (data.type === 'task_runtime') {
         agentMsg.projectRun = data.run || agentMsg.projectRun
+        activeProjectRunId.value = data.run?.id || activeProjectRunId.value
         agentMsg.task_id = data.taskExperience?.task_id || data.run?.id || agentMsg.task_id
         agentMsg.taskExperience = data.taskExperience || agentMsg.taskExperience
         if (agentMsg.messageMode === 'task') {
@@ -763,6 +837,7 @@ const sendMessage = async () => {
     if (backendError) throw new Error(backendError)
   } catch (error) {
     const stopped = error?.name === 'AbortError'
+    requestError = stopped ? '当前工作已停止' : (error?.message || '连接中断')
     addAgentMessage()
     if (stopped) {
       agentMsg.content = agentMsg.content
@@ -783,6 +858,8 @@ const sendMessage = async () => {
     agentMsg.streaming = false
     isStreaming.value = false
     if (streamController.value === controller) streamController.value = null
+    const completedRunId = agentMsg.projectRun?.id || activeProjectRunId.value
+    if (!agentMsg.projectRun || agentMsg.projectRun?.id === activeProjectRunId.value) activeProjectRunId.value = ''
     const hasAgentResult = agentMsg.content || agentMsg.taskExperience || agentMsg.workEvents.length
     if (hasAgentResult) {
       addAgentMessage()
@@ -801,7 +878,9 @@ const sendMessage = async () => {
       autoNameSession(projectAtSend, sessionAtSend, msg)
     }
     scrollToBottom()
+    if (!queuedTurn) window.setTimeout(() => drainProjectTurnQueue().catch(() => {}), 0)
   }
+  return { success: !requestError && !backendError, error: requestError || backendError, runId: agentMsg.projectRun?.id || '' }
 }
 
 const formatFileSize = (size) => {
@@ -1297,11 +1376,20 @@ const handleKeydown = async (e) => {
           target-id-prefix="msg-"
           @navigate="scrollToMessage"
         />
+        <ConversationTurnControls
+          :busy="isStreaming"
+          v-model:mode="projectTurnControl.mode.value"
+          :turns="projectTurnControl.turns.value"
+          :stopping="stoppingProjectTurn"
+          @stop="stopStreaming"
+          @cancel="projectTurnControl.cancel"
+          @retry="(turn) => projectTurnControl.retry(turn).then(() => drainProjectTurnQueue())"
+        />
         <ChatComposer
           v-model="chatInput"
           input-id="projectChatInput"
           placeholder="向项目 Agent 发送消息..."
-          send-label="发送"
+          :send-label="projectComposerSendLabel"
           :files="chatFiles"
           :slash="slash"
           :templates-open="showTemplateSelector"
@@ -1311,6 +1399,7 @@ const handleKeydown = async (e) => {
           :recommended-template="recommendedTemplate"
           :disabled="!currentProject || !currentSession"
           :busy="isStreaming"
+          :allow-input-while-busy="true"
           @files-selected="onChatFilesSelected"
           @remove-file="removeChatFile"
           @open-template="openTemplateSelector"

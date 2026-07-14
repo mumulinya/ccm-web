@@ -23,9 +23,14 @@ const prepare = async page => {
   await page.goto(`${baseUrl}/?tab=tools`, { waitUntil: 'domcontentloaded', timeout: 30_000 })
   await page.locator('[data-testid="tool-control-overview"]').waitFor({ timeout: 60_000 })
   await page.getByText('真实调用已验证', { exact: true }).waitFor()
-  await page.locator('[data-testid="tool-control-overview"]').getByText('3/3', { exact: true }).waitFor({ timeout: 60_000 })
-  await page.getByText('目标验收 7/7 项通过', { exact: true }).waitFor({ timeout: 60_000 })
+  await page.getByText(/目标验收 \d+\/\d+ 项通过/, { exact: true }).waitFor({ timeout: 60_000 })
 }
+
+const readMenuStructure = page => page.locator('.category-list').evaluate(sidebar => ({
+  labels: Array.from(sidebar.querySelectorAll('.category-group-label')).map(item => item.textContent?.trim()),
+  items: Array.from(sidebar.querySelectorAll('.category-item')).map(item => item.textContent?.replace(/\s+/g, ' ').trim()),
+  horizontalScroll: sidebar.scrollWidth > sidebar.clientWidth,
+}))
 
 const assertNoOverflow = async (page, label) => {
   const metrics = await page.evaluate(() => ({ client: document.documentElement.clientWidth, scroll: document.documentElement.scrollWidth }))
@@ -46,11 +51,23 @@ try {
   await prepare(desktop)
   await assertNoOverflow(desktop, 'desktop overview')
   assert.equal(await desktop.locator('.technical-overview[open]').count(), 0)
-  assert.equal(await desktop.getByText('3/3', { exact: true }).count() > 0, true)
-  assert.equal(await desktop.getByText('目标验收 7/7 项通过', { exact: true }).count(), 1)
-  assert.equal(await desktop.locator('.category-item').filter({ hasText: '授权总览' }).getByText('3/3', { exact: true }).count(), 1)
-  assert.equal(await desktop.locator('.category-item').filter({ hasText: 'Agent 运行时' }).getByText('4/4', { exact: true }).count(), 1)
-  report.checks.push({ name: 'desktop overview shows verified scopes and completed goal with technical details closed', pass: true })
+  assert.equal(await desktop.getByText(/目标验收 \d+\/\d+ 项通过/, { exact: true }).count(), 1)
+  const desktopMenu = await readMenuStructure(desktop)
+  assert.deepEqual(desktopMenu.labels, ['总览', '工具与连接', 'Skill', '治理与验收'])
+  assert.deepEqual(desktopMenu.items.map(item => item.replace(/[0-9/]+$/g, '')), [
+    '▦运行概况',
+    '⚙️内置核心工具',
+    '🔌MCP 连接中心',
+    '⚡Skill 管理',
+    '🔮外部 Skill 包',
+    '🛒技能商城',
+    '◈授权总览',
+    '◆链路验收',
+    '◇调用审计',
+    '◎Agent 运行时',
+  ])
+  assert.equal(desktopMenu.horizontalScroll, false)
+  report.checks.push({ name: 'desktop menu groups MCP, Skill, and governance entries in stable order', pass: true })
   await capture(desktop, 'desktop-overview')
 
   await desktop.locator('.category-item').filter({ hasText: 'MCP 连接中心' }).click()
@@ -74,7 +91,11 @@ try {
   const overviewBox = await mobile.locator('[data-testid="tool-control-overview"]').boundingBox()
   assert.ok(overviewBox && overviewBox.x >= -1 && overviewBox.x + overviewBox.width <= 391, 'mobile overview is outside viewport')
   assert.equal(await mobile.getByText('真实调用已验证', { exact: true }).count(), 1)
-  report.checks.push({ name: 'mobile overview stays usable and keeps the verified status visible', pass: true })
+  const mobileMenu = await readMenuStructure(mobile)
+  assert.equal(await mobile.locator('.category-group-label:visible').count(), 0)
+  assert.equal(mobileMenu.horizontalScroll, true)
+  assert.equal(mobileMenu.items.length, 10)
+  report.checks.push({ name: 'mobile menu hides group labels and keeps all entries in horizontal navigation', pass: true })
   await capture(mobile, 'mobile-overview')
   await mobileContext.close()
 

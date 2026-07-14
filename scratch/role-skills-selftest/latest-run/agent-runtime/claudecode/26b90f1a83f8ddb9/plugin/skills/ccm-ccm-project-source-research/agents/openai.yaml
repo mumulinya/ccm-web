@@ -1,4 +1,0 @@
-interface:
-  display_name: "CCM Project Source Research"
-  short_description: "Inspect current source and project rules before editing"
-  default_prompt: "Use $ccm-project-source-research to establish the current implementation before changing it."

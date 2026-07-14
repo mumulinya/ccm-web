@@ -50,7 +50,7 @@ const runtimeScenarios = [
   },
   {
     id: "release",
-    task: "完成版本升级、数据库迁移和生产发布就绪检查",
+    task: "完成版本升级、数据库迁移，运行构建并验证生产发布就绪",
     expected: [
       roleSkills.CCM_ROLE_SKILL_NAMES.releaseReadiness,
       roleSkills.CCM_ROLE_SKILL_NAMES.evidence,
@@ -83,6 +83,18 @@ for (const runtime of ["claudecode", "cursor", "codex"]) {
     }
     assert.match(usageDirective, /读取并应用其 SKILL\.md/);
     assert.match(usageDirective, /CCM_AGENT_RECEIPT/);
+    const simulatedUsageReceipt = allowedTools.skill.map(name => `已实际应用 Skill:${name}`).join("\n");
+    const detectedUsage = runtimeTools.detectInvokedSkillsFromText(simulatedUsageReceipt, allowedTools, catalog.skills);
+    assert.deepEqual(
+      detectedUsage.map(item => item.name).sort(),
+      [...allowedTools.skill].sort(),
+      `${runtime}/${scenario.id} did not record all reported Skill usage`,
+    );
+    assert.equal(
+      runtimeTools.detectInvokedSkillsFromText("Skill:unauthorized-skill", allowedTools, catalog.skills).length,
+      0,
+      `${runtime}/${scenario.id} recorded unauthorized Skill usage`,
+    );
 
     const workDir = path.join(scratchRoot, "workdirs", runtime, scenario.id);
     fs.mkdirSync(workDir, { recursive: true });
@@ -108,6 +120,7 @@ for (const runtime of ["claudecode", "cursor", "codex"]) {
       synced: audit.synced.skill,
       missing: audit.missing.skill,
       usageDirective,
+      detectedUsage,
     };
   }
   for (const required of requiredProjectRuntimeSkills) {
@@ -196,6 +209,7 @@ const sourceChecks = {
   projectRuntimeMergesRoleSkills: /selectRoleSkills\("project-child-agent"[\s\S]*?selectedRoleSkills\.map/.test(projectSource),
   projectRuntimeRequiresSkillApplication: /buildSelectedSkillUsageDirective\(selectedRoleSkills\)/.test(projectSource),
   projectExecutionPromptsReceiveSkillDirective: (projectSource.match(/toolContext\.prompt/g) || []).length >= 4,
+  projectExecutionRecordsInvokedSkills: /attachInvokedSkillsToReceipt\([\s\S]*?invoked_skills/.test(projectSource),
   testWorkOrderRecordsRoleSkills: /roleSkills:\s*\{[\s\S]*?role:\s*"test-agent"/.test(testAgentSource),
   testWorkOrderMarksNativeApplication: /appliedBy:\s*"ccm-native-test-agent-engine"/.test(testAgentSource),
   duplicateBrowserManualRemoved: !testAgentProfileSource.includes("Use genuinely concurrent HTTP requests"),

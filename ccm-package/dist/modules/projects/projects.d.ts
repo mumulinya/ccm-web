@@ -3,13 +3,19 @@ export declare function startControlBotConnection(port?: number): {
     success: boolean;
     running: boolean;
     pid: number;
+    target_port: number;
+    endpoint_current: boolean;
     config_path: string;
     message: string;
+    rebound_from_port?: undefined;
     log_file?: undefined;
 } | {
     success: boolean;
     running: boolean;
     pid: number;
+    target_port: number;
+    endpoint_current: boolean;
+    rebound_from_port: number;
     config_path: string;
     log_file: string;
     message: string;

@@ -33,8 +33,8 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.GROUP_SESSION_MODEL_EXTRACTION_TOPIC_VERSION = exports.GROUP_SESSION_MODEL_EXTRACTION_TYPED_MEMORY_VERSION = exports.GROUP_TYPED_MEMORY_DIRECT_OPERATION_VERSION = exports.GROUP_TYPED_MEMORY_WRITE_ADMISSION_VERSION = exports.GROUP_TYPED_MEMORY_DISTILLATION_QUALITY_VERSION = exports.GROUP_TYPED_MEMORY_DISTILLATION_FACT_LIMIT = exports.GROUP_TYPED_MEMORY_DISTILLATION_MAX_MESSAGES = exports.GROUP_TYPED_MEMORY_DISTILLATION_TRANSACTION_VERSION = exports.GROUP_TYPED_MEMORY_ARTIFACT_TRANSACTION_STAGE_DIR = exports.GROUP_TYPED_MEMORY_ARTIFACT_TRANSACTION_JOURNAL = exports.GROUP_TYPED_MEMORY_DISTILLATION_TRANSACTION_STATE = exports.GROUP_TYPED_MEMORY_DISTILLATION_LOCK = exports.GROUP_TYPED_MEMORY_DISTILLATION_LEDGER = exports.GROUP_TYPED_MEMORY_DISTILLATION_VERSION = exports.GROUP_CLAUDE_INSTRUCTIONS_LOADED_HOOK_VERSION = exports.GROUP_CLAUDE_MEMORY_SETTING_SOURCE_POLICY_VERSION = exports.GROUP_CLAUDE_MEMORY_EXTERNAL_INCLUDE_APPROVAL_VERSION = exports.GROUP_CLAUDE_MEMORY_INCLUDE_AUDIT_VERSION = exports.GROUP_GLOBAL_CLAUDE_MEMORY_IMPORT_VERSION = exports.GROUP_PROJECT_MEMORY_IMPORT_VERSION = exports.GROUP_TYPED_MEMORY_LOAD_PLAN_MAX_INCLUDE_DEPTH = exports.GROUP_TYPED_MEMORY_LOAD_PLAN_MAX_ENTRIES = exports.GROUP_TYPED_MEMORY_LOAD_PLAN_VERSION = exports.GROUP_TYPED_MEMORY_PRESSURE_RECALL_USAGE_CROSS_GROUP_MAX_GROUPS = exports.GROUP_TYPED_MEMORY_PRESSURE_RECALL_USAGE_STALE_AFTER_DAYS = exports.GROUP_TYPED_MEMORY_PRESSURE_RECALL_USAGE_HALF_LIFE_DAYS = exports.GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_CONFLICT_RATIO_THRESHOLD = exports.GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_CONFLICT_MIN_BRANCH_WEIGHT = exports.GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_EVIDENCE_CONFIDENCE_THRESHOLD = exports.GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_TASK_FAMILY_RELEVANCE_THRESHOLD = exports.GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_USAGE_STALE_AFTER_DAYS = exports.GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_USAGE_HALF_LIFE_DAYS = exports.GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_USAGE_LEDGER = exports.GROUP_TYPED_MEMORY_PRESSURE_RECALL_USAGE_LEDGER = exports.GROUP_TYPED_MEMORY_CONSUMPTION_STALE_AFTER_DAYS = exports.GROUP_TYPED_MEMORY_CONSUMPTION_HALF_LIFE_DAYS = exports.GROUP_TYPED_MEMORY_STALE_CANDIDATE_LEDGER = exports.GROUP_TYPED_MEMORY_CONSUMPTION_LEDGER = exports.GROUP_TYPED_MEMORY_RECALL_LEDGER_MAX_DELIVERY_LEASES_PER_SCOPE = exports.GROUP_TYPED_MEMORY_RECALL_LEDGER_MAX_SCOPES = exports.GROUP_TYPED_MEMORY_RECALL_LEDGER = exports.GROUP_TYPED_MEMORY_MANIFEST_SELECTOR_DECISION_DIR = exports.GROUP_TYPED_MEMORY_MANIFEST_SELECTOR_VERSION = exports.GROUP_TYPED_MEMORY_MANIFEST_MAX_SELECTION = exports.GROUP_TYPED_MEMORY_MANIFEST_MAX_FILES = exports.GROUP_TYPED_MEMORY_MAX_RECALL = exports.GROUP_TYPED_MEMORY_MAX_INDEX_BYTES = exports.GROUP_TYPED_MEMORY_MAX_INDEX_LINES = exports.GROUP_TYPED_MEMORY_ENTRYPOINT = exports.GROUP_TYPED_MEMORY_VERSION = void 0;
-exports.GROUP_CLAUDE_INSTRUCTIONS_LOADED_HOOK_LEDGER = exports.GROUP_CLAUDE_MEMORY_EXTERNAL_INCLUDE_APPROVAL_LEDGER = exports.GROUP_PTL_EMERGENCY_TYPED_MEMORY_DISTILLATION_VERSION = exports.GROUP_COMPACT_STRATEGY_TYPED_MEMORY_DISTILLATION_VERSION = exports.GROUP_CONTEXT_USAGE_REPAIR_DISTILLATION_VERSION = exports.GLOBAL_PROVIDER_DISPATCH_RELIABILITY_SNAPSHOT_TTL_MS = exports.GLOBAL_PROVIDER_DISPATCH_RELIABILITY_SNAPSHOT_VERSION = exports.GROUP_PROVIDER_DISPATCH_RELIABILITY_MAX_SOURCE_GROUPS = exports.GROUP_PROVIDER_DISPATCH_RELIABILITY_HALF_LIFE_DAYS = exports.GROUP_PROVIDER_SWITCH_EXECUTION_DISTILLATION_VERSION = exports.GROUP_PRESSURE_PROVENANCE_PROVIDER_DISPATCH_OVERRIDE_FOLLOWUP_RECEIPT_VALIDATION_DISTILLATION_VERSION = exports.GROUP_PRESSURE_PROVENANCE_PROVIDER_DISPATCH_OVERRIDE_FOLLOWUP_DISTILLATION_VERSION = exports.GROUP_PRESSURE_PROVENANCE_PRE_DISPATCH_COMPLIANCE_DISTILLATION_VERSION = exports.GROUP_PRESSURE_MEMORY_PROVENANCE_RECEIPT_REPAIR_DISTILLATION_VERSION = exports.GROUP_IGNORE_MEMORY_RECEIPT_REPAIR_DISTILLATION_VERSION = exports.GROUP_PROVIDER_RANKING_MEMORY_USAGE_RECEIPT_REPAIR_DISTILLATION_VERSION = exports.GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_CONFLICT_RESOLUTION_COLD_ARCHIVE_DIR = exports.GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_CONFLICT_RESOLUTION_COLD_ARCHIVE_VERSION = exports.GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_CONFLICT_RESOLUTION_HOT_ROW_LIMIT = exports.GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_CONFLICT_RESOLUTION_DISTILLATION_VERSION = exports.GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_REPAIR_CLOSURE_DISTILLATION_VERSION = exports.GROUP_POST_COMPACT_RECEIPT_MEMORY_USAGE_REPAIR_COMPLETION_DISTILLATION_VERSION = exports.GROUP_POST_COMPACT_REINJECTION_REPAIR_RECEIPT_CONSUMPTION_DISTILLATION_VERSION = exports.GROUP_PROVIDER_RANKING_PROVENANCE_COMPACT_REPAIR_RECEIPT_CONSUMPTION_DISTILLATION_VERSION = exports.GROUP_PROVIDER_REPROOF_RECEIPT_CONSUMPTION_DISTILLATION_VERSION = exports.GROUP_POSITIVE_FEEDBACK_LIFECYCLE_VERSION = exports.GROUP_SESSION_MODEL_EXTRACTION_TOPIC_MERGE_MIN_SIMILARITY = exports.GROUP_SESSION_MODEL_EXTRACTION_TOPIC_REUSE_MIN_SIMILARITY = exports.GROUP_SESSION_MODEL_EXTRACTION_TOPIC_ASSIGNMENT_MIN_CONFIDENCE = exports.GROUP_SESSION_MODEL_EXTRACTION_MAX_FACTS_PER_TOPIC_FILE = exports.GROUP_SESSION_MODEL_EXTRACTION_MAX_TOPICS_PER_CATEGORY = void 0;
+exports.GROUP_GLOBAL_CLAUDE_MEMORY_IMPORT_VERSION = exports.GROUP_PROJECT_MEMORY_IMPORT_VERSION = exports.GROUP_TYPED_MEMORY_LOAD_PLAN_MAX_INCLUDE_DEPTH = exports.GROUP_TYPED_MEMORY_LOAD_PLAN_MAX_ENTRIES = exports.GROUP_TYPED_MEMORY_LOAD_PLAN_VERSION = exports.GROUP_TYPED_MEMORY_PRESSURE_RECALL_USAGE_CROSS_GROUP_MAX_GROUPS = exports.GROUP_TYPED_MEMORY_PRESSURE_RECALL_USAGE_STALE_AFTER_DAYS = exports.GROUP_TYPED_MEMORY_PRESSURE_RECALL_USAGE_HALF_LIFE_DAYS = exports.GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_CONFLICT_RATIO_THRESHOLD = exports.GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_CONFLICT_MIN_BRANCH_WEIGHT = exports.GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_EVIDENCE_CONFIDENCE_THRESHOLD = exports.GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_TASK_FAMILY_RELEVANCE_THRESHOLD = exports.GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_USAGE_STALE_AFTER_DAYS = exports.GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_USAGE_HALF_LIFE_DAYS = exports.GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_USAGE_LEDGER = exports.GROUP_TYPED_MEMORY_PRESSURE_RECALL_USAGE_LEDGER = exports.GROUP_TYPED_MEMORY_CONSUMPTION_STALE_AFTER_DAYS = exports.GROUP_TYPED_MEMORY_CONSUMPTION_HALF_LIFE_DAYS = exports.GROUP_TYPED_MEMORY_STALE_CANDIDATE_LEDGER = exports.GROUP_TYPED_MEMORY_CONSUMPTION_LEDGER = exports.GROUP_TYPED_MEMORY_RECALL_LEDGER_MAX_DELIVERY_LEASES_PER_SCOPE = exports.GROUP_TYPED_MEMORY_RECALL_LEDGER_MAX_SCOPES = exports.GROUP_TYPED_MEMORY_RECALL_LEDGER = exports.GROUP_TYPED_MEMORY_SHAPE_TREND_INCIDENT_RETENTION_DAYS = exports.GROUP_TYPED_MEMORY_SHAPE_TREND_INCIDENT_MAX_EVENTS = exports.GROUP_TYPED_MEMORY_SHAPE_TREND_INCIDENT_LEDGER = exports.GROUP_TYPED_MEMORY_SHAPE_TREND_INCIDENT_VERSION = exports.GROUP_TYPED_MEMORY_SHAPE_TREND_MAX_KEYS_PER_BUCKET = exports.GROUP_TYPED_MEMORY_SHAPE_TREND_MUTABLE_DAYS = exports.GROUP_TYPED_MEMORY_SHAPE_TREND_RETENTION_DAYS = exports.GROUP_TYPED_MEMORY_SHAPE_TREND_LEDGER = exports.GROUP_TYPED_MEMORY_SHAPE_TREND_VERSION = exports.GROUP_TYPED_MEMORY_WRITE_SHAPE_MAX_EVENTS = exports.GROUP_TYPED_MEMORY_WRITE_SHAPE_DIR = exports.GROUP_TYPED_MEMORY_WRITE_SHAPE_VERSION = exports.GROUP_TYPED_MEMORY_MANIFEST_SELECTOR_SHAPE_DIR = exports.GROUP_TYPED_MEMORY_MANIFEST_SELECTOR_SHAPE_VERSION = exports.GROUP_TYPED_MEMORY_MANIFEST_SELECTOR_CONSUMPTION_DIR = exports.GROUP_TYPED_MEMORY_MANIFEST_SELECTOR_CONSUMPTION_VERSION = exports.GROUP_TYPED_MEMORY_MANIFEST_SELECTOR_OUTCOME_DIR = exports.GROUP_TYPED_MEMORY_MANIFEST_SELECTOR_OUTCOME_VERSION = exports.GROUP_TYPED_MEMORY_MANIFEST_SELECTOR_DECISION_DIR = exports.GROUP_TYPED_MEMORY_MANIFEST_SELECTOR_VERSION = exports.GROUP_TYPED_MEMORY_MANIFEST_MAX_SELECTION = exports.GROUP_TYPED_MEMORY_MANIFEST_MAX_FILES = exports.GROUP_TYPED_MEMORY_MAX_RECALL = exports.GROUP_TYPED_MEMORY_MAX_INDEX_BYTES = exports.GROUP_TYPED_MEMORY_MAX_INDEX_LINES = exports.GROUP_TYPED_MEMORY_ENTRYPOINT = exports.GROUP_TYPED_MEMORY_VERSION = void 0;
+exports.GROUP_CLAUDE_INSTRUCTIONS_LOADED_HOOK_LEDGER = exports.GROUP_CLAUDE_MEMORY_EXTERNAL_INCLUDE_APPROVAL_LEDGER = exports.GROUP_PTL_EMERGENCY_TYPED_MEMORY_DISTILLATION_VERSION = exports.GROUP_COMPACT_STRATEGY_TYPED_MEMORY_DISTILLATION_VERSION = exports.GROUP_CONTEXT_USAGE_REPAIR_DISTILLATION_VERSION = exports.GLOBAL_PROVIDER_DISPATCH_RELIABILITY_SNAPSHOT_TTL_MS = exports.GLOBAL_PROVIDER_DISPATCH_RELIABILITY_SNAPSHOT_VERSION = exports.GROUP_PROVIDER_DISPATCH_RELIABILITY_MAX_SOURCE_GROUPS = exports.GROUP_PROVIDER_DISPATCH_RELIABILITY_HALF_LIFE_DAYS = exports.GROUP_PROVIDER_SWITCH_EXECUTION_DISTILLATION_VERSION = exports.GROUP_PRESSURE_PROVENANCE_PROVIDER_DISPATCH_OVERRIDE_FOLLOWUP_RECEIPT_VALIDATION_DISTILLATION_VERSION = exports.GROUP_PRESSURE_PROVENANCE_PROVIDER_DISPATCH_OVERRIDE_FOLLOWUP_DISTILLATION_VERSION = exports.GROUP_PRESSURE_PROVENANCE_PRE_DISPATCH_COMPLIANCE_DISTILLATION_VERSION = exports.GROUP_PRESSURE_MEMORY_PROVENANCE_RECEIPT_REPAIR_DISTILLATION_VERSION = exports.GROUP_IGNORE_MEMORY_RECEIPT_REPAIR_DISTILLATION_VERSION = exports.GROUP_PROVIDER_RANKING_MEMORY_USAGE_RECEIPT_REPAIR_DISTILLATION_VERSION = exports.GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_CONFLICT_RESOLUTION_COLD_ARCHIVE_DIR = exports.GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_CONFLICT_RESOLUTION_COLD_ARCHIVE_VERSION = exports.GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_CONFLICT_RESOLUTION_HOT_ROW_LIMIT = exports.GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_CONFLICT_RESOLUTION_DISTILLATION_VERSION = exports.GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_REPAIR_CLOSURE_DISTILLATION_VERSION = exports.GROUP_POST_COMPACT_RECEIPT_MEMORY_USAGE_REPAIR_COMPLETION_DISTILLATION_VERSION = exports.GROUP_POST_COMPACT_REINJECTION_REPAIR_RECEIPT_CONSUMPTION_DISTILLATION_VERSION = exports.GROUP_PROVIDER_RANKING_PROVENANCE_COMPACT_REPAIR_RECEIPT_CONSUMPTION_DISTILLATION_VERSION = exports.GROUP_PROVIDER_REPROOF_RECEIPT_CONSUMPTION_DISTILLATION_VERSION = exports.GROUP_POSITIVE_FEEDBACK_LIFECYCLE_VERSION = exports.GROUP_SESSION_MODEL_EXTRACTION_TOPIC_MERGE_MIN_SIMILARITY = exports.GROUP_SESSION_MODEL_EXTRACTION_TOPIC_REUSE_MIN_SIMILARITY = exports.GROUP_SESSION_MODEL_EXTRACTION_TOPIC_ASSIGNMENT_MIN_CONFIDENCE = exports.GROUP_SESSION_MODEL_EXTRACTION_MAX_FACTS_PER_TOPIC_FILE = exports.GROUP_SESSION_MODEL_EXTRACTION_MAX_TOPICS_PER_CATEGORY = exports.GROUP_SESSION_MODEL_EXTRACTION_TOPIC_VERSION = exports.GROUP_SESSION_MODEL_EXTRACTION_TYPED_MEMORY_VERSION = exports.GROUP_TYPED_MEMORY_DIRECT_OPERATION_VERSION = exports.GROUP_TYPED_MEMORY_WRITE_ADMISSION_VERSION = exports.GROUP_TYPED_MEMORY_DISTILLATION_QUALITY_VERSION = exports.GROUP_TYPED_MEMORY_DISTILLATION_FACT_LIMIT = exports.GROUP_TYPED_MEMORY_DISTILLATION_MAX_MESSAGES = exports.GROUP_TYPED_MEMORY_DISTILLATION_TRANSACTION_VERSION = exports.GROUP_TYPED_MEMORY_ARTIFACT_TRANSACTION_STAGE_DIR = exports.GROUP_TYPED_MEMORY_ARTIFACT_TRANSACTION_JOURNAL = exports.GROUP_TYPED_MEMORY_DISTILLATION_TRANSACTION_STATE = exports.GROUP_TYPED_MEMORY_DISTILLATION_LOCK = exports.GROUP_TYPED_MEMORY_DISTILLATION_LEDGER = exports.GROUP_TYPED_MEMORY_DISTILLATION_VERSION = exports.GROUP_CLAUDE_INSTRUCTIONS_LOADED_HOOK_VERSION = exports.GROUP_CLAUDE_MEMORY_SETTING_SOURCE_POLICY_VERSION = exports.GROUP_CLAUDE_MEMORY_EXTERNAL_INCLUDE_APPROVAL_VERSION = exports.GROUP_CLAUDE_MEMORY_INCLUDE_AUDIT_VERSION = void 0;
 exports.buildClaudeMemorySettingSourcePolicy = buildClaudeMemorySettingSourcePolicy;
 exports.deriveGroupTypedMemoryTargetPaths = deriveGroupTypedMemoryTargetPaths;
 exports.readGroupTypedMemoryPressureRecallUsageLedger = readGroupTypedMemoryPressureRecallUsageLedger;
@@ -190,10 +190,42 @@ exports.recordGroupTypedMemoryStaleCandidates = recordGroupTypedMemoryStaleCandi
 exports.resolveGroupTypedMemoryStaleCandidate = resolveGroupTypedMemoryStaleCandidate;
 exports.buildGroupTypedMemoryConsumptionSummary = buildGroupTypedMemoryConsumptionSummary;
 exports.getGroupTypedMemoryManifestSelectorDecisionDir = getGroupTypedMemoryManifestSelectorDecisionDir;
+exports.getGroupTypedMemoryManifestSelectorOutcomeDir = getGroupTypedMemoryManifestSelectorOutcomeDir;
+exports.getGroupTypedMemoryManifestSelectorConsumptionDir = getGroupTypedMemoryManifestSelectorConsumptionDir;
+exports.getGroupTypedMemoryManifestSelectorShapeDir = getGroupTypedMemoryManifestSelectorShapeDir;
+exports.getGroupTypedMemoryWriteShapeDir = getGroupTypedMemoryWriteShapeDir;
+exports.getGroupTypedMemoryShapeTrendFile = getGroupTypedMemoryShapeTrendFile;
+exports.getGroupTypedMemoryShapeTrendIncidentFile = getGroupTypedMemoryShapeTrendIncidentFile;
+exports.verifyGroupTypedMemoryWriteShape = verifyGroupTypedMemoryWriteShape;
+exports.recordGroupTypedMemoryWriteShape = recordGroupTypedMemoryWriteShape;
+exports.summarizeGroupTypedMemoryWriteShapes = summarizeGroupTypedMemoryWriteShapes;
+exports.verifyGroupTypedMemoryShapeTrendLedger = verifyGroupTypedMemoryShapeTrendLedger;
+exports.readGroupTypedMemoryShapeTrendLedger = readGroupTypedMemoryShapeTrendLedger;
+exports.recordGroupTypedMemoryShapeTrendContribution = recordGroupTypedMemoryShapeTrendContribution;
+exports.verifyGroupTypedMemoryShapeTrendSummary = verifyGroupTypedMemoryShapeTrendSummary;
+exports.summarizeGroupTypedMemoryShapeTrend = summarizeGroupTypedMemoryShapeTrend;
+exports.verifyGroupTypedMemoryShapeTrendIncidentLedger = verifyGroupTypedMemoryShapeTrendIncidentLedger;
+exports.readGroupTypedMemoryShapeTrendIncidentLedger = readGroupTypedMemoryShapeTrendIncidentLedger;
+exports.syncGroupTypedMemoryShapeTrendIncident = syncGroupTypedMemoryShapeTrendIncident;
+exports.verifyGroupTypedMemoryShapeTrendIncidentSummary = verifyGroupTypedMemoryShapeTrendIncidentSummary;
+exports.summarizeGroupTypedMemoryShapeTrendIncidents = summarizeGroupTypedMemoryShapeTrendIncidents;
+exports.acknowledgeGroupTypedMemoryShapeTrendIncident = acknowledgeGroupTypedMemoryShapeTrendIncident;
+exports.verifyGroupTypedMemoryManifestSelectorOutcome = verifyGroupTypedMemoryManifestSelectorOutcome;
+exports.recordGroupTypedMemoryManifestSelectorOutcome = recordGroupTypedMemoryManifestSelectorOutcome;
+exports.verifyGroupTypedMemoryManifestSelectorConsumptionOutcome = verifyGroupTypedMemoryManifestSelectorConsumptionOutcome;
+exports.recordGroupTypedMemoryManifestSelectorConsumptionOutcomes = recordGroupTypedMemoryManifestSelectorConsumptionOutcomes;
+exports.summarizeGroupTypedMemoryManifestSelectorConsumption = summarizeGroupTypedMemoryManifestSelectorConsumption;
+exports.verifyGroupTypedMemoryManifestSelectorCalibration = verifyGroupTypedMemoryManifestSelectorCalibration;
+exports.buildGroupTypedMemoryManifestSelectorCalibration = buildGroupTypedMemoryManifestSelectorCalibration;
+exports.verifyGroupTypedMemoryManifestSelectorShape = verifyGroupTypedMemoryManifestSelectorShape;
+exports.recordGroupTypedMemoryManifestSelectorShape = recordGroupTypedMemoryManifestSelectorShape;
+exports.summarizeGroupTypedMemoryManifestSelectorShapes = summarizeGroupTypedMemoryManifestSelectorShapes;
+exports.verifyGroupTypedMemoryShapeDrift = verifyGroupTypedMemoryShapeDrift;
 exports.verifyGroupTypedMemoryManifestSelection = verifyGroupTypedMemoryManifestSelection;
 exports.configureGroupTypedMemoryManifestSelector = configureGroupTypedMemoryManifestSelector;
 exports.buildGroupTypedMemoryManifest = buildGroupTypedMemoryManifest;
 exports.selectGroupTypedMemoryManifest = selectGroupTypedMemoryManifest;
+exports.summarizeGroupTypedMemoryManifestSelectorOutcomes = summarizeGroupTypedMemoryManifestSelectorOutcomes;
 exports.summarizeGroupTypedMemoryManifestSelectorDecisions = summarizeGroupTypedMemoryManifestSelectorDecisions;
 exports.buildGroupTypedMemoryRecall = buildGroupTypedMemoryRecall;
 exports.renderGroupTypedMemoryRecall = renderGroupTypedMemoryRecall;
@@ -222,6 +254,7 @@ const fs = __importStar(require("fs"));
 const os = __importStar(require("os"));
 const path = __importStar(require("path"));
 const utils_1 = require("../../core/utils");
+const atomic_json_file_1 = require("../../core/atomic-json-file");
 exports.GROUP_TYPED_MEMORY_VERSION = 1;
 exports.GROUP_TYPED_MEMORY_ENTRYPOINT = "MEMORY.md";
 exports.GROUP_TYPED_MEMORY_MAX_INDEX_LINES = 200;
@@ -231,6 +264,24 @@ exports.GROUP_TYPED_MEMORY_MANIFEST_MAX_FILES = 200;
 exports.GROUP_TYPED_MEMORY_MANIFEST_MAX_SELECTION = 5;
 exports.GROUP_TYPED_MEMORY_MANIFEST_SELECTOR_VERSION = 1;
 exports.GROUP_TYPED_MEMORY_MANIFEST_SELECTOR_DECISION_DIR = ".manifest-selector-decisions";
+exports.GROUP_TYPED_MEMORY_MANIFEST_SELECTOR_OUTCOME_VERSION = 1;
+exports.GROUP_TYPED_MEMORY_MANIFEST_SELECTOR_OUTCOME_DIR = ".manifest-selector-outcomes";
+exports.GROUP_TYPED_MEMORY_MANIFEST_SELECTOR_CONSUMPTION_VERSION = 1;
+exports.GROUP_TYPED_MEMORY_MANIFEST_SELECTOR_CONSUMPTION_DIR = ".manifest-selector-consumption";
+exports.GROUP_TYPED_MEMORY_MANIFEST_SELECTOR_SHAPE_VERSION = 1;
+exports.GROUP_TYPED_MEMORY_MANIFEST_SELECTOR_SHAPE_DIR = ".manifest-selector-shape";
+exports.GROUP_TYPED_MEMORY_WRITE_SHAPE_VERSION = 1;
+exports.GROUP_TYPED_MEMORY_WRITE_SHAPE_DIR = ".memory-write-shape";
+exports.GROUP_TYPED_MEMORY_WRITE_SHAPE_MAX_EVENTS = 400;
+exports.GROUP_TYPED_MEMORY_SHAPE_TREND_VERSION = 1;
+exports.GROUP_TYPED_MEMORY_SHAPE_TREND_LEDGER = ".memory-shape-trend.json";
+exports.GROUP_TYPED_MEMORY_SHAPE_TREND_RETENTION_DAYS = 180;
+exports.GROUP_TYPED_MEMORY_SHAPE_TREND_MUTABLE_DAYS = 35;
+exports.GROUP_TYPED_MEMORY_SHAPE_TREND_MAX_KEYS_PER_BUCKET = 1_200;
+exports.GROUP_TYPED_MEMORY_SHAPE_TREND_INCIDENT_VERSION = 1;
+exports.GROUP_TYPED_MEMORY_SHAPE_TREND_INCIDENT_LEDGER = ".memory-shape-trend-incidents.json";
+exports.GROUP_TYPED_MEMORY_SHAPE_TREND_INCIDENT_MAX_EVENTS = 500;
+exports.GROUP_TYPED_MEMORY_SHAPE_TREND_INCIDENT_RETENTION_DAYS = 180;
 exports.GROUP_TYPED_MEMORY_RECALL_LEDGER = ".recall-ledger.json";
 exports.GROUP_TYPED_MEMORY_RECALL_LEDGER_MAX_SCOPES = 160;
 exports.GROUP_TYPED_MEMORY_RECALL_LEDGER_MAX_DELIVERY_LEASES_PER_SCOPE = 160;
@@ -510,9 +561,7 @@ function writeJsonAtomic(file, value) {
         stageGroupTypedMemoryArtifact(artifactMutation, file, JSON.stringify(value, null, 2));
         return;
     }
-    const temp = `${file}.${process.pid}.${Date.now()}.tmp`;
-    fs.writeFileSync(temp, JSON.stringify(value, null, 2), { encoding: "utf-8", flush: true });
-    fs.renameSync(temp, file);
+    (0, atomic_json_file_1.writeJsonAtomic)(file, value);
 }
 function yamlEscape(value) {
     return JSON.stringify(value == null ? "" : value);
@@ -4017,9 +4066,37 @@ function upsertGroupTypedMemoryDocument(groupId, input) {
     const name = markdownLinkTitle(input.name || input.title || type);
     const slug = safeSegment(input.slug || `${type}-${name.toLowerCase()}`, `${type}-memory`);
     const file = path.join(dir, `${slug}.md`);
+    const beforeExists = fs.existsSync(file);
+    let beforeContent = "";
+    if (beforeExists) {
+        try {
+            beforeContent = fs.readFileSync(file, "utf-8");
+        }
+        catch { }
+    }
     const content = renderMemoryDocument({ ...input, type, name, groupId });
     const changed = writeTextAtomic(file, content);
-    return { file, changed, slug, type, name };
+    let writeShapeTelemetry = null;
+    let writeShapeTelemetryError = "";
+    if (isExactGroupTypedMemorySessionScope(groupId)) {
+        try {
+            writeShapeTelemetry = recordGroupTypedMemoryWriteShape(groupId, {
+                relPath: `${slug}.md`,
+                memoryType: type,
+                beforeExists,
+                beforeContent,
+                afterContent: content,
+                changed,
+                inputBody: String(input.body || input.content || ""),
+                maxBodyChars: Number(input.maxBodyChars || 12_000),
+                source: String(input.source || "manual"),
+            });
+        }
+        catch (error) {
+            writeShapeTelemetryError = compactText(error?.message || error, 240);
+        }
+    }
+    return { file, changed, slug, type, name, writeShapeTelemetry, writeShapeTelemetryError };
 }
 function listMarkdownFilesRecursive(dir, options = {}) {
     const maxFiles = Math.max(1, Math.min(300, Number(options.maxFiles || options.max_files || 80)));
@@ -19769,7 +19846,7 @@ function getAlreadySurfacedGroupTypedMemory(groupId, scope = "global", options =
         .map(([relPath]) => relPath)
         .slice(-Number(options.limit || 120));
 }
-function recordGroupTypedMemoryRecall(groupId, scope, recall, query = "", options = {}) {
+function recordGroupTypedMemoryRecallUnlocked(groupId, scope, recall, query = "", options = {}) {
     if (options.disableLedger === true || options.disable_ledger === true || recall?.ignored)
         return readGroupTypedMemoryRecallLedger(groupId);
     const deliveryCapsule = options.deliveryCapsule || options.delivery_capsule || null;
@@ -19908,6 +19985,16 @@ function recordGroupTypedMemoryRecall(groupId, scope, recall, query = "", option
         updatedAt: at,
     });
     return readGroupTypedMemoryRecallLedger(groupId);
+}
+function recordGroupTypedMemoryRecall(groupId, scope, recall, query = "", options = {}) {
+    if (options.disableLedger === true || options.disable_ledger === true || recall?.ignored)
+        return readGroupTypedMemoryRecallLedger(groupId);
+    const file = getGroupTypedMemoryRecallLedgerFile(groupId);
+    return (0, atomic_json_file_1.withFileLock)(file, () => recordGroupTypedMemoryRecallUnlocked(groupId, scope, recall, query, options), {
+        timeoutMs: 5_000,
+        retryMs: 10,
+        staleMs: 60_000,
+    });
 }
 function typedMemoryConsumptionEntryChecksum(entry) {
     const fields = [
@@ -20786,15 +20873,2283 @@ const GROUP_TYPED_MEMORY_MANIFEST_SELECTOR_SYSTEM_PROMPT = `You are selecting me
 Return a list of filenames for the memories that will clearly be useful to the coding Agent as it processes the user's query (up to 5). Only include memories that you are certain will be helpful based on their name and description.
 - If you are unsure if a memory will be useful in processing the user's query, then do not include it in your list. Be selective and discerning.
 - If there are no memories in the list that would clearly be useful, return an empty list.
-- If a list of recently-used tools is provided, do not select memories that are usage reference or API documentation for those tools. Do still select memories containing warnings, gotchas, or known issues about those tools.`;
+- If a list of recently-used tools is provided, do not select memories that are usage reference or API documentation for those tools. Do still select memories containing warnings, gotchas, or known issues about those tools.
+- Historical outcome hints, when present, are advisory evidence from the same group-chat session and exact query only. Never select a memory solely because it was used before, and never reject it solely because it was ignored before. The current query, filename, description, freshness, and current-source truth remain authoritative.`;
 function groupTypedMemoryManifestSelectionChecksum(value) {
     const payload = { ...(value || {}) };
     delete payload.checksum;
     delete payload.decisionFile;
+    delete payload.recallShapeTelemetry;
+    delete payload.recallShapeTelemetryFile;
+    delete payload.recallShapeTelemetryError;
+    return checksum(JSON.stringify(payload), 64);
+}
+function groupTypedMemoryManifestSelectorCalibrationChecksum(value) {
+    const payload = { ...(value || {}) };
+    delete payload.checksum;
     return checksum(JSON.stringify(payload), 64);
 }
 function getGroupTypedMemoryManifestSelectorDecisionDir(scopeId) {
     return path.join(getGroupTypedMemoryDir(scopeId), exports.GROUP_TYPED_MEMORY_MANIFEST_SELECTOR_DECISION_DIR);
+}
+function getGroupTypedMemoryManifestSelectorOutcomeDir(scopeId) {
+    return path.join(getGroupTypedMemoryDir(scopeId), exports.GROUP_TYPED_MEMORY_MANIFEST_SELECTOR_OUTCOME_DIR);
+}
+function getGroupTypedMemoryManifestSelectorConsumptionDir(scopeId) {
+    return path.join(getGroupTypedMemoryDir(scopeId), exports.GROUP_TYPED_MEMORY_MANIFEST_SELECTOR_CONSUMPTION_DIR);
+}
+function getGroupTypedMemoryManifestSelectorShapeDir(scopeId) {
+    return path.join(getGroupTypedMemoryDir(scopeId), exports.GROUP_TYPED_MEMORY_MANIFEST_SELECTOR_SHAPE_DIR);
+}
+function getGroupTypedMemoryWriteShapeDir(scopeId) {
+    return path.join(getGroupTypedMemoryDir(scopeId), exports.GROUP_TYPED_MEMORY_WRITE_SHAPE_DIR);
+}
+function getGroupTypedMemoryShapeTrendFile(scopeId) {
+    return path.join(getGroupTypedMemoryDir(scopeId), exports.GROUP_TYPED_MEMORY_SHAPE_TREND_LEDGER);
+}
+function getGroupTypedMemoryShapeTrendIncidentFile(scopeId) {
+    return path.join(getGroupTypedMemoryDir(scopeId), exports.GROUP_TYPED_MEMORY_SHAPE_TREND_INCIDENT_LEDGER);
+}
+function groupTypedMemoryWriteShapeChecksum(value) {
+    const payload = { ...(value || {}) };
+    delete payload.checksum;
+    delete payload.shapeFile;
+    delete payload.valid;
+    delete payload.recorded;
+    delete payload.trendContribution;
+    delete payload.trendContributionError;
+    return checksum(JSON.stringify(payload), 64);
+}
+function groupTypedMemoryTextLineCount(value) {
+    const text = String(value || "");
+    return text ? text.split(/\r?\n/).length : 0;
+}
+function verifyGroupTypedMemoryWriteShape(shape, expectedScopeId = "") {
+    const beforeBytes = Number(shape?.beforeBytes || 0);
+    const afterBytes = Number(shape?.afterBytes || 0);
+    const beforeLines = Number(shape?.beforeLines || 0);
+    const afterLines = Number(shape?.afterLines || 0);
+    const inputBodyChars = Number(shape?.inputBodyChars || 0);
+    const maxBodyChars = Number(shape?.maxBodyChars || 0);
+    const checksumValid = !!shape && String(shape.checksum || "") === groupTypedMemoryWriteShapeChecksum(shape);
+    const scopeValid = isExactGroupTypedMemorySessionScope(String(shape?.scopeId || ""))
+        && (!expectedScopeId || String(shape?.scopeId || "") === expectedScopeId);
+    const relPath = String(shape?.relPath || "");
+    const operation = String(shape?.operation || "");
+    const operationValid = operation === "create"
+        ? shape.beforeExists === false && shape.changed === true
+        : operation === "update"
+            ? shape.beforeExists === true && shape.changed === true
+            : operation === "noop" && shape.beforeExists === true && shape.changed === false;
+    const valid = !!shape
+        && shape.schema === "ccm-group-typed-memory-write-shape-v1"
+        && Number(shape.version || 0) === exports.GROUP_TYPED_MEMORY_WRITE_SHAPE_VERSION
+        && scopeValid
+        && !!String(shape.eventId || "")
+        && path.basename(relPath) === relPath
+        && relPath.toLowerCase().endsWith(".md")
+        && relPath.toLowerCase() !== exports.GROUP_TYPED_MEMORY_ENTRYPOINT.toLowerCase()
+        && VALID_TYPES.has(String(shape.memoryType || ""))
+        && operationValid
+        && beforeBytes >= 0
+        && afterBytes > 0
+        && Number(shape.deltaBytes || 0) === afterBytes - beforeBytes
+        && beforeLines >= 0
+        && afterLines > 0
+        && Number(shape.deltaLines || 0) === afterLines - beforeLines
+        && inputBodyChars >= 0
+        && maxBodyChars > 0
+        && shape.bodyTruncated === (inputBodyChars > maxBodyChars)
+        && shape.nearBodyLimit === (inputBodyChars >= maxBodyChars * 0.9)
+        && !!String(shape.documentChecksumAfter || "")
+        && shape.bodyFree === true
+        && Number.isFinite(Date.parse(String(shape.recordedAt || "")))
+        && checksumValid;
+    return { valid, checksumValid, scopeValid, operationValid, beforeBytes, afterBytes, inputBodyChars, maxBodyChars };
+}
+function recordGroupTypedMemoryWriteShape(scopeId, input = {}) {
+    if (!isExactGroupTypedMemorySessionScope(scopeId))
+        return { recorded: false, reason: "exact_group_gcs_scope_required" };
+    const beforeContent = String(input.beforeContent || input.before_content || "");
+    const afterContent = String(input.afterContent || input.after_content || "");
+    const beforeExists = input.beforeExists === true || input.before_exists === true;
+    const changed = input.changed === true;
+    const maxBodyChars = Math.max(1, Math.min(1_000_000, Number(input.maxBodyChars || input.max_body_chars || 12_000)));
+    const inputBodyChars = String(input.inputBody || input.input_body || "").length;
+    const recordedAt = String(input.recordedAt || input.recorded_at || now());
+    const relPath = String(input.relPath || input.rel_path || "");
+    const operation = !beforeExists ? "create" : changed ? "update" : "noop";
+    const core = {
+        schema: "ccm-group-typed-memory-write-shape-v1",
+        version: exports.GROUP_TYPED_MEMORY_WRITE_SHAPE_VERSION,
+        eventId: String(input.eventId || input.event_id || `mws_${checksum([scopeId, relPath, recordedAt, crypto.randomBytes(8).toString("hex")], 24)}`),
+        scopeId,
+        relPath,
+        memoryType: normalizeMemoryType(input.memoryType || input.memory_type),
+        operation,
+        changed,
+        beforeExists,
+        beforeBytes: Buffer.byteLength(beforeContent, "utf-8"),
+        afterBytes: Buffer.byteLength(afterContent, "utf-8"),
+        deltaBytes: Buffer.byteLength(afterContent, "utf-8") - Buffer.byteLength(beforeContent, "utf-8"),
+        beforeLines: groupTypedMemoryTextLineCount(beforeContent),
+        afterLines: groupTypedMemoryTextLineCount(afterContent),
+        deltaLines: groupTypedMemoryTextLineCount(afterContent) - groupTypedMemoryTextLineCount(beforeContent),
+        inputBodyChars,
+        maxBodyChars,
+        bodyTruncated: inputBodyChars > maxBodyChars,
+        nearBodyLimit: inputBodyChars >= maxBodyChars * 0.9,
+        sourceChecksum: checksum(String(input.source || ""), 24),
+        documentChecksumBefore: beforeContent ? checksum(beforeContent, 64) : "",
+        documentChecksumAfter: checksum(afterContent, 64),
+        bodyFree: true,
+        recordedAt,
+    };
+    const shape = { ...core, checksum: groupTypedMemoryWriteShapeChecksum(core) };
+    if (!verifyGroupTypedMemoryWriteShape(shape, scopeId).valid)
+        throw new Error("typed_memory_write_shape_invalid");
+    if (input.recordShape === false || input.record_shape === false)
+        return { ...shape, recorded: false };
+    const dir = path.resolve(getGroupTypedMemoryWriteShapeDir(scopeId));
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.resolve(dir, `${safeSegment(shape.eventId, "write-shape")}.json`);
+    if (path.dirname(file).toLowerCase() !== dir.toLowerCase())
+        throw new Error("typed_memory_write_shape_path_invalid");
+    writeTextAtomicRaw(file, JSON.stringify(shape, null, 2));
+    try {
+        const files = fs.readdirSync(dir)
+            .filter(name => name.toLowerCase().endsWith(".json"))
+            .map(name => ({ file: path.resolve(dir, name), mtimeMs: fs.statSync(path.resolve(dir, name)).mtimeMs }))
+            .filter(item => path.dirname(item.file).toLowerCase() === dir.toLowerCase())
+            .sort((a, b) => b.mtimeMs - a.mtimeMs || b.file.localeCompare(a.file));
+        for (const item of files.slice(exports.GROUP_TYPED_MEMORY_WRITE_SHAPE_MAX_EVENTS)) {
+            try {
+                fs.unlinkSync(item.file);
+            }
+            catch { }
+        }
+    }
+    catch { }
+    let trendContribution = null;
+    let trendContributionError = "";
+    try {
+        trendContribution = recordGroupTypedMemoryShapeTrendContribution(scopeId, {
+            kind: "write",
+            eventKey: shape.eventId,
+            recordedAt: shape.recordedAt,
+            metrics: {
+                operation: shape.operation,
+                changed: shape.changed,
+                growthBytes: shape.deltaBytes,
+                afterBytes: shape.afterBytes,
+                nearBodyLimit: shape.nearBodyLimit,
+                bodyTruncated: shape.bodyTruncated,
+            },
+        });
+    }
+    catch (error) {
+        trendContributionError = compactText(error?.message || error, 240);
+    }
+    return { ...shape, shapeFile: file, recorded: true, trendContribution, trendContributionError };
+}
+function summarizeGroupTypedMemoryWriteShapes(scopeId, options = {}) {
+    const rows = [];
+    let unreadableCount = 0;
+    try {
+        for (const name of fs.readdirSync(getGroupTypedMemoryWriteShapeDir(scopeId)).filter(name => name.toLowerCase().endsWith(".json"))) {
+            const file = path.join(getGroupTypedMemoryWriteShapeDir(scopeId), name);
+            try {
+                const shape = JSON.parse(fs.readFileSync(file, "utf-8"));
+                rows.push({ ...shape, shapeFile: file, valid: verifyGroupTypedMemoryWriteShape(shape, scopeId).valid === true });
+            }
+            catch {
+                unreadableCount += 1;
+            }
+        }
+    }
+    catch { }
+    rows.sort((a, b) => String(b.recordedAt || "").localeCompare(String(a.recordedAt || "")) || String(b.eventId || "").localeCompare(String(a.eventId || "")));
+    const validRows = rows.filter(row => row.valid === true);
+    const invalidShapeCount = rows.filter(row => row.valid !== true).length + unreadableCount;
+    const changedRows = validRows.filter(row => row.changed === true);
+    return {
+        schema: "ccm-group-typed-memory-write-shape-summary-v1",
+        version: 1,
+        scopeId,
+        dir: getGroupTypedMemoryWriteShapeDir(scopeId),
+        present: rows.length > 0 || unreadableCount > 0,
+        valid: isExactGroupTypedMemorySessionScope(scopeId) && invalidShapeCount === 0,
+        shapeCount: rows.length + unreadableCount,
+        validShapeCount: validRows.length,
+        invalidShapeCount,
+        createCount: validRows.filter(row => row.operation === "create").length,
+        updateCount: validRows.filter(row => row.operation === "update").length,
+        noopCount: validRows.filter(row => row.operation === "noop").length,
+        changedCount: changedRows.length,
+        bodyTruncatedCount: validRows.filter(row => row.bodyTruncated === true).length,
+        nearBodyLimitCount: validRows.filter(row => row.nearBodyLimit === true).length,
+        totalGrowthBytes: changedRows.reduce((sum, row) => sum + Number(row.deltaBytes || 0), 0),
+        averageAfterBytes: validRows.length ? Number((validRows.reduce((sum, row) => sum + Number(row.afterBytes || 0), 0) / validRows.length).toFixed(3)) : 0,
+        maxAfterBytes: validRows.reduce((max, row) => Math.max(max, Number(row.afterBytes || 0)), 0),
+        latest: validRows[0] || null,
+        rows: options.includeRows === true || options.include_rows === true ? validRows : undefined,
+    };
+}
+function groupTypedMemoryShapeTrendBucketChecksum(value) {
+    const payload = { ...(value || {}) };
+    delete payload.checksum;
+    return checksum(JSON.stringify(payload), 64);
+}
+function groupTypedMemoryShapeTrendLedgerChecksum(value) {
+    const payload = { ...(value || {}) };
+    delete payload.checksum;
+    delete payload.file;
+    delete payload.present;
+    delete payload.valid;
+    delete payload.primaryValid;
+    delete payload.recoveredFromBackup;
+    return checksum(JSON.stringify(payload), 64);
+}
+function groupTypedMemoryShapeTrendSummaryChecksum(value) {
+    const payload = { ...(value || {}) };
+    delete payload.checksum;
+    return checksum(JSON.stringify(payload), 64);
+}
+function groupTypedMemoryShapeTrendDate(value) {
+    const ms = typeof value === "number" ? value : Date.parse(String(value || ""));
+    return Number.isFinite(ms) ? new Date(ms).toISOString().slice(0, 10) : "";
+}
+function emptyGroupTypedMemoryShapeTrendBucket(date) {
+    return {
+        date,
+        sealed: false,
+        sealedAt: "",
+        selector: {
+            runCount: 0,
+            candidateTotal: 0,
+            selectedTotal: 0,
+            emptyCount: 0,
+            selectedAgeWeightedDays: 0,
+            selectedAgeDocumentCount: 0,
+            freshCount: 0,
+            staleCount: 0,
+            candidateCapacityRunCount: 0,
+            selectionCapacityRunCount: 0,
+        },
+        write: {
+            eventCount: 0,
+            changedCount: 0,
+            createCount: 0,
+            updateCount: 0,
+            noopCount: 0,
+            growthBytes: 0,
+            afterBytesTotal: 0,
+            maxAfterBytes: 0,
+            nearBodyLimitCount: 0,
+            truncatedBodyCount: 0,
+        },
+        consumption: {
+            outcomeCount: 0,
+            deliveredDocumentCount: 0,
+            usedDocumentCount: 0,
+            verifiedDocumentCount: 0,
+            ignoredDocumentCount: 0,
+            unreportedDocumentCount: 0,
+            strongReceiptOutcomeCount: 0,
+            unexpectedClaimCount: 0,
+        },
+        contributionKeys: [],
+        previousBucketChecksum: "",
+        updatedAt: "",
+        checksum: "",
+    };
+}
+function emptyGroupTypedMemoryShapeTrendLedger(scopeId) {
+    const core = {
+        schema: "ccm-group-typed-memory-shape-trend-ledger-v1",
+        version: exports.GROUP_TYPED_MEMORY_SHAPE_TREND_VERSION,
+        scopeId,
+        bodyFree: true,
+        retentionDays: exports.GROUP_TYPED_MEMORY_SHAPE_TREND_RETENTION_DAYS,
+        mutableDays: exports.GROUP_TYPED_MEMORY_SHAPE_TREND_MUTABLE_DAYS,
+        maxKeysPerBucket: exports.GROUP_TYPED_MEMORY_SHAPE_TREND_MAX_KEYS_PER_BUCKET,
+        generation: 0,
+        headBucketChecksum: "",
+        buckets: [],
+        updatedAt: "",
+    };
+    return { ...core, checksum: groupTypedMemoryShapeTrendLedgerChecksum(core) };
+}
+function groupTypedMemoryShapeTrendMetricsValid(bucket) {
+    const selector = bucket?.selector || {};
+    const write = bucket?.write || {};
+    const consumption = bucket?.consumption || {};
+    const nonNegative = [
+        selector.runCount, selector.candidateTotal, selector.selectedTotal, selector.emptyCount,
+        selector.selectedAgeWeightedDays, selector.selectedAgeDocumentCount, selector.freshCount, selector.staleCount,
+        selector.candidateCapacityRunCount, selector.selectionCapacityRunCount,
+        write.eventCount, write.changedCount, write.createCount, write.updateCount, write.noopCount,
+        write.afterBytesTotal, write.maxAfterBytes, write.nearBodyLimitCount, write.truncatedBodyCount,
+        consumption.outcomeCount, consumption.deliveredDocumentCount, consumption.usedDocumentCount,
+        consumption.verifiedDocumentCount, consumption.ignoredDocumentCount, consumption.unreportedDocumentCount,
+        consumption.strongReceiptOutcomeCount, consumption.unexpectedClaimCount,
+    ];
+    return nonNegative.every(value => Number.isFinite(Number(value)) && Number(value) >= 0)
+        && Number.isFinite(Number(write.growthBytes || 0))
+        && Number(selector.selectedTotal || 0) <= Number(selector.candidateTotal || 0)
+        && Number(selector.emptyCount || 0) <= Number(selector.runCount || 0)
+        && Number(selector.candidateCapacityRunCount || 0) <= Number(selector.runCount || 0)
+        && Number(selector.selectionCapacityRunCount || 0) <= Number(selector.runCount || 0)
+        && Number(write.changedCount || 0) <= Number(write.eventCount || 0)
+        && Number(write.createCount || 0) + Number(write.updateCount || 0) + Number(write.noopCount || 0) === Number(write.eventCount || 0)
+        && Number(consumption.usedDocumentCount || 0) + Number(consumption.verifiedDocumentCount || 0)
+            + Number(consumption.ignoredDocumentCount || 0) + Number(consumption.unreportedDocumentCount || 0)
+            === Number(consumption.deliveredDocumentCount || 0)
+        && Number(consumption.strongReceiptOutcomeCount || 0) <= Number(consumption.outcomeCount || 0);
+}
+function verifyGroupTypedMemoryShapeTrendLedger(ledger, expectedScopeId = "") {
+    const buckets = Array.isArray(ledger?.buckets) ? ledger.buckets : [];
+    const scopeValid = isExactGroupTypedMemorySessionScope(String(ledger?.scopeId || ""))
+        && (!expectedScopeId || String(ledger?.scopeId || "") === expectedScopeId);
+    let previousChecksum = "";
+    let chainValid = true;
+    let previousDate = "";
+    const seenDates = new Set();
+    for (const bucket of buckets) {
+        const date = String(bucket?.date || "");
+        const keys = Array.isArray(bucket?.contributionKeys) ? bucket.contributionKeys : [];
+        const bucketValid = /^\d{4}-\d{2}-\d{2}$/.test(date)
+            && (!previousDate || date > previousDate)
+            && !seenDates.has(date)
+            && String(bucket.previousBucketChecksum || "") === previousChecksum
+            && String(bucket.checksum || "") === groupTypedMemoryShapeTrendBucketChecksum(bucket)
+            && groupTypedMemoryShapeTrendMetricsValid(bucket)
+            && keys.length <= exports.GROUP_TYPED_MEMORY_SHAPE_TREND_MAX_KEYS_PER_BUCKET
+            && new Set(keys).size === keys.length
+            && keys.every((key) => typeof key === "string" && /^[a-f0-9]{32}$/.test(key))
+            && (bucket.sealed !== true || keys.length === 0);
+        if (!bucketValid)
+            chainValid = false;
+        previousChecksum = String(bucket?.checksum || "");
+        previousDate = date;
+        seenDates.add(date);
+    }
+    const checksumValid = !!ledger && String(ledger.checksum || "") === groupTypedMemoryShapeTrendLedgerChecksum(ledger);
+    const valid = !!ledger
+        && ledger.schema === "ccm-group-typed-memory-shape-trend-ledger-v1"
+        && Number(ledger.version || 0) === exports.GROUP_TYPED_MEMORY_SHAPE_TREND_VERSION
+        && scopeValid
+        && ledger.bodyFree === true
+        && Number(ledger.retentionDays || 0) === exports.GROUP_TYPED_MEMORY_SHAPE_TREND_RETENTION_DAYS
+        && Number(ledger.mutableDays || 0) === exports.GROUP_TYPED_MEMORY_SHAPE_TREND_MUTABLE_DAYS
+        && Number(ledger.maxKeysPerBucket || 0) === exports.GROUP_TYPED_MEMORY_SHAPE_TREND_MAX_KEYS_PER_BUCKET
+        && buckets.length <= exports.GROUP_TYPED_MEMORY_SHAPE_TREND_RETENTION_DAYS
+        && String(ledger.headBucketChecksum || "") === (buckets.length ? String(buckets[buckets.length - 1].checksum || "") : "")
+        && chainValid
+        && checksumValid;
+    return { valid, checksumValid, scopeValid, chainValid, bucketCount: buckets.length };
+}
+function readGroupTypedMemoryShapeTrendLedger(scopeId) {
+    const file = getGroupTypedMemoryShapeTrendFile(scopeId);
+    let primary = null;
+    let backup = null;
+    try {
+        primary = JSON.parse(fs.readFileSync(file, "utf-8"));
+    }
+    catch { }
+    const primaryVerification = verifyGroupTypedMemoryShapeTrendLedger(primary, scopeId);
+    if (primaryVerification.valid)
+        return { ...primary, file, present: true, valid: true, primaryValid: true, recoveredFromBackup: false };
+    try {
+        backup = JSON.parse(fs.readFileSync(`${file}.bak`, "utf-8"));
+    }
+    catch { }
+    const backupVerification = verifyGroupTypedMemoryShapeTrendLedger(backup, scopeId);
+    if (backupVerification.valid)
+        return { ...backup, file, present: true, valid: true, primaryValid: false, recoveredFromBackup: true };
+    const present = fs.existsSync(file) || fs.existsSync(`${file}.bak`);
+    if (present)
+        return { ...(primary || backup || {}), file, present: true, valid: false, primaryValid: false, recoveredFromBackup: false };
+    const empty = emptyGroupTypedMemoryShapeTrendLedger(scopeId);
+    return { ...empty, file, present: false, valid: true, primaryValid: true, recoveredFromBackup: false };
+}
+function normalizeGroupTypedMemoryShapeTrendContribution(kind, input = {}) {
+    const metrics = input.metrics || {};
+    if (kind === "selector") {
+        const selectedCount = Number(metrics.selectedCount || 0);
+        const candidateCount = Number(metrics.candidateCount || 0);
+        const selectedAgeAverage = Number(metrics.selectedAgeAverage ?? -1);
+        return {
+            candidateCount,
+            selectedCount,
+            emptyCount: selectedCount === 0 ? 1 : 0,
+            selectedAgeWeightedDays: selectedCount > 0 && selectedAgeAverage >= 0 ? selectedAgeAverage * selectedCount : 0,
+            selectedAgeDocumentCount: selectedCount,
+            freshCount: Number(metrics.freshCount || 0),
+            staleCount: Number(metrics.staleCount || 0),
+            candidateCapacityRunCount: candidateCount >= exports.GROUP_TYPED_MEMORY_MANIFEST_MAX_FILES ? 1 : 0,
+            selectionCapacityRunCount: selectedCount >= exports.GROUP_TYPED_MEMORY_MANIFEST_MAX_SELECTION ? 1 : 0,
+        };
+    }
+    if (kind === "write") {
+        const operation = String(metrics.operation || "");
+        return {
+            changedCount: metrics.changed === true ? 1 : 0,
+            createCount: operation === "create" ? 1 : 0,
+            updateCount: operation === "update" ? 1 : 0,
+            noopCount: operation === "noop" ? 1 : 0,
+            growthBytes: Number(metrics.growthBytes || 0),
+            afterBytes: Number(metrics.afterBytes || 0),
+            nearBodyLimitCount: metrics.nearBodyLimit === true ? 1 : 0,
+            truncatedBodyCount: metrics.bodyTruncated === true ? 1 : 0,
+        };
+    }
+    const documents = Array.isArray(metrics.documents) ? metrics.documents : [];
+    return {
+        deliveredDocumentCount: documents.length,
+        usedDocumentCount: documents.filter((row) => row.usageState === "used").length,
+        verifiedDocumentCount: documents.filter((row) => row.usageState === "verified").length,
+        ignoredDocumentCount: documents.filter((row) => row.usageState === "ignored").length,
+        unreportedDocumentCount: documents.filter((row) => row.usageState === "unreported").length,
+        strongReceiptOutcomeCount: metrics.receiptBindingValid === true ? 1 : 0,
+        unexpectedClaimCount: Number(metrics.unexpectedClaimCount || 0),
+    };
+}
+function applyGroupTypedMemoryShapeTrendContribution(bucket, kind, metrics) {
+    if (kind === "selector") {
+        bucket.selector.runCount += 1;
+        bucket.selector.candidateTotal += metrics.candidateCount;
+        bucket.selector.selectedTotal += metrics.selectedCount;
+        bucket.selector.emptyCount += metrics.emptyCount;
+        bucket.selector.selectedAgeWeightedDays = Number((bucket.selector.selectedAgeWeightedDays + metrics.selectedAgeWeightedDays).toFixed(6));
+        bucket.selector.selectedAgeDocumentCount += metrics.selectedAgeDocumentCount;
+        bucket.selector.freshCount += metrics.freshCount;
+        bucket.selector.staleCount += metrics.staleCount;
+        bucket.selector.candidateCapacityRunCount += metrics.candidateCapacityRunCount;
+        bucket.selector.selectionCapacityRunCount += metrics.selectionCapacityRunCount;
+        return;
+    }
+    if (kind === "write") {
+        bucket.write.eventCount += 1;
+        bucket.write.changedCount += metrics.changedCount;
+        bucket.write.createCount += metrics.createCount;
+        bucket.write.updateCount += metrics.updateCount;
+        bucket.write.noopCount += metrics.noopCount;
+        bucket.write.growthBytes += metrics.growthBytes;
+        bucket.write.afterBytesTotal += metrics.afterBytes;
+        bucket.write.maxAfterBytes = Math.max(bucket.write.maxAfterBytes, metrics.afterBytes);
+        bucket.write.nearBodyLimitCount += metrics.nearBodyLimitCount;
+        bucket.write.truncatedBodyCount += metrics.truncatedBodyCount;
+        return;
+    }
+    bucket.consumption.outcomeCount += 1;
+    bucket.consumption.deliveredDocumentCount += metrics.deliveredDocumentCount;
+    bucket.consumption.usedDocumentCount += metrics.usedDocumentCount;
+    bucket.consumption.verifiedDocumentCount += metrics.verifiedDocumentCount;
+    bucket.consumption.ignoredDocumentCount += metrics.ignoredDocumentCount;
+    bucket.consumption.unreportedDocumentCount += metrics.unreportedDocumentCount;
+    bucket.consumption.strongReceiptOutcomeCount += metrics.strongReceiptOutcomeCount;
+    bucket.consumption.unexpectedClaimCount += metrics.unexpectedClaimCount;
+}
+function rechainGroupTypedMemoryShapeTrendBuckets(buckets) {
+    let previousBucketChecksum = "";
+    for (const bucket of buckets) {
+        bucket.previousBucketChecksum = previousBucketChecksum;
+        bucket.checksum = groupTypedMemoryShapeTrendBucketChecksum(bucket);
+        previousBucketChecksum = bucket.checksum;
+    }
+    return previousBucketChecksum;
+}
+function recordGroupTypedMemoryShapeTrendContribution(scopeId, input = {}, options = {}) {
+    if (!isExactGroupTypedMemorySessionScope(scopeId))
+        return { recorded: false, reason: "exact_group_gcs_scope_required" };
+    const kind = String(input.kind || "");
+    if (!["selector", "write", "consumption"].includes(kind))
+        return { recorded: false, reason: "trend_contribution_kind_invalid" };
+    const eventKey = String(input.eventKey || input.event_key || "");
+    if (!eventKey)
+        return { recorded: false, reason: "trend_contribution_key_required" };
+    const nowMs = Number(options.nowMs || options.now_ms || Date.now());
+    const recordedAt = String(input.recordedAt || input.recorded_at || new Date(nowMs).toISOString());
+    const recordedMs = Date.parse(recordedAt);
+    if (!Number.isFinite(recordedMs) || recordedMs > nowMs + 86_400_000)
+        return { recorded: false, reason: "trend_contribution_time_invalid" };
+    const bucketDate = groupTypedMemoryShapeTrendDate(recordedMs);
+    const mutableCutoffDate = groupTypedMemoryShapeTrendDate(nowMs - (exports.GROUP_TYPED_MEMORY_SHAPE_TREND_MUTABLE_DAYS - 1) * 86_400_000);
+    const retentionCutoffDate = groupTypedMemoryShapeTrendDate(nowMs - (exports.GROUP_TYPED_MEMORY_SHAPE_TREND_RETENTION_DAYS - 1) * 86_400_000);
+    if (!bucketDate || bucketDate < retentionCutoffDate)
+        return { recorded: false, reason: "trend_contribution_outside_retention", bucketDate };
+    if (bucketDate < mutableCutoffDate)
+        return { recorded: false, reason: "trend_bucket_sealed", bucketDate };
+    const metrics = normalizeGroupTypedMemoryShapeTrendContribution(kind, input);
+    const contributionKey = checksum([kind, eventKey], 32);
+    const file = getGroupTypedMemoryShapeTrendFile(scopeId);
+    const contribution = (0, atomic_json_file_1.withFileLock)(file, () => {
+        const current = (0, atomic_json_file_1.readJsonWithBackup)(file, null);
+        if (!current && (fs.existsSync(file) || fs.existsSync(`${file}.bak`)))
+            throw new Error("typed_memory_shape_trend_ledger_unrecoverable");
+        if (current && verifyGroupTypedMemoryShapeTrendLedger(current, scopeId).valid !== true)
+            throw new Error("typed_memory_shape_trend_ledger_invalid");
+        const ledger = current || emptyGroupTypedMemoryShapeTrendLedger(scopeId);
+        let bucket = (ledger.buckets || []).find((row) => row.date === bucketDate);
+        if (bucket?.sealed === true)
+            return { recorded: false, reason: "trend_bucket_sealed", bucketDate, ledgerFile: file };
+        if (!bucket) {
+            bucket = emptyGroupTypedMemoryShapeTrendBucket(bucketDate);
+            ledger.buckets.push(bucket);
+        }
+        if ((bucket.contributionKeys || []).includes(contributionKey))
+            return { recorded: false, idempotent: true, reason: "already_recorded", bucketDate, ledgerFile: file };
+        if ((bucket.contributionKeys || []).length >= exports.GROUP_TYPED_MEMORY_SHAPE_TREND_MAX_KEYS_PER_BUCKET) {
+            return { recorded: false, reason: "trend_bucket_key_capacity", bucketDate, ledgerFile: file };
+        }
+        applyGroupTypedMemoryShapeTrendContribution(bucket, kind, metrics);
+        if (!groupTypedMemoryShapeTrendMetricsValid(bucket))
+            throw new Error("typed_memory_shape_trend_contribution_invalid");
+        bucket.contributionKeys.push(contributionKey);
+        bucket.updatedAt = new Date(nowMs).toISOString();
+        ledger.buckets = (ledger.buckets || [])
+            .filter((row) => String(row.date || "") >= retentionCutoffDate)
+            .sort((a, b) => String(a.date || "").localeCompare(String(b.date || "")));
+        for (const row of ledger.buckets) {
+            if (String(row.date || "") < mutableCutoffDate && row.sealed !== true) {
+                row.sealed = true;
+                row.sealedAt = new Date(nowMs).toISOString();
+                row.contributionKeys = [];
+            }
+        }
+        ledger.generation = Number(ledger.generation || 0) + 1;
+        ledger.updatedAt = new Date(nowMs).toISOString();
+        ledger.headBucketChecksum = rechainGroupTypedMemoryShapeTrendBuckets(ledger.buckets);
+        ledger.checksum = groupTypedMemoryShapeTrendLedgerChecksum(ledger);
+        if (!verifyGroupTypedMemoryShapeTrendLedger(ledger, scopeId).valid)
+            throw new Error("typed_memory_shape_trend_ledger_write_invalid");
+        (0, atomic_json_file_1.writeJsonAtomic)(file, ledger);
+        return { recorded: true, idempotent: false, bucketDate, contributionKey, ledgerFile: file, generation: ledger.generation, ledgerChecksum: ledger.checksum };
+    }, { timeoutMs: 5_000, retryMs: 10, staleMs: 60_000 });
+    if (contribution?.recorded === true) {
+        try {
+            const trend = summarizeGroupTypedMemoryShapeTrend(scopeId, { nowMs });
+            contribution.incidentTransition = syncGroupTypedMemoryShapeTrendIncident(scopeId, trend, { nowMs });
+            contribution.incidentTransitionError = "";
+        }
+        catch (error) {
+            contribution.incidentTransition = null;
+            contribution.incidentTransitionError = compactText(error?.message || error, 240);
+        }
+    }
+    return contribution;
+}
+function summarizeGroupTypedMemoryShapeTrendBuckets(buckets) {
+    const selector = buckets.reduce((acc, bucket) => {
+        for (const key of Object.keys(acc))
+            acc[key] += Number(bucket.selector?.[key] || 0);
+        return acc;
+    }, { runCount: 0, candidateTotal: 0, selectedTotal: 0, emptyCount: 0, selectedAgeWeightedDays: 0, selectedAgeDocumentCount: 0, freshCount: 0, staleCount: 0, candidateCapacityRunCount: 0, selectionCapacityRunCount: 0 });
+    const write = buckets.reduce((acc, bucket) => {
+        for (const key of ["eventCount", "changedCount", "createCount", "updateCount", "noopCount", "growthBytes", "afterBytesTotal", "nearBodyLimitCount", "truncatedBodyCount"])
+            acc[key] += Number(bucket.write?.[key] || 0);
+        acc.maxAfterBytes = Math.max(acc.maxAfterBytes, Number(bucket.write?.maxAfterBytes || 0));
+        return acc;
+    }, { eventCount: 0, changedCount: 0, createCount: 0, updateCount: 0, noopCount: 0, growthBytes: 0, afterBytesTotal: 0, maxAfterBytes: 0, nearBodyLimitCount: 0, truncatedBodyCount: 0 });
+    const consumption = buckets.reduce((acc, bucket) => {
+        for (const key of Object.keys(acc))
+            acc[key] += Number(bucket.consumption?.[key] || 0);
+        return acc;
+    }, { outcomeCount: 0, deliveredDocumentCount: 0, usedDocumentCount: 0, verifiedDocumentCount: 0, ignoredDocumentCount: 0, unreportedDocumentCount: 0, strongReceiptOutcomeCount: 0, unexpectedClaimCount: 0 });
+    const declaredDocumentCount = consumption.usedDocumentCount + consumption.verifiedDocumentCount + consumption.ignoredDocumentCount;
+    return {
+        selectorRunCount: selector.runCount,
+        candidateTotal: selector.candidateTotal,
+        selectedTotal: selector.selectedTotal,
+        selectionRate: selector.candidateTotal ? Number((selector.selectedTotal / selector.candidateTotal).toFixed(6)) : null,
+        emptySelectionCount: selector.emptyCount,
+        emptySelectionRate: selector.runCount ? Number((selector.emptyCount / selector.runCount).toFixed(6)) : null,
+        averageSelectedAgeDays: selector.selectedAgeDocumentCount ? Number((selector.selectedAgeWeightedDays / selector.selectedAgeDocumentCount).toFixed(6)) : -1,
+        selectedStaleRate: selector.freshCount + selector.staleCount ? Number((selector.staleCount / (selector.freshCount + selector.staleCount)).toFixed(6)) : null,
+        candidateCapacityRunCount: selector.candidateCapacityRunCount,
+        selectionCapacityRunCount: selector.selectionCapacityRunCount,
+        writeEventCount: write.eventCount,
+        changedWriteCount: write.changedCount,
+        writeGrowthBytes: write.growthBytes,
+        averageWriteBytes: write.eventCount ? Number((write.afterBytesTotal / write.eventCount).toFixed(3)) : null,
+        maxWriteBytes: write.maxAfterBytes,
+        nearBodyLimitWriteCount: write.nearBodyLimitCount,
+        truncatedBodyWriteCount: write.truncatedBodyCount,
+        consumptionOutcomeCount: consumption.outcomeCount,
+        deliveredDocumentCount: consumption.deliveredDocumentCount,
+        declaredDocumentCount,
+        usedDocumentCount: consumption.usedDocumentCount,
+        verifiedDocumentCount: consumption.verifiedDocumentCount,
+        ignoredDocumentCount: consumption.ignoredDocumentCount,
+        unreportedDocumentCount: consumption.unreportedDocumentCount,
+        receiptCoverageRate: consumption.deliveredDocumentCount ? Number(((consumption.deliveredDocumentCount - consumption.unreportedDocumentCount) / consumption.deliveredDocumentCount).toFixed(6)) : null,
+        consumedUtilityRate: declaredDocumentCount ? Number(((consumption.usedDocumentCount + consumption.verifiedDocumentCount) / declaredDocumentCount).toFixed(6)) : null,
+    };
+}
+function verifyGroupTypedMemoryShapeTrendSummary(summary, expectedScopeId = "") {
+    const checksumValid = !!summary && String(summary.checksum || "") === groupTypedMemoryShapeTrendSummaryChecksum(summary);
+    const scopeValid = isExactGroupTypedMemorySessionScope(String(summary?.scopeId || ""))
+        && (!expectedScopeId || String(summary?.scopeId || "") === expectedScopeId);
+    const valid = !!summary
+        && summary.schema === "ccm-group-typed-memory-shape-trend-summary-v1"
+        && Number(summary.version || 0) === 1
+        && scopeValid
+        && summary.bodyFree === true
+        && summary.advisoryOnly === true
+        && summary.autoTuning === false
+        && summary.crossSessionReuse === false
+        && ["invalid", "unobserved", "warming", "stable", "drift"].includes(String(summary.status || ""))
+        && checksumValid;
+    return { valid, checksumValid, scopeValid };
+}
+function summarizeGroupTypedMemoryShapeTrend(scopeId, options = {}) {
+    const loaded = readGroupTypedMemoryShapeTrendLedger(scopeId);
+    const nowMs = Number(options.nowMs || options.now_ms || Date.now());
+    const recentWindowDays = Math.max(1, Math.min(30, Number(options.recentWindowDays || options.recent_window_days || 7)));
+    const baselineWindowDays = Math.max(recentWindowDays, Math.min(90, Number(options.baselineWindowDays || options.baseline_window_days || 21)));
+    const recentStartDate = groupTypedMemoryShapeTrendDate(nowMs - (recentWindowDays - 1) * 86_400_000);
+    const baselineStartDate = groupTypedMemoryShapeTrendDate(nowMs - (recentWindowDays + baselineWindowDays - 1) * 86_400_000);
+    const currentDate = groupTypedMemoryShapeTrendDate(nowMs);
+    const buckets = loaded.valid === true && Array.isArray(loaded.buckets)
+        ? loaded.buckets.filter((row) => String(row?.date || "") <= currentDate)
+        : [];
+    const recentBuckets = buckets.filter((row) => row.date >= recentStartDate);
+    const baselineBuckets = buckets.filter((row) => row.date >= baselineStartDate && row.date < recentStartDate);
+    const recent = summarizeGroupTypedMemoryShapeTrendBuckets(recentBuckets);
+    const baseline = summarizeGroupTypedMemoryShapeTrendBuckets(baselineBuckets);
+    const total = summarizeGroupTypedMemoryShapeTrendBuckets(buckets);
+    const deltas = {
+        selectionRate: groupTypedMemoryShapeMetricDelta(recent, baseline, "selectionRate"),
+        emptySelectionRate: groupTypedMemoryShapeMetricDelta(recent, baseline, "emptySelectionRate"),
+        averageSelectedAgeDays: groupTypedMemoryShapeMetricDelta(recent, baseline, "averageSelectedAgeDays"),
+        selectedStaleRate: groupTypedMemoryShapeMetricDelta(recent, baseline, "selectedStaleRate"),
+        receiptCoverageRate: groupTypedMemoryShapeMetricDelta(recent, baseline, "receiptCoverageRate"),
+        consumedUtilityRate: groupTypedMemoryShapeMetricDelta(recent, baseline, "consumedUtilityRate"),
+        averageWriteBytes: groupTypedMemoryShapeMetricDelta(recent, baseline, "averageWriteBytes"),
+    };
+    const selectorSufficient = recent.selectorRunCount >= 3 && baseline.selectorRunCount >= 3;
+    const consumptionSufficient = recent.declaredDocumentCount >= 3 && baseline.declaredDocumentCount >= 3;
+    const writeSufficient = recent.writeEventCount >= 3 && baseline.writeEventCount >= 3;
+    const signals = [];
+    const signal = (code, severity, delta) => signals.push({ code, severity, delta });
+    if (selectorSufficient) {
+        if (deltas.selectionRate !== null && Math.abs(deltas.selectionRate) >= 0.2)
+            signal("selection_rate_shift", "info", deltas.selectionRate);
+        if (deltas.emptySelectionRate !== null && deltas.emptySelectionRate >= 0.25)
+            signal("empty_selection_rise", "warning", deltas.emptySelectionRate);
+        if (deltas.averageSelectedAgeDays !== null && deltas.averageSelectedAgeDays >= 7)
+            signal("selected_age_rise", "warning", deltas.averageSelectedAgeDays);
+        if (deltas.selectedStaleRate !== null && deltas.selectedStaleRate >= 0.25)
+            signal("stale_selection_rise", "warning", deltas.selectedStaleRate);
+    }
+    if (consumptionSufficient) {
+        if (deltas.receiptCoverageRate !== null && deltas.receiptCoverageRate <= -0.2)
+            signal("receipt_coverage_drop", "warning", deltas.receiptCoverageRate);
+        if (deltas.consumedUtilityRate !== null && deltas.consumedUtilityRate <= -0.2)
+            signal("consumed_utility_drop", "warning", deltas.consumedUtilityRate);
+    }
+    if (writeSufficient) {
+        if (deltas.averageWriteBytes !== null && deltas.averageWriteBytes >= 4_000)
+            signal("write_size_growth", "warning", deltas.averageWriteBytes);
+        if (recent.nearBodyLimitWriteCount / Math.max(1, recent.writeEventCount) >= 0.5)
+            signal("write_capacity_pressure", "warning", null);
+    }
+    if (recent.truncatedBodyWriteCount > 0)
+        signal("write_body_truncated", "warning", null);
+    const comparisonReady = selectorSufficient || consumptionSufficient || writeSufficient;
+    const status = loaded.valid !== true ? "invalid" : !loaded.present ? "unobserved" : !comparisonReady ? "warming" : signals.length ? "drift" : "stable";
+    const oldestDate = buckets[0]?.date || "";
+    const core = {
+        schema: "ccm-group-typed-memory-shape-trend-summary-v1",
+        version: 1,
+        scopeId,
+        bodyFree: true,
+        advisoryOnly: true,
+        autoTuning: false,
+        crossSessionReuse: false,
+        status,
+        valid: loaded.valid === true,
+        ledgerPresent: loaded.present === true,
+        ledgerPrimaryValid: loaded.primaryValid === true,
+        recoveredFromBackup: loaded.recoveredFromBackup === true,
+        ledgerFile: loaded.file,
+        ledgerChecksum: String(loaded.checksum || ""),
+        generation: Number(loaded.generation || 0),
+        bucketCount: buckets.length,
+        mutableBucketCount: buckets.filter((row) => row.sealed !== true).length,
+        sealedBucketCount: buckets.filter((row) => row.sealed === true).length,
+        oldestDate,
+        latestDate: buckets[buckets.length - 1]?.date || "",
+        retentionDays: exports.GROUP_TYPED_MEMORY_SHAPE_TREND_RETENTION_DAYS,
+        mutableDays: exports.GROUP_TYPED_MEMORY_SHAPE_TREND_MUTABLE_DAYS,
+        extendsBeyondHotRetention: !!oldestDate && oldestDate < baselineStartDate,
+        recentWindowDays,
+        baselineWindowDays,
+        confidence: { selectorSufficient, consumptionSufficient, writeSufficient, comparisonReady },
+        recent,
+        baseline,
+        total,
+        deltas,
+        signalCount: signals.length,
+        warningSignalCount: signals.filter(row => row.severity === "warning").length,
+        signals,
+        buckets: options.includeBuckets === true || options.include_buckets === true ? buckets.slice(-60) : undefined,
+        generatedAt: new Date(nowMs).toISOString(),
+    };
+    return { ...core, checksum: groupTypedMemoryShapeTrendSummaryChecksum(core) };
+}
+function groupTypedMemoryShapeTrendIncidentEventChecksum(value) {
+    const payload = { ...(value || {}) };
+    delete payload.checksum;
+    return checksum(JSON.stringify(payload), 64);
+}
+function groupTypedMemoryShapeTrendIncidentLedgerChecksum(value) {
+    const payload = { ...(value || {}) };
+    delete payload.checksum;
+    delete payload.file;
+    delete payload.present;
+    delete payload.valid;
+    delete payload.primaryValid;
+    delete payload.recoveredFromBackup;
+    return checksum(JSON.stringify(payload), 64);
+}
+function groupTypedMemoryShapeTrendIncidentSummaryChecksum(value) {
+    const payload = { ...(value || {}) };
+    delete payload.checksum;
+    return checksum(JSON.stringify(payload), 64);
+}
+function groupTypedMemoryShapeTrendSignalState(trend) {
+    const signals = (Array.isArray(trend?.signals) ? trend.signals : [])
+        .map((row) => ({ code: String(row?.code || ""), severity: String(row?.severity || "") }))
+        .filter((row) => row.code && ["info", "warning"].includes(row.severity))
+        .sort((a, b) => a.code.localeCompare(b.code) || a.severity.localeCompare(b.severity));
+    const actionable = trend?.valid === true && String(trend?.status || "") === "drift" && signals.length > 0;
+    return {
+        actionable,
+        signalFingerprint: actionable ? checksum(JSON.stringify({ status: "drift", signals }), 32) : "",
+        signalCodes: signals.map((row) => row.code),
+        warningSignalCount: signals.filter((row) => row.severity === "warning").length,
+    };
+}
+function emptyGroupTypedMemoryShapeTrendIncidentLedger(scopeId) {
+    const core = {
+        schema: "ccm-group-typed-memory-shape-trend-incident-ledger-v1",
+        version: exports.GROUP_TYPED_MEMORY_SHAPE_TREND_INCIDENT_VERSION,
+        scopeId,
+        bodyFree: true,
+        advisoryOnly: true,
+        visibilityOnly: true,
+        memoryMutationAuthorized: false,
+        maxEvents: exports.GROUP_TYPED_MEMORY_SHAPE_TREND_INCIDENT_MAX_EVENTS,
+        retentionDays: exports.GROUP_TYPED_MEMORY_SHAPE_TREND_INCIDENT_RETENTION_DAYS,
+        generation: 0,
+        headEventChecksum: "",
+        events: [],
+        updatedAt: "",
+    };
+    return { ...core, checksum: groupTypedMemoryShapeTrendIncidentLedgerChecksum(core) };
+}
+function replayGroupTypedMemoryShapeTrendIncidentEvents(events, expectedScopeId = "") {
+    const incidents = new Map();
+    const seenEventIds = new Set();
+    let previousEventChecksum = "";
+    let chainValid = true;
+    let semanticsValid = true;
+    let activeIncident = null;
+    for (const event of events) {
+        const type = String(event?.type || "");
+        const incidentId = String(event?.incidentId || "");
+        const eventValid = !!event
+            && event.schema === "ccm-group-typed-memory-shape-trend-incident-event-v1"
+            && Number(event.version || 0) === exports.GROUP_TYPED_MEMORY_SHAPE_TREND_INCIDENT_VERSION
+            && /^mste_[a-f0-9]{24}$/.test(String(event.eventId || ""))
+            && !seenEventIds.has(String(event.eventId || ""))
+            && /^msti_[a-f0-9]{24}$/.test(incidentId)
+            && ["opened", "acknowledged", "resolved"].includes(type)
+            && isExactGroupTypedMemorySessionScope(String(event.scopeId || ""))
+            && (!expectedScopeId || String(event.scopeId || "") === expectedScopeId)
+            && event.bodyFree === true
+            && event.advisoryOnly === true
+            && event.visibilityOnly === true
+            && event.memoryMutationAuthorized === false
+            && Number.isFinite(Date.parse(String(event.at || "")))
+            && String(event.previousEventChecksum || "") === previousEventChecksum
+            && String(event.checksum || "") === groupTypedMemoryShapeTrendIncidentEventChecksum(event);
+        if (!eventValid)
+            chainValid = false;
+        seenEventIds.add(String(event?.eventId || ""));
+        previousEventChecksum = String(event?.checksum || "");
+        if (type === "opened") {
+            const openValid = !activeIncident
+                && !incidents.has(incidentId)
+                && String(event.trendStatus || "") === "drift"
+                && /^[a-f0-9]{32}$/.test(String(event.signalFingerprint || ""))
+                && Array.isArray(event.signalCodes)
+                && event.signalCodes.length > 0
+                && event.signalCodes.every((code) => typeof code === "string" && !!code)
+                && Number(event.trendGeneration || 0) > 0
+                && /^[a-f0-9]{64}$/.test(String(event.trendLedgerChecksum || ""))
+                && /^[a-f0-9]{64}$/.test(String(event.trendSummaryChecksum || ""));
+            if (!openValid)
+                semanticsValid = false;
+            const incident = { opened: event, acknowledgement: null, resolved: null };
+            incidents.set(incidentId, incident);
+            activeIncident = incident;
+            continue;
+        }
+        const incident = incidents.get(incidentId);
+        const targetValid = !!incident
+            && !incident.resolved
+            && String(event.targetIncidentChecksum || "") === String(incident.opened?.checksum || "");
+        if (type === "acknowledged") {
+            if (!targetValid || incident.acknowledgement || String(event.actor || "").length > 100 || !/^[a-f0-9]{32}$/.test(String(event.noteChecksum || "")))
+                semanticsValid = false;
+            else
+                incident.acknowledgement = event;
+        }
+        else {
+            if (!targetValid || activeIncident !== incident)
+                semanticsValid = false;
+            else {
+                incident.resolved = event;
+                activeIncident = null;
+            }
+        }
+    }
+    return {
+        valid: chainValid && semanticsValid,
+        chainValid,
+        semanticsValid,
+        incidents: [...incidents.values()],
+        activeIncident,
+        headEventChecksum: previousEventChecksum,
+    };
+}
+function verifyGroupTypedMemoryShapeTrendIncidentLedger(ledger, expectedScopeId = "") {
+    const events = Array.isArray(ledger?.events) ? ledger.events : [];
+    const replay = replayGroupTypedMemoryShapeTrendIncidentEvents(events, expectedScopeId || String(ledger?.scopeId || ""));
+    const scopeValid = isExactGroupTypedMemorySessionScope(String(ledger?.scopeId || ""))
+        && (!expectedScopeId || String(ledger?.scopeId || "") === expectedScopeId);
+    const checksumValid = !!ledger && String(ledger.checksum || "") === groupTypedMemoryShapeTrendIncidentLedgerChecksum(ledger);
+    const valid = !!ledger
+        && ledger.schema === "ccm-group-typed-memory-shape-trend-incident-ledger-v1"
+        && Number(ledger.version || 0) === exports.GROUP_TYPED_MEMORY_SHAPE_TREND_INCIDENT_VERSION
+        && scopeValid
+        && ledger.bodyFree === true
+        && ledger.advisoryOnly === true
+        && ledger.visibilityOnly === true
+        && ledger.memoryMutationAuthorized === false
+        && Number(ledger.maxEvents || 0) === exports.GROUP_TYPED_MEMORY_SHAPE_TREND_INCIDENT_MAX_EVENTS
+        && Number(ledger.retentionDays || 0) === exports.GROUP_TYPED_MEMORY_SHAPE_TREND_INCIDENT_RETENTION_DAYS
+        && events.length <= exports.GROUP_TYPED_MEMORY_SHAPE_TREND_INCIDENT_MAX_EVENTS
+        && String(ledger.headEventChecksum || "") === replay.headEventChecksum
+        && replay.valid
+        && checksumValid;
+    return { valid, checksumValid, scopeValid, chainValid: replay.chainValid, semanticsValid: replay.semanticsValid, eventCount: events.length };
+}
+function readGroupTypedMemoryShapeTrendIncidentLedger(scopeId) {
+    const file = getGroupTypedMemoryShapeTrendIncidentFile(scopeId);
+    let primary = null;
+    let backup = null;
+    try {
+        primary = JSON.parse(fs.readFileSync(file, "utf-8"));
+    }
+    catch { }
+    if (verifyGroupTypedMemoryShapeTrendIncidentLedger(primary, scopeId).valid)
+        return { ...primary, file, present: true, valid: true, primaryValid: true, recoveredFromBackup: false };
+    try {
+        backup = JSON.parse(fs.readFileSync(`${file}.bak`, "utf-8"));
+    }
+    catch { }
+    if (verifyGroupTypedMemoryShapeTrendIncidentLedger(backup, scopeId).valid)
+        return { ...backup, file, present: true, valid: true, primaryValid: false, recoveredFromBackup: true };
+    const present = fs.existsSync(file) || fs.existsSync(`${file}.bak`);
+    if (present)
+        return { ...(primary || backup || {}), file, present: true, valid: false, primaryValid: false, recoveredFromBackup: false };
+    const empty = emptyGroupTypedMemoryShapeTrendIncidentLedger(scopeId);
+    return { ...empty, file, present: false, valid: true, primaryValid: true, recoveredFromBackup: false };
+}
+function appendGroupTypedMemoryShapeTrendIncidentEvent(ledger, scopeId, type, input = {}) {
+    const at = String(input.at || now());
+    const previousEventChecksum = String(ledger.events?.[ledger.events.length - 1]?.checksum || "");
+    const incidentId = String(input.incidentId || `msti_${checksum([scopeId, type, at, crypto.randomBytes(8).toString("hex")], 24)}`);
+    const core = {
+        schema: "ccm-group-typed-memory-shape-trend-incident-event-v1",
+        version: exports.GROUP_TYPED_MEMORY_SHAPE_TREND_INCIDENT_VERSION,
+        eventId: `mste_${checksum([scopeId, incidentId, type, at, crypto.randomBytes(8).toString("hex")], 24)}`,
+        scopeId,
+        type,
+        incidentId,
+        targetIncidentChecksum: String(input.targetIncidentChecksum || ""),
+        signalFingerprint: String(input.signalFingerprint || ""),
+        signalCodes: uniqueStrings((input.signalCodes || []).map(String), 32).sort(),
+        warningSignalCount: Number(input.warningSignalCount || 0),
+        trendStatus: String(input.trendStatus || ""),
+        trendGeneration: Number(input.trendGeneration || 0),
+        trendLedgerChecksum: String(input.trendLedgerChecksum || ""),
+        trendSummaryChecksum: String(input.trendSummaryChecksum || ""),
+        actor: type === "acknowledged" ? compactText(input.actor || "memory-center", 100) : "",
+        noteChecksum: type === "acknowledged" ? checksum(String(input.note || ""), 32) : "",
+        noteChars: type === "acknowledged" ? String(input.note || "").length : 0,
+        bodyFree: true,
+        advisoryOnly: true,
+        visibilityOnly: true,
+        memoryMutationAuthorized: false,
+        at,
+        previousEventChecksum,
+    };
+    const event = { ...core, checksum: groupTypedMemoryShapeTrendIncidentEventChecksum(core) };
+    ledger.events.push(event);
+    return event;
+}
+function compactGroupTypedMemoryShapeTrendIncidentEvents(events, nowMs) {
+    const replay = replayGroupTypedMemoryShapeTrendIncidentEvents(events);
+    if (!replay.valid)
+        return events;
+    const cutoffMs = nowMs - exports.GROUP_TYPED_MEMORY_SHAPE_TREND_INCIDENT_RETENTION_DAYS * 86_400_000;
+    const removable = new Set();
+    for (const incident of replay.incidents) {
+        const resolvedMs = Date.parse(String(incident.resolved?.at || ""));
+        if (incident.resolved && Number.isFinite(resolvedMs) && resolvedMs < cutoffMs)
+            removable.add(String(incident.opened.incidentId || ""));
+    }
+    let kept = events.filter(event => !removable.has(String(event.incidentId || "")));
+    while (kept.length > exports.GROUP_TYPED_MEMORY_SHAPE_TREND_INCIDENT_MAX_EVENTS) {
+        const nextReplay = replayGroupTypedMemoryShapeTrendIncidentEvents(kept);
+        const oldestResolved = nextReplay.incidents.find((incident) => !!incident.resolved);
+        if (!oldestResolved)
+            break;
+        const incidentId = String(oldestResolved.opened.incidentId || "");
+        kept = kept.filter(event => String(event.incidentId || "") !== incidentId);
+    }
+    let previousEventChecksum = "";
+    const openedChecksums = new Map();
+    for (const event of kept) {
+        if (event.type !== "opened")
+            event.targetIncidentChecksum = String(openedChecksums.get(String(event.incidentId || "")) || event.targetIncidentChecksum || "");
+        event.previousEventChecksum = previousEventChecksum;
+        event.checksum = groupTypedMemoryShapeTrendIncidentEventChecksum(event);
+        if (event.type === "opened")
+            openedChecksums.set(String(event.incidentId || ""), event.checksum);
+        previousEventChecksum = event.checksum;
+    }
+    return kept;
+}
+function commitGroupTypedMemoryShapeTrendIncidentLedger(file, ledger, scopeId, nowMs) {
+    ledger.events = compactGroupTypedMemoryShapeTrendIncidentEvents(ledger.events || [], nowMs);
+    if (ledger.events.length > exports.GROUP_TYPED_MEMORY_SHAPE_TREND_INCIDENT_MAX_EVENTS)
+        throw new Error("typed_memory_shape_trend_incident_capacity_exceeded");
+    ledger.generation = Number(ledger.generation || 0) + 1;
+    ledger.updatedAt = new Date(nowMs).toISOString();
+    ledger.headEventChecksum = String(ledger.events[ledger.events.length - 1]?.checksum || "");
+    ledger.checksum = groupTypedMemoryShapeTrendIncidentLedgerChecksum(ledger);
+    if (!verifyGroupTypedMemoryShapeTrendIncidentLedger(ledger, scopeId).valid)
+        throw new Error("typed_memory_shape_trend_incident_ledger_write_invalid");
+    (0, atomic_json_file_1.writeJsonAtomic)(file, ledger);
+    return ledger;
+}
+function syncGroupTypedMemoryShapeTrendIncident(scopeId, trendInput = null, options = {}) {
+    if (!isExactGroupTypedMemorySessionScope(scopeId))
+        return { changed: false, reason: "exact_group_gcs_scope_required" };
+    const nowMs = Number(options.nowMs || options.now_ms || Date.now());
+    const trend = trendInput?.schema === "ccm-group-typed-memory-shape-trend-summary-v1"
+        ? trendInput
+        : summarizeGroupTypedMemoryShapeTrend(scopeId, { nowMs });
+    if (trend.valid !== true || !verifyGroupTypedMemoryShapeTrendSummary(trend, scopeId).valid)
+        return { changed: false, reason: "shape_trend_invalid" };
+    const signalState = groupTypedMemoryShapeTrendSignalState(trend);
+    const file = getGroupTypedMemoryShapeTrendIncidentFile(scopeId);
+    return (0, atomic_json_file_1.withFileLock)(file, () => {
+        const current = (0, atomic_json_file_1.readJsonWithBackup)(file, null);
+        if (!current && (fs.existsSync(file) || fs.existsSync(`${file}.bak`)))
+            throw new Error("typed_memory_shape_trend_incident_ledger_unrecoverable");
+        if (current && !verifyGroupTypedMemoryShapeTrendIncidentLedger(current, scopeId).valid)
+            throw new Error("typed_memory_shape_trend_incident_ledger_invalid");
+        const ledger = current || emptyGroupTypedMemoryShapeTrendIncidentLedger(scopeId);
+        const replay = replayGroupTypedMemoryShapeTrendIncidentEvents(ledger.events || [], scopeId);
+        const active = replay.activeIncident;
+        if ((!signalState.actionable && !active)
+            || (signalState.actionable && active && String(active.opened.signalFingerprint || "") === signalState.signalFingerprint)) {
+            return { changed: false, reason: "incident_state_unchanged", activeIncidentId: String(active?.opened?.incidentId || ""), ledgerFile: file };
+        }
+        const events = [];
+        if (active) {
+            events.push(appendGroupTypedMemoryShapeTrendIncidentEvent(ledger, scopeId, "resolved", {
+                incidentId: active.opened.incidentId,
+                targetIncidentChecksum: active.opened.checksum,
+                signalFingerprint: active.opened.signalFingerprint,
+                signalCodes: active.opened.signalCodes,
+                warningSignalCount: active.opened.warningSignalCount,
+                trendStatus: trend.status,
+                trendGeneration: trend.generation,
+                trendLedgerChecksum: trend.ledgerChecksum,
+                trendSummaryChecksum: trend.checksum,
+                at: new Date(nowMs).toISOString(),
+            }));
+        }
+        if (signalState.actionable) {
+            events.push(appendGroupTypedMemoryShapeTrendIncidentEvent(ledger, scopeId, "opened", {
+                signalFingerprint: signalState.signalFingerprint,
+                signalCodes: signalState.signalCodes,
+                warningSignalCount: signalState.warningSignalCount,
+                trendStatus: trend.status,
+                trendGeneration: trend.generation,
+                trendLedgerChecksum: trend.ledgerChecksum,
+                trendSummaryChecksum: trend.checksum,
+                at: new Date(nowMs).toISOString(),
+            }));
+        }
+        const committed = commitGroupTypedMemoryShapeTrendIncidentLedger(file, ledger, scopeId, nowMs);
+        return {
+            changed: true,
+            transition: active && signalState.actionable ? "replaced" : active ? "resolved" : "opened",
+            events,
+            activeIncidentId: String(events.find(event => event.type === "opened")?.incidentId || ""),
+            ledgerFile: file,
+            generation: committed.generation,
+            ledgerChecksum: committed.checksum,
+        };
+    }, { timeoutMs: 5_000, retryMs: 10, staleMs: 60_000 });
+}
+function verifyGroupTypedMemoryShapeTrendIncidentSummary(summary, expectedScopeId = "") {
+    const checksumValid = !!summary && String(summary.checksum || "") === groupTypedMemoryShapeTrendIncidentSummaryChecksum(summary);
+    const scopeValid = isExactGroupTypedMemorySessionScope(String(summary?.scopeId || ""))
+        && (!expectedScopeId || String(summary?.scopeId || "") === expectedScopeId);
+    const valid = !!summary
+        && summary.schema === "ccm-group-typed-memory-shape-trend-incident-summary-v1"
+        && Number(summary.version || 0) === exports.GROUP_TYPED_MEMORY_SHAPE_TREND_INCIDENT_VERSION
+        && scopeValid
+        && summary.bodyFree === true
+        && summary.advisoryOnly === true
+        && summary.visibilityOnly === true
+        && summary.memoryMutationAuthorized === false
+        && ["invalid", "unobserved", "pending", "acknowledged", "resolved"].includes(String(summary.status || ""))
+        && checksumValid;
+    return { valid, checksumValid, scopeValid };
+}
+function summarizeGroupTypedMemoryShapeTrendIncidents(scopeId, options = {}) {
+    const loaded = readGroupTypedMemoryShapeTrendIncidentLedger(scopeId);
+    const events = loaded.valid === true && Array.isArray(loaded.events) ? loaded.events : [];
+    const replay = replayGroupTypedMemoryShapeTrendIncidentEvents(events, scopeId);
+    const active = replay.activeIncident;
+    const acknowledged = !!active?.acknowledgement;
+    const incidents = replay.incidents || [];
+    const status = loaded.valid !== true ? "invalid" : active ? acknowledged ? "acknowledged" : "pending" : incidents.length ? "resolved" : "unobserved";
+    const core = {
+        schema: "ccm-group-typed-memory-shape-trend-incident-summary-v1",
+        version: exports.GROUP_TYPED_MEMORY_SHAPE_TREND_INCIDENT_VERSION,
+        scopeId,
+        bodyFree: true,
+        advisoryOnly: true,
+        visibilityOnly: true,
+        memoryMutationAuthorized: false,
+        valid: loaded.valid === true && replay.valid === true,
+        status,
+        ledgerPresent: loaded.present === true,
+        ledgerPrimaryValid: loaded.primaryValid === true,
+        recoveredFromBackup: loaded.recoveredFromBackup === true,
+        ledgerFile: loaded.file,
+        ledgerChecksum: String(loaded.checksum || ""),
+        generation: Number(loaded.generation || 0),
+        eventCount: events.length,
+        incidentCount: incidents.length,
+        pendingCount: active && !acknowledged ? 1 : 0,
+        acknowledgedCount: incidents.filter((incident) => !!incident.acknowledgement).length,
+        resolvedCount: incidents.filter((incident) => !!incident.resolved).length,
+        activeIncident: active ? {
+            incidentId: String(active.opened.incidentId || ""),
+            incidentChecksum: String(active.opened.checksum || ""),
+            signalFingerprint: String(active.opened.signalFingerprint || ""),
+            signalCodes: active.opened.signalCodes || [],
+            warningSignalCount: Number(active.opened.warningSignalCount || 0),
+            trendGeneration: Number(active.opened.trendGeneration || 0),
+            trendLedgerChecksum: String(active.opened.trendLedgerChecksum || ""),
+            openedAt: String(active.opened.at || ""),
+            acknowledged,
+            acknowledgement: active.acknowledgement ? {
+                eventId: String(active.acknowledgement.eventId || ""),
+                actor: String(active.acknowledgement.actor || ""),
+                acknowledgedAt: String(active.acknowledgement.at || ""),
+                noteChecksum: String(active.acknowledgement.noteChecksum || ""),
+            } : null,
+        } : null,
+        latestEvents: options.includeEvents === true || options.include_events === true
+            ? events.slice(-60).reverse()
+            : undefined,
+        generatedAt: now(),
+    };
+    return { ...core, checksum: groupTypedMemoryShapeTrendIncidentSummaryChecksum(core) };
+}
+function acknowledgeGroupTypedMemoryShapeTrendIncident(scopeId, input = {}) {
+    if (!isExactGroupTypedMemorySessionScope(scopeId))
+        return { acknowledged: false, reason: "exact_group_gcs_scope_required" };
+    if (input.explicitConfirmation !== true && input.explicit_confirmation !== true)
+        return { acknowledged: false, reason: "explicit_confirmation_required" };
+    const expectedIncidentId = String(input.incidentId || input.incident_id || "");
+    const expectedIncidentChecksum = String(input.incidentChecksum || input.incident_checksum || "");
+    const nowMs = Number(input.nowMs || input.now_ms || Date.now());
+    const trendFile = getGroupTypedMemoryShapeTrendFile(scopeId);
+    return (0, atomic_json_file_1.withFileLock)(trendFile, () => {
+        const trend = summarizeGroupTypedMemoryShapeTrend(scopeId, { nowMs });
+        if (trend.valid !== true || !verifyGroupTypedMemoryShapeTrendSummary(trend, scopeId).valid)
+            return { acknowledged: false, reason: "shape_trend_invalid" };
+        syncGroupTypedMemoryShapeTrendIncident(scopeId, trend, { nowMs });
+        const file = getGroupTypedMemoryShapeTrendIncidentFile(scopeId);
+        return (0, atomic_json_file_1.withFileLock)(file, () => {
+            const current = (0, atomic_json_file_1.readJsonWithBackup)(file, null);
+            if (!current && !fs.existsSync(file) && !fs.existsSync(`${file}.bak`))
+                return { acknowledged: false, reason: "no_active_shape_trend_incident" };
+            if (!current)
+                throw new Error("typed_memory_shape_trend_incident_ledger_unrecoverable");
+            if (!verifyGroupTypedMemoryShapeTrendIncidentLedger(current, scopeId).valid)
+                throw new Error("typed_memory_shape_trend_incident_ledger_invalid");
+            const replay = replayGroupTypedMemoryShapeTrendIncidentEvents(current.events || [], scopeId);
+            const active = replay.activeIncident;
+            if (!active)
+                return { acknowledged: false, reason: "no_active_shape_trend_incident" };
+            if (expectedIncidentId && expectedIncidentId !== String(active.opened.incidentId || ""))
+                return { acknowledged: false, reason: "shape_trend_incident_changed" };
+            if (expectedIncidentChecksum && expectedIncidentChecksum !== String(active.opened.checksum || ""))
+                return { acknowledged: false, reason: "shape_trend_incident_changed" };
+            if (active.acknowledgement)
+                return { acknowledged: true, idempotent: true, event: active.acknowledgement, summary: summarizeGroupTypedMemoryShapeTrendIncidents(scopeId) };
+            const signalState = groupTypedMemoryShapeTrendSignalState(trend);
+            if (!signalState.actionable || signalState.signalFingerprint !== String(active.opened.signalFingerprint || ""))
+                return { acknowledged: false, reason: "shape_trend_incident_changed" };
+            const event = appendGroupTypedMemoryShapeTrendIncidentEvent(current, scopeId, "acknowledged", {
+                incidentId: active.opened.incidentId,
+                targetIncidentChecksum: active.opened.checksum,
+                signalFingerprint: signalState.signalFingerprint,
+                signalCodes: signalState.signalCodes,
+                warningSignalCount: signalState.warningSignalCount,
+                trendStatus: trend.status,
+                trendGeneration: trend.generation,
+                trendLedgerChecksum: trend.ledgerChecksum,
+                trendSummaryChecksum: trend.checksum,
+                actor: input.actor || "memory-center",
+                note: input.note || "",
+                at: new Date(nowMs).toISOString(),
+            });
+            const committed = commitGroupTypedMemoryShapeTrendIncidentLedger(file, current, scopeId, nowMs);
+            return { acknowledged: true, idempotent: false, event, ledgerChecksum: committed.checksum, summary: summarizeGroupTypedMemoryShapeTrendIncidents(scopeId) };
+        }, { timeoutMs: 5_000, retryMs: 10, staleMs: 60_000 });
+    }, { timeoutMs: 5_000, retryMs: 10, staleMs: 60_000 });
+}
+function groupTypedMemoryManifestSelectorShapeChecksum(value) {
+    const payload = { ...(value || {}) };
+    delete payload.checksum;
+    delete payload.shapeFile;
+    delete payload.valid;
+    delete payload.recorded;
+    delete payload.idempotent;
+    delete payload.trendContribution;
+    delete payload.trendContributionError;
+    return checksum(JSON.stringify(payload), 64);
+}
+function groupTypedMemoryManifestSelectorOutcomeChecksum(value) {
+    const payload = { ...(value || {}) };
+    delete payload.checksum;
+    delete payload.outcomeFile;
+    return checksum(JSON.stringify(payload), 64);
+}
+function normalizeGroupTypedMemoryOutcomeRelPaths(value, limit = exports.GROUP_TYPED_MEMORY_MANIFEST_MAX_FILES) {
+    return uniqueStrings((Array.isArray(value) ? value : [])
+        .map((item) => String(item || "").trim())
+        .filter((item) => path.basename(item) === item && item.toLowerCase().endsWith(".md")), limit);
+}
+function verifyGroupTypedMemoryManifestSelectorOutcome(outcome, expectedScopeId = "", selection = null) {
+    const selected = normalizeGroupTypedMemoryOutcomeRelPaths(outcome?.selectedRelPaths, exports.GROUP_TYPED_MEMORY_MANIFEST_MAX_SELECTION);
+    const recalled = normalizeGroupTypedMemoryOutcomeRelPaths(outcome?.recalledSelectedRelPaths, exports.GROUP_TYPED_MEMORY_MANIFEST_MAX_SELECTION);
+    const attached = normalizeGroupTypedMemoryOutcomeRelPaths(outcome?.attachedSelectedRelPaths, exports.GROUP_TYPED_MEMORY_MANIFEST_MAX_SELECTION);
+    const selectedSet = new Set(selected);
+    const recalledSet = new Set(recalled);
+    const stage = String(outcome?.stage || "");
+    const checksumValid = !!outcome && String(outcome.checksum || "") === groupTypedMemoryManifestSelectorOutcomeChecksum(outcome);
+    const selectionValid = !selection || (verifyGroupTypedMemoryManifestSelection(selection, expectedScopeId || String(outcome?.scopeId || "")).valid === true
+        && String(outcome?.requestId || "") === String(selection.requestId || "")
+        && String(outcome?.selectionChecksum || "") === String(selection.checksum || "")
+        && String(outcome?.queryChecksum || "") === String(selection.queryChecksum || "")
+        && selected.join("\n") === normalizeGroupTypedMemoryOutcomeRelPaths(selection.selectedRelPaths, exports.GROUP_TYPED_MEMORY_MANIFEST_MAX_SELECTION).join("\n"));
+    const valid = !!outcome
+        && outcome.schema === "ccm-group-typed-memory-manifest-selector-outcome-v1"
+        && Number(outcome.version || 0) === exports.GROUP_TYPED_MEMORY_MANIFEST_SELECTOR_OUTCOME_VERSION
+        && ["attached", "committed"].includes(stage)
+        && isExactGroupTypedMemorySessionScope(String(outcome.scopeId || ""))
+        && (!expectedScopeId || String(outcome.scopeId || "") === expectedScopeId)
+        && !!String(outcome.requestId || "")
+        && !!String(outcome.selectionChecksum || "")
+        && recalled.every((item) => selectedSet.has(item))
+        && attached.every((item) => recalledSet.has(item))
+        && (stage !== "committed" || !!String(outcome.attachedOutcomeChecksum || ""))
+        && checksumValid
+        && selectionValid;
+    return {
+        valid,
+        checksumValid,
+        scopeValid: !expectedScopeId || String(outcome?.scopeId || "") === expectedScopeId,
+        selectionValid,
+        stage,
+        selectedCount: selected.length,
+        recalledCount: recalled.length,
+        attachedCount: attached.length,
+    };
+}
+function recordGroupTypedMemoryManifestSelectorOutcome(scopeId, selection, input = {}) {
+    const selectionVerification = verifyGroupTypedMemoryManifestSelection(selection, scopeId);
+    if (!selectionVerification.valid)
+        throw new Error("typed_memory_manifest_selector_outcome_selection_invalid");
+    const stage = String(input.stage || "attached");
+    if (!["attached", "committed"].includes(stage))
+        throw new Error("typed_memory_manifest_selector_outcome_stage_invalid");
+    const selectedRelPaths = normalizeGroupTypedMemoryOutcomeRelPaths(selection.selectedRelPaths, exports.GROUP_TYPED_MEMORY_MANIFEST_MAX_SELECTION);
+    const selectedSet = new Set(selectedRelPaths);
+    let recalledSelectedRelPaths = normalizeGroupTypedMemoryOutcomeRelPaths(input.recalledRelPaths || input.recalled_rel_paths, exports.GROUP_TYPED_MEMORY_MANIFEST_MAX_FILES)
+        .filter((item) => selectedSet.has(item));
+    let recalledSet = new Set(recalledSelectedRelPaths);
+    let attachedSelectedRelPaths = normalizeGroupTypedMemoryOutcomeRelPaths(input.attachedRelPaths || input.attached_rel_paths, exports.GROUP_TYPED_MEMORY_MANIFEST_MAX_FILES)
+        .filter((item) => recalledSet.has(item));
+    const requestId = String(selection.requestId || "");
+    const dir = path.resolve(getGroupTypedMemoryManifestSelectorOutcomeDir(scopeId));
+    fs.mkdirSync(dir, { recursive: true });
+    const attachedFile = path.resolve(dir, `${safeSegment(requestId, "selection")}.attached.json`);
+    const outcomeFile = path.resolve(dir, `${safeSegment(requestId, "selection")}.${stage}.json`);
+    if (path.dirname(outcomeFile).toLowerCase() !== dir.toLowerCase())
+        throw new Error("typed_memory_manifest_selector_outcome_path_invalid");
+    let attachedOutcome = input.attachedOutcome || input.attached_outcome || null;
+    if (stage === "committed" && !attachedOutcome) {
+        try {
+            attachedOutcome = JSON.parse(fs.readFileSync(attachedFile, "utf-8"));
+        }
+        catch { }
+    }
+    if (stage === "committed") {
+        const attachedVerification = verifyGroupTypedMemoryManifestSelectorOutcome(attachedOutcome, scopeId, selection);
+        if (!attachedVerification.valid || attachedVerification.stage !== "attached") {
+            throw new Error("typed_memory_manifest_selector_attached_outcome_invalid");
+        }
+        if (String(attachedOutcome.capsuleChecksum || "") !== String(input.capsuleChecksum || input.capsule_checksum || "")) {
+            throw new Error("typed_memory_manifest_selector_outcome_capsule_mismatch");
+        }
+        recalledSelectedRelPaths = normalizeGroupTypedMemoryOutcomeRelPaths(attachedOutcome.recalledSelectedRelPaths, exports.GROUP_TYPED_MEMORY_MANIFEST_MAX_SELECTION);
+        recalledSet = new Set(recalledSelectedRelPaths);
+        attachedSelectedRelPaths = normalizeGroupTypedMemoryOutcomeRelPaths(attachedOutcome.attachedSelectedRelPaths, exports.GROUP_TYPED_MEMORY_MANIFEST_MAX_SELECTION);
+    }
+    const core = {
+        schema: "ccm-group-typed-memory-manifest-selector-outcome-v1",
+        version: exports.GROUP_TYPED_MEMORY_MANIFEST_SELECTOR_OUTCOME_VERSION,
+        scopeId,
+        requestId,
+        stage,
+        selectionStatus: String(selection.status || ""),
+        selectionChecksum: String(selection.checksum || ""),
+        queryChecksum: String(selection.queryChecksum || ""),
+        manifestChecksum: String(selection.manifestChecksum || ""),
+        selectedRelPaths,
+        recalledSelectedRelPaths,
+        attachedSelectedRelPaths,
+        selectedNotRecalledRelPaths: selectedRelPaths.filter((item) => !recalledSet.has(item)),
+        recalledNotAttachedRelPaths: recalledSelectedRelPaths.filter((item) => !attachedSelectedRelPaths.includes(item)),
+        capsuleChecksum: String(input.capsuleChecksum || input.capsule_checksum || ""),
+        attachedOutcomeChecksum: stage === "committed" ? String(attachedOutcome?.checksum || "") : "",
+        deliveryLeaseId: String(input.deliveryLeaseId || input.delivery_lease_id || ""),
+        dispatchTicketChecksum: String(input.dispatchTicketChecksum || input.dispatch_ticket_checksum || ""),
+        deliveryReceiptChecksum: String(input.deliveryReceiptChecksum || input.delivery_receipt_checksum || ""),
+        memoryContextSnapshotId: String(input.memoryContextSnapshotId || input.memory_context_snapshot_id || ""),
+        memoryContextSnapshotChecksum: String(input.memoryContextSnapshotChecksum || input.memory_context_snapshot_checksum || ""),
+        workerContextPacketId: String(input.workerContextPacketId || input.worker_context_packet_id || ""),
+        taskId: String(input.taskId || input.task_id || ""),
+        taskAgentSessionId: String(input.taskAgentSessionId || input.task_agent_session_id || ""),
+        targetProject: String(input.targetProject || input.target_project || ""),
+        recorded: input.recordOutcome !== false && input.record_outcome !== false,
+        createdAt: String(input.createdAt || input.created_at || now()),
+    };
+    const outcome = { ...core, checksum: groupTypedMemoryManifestSelectorOutcomeChecksum(core) };
+    const verification = verifyGroupTypedMemoryManifestSelectorOutcome(outcome, scopeId, selection);
+    if (!verification.valid)
+        throw new Error("typed_memory_manifest_selector_outcome_invalid");
+    if (outcome.recorded !== true)
+        return outcome;
+    if (fs.existsSync(outcomeFile)) {
+        try {
+            const existing = JSON.parse(fs.readFileSync(outcomeFile, "utf-8"));
+            if (verifyGroupTypedMemoryManifestSelectorOutcome(existing, scopeId, selection).valid
+                && String(existing.stage || "") === stage
+                && String(existing.selectionChecksum || "") === String(outcome.selectionChecksum || "")
+                && String(existing.capsuleChecksum || "") === String(outcome.capsuleChecksum || "")
+                && String(existing.attachedOutcomeChecksum || "") === String(outcome.attachedOutcomeChecksum || "")
+                && String(existing.taskId || "") === String(outcome.taskId || "")
+                && String(existing.taskAgentSessionId || "") === String(outcome.taskAgentSessionId || "")
+                && String(existing.memoryContextSnapshotId || "") === String(outcome.memoryContextSnapshotId || "")
+                && String(existing.memoryContextSnapshotChecksum || "") === String(outcome.memoryContextSnapshotChecksum || "")
+                && JSON.stringify(existing.selectedRelPaths || []) === JSON.stringify(outcome.selectedRelPaths || [])
+                && JSON.stringify(existing.recalledSelectedRelPaths || []) === JSON.stringify(outcome.recalledSelectedRelPaths || [])
+                && JSON.stringify(existing.attachedSelectedRelPaths || []) === JSON.stringify(outcome.attachedSelectedRelPaths || [])) {
+                return { ...existing, outcomeFile };
+            }
+        }
+        catch { }
+        throw new Error("typed_memory_manifest_selector_outcome_conflict");
+    }
+    writeTextAtomicRaw(outcomeFile, JSON.stringify(outcome, null, 2));
+    return { ...outcome, outcomeFile };
+}
+function groupTypedMemoryManifestSelectorConsumptionChecksum(value) {
+    const payload = { ...(value || {}) };
+    delete payload.checksum;
+    delete payload.consumptionFile;
+    delete payload.valid;
+    delete payload.idempotent;
+    delete payload.trendContribution;
+    delete payload.trendContributionError;
+    return checksum(JSON.stringify(payload), 64);
+}
+function readGroupTypedMemoryManifestSelectorChain(scopeId, requestId) {
+    const decisionFile = path.join(getGroupTypedMemoryManifestSelectorDecisionDir(scopeId), `${safeSegment(requestId)}.json`);
+    const outcomeDir = getGroupTypedMemoryManifestSelectorOutcomeDir(scopeId);
+    const attachedFile = path.join(outcomeDir, `${safeSegment(requestId)}.attached.json`);
+    const committedFile = path.join(outcomeDir, `${safeSegment(requestId)}.committed.json`);
+    let selection = null;
+    let attached = null;
+    let committed = null;
+    try {
+        selection = JSON.parse(fs.readFileSync(decisionFile, "utf-8"));
+    }
+    catch { }
+    try {
+        attached = JSON.parse(fs.readFileSync(attachedFile, "utf-8"));
+    }
+    catch { }
+    try {
+        committed = JSON.parse(fs.readFileSync(committedFile, "utf-8"));
+    }
+    catch { }
+    const selectionValid = verifyGroupTypedMemoryManifestSelection(selection, scopeId).valid === true;
+    const attachedValid = selectionValid && verifyGroupTypedMemoryManifestSelectorOutcome(attached, scopeId, selection).valid === true && attached.stage === "attached";
+    const committedValid = attachedValid
+        && verifyGroupTypedMemoryManifestSelectorOutcome(committed, scopeId, selection).valid === true
+        && committed.stage === "committed"
+        && String(committed.attachedOutcomeChecksum || "") === String(attached.checksum || "")
+        && String(committed.capsuleChecksum || "") === String(attached.capsuleChecksum || "");
+    return {
+        valid: committedValid,
+        selection,
+        attached,
+        committed,
+        files: { decisionFile, attachedFile, committedFile },
+    };
+}
+function verifyGroupTypedMemoryManifestSelectorConsumptionOutcome(consumption, expectedScopeId = "", committedOutcome = null) {
+    const documents = Array.isArray(consumption?.documents) ? consumption.documents : [];
+    const relPaths = documents.map((row) => String(row?.relPath || ""));
+    const attachedRelPaths = normalizeGroupTypedMemoryOutcomeRelPaths(committedOutcome?.attachedSelectedRelPaths, exports.GROUP_TYPED_MEMORY_MANIFEST_MAX_SELECTION);
+    const attached = new Set(attachedRelPaths);
+    const documentsCoverAttached = !committedOutcome
+        || relPaths.map((item) => item.toLowerCase()).sort().join("\n") === attachedRelPaths.map((item) => item.toLowerCase()).sort().join("\n");
+    const checksumValid = !!consumption && String(consumption.checksum || "") === groupTypedMemoryManifestSelectorConsumptionChecksum(consumption);
+    const statesValid = documents.every((row) => typeof row?.relPath === "string"
+        && path.basename(row.relPath) === row.relPath
+        && row.relPath.toLowerCase().endsWith(".md")
+        && ["verified", "used", "ignored", "unreported"].includes(String(row.usageState || "")));
+    const committedValid = !committedOutcome || (verifyGroupTypedMemoryManifestSelectorOutcome(committedOutcome, expectedScopeId || String(consumption?.scopeId || "")).valid === true
+        && committedOutcome.stage === "committed"
+        && String(consumption?.requestId || "") === String(committedOutcome.requestId || "")
+        && String(consumption?.committedOutcomeChecksum || "") === String(committedOutcome.checksum || "")
+        && String(consumption?.selectionChecksum || "") === String(committedOutcome.selectionChecksum || "")
+        && String(consumption?.capsuleChecksum || "") === String(committedOutcome.capsuleChecksum || "")
+        && relPaths.every((relPath) => attached.has(relPath))
+        && documentsCoverAttached);
+    const valid = !!consumption
+        && consumption.schema === "ccm-group-typed-memory-manifest-selector-consumption-outcome-v1"
+        && Number(consumption.version || 0) === exports.GROUP_TYPED_MEMORY_MANIFEST_SELECTOR_CONSUMPTION_VERSION
+        && isExactGroupTypedMemorySessionScope(String(consumption.scopeId || ""))
+        && (!expectedScopeId || String(consumption.scopeId || "") === expectedScopeId)
+        && !!String(consumption.requestId || "")
+        && !!String(consumption.committedOutcomeChecksum || "")
+        && documents.length <= exports.GROUP_TYPED_MEMORY_MANIFEST_MAX_SELECTION
+        && new Set(relPaths).size === relPaths.length
+        && statesValid
+        && checksumValid
+        && committedValid;
+    return {
+        valid,
+        checksumValid,
+        scopeValid: !expectedScopeId || String(consumption?.scopeId || "") === expectedScopeId,
+        committedValid,
+        statesValid,
+        documentsCoverAttached,
+        receiptBindingValid: consumption?.receiptBindingValid === true,
+        documentCount: documents.length,
+    };
+}
+function recordGroupTypedMemoryManifestSelectorConsumptionOutcomes(scopeId, input = {}) {
+    if (!isExactGroupTypedMemorySessionScope(scopeId))
+        return { recordedCount: 0, reason: "exact_group_gcs_scope_required", outcomes: [] };
+    const taskId = String(input.taskId || input.task_id || "");
+    const targetProject = String(input.targetProject || input.target_project || "").trim().toLowerCase();
+    const rows = Array.isArray(input.rows) ? input.rows : [];
+    const receipts = Array.isArray(input.receipts) ? input.receipts : [];
+    const committedDir = getGroupTypedMemoryManifestSelectorOutcomeDir(scopeId);
+    let committedFiles = [];
+    try {
+        committedFiles = fs.readdirSync(committedDir).filter(name => name.endsWith(".committed.json")).map(name => path.join(committedDir, name));
+    }
+    catch { }
+    const outcomes = [];
+    let skippedCount = 0;
+    for (const committedFile of committedFiles) {
+        let requestId = "";
+        try {
+            requestId = String(JSON.parse(fs.readFileSync(committedFile, "utf-8"))?.requestId || "");
+        }
+        catch { }
+        if (!requestId) {
+            skippedCount += 1;
+            continue;
+        }
+        const chain = readGroupTypedMemoryManifestSelectorChain(scopeId, requestId);
+        if (!chain.valid) {
+            skippedCount += 1;
+            continue;
+        }
+        const committed = chain.committed;
+        if (taskId && String(committed.taskId || "") !== taskId)
+            continue;
+        if (targetProject && String(committed.targetProject || "").trim().toLowerCase() !== targetProject)
+            continue;
+        const taskAgentSessionId = String(committed.taskAgentSessionId || "");
+        const attachedRelPaths = normalizeGroupTypedMemoryOutcomeRelPaths(committed.attachedSelectedRelPaths, exports.GROUP_TYPED_MEMORY_MANIFEST_MAX_SELECTION);
+        if (!attachedRelPaths.length)
+            continue;
+        const matchingRows = rows.filter((row) => {
+            if (String(row.task_agent_session_id || row.taskAgentSessionId || "") !== taskAgentSessionId)
+                return false;
+            const rowProject = String(row.target_project || row.targetProject || "").trim().toLowerCase();
+            if (targetProject && rowProject && rowProject !== targetProject)
+                return false;
+            const expectedReceiptChecksum = String(committed.deliveryReceiptChecksum || "");
+            const rowReceiptChecksum = String(row.delivery_receipt_checksum || row.deliveryReceiptChecksum || "");
+            return !expectedReceiptChecksum || !rowReceiptChecksum || expectedReceiptChecksum === rowReceiptChecksum;
+        });
+        if (!matchingRows.length)
+            continue;
+        const rowReceiptEvidenceChecksums = new Set(matchingRows
+            .map((row) => String(row.receipt_evidence_checksum || row.receiptEvidenceChecksum || ""))
+            .filter(Boolean));
+        const matchingReceipts = receipts.filter((receipt) => {
+            if (String(receipt.task_agent_session_id || receipt.taskAgentSessionId || "") === taskAgentSessionId)
+                return true;
+            const evidenceChecksum = checksum(JSON.stringify({
+                typedMemoryUsage: receipt.typedMemoryUsage || receipt.typed_memory_usage || [],
+                memoryUsed: receipt.memoryUsed || receipt.memory_used || [],
+                memoryIgnored: receipt.memoryIgnored || receipt.memory_ignored || [],
+                memoryContextUsage: receipt.memoryContextUsage || receipt.memory_context_usage || receipt.agentMemoryContextUsage || receipt.agent_memory_context_usage || null,
+            }), 64);
+            return rowReceiptEvidenceChecksums.has(evidenceChecksum);
+        });
+        const documentRows = attachedRelPaths.map((relPath) => {
+            const candidates = matchingRows.filter((row) => String(row.rel_path || row.relPath || "").toLowerCase() === relPath.toLowerCase());
+            const states = uniqueStrings(candidates.map((row) => normalizeTypedMemoryConsumptionUsageState(row.usage_state || row.usageState))).filter(Boolean);
+            const source = candidates[0] || {};
+            const declaredUsageState = states.length === 1 && ["verified", "used", "ignored"].includes(states[0]) ? states[0] : "unreported";
+            const verifiedProofValid = source.current_source_verified === true || source.currentSourceVerified === true
+                ? (source.current_source_proof_valid === true || source.currentSourceProofValid === true)
+                    && String(source.evidence_tier || source.evidenceTier || "") === "system_current_source_file_proof"
+                : false;
+            const usageState = declaredUsageState === "verified" && !verifiedProofValid ? "used" : declaredUsageState;
+            return {
+                relPath,
+                usageState,
+                claimedUsageState: String(source.claimed_usage_state || source.claimedUsageState || declaredUsageState),
+                currentSourceVerified: usageState === "verified" && verifiedProofValid,
+                directReference: source.direct_reference === true || source.directReference === true,
+                evidenceTier: String(source.evidence_tier || source.evidenceTier || (usageState === "unreported" ? "snapshot_surfaced_only" : "")),
+                evidenceConfidence: Number(source.evidence_confidence ?? source.evidenceConfidence ?? (usageState === "unreported" ? 0.25 : 0)),
+                receiptEvidenceChecksum: String(source.receipt_evidence_checksum || source.receiptEvidenceChecksum || ""),
+                reason: compactText(source.reason || (usageState === "unreported" ? "valid bound receipt omitted per-relPath usage declaration" : ""), 500),
+                anomalyCodes: uniqueStrings([
+                    ...(Array.isArray(source.anomaly_codes || source.anomalyCodes) ? (source.anomaly_codes || source.anomalyCodes) : []),
+                    ...(states.length > 1 ? ["conflicting_usage_states"] : []),
+                    ...(declaredUsageState === "verified" && !verifiedProofValid ? ["verified_without_system_current_source_proof"] : []),
+                ]).slice(0, 12),
+            };
+        });
+        const structuredClaimedRelPaths = uniqueStrings(matchingReceipts.flatMap((receipt) => {
+            const usage = receipt.typedMemoryUsage || receipt.typed_memory_usage || [];
+            return Array.isArray(usage) ? usage.map((row) => String(row?.relPath || row?.rel_path || row?.path || "").trim()) : [];
+        }).filter(Boolean), 120);
+        const attachedSet = new Set(attachedRelPaths.map(item => item.toLowerCase()));
+        const unexpectedClaimedRelPaths = structuredClaimedRelPaths.filter(item => !attachedSet.has(item.toLowerCase()));
+        const firstRow = matchingRows[0] || {};
+        const snapshotId = String(firstRow.memory_context_snapshot_id || firstRow.memoryContextSnapshotId || "");
+        const snapshotChecksum = String(firstRow.memory_context_snapshot_checksum || firstRow.memoryContextSnapshotChecksum || "");
+        const deliveryReceiptChecksum = String(firstRow.delivery_receipt_checksum || firstRow.deliveryReceiptChecksum || "");
+        const receiptEvidenceChecksum = checksum(matchingRows.map((row) => String(row.receipt_evidence_checksum || row.receiptEvidenceChecksum || "")), 64);
+        const receiptBindingValid = !!snapshotId && !!snapshotChecksum && !!deliveryReceiptChecksum
+            && !!String(committed.memoryContextSnapshotId || "")
+            && !!String(committed.memoryContextSnapshotChecksum || "")
+            && !!String(committed.deliveryReceiptChecksum || "")
+            && String(committed.memoryContextSnapshotId) === snapshotId
+            && String(committed.memoryContextSnapshotChecksum) === snapshotChecksum
+            && String(committed.deliveryReceiptChecksum) === deliveryReceiptChecksum;
+        const core = {
+            schema: "ccm-group-typed-memory-manifest-selector-consumption-outcome-v1",
+            version: exports.GROUP_TYPED_MEMORY_MANIFEST_SELECTOR_CONSUMPTION_VERSION,
+            scopeId,
+            requestId,
+            committedOutcomeChecksum: String(committed.checksum || ""),
+            selectionChecksum: String(committed.selectionChecksum || ""),
+            capsuleChecksum: String(committed.capsuleChecksum || ""),
+            taskId: String(committed.taskId || ""),
+            taskAgentSessionId,
+            targetProject: String(committed.targetProject || ""),
+            memoryContextSnapshotId: snapshotId,
+            memoryContextSnapshotChecksum: snapshotChecksum,
+            deliveryReceiptChecksum,
+            receiptEvidenceChecksum,
+            receiptBindingValid,
+            documents: documentRows,
+            unexpectedClaimedRelPaths,
+            recordedAt: String(input.generatedAt || input.generated_at || now()),
+        };
+        const consumption = { ...core, checksum: groupTypedMemoryManifestSelectorConsumptionChecksum(core) };
+        if (!verifyGroupTypedMemoryManifestSelectorConsumptionOutcome(consumption, scopeId, committed).valid) {
+            skippedCount += 1;
+            continue;
+        }
+        const dir = path.resolve(getGroupTypedMemoryManifestSelectorConsumptionDir(scopeId));
+        fs.mkdirSync(dir, { recursive: true });
+        const eventId = checksum([requestId, snapshotId, deliveryReceiptChecksum, receiptEvidenceChecksum], 20);
+        const file = path.resolve(dir, `${safeSegment(requestId)}.${eventId}.json`);
+        if (path.dirname(file).toLowerCase() !== dir.toLowerCase()) {
+            skippedCount += 1;
+            continue;
+        }
+        const contributeTrend = (value) => {
+            try {
+                return {
+                    value: recordGroupTypedMemoryShapeTrendContribution(scopeId, {
+                        kind: "consumption",
+                        eventKey: value.checksum,
+                        recordedAt: value.recordedAt,
+                        metrics: {
+                            documents: value.documents || [],
+                            receiptBindingValid: value.receiptBindingValid === true,
+                            unexpectedClaimCount: Number(value.unexpectedClaimedRelPaths?.length || 0),
+                        },
+                    }),
+                    error: "",
+                };
+            }
+            catch (error) {
+                return { value: null, error: compactText(error?.message || error, 240) };
+            }
+        };
+        if (fs.existsSync(file)) {
+            try {
+                const existing = JSON.parse(fs.readFileSync(file, "utf-8"));
+                if (verifyGroupTypedMemoryManifestSelectorConsumptionOutcome(existing, scopeId, committed).valid) {
+                    const trend = contributeTrend(existing);
+                    outcomes.push({ ...existing, consumptionFile: file, idempotent: true, trendContribution: trend.value, trendContributionError: trend.error });
+                    continue;
+                }
+            }
+            catch { }
+            skippedCount += 1;
+            continue;
+        }
+        writeTextAtomicRaw(file, JSON.stringify(consumption, null, 2));
+        const trend = contributeTrend(consumption);
+        outcomes.push({ ...consumption, consumptionFile: file, idempotent: false, trendContribution: trend.value, trendContributionError: trend.error });
+    }
+    return {
+        schema: "ccm-group-typed-memory-manifest-selector-consumption-record-v1",
+        version: 1,
+        scopeId,
+        recordedCount: outcomes.filter(row => row.idempotent !== true).length,
+        idempotentCount: outcomes.filter(row => row.idempotent === true).length,
+        skippedCount,
+        outcomes,
+    };
+}
+function summarizeGroupTypedMemoryManifestSelectorConsumption(scopeId, options = {}) {
+    const dir = getGroupTypedMemoryManifestSelectorConsumptionDir(scopeId);
+    const rows = [];
+    let unreadableCount = 0;
+    try {
+        for (const name of fs.readdirSync(dir).filter(name => name.endsWith(".json"))) {
+            const file = path.join(dir, name);
+            try {
+                const consumption = JSON.parse(fs.readFileSync(file, "utf-8"));
+                const chain = readGroupTypedMemoryManifestSelectorChain(scopeId, String(consumption.requestId || ""));
+                const verification = verifyGroupTypedMemoryManifestSelectorConsumptionOutcome(consumption, scopeId, chain.committed);
+                rows.push({ ...consumption, consumptionFile: file, valid: chain.valid === true && verification.valid === true });
+            }
+            catch {
+                unreadableCount += 1;
+            }
+        }
+    }
+    catch { }
+    rows.sort((a, b) => String(b.recordedAt || "").localeCompare(String(a.recordedAt || "")) || String(b.checksum || "").localeCompare(String(a.checksum || "")));
+    const validRows = rows.filter(row => row.valid === true);
+    const latestByRequestId = new Map();
+    for (const row of validRows)
+        if (!latestByRequestId.has(String(row.requestId || "")))
+            latestByRequestId.set(String(row.requestId || ""), row);
+    const latestRows = [...latestByRequestId.values()];
+    const documents = latestRows.flatMap(row => row.documents || []);
+    const consumedRequestIds = new Set(latestRows.map(row => String(row.requestId || "")));
+    const committedRows = [];
+    try {
+        for (const name of fs.readdirSync(getGroupTypedMemoryManifestSelectorOutcomeDir(scopeId)).filter(name => name.endsWith(".committed.json"))) {
+            try {
+                const committed = JSON.parse(fs.readFileSync(path.join(getGroupTypedMemoryManifestSelectorOutcomeDir(scopeId), name), "utf-8"));
+                const chain = readGroupTypedMemoryManifestSelectorChain(scopeId, String(committed.requestId || ""));
+                if (chain.valid && (chain.committed.attachedSelectedRelPaths || []).length > 0)
+                    committedRows.push(chain.committed);
+            }
+            catch { }
+        }
+    }
+    catch { }
+    const nowMs = Number(options.nowMs || options.now_ms || Date.now());
+    const staleAfterMs = Math.max(1_000, Number(options.staleAfterMs || options.stale_after_ms || 5 * 60_000));
+    const staleCommittedWithoutConsumptionCount = committedRows.filter(row => {
+        if (consumedRequestIds.has(String(row.requestId || "")))
+            return false;
+        const createdMs = Date.parse(String(row.createdAt || ""));
+        return Number.isFinite(createdMs) && nowMs - createdMs >= staleAfterMs;
+    }).length;
+    const invalidOutcomeCount = rows.filter(row => row.valid !== true).length + unreadableCount;
+    const weakReceiptBindingCount = latestRows.filter(row => row.receiptBindingValid !== true).length;
+    const unexpectedClaimCount = latestRows.reduce((sum, row) => sum + Number(row.unexpectedClaimedRelPaths?.length || 0), 0);
+    const unreportedDocumentCount = documents.filter(row => row.usageState === "unreported").length;
+    return {
+        schema: "ccm-group-typed-memory-manifest-selector-consumption-summary-v1",
+        version: 1,
+        scopeId,
+        dir,
+        present: rows.length > 0 || unreadableCount > 0,
+        valid: invalidOutcomeCount === 0,
+        closureValid: invalidOutcomeCount === 0 && weakReceiptBindingCount === 0 && unexpectedClaimCount === 0 && unreportedDocumentCount === 0 && staleCommittedWithoutConsumptionCount === 0,
+        outcomeCount: rows.length + unreadableCount,
+        validOutcomeCount: validRows.length,
+        invalidOutcomeCount,
+        consumedDeliveryCount: latestRows.length,
+        deliveredDocumentCount: documents.length,
+        usedDocumentCount: documents.filter(row => row.usageState === "used").length,
+        verifiedDocumentCount: documents.filter(row => row.usageState === "verified").length,
+        ignoredDocumentCount: documents.filter(row => row.usageState === "ignored").length,
+        unreportedDocumentCount,
+        weakReceiptBindingCount,
+        unexpectedClaimCount,
+        staleCommittedWithoutConsumptionCount,
+        committedWithoutConsumptionCount: committedRows.filter(row => !consumedRequestIds.has(String(row.requestId || ""))).length,
+        closureGapCount: invalidOutcomeCount + weakReceiptBindingCount + unexpectedClaimCount + unreportedDocumentCount + staleCommittedWithoutConsumptionCount,
+        latest: latestRows[0] ? {
+            requestId: String(latestRows[0].requestId || ""),
+            valid: latestRows[0].valid === true,
+            receiptBindingValid: latestRows[0].receiptBindingValid === true,
+            usedCount: (latestRows[0].documents || []).filter((row) => row.usageState === "used").length,
+            verifiedCount: (latestRows[0].documents || []).filter((row) => row.usageState === "verified").length,
+            ignoredCount: (latestRows[0].documents || []).filter((row) => row.usageState === "ignored").length,
+            unreportedCount: (latestRows[0].documents || []).filter((row) => row.usageState === "unreported").length,
+            recordedAt: String(latestRows[0].recordedAt || ""),
+        } : null,
+        rows: options.includeRows === true ? rows : undefined,
+    };
+}
+function verifyGroupTypedMemoryManifestSelectorCalibration(calibration, expectedScopeId = "", expectedQueryChecksum = "") {
+    const hints = Array.isArray(calibration?.hints) ? calibration.hints : [];
+    const checksumValid = !!calibration
+        && String(calibration.checksum || "") === groupTypedMemoryManifestSelectorCalibrationChecksum(calibration);
+    const hintsValid = hints.length <= 12 && hints.every((hint) => typeof hint?.relPath === "string"
+        && path.basename(hint.relPath) === hint.relPath
+        && hint.relPath.toLowerCase().endsWith(".md")
+        && ["support", "caution", "mixed"].includes(String(hint.calibration || ""))
+        && Number(hint.evidenceCount || 0) > 0
+        && Number(hint.strongReceiptCount || 0) === Number(hint.evidenceCount || 0));
+    const valid = !!calibration
+        && calibration.schema === "ccm-group-typed-memory-manifest-selector-calibration-v1"
+        && Number(calibration.version || 0) === 1
+        && calibration.advisoryOnly === true
+        && calibration.autoSuppression === false
+        && calibration.crossSessionReuse === false
+        && calibration.validScope === true
+        && isExactGroupTypedMemorySessionScope(String(calibration.scopeId || ""))
+        && (!expectedScopeId || String(calibration.scopeId || "") === expectedScopeId)
+        && !!String(calibration.queryChecksum || "")
+        && (!expectedQueryChecksum || String(calibration.queryChecksum || "") === expectedQueryChecksum)
+        && new Set(hints.map((hint) => String(hint.relPath || "").toLowerCase())).size === hints.length
+        && hintsValid
+        && checksumValid;
+    return {
+        valid,
+        checksumValid,
+        scopeValid: !expectedScopeId || String(calibration?.scopeId || "") === expectedScopeId,
+        queryValid: !expectedQueryChecksum || String(calibration?.queryChecksum || "") === expectedQueryChecksum,
+        hintsValid,
+        hintCount: hints.length,
+    };
+}
+function buildGroupTypedMemoryManifestSelectorCalibration(scopeId, query, options = {}) {
+    const requestedNowMs = Number(options.nowMs || options.now_ms || Date.now());
+    const nowMs = Number.isFinite(requestedNowMs) ? requestedNowMs : Date.now();
+    const generatedAt = String(options.generatedAt || options.generated_at || new Date(nowMs).toISOString());
+    const queryChecksum = checksum(String(query || ""), 64);
+    const lookbackDays = Math.max(1, Math.min(180, Number(options.lookbackDays || options.lookback_days || 30)));
+    const halfLifeDays = Math.max(1, Math.min(90, Number(options.halfLifeDays || options.half_life_days || 14)));
+    const maxHints = Math.max(1, Math.min(12, Number(options.maxHints || options.max_hints || 12)));
+    const candidateRelPaths = new Set((options.candidateRelPaths || options.candidate_rel_paths || [])
+        .map((item) => String(item || "").trim().toLowerCase())
+        .filter(Boolean));
+    const base = {
+        schema: "ccm-group-typed-memory-manifest-selector-calibration-v1",
+        version: 1,
+        scopeId,
+        queryChecksum,
+        advisoryOnly: true,
+        autoSuppression: false,
+        crossSessionReuse: false,
+        evidencePolicy: "exact_session_exact_query_strong_receipt_latest_per_request",
+        lookbackDays,
+        halfLifeDays,
+        candidateBound: candidateRelPaths.size > 0,
+        candidateCount: candidateRelPaths.size,
+        generatedAt,
+    };
+    if (!isExactGroupTypedMemorySessionScope(scopeId)) {
+        const core = { ...base, validScope: false, evidenceCount: 0, excludedCount: 0, hintCount: 0, hints: [] };
+        return { ...core, checksum: groupTypedMemoryManifestSelectorCalibrationChecksum(core) };
+    }
+    const rows = [];
+    let excludedCount = 0;
+    const exclusionCounts = {};
+    const exclude = (reason) => {
+        excludedCount += 1;
+        exclusionCounts[reason] = Number(exclusionCounts[reason] || 0) + 1;
+    };
+    try {
+        for (const name of fs.readdirSync(getGroupTypedMemoryManifestSelectorConsumptionDir(scopeId)).filter(name => name.endsWith(".json"))) {
+            try {
+                const consumption = JSON.parse(fs.readFileSync(path.join(getGroupTypedMemoryManifestSelectorConsumptionDir(scopeId), name), "utf-8"));
+                const chain = readGroupTypedMemoryManifestSelectorChain(scopeId, String(consumption.requestId || ""));
+                const verified = chain.valid === true
+                    && verifyGroupTypedMemoryManifestSelectorConsumptionOutcome(consumption, scopeId, chain.committed).valid === true;
+                if (!verified) {
+                    exclude("invalid_chain_or_outcome");
+                    continue;
+                }
+                if (consumption.receiptBindingValid !== true) {
+                    exclude("weak_receipt_binding");
+                    continue;
+                }
+                if (Number(consumption.unexpectedClaimedRelPaths?.length || 0) > 0) {
+                    exclude("unexpected_claim");
+                    continue;
+                }
+                if (String(chain.selection?.queryChecksum || "") !== queryChecksum) {
+                    exclude("query_mismatch");
+                    continue;
+                }
+                rows.push({ ...consumption, selection: chain.selection });
+            }
+            catch {
+                exclude("unreadable");
+            }
+        }
+    }
+    catch { }
+    rows.sort((a, b) => String(b.recordedAt || "").localeCompare(String(a.recordedAt || "")) || String(b.checksum || "").localeCompare(String(a.checksum || "")));
+    const latestByRequestId = new Map();
+    for (const row of rows)
+        if (!latestByRequestId.has(String(row.requestId || "")))
+            latestByRequestId.set(String(row.requestId || ""), row);
+    const aggregates = new Map();
+    let evidenceCount = 0;
+    for (const row of latestByRequestId.values()) {
+        const recordedMs = Date.parse(String(row.recordedAt || ""));
+        if (!Number.isFinite(recordedMs)) {
+            exclude("recorded_at_invalid");
+            continue;
+        }
+        const ageDays = Math.max(0, (nowMs - recordedMs) / 86_400_000);
+        if (ageDays > lookbackDays) {
+            exclude("outside_lookback");
+            continue;
+        }
+        const decayWeight = Math.pow(0.5, ageDays / halfLifeDays);
+        for (const document of Array.isArray(row.documents) ? row.documents : []) {
+            const relPath = String(document.relPath || "");
+            const relKey = relPath.toLowerCase();
+            const usageState = String(document.usageState || "");
+            if (!relPath || !["used", "verified", "ignored"].includes(usageState))
+                continue;
+            if (candidateRelPaths.size > 0 && !candidateRelPaths.has(relKey))
+                continue;
+            const current = aggregates.get(relKey) || {
+                relPath,
+                usedCount: 0,
+                verifiedCount: 0,
+                ignoredCount: 0,
+                evidenceCount: 0,
+                strongReceiptCount: 0,
+                weightedUsed: 0,
+                weightedVerified: 0,
+                weightedIgnored: 0,
+                lastObservedAt: "",
+            };
+            current[`${usageState}Count`] = Number(current[`${usageState}Count`] || 0) + 1;
+            current[`weighted${usageState[0].toUpperCase()}${usageState.slice(1)}`] = Number(current[`weighted${usageState[0].toUpperCase()}${usageState.slice(1)}`] || 0) + decayWeight;
+            current.evidenceCount += 1;
+            current.strongReceiptCount += 1;
+            if (!current.lastObservedAt || String(row.recordedAt || "") > current.lastObservedAt)
+                current.lastObservedAt = String(row.recordedAt || "");
+            aggregates.set(relKey, current);
+            evidenceCount += 1;
+        }
+    }
+    const hints = [...aggregates.values()].map((row) => {
+        const weightedUseful = Number(row.weightedUsed || 0) + Number(row.weightedVerified || 0) * 1.5;
+        const weightedIgnored = Number(row.weightedIgnored || 0);
+        const calibration = weightedUseful >= 0.5 && weightedUseful >= weightedIgnored
+            ? "support"
+            : Number(row.ignoredCount || 0) >= 2 && weightedIgnored > weightedUseful * 1.5
+                ? "caution"
+                : "mixed";
+        return {
+            relPath: row.relPath,
+            calibration,
+            evidenceCount: Number(row.evidenceCount || 0),
+            strongReceiptCount: Number(row.strongReceiptCount || 0),
+            usedCount: Number(row.usedCount || 0),
+            verifiedCount: Number(row.verifiedCount || 0),
+            ignoredCount: Number(row.ignoredCount || 0),
+            weightedUseful: Number(weightedUseful.toFixed(6)),
+            weightedIgnored: Number(weightedIgnored.toFixed(6)),
+            lastObservedAt: String(row.lastObservedAt || ""),
+        };
+    }).sort((a, b) => Number(b.weightedUseful + b.weightedIgnored) - Number(a.weightedUseful + a.weightedIgnored)
+        || String(b.lastObservedAt || "").localeCompare(String(a.lastObservedAt || ""))
+        || String(a.relPath || "").localeCompare(String(b.relPath || "")))
+        .slice(0, maxHints);
+    const core = {
+        ...base,
+        validScope: true,
+        evidenceCount,
+        excludedCount,
+        exclusionCounts,
+        hintCount: hints.length,
+        supportHintCount: hints.filter((hint) => hint.calibration === "support").length,
+        cautionHintCount: hints.filter((hint) => hint.calibration === "caution").length,
+        mixedHintCount: hints.filter((hint) => hint.calibration === "mixed").length,
+        hints,
+    };
+    return { ...core, checksum: groupTypedMemoryManifestSelectorCalibrationChecksum(core) };
+}
+function groupTypedMemoryManifestSelectorAgeStats(candidates, nowMs) {
+    const ages = candidates.map((candidate) => {
+        const mtimeMs = Number(candidate?.mtimeMs || 0);
+        return mtimeMs > 0 ? Math.max(0, (nowMs - mtimeMs) / 86_400_000) : 0;
+    });
+    if (!ages.length)
+        return { newest: -1, oldest: -1, average: -1 };
+    return {
+        newest: Number(Math.min(...ages).toFixed(6)),
+        oldest: Number(Math.max(...ages).toFixed(6)),
+        average: Number((ages.reduce((sum, age) => sum + age, 0) / ages.length).toFixed(6)),
+    };
+}
+function verifyGroupTypedMemoryManifestSelectorShape(shape, expectedScopeId = "", decision = null) {
+    const checksumValid = !!shape && String(shape.checksum || "") === groupTypedMemoryManifestSelectorShapeChecksum(shape);
+    const decisionValid = !decision || (verifyGroupTypedMemoryManifestSelection(decision, expectedScopeId || String(shape?.scopeId || "")).valid === true
+        && String(shape?.requestId || "") === String(decision.requestId || "")
+        && String(shape?.decisionChecksum || "") === String(decision.checksum || "")
+        && String(shape?.queryChecksum || "") === String(decision.queryChecksum || "")
+        && String(shape?.manifestChecksum || "") === String(decision.manifestChecksum || "")
+        && Number(shape?.candidateCount || 0) === Number(decision.candidateCount || 0)
+        && Number(shape?.selectedCount || 0) === Number(decision.selectedRelPaths?.length || 0));
+    const candidateCount = Number(shape?.candidateCount || 0);
+    const selectedCount = Number(shape?.selectedCount || 0);
+    const expectedRate = candidateCount > 0 ? Number((selectedCount / candidateCount).toFixed(6)) : 0;
+    const selectedAge = shape?.selectedAgeDays || {};
+    const selectedAgeSentinelValid = selectedCount > 0
+        ? [selectedAge.newest, selectedAge.oldest, selectedAge.average].every((value) => Number(value) >= 0)
+        : Number(selectedAge.newest) === -1 && Number(selectedAge.oldest) === -1 && Number(selectedAge.average) === -1;
+    const valid = !!shape
+        && shape.schema === "ccm-group-typed-memory-manifest-selector-shape-v1"
+        && Number(shape.version || 0) === exports.GROUP_TYPED_MEMORY_MANIFEST_SELECTOR_SHAPE_VERSION
+        && shape.selectorRan === true
+        && isExactGroupTypedMemorySessionScope(String(shape.scopeId || ""))
+        && (!expectedScopeId || String(shape.scopeId || "") === expectedScopeId)
+        && !!String(shape.requestId || "")
+        && !!String(shape.decisionChecksum || "")
+        && candidateCount > 0
+        && selectedCount >= 0
+        && selectedCount <= Math.min(candidateCount, exports.GROUP_TYPED_MEMORY_MANIFEST_MAX_SELECTION)
+        && Number(shape.selectionRate || 0) === expectedRate
+        && selectedAgeSentinelValid
+        && shape.bodyFree === true
+        && checksumValid
+        && decisionValid;
+    return {
+        valid,
+        checksumValid,
+        decisionValid,
+        scopeValid: !expectedScopeId || String(shape?.scopeId || "") === expectedScopeId,
+        selectedAgeSentinelValid,
+        candidateCount,
+        selectedCount,
+    };
+}
+function recordGroupTypedMemoryManifestSelectorShape(scopeId, decision, candidates = [], input = {}) {
+    if (!isExactGroupTypedMemorySessionScope(scopeId))
+        return { recorded: false, reason: "exact_group_gcs_scope_required" };
+    const decisionVerification = verifyGroupTypedMemoryManifestSelection(decision, scopeId);
+    if (!decisionVerification.valid)
+        throw new Error("typed_memory_manifest_selector_shape_decision_invalid");
+    if (decision.selectorRan !== true || decision.shapeTelemetryExpected !== true)
+        return { recorded: false, reason: "selector_not_run" };
+    const candidateRows = Array.isArray(candidates) ? candidates : [];
+    if (!candidateRows.length || candidateRows.length !== Number(decision.candidateCount || 0)) {
+        throw new Error("typed_memory_manifest_selector_shape_candidates_invalid");
+    }
+    const completedMs = Date.parse(String(decision.completedAt || ""));
+    const nowMs = Number(input.nowMs || input.now_ms || (Number.isFinite(completedMs) ? completedMs : Date.now()));
+    const selectedSet = new Set((decision.selectedRelPaths || []).map((item) => String(item || "").toLowerCase()));
+    const selectedCandidates = candidateRows.filter((candidate) => selectedSet.has(String(candidate.filename || "").toLowerCase()));
+    const selectedCount = selectedCandidates.length;
+    const candidateCount = candidateRows.length;
+    const core = {
+        schema: "ccm-group-typed-memory-manifest-selector-shape-v1",
+        version: exports.GROUP_TYPED_MEMORY_MANIFEST_SELECTOR_SHAPE_VERSION,
+        scopeId,
+        requestId: String(decision.requestId || ""),
+        decisionChecksum: String(decision.checksum || ""),
+        queryChecksum: String(decision.queryChecksum || ""),
+        manifestChecksum: String(decision.manifestChecksum || ""),
+        selectorStatus: String(decision.status || ""),
+        selectorRan: true,
+        candidateCount,
+        selectedCount,
+        selectionRate: candidateCount ? Number((selectedCount / candidateCount).toFixed(6)) : 0,
+        candidateAgeDays: groupTypedMemoryManifestSelectorAgeStats(candidateRows, nowMs),
+        selectedAgeDays: groupTypedMemoryManifestSelectorAgeStats(selectedCandidates, nowMs),
+        selectedFreshCount: selectedCandidates.filter((candidate) => nowMs - Number(candidate.mtimeMs || nowMs) <= 86_400_000).length,
+        selectedStaleCount: selectedCandidates.filter((candidate) => nowMs - Number(candidate.mtimeMs || nowMs) > 86_400_000).length,
+        emptySelectionAgeSentinel: selectedCount === 0,
+        bodyFree: true,
+        recordedAt: String(input.recordedAt || input.recorded_at || decision.completedAt || now()),
+    };
+    const shape = { ...core, checksum: groupTypedMemoryManifestSelectorShapeChecksum(core) };
+    if (!verifyGroupTypedMemoryManifestSelectorShape(shape, scopeId, decision).valid) {
+        throw new Error("typed_memory_manifest_selector_shape_invalid");
+    }
+    if (input.recordShape === false || input.record_shape === false)
+        return { ...shape, recorded: false };
+    const dir = path.resolve(getGroupTypedMemoryManifestSelectorShapeDir(scopeId));
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.resolve(dir, `${safeSegment(decision.requestId, "selection")}.json`);
+    if (path.dirname(file).toLowerCase() !== dir.toLowerCase())
+        throw new Error("typed_memory_manifest_selector_shape_path_invalid");
+    const contributeTrend = (value) => {
+        try {
+            return {
+                value: recordGroupTypedMemoryShapeTrendContribution(scopeId, {
+                    kind: "selector",
+                    eventKey: value.requestId,
+                    recordedAt: value.recordedAt,
+                    metrics: {
+                        candidateCount: value.candidateCount,
+                        selectedCount: value.selectedCount,
+                        selectedAgeAverage: value.selectedAgeDays?.average,
+                        freshCount: value.selectedFreshCount,
+                        staleCount: value.selectedStaleCount,
+                    },
+                }),
+                error: "",
+            };
+        }
+        catch (error) {
+            return { value: null, error: compactText(error?.message || error, 240) };
+        }
+    };
+    if (fs.existsSync(file)) {
+        try {
+            const existing = JSON.parse(fs.readFileSync(file, "utf-8"));
+            if (verifyGroupTypedMemoryManifestSelectorShape(existing, scopeId, decision).valid) {
+                const trend = contributeTrend(existing);
+                return { ...existing, shapeFile: file, recorded: true, idempotent: true, trendContribution: trend.value, trendContributionError: trend.error };
+            }
+        }
+        catch { }
+        throw new Error("typed_memory_manifest_selector_shape_conflict");
+    }
+    writeTextAtomicRaw(file, JSON.stringify(shape, null, 2));
+    const trend = contributeTrend(shape);
+    return { ...shape, shapeFile: file, recorded: true, idempotent: false, trendContribution: trend.value, trendContributionError: trend.error };
+}
+function summarizeGroupTypedMemoryManifestSelectorShapes(scopeId, options = {}) {
+    const decisions = Array.isArray(options.decisions) ? options.decisions : [];
+    const decisionsByRequestId = new Map(decisions.map((row) => {
+        const decision = { ...row };
+        delete decision.valid;
+        delete decision.decisionFile;
+        delete decision.recallShapeTelemetry;
+        delete decision.recallShapeTelemetryFile;
+        delete decision.recallShapeTelemetryError;
+        return [String(row.requestId || ""), decision];
+    }));
+    const rows = [];
+    let unreadableCount = 0;
+    try {
+        for (const name of fs.readdirSync(getGroupTypedMemoryManifestSelectorShapeDir(scopeId)).filter(name => name.endsWith(".json"))) {
+            const file = path.join(getGroupTypedMemoryManifestSelectorShapeDir(scopeId), name);
+            try {
+                const shape = JSON.parse(fs.readFileSync(file, "utf-8"));
+                const decision = decisionsByRequestId.get(String(shape.requestId || "")) || null;
+                const verification = verifyGroupTypedMemoryManifestSelectorShape(shape, scopeId, decision);
+                rows.push({ ...shape, shapeFile: file, valid: !!decision && verification.valid === true });
+            }
+            catch {
+                unreadableCount += 1;
+            }
+        }
+    }
+    catch { }
+    rows.sort((a, b) => String(b.recordedAt || "").localeCompare(String(a.recordedAt || "")) || String(b.requestId || "").localeCompare(String(a.requestId || "")));
+    const expectedRequestIds = new Set(decisions.filter((decision) => decision.shapeTelemetryExpected === true).map((decision) => String(decision.requestId || "")));
+    const observedRequestIds = new Set(rows.filter(row => row.valid === true).map(row => String(row.requestId || "")));
+    const missingExpectedShapeCount = [...expectedRequestIds].filter(requestId => !observedRequestIds.has(requestId)).length;
+    const invalidShapeCount = rows.filter(row => row.valid !== true).length + unreadableCount;
+    const validRows = rows.filter(row => row.valid === true);
+    const consumption = summarizeGroupTypedMemoryManifestSelectorConsumption(scopeId, { includeRows: true });
+    const latestConsumptionByRequestId = new Map();
+    for (const row of Array.isArray(consumption.rows) ? consumption.rows.filter((item) => item.valid === true) : []) {
+        const requestId = String(row.requestId || "");
+        const previous = latestConsumptionByRequestId.get(requestId);
+        if (!previous || String(row.recordedAt || "") > String(previous.recordedAt || ""))
+            latestConsumptionByRequestId.set(requestId, row);
+    }
+    const linkedRows = validRows.map(row => ({ ...row, consumption: latestConsumptionByRequestId.get(String(row.requestId || "")) || null }));
+    const documents = linkedRows.flatMap(row => row.consumption?.documents || []);
+    const candidateTotal = validRows.reduce((sum, row) => sum + Number(row.candidateCount || 0), 0);
+    const selectedTotal = validRows.reduce((sum, row) => sum + Number(row.selectedCount || 0), 0);
+    const usedCount = documents.filter(row => row.usageState === "used").length;
+    const verifiedCount = documents.filter(row => row.usageState === "verified").length;
+    const ignoredCount = documents.filter(row => row.usageState === "ignored").length;
+    const unreportedCount = documents.filter(row => row.usageState === "unreported").length;
+    const declaredCount = usedCount + verifiedCount + ignoredCount;
+    const selectedAges = validRows.map(row => Number(row.selectedAgeDays?.average ?? -1)).filter(age => age >= 0);
+    return {
+        schema: "ccm-group-typed-memory-manifest-selector-shape-summary-v1",
+        version: 1,
+        scopeId,
+        dir: getGroupTypedMemoryManifestSelectorShapeDir(scopeId),
+        present: rows.length > 0 || unreadableCount > 0 || expectedRequestIds.size > 0,
+        valid: invalidShapeCount === 0 && missingExpectedShapeCount === 0,
+        shapeCount: rows.length + unreadableCount,
+        validShapeCount: validRows.length,
+        invalidShapeCount,
+        expectedShapeCount: expectedRequestIds.size,
+        missingExpectedShapeCount,
+        selectorRunCount: validRows.length,
+        emptySelectionCount: validRows.filter(row => Number(row.selectedCount || 0) === 0).length,
+        emptySelectionAgeSentinelCount: validRows.filter(row => Number(row.selectedCount || 0) === 0 && row.emptySelectionAgeSentinel === true && Number(row.selectedAgeDays?.average) === -1).length,
+        candidateTotal,
+        selectedTotal,
+        selectionRate: candidateTotal ? Number((selectedTotal / candidateTotal).toFixed(6)) : null,
+        averageEventSelectionRate: validRows.length ? Number((validRows.reduce((sum, row) => sum + Number(row.selectionRate || 0), 0) / validRows.length).toFixed(6)) : null,
+        averageSelectedAgeDays: selectedAges.length ? Number((selectedAges.reduce((sum, age) => sum + age, 0) / selectedAges.length).toFixed(6)) : -1,
+        selectedFreshCount: validRows.reduce((sum, row) => sum + Number(row.selectedFreshCount || 0), 0),
+        selectedStaleCount: validRows.reduce((sum, row) => sum + Number(row.selectedStaleCount || 0), 0),
+        consumptionLinkedRunCount: linkedRows.filter(row => !!row.consumption).length,
+        consumedDeliveredDocumentCount: documents.length,
+        consumedUsedDocumentCount: usedCount,
+        consumedVerifiedDocumentCount: verifiedCount,
+        consumedIgnoredDocumentCount: ignoredCount,
+        consumedUnreportedDocumentCount: unreportedCount,
+        consumptionReceiptCoverageRate: documents.length ? Number(((documents.length - unreportedCount) / documents.length).toFixed(6)) : null,
+        consumedUtilityRate: declaredCount ? Number(((usedCount + verifiedCount) / declaredCount).toFixed(6)) : null,
+        latest: linkedRows[0] || null,
+        rows: options.includeRows === true ? linkedRows : undefined,
+    };
+}
+function groupTypedMemoryShapeDriftChecksum(value) {
+    const payload = { ...(value || {}) };
+    delete payload.checksum;
+    delete payload.valid;
+    return checksum(JSON.stringify(payload), 64);
+}
+function summarizeGroupTypedMemoryShapeWindow(shapeRows, writeRows) {
+    const candidateTotal = shapeRows.reduce((sum, row) => sum + Number(row.candidateCount || 0), 0);
+    const selectedTotal = shapeRows.reduce((sum, row) => sum + Number(row.selectedCount || 0), 0);
+    const selectedAgeWeight = shapeRows.reduce((sum, row) => {
+        const count = Number(row.selectedCount || 0);
+        const average = Number(row.selectedAgeDays?.average ?? -1);
+        return average >= 0 ? sum + average * count : sum;
+    }, 0);
+    const freshCount = shapeRows.reduce((sum, row) => sum + Number(row.selectedFreshCount || 0), 0);
+    const staleCount = shapeRows.reduce((sum, row) => sum + Number(row.selectedStaleCount || 0), 0);
+    const documents = shapeRows.flatMap(row => row.consumption?.documents || []);
+    const usedCount = documents.filter(row => row.usageState === "used").length;
+    const verifiedCount = documents.filter(row => row.usageState === "verified").length;
+    const ignoredCount = documents.filter(row => row.usageState === "ignored").length;
+    const unreportedCount = documents.filter(row => row.usageState === "unreported").length;
+    const declaredCount = usedCount + verifiedCount + ignoredCount;
+    const changedWrites = writeRows.filter(row => row.changed === true);
+    return {
+        selectorRunCount: shapeRows.length,
+        candidateTotal,
+        selectedTotal,
+        selectionRate: candidateTotal ? Number((selectedTotal / candidateTotal).toFixed(6)) : null,
+        emptySelectionCount: shapeRows.filter(row => Number(row.selectedCount || 0) === 0).length,
+        emptySelectionRate: shapeRows.length ? Number((shapeRows.filter(row => Number(row.selectedCount || 0) === 0).length / shapeRows.length).toFixed(6)) : null,
+        averageCandidatesPerRun: shapeRows.length ? Number((candidateTotal / shapeRows.length).toFixed(6)) : null,
+        averageSelectedAgeDays: selectedTotal ? Number((selectedAgeWeight / selectedTotal).toFixed(6)) : -1,
+        selectedFreshCount: freshCount,
+        selectedStaleCount: staleCount,
+        selectedStaleRate: freshCount + staleCount ? Number((staleCount / (freshCount + staleCount)).toFixed(6)) : null,
+        candidateCapacityRunCount: shapeRows.filter(row => Number(row.candidateCount || 0) >= exports.GROUP_TYPED_MEMORY_MANIFEST_MAX_FILES).length,
+        selectionCapacityRunCount: shapeRows.filter(row => Number(row.selectedCount || 0) >= exports.GROUP_TYPED_MEMORY_MANIFEST_MAX_SELECTION).length,
+        consumptionLinkedRunCount: shapeRows.filter(row => !!row.consumption).length,
+        deliveredDocumentCount: documents.length,
+        declaredDocumentCount: declaredCount,
+        usedDocumentCount: usedCount,
+        verifiedDocumentCount: verifiedCount,
+        ignoredDocumentCount: ignoredCount,
+        unreportedDocumentCount: unreportedCount,
+        receiptCoverageRate: documents.length ? Number(((documents.length - unreportedCount) / documents.length).toFixed(6)) : null,
+        consumedUtilityRate: declaredCount ? Number(((usedCount + verifiedCount) / declaredCount).toFixed(6)) : null,
+        writeEventCount: writeRows.length,
+        changedWriteCount: changedWrites.length,
+        writeGrowthBytes: changedWrites.reduce((sum, row) => sum + Number(row.deltaBytes || 0), 0),
+        averageWriteBytes: writeRows.length ? Number((writeRows.reduce((sum, row) => sum + Number(row.afterBytes || 0), 0) / writeRows.length).toFixed(3)) : null,
+        nearBodyLimitWriteCount: writeRows.filter(row => row.nearBodyLimit === true).length,
+        truncatedBodyWriteCount: writeRows.filter(row => row.bodyTruncated === true).length,
+    };
+}
+function groupTypedMemoryShapeMetricDelta(recent, baseline, key) {
+    const current = recent?.[key];
+    const previous = baseline?.[key];
+    return current === null || current === undefined || previous === null || previous === undefined || Number(current) < 0 || Number(previous) < 0
+        ? null
+        : Number((Number(current) - Number(previous)).toFixed(6));
+}
+function verifyGroupTypedMemoryShapeDrift(report, expectedScopeId = "") {
+    const scopeValid = isExactGroupTypedMemorySessionScope(String(report?.scopeId || ""))
+        && (!expectedScopeId || String(report?.scopeId || "") === expectedScopeId);
+    const checksumValid = !!report && String(report.checksum || "") === groupTypedMemoryShapeDriftChecksum(report);
+    const valid = !!report
+        && report.schema === "ccm-group-typed-memory-shape-drift-v1"
+        && Number(report.version || 0) === 1
+        && scopeValid
+        && report.advisoryOnly === true
+        && report.autoTuning === false
+        && report.crossSessionReuse === false
+        && report.bodyFree === true
+        && Number(report.recentWindowDays || 0) > 0
+        && Number(report.baselineWindowDays || 0) > 0
+        && ["unobserved", "warming", "stable", "drift"].includes(String(report.status || ""))
+        && checksumValid;
+    return { valid, checksumValid, scopeValid };
+}
+function buildGroupTypedMemoryShapeDrift(scopeId, shapeRows, writeRows, options = {}) {
+    const nowMs = Number(options.nowMs || options.now_ms || Date.now());
+    const recentWindowDays = Math.max(1, Math.min(30, Number(options.recentWindowDays || options.recent_window_days || 7)));
+    const baselineWindowDays = Math.max(recentWindowDays, Math.min(90, Number(options.baselineWindowDays || options.baseline_window_days || 21)));
+    const minimumSelectorRuns = Math.max(2, Math.min(20, Number(options.minimumSelectorRuns || options.minimum_selector_runs || 3)));
+    const minimumConsumptionDocuments = Math.max(2, Math.min(20, Number(options.minimumConsumptionDocuments || options.minimum_consumption_documents || 3)));
+    const recentStartMs = nowMs - recentWindowDays * 86_400_000;
+    const baselineStartMs = recentStartMs - baselineWindowDays * 86_400_000;
+    const inWindow = (row, startMs, endMs) => {
+        const atMs = Date.parse(String(row.recordedAt || ""));
+        return Number.isFinite(atMs) && atMs >= startMs && atMs < endMs;
+    };
+    const recentShapeRows = shapeRows.filter(row => inWindow(row, recentStartMs, nowMs + 1));
+    const baselineShapeRows = shapeRows.filter(row => inWindow(row, baselineStartMs, recentStartMs));
+    const recentWriteRows = writeRows.filter(row => inWindow(row, recentStartMs, nowMs + 1));
+    const baselineWriteRows = writeRows.filter(row => inWindow(row, baselineStartMs, recentStartMs));
+    const recent = summarizeGroupTypedMemoryShapeWindow(recentShapeRows, recentWriteRows);
+    const baseline = summarizeGroupTypedMemoryShapeWindow(baselineShapeRows, baselineWriteRows);
+    const deltas = {
+        selectionRate: groupTypedMemoryShapeMetricDelta(recent, baseline, "selectionRate"),
+        emptySelectionRate: groupTypedMemoryShapeMetricDelta(recent, baseline, "emptySelectionRate"),
+        averageCandidatesPerRun: groupTypedMemoryShapeMetricDelta(recent, baseline, "averageCandidatesPerRun"),
+        averageSelectedAgeDays: groupTypedMemoryShapeMetricDelta(recent, baseline, "averageSelectedAgeDays"),
+        selectedStaleRate: groupTypedMemoryShapeMetricDelta(recent, baseline, "selectedStaleRate"),
+        receiptCoverageRate: groupTypedMemoryShapeMetricDelta(recent, baseline, "receiptCoverageRate"),
+        consumedUtilityRate: groupTypedMemoryShapeMetricDelta(recent, baseline, "consumedUtilityRate"),
+        averageWriteBytes: groupTypedMemoryShapeMetricDelta(recent, baseline, "averageWriteBytes"),
+    };
+    const selectorConfidenceSufficient = recent.selectorRunCount >= minimumSelectorRuns && baseline.selectorRunCount >= minimumSelectorRuns;
+    const consumptionConfidenceSufficient = recent.declaredDocumentCount >= minimumConsumptionDocuments && baseline.declaredDocumentCount >= minimumConsumptionDocuments;
+    const writeConfidenceSufficient = recent.writeEventCount >= minimumSelectorRuns && baseline.writeEventCount >= minimumSelectorRuns;
+    const signals = [];
+    const signal = (code, severity, metric, delta, reason) => signals.push({ code, severity, metric, delta, reason });
+    if (selectorConfidenceSufficient) {
+        if (deltas.selectionRate !== null && Math.abs(deltas.selectionRate) >= 0.2)
+            signal("selection_rate_shift", "info", "selectionRate", deltas.selectionRate, "selection rate changed by at least 20 percentage points");
+        if (deltas.emptySelectionRate !== null && deltas.emptySelectionRate >= 0.25)
+            signal("empty_selection_rise", "warning", "emptySelectionRate", deltas.emptySelectionRate, "empty selector runs rose by at least 25 percentage points");
+        if (deltas.averageSelectedAgeDays !== null && deltas.averageSelectedAgeDays >= 7)
+            signal("selected_age_rise", "warning", "averageSelectedAgeDays", deltas.averageSelectedAgeDays, "selected memory age rose by at least seven days");
+        if (deltas.selectedStaleRate !== null && deltas.selectedStaleRate >= 0.25)
+            signal("stale_selection_rise", "warning", "selectedStaleRate", deltas.selectedStaleRate, "stale selected-memory share rose by at least 25 percentage points");
+        if (recent.candidateCapacityRunCount / Math.max(1, recent.selectorRunCount) >= 0.5)
+            signal("candidate_capacity_pressure", "warning", "candidateCapacityRunCount", null, "at least half of recent selector runs reached the 200-header cap");
+        if (recent.selectionCapacityRunCount / Math.max(1, recent.selectorRunCount) >= 0.5)
+            signal("selection_capacity_pressure", "info", "selectionCapacityRunCount", null, "at least half of recent selector runs filled all five selection slots");
+    }
+    if (consumptionConfidenceSufficient) {
+        if (deltas.receiptCoverageRate !== null && deltas.receiptCoverageRate <= -0.2)
+            signal("receipt_coverage_drop", "warning", "receiptCoverageRate", deltas.receiptCoverageRate, "structured receipt coverage fell by at least 20 percentage points");
+        if (deltas.consumedUtilityRate !== null && deltas.consumedUtilityRate <= -0.2)
+            signal("consumed_utility_drop", "warning", "consumedUtilityRate", deltas.consumedUtilityRate, "observed consumed utility fell by at least 20 percentage points");
+    }
+    if (writeConfidenceSufficient) {
+        if (deltas.averageWriteBytes !== null && deltas.averageWriteBytes >= 4_000)
+            signal("write_size_growth", "warning", "averageWriteBytes", deltas.averageWriteBytes, "average written memory size grew by at least 4000 bytes");
+        if (recent.nearBodyLimitWriteCount / Math.max(1, recent.writeEventCount) >= 0.5)
+            signal("write_capacity_pressure", "warning", "nearBodyLimitWriteCount", null, "at least half of recent writes approached the configured body limit");
+    }
+    if (recent.truncatedBodyWriteCount > 0)
+        signal("write_body_truncated", "warning", "truncatedBodyWriteCount", null, "one or more recent typed-memory writes exceeded the configured body limit");
+    const anyObserved = recent.selectorRunCount + baseline.selectorRunCount + recent.writeEventCount + baseline.writeEventCount > 0;
+    const comparisonReady = selectorConfidenceSufficient || consumptionConfidenceSufficient || writeConfidenceSufficient;
+    const status = !anyObserved ? "unobserved" : !comparisonReady ? "warming" : signals.length ? "drift" : "stable";
+    const core = {
+        schema: "ccm-group-typed-memory-shape-drift-v1",
+        version: 1,
+        scopeId,
+        advisoryOnly: true,
+        autoTuning: false,
+        crossSessionReuse: false,
+        bodyFree: true,
+        status,
+        generatedAt: new Date(nowMs).toISOString(),
+        recentWindowDays,
+        baselineWindowDays,
+        minimumSelectorRuns,
+        minimumConsumptionDocuments,
+        retentionBounded: true,
+        maxShapeRows: 200,
+        maxWriteRows: exports.GROUP_TYPED_MEMORY_WRITE_SHAPE_MAX_EVENTS,
+        confidence: {
+            selectorSufficient: selectorConfidenceSufficient,
+            consumptionSufficient: consumptionConfidenceSufficient,
+            writeSufficient: writeConfidenceSufficient,
+            comparisonReady,
+        },
+        recent,
+        baseline,
+        deltas,
+        signalCount: signals.length,
+        warningSignalCount: signals.filter(row => row.severity === "warning").length,
+        signals,
+    };
+    return { ...core, checksum: groupTypedMemoryShapeDriftChecksum(core) };
 }
 function recordGroupTypedMemoryManifestSelectorDecision(scopeId, decision) {
     const dir = path.resolve(getGroupTypedMemoryManifestSelectorDecisionDir(scopeId));
@@ -20814,6 +23169,28 @@ function recordGroupTypedMemoryManifestSelectorDecision(scopeId, decision) {
                 fs.unlinkSync(item.file);
             }
             catch { }
+            const requestId = item.name.replace(/\.json$/i, "");
+            const outcomeDir = getGroupTypedMemoryManifestSelectorOutcomeDir(scopeId);
+            for (const stage of ["attached", "committed"]) {
+                try {
+                    fs.unlinkSync(path.join(outcomeDir, `${requestId}.${stage}.json`));
+                }
+                catch { }
+            }
+            const consumptionDir = getGroupTypedMemoryManifestSelectorConsumptionDir(scopeId);
+            try {
+                for (const name of fs.readdirSync(consumptionDir).filter(name => name.startsWith(`${requestId}.`) && name.endsWith(".json"))) {
+                    try {
+                        fs.unlinkSync(path.join(consumptionDir, name));
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+            try {
+                fs.unlinkSync(path.join(getGroupTypedMemoryManifestSelectorShapeDir(scopeId), `${requestId}.json`));
+            }
+            catch { }
         }
     }
     catch { }
@@ -20821,6 +23198,10 @@ function recordGroupTypedMemoryManifestSelectorDecision(scopeId, decision) {
 }
 function verifyGroupTypedMemoryManifestSelection(selection, expectedScopeId = "") {
     const selected = Array.isArray(selection?.selectedRelPaths) ? selection.selectedRelPaths : [];
+    const calibration = selection?.calibration || null;
+    const calibrationVerification = calibration
+        ? verifyGroupTypedMemoryManifestSelectorCalibration(calibration, expectedScopeId || String(selection?.scopeId || ""), String(selection?.queryChecksum || ""))
+        : { valid: true, checksumValid: true, scopeValid: true, queryValid: true, hintCount: 0 };
     const valid = !!selection
         && selection.schema === "ccm-group-typed-memory-manifest-selection-v1"
         && Number(selection.version || 0) === exports.GROUP_TYPED_MEMORY_MANIFEST_SELECTOR_VERSION
@@ -20828,11 +23209,16 @@ function verifyGroupTypedMemoryManifestSelection(selection, expectedScopeId = ""
         && (!expectedScopeId || String(selection.scopeId || "") === expectedScopeId)
         && selected.length <= exports.GROUP_TYPED_MEMORY_MANIFEST_MAX_SELECTION
         && selected.every((item) => typeof item === "string" && path.basename(item) === item && item.toLowerCase().endsWith(".md"))
+        && calibrationVerification.valid === true
+        && (!calibration || String(selection.calibrationChecksum || "") === String(calibration.checksum || ""))
         && String(selection.checksum || "") === groupTypedMemoryManifestSelectionChecksum(selection);
     return {
         valid,
         scopeValid: !expectedScopeId || String(selection?.scopeId || "") === expectedScopeId,
         checksumValid: !!selection && String(selection.checksum || "") === groupTypedMemoryManifestSelectionChecksum(selection),
+        calibrationValid: calibrationVerification.valid === true,
+        calibrationChecksumValid: calibrationVerification.checksumValid === true,
+        calibrationHintCount: Number(calibrationVerification.hintCount || 0),
         selectedCount: selected.length,
     };
 }
@@ -20852,10 +23238,13 @@ function buildGroupTypedMemoryManifest(scopeId, query, options = {}) {
             candidateCount: 0,
             filteredCount: 0,
             filterCounts: { invalid_scope: 1 },
+            calibration: null,
+            calibrationText: "",
             checksum: "",
         };
     }
     const text = String(query || "");
+    const generatedAt = String(options.generatedAt || options.generated_at || now());
     const index = buildGroupTypedMemoryIndex(scopeId);
     const already = new Set((options.alreadySurfaced || options.already_surfaced || [])
         .map((item) => String(item || "").trim().toLowerCase()).filter(Boolean));
@@ -20906,6 +23295,15 @@ function buildGroupTypedMemoryManifest(scopeId, query, options = {}) {
             ? `- ${tag}${item.filename} (${item.mtime}): ${item.description}`
             : `- ${tag}${item.filename} (${item.mtime})`;
     }).join("\n");
+    const calibration = buildGroupTypedMemoryManifestSelectorCalibration(scopeId, text, {
+        nowMs: options.nowMs || options.now_ms,
+        generatedAt,
+        lookbackDays: options.calibrationLookbackDays || options.calibration_lookback_days,
+        halfLifeDays: options.calibrationHalfLifeDays || options.calibration_half_life_days,
+        maxHints: options.calibrationMaxHints || options.calibration_max_hints,
+        candidateRelPaths: candidates.map((item) => item.filename),
+    });
+    const calibrationText = (calibration.hints || []).map((hint) => `- ${hint.relPath}: ${hint.calibration}; strong outcomes used=${hint.usedCount}, verified=${hint.verifiedCount}, ignored=${hint.ignoredCount}`).join("\n");
     const manifestCore = {
         schema: "ccm-group-typed-memory-selection-manifest-v1",
         version: 1,
@@ -20919,7 +23317,9 @@ function buildGroupTypedMemoryManifest(scopeId, query, options = {}) {
         filterCounts,
         targetPaths,
         alreadySurfacedCount: already.size,
-        generatedAt: String(options.generatedAt || options.generated_at || now()),
+        calibration,
+        calibrationText,
+        generatedAt,
     };
     return { ...manifestCore, checksum: checksum(JSON.stringify(manifestCore), 64) };
 }
@@ -20953,6 +23353,8 @@ function finalizeGroupTypedMemoryManifestSelection(scopeId, input, options = {})
         requestId: String(input.requestId || `ms_${checksum([scopeId, Date.now(), crypto.randomBytes(8).toString("hex")], 24)}`),
         status: String(input.status || "empty"),
         reason: String(input.reason || ""),
+        selectorRan: input.selectorRan === true,
+        shapeTelemetryExpected: input.shapeTelemetryExpected === true,
         queryChecksum: String(input.queryChecksum || ""),
         manifestChecksum: String(input.manifestChecksum || ""),
         candidateCount: Number(input.candidateCount || 0),
@@ -20961,6 +23363,10 @@ function finalizeGroupTypedMemoryManifestSelection(scopeId, input, options = {})
         invalidFilenameCount: Number(input.invalidFilenameCount || 0),
         recentTools: uniqueStrings((input.recentTools || []).map(String), 20),
         filterCounts: input.filterCounts || {},
+        calibration: input.calibration || null,
+        calibrationChecksum: String(input.calibrationChecksum || input.calibration?.checksum || ""),
+        calibrationHintCount: Number(input.calibrationHintCount ?? input.calibration?.hintCount ?? 0),
+        calibrationEvidenceCount: Number(input.calibrationEvidenceCount ?? input.calibration?.evidenceCount ?? 0),
         selectorProject: String(input.selectorProject || ""),
         selectorAgentType: String(input.selectorAgentType || ""),
         selectorModel: String(input.selectorModel || ""),
@@ -20984,17 +23390,39 @@ async function selectGroupTypedMemoryManifest(scopeId, query, options = {}) {
     const queryChecksum = checksum(String(query || ""), 64);
     const recentTools = uniqueStrings((options.recentTools || options.recent_tools || []).map(String), 20);
     const manifest = buildGroupTypedMemoryManifest(scopeId, query, options);
-    const finish = (input) => finalizeGroupTypedMemoryManifestSelection(scopeId, {
-        requestId,
-        queryChecksum,
-        manifestChecksum: manifest.checksum || "",
-        candidateCount: manifest.candidateCount || 0,
-        filterCounts: manifest.filterCounts || {},
-        recentTools,
-        startedAt,
-        completedAt: now(),
-        ...input,
-    }, options);
+    const finish = (input) => {
+        const selectorRan = input.selectorRan === true;
+        const decision = finalizeGroupTypedMemoryManifestSelection(scopeId, {
+            requestId,
+            queryChecksum,
+            manifestChecksum: manifest.checksum || "",
+            candidateCount: manifest.candidateCount || 0,
+            filterCounts: manifest.filterCounts || {},
+            calibration: manifest.calibration || null,
+            calibrationChecksum: manifest.calibration?.checksum || "",
+            calibrationHintCount: Number(manifest.calibration?.hintCount || 0),
+            calibrationEvidenceCount: Number(manifest.calibration?.evidenceCount || 0),
+            recentTools,
+            startedAt,
+            completedAt: now(),
+            ...input,
+            selectorRan,
+            shapeTelemetryExpected: selectorRan && options.recordDecision !== false,
+        }, options);
+        if (selectorRan) {
+            try {
+                const shape = recordGroupTypedMemoryManifestSelectorShape(scopeId, decision, manifest.candidates || [], {
+                    recordShape: options.recordDecision !== false,
+                });
+                decision.recallShapeTelemetry = shape;
+                decision.recallShapeTelemetryFile = shape.shapeFile || "";
+            }
+            catch (error) {
+                decision.recallShapeTelemetryError = compactText(error?.message || error, 240);
+            }
+        }
+        return decision;
+    };
     if (!manifest.validScope)
         return finish({ status: "invalid_scope", reason: "exact_group_gcs_scope_required", selectedRelPaths: [] });
     if (shouldIgnoreGroupMemoryRequest(query, options))
@@ -21007,6 +23435,9 @@ async function selectGroupTypedMemoryManifest(scopeId, query, options = {}) {
     if (typeof executor !== "function")
         return finish({ status: "unavailable", reason: "manifest_selector_executor_not_configured", selectedRelPaths: [] });
     const toolsSection = recentTools.length ? `\n\nRecently used tools: ${recentTools.join(", ")}` : "";
+    const calibrationSection = manifest.calibrationText
+        ? `\n\nHistorical outcomes for this exact group-chat session and exact query (advisory only; do not auto-select or auto-reject):\n${manifest.calibrationText}`
+        : "";
     try {
         const response = await executor({
             schema: "ccm-group-typed-memory-manifest-selector-request-v1",
@@ -21017,10 +23448,12 @@ async function selectGroupTypedMemoryManifest(scopeId, query, options = {}) {
             groupSessionId: String(options.groupSessionId || options.group_session_id || scopeId.slice(scopeId.lastIndexOf("--") + 2)),
             query: compactText(query, 6000),
             systemPrompt: GROUP_TYPED_MEMORY_MANIFEST_SELECTOR_SYSTEM_PROMPT,
-            userPrompt: `Query: ${compactText(query, 6000)}\n\nAvailable memories:\n${manifest.manifest}${toolsSection}`,
+            userPrompt: `Query: ${compactText(query, 6000)}\n\nAvailable memories:\n${manifest.manifest}${toolsSection}${calibrationSection}`,
             recentTools,
             manifest: manifest.manifest,
             manifestChecksum: manifest.checksum,
+            calibration: manifest.calibration,
+            calibrationChecksum: manifest.calibration?.checksum || "",
             maxTokens: 256,
             maxSelection: exports.GROUP_TYPED_MEMORY_MANIFEST_MAX_SELECTION,
             outputSchema: {
@@ -21032,7 +23465,7 @@ async function selectGroupTypedMemoryManifest(scopeId, query, options = {}) {
             signal: options.signal,
         });
         if (options.signal?.aborted)
-            return finish({ status: "aborted", reason: "selector_aborted_after_call", selectedRelPaths: [] });
+            return finish({ status: "aborted", reason: "selector_aborted_after_call", selectedRelPaths: [], selectorRan: true });
         const rawSelected = parseGroupTypedMemoryManifestSelectorOutput(response);
         const validNames = new Set(manifest.candidates.map((item) => item.filename));
         const selectedRelPaths = [];
@@ -21061,11 +23494,108 @@ async function selectGroupTypedMemoryManifest(scopeId, query, options = {}) {
             selectorProject: response?.project || "",
             selectorAgentType: response?.agentType || "",
             selectorModel: response?.model || "",
+            selectorRan: true,
         });
     }
     catch (error) {
-        return finish({ status: "failed", reason: compactText(error?.message || error, 240), selectedRelPaths: [] });
+        return finish({ status: "failed", reason: compactText(error?.message || error, 240), selectedRelPaths: [], selectorRan: true });
     }
+}
+function summarizeGroupTypedMemoryManifestSelectorOutcomes(scopeId, options = {}) {
+    const dir = getGroupTypedMemoryManifestSelectorOutcomeDir(scopeId);
+    const decisions = Array.isArray(options.decisions) ? options.decisions : [];
+    const decisionsByRequestId = new Map(decisions.map((row) => {
+        const selection = { ...row };
+        delete selection.valid;
+        delete selection.decisionFile;
+        return [String(row.requestId || ""), selection];
+    }));
+    const rows = [];
+    let unreadableCount = 0;
+    try {
+        for (const name of fs.readdirSync(dir).filter(name => name.toLowerCase().endsWith(".json"))) {
+            const file = path.join(dir, name);
+            try {
+                const outcome = JSON.parse(fs.readFileSync(file, "utf-8"));
+                const selection = decisionsByRequestId.get(String(outcome.requestId || "")) || null;
+                const verification = verifyGroupTypedMemoryManifestSelectorOutcome(outcome, scopeId, selection);
+                rows.push({ ...outcome, outcomeFile: file, valid: verification.valid === true && !!selection });
+            }
+            catch {
+                unreadableCount += 1;
+            }
+        }
+    }
+    catch { }
+    rows.sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")) || String(b.requestId || "").localeCompare(String(a.requestId || "")));
+    const attachedByRequestId = new Map(rows.filter(row => row.stage === "attached").map(row => [String(row.requestId || ""), row]));
+    for (const row of rows.filter(row => row.stage === "committed")) {
+        const attached = attachedByRequestId.get(String(row.requestId || ""));
+        if (!attached
+            || attached.valid !== true
+            || String(row.attachedOutcomeChecksum || "") !== String(attached.checksum || "")
+            || String(row.capsuleChecksum || "") !== String(attached.capsuleChecksum || "")) {
+            row.valid = false;
+            row.chainInvalid = true;
+        }
+    }
+    const validRows = rows.filter(row => row.valid === true);
+    const attachedRows = validRows.filter(row => row.stage === "attached");
+    const committedRows = validRows.filter(row => row.stage === "committed");
+    const attachedRequestIds = new Set(attachedRows.map(row => String(row.requestId || "")));
+    const committedRequestIds = new Set(committedRows.map(row => String(row.requestId || "")));
+    const selectedDecisions = decisions.filter((row) => row.valid === true && String(row.status || "") === "selected");
+    const nowMs = Number(options.nowMs || options.now_ms || Date.now());
+    const staleAfterMs = Math.max(1_000, Number(options.staleAfterMs || options.stale_after_ms || 5 * 60_000));
+    const staleUnattachedDecisionCount = selectedDecisions.filter((row) => {
+        if (attachedRequestIds.has(String(row.requestId || "")))
+            return false;
+        const completedMs = Date.parse(String(row.completedAt || ""));
+        return Number.isFinite(completedMs) && nowMs - completedMs >= staleAfterMs;
+    }).length;
+    const staleUncommittedAttachmentCount = attachedRows.filter(row => {
+        if (committedRequestIds.has(String(row.requestId || "")))
+            return false;
+        const createdMs = Date.parse(String(row.createdAt || ""));
+        return Number.isFinite(createdMs) && nowMs - createdMs >= staleAfterMs;
+    }).length;
+    const selectedAttachedDocumentCount = attachedRows.reduce((sum, row) => sum + Number(row.attachedSelectedRelPaths?.length || 0), 0);
+    const selectedCommittedDocumentCount = committedRows.reduce((sum, row) => sum + Number(row.attachedSelectedRelPaths?.length || 0), 0);
+    const selectedNotRecalledDocumentCount = attachedRows.reduce((sum, row) => sum + Number(row.selectedNotRecalledRelPaths?.length || 0), 0);
+    const recalledNotAttachedDocumentCount = attachedRows.reduce((sum, row) => sum + Number(row.recalledNotAttachedRelPaths?.length || 0), 0);
+    const invalidOutcomeCount = rows.filter(row => row.valid !== true).length + unreadableCount;
+    return {
+        schema: "ccm-group-typed-memory-manifest-selector-outcome-summary-v1",
+        version: 1,
+        scopeId,
+        dir,
+        present: rows.length > 0 || unreadableCount > 0,
+        valid: invalidOutcomeCount === 0,
+        closureValid: invalidOutcomeCount === 0 && staleUnattachedDecisionCount === 0 && staleUncommittedAttachmentCount === 0,
+        outcomeCount: rows.length + unreadableCount,
+        attachedOutcomeCount: attachedRows.length,
+        committedOutcomeCount: committedRows.length,
+        invalidOutcomeCount,
+        selectedAttachedDocumentCount,
+        selectedCommittedDocumentCount,
+        selectedNotRecalledDocumentCount,
+        recalledNotAttachedDocumentCount,
+        selectedDecisionWithoutAttachmentCount: selectedDecisions.filter((row) => !attachedRequestIds.has(String(row.requestId || ""))).length,
+        attachmentWithoutCommitCount: attachedRows.filter(row => !committedRequestIds.has(String(row.requestId || ""))).length,
+        staleUnattachedDecisionCount,
+        staleUncommittedAttachmentCount,
+        closureGapCount: invalidOutcomeCount + staleUnattachedDecisionCount + staleUncommittedAttachmentCount,
+        latest: rows[0] ? {
+            requestId: String(rows[0].requestId || ""),
+            stage: String(rows[0].stage || ""),
+            valid: rows[0].valid === true,
+            selectedCount: Number(rows[0].selectedRelPaths?.length || 0),
+            recalledCount: Number(rows[0].recalledSelectedRelPaths?.length || 0),
+            attachedCount: Number(rows[0].attachedSelectedRelPaths?.length || 0),
+            createdAt: String(rows[0].createdAt || ""),
+        } : null,
+        rows: options.includeRows === true ? rows : undefined,
+    };
 }
 function summarizeGroupTypedMemoryManifestSelectorDecisions(scopeId, options = {}) {
     const dir = getGroupTypedMemoryManifestSelectorDecisionDir(scopeId);
@@ -21091,18 +23621,60 @@ function summarizeGroupTypedMemoryManifestSelectorDecisions(scopeId, options = {
     rows.sort((a, b) => String(b.completedAt || "").localeCompare(String(a.completedAt || "")) || String(b.requestId || "").localeCompare(String(a.requestId || "")));
     const bounded = rows.slice(0, limit);
     const validRows = bounded.filter(row => row.valid === true);
+    const calibratedRows = validRows.filter(row => row.calibration?.schema === "ccm-group-typed-memory-manifest-selector-calibration-v1");
+    const calibrationHints = calibratedRows.flatMap(row => Array.isArray(row.calibration?.hints) ? row.calibration.hints : []);
     const statusCounts = {};
     for (const row of validRows)
         statusCounts[String(row.status || "unknown")] = Number(statusCounts[String(row.status || "unknown")] || 0) + 1;
     const selectedDocumentCount = validRows.reduce((sum, row) => sum + Number(row.selectedRelPaths?.length || 0), 0);
     const latest = bounded[0] || null;
+    const outcomeSummary = summarizeGroupTypedMemoryManifestSelectorOutcomes(scopeId, {
+        decisions: validRows,
+        nowMs: options.nowMs || options.now_ms,
+        staleAfterMs: options.staleAfterMs || options.stale_after_ms,
+        includeRows: options.includeOutcomeRows === true || options.include_outcome_rows === true,
+    });
+    const consumptionSummary = summarizeGroupTypedMemoryManifestSelectorConsumption(scopeId, {
+        nowMs: options.nowMs || options.now_ms,
+        staleAfterMs: options.staleAfterMs || options.stale_after_ms,
+        includeRows: options.includeConsumptionRows === true || options.include_consumption_rows === true,
+    });
+    const shapeSummary = summarizeGroupTypedMemoryManifestSelectorShapes(scopeId, {
+        decisions: validRows,
+        includeRows: true,
+    });
+    const writeShapeSummary = summarizeGroupTypedMemoryWriteShapes(scopeId, { includeRows: true });
+    const shapeDrift = buildGroupTypedMemoryShapeDrift(scopeId, shapeSummary.rows || [], writeShapeSummary.rows || [], {
+        nowMs: options.nowMs || options.now_ms,
+        recentWindowDays: options.recentWindowDays || options.recent_window_days,
+        baselineWindowDays: options.baselineWindowDays || options.baseline_window_days,
+        minimumSelectorRuns: options.minimumSelectorRuns || options.minimum_selector_runs,
+        minimumConsumptionDocuments: options.minimumConsumptionDocuments || options.minimum_consumption_documents,
+    });
+    const shapeTrend = summarizeGroupTypedMemoryShapeTrend(scopeId, {
+        nowMs: options.nowMs || options.now_ms,
+        recentWindowDays: options.recentWindowDays || options.recent_window_days,
+        baselineWindowDays: options.baselineWindowDays || options.baseline_window_days,
+        includeBuckets: options.includeTrendBuckets === true || options.include_trend_buckets === true,
+    });
+    const shapeTrendIncidents = summarizeGroupTypedMemoryShapeTrendIncidents(scopeId, {
+        includeEvents: options.includeTrendIncidentEvents === true || options.include_trend_incident_events === true,
+    });
+    const publicShapeSummary = options.includeShapeRows === true || options.include_shape_rows === true
+        ? shapeSummary
+        : { ...shapeSummary, rows: undefined };
+    const publicWriteShapeSummary = options.includeWriteShapeRows === true || options.include_write_shape_rows === true
+        ? writeShapeSummary
+        : { ...writeShapeSummary, rows: undefined };
     return {
         schema: "ccm-group-typed-memory-manifest-selector-summary-v1",
         version: 1,
         scopeId,
         dir,
         present: rows.length > 0 || unreadableCount > 0,
-        valid: unreadableCount === 0 && rows.every(row => row.valid === true),
+        valid: unreadableCount === 0 && rows.every(row => row.valid === true) && outcomeSummary.valid === true && consumptionSummary.valid === true && shapeSummary.valid === true && writeShapeSummary.valid === true && verifyGroupTypedMemoryShapeDrift(shapeDrift, scopeId).valid === true && shapeTrend.valid === true && verifyGroupTypedMemoryShapeTrendSummary(shapeTrend, scopeId).valid === true && shapeTrendIncidents.valid === true && verifyGroupTypedMemoryShapeTrendIncidentSummary(shapeTrendIncidents, scopeId).valid === true,
+        closureValid: outcomeSummary.closureValid === true,
+        consumptionClosureValid: consumptionSummary.closureValid === true,
         decisionCount: rows.length + unreadableCount,
         validDecisionCount: rows.filter(row => row.valid === true).length,
         invalidDecisionCount: rows.filter(row => row.valid !== true).length + unreadableCount,
@@ -21112,6 +23684,100 @@ function summarizeGroupTypedMemoryManifestSelectorDecisions(scopeId, options = {
         ignoredDecisionCount: Number(statusCounts.ignored || 0),
         selectedDocumentCount,
         averageSelectedDocuments: validRows.length ? Number((selectedDocumentCount / validRows.length).toFixed(3)) : 0,
+        calibrationObservedDecisionCount: calibratedRows.length,
+        calibrationHintedDecisionCount: calibratedRows.filter(row => Number(row.calibrationHintCount || row.calibration?.hintCount || 0) > 0).length,
+        calibrationEvidenceCount: calibratedRows.reduce((sum, row) => sum + Number(row.calibrationEvidenceCount || row.calibration?.evidenceCount || 0), 0),
+        calibrationHintCount: calibrationHints.length,
+        calibrationSupportHintCount: calibrationHints.filter((hint) => hint.calibration === "support").length,
+        calibrationCautionHintCount: calibrationHints.filter((hint) => hint.calibration === "caution").length,
+        calibrationMixedHintCount: calibrationHints.filter((hint) => hint.calibration === "mixed").length,
+        shapeSummary: publicShapeSummary,
+        shapeValid: shapeSummary.valid === true,
+        shapeCount: Number(shapeSummary.shapeCount || 0),
+        shapeInvalidCount: Number(shapeSummary.invalidShapeCount || 0),
+        shapeMissingExpectedCount: Number(shapeSummary.missingExpectedShapeCount || 0),
+        shapeSelectorRunCount: Number(shapeSummary.selectorRunCount || 0),
+        shapeEmptySelectionCount: Number(shapeSummary.emptySelectionCount || 0),
+        shapeCandidateTotal: Number(shapeSummary.candidateTotal || 0),
+        shapeSelectedTotal: Number(shapeSummary.selectedTotal || 0),
+        shapeSelectionRate: shapeSummary.selectionRate,
+        shapeAverageSelectedAgeDays: Number(shapeSummary.averageSelectedAgeDays ?? -1),
+        shapeSelectedFreshCount: Number(shapeSummary.selectedFreshCount || 0),
+        shapeSelectedStaleCount: Number(shapeSummary.selectedStaleCount || 0),
+        shapeConsumptionLinkedRunCount: Number(shapeSummary.consumptionLinkedRunCount || 0),
+        shapeConsumedDeliveredDocumentCount: Number(shapeSummary.consumedDeliveredDocumentCount || 0),
+        shapeConsumedUsedDocumentCount: Number(shapeSummary.consumedUsedDocumentCount || 0),
+        shapeConsumedVerifiedDocumentCount: Number(shapeSummary.consumedVerifiedDocumentCount || 0),
+        shapeConsumedIgnoredDocumentCount: Number(shapeSummary.consumedIgnoredDocumentCount || 0),
+        shapeConsumedUnreportedDocumentCount: Number(shapeSummary.consumedUnreportedDocumentCount || 0),
+        shapeConsumptionReceiptCoverageRate: shapeSummary.consumptionReceiptCoverageRate,
+        shapeConsumedUtilityRate: shapeSummary.consumedUtilityRate,
+        writeShapeSummary: publicWriteShapeSummary,
+        writeShapePresent: writeShapeSummary.present === true,
+        writeShapeValid: writeShapeSummary.valid === true,
+        writeShapeCount: Number(writeShapeSummary.shapeCount || 0),
+        writeShapeInvalidCount: Number(writeShapeSummary.invalidShapeCount || 0),
+        writeShapeCreateCount: Number(writeShapeSummary.createCount || 0),
+        writeShapeUpdateCount: Number(writeShapeSummary.updateCount || 0),
+        writeShapeNoopCount: Number(writeShapeSummary.noopCount || 0),
+        writeShapeChangedCount: Number(writeShapeSummary.changedCount || 0),
+        writeShapeBodyTruncatedCount: Number(writeShapeSummary.bodyTruncatedCount || 0),
+        writeShapeNearBodyLimitCount: Number(writeShapeSummary.nearBodyLimitCount || 0),
+        writeShapeTotalGrowthBytes: Number(writeShapeSummary.totalGrowthBytes || 0),
+        writeShapeAverageAfterBytes: Number(writeShapeSummary.averageAfterBytes || 0),
+        writeShapeMaxAfterBytes: Number(writeShapeSummary.maxAfterBytes || 0),
+        shapeDrift,
+        shapeDriftValid: verifyGroupTypedMemoryShapeDrift(shapeDrift, scopeId).valid === true,
+        shapeDriftStatus: String(shapeDrift.status || "unobserved"),
+        shapeDriftSignalCount: Number(shapeDrift.signalCount || 0),
+        shapeDriftWarningSignalCount: Number(shapeDrift.warningSignalCount || 0),
+        shapeTrend,
+        shapeTrendPresent: shapeTrend.ledgerPresent === true,
+        shapeTrendValid: shapeTrend.valid === true && verifyGroupTypedMemoryShapeTrendSummary(shapeTrend, scopeId).valid === true,
+        shapeTrendStatus: String(shapeTrend.status || "unobserved"),
+        shapeTrendBucketCount: Number(shapeTrend.bucketCount || 0),
+        shapeTrendMutableBucketCount: Number(shapeTrend.mutableBucketCount || 0),
+        shapeTrendSealedBucketCount: Number(shapeTrend.sealedBucketCount || 0),
+        shapeTrendGeneration: Number(shapeTrend.generation || 0),
+        shapeTrendSignalCount: Number(shapeTrend.signalCount || 0),
+        shapeTrendWarningSignalCount: Number(shapeTrend.warningSignalCount || 0),
+        shapeTrendRecoveredFromBackup: shapeTrend.recoveredFromBackup === true,
+        shapeTrendExtendsBeyondHotRetention: shapeTrend.extendsBeyondHotRetention === true,
+        shapeTrendIncidents,
+        shapeTrendIncidentPresent: shapeTrendIncidents.ledgerPresent === true,
+        shapeTrendIncidentValid: shapeTrendIncidents.valid === true && verifyGroupTypedMemoryShapeTrendIncidentSummary(shapeTrendIncidents, scopeId).valid === true,
+        shapeTrendIncidentStatus: String(shapeTrendIncidents.status || "unobserved"),
+        shapeTrendIncidentEventCount: Number(shapeTrendIncidents.eventCount || 0),
+        shapeTrendIncidentCount: Number(shapeTrendIncidents.incidentCount || 0),
+        shapeTrendIncidentPendingCount: Number(shapeTrendIncidents.pendingCount || 0),
+        shapeTrendIncidentAcknowledgedCount: Number(shapeTrendIncidents.acknowledgedCount || 0),
+        shapeTrendIncidentResolvedCount: Number(shapeTrendIncidents.resolvedCount || 0),
+        shapeTrendIncidentRecoveredFromBackup: shapeTrendIncidents.recoveredFromBackup === true,
+        shapeTrendActiveIncident: shapeTrendIncidents.activeIncident || null,
+        outcomeSummary,
+        attachedOutcomeCount: outcomeSummary.attachedOutcomeCount,
+        committedOutcomeCount: outcomeSummary.committedOutcomeCount,
+        invalidOutcomeCount: outcomeSummary.invalidOutcomeCount,
+        selectedAttachedDocumentCount: outcomeSummary.selectedAttachedDocumentCount,
+        selectedCommittedDocumentCount: outcomeSummary.selectedCommittedDocumentCount,
+        selectedNotRecalledDocumentCount: outcomeSummary.selectedNotRecalledDocumentCount,
+        recalledNotAttachedDocumentCount: outcomeSummary.recalledNotAttachedDocumentCount,
+        selectedDecisionWithoutAttachmentCount: outcomeSummary.selectedDecisionWithoutAttachmentCount,
+        attachmentWithoutCommitCount: outcomeSummary.attachmentWithoutCommitCount,
+        staleUnattachedDecisionCount: outcomeSummary.staleUnattachedDecisionCount,
+        staleUncommittedAttachmentCount: outcomeSummary.staleUncommittedAttachmentCount,
+        closureGapCount: outcomeSummary.closureGapCount,
+        consumptionSummary,
+        consumptionOutcomeCount: consumptionSummary.outcomeCount,
+        consumptionDeliveredDocumentCount: consumptionSummary.deliveredDocumentCount,
+        consumptionUsedDocumentCount: consumptionSummary.usedDocumentCount,
+        consumptionVerifiedDocumentCount: consumptionSummary.verifiedDocumentCount,
+        consumptionIgnoredDocumentCount: consumptionSummary.ignoredDocumentCount,
+        consumptionUnreportedDocumentCount: consumptionSummary.unreportedDocumentCount,
+        consumptionWeakReceiptBindingCount: consumptionSummary.weakReceiptBindingCount,
+        consumptionUnexpectedClaimCount: consumptionSummary.unexpectedClaimCount,
+        consumptionStaleCommittedWithoutConsumptionCount: consumptionSummary.staleCommittedWithoutConsumptionCount,
+        consumptionClosureGapCount: consumptionSummary.closureGapCount,
         latest: latest ? {
             requestId: String(latest.requestId || ""),
             status: String(latest.status || ""),
@@ -21123,6 +23789,10 @@ function summarizeGroupTypedMemoryManifestSelectorDecisions(scopeId, options = {
             selectorProject: String(latest.selectorProject || ""),
             selectorAgentType: String(latest.selectorAgentType || ""),
             selectorModel: String(latest.selectorModel || ""),
+            calibrationChecksum: String(latest.calibrationChecksum || ""),
+            calibrationHintCount: Number(latest.calibrationHintCount || latest.calibration?.hintCount || 0),
+            calibrationEvidenceCount: Number(latest.calibrationEvidenceCount || latest.calibration?.evidenceCount || 0),
+            calibration: latest.calibration || null,
             decisionFile: String(latest.decisionFile || ""),
         } : null,
         rows: options.includeRows === true ? bounded.map(row => ({
@@ -21131,6 +23801,8 @@ function summarizeGroupTypedMemoryManifestSelectorDecisions(scopeId, options = {
             valid: row.valid === true,
             candidateCount: Number(row.candidateCount || 0),
             selectedCount: Number(row.selectedRelPaths?.length || 0),
+            calibrationHintCount: Number(row.calibrationHintCount || row.calibration?.hintCount || 0),
+            calibrationEvidenceCount: Number(row.calibrationEvidenceCount || row.calibration?.evidenceCount || 0),
             completedAt: String(row.completedAt || ""),
         })) : undefined,
     };

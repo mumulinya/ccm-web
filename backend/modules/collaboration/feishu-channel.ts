@@ -9,6 +9,7 @@ const STATE_FILE = path.join(CCM_DIR, "feishu-channel-state.json");
 const SESSION_DIR = path.join(CCM_DIR, "sessions");
 const CONTROL_BOT_PID_FILE = path.join(CCM_DIR, "pids", "ccm-control-bot.pid");
 const CONTROL_BOT_LOG_FILE = path.join(CCM_DIR, "logs", "ccm-control-bot.log");
+const CONTROL_BOT_CONFIG_FILE = path.join(CCM_DIR, "control-bot", "config.toml");
 const DELIVERY_LOCK_DIR = path.join(CCM_DIR, "feishu-channel-locks");
 const DELIVERY_LOCK_STALE_MS = 2 * 60_000;
 const MAX_BINDINGS = 500;
@@ -452,7 +453,22 @@ function processAlive(pid: number) {
   try { process.kill(pid, 0); return true; } catch { return false; }
 }
 
-function controlBotSocketSnapshot() {
+function configuredControlBotPort() {
+  try {
+    const match = fs.readFileSync(CONTROL_BOT_CONFIG_FILE, "utf-8").match(/--port=(\d{1,5})/);
+    return match ? Number(match[1]) : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function lastLogTimestamp(log: string, messagePattern: string) {
+  const expression = new RegExp(`time=([^\\s]+)[^\\n]*msg="${messagePattern}`, "gi");
+  const value = [...log.matchAll(expression)].at(-1)?.[1] || "";
+  return { value, at: value ? Date.parse(value) : 0 };
+}
+
+function controlBotSocketSnapshot(expectedPort: number) {
   let pid = 0;
   try { pid = Number(fs.readFileSync(CONTROL_BOT_PID_FILE, "utf-8").trim()); } catch {}
   let log = "";
@@ -468,18 +484,38 @@ function controlBotSocketSnapshot() {
   const connected = [...log.matchAll(/^(.*)\[(?:Info|INFO)\].*connected to wss:\/\/msg-frontier\.feishu\.cn.*$/gmi)].at(-1)?.[1]?.trim() || "";
   const disconnected = [...log.matchAll(/^(.*)\[(?:Info|INFO)\].*disconnected to wss:\/\/msg-frontier\.feishu\.cn.*$/gmi)].at(-1)?.[1]?.trim() || "";
   const socketConnected = !!connected && (!disconnected || connected > disconnected);
-  return { pid, process_alive: processAlive(pid), socket_connected: socketConnected, last_connected_at: connected, last_disconnected_at: disconnected };
+  const turnStarted = lastLogTimestamp(log, "processing message");
+  const completed = lastLogTimestamp(log, "turn complete");
+  const timedOut = lastLogTimestamp(log, 'agent session idle timeout:[^\"]*');
+  const engineStarted = lastLogTimestamp(log, "engine started");
+  const lastSettledAt = Math.max(completed.at, timedOut.at, engineStarted.at);
+  const pendingSince = turnStarted.at > lastSettledAt ? turnStarted.value : "";
+  const turnStalled = !!pendingSince && Date.now() - turnStarted.at > 2 * 60_000;
+  const targetPort = configuredControlBotPort();
+  return {
+    pid,
+    process_alive: processAlive(pid),
+    socket_connected: socketConnected,
+    last_connected_at: connected,
+    last_disconnected_at: disconnected,
+    process_started_at: engineStarted.value,
+    target_port: targetPort,
+    expected_port: expectedPort,
+    endpoint_current: targetPort === expectedPort,
+    pending_turn_since: pendingSince,
+    turn_stalled: turnStalled,
+  };
 }
 
-export function getFeishuChannelHealth() {
+export function getFeishuChannelHealth(expectedPort = Number(process.env.CCM_PORT || process.argv[2] || 3080)) {
   const config = loadFeishuConfig();
   const reports = loadAutoDevNotifyConfig();
   const state = loadState();
-  const socket = controlBotSocketSnapshot();
+  const socket = controlBotSocketSnapshot(expectedPort);
   const ready = config.control_bot_enabled === true && !!(config.control_bot_app_id || config.app_id) && !!(config.control_bot_app_secret || config.app_secret);
   return {
     schema: "ccm-feishu-channel-health-v1",
-    healthy: ready && socket.process_alive && socket.socket_connected,
+    healthy: ready && socket.process_alive && socket.socket_connected && socket.endpoint_current && !socket.turn_stalled,
     checked_at: new Date().toISOString(),
     control_bot_ready: ready,
     webhook_ready: !!config.webhook_url,

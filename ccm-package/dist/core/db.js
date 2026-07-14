@@ -76,6 +76,7 @@ const path = __importStar(require("path"));
 const os = __importStar(require("os"));
 const credential_store_1 = require("./credential-store");
 const tool_catalog_management_1 = require("../tools/tool-catalog-management");
+const internal_skill_catalog_1 = require("../skills/internal-skill-catalog");
 const CCM_DIR = path.join(os.homedir(), ".cc-connect");
 const CONFIGS_DIR = path.join(CCM_DIR, "configs");
 const PID_DIR = path.join(CCM_DIR, "pids");
@@ -317,12 +318,45 @@ function loadSkills() {
     }
 }
 function saveSkill(skill) {
+    (0, internal_skill_catalog_1.assertCcmInternalSkillMutable)(skill?.name, "修改、停用或覆盖");
     const filename = skill.name.replace(/[^a-zA-Z0-9-_]/g, '_') + '.json';
-    writeJsonAtomic(path.join(exports.SKILLS_DIR, filename), skill);
+    const filePath = path.join(exports.SKILLS_DIR, filename);
+    if (fs.existsSync(filePath)) {
+        try {
+            const current = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+            if (current?.immutable || current?.systemManaged || current?.origin === "internal") {
+                const error = new Error(`受系统管理的 Skill "${skill.name}" 不能修改、停用或覆盖`);
+                error.code = "CCM_INTERNAL_SKILL_IMMUTABLE";
+                error.statusCode = 403;
+                throw error;
+            }
+        }
+        catch (error) {
+            if (error?.code === "CCM_INTERNAL_SKILL_IMMUTABLE")
+                throw error;
+        }
+    }
+    writeJsonAtomic(filePath, skill);
 }
 function deleteSkill(name) {
+    (0, internal_skill_catalog_1.assertCcmInternalSkillMutable)(name, "删除");
     const filename = name.replace(/[^a-zA-Z0-9-_]/g, '_') + '.json';
     const filePath = path.join(exports.SKILLS_DIR, filename);
+    if (fs.existsSync(filePath)) {
+        try {
+            const current = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+            if (current?.immutable || current?.systemManaged || current?.origin === "internal" || (0, internal_skill_catalog_1.isCcmInternalSkillName)(current?.name)) {
+                const error = new Error(`受系统管理的 Skill "${name}" 不能删除`);
+                error.code = "CCM_INTERNAL_SKILL_IMMUTABLE";
+                error.statusCode = 403;
+                throw error;
+            }
+        }
+        catch (error) {
+            if (error?.code === "CCM_INTERNAL_SKILL_IMMUTABLE")
+                throw error;
+        }
+    }
     try {
         if (fs.existsSync(filePath)) {
             const skill = JSON.parse(fs.readFileSync(filePath, "utf-8"));

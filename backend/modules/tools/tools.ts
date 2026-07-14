@@ -34,6 +34,7 @@ import { getRuntimeToolRealCliMatrixStatus, startRuntimeToolRealCliMatrix } from
 import { handleTerminalApi } from "./terminal";
 import { completeToolCatalogMutationLifecycle, previewToolCatalogMutationImpact } from "./marketplace";
 import { mergeMcpToolUpdate, mergeSkillUpdate, normalizeToolCatalogName, redactMcpToolForDisplay } from "../../tools/tool-catalog-management";
+import { isCcmInternalSkillName } from "../../skills/internal-skill-catalog";
 const { toolManager } = require("../../tools/tool-manager");
 const TOOL_CATALOG_AUDIT_FILE = path.join(os.homedir(), ".cc-connect", "tools", "catalog-operations.jsonl");
 const TOOL_INVOCATION_AUDIT_FILES = {
@@ -1369,7 +1370,51 @@ const customSkillRoots = [
   { root: path.join(os.homedir(), ".gemini", "config", "skills"), source: "gemini" },
 ];
 
-function loadCustomSkills() {
+function skillTemplateRoot() {
+  const configured = String(process.env.CCM_ROLE_SKILL_TEMPLATE_ROOT || "").trim();
+  return configured
+    ? path.resolve(configured)
+    : path.resolve(__dirname, "..", "..", "..", "templates", "skills");
+}
+
+function readSkillManual(name: any) {
+  const normalizedName = normalizeToolCatalogName(name);
+  const skill = loadSkills().find(item => String(item.name) === normalizedName);
+  if (!skill) return null;
+
+  let skillFile = "";
+  if (isCcmInternalSkillName(normalizedName)) {
+    skillFile = path.join(skillTemplateRoot(), normalizedName.toLowerCase(), "SKILL.md");
+  } else if (skill?.packagePath) {
+    const packageRoot = path.resolve(SKILL_PACKAGES_DIR);
+    const packagePath = path.resolve(String(skill.packagePath));
+    const relative = path.relative(packageRoot, packagePath);
+    if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
+      throw new Error("外部 Skill 手册路径不在受控目录中");
+    }
+    skillFile = path.join(packagePath, "SKILL.md");
+  }
+
+  let content = "";
+  if (skillFile) {
+    if (!fs.existsSync(skillFile)) throw new Error(`Skill 手册不存在：${normalizedName}`);
+    if (fs.statSync(skillFile).size > 1024 * 1024) throw new Error("Skill 手册超过 1 MB，无法在线查看");
+    content = fs.readFileSync(skillFile, "utf-8");
+  } else {
+    content = `---\nname: ${normalizedName}\ndescription: ${String(skill.description || "").replace(/[\r\n]+/g, " ")}\n---\n\n${String(skill.prompt || "").trim()}`;
+  }
+
+  return {
+    id: normalizedName,
+    name: normalizedName,
+    description: String(skill.description || ""),
+    content,
+    source: isCcmInternalSkillName(normalizedName) ? "ccm-internal" : String(skill.origin || "user"),
+    readOnly: isCcmInternalSkillName(normalizedName) || skill.immutable === true,
+  };
+}
+
+export function loadCustomSkills() {
   const result: any[] = [];
   const seen = new Set<string>();
   for (const source of customSkillRoots) {
@@ -1378,6 +1423,7 @@ function loadCustomSkills() {
       const folders = fs.readdirSync(source.root, { withFileTypes: true })
         .filter(dirent => dirent.isDirectory() && !dirent.name.startsWith("."));
       for (const folder of folders) {
+        if (isCcmInternalSkillName(folder.name)) continue;
         const folderPath = path.join(source.root, folder.name);
         const skillMdPath = path.join(folderPath, "SKILL.md");
         if (!fs.existsSync(skillMdPath)) continue;
@@ -1390,6 +1436,7 @@ function loadCustomSkills() {
         const descMatch = yamlText.match(/^description:\s*(.*)$/mi);
         if (nameMatch) name = nameMatch[1].replace(/^['"]|['"]$/g, "").trim();
         if (descMatch) description = descMatch[1].replace(/^['"]|['"]$/g, "").trim();
+        if (isCcmInternalSkillName(name)) continue;
         if (seen.has(name)) continue;
         seen.add(name);
         result.push({
@@ -1654,6 +1701,20 @@ export function handleToolsAndMetricsApi(pathname: string, req: any, res: any, p
   }
 
   // === Skills API ===
+  if (pathname === "/api/skills/manual" && req.method === "GET") {
+    try {
+      const skill = readSkillManual(parsed.query.name);
+      if (!skill) {
+        sendJson(res, { success: false, error: "Skill 不存在" }, 404);
+        return true;
+      }
+      sendJson(res, { success: true, skill });
+    } catch (e: any) {
+      sendJson(res, { success: false, error: e.message }, 400);
+    }
+    return true;
+  }
+
   if (pathname === "/api/skills/customizations" && req.method === "GET") {
     sendJson(res, { success: true, skills: loadCustomSkills() });
     return true;
@@ -1673,7 +1734,18 @@ export function handleToolsAndMetricsApi(pathname: string, req: any, res: any, p
         const name = normalizeToolCatalogName(payload.name);
         const previous = loadSkills().find(item => String(item.name) === name) || null;
         if (payload.createOnly === true && previous) return sendJson(res, { success: false, error: "同名 Prompt Skill 已存在" }, 409);
-        const skill = mergeSkillUpdate(previous, { ...payload, name }, { create: !previous });
+        const skill = {
+          ...mergeSkillUpdate(previous, { ...payload, name }, { create: !previous }),
+          origin: previous?.origin || (previous?.marketplace ? "external" : "user"),
+          scope: previous?.scope || (previous?.marketplace ? "external" : "user"),
+          sourceType: previous?.sourceType || (previous?.marketplace ? "marketplace" : "prompt"),
+          immutable: false,
+          deletable: true,
+          editable: true,
+          disableable: true,
+          systemManaged: false,
+          roleSkill: false,
+        };
         saveSkill(skill);
         let reload;
         try {
@@ -1688,7 +1760,7 @@ export function handleToolsAndMetricsApi(pathname: string, req: any, res: any, p
         }
         sendJson(res, { success: true, skill, reload });
       } catch (e: any) {
-        sendJson(res, { success: false, error: e.message }, 400);
+        sendJson(res, { success: false, error: e.message, code: e.code }, Number(e.statusCode || 400));
       }
     });
     return true;
@@ -1718,7 +1790,7 @@ export function handleToolsAndMetricsApi(pathname: string, req: any, res: any, p
         }
         sendJson(res, { success: true, removed: !!previous, impact, reload });
       } catch (e: any) {
-        sendJson(res, { success: false, error: e.message }, 400);
+        sendJson(res, { success: false, error: e.message, code: e.code }, Number(e.statusCode || 400));
       }
     });
     return true;

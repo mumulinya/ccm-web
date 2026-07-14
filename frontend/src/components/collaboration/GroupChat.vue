@@ -3,6 +3,7 @@ import { ref, onMounted, onUnmounted, nextTick, watch, inject, computed } from '
 import { groupsApi, projectsApi } from '../../api/index.js'
 import { toast, confirmDialog } from '../../utils/toast.js'
 import ChatComposer from '../common/ChatComposer.vue'
+import ConversationTurnControls from '../common/ConversationTurnControls.vue'
 import CommandResultCard from '../common/CommandResultCard.vue'
 import MessageNavigator from '../common/MessageNavigator.vue'
 import ConflictPlanMessage from './ConflictPlanMessage.vue'
@@ -31,6 +32,7 @@ import { useChatTemplates } from '../../composables/useChatTemplates.js'
 import { useCodeChangeDrawer } from '../../composables/useCodeChangeDrawer.js'
 import { useMessageNavigation } from '../../composables/useMessageNavigation.js'
 import { usePinnedScroll } from '../../composables/usePinnedScroll.js'
+import { useConversationTurnControl } from '../../composables/useConversationTurnControl.js'
 import { buildGroupConversationKnowledgePayload, postKnowledgeCapture } from '../../utils/knowledgeCapture.js'
 import { normalizeTestAgentExecutionPlanSummary, sanitizeUserFacingAgentText, sanitizeUserFacingLegacyTerminology, sanitizeUserFacingPlanText, sanitizeUserFacingStructure } from '../../utils/agentDisplay.js'
 
@@ -1536,6 +1538,90 @@ const saveCurrentGroupConversationKnowledge = async () => {
 const isStreaming = ref(false)
 const thinkingMessages = ref([])
 const pendingGroupSendRetry = ref(null)
+const groupStreamController = ref(null)
+const activeGroupTaskId = ref('')
+const stoppingGroupTurn = ref(false)
+const groupTurnConversationId = computed(() => currentGroup.value?.id && currentGroupSessionId.value
+  ? `${currentGroup.value.id}:${currentGroupSessionId.value}`
+  : '')
+const groupTurnControl = useConversationTurnControl({
+  scope: 'group',
+  conversationId: groupTurnConversationId,
+  busy: isStreaming,
+})
+
+const stopGroupCurrentWork = async ({ preserveTask = false } = {}) => {
+  if (!isStreaming.value || stoppingGroupTurn.value) return
+  stoppingGroupTurn.value = true
+  try {
+    const groupId = currentGroup.value?.id
+    const sessionId = currentGroupSessionId.value
+    if (groupId && sessionId) {
+      await fetch('/api/conversation-turns/stop', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          scope: 'group',
+          group_id: groupId,
+          group_session_id: sessionId,
+          task_id: activeGroupTaskId.value,
+          reason: preserveTask ? '用户引导当前群聊任务，停止旧执行后续接' : '用户停止群聊主 Agent 当前工作',
+          actor: preserveTask ? 'group-chat-steer' : 'group-chat-stop',
+        }),
+      }).catch(() => null)
+    }
+    if (!preserveTask && activeGroupTaskId.value) {
+      await fetch('/api/tasks/cancel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: activeGroupTaskId.value, reason: '用户从群聊会话停止当前工作' }),
+      }).catch(() => null)
+    }
+    groupStreamController.value?.abort()
+  } finally {
+    stoppingGroupTurn.value = false
+  }
+}
+
+const drainGroupTurnQueue = () => groupTurnControl.drain(async (turn) => {
+  const result = await sendMessage({ queueTurn: turn })
+  if (result?.success === false) throw new Error(result.error || '群聊消息没有完成')
+  return { task_id: result?.taskId || '' }
+})
+watch(
+  () => [groupTurnConversationId.value, isStreaming.value, groupTurnControl.turns.value.filter(turn => turn.status === 'queued').length],
+  ([conversationId, busy, queued]) => {
+    if (conversationId && !busy && queued) window.setTimeout(() => drainGroupTurnQueue().catch(() => {}), 0)
+  },
+  { flush: 'post' },
+)
+
+const submitGroupMessageWhileBusy = async () => {
+  const message = newMessage.value.trim()
+  if (!message) return
+  if (messageFiles.value.length) {
+    toast.info('工作中的排队消息暂不保存本地附件，请停止当前工作后连同附件发送')
+    return
+  }
+  const requestedMode = groupTurnControl.mode.value
+  await groupTurnControl.enqueue({
+    message,
+    mode: requestedMode,
+    activeRunId: activeGroupTaskId.value,
+    metadata: {
+      group_id: currentGroup.value.id,
+      group_session_id: currentGroupSessionId.value,
+      target_project: targetAgent.value,
+      message_mode: messageMode.value,
+      continuation_task_id: activeGroupTaskId.value,
+      requested_mode: requestedMode,
+    },
+  })
+  newMessage.value = ''
+  toast.success(requestedMode === 'steer' ? '已接收引导，正在停止旧执行并沿用当前任务继续' : '已加入队列，当前协作结束后会自动发送')
+  if (requestedMode === 'steer') await stopGroupCurrentWork({ preserveTask: true })
+  window.setTimeout(() => drainGroupTurnQueue().catch(() => {}), 0)
+}
 
 const groupSendRetrySignature = ({ groupId, target, mode, message, files, directed }) => JSON.stringify({
   groupId,
@@ -1549,10 +1635,12 @@ const groupSendRetrySignature = ({ groupId, target, mode, message, files, direct
   memoryContent: directed?.memory_content || '',
 })
 
-const sendMessage = async () => {
-  if ((!newMessage.value.trim() && messageFiles.value.length === 0) || !currentGroup.value) return
-  const msg = newMessage.value.trim()
-  const filesToSend = [...messageFiles.value]
+const sendMessage = async (options = {}) => {
+  const queuedTurn = options?.queueTurn || null
+  if (isStreaming.value && !queuedTurn) return submitGroupMessageWhileBusy()
+  if ((!queuedTurn && !newMessage.value.trim() && messageFiles.value.length === 0) || !currentGroup.value) return
+  const msg = queuedTurn ? String(queuedTurn.message || '').trim() : newMessage.value.trim()
+  const filesToSend = queuedTurn ? [] : [...messageFiles.value]
   const taskSupplementTarget = isTaskSupplementMode.value ? { ...pendingGroupTaskInput.value } : null
   const clarificationResponseTarget = !taskSupplementTarget && isClarificationResponseMode.value
     ? { ...pendingGroupClarificationInput.value }
@@ -1560,9 +1648,15 @@ const sendMessage = async () => {
   const directMemoryCommand = !taskSupplementTarget && !clarificationResponseTarget && pendingDirectMemoryCommand.value
     ? { ...pendingDirectMemoryCommand.value }
     : null
-  const taskContinuationFields = taskSupplementTarget
+  const queuedSteerFields = queuedTurn?.metadata?.requested_mode === 'steer' && queuedTurn?.metadata?.continuation_task_id ? {
+    continuation_task_id: queuedTurn.metadata.continuation_task_id,
+    continuation_kind: 'supplement',
+    interrupt_current_run: false,
+    message_mode: 'project_task',
+  } : null
+  const taskContinuationFields = queuedSteerFields || (taskSupplementTarget
     ? buildWaitingUserTaskContinuationFields(taskSupplementTarget)
-    : null
+    : null)
   const clarificationResponseFields = clarificationResponseTarget
     ? buildGroupClarificationResponseFields(clarificationResponseTarget)
     : null
@@ -1573,8 +1667,8 @@ const sendMessage = async () => {
   } : null)
   const retrySignature = groupSendRetrySignature({
     groupId: currentGroup.value.id,
-    target: targetAgent.value,
-    mode: directedInputFields?.message_mode || messageMode.value,
+    target: queuedTurn?.metadata?.target_project || targetAgent.value,
+    mode: directedInputFields?.message_mode || queuedTurn?.metadata?.message_mode || messageMode.value,
     message: msg,
     files: filesToSend,
     directed: directedInputFields,
@@ -1597,7 +1691,7 @@ ${filesToSend.map(f => `- ${f.name}（${formatFileSize(f.size)}）`).join('\n')}
     messages.value.push({
       id: clientMessageId,
       role: 'user',
-      target: targetAgent.value === 'all' ? 'coordinator' : targetAgent.value,
+      target: (queuedTurn?.metadata?.target_project || targetAgent.value) === 'all' ? 'coordinator' : (queuedTurn?.metadata?.target_project || targetAgent.value),
       content: `${msg || '请处理附件'}${attachmentText}`,
       timestamp: new Date().toISOString(),
       ...(taskSupplementTarget ? { task_id: taskSupplementTarget.taskId } : {}),
@@ -1620,7 +1714,7 @@ ${filesToSend.map(f => `- ${f.name}（${formatFileSize(f.size)}）`).join('\n')}
   // 创建 Agent 回复消息
   const agentMsg = {
     role: 'assistant',
-    agent: targetAgent.value === 'all' ? 'coordinator' : targetAgent.value,
+    agent: (queuedTurn?.metadata?.target_project || targetAgent.value) === 'all' ? 'coordinator' : (queuedTurn?.metadata?.target_project || targetAgent.value),
     content: '',
     timestamp: new Date().toISOString()
   }
@@ -1643,10 +1737,10 @@ ${filesToSend.map(f => `- ${f.name}（${formatFileSize(f.size)}）`).join('\n')}
     payload = new FormData()
     payload.append('group_id', currentGroup.value.id)
     payload.append('group_session_id', currentGroupSessionId.value)
-    payload.append('target_project', targetAgent.value === 'all' ? 'all' : targetAgent.value)
+    payload.append('target_project', (queuedTurn?.metadata?.target_project || targetAgent.value) === 'all' ? 'all' : (queuedTurn?.metadata?.target_project || targetAgent.value))
     payload.append('message', msg)
     payload.append('client_message_id', clientMessageId)
-    payload.append('message_mode', directedInputFields?.message_mode || messageMode.value)
+    payload.append('message_mode', directedInputFields?.message_mode || queuedTurn?.metadata?.message_mode || messageMode.value)
     if (directedInputFields) {
       Object.entries(directedInputFields)
         .filter(([key]) => key !== 'message_mode')
@@ -1657,34 +1751,41 @@ ${filesToSend.map(f => `- ${f.name}（${formatFileSize(f.size)}）`).join('\n')}
     payload = {
       group_id: currentGroup.value.id,
       group_session_id: currentGroupSessionId.value,
-      target_project: targetAgent.value === 'all' ? undefined : targetAgent.value,
+      target_project: (queuedTurn?.metadata?.target_project || targetAgent.value) === 'all' ? undefined : (queuedTurn?.metadata?.target_project || targetAgent.value),
       message: msg,
       client_message_id: clientMessageId,
-      message_mode: messageMode.value,
+      message_mode: queuedTurn?.metadata?.message_mode || messageMode.value,
       ...(directedInputFields || {})
     }
   }
 
   let res
+  const controller = new AbortController()
+  groupStreamController.value = controller
   try {
-    res = await groupsApi.send(payload)
+    res = await groupsApi.send(payload, { signal: controller.signal })
   } catch (error) {
-    newMessage.value = msg
-    messageFiles.value = filesToSend
+    const stopped = error?.name === 'AbortError'
+    if (!stopped) {
+      newMessage.value = msg
+      messageFiles.value = filesToSend
+    }
     const optimisticIdx = messages.value.findIndex(item => item.id === clientMessageId)
     if (optimisticIdx !== -1) messages.value.splice(optimisticIdx, 1)
     isStreaming.value = false
     const thinkingIdx = messages.value.indexOf(thinkingMsg)
     if (thinkingIdx !== -1) messages.value.splice(thinkingIdx, 1)
-    toast.error(error?.message || '消息提交失败，请检查后重试')
+    if (!stopped) toast.error(error?.message || '消息提交失败，请检查后重试')
     nextTick(focusGroupInput)
-    return
+    if (groupStreamController.value === controller) groupStreamController.value = null
+    return { success: false, error: stopped ? '当前工作已停止' : (error?.message || '消息提交失败') }
   }
 
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
   let sseBuffer = ''
   let streamFailed = false
+  let streamStopped = false
   const seenStreamEventIds = new Set()
 
   const handleStreamLine = (line) => {
@@ -1715,6 +1816,7 @@ ${filesToSend.map(f => `- ${f.name}（${formatFileSize(f.size)}）`).join('\n')}
         waitingCrossReply.value = applied || waitingCrossReply.value
         scrollToBottom()
       } else if (data.type === 'task_created') {
+        activeGroupTaskId.value = data.task?.id || activeGroupTaskId.value
         applyMainAgentProgressCheckpoint(data)
         const taskMessage = {
           id: data.messageId,
@@ -1744,6 +1846,7 @@ ${filesToSend.map(f => `- ${f.name}（${formatFileSize(f.size)}）`).join('\n')}
         scrollToBottom()
       } else if (data.type === 'task_updated') {
         const taskId = data.taskId || data.task_id || data.task?.id || ''
+        activeGroupTaskId.value = taskId || activeGroupTaskId.value
         const taskMessageIndex = messages.value.findIndex(item => getMessageTaskId(item) === taskId && getTaskCard(item))
         if (taskMessageIndex >= 0) {
           const current = messages.value[taskMessageIndex]
@@ -1962,12 +2065,17 @@ ${filesToSend.map(f => `- ${f.name}（${formatFileSize(f.size)}）`).join('\n')}
     }
   } catch (error) {
     streamFailed = true
-    newMessage.value = msg
-    messageFiles.value = filesToSend
-    toast.error('连接中断，重新发送会继续同一次请求')
+    const stopped = error?.name === 'AbortError'
+    streamStopped = stopped
+    if (!stopped) {
+      newMessage.value = msg
+      messageFiles.value = filesToSend
+      toast.error('连接中断，重新发送会继续同一次请求')
+    }
   }
 
   isStreaming.value = false
+  if (groupStreamController.value === controller) groupStreamController.value = null
   const thinkingIdx = messages.value.indexOf(thinkingMsg)
   if (thinkingIdx !== -1) messages.value.splice(thinkingIdx, 1)
 
@@ -2002,10 +2110,12 @@ ${filesToSend.map(f => `- ${f.name}（${formatFileSize(f.size)}）`).join('\n')}
       && pendingDirectMemoryCommand.value?.content === directMemoryCommand.content) {
       pendingDirectMemoryCommand.value = null
     }
-  } else if (streamFailed && !newMessage.value.trim()) {
+  } else if (streamFailed && !streamStopped && !newMessage.value.trim()) {
     newMessage.value = msg
     messageFiles.value = filesToSend
   }
+  if (!queuedTurn) window.setTimeout(() => drainGroupTurnQueue().catch(() => {}), 0)
+  return { success: !streamFailed, error: streamFailed ? '群聊消息没有完成' : '', taskId: activeGroupTaskId.value }
 }
 
 // 等待跨 Agent 回复状态
@@ -2519,13 +2629,25 @@ if (activeSelectedTemplate) {
         </div>
 
         <!-- 输入栏 -->
+        <ConversationTurnControls
+          v-if="currentGroup"
+          :busy="isStreaming"
+          v-model:mode="groupTurnControl.mode.value"
+          :turns="groupTurnControl.turns.value"
+          :stopping="stoppingGroupTurn"
+          @stop="stopGroupCurrentWork()"
+          @cancel="groupTurnControl.cancel"
+          @retry="(turn) => groupTurnControl.retry(turn).then(() => drainGroupTurnQueue())"
+        />
         <ChatComposer
           v-if="currentGroup"
           v-model="newMessage"
           input-id="groupChatInput"
           :placeholder="groupComposerPlaceholder"
-          :send-label="groupComposerSendLabel"
-          :disabled="isStreaming"
+          :send-label="isStreaming ? (groupTurnControl.mode.value === 'steer' ? '引导' : '排队') : groupComposerSendLabel"
+          :disabled="false"
+          :busy="isStreaming"
+          :allow-input-while-busy="true"
           :files="messageFiles"
           :slash="slash"
           :templates-open="showTemplateSelector"

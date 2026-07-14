@@ -44,80 +44,10 @@ const crypto = __importStar(require("crypto"));
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const db_1 = require("../core/db");
-exports.CCM_ROLE_SKILL_NAMES = {
-    global: "ccm-global-mission-lead",
-    group: "ccm-group-coordination-lead",
-    project: "ccm-project-delivery-worker",
-    test: "ccm-test-acceptance-verifier",
-    receipt: "ccm-delivery-receipt",
-    evidence: "ccm-acceptance-evidence",
-    requirementIntake: "ccm-requirement-intake",
-    taskDecomposition: "ccm-task-decomposition",
-    deliveryReviewRework: "ccm-delivery-review-rework",
-    projectSourceResearch: "ccm-project-source-research",
-    documentDrivenDelivery: "ccm-document-driven-delivery",
-    incidentDiagnosis: "ccm-incident-diagnosis",
-    frontendVisualQa: "ccm-frontend-visual-qa",
-    releaseReadiness: "ccm-release-readiness",
-};
-const ROLE_SKILL_CATALOG = [
-    {
-        name: exports.CCM_ROLE_SKILL_NAMES.global,
-        description: "Coordinate explicit CCM work across groups or projects, supervise mission evidence, and return a friendly final summary.",
-    },
-    {
-        name: exports.CCM_ROLE_SKILL_NAMES.group,
-        description: "Plan executable group work, dispatch scoped project Agents, review receipts, request rework, and hand off acceptance.",
-    },
-    {
-        name: exports.CCM_ROLE_SKILL_NAMES.project,
-        description: "Execute a scoped CCM project assignment, implement and verify changes, and return a structured delivery receipt.",
-    },
-    {
-        name: exports.CCM_ROLE_SKILL_NAMES.test,
-        description: "Independently verify CCM acceptance criteria with commands, APIs, browser checks, screenshots, and conservative verdicts.",
-    },
-    {
-        name: exports.CCM_ROLE_SKILL_NAMES.receipt,
-        description: "Produce a structured CCM implementation receipt containing actions, changed files, verification, blockers, and Skill usage.",
-    },
-    {
-        name: exports.CCM_ROLE_SKILL_NAMES.evidence,
-        description: "Map CCM acceptance criteria to reproducible command, API, browser, screenshot, and artifact evidence.",
-    },
-    {
-        name: exports.CCM_ROLE_SKILL_NAMES.requirementIntake,
-        description: "Extract executable goals, contracts, constraints, source references, and acceptance criteria from messages and documents.",
-    },
-    {
-        name: exports.CCM_ROLE_SKILL_NAMES.taskDecomposition,
-        description: "Split delivery work into scoped project assignments with semantic dependencies and observable completion conditions.",
-    },
-    {
-        name: exports.CCM_ROLE_SKILL_NAMES.deliveryReviewRework,
-        description: "Review project receipts against assignments and acceptance criteria, then produce precise evidence-based rework.",
-    },
-    {
-        name: exports.CCM_ROLE_SKILL_NAMES.projectSourceResearch,
-        description: "Inspect current project source, repository state, instructions, and established patterns before implementation.",
-    },
-    {
-        name: exports.CCM_ROLE_SKILL_NAMES.documentDrivenDelivery,
-        description: "Trace PRD, API, image, and attachment clauses through implementation and criterion-linked verification.",
-    },
-    {
-        name: exports.CCM_ROLE_SKILL_NAMES.incidentDiagnosis,
-        description: "Reproduce runtime or build failures, isolate the supported root cause, repair it, and verify recovery.",
-    },
-    {
-        name: exports.CCM_ROLE_SKILL_NAMES.frontendVisualQa,
-        description: "Verify real frontend behavior, responsive layout, browser state, console failures, and screenshot evidence.",
-    },
-    {
-        name: exports.CCM_ROLE_SKILL_NAMES.releaseReadiness,
-        description: "Assess build, configuration, compatibility, migration, rollout, rollback, and residual release risk.",
-    },
-];
+const internal_skill_catalog_1 = require("./internal-skill-catalog");
+var internal_skill_catalog_2 = require("./internal-skill-catalog");
+Object.defineProperty(exports, "CCM_ROLE_SKILL_NAMES", { enumerable: true, get: function () { return internal_skill_catalog_2.CCM_ROLE_SKILL_NAMES; } });
+const ROLE_SKILL_CATALOG = internal_skill_catalog_1.CCM_INTERNAL_SKILL_CATALOG;
 let installationChecked = false;
 function templateRoot() {
     const configured = String(process.env.CCM_ROLE_SKILL_TEMPLATE_ROOT || "").trim();
@@ -164,36 +94,19 @@ function writeJsonAtomic(file, value) {
         fs.renameSync(temporary, file);
     }
 }
-function syncPackage(source, destination) {
-    fs.mkdirSync(destination, { recursive: true });
-    for (const relative of listFiles(source)) {
-        const target = path.join(destination, relative);
-        fs.mkdirSync(path.dirname(target), { recursive: true });
-        const sourceBuffer = fs.readFileSync(path.join(source, relative));
-        const currentBuffer = fs.existsSync(target) ? fs.readFileSync(target) : null;
-        if (!currentBuffer || !sourceBuffer.equals(currentBuffer))
-            fs.writeFileSync(target, sourceBuffer);
-    }
-}
 function ensureRoleSkillsInstalled(options = {}) {
     if (installationChecked && !options.force)
         return { installed: [], available: ROLE_SKILL_CATALOG.map(item => item.name) };
     const sourceRoot = templateRoot();
     const installed = [];
     const available = [];
-    fs.mkdirSync(db_1.SKILL_PACKAGES_DIR, { recursive: true });
     fs.mkdirSync(db_1.SKILLS_DIR, { recursive: true });
     for (const definition of ROLE_SKILL_CATALOG) {
         const source = path.join(sourceRoot, definition.name);
         const sourceSkill = path.join(source, "SKILL.md");
         if (!fs.existsSync(sourceSkill))
             continue;
-        const destination = path.join(db_1.SKILL_PACKAGES_DIR, definition.name);
-        const before = fs.existsSync(path.join(destination, "SKILL.md")) ? packageFingerprint(destination) : "";
-        syncPackage(source, destination);
-        const contentHash = packageFingerprint(destination);
-        if (contentHash !== before)
-            installed.push(definition.name);
+        const contentHash = packageFingerprint(source);
         available.push(definition.name);
         const catalogFile = path.join(db_1.SKILLS_DIR, `${definition.name}.json`);
         let previous = {};
@@ -201,6 +114,9 @@ function ensureRoleSkillsInstalled(options = {}) {
             previous = JSON.parse(fs.readFileSync(catalogFile, "utf-8"));
         }
         catch { }
+        if (contentHash !== previous?.contentHash || path.resolve(previous?.packagePath || "") !== path.resolve(source)) {
+            installed.push(definition.name);
+        }
         writeJsonAtomic(catalogFile, {
             ...previous,
             name: definition.name,
@@ -210,10 +126,17 @@ function ensureRoleSkillsInstalled(options = {}) {
             enabled: true,
             version: "1.0.0",
             author: "CCM",
-            packagePath: destination,
-            skillFile: path.join(destination, "SKILL.md"),
-            packageStats: packageStats(destination),
+            packagePath: source,
+            skillFile: sourceSkill,
+            packageStats: packageStats(source),
             contentHash,
+            origin: "internal",
+            scope: "ccm-internal",
+            sourceType: "builtin",
+            immutable: true,
+            deletable: false,
+            editable: false,
+            disableable: false,
             systemManaged: true,
             roleSkill: true,
             marketplace: {
@@ -225,13 +148,24 @@ function ensureRoleSkillsInstalled(options = {}) {
                 ? previous.updated_at
                 : new Date().toISOString(),
         });
+        // Older releases copied built-ins into the external package directory.
+        // Reserved names now always resolve to the package-owned template above.
+        const legacyCopy = path.join(db_1.SKILL_PACKAGES_DIR, definition.name);
+        const relative = path.relative(path.resolve(db_1.SKILL_PACKAGES_DIR), path.resolve(legacyCopy));
+        if (path.resolve(source) !== path.resolve(legacyCopy)
+            && relative
+            && !relative.startsWith("..")
+            && !path.isAbsolute(relative)
+            && fs.existsSync(legacyCopy)) {
+            fs.rmSync(legacyCopy, { recursive: true, force: true });
+        }
     }
     installationChecked = true;
     return { installed, available };
 }
 function skillBody(name) {
     ensureRoleSkillsInstalled();
-    const skillPath = path.join(db_1.SKILL_PACKAGES_DIR, name, "SKILL.md");
+    const skillPath = path.join(templateRoot(), name, "SKILL.md");
     if (!fs.existsSync(skillPath))
         return { skillPath, body: "" };
     const markdown = fs.readFileSync(skillPath, "utf-8").replace(/^\uFEFF/, "");
@@ -284,58 +218,58 @@ function selectRoleSkills(role, taskText = "", options = {}) {
     const phase = options.phase || (role === "test-agent" ? "verification" : role === "project-child-agent" ? "execution" : "planning");
     const add = (name, kind, reason) => rows.push({ name, kind, reason });
     if (role === "global-agent") {
-        add(exports.CCM_ROLE_SKILL_NAMES.global, "role", "跨群聊任务路由与监督");
+        add(internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.global, "role", "跨群聊任务路由与监督");
         if (wantsRequirementIntake(taskText))
-            add(exports.CCM_ROLE_SKILL_NAMES.requirementIntake, "workflow", "消息或附件需要形成可执行需求");
+            add(internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.requirementIntake, "workflow", "消息或附件需要形成可执行需求");
         if (wantsDocumentDrivenDelivery(taskText))
-            add(exports.CCM_ROLE_SKILL_NAMES.documentDrivenDelivery, "workflow", "需求包含文档或接口契约");
+            add(internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.documentDrivenDelivery, "workflow", "需求包含文档或接口契约");
         if (wantsIncidentDiagnosis(taskText))
-            add(exports.CCM_ROLE_SKILL_NAMES.incidentDiagnosis, "workflow", "任务要求定位或修复故障");
+            add(internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.incidentDiagnosis, "workflow", "任务要求定位或修复故障");
         if (wantsReleaseReadiness(taskText))
-            add(exports.CCM_ROLE_SKILL_NAMES.releaseReadiness, "workflow", "任务涉及发布或生产变更");
+            add(internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.releaseReadiness, "workflow", "任务涉及发布或生产变更");
     }
     if (role === "group-main-agent") {
-        add(exports.CCM_ROLE_SKILL_NAMES.group, "role", "群聊任务计划、派发与复核");
+        add(internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.group, "role", "群聊任务计划、派发与复核");
         if (phase === "review" || phase === "summary") {
-            add(exports.CCM_ROLE_SKILL_NAMES.deliveryReviewRework, "workflow", "当前阶段需要复核回执或生成返工");
-            add(exports.CCM_ROLE_SKILL_NAMES.receipt, "shared", "读取统一子 Agent 交付回执");
+            add(internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.deliveryReviewRework, "workflow", "当前阶段需要复核回执或生成返工");
+            add(internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.receipt, "shared", "读取统一子 Agent 交付回执");
             if (wantsAcceptanceEvidence(taskText))
-                add(exports.CCM_ROLE_SKILL_NAMES.evidence, "shared", "复核验收项与实际证据");
+                add(internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.evidence, "shared", "复核验收项与实际证据");
         }
         else {
-            add(exports.CCM_ROLE_SKILL_NAMES.taskDecomposition, "workflow", "当前阶段需要拆解和路由任务");
+            add(internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.taskDecomposition, "workflow", "当前阶段需要拆解和路由任务");
             if (wantsRequirementIntake(taskText))
-                add(exports.CCM_ROLE_SKILL_NAMES.requirementIntake, "workflow", "消息或附件需要先提炼需求");
+                add(internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.requirementIntake, "workflow", "消息或附件需要先提炼需求");
             if (wantsDocumentDrivenDelivery(taskText))
-                add(exports.CCM_ROLE_SKILL_NAMES.documentDrivenDelivery, "workflow", "工作单需要保留文档条款追踪");
+                add(internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.documentDrivenDelivery, "workflow", "工作单需要保留文档条款追踪");
             if (wantsIncidentDiagnosis(taskText))
-                add(exports.CCM_ROLE_SKILL_NAMES.incidentDiagnosis, "workflow", "故障任务需要复现和根因链路");
+                add(internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.incidentDiagnosis, "workflow", "故障任务需要复现和根因链路");
             if (wantsReleaseReadiness(taskText))
-                add(exports.CCM_ROLE_SKILL_NAMES.releaseReadiness, "workflow", "计划涉及发布或迁移边界");
+                add(internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.releaseReadiness, "workflow", "计划涉及发布或迁移边界");
         }
     }
     if (role === "project-child-agent") {
-        add(exports.CCM_ROLE_SKILL_NAMES.project, "role", "限定范围内实施与验证");
-        add(exports.CCM_ROLE_SKILL_NAMES.projectSourceResearch, "workflow", "修改前确认当前源码和项目规范");
-        add(exports.CCM_ROLE_SKILL_NAMES.receipt, "shared", "向主 Agent 返回可复核回执");
+        add(internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.project, "role", "限定范围内实施与验证");
+        add(internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.projectSourceResearch, "workflow", "修改前确认当前源码和项目规范");
+        add(internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.receipt, "shared", "向主 Agent 返回可复核回执");
         if (wantsDocumentDrivenDelivery(taskText))
-            add(exports.CCM_ROLE_SKILL_NAMES.documentDrivenDelivery, "workflow", "按文档条款追踪实现覆盖");
+            add(internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.documentDrivenDelivery, "workflow", "按文档条款追踪实现覆盖");
         if (wantsIncidentDiagnosis(taskText))
-            add(exports.CCM_ROLE_SKILL_NAMES.incidentDiagnosis, "workflow", "先复现并定位根因再修改");
+            add(internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.incidentDiagnosis, "workflow", "先复现并定位根因再修改");
         if (wantsFrontendVisualQa(taskText))
-            add(exports.CCM_ROLE_SKILL_NAMES.frontendVisualQa, "workflow", "前端任务需要真实浏览器与视觉证据");
+            add(internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.frontendVisualQa, "workflow", "前端任务需要真实浏览器与视觉证据");
         if (wantsAcceptanceEvidence(taskText))
-            add(exports.CCM_ROLE_SKILL_NAMES.evidence, "shared", "任务要求验证或验收证据");
+            add(internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.evidence, "shared", "任务要求验证或验收证据");
         if (wantsReleaseReadiness(taskText))
-            add(exports.CCM_ROLE_SKILL_NAMES.releaseReadiness, "workflow", "任务涉及发布、升级或迁移");
+            add(internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.releaseReadiness, "workflow", "任务涉及发布、升级或迁移");
     }
     if (role === "test-agent") {
-        add(exports.CCM_ROLE_SKILL_NAMES.test, "role", "独立验收与保守结论");
-        add(exports.CCM_ROLE_SKILL_NAMES.evidence, "shared", "验收项与真实证据绑定");
+        add(internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.test, "role", "独立验收与保守结论");
+        add(internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.evidence, "shared", "验收项与真实证据绑定");
         if (wantsFrontendVisualQa(taskText))
-            add(exports.CCM_ROLE_SKILL_NAMES.frontendVisualQa, "workflow", "用户界面需要浏览器和截图验收");
+            add(internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.frontendVisualQa, "workflow", "用户界面需要浏览器和截图验收");
         if (wantsReleaseReadiness(taskText))
-            add(exports.CCM_ROLE_SKILL_NAMES.releaseReadiness, "workflow", "验收包含发布就绪条件");
+            add(internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.releaseReadiness, "workflow", "验收包含发布就绪条件");
     }
     const defaultMaxSkills = role === "project-child-agent" ? 6 : 4;
     const maxSkills = Math.max(1, Math.min(6, Number(options.maxSkills || defaultMaxSkills)));
@@ -345,7 +279,7 @@ function selectRoleSkills(role, taskText = "", options = {}) {
         return {
             ...row,
             role,
-            packagePath: path.join(db_1.SKILL_PACKAGES_DIR, row.name),
+            packagePath: path.join(templateRoot(), row.name),
             skillPath: loaded.skillPath,
             body: loaded.body,
         };
@@ -386,31 +320,31 @@ function runRoleSkillSelectionSelfTest() {
     const testWork = selectRoleSkills("test-agent", "在浏览器验证退款页面响应式布局并截图", { phase: "verification" });
     const checks = {
         allPackagesInstalled: ROLE_SKILL_CATALOG.every(item => installation.available.includes(item.name)
-            && fs.existsSync(path.join(db_1.SKILL_PACKAGES_DIR, item.name, "SKILL.md"))
-            && fs.existsSync(path.join(db_1.SKILL_PACKAGES_DIR, item.name, "agents", "openai.yaml"))
+            && fs.existsSync(path.join(templateRoot(), item.name, "SKILL.md"))
+            && fs.existsSync(path.join(templateRoot(), item.name, "agents", "openai.yaml"))
             && fs.existsSync(path.join(db_1.SKILLS_DIR, `${item.name}.json`))),
         ordinaryGlobalLoadsNoWorkSkills: ordinaryGlobal.length === 0,
         ordinaryGroupLoadsNoWorkSkills: ordinaryGroup.length === 0,
-        globalGetsOnlyRelevantSkills: globalWork[0]?.name === exports.CCM_ROLE_SKILL_NAMES.global
-            && globalWork.some(item => item.name === exports.CCM_ROLE_SKILL_NAMES.requirementIntake)
-            && globalWork.some(item => item.name === exports.CCM_ROLE_SKILL_NAMES.incidentDiagnosis)
-            && !globalWork.some(item => item.name === exports.CCM_ROLE_SKILL_NAMES.group),
-        groupGetsCoordinatorAndDecomposition: groupWork[0]?.name === exports.CCM_ROLE_SKILL_NAMES.group
-            && groupWork.some(item => item.name === exports.CCM_ROLE_SKILL_NAMES.taskDecomposition)
-            && !groupWork.some(item => item.name === exports.CCM_ROLE_SKILL_NAMES.project),
-        groupReviewGetsReviewAndReceipt: groupReview.some(item => item.name === exports.CCM_ROLE_SKILL_NAMES.deliveryReviewRework)
-            && groupReview.some(item => item.name === exports.CCM_ROLE_SKILL_NAMES.receipt),
-        contextualExecutionLoadsGroupSkill: contextualGroupWork[0]?.name === exports.CCM_ROLE_SKILL_NAMES.group,
-        projectGetsSourceReceiptAndMatchedWorkflows: projectWork[0]?.name === exports.CCM_ROLE_SKILL_NAMES.project
-            && projectWork.some(item => item.name === exports.CCM_ROLE_SKILL_NAMES.projectSourceResearch)
-            && projectWork.some(item => item.name === exports.CCM_ROLE_SKILL_NAMES.receipt)
-            && projectWork.some(item => item.name === exports.CCM_ROLE_SKILL_NAMES.documentDrivenDelivery)
-            && projectWork.some(item => item.name === exports.CCM_ROLE_SKILL_NAMES.frontendVisualQa),
-        incidentTaskGetsDiagnosis: incidentWork.some(item => item.name === exports.CCM_ROLE_SKILL_NAMES.incidentDiagnosis),
-        releaseTaskGetsReadiness: releaseWork.some(item => item.name === exports.CCM_ROLE_SKILL_NAMES.releaseReadiness),
-        testAgentGetsVerifierEvidenceAndVisualQa: testWork.some(item => item.name === exports.CCM_ROLE_SKILL_NAMES.test)
-            && testWork.some(item => item.name === exports.CCM_ROLE_SKILL_NAMES.evidence)
-            && testWork.some(item => item.name === exports.CCM_ROLE_SKILL_NAMES.frontendVisualQa),
+        globalGetsOnlyRelevantSkills: globalWork[0]?.name === internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.global
+            && globalWork.some(item => item.name === internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.requirementIntake)
+            && globalWork.some(item => item.name === internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.incidentDiagnosis)
+            && !globalWork.some(item => item.name === internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.group),
+        groupGetsCoordinatorAndDecomposition: groupWork[0]?.name === internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.group
+            && groupWork.some(item => item.name === internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.taskDecomposition)
+            && !groupWork.some(item => item.name === internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.project),
+        groupReviewGetsReviewAndReceipt: groupReview.some(item => item.name === internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.deliveryReviewRework)
+            && groupReview.some(item => item.name === internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.receipt),
+        contextualExecutionLoadsGroupSkill: contextualGroupWork[0]?.name === internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.group,
+        projectGetsSourceReceiptAndMatchedWorkflows: projectWork[0]?.name === internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.project
+            && projectWork.some(item => item.name === internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.projectSourceResearch)
+            && projectWork.some(item => item.name === internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.receipt)
+            && projectWork.some(item => item.name === internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.documentDrivenDelivery)
+            && projectWork.some(item => item.name === internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.frontendVisualQa),
+        incidentTaskGetsDiagnosis: incidentWork.some(item => item.name === internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.incidentDiagnosis),
+        releaseTaskGetsReadiness: releaseWork.some(item => item.name === internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.releaseReadiness),
+        testAgentGetsVerifierEvidenceAndVisualQa: testWork.some(item => item.name === internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.test)
+            && testWork.some(item => item.name === internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.evidence)
+            && testWork.some(item => item.name === internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.frontendVisualQa),
         selectionBudgetBounded: [globalWork, groupWork, groupReview, projectWork, incidentWork, releaseWork, testWork].every(items => items.length <= 6),
         usageDirectiveRequiresApplicationAndReceipt: buildSelectedSkillUsageDirective(projectWork).includes("不是可选目录项")
             && buildSelectedSkillUsageDirective(projectWork).includes("CCM_AGENT_RECEIPT"),

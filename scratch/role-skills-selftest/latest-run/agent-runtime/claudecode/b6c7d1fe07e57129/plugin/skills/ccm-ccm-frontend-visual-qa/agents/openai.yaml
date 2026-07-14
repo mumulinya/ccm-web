@@ -1,4 +1,0 @@
-interface:
-  display_name: "CCM Frontend Visual QA"
-  short_description: "Verify real UI behavior, responsive layout, and screenshots"
-  default_prompt: "Use $ccm-frontend-visual-qa to verify this frontend change in a real browser."

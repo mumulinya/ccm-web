@@ -1,22 +1,8 @@
+import { CcmInternalSkillName } from "./internal-skill-catalog";
+export { CCM_ROLE_SKILL_NAMES } from "./internal-skill-catalog";
 export type CcmAgentRole = "global-agent" | "group-main-agent" | "project-child-agent" | "test-agent";
 export type CcmAgentSkillPhase = "intake" | "planning" | "execution" | "review" | "summary" | "verification" | "release";
-export declare const CCM_ROLE_SKILL_NAMES: {
-    readonly global: "ccm-global-mission-lead";
-    readonly group: "ccm-group-coordination-lead";
-    readonly project: "ccm-project-delivery-worker";
-    readonly test: "ccm-test-acceptance-verifier";
-    readonly receipt: "ccm-delivery-receipt";
-    readonly evidence: "ccm-acceptance-evidence";
-    readonly requirementIntake: "ccm-requirement-intake";
-    readonly taskDecomposition: "ccm-task-decomposition";
-    readonly deliveryReviewRework: "ccm-delivery-review-rework";
-    readonly projectSourceResearch: "ccm-project-source-research";
-    readonly documentDrivenDelivery: "ccm-document-driven-delivery";
-    readonly incidentDiagnosis: "ccm-incident-diagnosis";
-    readonly frontendVisualQa: "ccm-frontend-visual-qa";
-    readonly releaseReadiness: "ccm-release-readiness";
-};
-type RoleSkillName = typeof CCM_ROLE_SKILL_NAMES[keyof typeof CCM_ROLE_SKILL_NAMES];
+type RoleSkillName = CcmInternalSkillName;
 export interface SelectedRoleSkill {
     name: RoleSkillName;
     role: CcmAgentRole;
@@ -64,20 +50,19 @@ export declare function runRoleSkillSelectionSelfTest(): {
         usageDirectiveRequiresApplicationAndReceipt: boolean;
     };
     selections: {
-        ordinaryGlobal: RoleSkillName[];
-        ordinaryGroup: RoleSkillName[];
-        globalWork: RoleSkillName[];
-        groupWork: RoleSkillName[];
-        groupReview: RoleSkillName[];
-        contextualGroupWork: RoleSkillName[];
-        projectWork: RoleSkillName[];
-        incidentWork: RoleSkillName[];
-        releaseWork: RoleSkillName[];
-        testWork: RoleSkillName[];
+        ordinaryGlobal: CcmInternalSkillName[];
+        ordinaryGroup: CcmInternalSkillName[];
+        globalWork: CcmInternalSkillName[];
+        groupWork: CcmInternalSkillName[];
+        groupReview: CcmInternalSkillName[];
+        contextualGroupWork: CcmInternalSkillName[];
+        projectWork: CcmInternalSkillName[];
+        incidentWork: CcmInternalSkillName[];
+        releaseWork: CcmInternalSkillName[];
+        testWork: CcmInternalSkillName[];
     };
     installation: {
         installed: string[];
         available: string[];
     };
 };
-export {};

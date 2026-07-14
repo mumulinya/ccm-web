@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
-import { ChevronLeft, ChevronRight, ExternalLink, Package, RefreshCw, Search, Server, ShieldCheck } from '@lucide/vue'
+import { BookOpen, ChevronLeft, ChevronRight, ExternalLink, Package, RefreshCw, Search, Server, ShieldCheck } from '@lucide/vue'
 import { toolsApi } from '../../api/index.js'
 import { toast, confirmDialog } from '../../utils/toast.js'
 import ToolControlOverview from './ToolControlOverview.vue'
@@ -33,6 +33,7 @@ const goalAuditLoading = ref(false)
 // 抽屉状态
 const showDrawer = ref(false)
 const drawerSkill = ref(null)
+const openingSkillManual = ref('')
 
 // 折叠展开的 MCP 服务器列表
 const expandedMcp = ref({})
@@ -72,6 +73,16 @@ const editingMcp = ref(null)
 
 // 新建表单
 const newSkill = ref({ name: '', description: '', prompt: '' })
+
+const isInternalSkill = (skill) => skill?.origin === 'internal'
+  || skill?.scope === 'ccm-internal'
+  || skill?.immutable === true
+  || skill?.systemManaged === true
+const internalSkills = computed(() => skills.value.filter(isInternalSkill))
+const externalSkills = computed(() => skills.value.filter(skill => !isInternalSkill(skill)))
+const externalSkillLabel = (skill) => skill?.origin === 'external' || skill?.sourceType === 'marketplace'
+  ? '外部下载'
+  : '用户创建'
 
 // 静态定义的系统核心内置工具列表
 const coreToolsList = [
@@ -1323,6 +1334,19 @@ const openSkillManual = (skill) => {
   showDrawer.value = true
 }
 
+const openCatalogSkillManual = async (skill) => {
+  openingSkillManual.value = skill.name
+  try {
+    const res = await toolsApi.skills.getManual(skill.name)
+    if (!res.success || !res.skill) throw new Error(res.error || 'Skill 手册加载失败')
+    openSkillManual(res.skill)
+  } catch (error) {
+    toast.error(`无法查看 Skill：${error.message}`)
+  } finally {
+    openingSkillManual.value = ''
+  }
+}
+
 onMounted(loadTools)
 </script>
 
@@ -1336,7 +1360,7 @@ onMounted(loadTools)
         <button class="btn btn-outline btn-sm" @click="reloadTools">🔄 重载工具</button>
       </div>
       <span class="count">
-        内置: {{ coreToolsList.length }} | MCP: {{ mcpTools.length }} | 授权: {{ authorizationSummary.configuredScopes || 0 }} | 技能书: {{ customSkills.length }}
+        内置工具: {{ coreToolsList.length }} | 内置 Skill: {{ internalSkills.length }} | 外部 Skill: {{ externalSkills.length }} | MCP: {{ mcpTools.length }}
       </span>
     </div>
 
@@ -1345,10 +1369,13 @@ onMounted(loadTools)
       <div class="sidebar">
         <div class="sidebar-header">🛠️ 工具与技能中心</div>
         <div class="category-list">
+          <div class="category-group-label">总览</div>
           <div class="category-item" :class="{ active: currentFilter === 'overview' }" @click="currentFilter = 'overview'">
             <span>▦</span><span>运行概况</span>
             <span class="badge">{{ chainVerificationSummary.verified || 0 }}/{{ chainVerificationSummary.configuredScopes || 0 }}</span>
           </div>
+
+          <div class="category-group-label">工具与连接</div>
           <div class="category-item" :class="{ active: currentFilter === 'core' }" @click="currentFilter = 'core'">
             <span>⚙️</span><span>内置核心工具</span>
             <span class="badge">{{ coreToolsList.length }}</span>
@@ -1357,6 +1384,21 @@ onMounted(loadTools)
             <span>🔌</span><span>MCP 连接中心</span>
             <span class="badge">{{ mcpTools.length }}</span>
           </div>
+
+          <div class="category-group-label">Skill</div>
+          <div class="category-item" :class="{ active: currentFilter === 'custom-prompt' }" @click="currentFilter = 'custom-prompt'">
+            <span>⚡</span><span>Skill 管理</span>
+            <span class="badge">{{ skills.length }}</span>
+          </div>
+          <div class="category-item" :class="{ active: currentFilter === 'custom-skills' }" @click="currentFilter = 'custom-skills'">
+            <span>🔮</span><span>外部 Skill 包</span>
+            <span class="badge">{{ customSkills.length }}</span>
+          </div>
+          <div class="category-item" :class="{ active: currentFilter === 'marketplace' }" @click="currentFilter = 'marketplace'">
+            <span>🛒</span><span>技能商城</span>
+          </div>
+
+          <div class="category-group-label">治理与验收</div>
           <div class="category-item" :class="{ active: currentFilter === 'authorization' }" @click="currentFilter = 'authorization'">
             <span>◈</span><span>授权总览</span>
             <span class="badge">{{ authorizationConfiguredReady }}/{{ authorizationSummary.configuredScopes || 0 }}</span>
@@ -1373,17 +1415,6 @@ onMounted(loadTools)
             <span>◎</span><span>Agent 运行时</span>
             <span class="badge">{{ businessRuntimeSummary.ready }}/{{ businessRuntimeSummary.total }}</span>
           </div>
-          <div class="category-item" :class="{ active: currentFilter === 'custom-skills' }" @click="currentFilter = 'custom-skills'">
-            <span>🔮</span><span>系统高级技能书</span>
-            <span class="badge">{{ customSkills.length }}</span>
-          </div>
-          <div class="category-item" :class="{ active: currentFilter === 'custom-prompt' }" @click="currentFilter = 'custom-prompt'">
-            <span>⚡</span><span>自定义 Prompt 技能</span>
-            <span class="badge">{{ skills.length }}</span>
-          </div>
-          <div class="category-item" :class="{ active: currentFilter === 'marketplace' }" @click="currentFilter = 'marketplace'">
-            <span>🛒</span><span>技能商城</span>
-          </div>
         </div>
       </div>
 
@@ -1399,8 +1430,8 @@ onMounted(loadTools)
               currentFilter === 'chain-verification' ? '◆ MCP / Skill 子 Agent 链路验收报告' :
               currentFilter === 'invocation-audit' ? '◇ 子 Agent MCP / Skill 调用审计' :
               currentFilter === 'runtime' ? '◎ 子 Agent MCP / Skill 运行时就绪状态' :
-              currentFilter === 'custom-skills' ? '🔮 物理加载系统高级技能书' :
-              currentFilter === 'custom-prompt' ? '⚡ 用户自定义 Prompt 技能' :
+              currentFilter === 'custom-skills' ? '🔮 外部下载与本机 Skill 包' :
+              currentFilter === 'custom-prompt' ? '⚡ 内置与外部 Skill 管理' :
               '🛒 技能与 MCP 一键安装市场' 
             }}
           </span>
@@ -1798,11 +1829,11 @@ onMounted(loadTools)
             </div>
           </template>
 
-          <!-- 5. 🔮 物理加载系统高级技能书 -->
+          <!-- 5. 外部物理 Skill 包 -->
           <template v-if="currentFilter === 'custom-skills'">
             <div v-if="customSkills.length === 0" class="empty">
               <span class="icon">🔮</span>
-              <span>未扫描到系统加载的 Customization 物理技能文件夹</span>
+              <span>暂无外部下载或本机加载的 Skill 包</span>
             </div>
             <div class="custom-skills-grid">
               <div v-for="skill in customSkills" :key="skill.id" class="skill-card-fancy">
@@ -1812,7 +1843,7 @@ onMounted(loadTools)
                     <div class="skill-name">{{ skill.name }}</div>
                     <div class="skill-id font-mono">skills/{{ skill.id }}</div>
                   </div>
-                  <span class="badge" style="background:rgba(168,85,247,0.1);color:var(--accent-purple)">物理激活</span>
+                  <span class="badge" style="background:rgba(168,85,247,0.1);color:var(--accent-purple)">外部 Skill</span>
                 </div>
                 <div class="skill-card-body">
                   {{ skill.description || '暂无描述' }}
@@ -1826,40 +1857,83 @@ onMounted(loadTools)
             </div>
           </template>
 
-          <!-- 6. ⚡ 用户自定义 Prompt 技能 -->
+          <!-- 6. 内置与外部 Skill 元数据 -->
           <template v-if="currentFilter === 'custom-prompt'">
-            <div v-if="skills.length === 0" class="empty">
-              <span class="icon">⚡</span>
-              <span>暂无自定义 Prompt 技能，点击上方按钮新增</span>
-            </div>
-            <div v-for="tool in skills" :key="tool.name" class="tool-card">
-              <div class="tool-header">
-                <div style="display:flex;align-items:flex-start;gap:12px;width:100%">
-                  <span style="font-size:24px;line-height:1">⚡</span>
-                  <div style="flex:1">
-                    <div class="tool-name">
-                      {{ tool.name }}
-                      <span class="security-badge sec-success">SkillTool</span>
+            <section class="skill-management-section">
+              <div class="skill-section-heading">
+                <div>
+                  <strong>CCM 内置 Skill</strong>
+                  <span>随项目和 npm 包发布，系统自动维护，不能停用、编辑或删除</span>
+                </div>
+                <span class="badge">{{ internalSkills.length }}</span>
+              </div>
+              <div v-if="internalSkills.length === 0" class="empty compact-empty">内置 Skill 尚未完成初始化</div>
+              <div v-for="tool in internalSkills" :key="tool.name" class="tool-card internal-skill-card">
+                <div class="tool-header">
+                  <div class="skill-card-row">
+                    <span class="skill-list-icon">⚙️</span>
+                    <div class="skill-card-content">
+                      <div class="tool-name">
+                        {{ tool.name }}
+                        <span class="security-badge sec-success">CCM 内置</span>
+                        <span class="security-badge immutable-badge">只读</span>
+                      </div>
+                      <div class="tool-desc">{{ tool.description || 'CCM 内部工作 Skill' }}</div>
+                      <div class="skill-source-note">来源：应用内置 templates/skills · 状态由系统维护</div>
                     </div>
-                    <div class="tool-desc" style="margin-top:4px">{{ tool.description || '暂无描述' }}</div>
-                    <div class="mcp-runtime-status">
-                      <span>invoke: {{ getSkillToolInfo(tool.name).invokeToolName || 'invoke_skill' }}</span>
-                      <span>tool: {{ getSkillToolInfo(tool.name).toolName || `skill:${tool.name}` }}</span>
-                      <span v-if="getSkillToolInfo(tool.name).contentHash">hash: {{ getSkillToolInfo(tool.name).contentHash }}</span>
-                      <span v-if="toolStatus.skillAuditFile">audit: {{ toolStatus.skillAuditFile }}</span>
-                    </div>
-                    <div class="tool-prompt" style="margin-top:8px">📝 {{ tool.prompt }}</div>
-                  </div>
-                  <div style="display:flex;align-items:center;gap:8px">
-                    <label class="toggle">
-                      <input type="checkbox" :checked="tool.enabled" @change="toggleEnabled('skill', tool)">
-                      <span>启用</span>
-                    </label>
-                    <button class="btn btn-danger btn-sm" @click="deleteTool('skill', tool.name)">删除</button>
+                    <button
+                      class="btn btn-outline btn-sm internal-skill-view"
+                      :disabled="openingSkillManual === tool.name"
+                      @click="openCatalogSkillManual(tool)"
+                    >
+                      <BookOpen :size="14" />
+                      {{ openingSkillManual === tool.name ? '加载中' : '查看说明' }}
+                    </button>
                   </div>
                 </div>
               </div>
-            </div>
+            </section>
+
+            <section class="skill-management-section external-skill-section">
+              <div class="skill-section-heading">
+                <div>
+                  <strong>外部与用户 Skill</strong>
+                  <span>商城下载和用户创建的 Skill 独立存放，可按需启停或删除</span>
+                </div>
+                <span class="badge">{{ externalSkills.length }}</span>
+              </div>
+              <div v-if="externalSkills.length === 0" class="empty compact-empty">
+                暂无外部或用户 Skill，可从技能商城安装或点击上方按钮创建
+              </div>
+              <div v-for="tool in externalSkills" :key="tool.name" class="tool-card">
+                <div class="tool-header">
+                  <div class="skill-card-row">
+                    <span class="skill-list-icon">⚡</span>
+                    <div class="skill-card-content">
+                      <div class="tool-name">
+                        {{ tool.name }}
+                        <span class="security-badge sec-success">{{ externalSkillLabel(tool) }}</span>
+                      </div>
+                      <div class="tool-desc">{{ tool.description || '暂无描述' }}</div>
+                      <div class="mcp-runtime-status">
+                        <span>invoke: {{ getSkillToolInfo(tool.name).invokeToolName || 'invoke_skill' }}</span>
+                        <span>tool: {{ getSkillToolInfo(tool.name).toolName || `skill:${tool.name}` }}</span>
+                        <span v-if="getSkillToolInfo(tool.name).contentHash">hash: {{ getSkillToolInfo(tool.name).contentHash }}</span>
+                        <span v-if="toolStatus.skillAuditFile">audit: {{ toolStatus.skillAuditFile }}</span>
+                      </div>
+                      <div class="tool-prompt">📝 {{ tool.prompt }}</div>
+                    </div>
+                    <div class="skill-card-actions">
+                      <label class="toggle">
+                        <input type="checkbox" :checked="tool.enabled" @change="toggleEnabled('skill', tool)">
+                        <span>启用</span>
+                      </label>
+                      <button class="btn btn-danger btn-sm" @click="deleteTool('skill', tool.name)">删除</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
           </template>
 
           <!-- 7. 🛒 技能与 MCP 一键安装市场 -->
@@ -2196,6 +2270,8 @@ onMounted(loadTools)
 .sidebar { width: 220px; background: rgba(255, 255, 255, 0.15); border-right: 1px solid rgba(0, 0, 0, 0.05); display: flex; flex-direction: column; }
 .sidebar-header { padding: 16px; font-size: 13px; font-weight: 600; color: var(--text-secondary); border-bottom: 1px solid rgba(0, 0, 0, 0.05); }
 .category-list { padding: 8px; display: flex; flex-direction: column; gap: 4px; }
+.category-group-label { padding: 12px 10px 4px; color: var(--text-muted); font-size: 10.5px; font-weight: 600; line-height: 1; }
+.category-group-label:first-child { padding-top: 4px; }
 .category-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 8px; cursor: pointer; color: var(--text-secondary); transition: all 0.25s; font-size: 12.5px; }
 .category-item:hover { background: rgba(59, 130, 246, 0.04); color: var(--accent-blue); }
 .category-item.active { background: rgba(59, 130, 246, 0.08); color: var(--accent-blue); font-weight: 600; }
@@ -2209,6 +2285,21 @@ onMounted(loadTools)
 /* 卡片样式 */
 .tool-card { background: rgba(255, 255, 255, 0.45); backdrop-filter: blur(25px); border: 1px solid rgba(0, 0, 0, 0.04); border-radius: 12px; padding: 18px; transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1); }
 .tool-card:hover { border-color: rgba(59, 130, 246, 0.2); box-shadow: 0 8px 24px rgba(59, 130, 246, 0.04); transform: translateY(-1px); }
+.skill-management-section { display: grid; gap: 12px; }
+.skill-management-section + .skill-management-section { margin-top: 28px; padding-top: 24px; border-top: 1px solid var(--border-color); }
+.skill-section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.skill-section-heading > div { display: grid; gap: 4px; min-width: 0; }
+.skill-section-heading strong { font-size: 14px; color: var(--text-primary); }
+.skill-section-heading span:not(.badge) { color: var(--text-secondary); font-size: 12px; line-height: 1.5; }
+.skill-card-row { display: flex; align-items: flex-start; gap: 12px; width: 100%; min-width: 0; }
+.skill-list-icon { flex: 0 0 auto; font-size: 22px; line-height: 1; }
+.skill-card-content { flex: 1; min-width: 0; }
+.skill-card-actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.internal-skill-card { border-left: 3px solid var(--accent-green); }
+.immutable-badge { background: var(--bg-secondary); color: var(--text-secondary); }
+.skill-source-note { margin-top: 8px; color: var(--text-secondary); font-size: 11px; }
+.compact-empty { min-height: 80px; }
+.external-skill-section .tool-prompt { margin-top: 8px; }
 .tool-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .tool-name { font-size: 14px; font-weight: 700; color: var(--text-primary); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .conn-status { font-size: 10.5px; font-weight: 600; padding: 2px 6px; border-radius: 4px; background: rgba(239, 68, 68, 0.08); color: var(--accent-red); }
@@ -2333,6 +2424,12 @@ onMounted(loadTools)
 .custom-skills-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
 .skill-card-fancy { background: rgba(255,255,255,0.45); backdrop-filter: blur(25px); border: 1px solid rgba(0,0,0,0.04); border-radius: 12px; padding: 18px; display: flex; flex-direction: column; gap: 12px; transition: all 0.25s; }
 .skill-card-fancy:hover { border-color: rgba(168,85,247,0.25); box-shadow: 0 8px 24px rgba(168,85,247,0.05); transform: translateY(-1.5px); }
+
+@media (max-width: 720px) {
+  .skill-card-row { flex-wrap: wrap; }
+  .skill-card-actions { width: 100%; justify-content: flex-end; padding-left: 34px; }
+  .skill-section-heading { align-items: center; }
+}
 .skill-card-header { display: flex; align-items: center; gap: 10px; border-bottom: 1px dashed rgba(0,0,0,0.03); padding-bottom: 10px; }
 .skill-icon { font-size: 24px; }
 .skill-meta { flex: 1; min-width: 0; }
@@ -2605,6 +2702,7 @@ onMounted(loadTools)
   .main-content { flex-direction: column; }
   .sidebar { width: 100% !important; border-right: none !important; border-bottom: 1px solid rgba(0, 0, 0, 0.05); }
   .category-list { display: flex; flex-direction: row; overflow-x: auto; padding: 6px; }
+  .category-group-label { display: none; }
   .category-item { white-space: nowrap; }
   .drawer { width: 100% !important; }
   .marketplace-actions { width:100%; justify-content:flex-start; padding-left:30px; }

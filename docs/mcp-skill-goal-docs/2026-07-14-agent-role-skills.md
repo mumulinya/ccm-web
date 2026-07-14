@@ -17,12 +17,14 @@
 | `ccm-delivery-receipt` | 群聊主 Agent、项目子 Agent | 统一结构化交付回执 |
 | `ccm-acceptance-evidence` | 按任务动态选择、TestAgent 必选 | 验收标准与真实证据绑定 |
 
+后续新增的 8 个工作流 Skill、阶段选择规则和第三方运行时验证见 `2026-07-14-agent-workflow-skills-and-prompt-slimming.md`。
+
 ## 选择规则
 
 - 全局 Agent 和群聊主 Agent：只有明确执行请求或可信任务来源才加载角色 Skill；问候、知识问答、项目介绍和方案咨询返回空选择。
 - 项目子 Agent：始终加载 Worker 与交付回执 Skill；任务包含测试、构建、API、页面、浏览器、截图或验收要求时追加验收证据 Skill。
 - TestAgent：固定加载独立验收与验收证据 Skill，并把选择写入真实 work order 元数据。
-- 单角色最多注入 3 个 Skill，按角色基础、共享规范、任务匹配顺序去重。
+- 全局、群聊主 Agent 和 TestAgent 默认最多注入 4 个 Skill，项目子 Agent 默认最多 6 个；按角色、阶段和任务语义选择，不全量灌入提示词。
 - 项目和群聊里用户配置的 MCP/Skill 与系统角色 Skill 合并，不被覆盖。
 
 ## 实现位置
@@ -41,8 +43,8 @@
 
 1. 普通全局/群聊问话不选择工作 Skill。
 2. 四个角色只获得对应基础 Skill，共享 Skill 按任务追加。
-3. 6 个官方 Skill 包和 `agents/openai.yaml` 已安装到 CCM 托管目录。
-4. Claude Code、Cursor、Codex 的隔离运行时快照都包含项目 Worker、交付回执和验收证据 Skill，且无缺失项。
+3. 14 个官方 Skill 包和 `agents/openai.yaml` 已安装到 CCM 托管目录。
+4. Claude Code、Cursor、Codex 的隔离运行时快照按文档/UI、故障、发布场景同步所有项目执行相关 Skill，且无缺失项。
 5. TestAgent profile 明确包含独立验收与验收证据 Skill。
 
 机器报告输出到 `scratch/role-skills-selftest/report.json`。生产重启后还需检查 `~/.cc-connect/skills`、`~/.cc-connect/skill-packages` 和真实运行时快照。

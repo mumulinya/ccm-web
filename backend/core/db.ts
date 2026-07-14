@@ -3,6 +3,7 @@ import * as path from "path";
 import * as os from "os";
 import { isCredentialReference, protectCredential, protectObjectSecrets, resolveObjectSecrets } from "./credential-store";
 import { normalizeMcpEnvironment } from "../tools/tool-catalog-management";
+import { assertCcmInternalSkillMutable, isCcmInternalSkillName } from "../skills/internal-skill-catalog";
 
 const CCM_DIR = path.join(os.homedir(), ".cc-connect");
 const CONFIGS_DIR = path.join(CCM_DIR, "configs");
@@ -219,13 +220,42 @@ export function loadSkills(): any[] {
 }
 
 export function saveSkill(skill: any) {
+  assertCcmInternalSkillMutable(skill?.name, "修改、停用或覆盖");
   const filename = skill.name.replace(/[^a-zA-Z0-9-_]/g, '_') + '.json';
-  writeJsonAtomic(path.join(SKILLS_DIR, filename), skill);
+  const filePath = path.join(SKILLS_DIR, filename);
+  if (fs.existsSync(filePath)) {
+    try {
+      const current = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+      if (current?.immutable || current?.systemManaged || current?.origin === "internal") {
+        const error: any = new Error(`受系统管理的 Skill "${skill.name}" 不能修改、停用或覆盖`);
+        error.code = "CCM_INTERNAL_SKILL_IMMUTABLE";
+        error.statusCode = 403;
+        throw error;
+      }
+    } catch (error: any) {
+      if (error?.code === "CCM_INTERNAL_SKILL_IMMUTABLE") throw error;
+    }
+  }
+  writeJsonAtomic(filePath, skill);
 }
 
 export function deleteSkill(name: string) {
+  assertCcmInternalSkillMutable(name, "删除");
   const filename = name.replace(/[^a-zA-Z0-9-_]/g, '_') + '.json';
   const filePath = path.join(SKILLS_DIR, filename);
+  if (fs.existsSync(filePath)) {
+    try {
+      const current = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+      if (current?.immutable || current?.systemManaged || current?.origin === "internal" || isCcmInternalSkillName(current?.name)) {
+        const error: any = new Error(`受系统管理的 Skill "${name}" 不能删除`);
+        error.code = "CCM_INTERNAL_SKILL_IMMUTABLE";
+        error.statusCode = 403;
+        throw error;
+      }
+    } catch (error: any) {
+      if (error?.code === "CCM_INTERNAL_SKILL_IMMUTABLE") throw error;
+    }
+  }
   try {
     if (fs.existsSync(filePath)) {
       const skill = JSON.parse(fs.readFileSync(filePath, "utf-8"));

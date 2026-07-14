@@ -116,7 +116,19 @@ Regression results:
 - Global Agent global-only boundary: 13 passed.
 - Full `npm run build`: passed.
 
-Production runtime verification is recorded below after deployment.
+Production runtime verification after restart:
+
+- URL: `http://localhost:3081`
+- root HTTP status: 200
+- Memory Center overview HTTP status: 200
+- server PID: `32036`
+- lifecycle heads: 4 anchored and valid, 0 fail-closed, 0 invalid journals, 0 invalid commits
+- `fetch-web-mcp`, `filesystem-mcp`, and `mcp-feishu`: connected
+- Memory Center exposes all manifest-selector decision, selected, empty, failed, selected-document, and invalid-session counters
+- active group Session Memory scopes: 0 after old-session deletion
+- legacy `default` Session Memory scopes: 0
+- selector decision count: 0 because no active group Session Memory remains; this is a valid cold state
+- stderr: empty
 
 ## Long-Term Direction
 

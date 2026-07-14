@@ -18,6 +18,7 @@ const props = defineProps({
   recommendedTemplate: { type: Object, default: null },
   disabled: { type: Boolean, default: false },
   busy: { type: Boolean, default: false },
+  allowInputWhileBusy: { type: Boolean, default: false },
   sendLabel: { type: String, default: '发送' },
   attachTitle: { type: String, default: '添加附件' },
   accept: { type: String, default: 'image/*,.txt,.md,.json,.csv,.pdf,.docx,.pptx,.xlsx' },
@@ -78,7 +79,7 @@ const onInput = (event) => {
         :value="props.modelValue"
         :placeholder="props.placeholder"
         :rows="props.rows"
-        :disabled="props.disabled || props.busy"
+        :disabled="props.disabled || (props.busy && !props.allowInputWhileBusy)"
         @input="onInput"
         @keydown="emit('keydown', $event)"
       ></textarea>
@@ -101,8 +102,8 @@ const onInput = (event) => {
         @select="emit('select-template', $event)"
       />
     </div>
-    <button :class="['send-button', { stopping: props.busy }]" type="button" :disabled="props.disabled && !props.busy" @click="emit(props.busy ? 'stop' : 'send')">
-      {{ props.busy ? '停止' : props.sendLabel }}
+    <button :class="['send-button', { stopping: props.busy && !props.allowInputWhileBusy }]" type="button" :disabled="props.disabled || (props.busy && props.allowInputWhileBusy && !props.modelValue.trim())" @click="emit(props.busy && !props.allowInputWhileBusy ? 'stop' : 'send')">
+      {{ props.busy && !props.allowInputWhileBusy ? '停止' : props.sendLabel }}
     </button>
   </div>
 </template>

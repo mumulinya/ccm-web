@@ -146,6 +146,8 @@ export declare function distillGroupGlobalMemoryArbitrationToTypedMemory(groupId
         slug: string;
         type: import("./group-memory-index").GroupTypedMemoryType;
         name: string;
+        writeShapeTelemetry: any;
+        writeShapeTelemetryError: string;
     };
     index: {
         file: string;
@@ -645,8 +647,35 @@ export declare function deleteGroupSessionMemoryArtifacts(groupId: string, sessi
     } | {
         deleted: number;
     };
+    providerNativeCompactSessionCapacityArtifacts: {
+        deleted: number;
+        file: string;
+        groupId: string;
+        groupSessionId: string;
+    };
+    autoCompactCircuitBreakerArtifacts: {
+        deleted: number;
+        groupId: string;
+        groupSessionId: string;
+        file: string;
+    } | {
+        deleted: number;
+    };
     deletedAt: string;
 };
+export declare function appendGroupMemorySnipBoundaryMarker(groupId: string, groupSessionId: string, removedMessageIds: string[], options?: any): {
+    schema: string;
+    version: number;
+    groupId: string;
+    groupSessionId: string;
+    appended: boolean;
+    marker: any;
+    removedMessageCount: number;
+    missingMessageCount: number;
+    removalChecksum: string;
+};
+export declare function buildGroupMemoryResumeEffectiveTokenBaseline(projection: any, memory: any, allMessages: any[], options?: any): any;
+export declare function validateGroupMemoryResumeEffectiveTokenBaseline(baseline: any): boolean;
 export declare function prepareGroupMemoryResumeProjection(groupId: string, groupSessionId: string, allMessages: any[], storedMemory: any, options?: any): {
     schema: string;
     groupId: string;
@@ -654,6 +683,11 @@ export declare function prepareGroupMemoryResumeProjection(groupId: string, grou
     memory: any;
     projection: any;
     proof: any;
+    resumeBaseline: any;
+    sessionMemoryCadenceDecision: any;
+    skippedFullSnapshotRefresh: boolean;
+    compactHeadRecovery: any;
+    providerNativeCompactSessionCapacityReconciliation: any;
     recovered: boolean;
     recoveryReason: any;
     recoveryRotation: any;
@@ -742,6 +776,7 @@ export declare function buildGroupApiMicrocompactNativeApplyAdapterTelemetryRow(
     nativeSessionId: string;
     memoryContextSnapshotId: string;
     memoryContextSnapshotChecksum: string;
+    groupSessionId: string;
     targetProject: string;
     agent: string;
     taskId: string;
@@ -858,16 +893,16 @@ export declare function buildGroupApiMicrocompactNativeApplyProofSummary(groupId
     ledger_file: any;
     has_history: boolean;
     status: string;
-    entry_count: any;
+    entry_count: number;
     proof_coverage_rate: number;
     request_telemetry: {
-        matched_verified_count: any;
-        adapter_matched_verified_count: any;
-        receipt_matched_verified_count: any;
-        strong_verified_count: any;
-        receipt_only_verified_count: any;
-        missing_verified_count: any;
-        stale_verified_count: any;
+        matched_verified_count: number;
+        adapter_matched_verified_count: number;
+        receipt_matched_verified_count: number;
+        strong_verified_count: number;
+        receipt_only_verified_count: number;
+        missing_verified_count: number;
+        stale_verified_count: number;
         max_age_ms: number;
         schema: string;
         version: number;
@@ -885,11 +920,29 @@ export declare function buildGroupApiMicrocompactNativeApplyProofSummary(groupId
         recent_entries: any;
         updatedAt: any;
     };
+    platform_execution_receipts: {
+        schema: string;
+        version: number;
+        groupId: string;
+        groupSessionId: string;
+        target_project: string;
+        ledger_file: any;
+        status: string;
+        entry_count: any;
+        totals: any;
+        entries: any;
+        native_applied_entries: any;
+        failed_entries: any;
+        accepted_unverified_entries: any;
+        advisory_entries: any;
+        recent_entries: any;
+        updatedAt: any;
+    };
     totals: any;
-    verified_entries: any;
-    failed_entries: any;
-    advisory_entries: any;
-    recent_entries: any;
+    verified_entries: any[];
+    failed_entries: any[];
+    advisory_entries: any[];
+    recent_entries: any[];
     updatedAt: any;
 };
 export declare function recordGroupMemoryReloadAudit(groupId: string, input?: any): {
@@ -955,12 +1008,21 @@ export declare function scheduleGroupMemoryAutoCompaction(groupId: string, optio
     reason: string;
     groupId?: undefined;
     sessionId?: undefined;
+    circuitBreaker?: undefined;
     delayMs?: undefined;
 } | {
     scheduled: boolean;
     reason: string;
     groupId: string;
     sessionId: string;
+    circuitBreaker?: undefined;
+    delayMs?: undefined;
+} | {
+    scheduled: boolean;
+    reason: string;
+    groupId: string;
+    sessionId: string;
+    circuitBreaker: any;
     delayMs?: undefined;
 } | {
     scheduled: boolean;
@@ -968,6 +1030,7 @@ export declare function scheduleGroupMemoryAutoCompaction(groupId: string, optio
     sessionId: string;
     delayMs: number;
     reason?: undefined;
+    circuitBreaker?: undefined;
 };
 export declare function runGroupMemoryAutoCompactionNow(groupId: string, options?: any): Promise<{
     success: boolean;
@@ -975,6 +1038,8 @@ export declare function runGroupMemoryAutoCompactionNow(groupId: string, options
     reason: string;
     groupId?: undefined;
     sessionId?: undefined;
+    skipped?: undefined;
+    circuitBreaker?: undefined;
     scheduled?: undefined;
     boundary?: undefined;
     keepIndex?: undefined;
@@ -983,6 +1048,7 @@ export declare function runGroupMemoryAutoCompactionNow(groupId: string, options
     compactHead?: undefined;
     typedMemoryScopeId?: undefined;
     logDistillation?: undefined;
+    providerNativeCompactSessionCapacityReset?: undefined;
     error?: undefined;
 } | {
     success: boolean;
@@ -990,6 +1056,8 @@ export declare function runGroupMemoryAutoCompactionNow(groupId: string, options
     reason: string;
     groupId: string;
     sessionId: string;
+    skipped?: undefined;
+    circuitBreaker?: undefined;
     scheduled?: undefined;
     boundary?: undefined;
     keepIndex?: undefined;
@@ -998,6 +1066,25 @@ export declare function runGroupMemoryAutoCompactionNow(groupId: string, options
     compactHead?: undefined;
     typedMemoryScopeId?: undefined;
     logDistillation?: undefined;
+    providerNativeCompactSessionCapacityReset?: undefined;
+    error?: undefined;
+} | {
+    success: boolean;
+    compacted: boolean;
+    skipped: boolean;
+    reason: string;
+    groupId: string;
+    sessionId: string;
+    circuitBreaker: any;
+    scheduled?: undefined;
+    boundary?: undefined;
+    keepIndex?: undefined;
+    background?: undefined;
+    memory?: undefined;
+    compactHead?: undefined;
+    typedMemoryScopeId?: undefined;
+    logDistillation?: undefined;
+    providerNativeCompactSessionCapacityReset?: undefined;
     error?: undefined;
 } | {
     success: boolean;
@@ -1006,6 +1093,8 @@ export declare function runGroupMemoryAutoCompactionNow(groupId: string, options
     reason: string;
     groupId?: undefined;
     sessionId?: undefined;
+    skipped?: undefined;
+    circuitBreaker?: undefined;
     boundary?: undefined;
     keepIndex?: undefined;
     background?: undefined;
@@ -1013,6 +1102,7 @@ export declare function runGroupMemoryAutoCompactionNow(groupId: string, options
     compactHead?: undefined;
     typedMemoryScopeId?: undefined;
     logDistillation?: undefined;
+    providerNativeCompactSessionCapacityReset?: undefined;
     error?: undefined;
 } | {
     success: boolean;
@@ -1045,9 +1135,12 @@ export declare function runGroupMemoryAutoCompactionNow(groupId: string, options
     };
     typedMemoryScopeId: string;
     logDistillation: any;
+    providerNativeCompactSessionCapacityReset: any;
+    circuitBreaker: any;
     reason?: undefined;
     groupId?: undefined;
     sessionId?: undefined;
+    skipped?: undefined;
     scheduled?: undefined;
     error?: undefined;
 } | {
@@ -1071,9 +1164,11 @@ export declare function runGroupMemoryAutoCompactionNow(groupId: string, options
         startedAt: string;
         completedAt: string;
     };
+    circuitBreaker: any;
     reason?: undefined;
     groupId?: undefined;
     sessionId?: undefined;
+    skipped?: undefined;
     scheduled?: undefined;
     boundary?: undefined;
     keepIndex?: undefined;
@@ -1081,6 +1176,7 @@ export declare function runGroupMemoryAutoCompactionNow(groupId: string, options
     compactHead?: undefined;
     typedMemoryScopeId?: undefined;
     logDistillation?: undefined;
+    providerNativeCompactSessionCapacityReset?: undefined;
 }>;
 export declare function ensureGroupMemoryAutoCompactionHook(): {
     registered: boolean;
@@ -1133,10 +1229,12 @@ export declare function commitChildTypedMemoryDelivery(memoryBundle: any, option
     dispatched?: undefined;
     executionReturned?: undefined;
     promptBindingVerified?: undefined;
-    idempotent?: undefined;
+    error?: undefined;
     lease?: undefined;
     stats?: undefined;
     ledger_file?: undefined;
+    idempotent?: undefined;
+    manifest_selector_outcome?: undefined;
 } | {
     committed: boolean;
     reason: string;
@@ -1144,10 +1242,12 @@ export declare function commitChildTypedMemoryDelivery(memoryBundle: any, option
     dispatched?: undefined;
     executionReturned?: undefined;
     promptBindingVerified?: undefined;
-    idempotent?: undefined;
+    error?: undefined;
     lease?: undefined;
     stats?: undefined;
     ledger_file?: undefined;
+    idempotent?: undefined;
+    manifest_selector_outcome?: undefined;
 } | {
     committed: boolean;
     reason: string;
@@ -1155,14 +1255,16 @@ export declare function commitChildTypedMemoryDelivery(memoryBundle: any, option
     executionReturned: boolean;
     promptBindingVerified: boolean;
     validation_issues?: undefined;
-    idempotent?: undefined;
+    error?: undefined;
     lease?: undefined;
     stats?: undefined;
     ledger_file?: undefined;
+    idempotent?: undefined;
+    manifest_selector_outcome?: undefined;
 } | {
     committed: boolean;
-    idempotent: boolean;
     reason: string;
+    error: string;
     lease: any;
     stats: {
         schema: string;
@@ -1183,6 +1285,34 @@ export declare function commitChildTypedMemoryDelivery(memoryBundle: any, option
     dispatched?: undefined;
     executionReturned?: undefined;
     promptBindingVerified?: undefined;
+    idempotent?: undefined;
+    manifest_selector_outcome?: undefined;
+} | {
+    committed: boolean;
+    idempotent: boolean;
+    reason: string;
+    lease: any;
+    stats: {
+        schema: string;
+        version: number;
+        groupId: string;
+        scope: string;
+        deliveredBytes: number;
+        deliveredTokens: number;
+        deliveryCount: number;
+        deliveredDocumentCount: number;
+        compactEpoch: string;
+        taskAgentSessionId: string;
+        updatedAt: string;
+        file: any;
+    };
+    ledger_file: any;
+    manifest_selector_outcome: any;
+    validation_issues?: undefined;
+    dispatched?: undefined;
+    executionReturned?: undefined;
+    promptBindingVerified?: undefined;
+    error?: undefined;
 };
 export declare function createChildTypedMemoryDispatchWal(admission: any, input?: any): {
     required: boolean;

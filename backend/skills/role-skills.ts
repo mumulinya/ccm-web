@@ -2,28 +2,18 @@ import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
 import { SKILLS_DIR, SKILL_PACKAGES_DIR } from "../core/db";
+import {
+  CCM_INTERNAL_SKILL_CATALOG,
+  CCM_ROLE_SKILL_NAMES,
+  CcmInternalSkillName,
+} from "./internal-skill-catalog";
+
+export { CCM_ROLE_SKILL_NAMES } from "./internal-skill-catalog";
 
 export type CcmAgentRole = "global-agent" | "group-main-agent" | "project-child-agent" | "test-agent";
 export type CcmAgentSkillPhase = "intake" | "planning" | "execution" | "review" | "summary" | "verification" | "release";
 
-export const CCM_ROLE_SKILL_NAMES = {
-  global: "ccm-global-mission-lead",
-  group: "ccm-group-coordination-lead",
-  project: "ccm-project-delivery-worker",
-  test: "ccm-test-acceptance-verifier",
-  receipt: "ccm-delivery-receipt",
-  evidence: "ccm-acceptance-evidence",
-  requirementIntake: "ccm-requirement-intake",
-  taskDecomposition: "ccm-task-decomposition",
-  deliveryReviewRework: "ccm-delivery-review-rework",
-  projectSourceResearch: "ccm-project-source-research",
-  documentDrivenDelivery: "ccm-document-driven-delivery",
-  incidentDiagnosis: "ccm-incident-diagnosis",
-  frontendVisualQa: "ccm-frontend-visual-qa",
-  releaseReadiness: "ccm-release-readiness",
-} as const;
-
-type RoleSkillName = typeof CCM_ROLE_SKILL_NAMES[keyof typeof CCM_ROLE_SKILL_NAMES];
+type RoleSkillName = CcmInternalSkillName;
 
 export interface SelectedRoleSkill {
   name: RoleSkillName;
@@ -42,67 +32,7 @@ export interface RoleSkillSelectionOptions {
   phase?: CcmAgentSkillPhase;
 }
 
-const ROLE_SKILL_CATALOG: Array<{
-  name: RoleSkillName;
-  description: string;
-}> = [
-  {
-    name: CCM_ROLE_SKILL_NAMES.global,
-    description: "Coordinate explicit CCM work across groups or projects, supervise mission evidence, and return a friendly final summary.",
-  },
-  {
-    name: CCM_ROLE_SKILL_NAMES.group,
-    description: "Plan executable group work, dispatch scoped project Agents, review receipts, request rework, and hand off acceptance.",
-  },
-  {
-    name: CCM_ROLE_SKILL_NAMES.project,
-    description: "Execute a scoped CCM project assignment, implement and verify changes, and return a structured delivery receipt.",
-  },
-  {
-    name: CCM_ROLE_SKILL_NAMES.test,
-    description: "Independently verify CCM acceptance criteria with commands, APIs, browser checks, screenshots, and conservative verdicts.",
-  },
-  {
-    name: CCM_ROLE_SKILL_NAMES.receipt,
-    description: "Produce a structured CCM implementation receipt containing actions, changed files, verification, blockers, and Skill usage.",
-  },
-  {
-    name: CCM_ROLE_SKILL_NAMES.evidence,
-    description: "Map CCM acceptance criteria to reproducible command, API, browser, screenshot, and artifact evidence.",
-  },
-  {
-    name: CCM_ROLE_SKILL_NAMES.requirementIntake,
-    description: "Extract executable goals, contracts, constraints, source references, and acceptance criteria from messages and documents.",
-  },
-  {
-    name: CCM_ROLE_SKILL_NAMES.taskDecomposition,
-    description: "Split delivery work into scoped project assignments with semantic dependencies and observable completion conditions.",
-  },
-  {
-    name: CCM_ROLE_SKILL_NAMES.deliveryReviewRework,
-    description: "Review project receipts against assignments and acceptance criteria, then produce precise evidence-based rework.",
-  },
-  {
-    name: CCM_ROLE_SKILL_NAMES.projectSourceResearch,
-    description: "Inspect current project source, repository state, instructions, and established patterns before implementation.",
-  },
-  {
-    name: CCM_ROLE_SKILL_NAMES.documentDrivenDelivery,
-    description: "Trace PRD, API, image, and attachment clauses through implementation and criterion-linked verification.",
-  },
-  {
-    name: CCM_ROLE_SKILL_NAMES.incidentDiagnosis,
-    description: "Reproduce runtime or build failures, isolate the supported root cause, repair it, and verify recovery.",
-  },
-  {
-    name: CCM_ROLE_SKILL_NAMES.frontendVisualQa,
-    description: "Verify real frontend behavior, responsive layout, browser state, console failures, and screenshot evidence.",
-  },
-  {
-    name: CCM_ROLE_SKILL_NAMES.releaseReadiness,
-    description: "Assess build, configuration, compatibility, migration, rollout, rollback, and residual release risk.",
-  },
-];
+const ROLE_SKILL_CATALOG = CCM_INTERNAL_SKILL_CATALOG;
 
 let installationChecked = false;
 
@@ -149,38 +79,25 @@ function writeJsonAtomic(file: string, value: any) {
   }
 }
 
-function syncPackage(source: string, destination: string) {
-  fs.mkdirSync(destination, { recursive: true });
-  for (const relative of listFiles(source)) {
-    const target = path.join(destination, relative);
-    fs.mkdirSync(path.dirname(target), { recursive: true });
-    const sourceBuffer = fs.readFileSync(path.join(source, relative));
-    const currentBuffer = fs.existsSync(target) ? fs.readFileSync(target) : null;
-    if (!currentBuffer || !sourceBuffer.equals(currentBuffer)) fs.writeFileSync(target, sourceBuffer);
-  }
-}
-
 export function ensureRoleSkillsInstalled(options: { force?: boolean } = {}) {
   if (installationChecked && !options.force) return { installed: [], available: ROLE_SKILL_CATALOG.map(item => item.name) };
   const sourceRoot = templateRoot();
   const installed: string[] = [];
   const available: string[] = [];
-  fs.mkdirSync(SKILL_PACKAGES_DIR, { recursive: true });
   fs.mkdirSync(SKILLS_DIR, { recursive: true });
 
   for (const definition of ROLE_SKILL_CATALOG) {
     const source = path.join(sourceRoot, definition.name);
     const sourceSkill = path.join(source, "SKILL.md");
     if (!fs.existsSync(sourceSkill)) continue;
-    const destination = path.join(SKILL_PACKAGES_DIR, definition.name);
-    const before = fs.existsSync(path.join(destination, "SKILL.md")) ? packageFingerprint(destination) : "";
-    syncPackage(source, destination);
-    const contentHash = packageFingerprint(destination);
-    if (contentHash !== before) installed.push(definition.name);
+    const contentHash = packageFingerprint(source);
     available.push(definition.name);
     const catalogFile = path.join(SKILLS_DIR, `${definition.name}.json`);
     let previous: any = {};
     try { previous = JSON.parse(fs.readFileSync(catalogFile, "utf-8")); } catch {}
+    if (contentHash !== previous?.contentHash || path.resolve(previous?.packagePath || "") !== path.resolve(source)) {
+      installed.push(definition.name);
+    }
     writeJsonAtomic(catalogFile, {
       ...previous,
       name: definition.name,
@@ -190,10 +107,17 @@ export function ensureRoleSkillsInstalled(options: { force?: boolean } = {}) {
       enabled: true,
       version: "1.0.0",
       author: "CCM",
-      packagePath: destination,
-      skillFile: path.join(destination, "SKILL.md"),
-      packageStats: packageStats(destination),
+      packagePath: source,
+      skillFile: sourceSkill,
+      packageStats: packageStats(source),
       contentHash,
+      origin: "internal",
+      scope: "ccm-internal",
+      sourceType: "builtin",
+      immutable: true,
+      deletable: false,
+      editable: false,
+      disableable: false,
       systemManaged: true,
       roleSkill: true,
       marketplace: {
@@ -205,6 +129,18 @@ export function ensureRoleSkillsInstalled(options: { force?: boolean } = {}) {
         ? previous.updated_at
         : new Date().toISOString(),
     });
+
+    // Older releases copied built-ins into the external package directory.
+    // Reserved names now always resolve to the package-owned template above.
+    const legacyCopy = path.join(SKILL_PACKAGES_DIR, definition.name);
+    const relative = path.relative(path.resolve(SKILL_PACKAGES_DIR), path.resolve(legacyCopy));
+    if (path.resolve(source) !== path.resolve(legacyCopy)
+      && relative
+      && !relative.startsWith("..")
+      && !path.isAbsolute(relative)
+      && fs.existsSync(legacyCopy)) {
+      fs.rmSync(legacyCopy, { recursive: true, force: true });
+    }
   }
   installationChecked = true;
   return { installed, available };
@@ -212,7 +148,7 @@ export function ensureRoleSkillsInstalled(options: { force?: boolean } = {}) {
 
 function skillBody(name: RoleSkillName) {
   ensureRoleSkillsInstalled();
-  const skillPath = path.join(SKILL_PACKAGES_DIR, name, "SKILL.md");
+  const skillPath = path.join(templateRoot(), name, "SKILL.md");
   if (!fs.existsSync(skillPath)) return { skillPath, body: "" };
   const markdown = fs.readFileSync(skillPath, "utf-8").replace(/^\uFEFF/, "");
   const body = markdown.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "").trim();
@@ -313,7 +249,7 @@ export function selectRoleSkills(role: CcmAgentRole, taskText = "", options: Rol
     return {
       ...row,
       role,
-      packagePath: path.join(SKILL_PACKAGES_DIR, row.name),
+      packagePath: path.join(templateRoot(), row.name),
       skillPath: loaded.skillPath,
       body: loaded.body,
     };
@@ -355,8 +291,8 @@ export function runRoleSkillSelectionSelfTest() {
   const testWork = selectRoleSkills("test-agent", "在浏览器验证退款页面响应式布局并截图", { phase: "verification" });
   const checks = {
     allPackagesInstalled: ROLE_SKILL_CATALOG.every(item => installation.available.includes(item.name)
-      && fs.existsSync(path.join(SKILL_PACKAGES_DIR, item.name, "SKILL.md"))
-      && fs.existsSync(path.join(SKILL_PACKAGES_DIR, item.name, "agents", "openai.yaml"))
+      && fs.existsSync(path.join(templateRoot(), item.name, "SKILL.md"))
+      && fs.existsSync(path.join(templateRoot(), item.name, "agents", "openai.yaml"))
       && fs.existsSync(path.join(SKILLS_DIR, `${item.name}.json`))),
     ordinaryGlobalLoadsNoWorkSkills: ordinaryGlobal.length === 0,
     ordinaryGroupLoadsNoWorkSkills: ordinaryGroup.length === 0,

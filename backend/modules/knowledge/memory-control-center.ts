@@ -3,6 +3,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { DEFAULT_CONTEXT_WINDOW_TOKENS } from "../../system/context-budget";
 import { CCM_DIR, GROUP_MESSAGES_DIR } from "../../core/utils";
+import { withFileLock, writeJsonAtomic as writeJsonAtomicDurable } from "../../core/atomic-json-file";
 import { loadProjectConfigs, loadTasks, saveTasks } from "../../core/db";
 import {
   inspectGroupSessionMemoryExtractionLease,
@@ -660,9 +661,10 @@ export function buildGroupPostCompactUsageDiagnostics(groupId: string, memory: a
       buildGroupTypedMemoryIndex,
     } = require("../collaboration/group-memory-index");
     const { readGroupMemoryCompactionHookLedger } = require("../collaboration/group-memory-compaction");
+    const { readGroupMemoryAutoCompactCircuitBreaker } = require("../collaboration/group-memory-auto-compact-circuit-breaker");
 
     const ledger = readGroupPostCompactCandidateUsageLedger(id, resolvedSessionId);
-    const hookLedger = summarizeCompactionHookLedger(id, memory, readGroupMemoryCompactionHookLedger(id));
+    const hookLedger = summarizeCompactionHookLedger(id, memory, readGroupMemoryCompactionHookLedger(id, resolvedSessionId), resolvedSessionId);
     const usageSummary = buildGroupPostCompactCandidateUsageSummary(id, { groupSessionId: resolvedSessionId });
     const distillationLedger = readGroupTypedMemoryDistillationLedger(typedScopeId);
     const distillationTransactionState = readGroupTypedMemoryDistillationTransactionState(typedScopeId);
@@ -759,7 +761,10 @@ export function buildGroupPostCompactUsageDiagnostics(groupId: string, memory: a
     const historicalReplay = buildGroupHistoricalCompactBoundaryReplay(id, memory, { hookLedger });
     const agentTypeReplay = buildGroupChildAgentTypeReplayMatrix(id, memory, { hookLedger });
     const compactStrategyDecision = buildGroupCompactStrategyDecisionOverview(id, memory);
-    const postCompactCleanupAudit = buildGroupPostCompactCleanupAuditOverview(id, memory);
+    const postCompactCleanupAudit = buildGroupPostCompactCleanupAuditOverview(id, memory, { groupSessionId: resolvedSessionId });
+    const autoCompactCircuitBreaker = resolvedSessionId.startsWith("gcs_")
+      ? readGroupMemoryAutoCompactCircuitBreaker(id, resolvedSessionId)
+      : null;
     const apiMicroCompactEditPlan = buildGroupApiMicroCompactEditPlanOverview(id, memory);
     const replayRepairWorkItems = replay.repairWorkItems || summarizeReplayRepairPendingWorkItems(id, null, resolvedSessionId);
     const replayRepairDispatchCandidates = buildReplayRepairMainAgentDispatchCandidates(id, { groupSessionId: resolvedSessionId });
@@ -821,6 +826,43 @@ export function buildGroupPostCompactUsageDiagnostics(groupId: string, memory: a
       groupSessionId: resolvedSessionId,
       taskLimit: 160,
     }).groups?.[0] || null;
+    const { readGroupCompactHead, reconcileGroupCompactHeadFromMemory } = require("../collaboration/group-compact-head");
+    const {
+      buildProviderNativeCompactSessionCapacitySummary,
+      reconcileProviderNativeCompactSessionCapacityReset,
+    } = require("../collaboration/provider-native-compact-session-capacity");
+    let providerNativeCompactSessionCapacityReconciliation: any = null;
+    if (resolvedSessionId.startsWith("gcs_") && memory?.compactBoundary?.id) {
+      const compactHeadRecovery = reconcileGroupCompactHeadFromMemory({
+        groupId: id,
+        groupSessionId: resolvedSessionId,
+        memory,
+      });
+      if (["current", "recovered"].includes(String(compactHeadRecovery?.status || ""))) {
+        const compactHead = compactHeadRecovery?.head || readGroupCompactHead(id, resolvedSessionId);
+        providerNativeCompactSessionCapacityReconciliation = reconcileProviderNativeCompactSessionCapacityReset({
+          groupId: id,
+          groupSessionId: resolvedSessionId,
+          compactHead,
+          reason: "memory_center_reconcile_durable_compact_boundary",
+        });
+      } else {
+        providerNativeCompactSessionCapacityReconciliation = {
+          schema: "ccm-provider-native-compact-session-capacity-reconciliation-v1",
+          version: 1,
+          group_id: id,
+          group_session_id: resolvedSessionId,
+          status: "fail_closed",
+          recovered: false,
+          idempotent: false,
+          issues: Array.isArray(compactHeadRecovery?.issues) ? compactHeadRecovery.issues.slice(0, 8) : ["compact_head_not_current"],
+        };
+      }
+    }
+    const providerNativeCompactSessionCapacity = {
+      ...buildProviderNativeCompactSessionCapacitySummary(id, resolvedSessionId),
+      reconciliation: providerNativeCompactSessionCapacityReconciliation,
+    };
     const crossGroupPressureRecallUsage = buildWorkerContextPacketCrossGroupPressureRecallUsageReport({ groupIds: [id] }).groups?.[0] || null;
     const pressureProvenanceFeedbackPolicyRepairWorkItems = syncWorkerContextPacketPressureProvenanceFeedbackPolicyRepairWorkItems(
       id,
@@ -916,10 +958,13 @@ export function buildGroupPostCompactUsageDiagnostics(groupId: string, memory: a
       taskAgentMemoryContextSnapshots,
       compactStrategyDecision,
       postCompactCleanupAudit,
+      autoCompactCircuitBreaker,
       apiMicroCompactEditPlan,
       apiMicrocompactReceiptDiscipline,
       apiMicrocompactNativeApplyReadiness,
       apiMicrocompactNativeApplyProof,
+      providerNativeCompactSessionCapacity,
+      providerNativeCompactSessionCapacityReconciliation,
       apiMicrocompactNativeApplyProofRepairWorkItems,
       crossGroupPressureRecallUsage,
       crossGroupPressureRecallUsageRepairWorkItems,
@@ -1270,19 +1315,28 @@ export function getMemoryMetrics() {
   };
 }
 
+function mutateMemoryMetrics(mutator: (state: any) => any) {
+  return withFileLock(METRICS_FILE, () => {
+    const state = readJson(METRICS_FILE, { version: 1, counters: {}, events: [], updatedAt: "" });
+    const next = mutator(state);
+    writeJsonAtomicDurable(METRICS_FILE, next);
+    return next;
+  }, { timeoutMs: 5_000, retryMs: 10, staleMs: 60_000 });
+}
+
 export function recordMemoryMetric(type: string, payload: any = {}) {
-  const state = readJson(METRICS_FILE, { version: 1, counters: {}, events: [], updatedAt: "" });
-  const counters = { ...(state.counters || {}) };
   const increments: Record<string, Record<string, number>> = {
     recall_hit: { recallAttempts: 1, recallHits: 1 }, recall_miss: { recallAttempts: 1 },
     remembered: { memoryChecks: 1 }, forgotten: { memoryChecks: 1, forgettingFailures: 1 },
     dispatch: { dispatches: 1 }, dispatch_correct: {}, misdispatch: { misdispatches: 1 },
     recovery_success: { recoveryAttempts: 1, recoverySuccesses: 1 }, recovery_failure: { recoveryAttempts: 1 },
   };
-  for (const [key, value] of Object.entries(increments[type] || {})) counters[key] = Number(counters[key] || 0) + value;
   const event = { id: `metric-${Date.now().toString(36)}-${crypto.randomBytes(2).toString("hex")}`, at: now(), type, ...payload };
-  const next = { version: 1, counters, events: [...(state.events || []), event].slice(-500), updatedAt: event.at };
-  writeJsonAtomic(METRICS_FILE, next);
+  mutateMemoryMetrics((state: any) => {
+    const counters = { ...(state.counters || {}) };
+    for (const [key, value] of Object.entries(increments[type] || {})) counters[key] = Number(counters[key] || 0) + value;
+    return { ...state, version: 1, counters, events: [...(state.events || []), event].slice(-500), updatedAt: event.at };
+  });
   return getMemoryMetrics();
 }
 
@@ -1413,9 +1467,8 @@ export function runMemoryAcceptanceSnapshot() {
     },
     scopes,
   };
-  const state = readJson(METRICS_FILE, { version: 1, counters: {}, events: [], updatedAt: "" });
   const event = { id: snapshot.id, at: snapshot.at, type: "acceptance_run", dataset: snapshot.dataset, rates: snapshot.rates };
-  writeJsonAtomic(METRICS_FILE, { ...state, latestAcceptance: snapshot, events: [...(state.events || []), event].slice(-500), updatedAt: snapshot.at });
+  mutateMemoryMetrics((state: any) => ({ ...state, latestAcceptance: snapshot, events: [...(state.events || []), event].slice(-500), updatedAt: snapshot.at }));
   appendAudit({ type: "memory_acceptance", action: "acceptance_run", scope: "system", scopeId: "all", actor: "local-user", reason: "真实项目长期记忆验收快照", dataset: snapshot.dataset, rates: snapshot.rates });
   return snapshot;
 }
@@ -3166,7 +3219,7 @@ function postCompactCleanupAuditFromMemory(memory: any = {}) {
     || null;
 }
 
-function buildGroupPostCompactCleanupAuditOverview(groupId: string, memory: any = {}) {
+function buildGroupPostCompactCleanupAuditOverview(groupId: string, memory: any = {}, options: any = {}) {
   const compaction = memory?.compaction || {};
   const boundary = memory?.compactBoundary || {};
   const restore = boundary.post_compact_restore || {};
@@ -3206,10 +3259,20 @@ function buildGroupPostCompactCleanupAuditOverview(groupId: string, memory: any 
     createdAt: compaction.lastCompactedAt || boundary.createdAt || "",
   } : null;
   const audit = storedAudit || legacyAudit;
+  const expectedGroupSessionId = String(options.groupSessionId || options.group_session_id || memory?.groupSessionId || memory?.group_session_id || audit?.groupSessionId || "");
   const gaps: any[] = [];
   if (hasBoundary && !audit) gaps.push({ severity: "fatal", reason: "compact boundary exists but cleanup audit is missing" });
   if (audit) {
-    if (audit.schema !== "ccm-post-compact-cleanup-audit-v1") gaps.push({ severity: "fatal", reason: "post compact cleanup audit schema mismatch" });
+    if (!["ccm-post-compact-cleanup-audit-v1", "ccm-post-compact-cleanup-audit-v2"].includes(String(audit.schema || ""))) gaps.push({ severity: "fatal", reason: "post compact cleanup audit schema mismatch" });
+    if (audit.schema === "ccm-post-compact-cleanup-audit-v2") {
+      const { verifyGroupPostCompactCleanupAudit } = require("../collaboration/group-memory-compaction");
+      const verification = verifyGroupPostCompactCleanupAudit(audit, {
+        groupId,
+        groupSessionId: expectedGroupSessionId,
+        boundaryId: boundary.id || audit.boundaryId || "",
+      });
+      for (const issue of verification.issues || []) gaps.push({ severity: "fatal", reason: issue });
+    }
     if (audit.status === "failed") gaps.push({ severity: "fatal", reason: "post compact cleanup audit failed" });
     if (audit.status === "degraded") gaps.push({ severity: "high", reason: "post compact cleanup audit degraded" });
     if (hasBoundary && !audit.transcriptPath && !audit.inferredFromLegacy) gaps.push({ severity: "high", reason: "cleanup audit missing raw transcript path" });
@@ -3228,6 +3291,8 @@ function buildGroupPostCompactCleanupAuditOverview(groupId: string, memory: any 
   return {
     schema: "ccm-group-post-compact-cleanup-audit-overview-v1",
     groupId,
+    groupSessionId: audit?.groupSessionId || expectedGroupSessionId,
+    scopeId: audit?.scopeId || "",
     status,
     checked: hasBoundary || !!audit,
     compacted: hasBoundary,
@@ -3242,6 +3307,9 @@ function buildGroupPostCompactCleanupAuditOverview(groupId: string, memory: any 
     preserveInvokedSkills: audit?.preserveInvokedSkills === true,
     preserveToolContinuity: audit?.preserveToolContinuity === true,
     resetDerivedCompactState: audit?.resetDerivedCompactState === true,
+    cleanupAuditChecksum: audit?.audit_checksum || "",
+    cleanupScope: audit?.cleanupScope || null,
+    compactSource: audit?.compactSource || null,
     cleanupActionCount: Array.isArray(audit?.cleanupActions) ? audit.cleanupActions.length : 0,
     passedChecks: Number(audit?.passedChecks || 0),
     checkCount: Number(audit?.checkCount || 0),
@@ -4217,11 +4285,88 @@ function buildApiMicrocompactNativeApplyProofReport(options: any = {}) {
     const claims = groupTasks.flatMap((task: any) => apiMicrocompactNativeApplyClaimRowsFromTask(task));
     const ledger = readApiMicrocompactNativeApplyProofLedgerForCenter(groupId, groupSessionId);
     const telemetryLedger = readApiMicrocompactNativeApplyRequestTelemetryLedgerForCenter(groupId, groupSessionId);
-    const entries = Array.isArray(ledger.entries) ? ledger.entries : [];
+    const executionReceiptSummary = (() => {
+      try {
+        return require("../collaboration/provider-native-compact-execution-receipt").buildProviderNativeCompactExecutionReceiptSummary(groupId, { groupSessionId });
+      } catch { return { entries: [], recent_entries: [], totals: {}, ledger_file: "", status: "empty" }; }
+    })();
+    const platformProofEntries = (Array.isArray(executionReceiptSummary.entries) ? executionReceiptSummary.entries : executionReceiptSummary.recent_entries || []).map((receipt: any) => ({
+      schema: "ccm-group-api-microcompact-native-apply-proof-entry-v1",
+      entry_id: receipt.receipt_id,
+      group_id: receipt.group_id,
+      group_session_id: receipt.group_session_id,
+      target_project: receipt.target_project,
+      agent: receipt.target_project,
+      task_id: receipt.task_id,
+      execution_id: receipt.execution_id,
+      runner_request_id: receipt.runner_request_id,
+      external_runner_request_id: receipt.runner_request_id,
+      plan_checksum: receipt.plan_checksum,
+      apply_plan_checksum: receipt.apply_plan_checksum,
+      request_patch_checksum: receipt.request_patch_checksum,
+      receipt_apply_plan_checksum: receipt.apply_plan_checksum,
+      receipt_request_patch_checksum: receipt.request_patch_checksum,
+      task_agent_session_id: receipt.task_agent_session_id,
+      native_session_id: receipt.native_session_id,
+      memory_context_snapshot_id: receipt.memory_context_snapshot_id,
+      memory_context_snapshot_checksum: receipt.memory_context_snapshot_checksum,
+      native_applied: receipt.status === "native_applied",
+      proof_status: receipt.status === "native_applied" && receipt.strong_proof === true
+        ? "verified"
+        : ["advisory_only", "request_accepted", "no_edits_applied"].includes(receipt.status)
+          ? "advisory"
+          : receipt.status === "not_supported"
+            ? "not_supported"
+            : "failed",
+      proof_source: "platform_execution_receipt",
+      strong_proof: receipt.status === "native_applied" && receipt.strong_proof === true,
+      reason: receipt.failure_reason || `platform request adapter status=${receipt.status}`,
+      generated_at: receipt.accepted_at || receipt.sent_at || receipt.created_at,
+    }));
+    const executionProofKey = (entry: any) => [
+      entry.plan_checksum,
+      entry.apply_plan_checksum || entry.receipt_apply_plan_checksum,
+      entry.request_patch_checksum || entry.receipt_request_patch_checksum,
+      entry.task_agent_session_id || entry.receipt_task_agent_session_id,
+      entry.execution_id,
+      entry.runner_request_id || entry.external_runner_request_id,
+    ].map(value => String(value || "")).join("|");
+    const platformProofKeys = new Set(platformProofEntries.map(executionProofKey));
+    const entries = [
+      ...platformProofEntries,
+      ...(Array.isArray(ledger.entries) ? ledger.entries : []).filter((entry: any) => !platformProofKeys.has(executionProofKey(entry))),
+    ];
     const telemetryEntries = Array.isArray(telemetryLedger.entries) ? telemetryLedger.entries : [];
     const proofEntries = entries.filter((entry: any) => ["verified", "failed"].includes(String(entry.proof_status || "")));
     const verifiedEntriesRaw = proofEntries.filter((entry: any) => entry.proof_status === "verified");
     const verifiedEntries = verifiedEntriesRaw.map((entry: any) => {
+      if (entry.proof_source === "platform_execution_receipt" && entry.strong_proof === true) {
+        return {
+          ...entry,
+          request_telemetry_matched: true,
+          request_telemetry_strong: true,
+          request_telemetry_fresh: true,
+          request_telemetry_stale: false,
+          request_telemetry_status: "matched",
+          request_telemetry_entry_id: entry.entry_id,
+          request_telemetry_sent_at: entry.generated_at || "",
+          request_telemetry_source: "native_request_adapter",
+          request_telemetry_age_ms: 0,
+          request_telemetry_max_age_ms: telemetryMaxAgeMs,
+          request_telemetry_adapter_captured: true,
+          request_telemetry_session_bound: true,
+          request_telemetry_session_status: "exact_match",
+          request_telemetry_session_issues: [],
+          request_telemetry_dispatch_bound: true,
+          request_telemetry_dispatch_status: "exact_match",
+          request_telemetry_dispatch_issues: [],
+          request_telemetry_runner_request_id: entry.runner_request_id || "",
+          request_telemetry_runner_matched: true,
+          request_telemetry_runner_missing: false,
+          request_telemetry_binding_weak_reason: "",
+          request_telemetry_weak_reason: "",
+        };
+      }
       const telemetry = telemetryEntries.find((item: any) => apiMicrocompactTelemetryEntryMatchesProof(item, entry))
         || telemetryEntries.find((item: any) => apiMicrocompactTelemetryEntryMatchesProofCore(item, entry));
       const telemetryProof = classifyApiMicrocompactNativeApplyTelemetryForProof(telemetry, { nowMs, telemetryMaxAgeMs });
@@ -4401,6 +4546,12 @@ function buildApiMicrocompactNativeApplyProofReport(options: any = {}) {
       requestTelemetryNativeAdapterEntryCount: telemetryNativeAdapterEntries.length,
       requestTelemetryAgentReceiptEntryCount: telemetryAgentReceiptEntries.length,
       requestTelemetryLedgerFile: telemetryLedger.file || getGroupApiMicrocompactNativeApplyRequestTelemetryLedgerFile(groupId, groupSessionId),
+      platformExecutionReceiptCount: Number(executionReceiptSummary.entry_count || executionReceiptSummary.recent_entries?.length || 0),
+      platformExecutionNativeAppliedCount: Number(executionReceiptSummary.totals?.native_applied || 0),
+      platformExecutionRequestAcceptedCount: Number(executionReceiptSummary.totals?.request_accepted || 0),
+      platformExecutionNoEditsCount: Number(executionReceiptSummary.totals?.no_edits_applied || 0),
+      platformExecutionFailedCount: Number(executionReceiptSummary.totals?.request_failed || 0) + Number(executionReceiptSummary.totals?.unverified || 0) + Number(executionReceiptSummary.totals?.invalid || 0),
+      platformExecutionReceiptLedgerFile: executionReceiptSummary.ledger_file || "",
       advisoryProofCount: advisoryEntries.length,
       ledgerEntryCount: entries.length,
       ledgerFile: ledger.file || getGroupApiMicrocompactNativeApplyProofLedgerFile(groupId, groupSessionId),
@@ -4453,6 +4604,11 @@ function buildApiMicrocompactNativeApplyProofReport(options: any = {}) {
       requestTelemetryEntryCount: groups.reduce((sum: number, row: any) => sum + Number(row.requestTelemetryEntryCount || 0), 0),
       requestTelemetryNativeAdapterEntryCount: groups.reduce((sum: number, row: any) => sum + Number(row.requestTelemetryNativeAdapterEntryCount || 0), 0),
       requestTelemetryAgentReceiptEntryCount: groups.reduce((sum: number, row: any) => sum + Number(row.requestTelemetryAgentReceiptEntryCount || 0), 0),
+      platformExecutionReceiptCount: groups.reduce((sum: number, row: any) => sum + Number(row.platformExecutionReceiptCount || 0), 0),
+      platformExecutionNativeAppliedCount: groups.reduce((sum: number, row: any) => sum + Number(row.platformExecutionNativeAppliedCount || 0), 0),
+      platformExecutionRequestAcceptedCount: groups.reduce((sum: number, row: any) => sum + Number(row.platformExecutionRequestAcceptedCount || 0), 0),
+      platformExecutionNoEditsCount: groups.reduce((sum: number, row: any) => sum + Number(row.platformExecutionNoEditsCount || 0), 0),
+      platformExecutionFailedCount: groups.reduce((sum: number, row: any) => sum + Number(row.platformExecutionFailedCount || 0), 0),
       advisoryProofCount: groups.reduce((sum: number, row: any) => sum + Number(row.advisoryProofCount || 0), 0),
     },
     groups: groups.sort((a: any, b: any) => b.checked - a.checked || b.failedProofCount - a.failedProofCount || b.missingProofCount - a.missingProofCount).slice(0, 50),
@@ -4611,7 +4767,8 @@ function evaluateApiMicrocompactNativeApplyProofRepairWorkItems(options: any = {
   return check;
 }
 
-function summarizeCompactionHookLedger(groupId: string, memory: any = {}, ledger: any = {}) {
+function summarizeCompactionHookLedger(groupId: string, memory: any = {}, ledger: any = {}, explicitGroupSessionId = "") {
+  const groupSessionId = String(explicitGroupSessionId || memory?.groupSessionId || ledger?.groupSessionId || "").trim();
   const compaction = memory?.compaction || {};
   const legacyPre = Array.isArray(compaction.hookResults?.pre) ? compaction.hookResults.pre : [];
   const legacyPost = Array.isArray(compaction.hookResults?.post) ? compaction.hookResults.post : [];
@@ -4621,6 +4778,7 @@ function summarizeCompactionHookLedger(groupId: string, memory: any = {}, ledger
       entry_id: `legacy-pre-${index}`,
       hook_run_id: compaction.hookLedger?.hookRunId || "legacy",
       group_id: groupId,
+      group_session_id: groupSessionId,
       phase: "pre",
       hook_index: index,
       ok: entry?.ok === true,
@@ -4638,6 +4796,7 @@ function summarizeCompactionHookLedger(groupId: string, memory: any = {}, ledger
       entry_id: `legacy-post-${index}`,
       hook_run_id: compaction.hookLedger?.hookRunId || "legacy",
       group_id: groupId,
+      group_session_id: groupSessionId,
       phase: "post",
       hook_index: index,
       ok: entry?.ok === true,
@@ -4660,18 +4819,26 @@ function summarizeCompactionHookLedger(groupId: string, memory: any = {}, ledger
   const totalDuration = merged.reduce((sum: number, entry: any) => sum + Number(entry.duration_ms || 0), 0);
   const boundary = compactMemoryHasPostCompactBoundary(memory);
   const gaps: any[] = [];
+  if (groupSessionId.startsWith("gcs_") && ledger.scopeValid === false) {
+    gaps.push({ component: "scope", reason: `compact hook ledger exact-session scope 无效：${(ledger.scopeIssues || []).join(",") || "unknown"}` });
+  }
   if (boundary.hasBoundary && preEntries.length === 0) gaps.push({ component: "pre", reason: "compact boundary 缺少 pre-compact hook ledger" });
   if (boundary.hasBoundary && postEntries.length === 0) gaps.push({ component: "post", reason: "compact boundary 缺少 post-compact hook ledger" });
   for (const entry of failedEntries.slice(0, 6)) {
     gaps.push({ component: entry.phase || "hook", reason: `${entry.phase || "hook"} hook 失败：${entry.error || "unknown"}`, entryId: entry.entry_id });
   }
-  const hasRequiredPhases = !boundary.hasBoundary || (preEntries.length > 0 && postEntries.length > 0);
+  const exactSessionScopeValid = groupSessionId.startsWith("gcs_") && ledger.scopeValid !== false;
+  const hasRequiredPhases = exactSessionScopeValid && (!boundary.hasBoundary || (preEntries.length > 0 && postEntries.length > 0));
   const score = !merged.length && !boundary.hasBoundary
     ? null
     : Math.max(0, (hasRequiredPhases ? 100 : 60) - failedEntries.length * 35);
   return {
     schema: "ccm-group-compaction-hook-ledger-summary-v1",
     groupId,
+    groupSessionId,
+    scopeId: groupSessionId.startsWith("gcs_") ? `${groupId}::${groupSessionId}` : "",
+    scopeValid: exactSessionScopeValid,
+    rejectedEntryCount: Number(ledger.rejectedEntryCount || 0),
     compacted: boundary.hasBoundary === true,
     file: ledger.file || compaction.hookLedger?.file || "",
     status: score === null ? "empty" : score >= 90 ? "ok" : score >= 70 ? "warn" : "fail",
@@ -4707,19 +4874,16 @@ function buildCompactionHookLedgerReport(options: any = {}) {
   const explicitGroupIds = Array.isArray(options.groupIds || options.group_ids)
     ? (options.groupIds || options.group_ids).map((item: any) => String(item || "").trim()).filter(Boolean)
     : null;
-  const files = explicitGroupIds
-    ? explicitGroupIds.map((id: string) => path.join(GROUP_MEMORY_DIR, `${id}.json`))
-    : listJsonFiles(GROUP_MEMORY_DIR);
+  const scopes = listGroupMemoryScopes().filter((entry: any) => entry.sessionId.startsWith("gcs_")
+    && (!explicitGroupIds || explicitGroupIds.includes(entry.groupId)));
   const rows: any[] = [];
-  for (const file of files) {
-    const memory = readMemoryFile(file);
-    if (!memory) continue;
-    const groupId = String(memory.groupId || path.basename(file, ".json"));
+  for (const scope of scopes) {
+    const { groupId, sessionId, memory } = scope;
     try {
       const { readGroupMemoryCompactionHookLedger } = require("../collaboration/group-memory-compaction");
-      rows.push(summarizeCompactionHookLedger(groupId, memory, readGroupMemoryCompactionHookLedger(groupId)));
+      rows.push(summarizeCompactionHookLedger(groupId, memory, readGroupMemoryCompactionHookLedger(groupId, sessionId), sessionId));
     } catch {
-      rows.push(summarizeCompactionHookLedger(groupId, memory, {}));
+      rows.push(summarizeCompactionHookLedger(groupId, memory, { scopeValid: false, scopeIssues: ["hook_ledger_read_failed"] }, sessionId));
     }
   }
   const compactedRows = rows.filter(row => row.compacted === true || row.entryCount > 0);
@@ -8942,23 +9106,24 @@ function buildHistoricalCompactBoundaryReplayReport(options: any = {}) {
   const explicitGroupIds = Array.isArray(options.groupIds || options.group_ids)
     ? (options.groupIds || options.group_ids).map((item: any) => String(item || "").trim()).filter(Boolean)
     : null;
-  const files = explicitGroupIds
-    ? explicitGroupIds.map((id: string) => path.join(GROUP_MEMORY_DIR, `${id}.json`))
-    : listJsonFiles(GROUP_MEMORY_DIR);
+  const scopes = listGroupMemoryScopes().filter((entry: any) => entry.sessionId.startsWith("gcs_")
+    && (!explicitGroupIds || explicitGroupIds.includes(entry.groupId)));
   const rows: any[] = [];
-  for (const file of files) {
-    const memory = readMemoryFile(file);
-    if (!memory) continue;
-    const groupId = String(memory.groupId || path.basename(file, ".json"));
+  for (const scope of scopes) {
+    const { groupId, sessionId, memory } = scope;
     const hooks = (() => {
       try {
         const { readGroupMemoryCompactionHookLedger } = require("../collaboration/group-memory-compaction");
-        return summarizeCompactionHookLedger(groupId, memory, readGroupMemoryCompactionHookLedger(groupId));
+        return summarizeCompactionHookLedger(groupId, memory, readGroupMemoryCompactionHookLedger(groupId, sessionId), sessionId);
       } catch {
-        return summarizeCompactionHookLedger(groupId, memory, {});
+        return summarizeCompactionHookLedger(groupId, memory, { scopeValid: false, scopeIssues: ["hook_ledger_read_failed"] }, sessionId);
       }
     })();
-    rows.push(buildGroupHistoricalCompactBoundaryReplay(groupId, memory, { hookLedger: hooks, maxBoundaries: options.maxBoundaries || options.max_boundaries }));
+    rows.push({
+      ...buildGroupHistoricalCompactBoundaryReplay(groupId, memory, { hookLedger: hooks, maxBoundaries: options.maxBoundaries || options.max_boundaries }),
+      groupSessionId: sessionId,
+      scopeId: `${groupId}::${sessionId}`,
+    });
   }
   const checkedRows = rows.filter(row => row.status !== "empty");
   const scoredRows = checkedRows.filter(row => row.score !== null && row.score !== undefined);
@@ -9207,23 +9372,24 @@ function buildChildAgentTypeReplayMatrixReport(options: any = {}) {
   const explicitGroupIds = Array.isArray(options.groupIds || options.group_ids)
     ? (options.groupIds || options.group_ids).map((item: any) => String(item || "").trim()).filter(Boolean)
     : null;
-  const files = explicitGroupIds
-    ? explicitGroupIds.map((id: string) => path.join(GROUP_MEMORY_DIR, `${id}.json`))
-    : listJsonFiles(GROUP_MEMORY_DIR);
+  const scopes = listGroupMemoryScopes().filter((entry: any) => entry.sessionId.startsWith("gcs_")
+    && (!explicitGroupIds || explicitGroupIds.includes(entry.groupId)));
   const rows: any[] = [];
-  for (const file of files) {
-    const memory = readMemoryFile(file);
-    if (!memory) continue;
-    const groupId = String(memory.groupId || path.basename(file, ".json"));
+  for (const scope of scopes) {
+    const { groupId, sessionId, memory } = scope;
     const hooks = (() => {
       try {
         const { readGroupMemoryCompactionHookLedger } = require("../collaboration/group-memory-compaction");
-        return summarizeCompactionHookLedger(groupId, memory, readGroupMemoryCompactionHookLedger(groupId));
+        return summarizeCompactionHookLedger(groupId, memory, readGroupMemoryCompactionHookLedger(groupId, sessionId), sessionId);
       } catch {
-        return summarizeCompactionHookLedger(groupId, memory, {});
+        return summarizeCompactionHookLedger(groupId, memory, { scopeValid: false, scopeIssues: ["hook_ledger_read_failed"] }, sessionId);
       }
     })();
-    rows.push(buildGroupChildAgentTypeReplayMatrix(groupId, memory, { hookLedger: hooks, targets: options.targets }));
+    rows.push({
+      ...buildGroupChildAgentTypeReplayMatrix(groupId, memory, { hookLedger: hooks, targets: options.targets }),
+      groupSessionId: sessionId,
+      scopeId: `${groupId}::${sessionId}`,
+    });
   }
   const checkedRows = rows.filter(row => row.status !== "empty");
   const scoredRows = checkedRows.filter(row => row.score !== null && row.score !== undefined);
@@ -9280,23 +9446,29 @@ function buildCompactBoundaryReplayReport(options: any = {}) {
   const explicitGroupIds = Array.isArray(options.groupIds || options.group_ids)
     ? (options.groupIds || options.group_ids).map((item: any) => String(item || "").trim()).filter(Boolean)
     : null;
-  const files = explicitGroupIds
-    ? explicitGroupIds.map((id: string) => path.join(GROUP_MEMORY_DIR, `${id}.json`))
-    : listJsonFiles(GROUP_MEMORY_DIR);
+  const scopes = listGroupMemoryScopes().filter((entry: any) => entry.sessionId.startsWith("gcs_")
+    && (!explicitGroupIds || explicitGroupIds.includes(entry.groupId)));
   const rows: any[] = [];
-  for (const file of files) {
-    const memory = readMemoryFile(file);
-    if (!memory) continue;
-    const groupId = String(memory.groupId || path.basename(file, ".json"));
+  for (const scope of scopes) {
+    const { groupId, sessionId, memory } = scope;
     const hooks = (() => {
       try {
         const { readGroupMemoryCompactionHookLedger } = require("../collaboration/group-memory-compaction");
-        return summarizeCompactionHookLedger(groupId, memory, readGroupMemoryCompactionHookLedger(groupId));
+        return summarizeCompactionHookLedger(groupId, memory, readGroupMemoryCompactionHookLedger(groupId, sessionId), sessionId);
       } catch {
-        return summarizeCompactionHookLedger(groupId, memory, {});
+        return summarizeCompactionHookLedger(groupId, memory, { scopeValid: false, scopeIssues: ["hook_ledger_read_failed"] }, sessionId);
       }
     })();
-    rows.push(buildGroupCompactBoundaryReplayGate(groupId, memory, { hookLedger: hooks }));
+    rows.push({
+      ...buildGroupCompactBoundaryReplayGate(groupId, memory, {
+        hookLedger: hooks,
+        groupSessionId: sessionId,
+        groupMemoryFile: scope.file,
+        groupMessagesFile: require("../collaboration/storage").getGroupChatSessionMessagesFile(groupId, sessionId),
+      }),
+      groupSessionId: sessionId,
+      scopeId: `${groupId}::${sessionId}`,
+    });
   }
   const checkedRows = rows.filter(row => row.status !== "empty");
   const scoredRows = checkedRows.filter(row => row.score !== null && row.score !== undefined);
@@ -9353,10 +9525,13 @@ function evaluateCompactBoundaryReplayGate(options: any = {}) {
   return check;
 }
 
-function replayOverrideForGroup(options: any = {}, groupId: string) {
+function replayOverrideForGroup(options: any = {}, groupId: string, groupSessionId = "") {
   const overrides = options.replays || options.replayRows || options.replay_rows;
-  if (Array.isArray(overrides)) return overrides.find((row: any) => String(row.groupId || row.group_id || "") === String(groupId)) || null;
-  if (overrides && typeof overrides === "object") return overrides[groupId] || overrides[String(groupId)] || null;
+  if (Array.isArray(overrides)) return overrides.find((row: any) => String(row.groupId || row.group_id || "") === String(groupId)
+    && (!groupSessionId || String(row.groupSessionId || row.group_session_id || "") === groupSessionId)) || null;
+  if (overrides && typeof overrides === "object") {
+    return overrides[`${groupId}::${groupSessionId}`] || overrides[groupId] || overrides[String(groupId)] || null;
+  }
   return null;
 }
 
@@ -9364,33 +9539,31 @@ function buildReplayRepairPendingWorkItemReport(options: any = {}) {
   const explicitGroupIds = Array.isArray(options.groupIds || options.group_ids)
     ? (options.groupIds || options.group_ids).map((item: any) => String(item || "").trim()).filter(Boolean)
     : null;
-  const overrideGroupIds = Array.isArray(options.replays || options.replayRows || options.replay_rows)
-    ? (options.replays || options.replayRows || options.replay_rows).map((row: any) => String(row.groupId || row.group_id || "")).filter(Boolean)
-    : [];
-  const groupIds = explicitGroupIds || overrideGroupIds;
-  const files = groupIds?.length
-    ? groupIds.map((id: string) => path.join(GROUP_MEMORY_DIR, `${id}.json`))
-    : listJsonFiles(GROUP_MEMORY_DIR);
+  const scopes = listGroupMemoryScopes().filter((entry: any) => entry.sessionId.startsWith("gcs_")
+    && (!explicitGroupIds || explicitGroupIds.includes(entry.groupId)));
   const rows: any[] = [];
-  for (const file of files) {
-    const fileGroupId = path.basename(file, ".json");
-    const memory = readMemoryFile(file) || { groupId: fileGroupId };
-    const groupId = String(memory.groupId || fileGroupId);
-    const replayOverride = replayOverrideForGroup(options, groupId);
+  for (const scope of scopes) {
+    const { groupId, sessionId: groupSessionId, memory, file } = scope;
+    const replayOverride = replayOverrideForGroup(options, groupId, groupSessionId);
     const replay = replayOverride || (() => {
       const hooks = (() => {
         try {
           const { readGroupMemoryCompactionHookLedger } = require("../collaboration/group-memory-compaction");
-          return summarizeCompactionHookLedger(groupId, memory, readGroupMemoryCompactionHookLedger(groupId));
+          return summarizeCompactionHookLedger(groupId, memory, readGroupMemoryCompactionHookLedger(groupId, groupSessionId), groupSessionId);
         } catch {
-          return summarizeCompactionHookLedger(groupId, memory, {});
+          return summarizeCompactionHookLedger(groupId, memory, { scopeValid: false, scopeIssues: ["hook_ledger_read_failed"] }, groupSessionId);
         }
       })();
-      return buildGroupCompactBoundaryReplayGate(groupId, memory, { hookLedger: hooks });
+      return buildGroupCompactBoundaryReplayGate(groupId, memory, {
+        hookLedger: hooks,
+        groupSessionId,
+        groupMemoryFile: file,
+        groupMessagesFile: require("../collaboration/storage").getGroupChatSessionMessagesFile(groupId, groupSessionId),
+      });
     })();
     const workItems = replayOverride
-      ? syncCompactBoundaryReplayRepairPendingWorkItems(groupId, replayOverride, { at: options.generatedAt || options.generated_at || now() })
-      : replay.repairWorkItems || summarizeReplayRepairPendingWorkItems(groupId);
+      ? syncCompactBoundaryReplayRepairPendingWorkItems(groupId, replayOverride, { at: options.generatedAt || options.generated_at || now(), groupSessionId })
+      : replay.repairWorkItems || summarizeReplayRepairPendingWorkItems(groupId, null, groupSessionId);
     const requiredActionCount = Number(replay.repairPlan?.requiredActionCount || replay.repair_plan?.requiredActionCount || 0);
     const openItemCount = Number(workItems.openItemCount || 0);
     const coveredItemCount = openItemCount + Number(workItems.completedCount || 0);
@@ -9400,6 +9573,8 @@ function buildReplayRepairPendingWorkItemReport(options: any = {}) {
     rows.push({
       schema: "ccm-replay-repair-pending-work-item-group-v1",
       groupId,
+      groupSessionId,
+      scopeId: `${groupId}::${groupSessionId}`,
       status,
       replayStatus: replay.status || "",
       replayScore: replay.score ?? null,
@@ -9411,7 +9586,7 @@ function buildReplayRepairPendingWorkItemReport(options: any = {}) {
       inProgressCount: Number(workItems.inProgressCount || 0),
       blockedCount: Number(workItems.blockedCount || 0),
       completedCount: Number(workItems.completedCount || 0),
-      file: workItems.file || getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId),
+      file: workItems.file || getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId, groupSessionId),
       latestReplay: workItems.latestReplay || null,
       items: workItems.items || [],
       gaps: status === "fail" ? [{
@@ -29734,6 +29909,7 @@ export function buildGroupSessionMemorySnapshotReport(options: any = {}) {
   const explicitGroupSessionId = String(options.groupSessionId || options.group_session_id || "").trim();
   const groupIdSet = explicitGroupIds?.length ? new Set(explicitGroupIds) : null;
   const scopes = listGroupMemoryScopes()
+    .filter((entry: any) => String(entry.sessionId || "").startsWith("gcs_"))
     .filter((entry: any) => !groupIdSet || groupIdSet.has(String(entry.groupId || "")))
     .filter((entry: any) => !explicitGroupSessionId || String(entry.sessionId || "default") === explicitGroupSessionId);
   const rows = scopes.map((entry: any) => {
@@ -29744,8 +29920,25 @@ export function buildGroupSessionMemorySnapshotReport(options: any = {}) {
     const typedScopeId = groupSessionId === "default" ? groupId : `${groupId}--${groupSessionId}`;
     const manifestSelectorSummary = groupSessionId.startsWith("gcs_")
       ? require("../collaboration/group-memory-index").summarizeGroupTypedMemoryManifestSelectorDecisions(typedScopeId)
-      : { present: false, valid: true, decisionCount: 0, selectedDecisionCount: 0, emptyDecisionCount: 0, failedDecisionCount: 0, selectedDocumentCount: 0, averageSelectedDocuments: 0, latest: null };
+      : { present: false, valid: true, closureValid: true, consumptionClosureValid: true, shapeValid: true, decisionCount: 0, selectedDecisionCount: 0, emptyDecisionCount: 0, failedDecisionCount: 0, selectedDocumentCount: 0, attachedOutcomeCount: 0, committedOutcomeCount: 0, invalidOutcomeCount: 0, selectedAttachedDocumentCount: 0, selectedCommittedDocumentCount: 0, selectedNotRecalledDocumentCount: 0, recalledNotAttachedDocumentCount: 0, staleUnattachedDecisionCount: 0, staleUncommittedAttachmentCount: 0, closureGapCount: 0, consumptionOutcomeCount: 0, consumptionDeliveredDocumentCount: 0, consumptionUsedDocumentCount: 0, consumptionVerifiedDocumentCount: 0, consumptionIgnoredDocumentCount: 0, consumptionUnreportedDocumentCount: 0, consumptionWeakReceiptBindingCount: 0, consumptionUnexpectedClaimCount: 0, consumptionStaleCommittedWithoutConsumptionCount: 0, consumptionClosureGapCount: 0, calibrationObservedDecisionCount: 0, calibrationHintedDecisionCount: 0, calibrationEvidenceCount: 0, calibrationHintCount: 0, calibrationSupportHintCount: 0, calibrationCautionHintCount: 0, calibrationMixedHintCount: 0, shapeCount: 0, shapeInvalidCount: 0, shapeMissingExpectedCount: 0, shapeSelectorRunCount: 0, shapeEmptySelectionCount: 0, shapeCandidateTotal: 0, shapeSelectedTotal: 0, shapeSelectionRate: null, shapeAverageSelectedAgeDays: -1, shapeSelectedFreshCount: 0, shapeSelectedStaleCount: 0, shapeConsumptionLinkedRunCount: 0, shapeConsumptionReceiptCoverageRate: null, shapeConsumedUtilityRate: null, writeShapePresent: false, writeShapeValid: true, writeShapeCount: 0, writeShapeInvalidCount: 0, writeShapeCreateCount: 0, writeShapeUpdateCount: 0, writeShapeNoopCount: 0, writeShapeChangedCount: 0, writeShapeBodyTruncatedCount: 0, writeShapeNearBodyLimitCount: 0, writeShapeTotalGrowthBytes: 0, writeShapeAverageAfterBytes: 0, writeShapeMaxAfterBytes: 0, shapeDriftValid: true, shapeDriftStatus: "unobserved", shapeDriftSignalCount: 0, shapeDriftWarningSignalCount: 0, shapeDrift: null, shapeTrendPresent: false, shapeTrendValid: true, shapeTrendStatus: "unobserved", shapeTrendBucketCount: 0, shapeTrendMutableBucketCount: 0, shapeTrendSealedBucketCount: 0, shapeTrendGeneration: 0, shapeTrendSignalCount: 0, shapeTrendWarningSignalCount: 0, shapeTrendRecoveredFromBackup: false, shapeTrendExtendsBeyondHotRetention: false, shapeTrend: null, shapeTrendIncidentPresent: false, shapeTrendIncidentValid: true, shapeTrendIncidentStatus: "unobserved", shapeTrendIncidentEventCount: 0, shapeTrendIncidentCount: 0, shapeTrendIncidentPendingCount: 0, shapeTrendIncidentAcknowledgedCount: 0, shapeTrendIncidentResolvedCount: 0, shapeTrendIncidentRecoveredFromBackup: false, shapeTrendActiveIncident: null, shapeTrendIncidents: null, averageSelectedDocuments: 0, latest: null };
     const manifestSelectorInvalid = manifestSelectorSummary.present === true && manifestSelectorSummary.valid !== true;
+    const manifestSelectorClosureInvalid = manifestSelectorSummary.present === true && manifestSelectorSummary.closureValid !== true;
+    const manifestSelectorConsumptionClosureInvalid = manifestSelectorSummary.present === true
+      && manifestSelectorSummary.consumptionClosureValid !== true;
+    const manifestSelectorShapeInvalid = manifestSelectorSummary.present === true
+      && manifestSelectorSummary.shapeValid !== true;
+    const memoryWriteShapeInvalid = manifestSelectorSummary.writeShapePresent === true
+      && manifestSelectorSummary.writeShapeValid !== true;
+    const memoryShapeDriftInvalid = groupSessionId.startsWith("gcs_")
+      && manifestSelectorSummary.shapeDriftValid !== true;
+    const memoryShapeTrendInvalid = groupSessionId.startsWith("gcs_")
+      && manifestSelectorSummary.shapeTrendValid !== true;
+    const memoryShapeTrendRecovered = groupSessionId.startsWith("gcs_")
+      && manifestSelectorSummary.shapeTrendRecoveredFromBackup === true;
+    const memoryShapeTrendIncidentInvalid = groupSessionId.startsWith("gcs_")
+      && manifestSelectorSummary.shapeTrendIncidentValid !== true;
+    const memoryShapeTrendIncidentRecovered = groupSessionId.startsWith("gcs_")
+      && manifestSelectorSummary.shapeTrendIncidentRecoveredFromBackup === true;
     const autoCompactionBackground = memory.compaction?.background || null;
     const autoCompactionLogDistillation = memory.compaction?.logDistillation || memory.longTermLogDistillation || null;
     const autoCompactionScopeEvidencePresent = !!autoCompactionBackground?.status || !!autoCompactionLogDistillation?.schema;
@@ -29899,7 +30092,7 @@ export function buildGroupSessionMemorySnapshotReport(options: any = {}) {
       ? "fail"
       : !requiresSnapshot
       ? "empty"
-      : budgetExceeded || modelEvidenceInvalid || modelFailureEvidenceInvalid || modelHistoryEvidenceInvalid || modelReplayEvidenceInvalid || modelExtractionDeliveryEvidenceInvalid || modelArtifactRetentionInvalid || modelArtifactRetentionCapacityExceeded || factSupersessionGraphInvalid || !modelExtractionTypedMemoryArchiveValid || modelExtractionTypedMemoryRetryInvalid || modelExtractionTypedMemoryRetryExhaustedCount > 0 || manifestSelectorInvalid || extractionStale || (cadenceOverdue && !extractionActive && !hasSummary) || (extractionFailed && !snapshot.hasSummary) ? "fail"
+      : budgetExceeded || modelEvidenceInvalid || modelFailureEvidenceInvalid || modelHistoryEvidenceInvalid || modelReplayEvidenceInvalid || modelExtractionDeliveryEvidenceInvalid || modelArtifactRetentionInvalid || modelArtifactRetentionCapacityExceeded || factSupersessionGraphInvalid || !modelExtractionTypedMemoryArchiveValid || modelExtractionTypedMemoryRetryInvalid || modelExtractionTypedMemoryRetryExhaustedCount > 0 || manifestSelectorInvalid || manifestSelectorClosureInvalid || manifestSelectorConsumptionClosureInvalid || extractionStale || (cadenceOverdue && !extractionActive && !hasSummary) || (extractionFailed && !snapshot.hasSummary) ? "fail"
       : snapshotExists && markdownExists && checksumMatches && hasSummary && !budgetNearLimit && !modelArtifactRetentionDue && !extractionFailed && !modelExtractionPending && modelExtractionTypedMemoryRetryPendingCount === 0 ? "ok"
       : snapshotExists && markdownExists && hasSummary ? "warn"
       : "fail";
@@ -29936,6 +30129,15 @@ export function buildGroupSessionMemorySnapshotReport(options: any = {}) {
     if (modelExtractionTypedMemoryRetryPendingCount > 0) gaps.push({ reason: `有 ${modelExtractionTypedMemoryRetryPendingCount} 个模型 extraction typed-memory 提交等待 artifact-only 重试` });
     if (modelExtractionTypedMemoryRetryExhaustedCount > 0) gaps.push({ reason: `有 ${modelExtractionTypedMemoryRetryExhaustedCount} 个模型 extraction typed-memory 提交已耗尽自动重试` });
     if (manifestSelectorInvalid) gaps.push({ reason: `typed-memory manifest selector 决策完整性失败：invalid=${manifestSelectorSummary.invalidDecisionCount || 0}` });
+    if (manifestSelectorClosureInvalid) gaps.push({ reason: `typed-memory manifest selector 交付闭环失败：outcome invalid=${manifestSelectorSummary.invalidOutcomeCount || 0}，未附着=${manifestSelectorSummary.staleUnattachedDecisionCount || 0}，附着未提交=${manifestSelectorSummary.staleUncommittedAttachmentCount || 0}` });
+    if (manifestSelectorConsumptionClosureInvalid) gaps.push({ reason: `typed-memory manifest selector 消费回执闭环失败：outcome invalid=${manifestSelectorSummary.consumptionSummary?.invalidOutcomeCount || 0}，弱绑定=${manifestSelectorSummary.consumptionWeakReceiptBindingCount || 0}，未逐项回执=${manifestSelectorSummary.consumptionUnreportedDocumentCount || 0}，越权声明=${manifestSelectorSummary.consumptionUnexpectedClaimCount || 0}，提交后无回执=${manifestSelectorSummary.consumptionStaleCommittedWithoutConsumptionCount || 0}` });
+    if (manifestSelectorShapeInvalid) gaps.push({ reason: `typed-memory manifest selector recall-shape 遥测完整性失败：invalid=${manifestSelectorSummary.shapeInvalidCount || 0}，missing=${manifestSelectorSummary.shapeMissingExpectedCount || 0}` });
+    if (memoryWriteShapeInvalid) gaps.push({ reason: `typed-memory write-shape 遥测完整性失败：invalid=${manifestSelectorSummary.writeShapeInvalidCount || 0}` });
+    if (memoryShapeDriftInvalid) gaps.push({ reason: "typed-memory shape drift 报告 checksum 或精确会话绑定无效" });
+    if (memoryShapeTrendInvalid) gaps.push({ reason: "typed-memory durable shape trend 账本、桶链或精确会话绑定无效" });
+    if (memoryShapeTrendRecovered) gaps.push({ reason: "typed-memory durable shape trend 主账本无效，当前已从原子备份恢复" });
+    if (memoryShapeTrendIncidentInvalid) gaps.push({ reason: "typed-memory durable shape trend incident 事件链、确认绑定或精确会话绑定无效" });
+    if (memoryShapeTrendIncidentRecovered) gaps.push({ reason: "typed-memory durable shape trend incident 主账本无效，当前已从原子备份恢复" });
     if (directMemorySuppressionPresent && !directMemorySuppressionChecksumValid) gaps.push({ reason: "直接记忆模型抽取抑制回执 checksum、会话身份或游标绑定无效" });
     if (extractionFailed) gaps.push({ reason: `group session memory 最近一次提取失败：${extractionState.lastError || "unknown error"}` });
     if (modelExtractionBackoff) gaps.push({ reason: `模型 Session Memory 提取处于失败退避，计划 ${extractionState.nextRetryAt} 重试` });
@@ -30135,12 +30337,103 @@ export function buildGroupSessionMemorySnapshotReport(options: any = {}) {
       manifestSelectorSummary,
       manifestSelectorPresent: manifestSelectorSummary.present === true,
       manifestSelectorValid: manifestSelectorSummary.valid === true,
+      manifestSelectorClosureValid: manifestSelectorSummary.closureValid === true,
+      manifestSelectorConsumptionClosureValid: manifestSelectorSummary.consumptionClosureValid === true,
       manifestSelectorDecisionCount: Number(manifestSelectorSummary.decisionCount || 0),
       manifestSelectorSelectedDecisionCount: Number(manifestSelectorSummary.selectedDecisionCount || 0),
       manifestSelectorEmptyDecisionCount: Number(manifestSelectorSummary.emptyDecisionCount || 0),
       manifestSelectorFailedDecisionCount: Number(manifestSelectorSummary.failedDecisionCount || 0),
       manifestSelectorSelectedDocumentCount: Number(manifestSelectorSummary.selectedDocumentCount || 0),
+      manifestSelectorAttachedOutcomeCount: Number(manifestSelectorSummary.attachedOutcomeCount || 0),
+      manifestSelectorCommittedOutcomeCount: Number(manifestSelectorSummary.committedOutcomeCount || 0),
+      manifestSelectorInvalidOutcomeCount: Number(manifestSelectorSummary.invalidOutcomeCount || 0),
+      manifestSelectorSelectedAttachedDocumentCount: Number(manifestSelectorSummary.selectedAttachedDocumentCount || 0),
+      manifestSelectorSelectedCommittedDocumentCount: Number(manifestSelectorSummary.selectedCommittedDocumentCount || 0),
+      manifestSelectorSelectedNotRecalledDocumentCount: Number(manifestSelectorSummary.selectedNotRecalledDocumentCount || 0),
+      manifestSelectorRecalledNotAttachedDocumentCount: Number(manifestSelectorSummary.recalledNotAttachedDocumentCount || 0),
+      manifestSelectorStaleUnattachedDecisionCount: Number(manifestSelectorSummary.staleUnattachedDecisionCount || 0),
+      manifestSelectorStaleUncommittedAttachmentCount: Number(manifestSelectorSummary.staleUncommittedAttachmentCount || 0),
+      manifestSelectorClosureGapCount: Number(manifestSelectorSummary.closureGapCount || 0),
+      manifestSelectorConsumptionOutcomeCount: Number(manifestSelectorSummary.consumptionOutcomeCount || 0),
+      manifestSelectorConsumptionDeliveredDocumentCount: Number(manifestSelectorSummary.consumptionDeliveredDocumentCount || 0),
+      manifestSelectorConsumptionUsedDocumentCount: Number(manifestSelectorSummary.consumptionUsedDocumentCount || 0),
+      manifestSelectorConsumptionVerifiedDocumentCount: Number(manifestSelectorSummary.consumptionVerifiedDocumentCount || 0),
+      manifestSelectorConsumptionIgnoredDocumentCount: Number(manifestSelectorSummary.consumptionIgnoredDocumentCount || 0),
+      manifestSelectorConsumptionUnreportedDocumentCount: Number(manifestSelectorSummary.consumptionUnreportedDocumentCount || 0),
+      manifestSelectorConsumptionWeakReceiptBindingCount: Number(manifestSelectorSummary.consumptionWeakReceiptBindingCount || 0),
+      manifestSelectorConsumptionUnexpectedClaimCount: Number(manifestSelectorSummary.consumptionUnexpectedClaimCount || 0),
+      manifestSelectorConsumptionStaleCommittedWithoutConsumptionCount: Number(manifestSelectorSummary.consumptionStaleCommittedWithoutConsumptionCount || 0),
+      manifestSelectorConsumptionClosureGapCount: Number(manifestSelectorSummary.consumptionClosureGapCount || 0),
+      manifestSelectorConsumptionLatest: manifestSelectorSummary.consumptionSummary?.latest || null,
       manifestSelectorAverageSelectedDocuments: Number(manifestSelectorSummary.averageSelectedDocuments || 0),
+      manifestSelectorCalibrationObservedDecisionCount: Number(manifestSelectorSummary.calibrationObservedDecisionCount || 0),
+      manifestSelectorCalibrationHintedDecisionCount: Number(manifestSelectorSummary.calibrationHintedDecisionCount || 0),
+      manifestSelectorCalibrationEvidenceCount: Number(manifestSelectorSummary.calibrationEvidenceCount || 0),
+      manifestSelectorCalibrationHintCount: Number(manifestSelectorSummary.calibrationHintCount || 0),
+      manifestSelectorCalibrationSupportHintCount: Number(manifestSelectorSummary.calibrationSupportHintCount || 0),
+      manifestSelectorCalibrationCautionHintCount: Number(manifestSelectorSummary.calibrationCautionHintCount || 0),
+      manifestSelectorCalibrationMixedHintCount: Number(manifestSelectorSummary.calibrationMixedHintCount || 0),
+      manifestSelectorShapeValid: manifestSelectorSummary.shapeValid === true,
+      manifestSelectorShapeCount: Number(manifestSelectorSummary.shapeCount || 0),
+      manifestSelectorShapeInvalidCount: Number(manifestSelectorSummary.shapeInvalidCount || 0),
+      manifestSelectorShapeMissingExpectedCount: Number(manifestSelectorSummary.shapeMissingExpectedCount || 0),
+      manifestSelectorShapeSelectorRunCount: Number(manifestSelectorSummary.shapeSelectorRunCount || 0),
+      manifestSelectorShapeEmptySelectionCount: Number(manifestSelectorSummary.shapeEmptySelectionCount || 0),
+      manifestSelectorShapeCandidateTotal: Number(manifestSelectorSummary.shapeCandidateTotal || 0),
+      manifestSelectorShapeSelectedTotal: Number(manifestSelectorSummary.shapeSelectedTotal || 0),
+      manifestSelectorShapeSelectionRate: manifestSelectorSummary.shapeSelectionRate,
+      manifestSelectorShapeAverageSelectedAgeDays: Number(manifestSelectorSummary.shapeAverageSelectedAgeDays ?? -1),
+      manifestSelectorShapeSelectedFreshCount: Number(manifestSelectorSummary.shapeSelectedFreshCount || 0),
+      manifestSelectorShapeSelectedStaleCount: Number(manifestSelectorSummary.shapeSelectedStaleCount || 0),
+      manifestSelectorShapeConsumptionLinkedRunCount: Number(manifestSelectorSummary.shapeConsumptionLinkedRunCount || 0),
+      manifestSelectorShapeConsumedDeliveredDocumentCount: Number(manifestSelectorSummary.shapeConsumedDeliveredDocumentCount || 0),
+      manifestSelectorShapeConsumedUsedDocumentCount: Number(manifestSelectorSummary.shapeConsumedUsedDocumentCount || 0),
+      manifestSelectorShapeConsumedVerifiedDocumentCount: Number(manifestSelectorSummary.shapeConsumedVerifiedDocumentCount || 0),
+      manifestSelectorShapeConsumedIgnoredDocumentCount: Number(manifestSelectorSummary.shapeConsumedIgnoredDocumentCount || 0),
+      manifestSelectorShapeConsumedUnreportedDocumentCount: Number(manifestSelectorSummary.shapeConsumedUnreportedDocumentCount || 0),
+      manifestSelectorShapeConsumptionReceiptCoverageRate: manifestSelectorSummary.shapeConsumptionReceiptCoverageRate,
+      manifestSelectorShapeConsumedUtilityRate: manifestSelectorSummary.shapeConsumedUtilityRate,
+      memoryWriteShapePresent: manifestSelectorSummary.writeShapePresent === true,
+      memoryWriteShapeValid: manifestSelectorSummary.writeShapeValid === true,
+      memoryWriteShapeCount: Number(manifestSelectorSummary.writeShapeCount || 0),
+      memoryWriteShapeInvalidCount: Number(manifestSelectorSummary.writeShapeInvalidCount || 0),
+      memoryWriteShapeCreateCount: Number(manifestSelectorSummary.writeShapeCreateCount || 0),
+      memoryWriteShapeUpdateCount: Number(manifestSelectorSummary.writeShapeUpdateCount || 0),
+      memoryWriteShapeNoopCount: Number(manifestSelectorSummary.writeShapeNoopCount || 0),
+      memoryWriteShapeChangedCount: Number(manifestSelectorSummary.writeShapeChangedCount || 0),
+      memoryWriteShapeBodyTruncatedCount: Number(manifestSelectorSummary.writeShapeBodyTruncatedCount || 0),
+      memoryWriteShapeNearBodyLimitCount: Number(manifestSelectorSummary.writeShapeNearBodyLimitCount || 0),
+      memoryWriteShapeTotalGrowthBytes: Number(manifestSelectorSummary.writeShapeTotalGrowthBytes || 0),
+      memoryWriteShapeAverageAfterBytes: Number(manifestSelectorSummary.writeShapeAverageAfterBytes || 0),
+      memoryWriteShapeMaxAfterBytes: Number(manifestSelectorSummary.writeShapeMaxAfterBytes || 0),
+      memoryShapeDrift: manifestSelectorSummary.shapeDrift || null,
+      memoryShapeDriftValid: manifestSelectorSummary.shapeDriftValid === true,
+      memoryShapeDriftStatus: String(manifestSelectorSummary.shapeDriftStatus || "unobserved"),
+      memoryShapeDriftSignalCount: Number(manifestSelectorSummary.shapeDriftSignalCount || 0),
+      memoryShapeDriftWarningSignalCount: Number(manifestSelectorSummary.shapeDriftWarningSignalCount || 0),
+      memoryShapeTrend: manifestSelectorSummary.shapeTrend || null,
+      memoryShapeTrendPresent: manifestSelectorSummary.shapeTrendPresent === true,
+      memoryShapeTrendValid: manifestSelectorSummary.shapeTrendValid === true,
+      memoryShapeTrendStatus: String(manifestSelectorSummary.shapeTrendStatus || "unobserved"),
+      memoryShapeTrendBucketCount: Number(manifestSelectorSummary.shapeTrendBucketCount || 0),
+      memoryShapeTrendMutableBucketCount: Number(manifestSelectorSummary.shapeTrendMutableBucketCount || 0),
+      memoryShapeTrendSealedBucketCount: Number(manifestSelectorSummary.shapeTrendSealedBucketCount || 0),
+      memoryShapeTrendGeneration: Number(manifestSelectorSummary.shapeTrendGeneration || 0),
+      memoryShapeTrendSignalCount: Number(manifestSelectorSummary.shapeTrendSignalCount || 0),
+      memoryShapeTrendWarningSignalCount: Number(manifestSelectorSummary.shapeTrendWarningSignalCount || 0),
+      memoryShapeTrendRecoveredFromBackup: manifestSelectorSummary.shapeTrendRecoveredFromBackup === true,
+      memoryShapeTrendExtendsBeyondHotRetention: manifestSelectorSummary.shapeTrendExtendsBeyondHotRetention === true,
+      memoryShapeTrendIncidents: manifestSelectorSummary.shapeTrendIncidents || null,
+      memoryShapeTrendIncidentPresent: manifestSelectorSummary.shapeTrendIncidentPresent === true,
+      memoryShapeTrendIncidentValid: manifestSelectorSummary.shapeTrendIncidentValid === true,
+      memoryShapeTrendIncidentStatus: String(manifestSelectorSummary.shapeTrendIncidentStatus || "unobserved"),
+      memoryShapeTrendIncidentEventCount: Number(manifestSelectorSummary.shapeTrendIncidentEventCount || 0),
+      memoryShapeTrendIncidentCount: Number(manifestSelectorSummary.shapeTrendIncidentCount || 0),
+      memoryShapeTrendIncidentPendingCount: Number(manifestSelectorSummary.shapeTrendIncidentPendingCount || 0),
+      memoryShapeTrendIncidentAcknowledgedCount: Number(manifestSelectorSummary.shapeTrendIncidentAcknowledgedCount || 0),
+      memoryShapeTrendIncidentResolvedCount: Number(manifestSelectorSummary.shapeTrendIncidentResolvedCount || 0),
+      memoryShapeTrendIncidentRecoveredFromBackup: manifestSelectorSummary.shapeTrendIncidentRecoveredFromBackup === true,
+      memoryShapeTrendActiveIncident: manifestSelectorSummary.shapeTrendActiveIncident || null,
       manifestSelectorLatest: manifestSelectorSummary.latest || null,
       modelExtractorProject: String(modelReceipt?.extractorProject || ""),
       modelExtractorAgentType: String(modelReceipt?.extractorAgentType || ""),
@@ -30244,7 +30537,97 @@ export function buildGroupSessionMemorySnapshotReport(options: any = {}) {
       manifestSelectorEmptyDecisionCount: rows.reduce((sum, row) => sum + Number(row.manifestSelectorEmptyDecisionCount || 0), 0),
       manifestSelectorFailedDecisionCount: rows.reduce((sum, row) => sum + Number(row.manifestSelectorFailedDecisionCount || 0), 0),
       manifestSelectorSelectedDocumentCount: rows.reduce((sum, row) => sum + Number(row.manifestSelectorSelectedDocumentCount || 0), 0),
+      manifestSelectorAttachedOutcomeCount: rows.reduce((sum, row) => sum + Number(row.manifestSelectorAttachedOutcomeCount || 0), 0),
+      manifestSelectorCommittedOutcomeCount: rows.reduce((sum, row) => sum + Number(row.manifestSelectorCommittedOutcomeCount || 0), 0),
+      manifestSelectorInvalidOutcomeCount: rows.reduce((sum, row) => sum + Number(row.manifestSelectorInvalidOutcomeCount || 0), 0),
+      manifestSelectorSelectedAttachedDocumentCount: rows.reduce((sum, row) => sum + Number(row.manifestSelectorSelectedAttachedDocumentCount || 0), 0),
+      manifestSelectorSelectedCommittedDocumentCount: rows.reduce((sum, row) => sum + Number(row.manifestSelectorSelectedCommittedDocumentCount || 0), 0),
+      manifestSelectorSelectedNotRecalledDocumentCount: rows.reduce((sum, row) => sum + Number(row.manifestSelectorSelectedNotRecalledDocumentCount || 0), 0),
+      manifestSelectorRecalledNotAttachedDocumentCount: rows.reduce((sum, row) => sum + Number(row.manifestSelectorRecalledNotAttachedDocumentCount || 0), 0),
+      manifestSelectorClosureGapCount: rows.reduce((sum, row) => sum + Number(row.manifestSelectorClosureGapCount || 0), 0),
       manifestSelectorInvalidSessionCount: rows.filter(row => row.manifestSelectorPresent && !row.manifestSelectorValid).length,
+      manifestSelectorClosureInvalidSessionCount: rows.filter(row => row.manifestSelectorPresent && !row.manifestSelectorClosureValid).length,
+      manifestSelectorConsumptionOutcomeCount: rows.reduce((sum, row) => sum + Number(row.manifestSelectorConsumptionOutcomeCount || 0), 0),
+      manifestSelectorConsumptionDeliveredDocumentCount: rows.reduce((sum, row) => sum + Number(row.manifestSelectorConsumptionDeliveredDocumentCount || 0), 0),
+      manifestSelectorConsumptionUsedDocumentCount: rows.reduce((sum, row) => sum + Number(row.manifestSelectorConsumptionUsedDocumentCount || 0), 0),
+      manifestSelectorConsumptionVerifiedDocumentCount: rows.reduce((sum, row) => sum + Number(row.manifestSelectorConsumptionVerifiedDocumentCount || 0), 0),
+      manifestSelectorConsumptionIgnoredDocumentCount: rows.reduce((sum, row) => sum + Number(row.manifestSelectorConsumptionIgnoredDocumentCount || 0), 0),
+      manifestSelectorConsumptionUnreportedDocumentCount: rows.reduce((sum, row) => sum + Number(row.manifestSelectorConsumptionUnreportedDocumentCount || 0), 0),
+      manifestSelectorConsumptionWeakReceiptBindingCount: rows.reduce((sum, row) => sum + Number(row.manifestSelectorConsumptionWeakReceiptBindingCount || 0), 0),
+      manifestSelectorConsumptionUnexpectedClaimCount: rows.reduce((sum, row) => sum + Number(row.manifestSelectorConsumptionUnexpectedClaimCount || 0), 0),
+      manifestSelectorConsumptionStaleCommittedWithoutConsumptionCount: rows.reduce((sum, row) => sum + Number(row.manifestSelectorConsumptionStaleCommittedWithoutConsumptionCount || 0), 0),
+      manifestSelectorConsumptionClosureGapCount: rows.reduce((sum, row) => sum + Number(row.manifestSelectorConsumptionClosureGapCount || 0), 0),
+      manifestSelectorConsumptionClosureInvalidSessionCount: rows.filter(row => row.manifestSelectorPresent && !row.manifestSelectorConsumptionClosureValid).length,
+      manifestSelectorCalibrationObservedDecisionCount: rows.reduce((sum, row) => sum + Number(row.manifestSelectorCalibrationObservedDecisionCount || 0), 0),
+      manifestSelectorCalibrationHintedDecisionCount: rows.reduce((sum, row) => sum + Number(row.manifestSelectorCalibrationHintedDecisionCount || 0), 0),
+      manifestSelectorCalibrationEvidenceCount: rows.reduce((sum, row) => sum + Number(row.manifestSelectorCalibrationEvidenceCount || 0), 0),
+      manifestSelectorCalibrationHintCount: rows.reduce((sum, row) => sum + Number(row.manifestSelectorCalibrationHintCount || 0), 0),
+      manifestSelectorCalibrationSupportHintCount: rows.reduce((sum, row) => sum + Number(row.manifestSelectorCalibrationSupportHintCount || 0), 0),
+      manifestSelectorCalibrationCautionHintCount: rows.reduce((sum, row) => sum + Number(row.manifestSelectorCalibrationCautionHintCount || 0), 0),
+      manifestSelectorCalibrationMixedHintCount: rows.reduce((sum, row) => sum + Number(row.manifestSelectorCalibrationMixedHintCount || 0), 0),
+      manifestSelectorShapeCount: rows.reduce((sum, row) => sum + Number(row.manifestSelectorShapeCount || 0), 0),
+      manifestSelectorShapeInvalidCount: rows.reduce((sum, row) => sum + Number(row.manifestSelectorShapeInvalidCount || 0), 0),
+      manifestSelectorShapeMissingExpectedCount: rows.reduce((sum, row) => sum + Number(row.manifestSelectorShapeMissingExpectedCount || 0), 0),
+      manifestSelectorShapeSelectorRunCount: rows.reduce((sum, row) => sum + Number(row.manifestSelectorShapeSelectorRunCount || 0), 0),
+      manifestSelectorShapeEmptySelectionCount: rows.reduce((sum, row) => sum + Number(row.manifestSelectorShapeEmptySelectionCount || 0), 0),
+      manifestSelectorShapeCandidateTotal: rows.reduce((sum, row) => sum + Number(row.manifestSelectorShapeCandidateTotal || 0), 0),
+      manifestSelectorShapeSelectedTotal: rows.reduce((sum, row) => sum + Number(row.manifestSelectorShapeSelectedTotal || 0), 0),
+      manifestSelectorShapeSelectedFreshCount: rows.reduce((sum, row) => sum + Number(row.manifestSelectorShapeSelectedFreshCount || 0), 0),
+      manifestSelectorShapeSelectedStaleCount: rows.reduce((sum, row) => sum + Number(row.manifestSelectorShapeSelectedStaleCount || 0), 0),
+      manifestSelectorShapeConsumptionLinkedRunCount: rows.reduce((sum, row) => sum + Number(row.manifestSelectorShapeConsumptionLinkedRunCount || 0), 0),
+      manifestSelectorShapeConsumedDeliveredDocumentCount: rows.reduce((sum, row) => sum + Number(row.manifestSelectorShapeConsumedDeliveredDocumentCount || 0), 0),
+      manifestSelectorShapeConsumedUsedDocumentCount: rows.reduce((sum, row) => sum + Number(row.manifestSelectorShapeConsumedUsedDocumentCount || 0), 0),
+      manifestSelectorShapeConsumedVerifiedDocumentCount: rows.reduce((sum, row) => sum + Number(row.manifestSelectorShapeConsumedVerifiedDocumentCount || 0), 0),
+      manifestSelectorShapeConsumedIgnoredDocumentCount: rows.reduce((sum, row) => sum + Number(row.manifestSelectorShapeConsumedIgnoredDocumentCount || 0), 0),
+      manifestSelectorShapeConsumedUnreportedDocumentCount: rows.reduce((sum, row) => sum + Number(row.manifestSelectorShapeConsumedUnreportedDocumentCount || 0), 0),
+      manifestSelectorShapeInvalidSessionCount: rows.filter(row => row.manifestSelectorPresent && !row.manifestSelectorShapeValid).length,
+      manifestSelectorShapeSelectionRate: rows.reduce((sum, row) => sum + Number(row.manifestSelectorShapeCandidateTotal || 0), 0)
+        ? Number((rows.reduce((sum, row) => sum + Number(row.manifestSelectorShapeSelectedTotal || 0), 0) / rows.reduce((sum, row) => sum + Number(row.manifestSelectorShapeCandidateTotal || 0), 0)).toFixed(6))
+        : null,
+      manifestSelectorShapeConsumptionReceiptCoverageRate: rows.reduce((sum, row) => sum + Number(row.manifestSelectorShapeConsumedDeliveredDocumentCount || 0), 0)
+        ? Number(((rows.reduce((sum, row) => sum + Number(row.manifestSelectorShapeConsumedDeliveredDocumentCount || 0), 0) - rows.reduce((sum, row) => sum + Number(row.manifestSelectorShapeConsumedUnreportedDocumentCount || 0), 0)) / rows.reduce((sum, row) => sum + Number(row.manifestSelectorShapeConsumedDeliveredDocumentCount || 0), 0)).toFixed(6))
+        : null,
+      manifestSelectorShapeConsumedUtilityRate: rows.reduce((sum, row) => sum + Number(row.manifestSelectorShapeConsumedUsedDocumentCount || 0) + Number(row.manifestSelectorShapeConsumedVerifiedDocumentCount || 0) + Number(row.manifestSelectorShapeConsumedIgnoredDocumentCount || 0), 0)
+        ? Number((rows.reduce((sum, row) => sum + Number(row.manifestSelectorShapeConsumedUsedDocumentCount || 0) + Number(row.manifestSelectorShapeConsumedVerifiedDocumentCount || 0), 0) / rows.reduce((sum, row) => sum + Number(row.manifestSelectorShapeConsumedUsedDocumentCount || 0) + Number(row.manifestSelectorShapeConsumedVerifiedDocumentCount || 0) + Number(row.manifestSelectorShapeConsumedIgnoredDocumentCount || 0), 0)).toFixed(6))
+        : null,
+      memoryWriteShapeCount: rows.reduce((sum, row) => sum + Number(row.memoryWriteShapeCount || 0), 0),
+      memoryWriteShapeInvalidCount: rows.reduce((sum, row) => sum + Number(row.memoryWriteShapeInvalidCount || 0), 0),
+      memoryWriteShapeCreateCount: rows.reduce((sum, row) => sum + Number(row.memoryWriteShapeCreateCount || 0), 0),
+      memoryWriteShapeUpdateCount: rows.reduce((sum, row) => sum + Number(row.memoryWriteShapeUpdateCount || 0), 0),
+      memoryWriteShapeNoopCount: rows.reduce((sum, row) => sum + Number(row.memoryWriteShapeNoopCount || 0), 0),
+      memoryWriteShapeChangedCount: rows.reduce((sum, row) => sum + Number(row.memoryWriteShapeChangedCount || 0), 0),
+      memoryWriteShapeBodyTruncatedCount: rows.reduce((sum, row) => sum + Number(row.memoryWriteShapeBodyTruncatedCount || 0), 0),
+      memoryWriteShapeNearBodyLimitCount: rows.reduce((sum, row) => sum + Number(row.memoryWriteShapeNearBodyLimitCount || 0), 0),
+      memoryWriteShapeTotalGrowthBytes: rows.reduce((sum, row) => sum + Number(row.memoryWriteShapeTotalGrowthBytes || 0), 0),
+      memoryWriteShapeMaxAfterBytes: rows.reduce((max, row) => Math.max(max, Number(row.memoryWriteShapeMaxAfterBytes || 0)), 0),
+      memoryWriteShapeInvalidSessionCount: rows.filter(row => row.memoryWriteShapePresent && !row.memoryWriteShapeValid).length,
+      memoryShapeDriftSessionCount: rows.filter(row => row.memoryShapeDriftStatus === "drift").length,
+      memoryShapeStableSessionCount: rows.filter(row => row.memoryShapeDriftStatus === "stable").length,
+      memoryShapeWarmingSessionCount: rows.filter(row => row.memoryShapeDriftStatus === "warming").length,
+      memoryShapeUnobservedSessionCount: rows.filter(row => row.memoryShapeDriftStatus === "unobserved").length,
+      memoryShapeDriftSignalCount: rows.reduce((sum, row) => sum + Number(row.memoryShapeDriftSignalCount || 0), 0),
+      memoryShapeDriftWarningSignalCount: rows.reduce((sum, row) => sum + Number(row.memoryShapeDriftWarningSignalCount || 0), 0),
+      memoryShapeDriftInvalidSessionCount: rows.filter(row => !row.memoryShapeDriftValid).length,
+      memoryShapeTrendPresentSessionCount: rows.filter(row => row.memoryShapeTrendPresent).length,
+      memoryShapeTrendBucketCount: rows.reduce((sum, row) => sum + Number(row.memoryShapeTrendBucketCount || 0), 0),
+      memoryShapeTrendSealedBucketCount: rows.reduce((sum, row) => sum + Number(row.memoryShapeTrendSealedBucketCount || 0), 0),
+      memoryShapeTrendDriftSessionCount: rows.filter(row => row.memoryShapeTrendStatus === "drift").length,
+      memoryShapeTrendStableSessionCount: rows.filter(row => row.memoryShapeTrendStatus === "stable").length,
+      memoryShapeTrendWarmingSessionCount: rows.filter(row => row.memoryShapeTrendStatus === "warming").length,
+      memoryShapeTrendUnobservedSessionCount: rows.filter(row => row.memoryShapeTrendStatus === "unobserved").length,
+      memoryShapeTrendSignalCount: rows.reduce((sum, row) => sum + Number(row.memoryShapeTrendSignalCount || 0), 0),
+      memoryShapeTrendWarningSignalCount: rows.reduce((sum, row) => sum + Number(row.memoryShapeTrendWarningSignalCount || 0), 0),
+      memoryShapeTrendInvalidSessionCount: rows.filter(row => !row.memoryShapeTrendValid).length,
+      memoryShapeTrendBackupRecoverySessionCount: rows.filter(row => row.memoryShapeTrendRecoveredFromBackup).length,
+      memoryShapeTrendBeyondHotRetentionSessionCount: rows.filter(row => row.memoryShapeTrendExtendsBeyondHotRetention).length,
+      memoryShapeTrendIncidentPresentSessionCount: rows.filter(row => row.memoryShapeTrendIncidentPresent).length,
+      memoryShapeTrendIncidentEventCount: rows.reduce((sum, row) => sum + Number(row.memoryShapeTrendIncidentEventCount || 0), 0),
+      memoryShapeTrendIncidentCount: rows.reduce((sum, row) => sum + Number(row.memoryShapeTrendIncidentCount || 0), 0),
+      memoryShapeTrendIncidentPendingCount: rows.reduce((sum, row) => sum + Number(row.memoryShapeTrendIncidentPendingCount || 0), 0),
+      memoryShapeTrendIncidentAcknowledgedCount: rows.reduce((sum, row) => sum + Number(row.memoryShapeTrendIncidentAcknowledgedCount || 0), 0),
+      memoryShapeTrendIncidentResolvedCount: rows.reduce((sum, row) => sum + Number(row.memoryShapeTrendIncidentResolvedCount || 0), 0),
+      memoryShapeTrendIncidentInvalidSessionCount: rows.filter(row => !row.memoryShapeTrendIncidentValid).length,
+      memoryShapeTrendIncidentBackupRecoverySessionCount: rows.filter(row => row.memoryShapeTrendIncidentRecoveredFromBackup).length,
       postTurnSummaryCount: rows.reduce((sum, row) => sum + Number(row.postTurnSummaryCount || 0), 0),
       postTurnSummaryEventCount: rows.reduce((sum, row) => sum + Number(row.postTurnSummaryEventCount || 0), 0),
       postTurnSummaryMissingCount: rows.reduce((sum, row) => sum + Number(row.postTurnSummaryMissingCount || 0), 0),
@@ -30466,6 +30849,404 @@ function evaluateGroupToolContinuitySnapshots(options: any = {}) {
   return check;
 }
 
+function memoryCenterDiagnosticCanonical(value: any): any {
+  if (Array.isArray(value)) return value.map(memoryCenterDiagnosticCanonical);
+  if (value && typeof value === "object") {
+    return Object.keys(value).sort().reduce((result: any, key) => {
+      if (value[key] !== undefined) result[key] = memoryCenterDiagnosticCanonical(value[key]);
+      return result;
+    }, {});
+  }
+  return value;
+}
+
+function memoryCenterDiagnosticChecksum(value: any) {
+  return crypto.createHash("sha256").update(JSON.stringify(memoryCenterDiagnosticCanonical(value))).digest("hex");
+}
+
+function memoryCenterDiagnosticId(value: any, maxLength = 180) {
+  return String(value || "").trim().replace(/[^a-zA-Z0-9._:@/+() -]+/g, "?").slice(0, maxLength);
+}
+
+function memoryCenterDiagnosticRate(covered: number, total: number) {
+  return total > 0 ? Math.round((covered / total) * 1000) / 10 : null;
+}
+
+function captureMemoryCenterProviderRuntimeContracts() {
+  const { captureAgentRuntimeVersionSnapshot } = require("../../agents/runtime");
+  return ["claudecode", "codex", "cursor"].map(provider => {
+    try {
+      const snapshot = captureAgentRuntimeVersionSnapshot(provider);
+      return {
+        provider,
+        status: memoryCenterDiagnosticId(snapshot?.status || "unknown", 40),
+        version: memoryCenterDiagnosticId(snapshot?.semanticVersion || snapshot?.versionText || ""),
+        runtimeIdentityChecksum: memoryCenterDiagnosticId(snapshot?.executableIdentityChecksum || "", 80),
+      };
+    } catch {
+      return { provider, status: "version_probe_failed", version: "", runtimeIdentityChecksum: "" };
+    }
+  });
+}
+
+function memoryCenterInvocationVersionEvidence(row: any, sessionsById: Map<string, any>) {
+  const nativeReceipt = row?.native_continuation_receipt || {};
+  const rebudgetProof = row?.context_rebudget_proof || {};
+  const session = sessionsById.get(String(row?.task_agent_session_id || "")) || {};
+  const provider = memoryCenterDiagnosticId(nativeReceipt.provider || rebudgetProof.provider || row?.transport || session.agentType || "", 80);
+  const model = memoryCenterDiagnosticId(rebudgetProof.model || session.modelId || "", 160);
+  const providerContractId = memoryCenterDiagnosticId(nativeReceipt.provider_contract_id || session.providerContractId || "", 180);
+  const providerRuntimeVersion = memoryCenterDiagnosticId(nativeReceipt.provider_runtime_version || session.providerRuntimeVersion || "", 180);
+  const providerRuntimeIdentityChecksum = memoryCenterDiagnosticId(nativeReceipt.provider_runtime_identity_checksum || session.providerRuntimeIdentityChecksum || "", 80);
+  const fullyBound = !!provider && !!model && !!providerContractId && !!providerRuntimeVersion && !!providerRuntimeIdentityChecksum;
+  return {
+    invocationEdgeId: memoryCenterDiagnosticId(row?.invocation_edge_id || "", 100),
+    edgeChecksum: memoryCenterDiagnosticId(row?.edge_checksum || "", 80),
+    groupId: memoryCenterDiagnosticId(row?.group_id || "", 140),
+    groupSessionId: memoryCenterDiagnosticId(row?.group_session_id || "", 140),
+    taskAgentSessionId: memoryCenterDiagnosticId(row?.task_agent_session_id || "", 140),
+    status: memoryCenterDiagnosticId(row?.status || "unknown", 40),
+    valid: row?.valid === true,
+    provider,
+    model,
+    providerContractId,
+    providerRuntimeVersion,
+    providerRuntimeIdentityChecksum,
+    nativeContinuationReceiptChecksum: memoryCenterDiagnosticId(nativeReceipt.receipt_checksum || "", 80),
+    contextRebudgetProofChecksum: memoryCenterDiagnosticId(rebudgetProof.proof_checksum || "", 80),
+    memoryContextSnapshotChecksum: memoryCenterDiagnosticId(row?.memory_context_snapshot_checksum || "", 80),
+    memoryDeliveryReceiptChecksum: memoryCenterDiagnosticId(row?.memory_delivery_receipt_checksum || "", 80),
+    providerBound: !!provider,
+    modelBound: !!model,
+    runtimeVersionBound: !!providerRuntimeVersion,
+    runtimeIdentityBound: !!providerRuntimeIdentityChecksum,
+    providerContractBound: !!providerContractId,
+    fullyBound,
+  };
+}
+
+function buildMemoryCenterProviderVersionComparisons(evidenceRows: any[], currentRuntimeRows: any[]) {
+  const currentByProvider = new Map(currentRuntimeRows.map((row: any) => [String(row.provider || ""), row]));
+  const grouped = new Map<string, any>();
+  for (const row of evidenceRows) {
+    const key = [row.provider, row.model, row.providerRuntimeVersion, row.providerRuntimeIdentityChecksum, row.providerContractId].join("\0");
+    const current = grouped.get(key) || {
+      provider: row.provider,
+      model: row.model,
+      providerRuntimeVersion: row.providerRuntimeVersion,
+      providerRuntimeIdentityChecksum: row.providerRuntimeIdentityChecksum,
+      providerContractId: row.providerContractId,
+      evidenceCount: 0,
+      fullyBoundCount: 0,
+      validEvidenceCount: 0,
+    };
+    current.evidenceCount += 1;
+    current.fullyBoundCount += row.fullyBound ? 1 : 0;
+    current.validEvidenceCount += row.valid ? 1 : 0;
+    grouped.set(key, current);
+  }
+  return Array.from(grouped.values()).map(row => {
+    const current = currentByProvider.get(row.provider) || null;
+    const versionMatch = current?.status === "ok" && !!row.providerRuntimeVersion && !!current.version
+      ? row.providerRuntimeVersion === current.version
+      : null;
+    const identityMatch = current?.status === "ok" && !!row.providerRuntimeIdentityChecksum && !!current.runtimeIdentityChecksum
+      ? row.providerRuntimeIdentityChecksum === current.runtimeIdentityChecksum
+      : null;
+    const comparisonStatus = !row.provider
+      ? "provider_unbound"
+      : current?.status !== "ok"
+        ? "runtime_probe_unavailable"
+        : !row.providerRuntimeVersion || !row.providerRuntimeIdentityChecksum
+          ? "runtime_evidence_unbound"
+          : versionMatch && identityMatch ? "current" : "runtime_drift";
+    return {
+      ...row,
+      currentRuntimeStatus: current?.status || "unavailable",
+      currentRuntimeVersion: current?.version || "",
+      currentRuntimeIdentityChecksum: current?.runtimeIdentityChecksum || "",
+      versionMatch,
+      identityMatch,
+      comparisonStatus,
+    };
+  }).sort((a, b) => String(a.provider).localeCompare(String(b.provider)) || String(a.model).localeCompare(String(b.model)) || String(a.providerRuntimeVersion).localeCompare(String(b.providerRuntimeVersion)));
+}
+
+function buildMemoryCenterDiagnosticFleetSummary(invocationRows: any[], sessions: any[], currentRuntimeRows: any[]) {
+  const sessionsById = new Map((sessions || []).map((session: any) => [String(session.id || ""), session]));
+  const exactRows = (invocationRows || [])
+    .filter((row: any) => String(row?.group_session_id || "").startsWith("gcs_"))
+    .map((row: any) => memoryCenterInvocationVersionEvidence(row, sessionsById));
+  const evidenceCount = exactRows.length;
+  const providerBoundCount = exactRows.filter(row => row.providerBound).length;
+  const modelBoundCount = exactRows.filter(row => row.modelBound).length;
+  const runtimeVersionBoundCount = exactRows.filter(row => row.runtimeVersionBound).length;
+  const runtimeIdentityBoundCount = exactRows.filter(row => row.runtimeIdentityBound).length;
+  const providerContractBoundCount = exactRows.filter(row => row.providerContractBound).length;
+  const fullyBoundCount = exactRows.filter(row => row.fullyBound).length;
+  const core = {
+    schema: "ccm-memory-center-provider-version-fleet-summary-v1",
+    version: 1,
+    generatedAt: now(),
+    bodyFree: true,
+    aggregateOnly: true,
+    contextInjectionAllowed: false,
+    memoryMutationAuthorized: false,
+    recallPolicyMutationAuthorized: false,
+    crossSessionReuse: false,
+    overall: {
+      exactSessionCount: new Set(exactRows.map(row => `${row.groupId}\0${row.groupSessionId}`)).size,
+      evidenceCount,
+      providerBoundCount,
+      modelBoundCount,
+      runtimeVersionBoundCount,
+      runtimeIdentityBoundCount,
+      providerContractBoundCount,
+      fullyBoundCount,
+      unboundEvidenceCount: evidenceCount - fullyBoundCount,
+      providerCoverageRate: memoryCenterDiagnosticRate(providerBoundCount, evidenceCount),
+      modelCoverageRate: memoryCenterDiagnosticRate(modelBoundCount, evidenceCount),
+      runtimeVersionCoverageRate: memoryCenterDiagnosticRate(runtimeVersionBoundCount, evidenceCount),
+      runtimeIdentityCoverageRate: memoryCenterDiagnosticRate(runtimeIdentityBoundCount, evidenceCount),
+      providerContractCoverageRate: memoryCenterDiagnosticRate(providerContractBoundCount, evidenceCount),
+      fullCoverageRate: memoryCenterDiagnosticRate(fullyBoundCount, evidenceCount),
+    },
+    currentRuntimeRows,
+    rows: buildMemoryCenterProviderVersionComparisons(exactRows, currentRuntimeRows),
+  };
+  return { ...core, checksum: memoryCenterDiagnosticChecksum(core) };
+}
+
+function sanitizeMemoryCenterShapeTrend(trend: any) {
+  return {
+    schema: "ccm-memory-center-shape-trend-diagnostic-v1",
+    sourceSchema: memoryCenterDiagnosticId(trend?.schema || "", 100),
+    sourceSummaryChecksum: memoryCenterDiagnosticId(trend?.checksum || "", 80),
+    sourceLedgerChecksum: memoryCenterDiagnosticId(trend?.ledgerChecksum || "", 80),
+    bodyFree: true,
+    advisoryOnly: true,
+    valid: trend?.valid === true,
+    status: memoryCenterDiagnosticId(trend?.status || "invalid", 40),
+    ledgerPresent: trend?.ledgerPresent === true,
+    ledgerPrimaryValid: trend?.ledgerPrimaryValid === true,
+    recoveredFromBackup: trend?.recoveredFromBackup === true,
+    generation: Number(trend?.generation || 0),
+    bucketCount: Number(trend?.bucketCount || 0),
+    mutableBucketCount: Number(trend?.mutableBucketCount || 0),
+    sealedBucketCount: Number(trend?.sealedBucketCount || 0),
+    oldestDate: memoryCenterDiagnosticId(trend?.oldestDate || "", 30),
+    latestDate: memoryCenterDiagnosticId(trend?.latestDate || "", 30),
+    retentionDays: Number(trend?.retentionDays || 0),
+    mutableDays: Number(trend?.mutableDays || 0),
+    recentWindowDays: Number(trend?.recentWindowDays || 0),
+    baselineWindowDays: Number(trend?.baselineWindowDays || 0),
+    confidence: trend?.confidence || {},
+    recent: trend?.recent || {},
+    baseline: trend?.baseline || {},
+    total: trend?.total || {},
+    deltas: trend?.deltas || {},
+    signalCount: Number(trend?.signalCount || 0),
+    warningSignalCount: Number(trend?.warningSignalCount || 0),
+    signals: (Array.isArray(trend?.signals) ? trend.signals : []).map((signal: any) => ({
+      code: memoryCenterDiagnosticId(signal?.code || "", 80),
+      severity: memoryCenterDiagnosticId(signal?.severity || "", 30),
+      delta: signal?.delta === null ? null : Number(signal?.delta || 0),
+    })),
+  };
+}
+
+function sanitizeMemoryCenterShapeTrendIncidents(incidents: any) {
+  const active = incidents?.activeIncident || null;
+  return {
+    schema: "ccm-memory-center-shape-trend-incident-diagnostic-v1",
+    sourceSchema: memoryCenterDiagnosticId(incidents?.schema || "", 100),
+    sourceSummaryChecksum: memoryCenterDiagnosticId(incidents?.checksum || "", 80),
+    sourceLedgerChecksum: memoryCenterDiagnosticId(incidents?.ledgerChecksum || "", 80),
+    bodyFree: true,
+    advisoryOnly: true,
+    visibilityOnly: true,
+    memoryMutationAuthorized: false,
+    valid: incidents?.valid === true,
+    status: memoryCenterDiagnosticId(incidents?.status || "invalid", 40),
+    ledgerPresent: incidents?.ledgerPresent === true,
+    ledgerPrimaryValid: incidents?.ledgerPrimaryValid === true,
+    recoveredFromBackup: incidents?.recoveredFromBackup === true,
+    generation: Number(incidents?.generation || 0),
+    eventCount: Number(incidents?.eventCount || 0),
+    incidentCount: Number(incidents?.incidentCount || 0),
+    pendingCount: Number(incidents?.pendingCount || 0),
+    acknowledgedCount: Number(incidents?.acknowledgedCount || 0),
+    resolvedCount: Number(incidents?.resolvedCount || 0),
+    activeIncident: active ? {
+      incidentId: memoryCenterDiagnosticId(active.incidentId || "", 100),
+      incidentChecksum: memoryCenterDiagnosticId(active.incidentChecksum || "", 80),
+      signalFingerprint: memoryCenterDiagnosticId(active.signalFingerprint || "", 80),
+      signalCodes: (Array.isArray(active.signalCodes) ? active.signalCodes : []).map((code: any) => memoryCenterDiagnosticId(code, 80)),
+      warningSignalCount: Number(active.warningSignalCount || 0),
+      trendGeneration: Number(active.trendGeneration || 0),
+      trendLedgerChecksum: memoryCenterDiagnosticId(active.trendLedgerChecksum || "", 80),
+      openedAt: memoryCenterDiagnosticId(active.openedAt || "", 40),
+      acknowledged: active.acknowledged === true,
+      acknowledgement: active.acknowledgement ? {
+        eventId: memoryCenterDiagnosticId(active.acknowledgement.eventId || "", 100),
+        acknowledgedAt: memoryCenterDiagnosticId(active.acknowledgement.acknowledgedAt || "", 40),
+        noteChecksum: memoryCenterDiagnosticId(active.acknowledgement.noteChecksum || "", 80),
+      } : null,
+    } : null,
+  };
+}
+
+function memoryCenterDiagnosticForbiddenKeys(value: any, trail = "root", issues: string[] = []) {
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => memoryCenterDiagnosticForbiddenKeys(item, `${trail}[${index}]`, issues));
+    return issues;
+  }
+  if (!value || typeof value !== "object") return issues;
+  const forbidden = new Set(["query", "prompt", "content", "body", "memorybody", "memorytext", "output", "outputtext", "childoutput", "receiptreason", "reason", "message", "messages", "markdown", "markdownexcerpt", "transcript"]);
+  for (const [key, child] of Object.entries(value)) {
+    const normalized = key.replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
+    if (forbidden.has(normalized)) issues.push(`${trail}.${key}`);
+    memoryCenterDiagnosticForbiddenKeys(child, `${trail}.${key}`, issues);
+  }
+  return issues;
+}
+
+export function buildMemoryCenterExactSessionDiagnosticExport(scopeIdInput: any) {
+  const scope = memoryCenterExactGroupSessionScope(scopeIdInput);
+  const { buildTaskAgentInvocationLineageReport } = require("../../tasks/task-agent-invocation-lineage");
+  const { buildTaskAgentContinuationSoakReport } = require("../../tasks/task-agent-continuation-soak");
+  const { listTaskAgentSessions } = require("../../tasks/agent-sessions");
+  const typed = require("../collaboration/group-memory-index");
+  const currentRuntimeRows = captureMemoryCenterProviderRuntimeContracts();
+  const sessions = listTaskAgentSessions({ groupId: scope.groupId });
+  const sessionsById = new Map<string, any>(sessions.map((session: any) => [String(session.id || ""), session]));
+  const lineage = buildTaskAgentInvocationLineageReport({ groupId: scope.groupId, groupSessionId: scope.sessionId });
+  const allLineage = buildTaskAgentInvocationLineageReport({});
+  const allSessions = listTaskAgentSessions({});
+  const evidenceRows = (lineage.rows || []).map((row: any) => memoryCenterInvocationVersionEvidence(row, sessionsById));
+  const continuation = buildTaskAgentContinuationSoakReport({ groupId: scope.groupId, groupSessionId: scope.sessionId });
+  const trend = typed.summarizeGroupTypedMemoryShapeTrend(scope.typedScopeId);
+  const incidents = typed.summarizeGroupTypedMemoryShapeTrendIncidents(scope.typedScopeId);
+  const memoryReport = buildGroupSessionMemorySnapshotReport({ groupIds: [scope.groupId], groupSessionId: scope.sessionId });
+  const memoryRow: any = (memoryReport.groups || []).find((row: any) => row.groupId === scope.groupId && row.groupSessionId === scope.sessionId) || null;
+  const evidenceCount = evidenceRows.length;
+  const fullyBoundCount = evidenceRows.filter((row: any) => row.fullyBound).length;
+  const core = {
+    schema: "ccm-memory-center-exact-session-diagnostic-export-v1",
+    version: 1,
+    generatedAt: now(),
+    scope: {
+      scopeId: scope.scopeId,
+      typedScopeId: scope.typedScopeId,
+      groupId: scope.groupId,
+      groupSessionId: scope.sessionId,
+      exactSession: true,
+    },
+    policy: {
+      bodyFree: true,
+      offlineOnly: true,
+      advisoryOnly: true,
+      contextInjectionAllowed: false,
+      memoryMutationAuthorized: false,
+      recallPolicyMutationAuthorized: false,
+      crossSessionReuse: false,
+      crossSessionEvidenceMode: "aggregate_only",
+    },
+    sessionMemory: {
+      present: !!memoryRow,
+      status: memoryCenterDiagnosticId(memoryRow?.status || "missing", 40),
+      checksumMatches: memoryRow?.checksumMatches === true,
+      markdownChecksum: memoryCenterDiagnosticId(memoryRow?.markdownChecksum || "", 80),
+      postTurnSummaryHeadChecksum: memoryCenterDiagnosticId(memoryRow?.postTurnSummaryHeadChecksum || "", 80),
+      compactedMessageCount: Number(memoryRow?.compactedMessageCount || 0),
+      markdownTokens: Number(memoryRow?.markdownTokens || 0),
+      totalTokenBudget: Number(memoryRow?.totalTokenBudget || 0),
+      budgetStatus: memoryCenterDiagnosticId(memoryRow?.budgetStatus || "empty", 40),
+      modelExtractionReplayEvidenceChecksum: memoryCenterDiagnosticId(memoryRow?.modelExtractionReplayEvidenceChecksum || "", 80),
+    },
+    trend: sanitizeMemoryCenterShapeTrend(trend),
+    incidents: sanitizeMemoryCenterShapeTrendIncidents(incidents),
+    providerVersionEvidence: {
+      schema: "ccm-memory-center-exact-session-provider-version-evidence-v1",
+      exactSessionOnly: true,
+      evidenceCount,
+      validEvidenceCount: evidenceRows.filter((row: any) => row.valid).length,
+      fullyBoundCount,
+      unboundEvidenceCount: evidenceCount - fullyBoundCount,
+      providerCoverageRate: memoryCenterDiagnosticRate(evidenceRows.filter((row: any) => row.providerBound).length, evidenceCount),
+      modelCoverageRate: memoryCenterDiagnosticRate(evidenceRows.filter((row: any) => row.modelBound).length, evidenceCount),
+      runtimeVersionCoverageRate: memoryCenterDiagnosticRate(evidenceRows.filter((row: any) => row.runtimeVersionBound).length, evidenceCount),
+      runtimeIdentityCoverageRate: memoryCenterDiagnosticRate(evidenceRows.filter((row: any) => row.runtimeIdentityBound).length, evidenceCount),
+      providerContractCoverageRate: memoryCenterDiagnosticRate(evidenceRows.filter((row: any) => row.providerContractBound).length, evidenceCount),
+      fullCoverageRate: memoryCenterDiagnosticRate(fullyBoundCount, evidenceCount),
+      rows: evidenceRows.slice(-1000),
+      truncatedEvidenceCount: Math.max(0, evidenceRows.length - 1000),
+      comparisons: buildMemoryCenterProviderVersionComparisons(evidenceRows, currentRuntimeRows),
+      continuationChains: (continuation.rows || []).slice(-500).map((row: any) => ({
+        groupId: memoryCenterDiagnosticId(row.groupId || "", 140),
+        groupSessionId: memoryCenterDiagnosticId(row.groupSessionId || "", 140),
+        taskAgentSessionId: memoryCenterDiagnosticId(row.taskAgentSessionId || "", 140),
+        status: memoryCenterDiagnosticId(row.status || "unknown", 40),
+        valid: row.valid === true,
+        eventCount: Number(row.eventCount || 0),
+        turnCount: Number(row.turnCount || 0),
+        providerContractEpochCount: Number(row.providerContractEpochCount || 0),
+        providerContractTransitionCount: Number(row.providerContractTransitionCount || 0),
+        providerContractTransitionVerifiedCount: Number(row.providerContractTransitionVerifiedCount || 0),
+        providerRuntimeVersions: (Array.isArray(row.providerRuntimeVersions) ? row.providerRuntimeVersions : []).map((value: any) => memoryCenterDiagnosticId(value)),
+        latestProviderContractId: memoryCenterDiagnosticId(row.latestProviderContractId || ""),
+        latestProviderRuntimeVersion: memoryCenterDiagnosticId(row.latestProviderRuntimeVersion || ""),
+        postCompactArtifactClosureProvenCount: Number(row.postCompactArtifactClosureProvenCount || 0),
+        postCompactArtifactClosureUnprovenCount: Number(row.postCompactArtifactClosureUnprovenCount || 0),
+      })),
+    },
+    currentRuntimeRows,
+    fleetComparison: buildMemoryCenterDiagnosticFleetSummary(allLineage.rows || [], allSessions, currentRuntimeRows),
+  };
+  return { ...core, checksum: memoryCenterDiagnosticChecksum(core) };
+}
+
+export function verifyMemoryCenterExactSessionDiagnosticExport(snapshot: any, expectedScopeId = "") {
+  const payload = { ...(snapshot || {}) };
+  const expectedChecksum = String(payload.checksum || "");
+  delete payload.checksum;
+  const checksumValid = !!expectedChecksum && expectedChecksum === memoryCenterDiagnosticChecksum(payload);
+  const groupId = String(snapshot?.scope?.groupId || "");
+  const groupSessionId = String(snapshot?.scope?.groupSessionId || "");
+  const scopeId = `${groupId}::${groupSessionId}`;
+  const scopeValid = !!groupId
+    && /^gcs_[a-zA-Z0-9._-]+$/.test(groupSessionId)
+    && String(snapshot?.scope?.scopeId || "") === scopeId
+    && String(snapshot?.scope?.typedScopeId || "") === `${groupId}--${groupSessionId}`
+    && (!expectedScopeId || scopeId === String(expectedScopeId));
+  const policyValid = snapshot?.policy?.bodyFree === true
+    && snapshot?.policy?.offlineOnly === true
+    && snapshot?.policy?.advisoryOnly === true
+    && snapshot?.policy?.contextInjectionAllowed === false
+    && snapshot?.policy?.memoryMutationAuthorized === false
+    && snapshot?.policy?.recallPolicyMutationAuthorized === false
+    && snapshot?.policy?.crossSessionReuse === false
+    && snapshot?.policy?.crossSessionEvidenceMode === "aggregate_only";
+  const evidenceRows = Array.isArray(snapshot?.providerVersionEvidence?.rows) ? snapshot.providerVersionEvidence.rows : [];
+  const continuationRows = Array.isArray(snapshot?.providerVersionEvidence?.continuationChains) ? snapshot.providerVersionEvidence.continuationChains : [];
+  const exactBindingValid = evidenceRows.every((row: any) => row.groupId === groupId && row.groupSessionId === groupSessionId)
+    && continuationRows.every((row: any) => row.groupId === groupId && row.groupSessionId === groupSessionId);
+  const fleetRows = Array.isArray(snapshot?.fleetComparison?.rows) ? snapshot.fleetComparison.rows : [];
+  const fleetAggregateOnly = fleetRows.every((row: any) => row.groupId === undefined && row.groupSessionId === undefined && row.taskAgentSessionId === undefined)
+    && snapshot?.fleetComparison?.aggregateOnly === true
+    && snapshot?.fleetComparison?.contextInjectionAllowed === false;
+  const forbiddenKeys = memoryCenterDiagnosticForbiddenKeys(snapshot);
+  const valid = snapshot?.schema === "ccm-memory-center-exact-session-diagnostic-export-v1"
+    && Number(snapshot?.version || 0) === 1
+    && checksumValid
+    && scopeValid
+    && policyValid
+    && exactBindingValid
+    && fleetAggregateOnly
+    && forbiddenKeys.length === 0;
+  return { valid, checksumValid, scopeValid, policyValid, exactBindingValid, fleetAggregateOnly, bodyFree: forbiddenKeys.length === 0, forbiddenKeys };
+}
+
 export function buildTaskAgentMemoryContextSnapshotReport(options: any = {}) {
   try {
     const {
@@ -30490,12 +31271,19 @@ export function buildTaskAgentMemoryContextSnapshotReport(options: any = {}) {
         return { provider, status: "version_probe_failed", versionText: "", semanticVersion: "", executableIdentityChecksum: "", error: error?.message || String(error) };
       }
     });
+    const diagnosticCurrentRuntimeRows = providerRuntimeContractRows.map((row: any) => ({
+      provider: memoryCenterDiagnosticId(row.provider || "", 80),
+      status: memoryCenterDiagnosticId(row.status || "unknown", 40),
+      version: memoryCenterDiagnosticId(row.semanticVersion || row.versionText || ""),
+      runtimeIdentityChecksum: memoryCenterDiagnosticId(row.executableIdentityChecksum || "", 80),
+    }));
     const invocationRecoveryOverall = invocationLineage.recoveryStatus?.overall || {};
     const capacitySessions = listTaskAgentSessions({
       groupId: options.groupId || options.group_id || undefined,
       taskId: options.taskId || options.task_id || undefined,
       project: options.project || undefined,
     });
+    const diagnosticExportFleet = buildMemoryCenterDiagnosticFleetSummary(invocationLineage.rows || [], capacitySessions || [], diagnosticCurrentRuntimeRows);
     const capacityPreparedSessions = capacitySessions.filter((session: any) => !!session.capacityRevalidationProof);
     const capacityCommittedSessions = capacitySessions.filter((session: any) => !!session.capacityRevalidationCommitReceipt);
     const capacityPendingSessions = capacitySessions.filter((session: any) => session.capacityRevalidationRequired === true);
@@ -30638,6 +31426,10 @@ export function buildTaskAgentMemoryContextSnapshotReport(options: any = {}) {
         providerRuntimeContractCount: providerRuntimeContractRows.length,
         providerRuntimeContractHealthyCount: providerRuntimeContractRows.filter((row: any) => row.status === "ok").length,
         providerRuntimeContractFailedCount: providerRuntimeContractRows.filter((row: any) => row.status !== "ok").length,
+        diagnosticVersionEvidenceCount: Number(diagnosticExportFleet.overall?.evidenceCount || 0),
+        diagnosticVersionFullyBoundCount: Number(diagnosticExportFleet.overall?.fullyBoundCount || 0),
+        diagnosticVersionUnboundEvidenceCount: Number(diagnosticExportFleet.overall?.unboundEvidenceCount || 0),
+        diagnosticVersionFullCoverageRate: diagnosticExportFleet.overall?.fullCoverageRate ?? null,
         continuationSoakPostCompactReinjectionProvenCount: Number(continuationSoakOverall.postCompactReinjectionProvenCount || 0),
         invocationLineageBoundCount: Number(summary.invocationLineageBoundCount || 0),
         invocationLedgerMissingCount: Number(summary.invocationLedgerMissingCount || 0),
@@ -30662,6 +31454,7 @@ export function buildTaskAgentMemoryContextSnapshotReport(options: any = {}) {
         generatedAt: now(),
         rows: providerRuntimeContractRows,
       },
+      diagnosticExportFleet,
       capacityRevalidation: {
         schema: "ccm-memory-center-capacity-revalidation-overview-v1",
         preparedCount: capacityPreparedSessions.length,
@@ -50759,30 +51552,35 @@ export function runMemoryCenterApiMicrocompactNativeApplyProviderReproofReceiptC
 
 export function runMemoryCenterCompactionHookLedgerSelfTest() {
   const groupId = `memory-center-hook-ledger-selftest-${process.pid}-${Date.now()}`;
-  const groupFile = path.join(GROUP_MEMORY_DIR, `${groupId}.json`);
-  const messageFile = path.join(GROUP_MESSAGES_DIR, `${groupId}.json`);
-  const reloadFile = path.join(CCM_DIR, "group-memory-reload", `${cleanId(groupId)}.json`);
-  const replayRepairLedgerFile = getGroupCompactBoundaryReplayRepairLedgerFile(groupId);
+  const groupSessionId = "gcs_memory_center_hook_ledger_selftest";
+  let groupFile = "";
+  let messageFile = "";
+  const reloadFile = groupSessionSidecarFile(path.join(CCM_DIR, "group-memory-reload"), groupId, groupSessionId);
+  const replayRepairLedgerFile = getGroupCompactBoundaryReplayRepairLedgerFile(groupId, groupSessionId);
   let hookLedgerFile = "";
   try {
     const {
       getGroupMemoryCompactionHookLedgerFile,
     } = require("../collaboration/group-memory-compaction");
-    const { saveGroupMemory } = require("../collaboration/memory");
-    const { saveGroupMessages } = require("../collaboration/storage");
-    hookLedgerFile = getGroupMemoryCompactionHookLedgerFile(groupId);
+    const { saveGroupMemory, getGroupMemoryFile } = require("../collaboration/memory");
+    const { saveGroupMessages, getGroupChatSessionMessagesFile } = require("../collaboration/storage");
+    groupFile = getGroupMemoryFile(groupId, groupSessionId);
+    messageFile = getGroupChatSessionMessagesFile(groupId, groupSessionId);
+    hookLedgerFile = getGroupMemoryCompactionHookLedgerFile(groupId, groupSessionId);
     const hookRunId = `gmch-selftest-${Date.now().toString(36)}`;
     saveGroupMessages(groupId, Array.from({ length: 10 }, (_: any, index: number) => ({
       id: `hook-ledger-${index}`,
+      group_session_id: groupSessionId,
       role: index % 2 ? "assistant" : "user",
       agent: index % 2 ? "api" : undefined,
       content: index === 0
         ? "必须保留 HOOK_LEDGER_SENTINEL。"
         : `hook ledger 自测 ${index}，涉及 src/hook-ledger.ts。`,
       timestamp: "2026-07-07T03:00:00.000Z",
-    })));
+    })), groupSessionId);
     saveGroupMemory(groupId, {
       groupId,
+      groupSessionId,
       goal: "压缩 hook ledger 自测",
       persistentRequirements: [{ messageId: "hook-ledger-0", text: "必须保留 HOOK_LEDGER_SENTINEL。" }],
       compaction: {
@@ -50815,12 +51613,13 @@ export function runMemoryCenterCompactionHookLedgerSelfTest() {
         preCompactTokenCount: 6000,
         postCompactTokenCount: 1600,
       },
-    });
+    }, groupSessionId);
     const entries = [
       {
         entry_id: "hook-ledger-pre",
         hook_run_id: hookRunId,
         group_id: groupId,
+        group_session_id: groupSessionId,
         phase: "pre",
         hook_index: 0,
         ok: true,
@@ -50837,6 +51636,7 @@ export function runMemoryCenterCompactionHookLedgerSelfTest() {
         entry_id: "hook-ledger-post",
         hook_run_id: hookRunId,
         group_id: groupId,
+        group_session_id: groupSessionId,
         phase: "post",
         hook_index: 0,
         ok: true,
@@ -50852,14 +51652,19 @@ export function runMemoryCenterCompactionHookLedgerSelfTest() {
     ];
     fs.mkdirSync(path.dirname(hookLedgerFile), { recursive: true });
     fs.writeFileSync(hookLedgerFile, JSON.stringify({
-      schema: "ccm-group-memory-compaction-hook-ledger-v1",
-      version: 1,
+      schema: "ccm-group-memory-compaction-hook-ledger-v2",
+      version: 2,
       groupId,
+      groupSessionId,
+      scopeId: `${groupId}::${groupSessionId}`,
+      scopeValid: true,
+      scopeIssues: [],
+      rejectedEntryCount: 0,
       entries,
       stats: { total: 2, ok: 2, failed: 0, pre: { total: 1, ok: 1, failed: 0 }, post: { total: 1, ok: 1, failed: 0 } },
       updatedAt: "2026-07-07T03:00:01.000Z",
     }, null, 2), "utf-8");
-    const detail: any = getMemoryCenterScope("group", groupId);
+    const detail: any = getMemoryCenterScope("group", `${groupId}::${groupSessionId}`);
     const hooks = detail.postCompactUsage?.compactionHooks || {};
     const report = buildCompactionHookLedgerReport({ groupIds: [groupId] });
     const check = evaluateCompactionHookLedger({ groupIds: [groupId] });
@@ -50892,27 +51697,32 @@ export function runMemoryCenterCompactionHookLedgerSelfTest() {
 
 export function runMemoryCenterCompactBoundaryReplayGateSelfTest() {
   const groupId = `memory-center-replay-gate-selftest-${process.pid}-${Date.now()}`;
-  const groupFile = path.join(GROUP_MEMORY_DIR, `${groupId}.json`);
-  const messageFile = path.join(GROUP_MESSAGES_DIR, `${groupId}.json`);
-  const reloadFile = path.join(CCM_DIR, "group-memory-reload", `${cleanId(groupId)}.json`);
+  const groupSessionId = "gcs_memory_center_replay_gate_selftest";
+  let groupFile = "";
+  let messageFile = "";
+  const reloadFile = groupSessionSidecarFile(path.join(CCM_DIR, "group-memory-reload"), groupId, groupSessionId);
   let hookLedgerFile = "";
   try {
     const { getGroupMemoryCompactionHookLedgerFile } = require("../collaboration/group-memory-compaction");
-    const { saveGroupMemory } = require("../collaboration/memory");
-    const { saveGroupMessages } = require("../collaboration/storage");
-    hookLedgerFile = getGroupMemoryCompactionHookLedgerFile(groupId);
+    const { saveGroupMemory, getGroupMemoryFile } = require("../collaboration/memory");
+    const { saveGroupMessages, getGroupChatSessionMessagesFile } = require("../collaboration/storage");
+    groupFile = getGroupMemoryFile(groupId, groupSessionId);
+    messageFile = getGroupChatSessionMessagesFile(groupId, groupSessionId);
+    hookLedgerFile = getGroupMemoryCompactionHookLedgerFile(groupId, groupSessionId);
     const hookRunId = `gmch-replay-${Date.now().toString(36)}`;
     saveGroupMessages(groupId, Array.from({ length: 12 }, (_: any, index: number) => ({
       id: `replay-gate-${index}`,
+      group_session_id: groupSessionId,
       role: index % 2 ? "assistant" : "user",
       agent: index % 2 ? "api" : undefined,
       content: index === 0
         ? "必须保留 REPLAY_GATE_HOOK_SENTINEL。"
         : `Replay gate 自测 ${index}，涉及 src/replay-gate.ts 和 npm run test:replay。`,
       timestamp: "2026-07-07T04:00:00.000Z",
-    })));
+    })), groupSessionId);
     saveGroupMemory(groupId, {
       groupId,
+      groupSessionId,
       goal: "验证压缩边界 replay gate 能恢复子 Agent 上下文",
       persistentRequirements: [{ messageId: "hook-pre", text: "必须保留 REPLAY_GATE_HOOK_SENTINEL。" }],
       nextActions: [{ action: "继续核对 replay gate 验收线索" }],
@@ -50981,17 +51791,23 @@ export function runMemoryCenterCompactBoundaryReplayGateSelfTest() {
         postCompactTokenCount: 1700,
       },
       agentMemories: { api: { project: "api", recentReceipts: [], frequentFiles: ["src/replay-gate.ts"] } },
-    });
+    }, groupSessionId);
     fs.mkdirSync(path.dirname(hookLedgerFile), { recursive: true });
     fs.writeFileSync(hookLedgerFile, JSON.stringify({
-      schema: "ccm-group-memory-compaction-hook-ledger-v1",
-      version: 1,
+      schema: "ccm-group-memory-compaction-hook-ledger-v2",
+      version: 2,
       groupId,
+      groupSessionId,
+      scopeId: `${groupId}::${groupSessionId}`,
+      scopeValid: true,
+      scopeIssues: [],
+      rejectedEntryCount: 0,
       entries: [
         {
           entry_id: "replay-hook-pre",
           hook_run_id: hookRunId,
           group_id: groupId,
+          group_session_id: groupSessionId,
           phase: "pre",
           hook_index: 0,
           ok: true,
@@ -51004,6 +51820,7 @@ export function runMemoryCenterCompactBoundaryReplayGateSelfTest() {
           entry_id: "replay-hook-post",
           hook_run_id: hookRunId,
           group_id: groupId,
+          group_session_id: groupSessionId,
           phase: "post",
           hook_index: 0,
           ok: true,
@@ -51016,7 +51833,7 @@ export function runMemoryCenterCompactBoundaryReplayGateSelfTest() {
       stats: { total: 2, ok: 2, failed: 0, pre: { total: 1, ok: 1, failed: 0 }, post: { total: 1, ok: 1, failed: 0 } },
       updatedAt: "2026-07-07T04:00:01.000Z",
     }, null, 2), "utf-8");
-    const detail: any = getMemoryCenterScope("group", groupId);
+    const detail: any = getMemoryCenterScope("group", `${groupId}::${groupSessionId}`);
     const replay = detail.postCompactUsage?.boundaryReplay || {};
     const report = buildCompactBoundaryReplayReport({ groupIds: [groupId] });
     const check = evaluateCompactBoundaryReplayGate({ groupIds: [groupId] });
@@ -60369,10 +61186,15 @@ export function runMemoryCenterChildAgentTypeReplayMatrixSelfTest() {
   }
 }
 
-function memoryCenterTypedStaleCandidateScope(scopeId: any) {
+function memoryCenterExactGroupSessionScope(scopeId: any) {
   const parsed = parseGroupMemoryScopeId(String(scopeId || ""));
-  if (!parsed.groupId || !/^gcs_[a-zA-Z0-9._-]+$/.test(parsed.sessionId)) throw new Error("Stale memory candidates require an exact group::gcs_* session scope");
+  if (!parsed.groupId || !/^gcs_[a-zA-Z0-9._-]+$/.test(parsed.sessionId)) throw new Error("An exact group::gcs_* session scope is required");
   return { ...parsed, typedScopeId: `${parsed.groupId}--${parsed.sessionId}` };
+}
+
+function memoryCenterTypedStaleCandidateScope(scopeId: any) {
+  try { return memoryCenterExactGroupSessionScope(scopeId); }
+  catch { throw new Error("Stale memory candidates require an exact group::gcs_* session scope"); }
 }
 
 export function summarizeMemoryCenterTypedStaleCandidateLedger(ledger: any) {
@@ -60773,6 +61595,28 @@ export function handleMemoryCenterApi(pathname: string, req: any, res: any, pars
     return true;
   }
 
+  if (pathname === "/api/memory-center/session-diagnostic-export" && req.method === "GET") {
+    try {
+      const requestedScopeId = String(parsed.query.scopeId || parsed.query.scope_id || "").trim();
+      const snapshot = buildMemoryCenterExactSessionDiagnosticExport(requestedScopeId);
+      const verification = verifyMemoryCenterExactSessionDiagnosticExport(snapshot, requestedScopeId);
+      if (!verification.valid) return sendJson(res, { success: false, error: "Exact-session diagnostic export failed integrity verification", verification }, 500);
+      const filename = `ccm-memory-diagnostic-${sidecarFileId(snapshot.scope.groupId)}-${sidecarFileId(snapshot.scope.groupSessionId)}.json`;
+      const body = JSON.stringify(snapshot, null, 2);
+      res.writeHead(200, {
+        "Content-Type": "application/json; charset=utf-8",
+        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Content-Length": Buffer.byteLength(body, "utf-8"),
+        "Cache-Control": "no-store",
+        "X-Content-Type-Options": "nosniff",
+      });
+      res.end(body);
+    } catch (e: any) {
+      sendJson(res, { success: false, error: String(e?.message || e) }, 400);
+    }
+    return true;
+  }
+
   if (pathname === "/api/memory-center/dispatch-recovery" && req.method === "GET") {
     try {
       sendJson(res, { success: true, inventory: buildMemoryDispatchRecoveryInventory({ limit: parsed.query.limit }) });
@@ -60850,6 +61694,44 @@ export function handleMemoryCenterApi(pathname: string, req: any, res: any, pars
         sendJson(res, { success: true, result: { event: result.event, candidate: summarizeMemoryCenterTypedStaleCandidateLedger(result.ledger).candidates.find((item: any) => item.candidateId === result.candidate?.candidate_id) }, staleCandidates: summarizeMemoryCenterTypedStaleCandidateLedger(result.ledger) });
       } catch (e: any) {
         sendJson(res, { success: false, error: e.message }, 400);
+      }
+    });
+    return true;
+  }
+
+  if (pathname === "/api/memory-center/session-memory-shape-trend/acknowledge" && req.method === "POST") {
+    let body = "";
+    req.on("data", (chunk: any) => body += chunk);
+    req.on("end", () => {
+      try {
+        const data = JSON.parse(body || "{}");
+        const scope = memoryCenterTypedStaleCandidateScope(data.scopeId || data.scope_id || "");
+        const { acknowledgeGroupTypedMemoryShapeTrendIncident } = require("../collaboration/group-memory-index");
+        const result = acknowledgeGroupTypedMemoryShapeTrendIncident(scope.typedScopeId, {
+          incidentId: data.incidentId || data.incident_id,
+          incidentChecksum: data.incidentChecksum || data.incident_checksum,
+          explicitConfirmation: data.explicitConfirmation === true || data.explicit_confirmation === true,
+          actor: data.actor || "memory-center",
+          note: data.note || "",
+        });
+        if (result.acknowledged !== true) return sendJson(res, { success: false, error: result.reason || "趋势事件确认失败", result }, 409);
+        appendAudit({
+          type: "memory_shape_trend_incident_acknowledged",
+          action: "acknowledge_shape_trend_incident",
+          scope: "group",
+          scopeId: scope.scopeId,
+          groupId: scope.groupId,
+          groupSessionId: scope.sessionId,
+          actor: data.actor || "memory-center",
+          incidentId: result.event?.incidentId || data.incidentId || data.incident_id || "",
+          incidentEventId: result.event?.eventId || "",
+          idempotent: result.idempotent === true,
+          visibilityOnly: true,
+          memoryMutationAuthorized: false,
+        });
+        sendJson(res, { success: true, result });
+      } catch (e: any) {
+        sendJson(res, { success: false, error: String(e?.message || e) }, 400);
       }
     });
     return true;

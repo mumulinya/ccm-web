@@ -21,6 +21,7 @@ import {
 import { loadGroups } from "../collaboration/storage";
 import { buildToolAuthorizationOptions, normalizeToolAuthorization, parseMcpGrant } from "../../tools/tool-authorization";
 import { listRecentRuntimeToolAudits, probeRuntimeToolReadiness, resyncMissingRuntimeToolSnapshots, resyncRecentRuntimeToolSnapshots, syncRuntimeToolsWithCatalog } from "../../tools/runtime-tool-sync";
+import { assertCcmInternalSkillMutable } from "../../skills/internal-skill-catalog";
 
 const { toolManager } = require("../../tools/tool-manager");
 const execFileAsync = promisify(execFile);
@@ -1251,6 +1252,7 @@ async function cloneGithubSkill(item: any, staging: string) {
 }
 
 async function stageSkillPackage(item: any, skillPackagesDir = SKILL_PACKAGES_DIR) {
+  assertCcmInternalSkillMutable(item?.name, "从外部来源安装或覆盖");
   fs.mkdirSync(skillPackagesDir, { recursive: true });
   const staging = path.join(skillPackagesDir, `.staging-${safeSlug(item.name)}-${process.pid}-${Date.now()}`);
   fs.mkdirSync(staging, { recursive: true });
@@ -1282,6 +1284,7 @@ async function stageSkillPackage(item: any, skillPackagesDir = SKILL_PACKAGES_DI
 }
 
 function installStagedPackage(staging: string, name: string, skillPackagesDir = SKILL_PACKAGES_DIR) {
+  assertCcmInternalSkillMutable(name, "从外部来源安装或覆盖");
   const target = path.join(skillPackagesDir, safeSlug(name));
   if (!isPathInside(skillPackagesDir, target)) throw new Error("Skill 安装路径无效");
   const backup = `${target}.backup-${process.pid}-${Date.now()}`;
@@ -1991,6 +1994,15 @@ function buildMarketplaceSkillRecord(item: any, staged: any, packagePath: string
     skillFile: path.join(packagePath, "SKILL.md"),
     packageStats: staged.packageStats,
     contentHash: checksum.slice(0, 16),
+    origin: "external",
+    scope: "external",
+    sourceType: "marketplace",
+    immutable: false,
+    deletable: true,
+    editable: true,
+    disableable: true,
+    systemManaged: false,
+    roleSkill: false,
     marketplace: { source: item.source, itemId: item.id, homepage: item.homepage || item.sourceUrl || "" },
     updated_at: now,
   };
@@ -2380,8 +2392,9 @@ async function runMarketplaceInstallE2ESelfTest() {
   }
 }
 
-async function installMarketplaceItemWithStore(rawItem: any, store: MarketplaceInstallStore = {}, mode: "install" | "update" = "install", options: any = {}) {
+export async function installMarketplaceItemWithStore(rawItem: any, store: MarketplaceInstallStore = {}, mode: "install" | "update" = "install", options: any = {}) {
   const item = normalizeMarketplaceItem(rawItem, { id: "custom", label: "Custom source", kind: "direct", trust: "custom" });
+  if (item.type === "skill") assertCcmInternalSkillMutable(item.name, mode === "update" ? "通过商城更新或覆盖" : "从商城安装或覆盖");
   const now = new Date().toISOString();
   let checksum = "";
   let packagePath = "";
@@ -2445,21 +2458,28 @@ async function installMarketplaceItemWithStore(rawItem: any, store: MarketplaceI
 }
 
 async function installMarketplaceItem(rawItem: any) {
+  if (String(rawItem?.type || "").toLowerCase() === "skill") {
+    assertCcmInternalSkillMutable(rawItem?.name, "从商城安装或覆盖");
+  }
   const item = await resolveMarketplaceItemForInstall(rawItem, "install");
   const result = await installMarketplaceItemWithStore(item, {}, "install", { autoResync: rawItem?.autoResync });
   return { ...result, sourceVerified: true };
 }
 
 async function updateMarketplaceItem(rawItem: any) {
+  if (String(rawItem?.type || "").toLowerCase() === "skill") {
+    assertCcmInternalSkillMutable(rawItem?.name, "通过商城更新或覆盖");
+  }
   const item = await resolveMarketplaceItemForInstall(rawItem, "update");
   const result = await installMarketplaceItemWithStore(item, {}, "update", { autoResync: rawItem?.autoResync });
   return { ...result, sourceVerified: true };
 }
 
-async function uninstallMarketplaceItemWithStore(payload: any, store: MarketplaceInstallStore = {}, options: any = {}) {
+export async function uninstallMarketplaceItemWithStore(payload: any, store: MarketplaceInstallStore = {}, options: any = {}) {
   const type = String(payload?.type || "").toLowerCase();
   const name = String(payload?.name || "").trim();
   if (!["mcp", "skill"].includes(type) || !name) throw new Error("卸载参数无效");
+  if (type === "skill") assertCcmInternalSkillMutable(name, "通过商城卸载");
   const skillPackagesDir = store.skillPackagesDir || SKILL_PACKAGES_DIR;
   const loadRecords = store.loadInstallations || loadInstallations;
   const saveRecords = store.saveInstallations || saveInstallations;
@@ -2664,7 +2684,7 @@ export function handleMarketplaceApi(pathname: string, req: any, res: any, parse
     readJsonBody(req)
       .then(installMarketplaceItem)
       .then(result => sendJson(res, { success: true, ...result }))
-      .catch(error => sendJson(res, { success: false, error: error.message }, 400));
+      .catch(error => sendJson(res, { success: false, error: error.message, code: error.code }, Number(error.statusCode || 400)));
     return true;
   }
 
@@ -2672,7 +2692,7 @@ export function handleMarketplaceApi(pathname: string, req: any, res: any, parse
     readJsonBody(req)
       .then(updateMarketplaceItem)
       .then(result => sendJson(res, { success: true, ...result }))
-      .catch(error => sendJson(res, { success: false, error: error.message }, 400));
+      .catch(error => sendJson(res, { success: false, error: error.message, code: error.code }, Number(error.statusCode || 400)));
     return true;
   }
 
@@ -2680,7 +2700,7 @@ export function handleMarketplaceApi(pathname: string, req: any, res: any, parse
     readJsonBody(req)
       .then(uninstallMarketplaceItem)
       .then(result => sendJson(res, { success: true, ...result }))
-      .catch(error => sendJson(res, { success: false, error: error.message }, 400));
+      .catch(error => sendJson(res, { success: false, error: error.message, code: error.code }, Number(error.statusCode || 400)));
     return true;
   }
 

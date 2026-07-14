@@ -128,7 +128,7 @@ export declare function feishuRuntimeEventPresentation(event: any): {
     title: string;
     markdown: string;
 };
-export declare function getFeishuChannelHealth(): {
+export declare function getFeishuChannelHealth(expectedPort?: number): {
     inbound: any;
     outbound: any;
     outbox: {
@@ -150,6 +150,12 @@ export declare function getFeishuChannelHealth(): {
     socket_connected: boolean;
     last_connected_at: string;
     last_disconnected_at: string;
+    process_started_at: string;
+    target_port: number;
+    expected_port: number;
+    endpoint_current: boolean;
+    pending_turn_since: string;
+    turn_stalled: boolean;
     schema: string;
     healthy: boolean;
     checked_at: string;
