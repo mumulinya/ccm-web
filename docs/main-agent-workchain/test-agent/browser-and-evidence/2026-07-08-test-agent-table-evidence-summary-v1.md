@@ -6,7 +6,7 @@
 
 ## Context
 
-已参考 `docs/test-agent/2026-07-08-browser-table-assertions.md`。TestAgent 侧已经支持：
+已参考 `docs/test-agent/assertions-and-coverage/2026-07-08-browser-table-assertions.md`。TestAgent 侧已经支持：
 
 - `tableRowIncludes`
 - `tableCellTextIncludes`

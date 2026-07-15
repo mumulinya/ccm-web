@@ -7,6 +7,9 @@ export type LlmTokenUsage = {
     outputTokens: number;
     totalTokens: number;
     reported: boolean;
+    directInputTokens?: number;
+    cacheCreationInputTokens?: number;
+    cacheReadInputTokens?: number;
 };
 type LlmCallOptions = {
     messages: LlmChatMessage[];
@@ -53,6 +56,7 @@ export declare function runGroupOrchestratorApiMicrocompactNativeAdapterTelemetr
         requestHeaderIncludesBeta: boolean;
         ledgerRecordedAdapterTelemetry: boolean;
         ledgerBindsSessionAndSnapshot: boolean;
+        platformExecutionReceiptIsStrong: boolean;
     };
     captured: {
         hasContextManagement: boolean;

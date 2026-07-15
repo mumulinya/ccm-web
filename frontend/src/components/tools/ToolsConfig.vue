@@ -6,10 +6,13 @@ import { toast, confirmDialog } from '../../utils/toast.js'
 import ToolControlOverview from './ToolControlOverview.vue'
 import McpServerEditor from './McpServerEditor.vue'
 import SkillMarkdownViewer from './SkillMarkdownViewer.vue'
+import InternalMcpCatalog from './InternalMcpCatalog.vue'
 
 const emit = defineEmits(['navigate'])
 
 const mcpTools = ref([])
+const internalMcpCatalog = ref({ items: [], summary: { total: 0, ready: 0, needs_configuration: 0, unavailable: 0, tools: 0 } })
+const internalMcpLoading = ref(false)
 const skills = ref([])
 const customSkills = ref([]) // 本地物理加载的高级 Customization Skills
 const currentFilter = ref('overview')
@@ -80,6 +83,8 @@ const isInternalSkill = (skill) => skill?.origin === 'internal'
   || skill?.systemManaged === true
 const internalSkills = computed(() => skills.value.filter(isInternalSkill))
 const externalSkills = computed(() => skills.value.filter(skill => !isInternalSkill(skill)))
+const internalMcpNames = computed(() => new Set((internalMcpCatalog.value.items || []).map(item => item.name)))
+const isBundledInternalMcp = (item) => item?.type === 'mcp' && internalMcpNames.value.has(item.name)
 const externalSkillLabel = (skill) => skill?.origin === 'external' || skill?.sourceType === 'marketplace'
   ? '外部下载'
   : '用户创建'
@@ -154,12 +159,15 @@ const coreToolsList = [
 ]
 
 const loadTools = async () => {
-  const [mcpData, skillData] = await Promise.all([
+  internalMcpLoading.value = true
+  const [mcpData, skillData, internalMcpData] = await Promise.all([
     toolsApi.mcp.list(),
-    toolsApi.skills.list()
-  ])
+    toolsApi.skills.list(),
+    toolsApi.internalMcp()
+  ]).finally(() => { internalMcpLoading.value = false })
   mcpTools.value = (mcpData.tools || []).map(t => ({ ...t, type: 'mcp', enabled: t.enabled !== false }))
   skills.value = (skillData.skills || []).map(s => ({ ...s, type: 'skill', enabled: s.enabled !== false }))
+  internalMcpCatalog.value = internalMcpData || { items: [], summary: {} }
   
   // 加载系统物理 Customization Skills
   try {
@@ -1090,6 +1098,7 @@ const filteredTools = () => {
 }
 
 const isInstalled = (item) => {
+  if (isBundledInternalMcp(item)) return true
   if (typeof item.installed === 'boolean') return item.installed
   if (item.type === 'mcp') {
     return mcpTools.value.some(t => t.name === item.name)
@@ -1360,7 +1369,7 @@ onMounted(loadTools)
         <button class="btn btn-outline btn-sm" @click="reloadTools">🔄 重载工具</button>
       </div>
       <span class="count">
-        内置工具: {{ coreToolsList.length }} | 内置 Skill: {{ internalSkills.length }} | 外部 Skill: {{ externalSkills.length }} | MCP: {{ mcpTools.length }}
+        内置工具: {{ coreToolsList.length }} | 内部 MCP: {{ internalMcpCatalog.summary?.total || 0 }} | 内置 Skill: {{ internalSkills.length }} | 外部 MCP: {{ mcpTools.length }}
       </span>
     </div>
 
@@ -1380,8 +1389,12 @@ onMounted(loadTools)
             <span>⚙️</span><span>内置核心工具</span>
             <span class="badge">{{ coreToolsList.length }}</span>
           </div>
+          <div class="category-item" :class="{ active: currentFilter === 'internal-mcp' }" @click="currentFilter = 'internal-mcp'">
+            <span>◆</span><span>内部 MCP</span>
+            <span class="badge">{{ internalMcpCatalog.summary?.ready || 0 }}/{{ internalMcpCatalog.summary?.total || 0 }}</span>
+          </div>
           <div class="category-item" :class="{ active: currentFilter === 'mcp' }" @click="currentFilter = 'mcp'">
-            <span>🔌</span><span>MCP 连接中心</span>
+            <span>🔌</span><span>外部 MCP</span>
             <span class="badge">{{ mcpTools.length }}</span>
           </div>
 
@@ -1425,7 +1438,8 @@ onMounted(loadTools)
             {{ 
               currentFilter === 'overview' ? '工具运行概况' :
               currentFilter === 'core' ? '⚙️ 系统内置核心工具' : 
-              currentFilter === 'mcp' ? '🔌 MCP 服务与客户端连接中心' : 
+              currentFilter === 'internal-mcp' ? '◆ 随项目安装的内部 MCP' :
+              currentFilter === 'mcp' ? '🔌 外部 MCP 服务与客户端连接中心' :
               currentFilter === 'authorization' ? '◈ 项目 / 群聊 MCP 与 Skill 授权总览' :
               currentFilter === 'chain-verification' ? '◆ MCP / Skill 子 Agent 链路验收报告' :
               currentFilter === 'invocation-audit' ? '◇ 子 Agent MCP / Skill 调用审计' :
@@ -1449,6 +1463,15 @@ onMounted(loadTools)
             :loading="authorizationInventoryLoading || toolChainVerificationLoading || runtimeReadinessLoading || goalAuditLoading"
             @open="currentFilter = $event"
             @refresh="loadTools"
+          />
+
+          <InternalMcpCatalog
+            v-if="currentFilter === 'internal-mcp'"
+            :items="internalMcpCatalog.items || []"
+            :summary="internalMcpCatalog.summary || {}"
+            :loading="internalMcpLoading"
+            @refresh="loadTools"
+            @configure="emit('navigate', { tab: 'settings' })"
           />
 
           <!-- 1. ⚙️ 系统内置核心工具 -->
@@ -2082,7 +2105,8 @@ onMounted(loadTools)
                       <span v-if="tool.installs">{{ formatMarketplaceCount(tool.installs) }} 次安装</span>
                       <span v-if="tool.useCount">{{ formatMarketplaceCount(tool.useCount) }} 次使用</span>
                       <span :class="`trust-${tool.source?.trust || 'custom'}`">{{ sourceTrustLabel(tool) }}来源</span>
-                      <span v-if="tool.installedVersion">已安装</span>
+                      <span v-if="isBundledInternalMcp(tool)" class="marketplace-verified"><ShieldCheck :size="12" aria-hidden="true" /> 项目内置</span>
+                      <span v-else-if="tool.installedVersion">已安装</span>
                       <span v-if="tool.updateAvailable" class="update-ready">可更新</span>
                       <a v-if="tool.homepage || tool.sourceUrl" :href="tool.homepage || tool.sourceUrl" target="_blank" rel="noreferrer">
                         查看来源 <ExternalLink :size="11" aria-hidden="true" />
@@ -2094,10 +2118,11 @@ onMounted(loadTools)
                   <button class="btn btn-outline btn-sm" :disabled="tool.previewing" @click="previewMarketTool(tool)">
                     {{ tool.previewing ? '读取中' : '预览' }}
                   </button>
-                  <button v-if="!isInstalled(tool) || tool.updateAvailable || marketplaceCanRefresh(tool)" class="btn btn-primary btn-sm" :disabled="tool.installing" @click="installMarketTool(tool)">
+                  <button v-if="isBundledInternalMcp(tool)" class="btn btn-outline btn-sm" @click="currentFilter = 'internal-mcp'">查看内部 MCP</button>
+                  <button v-else-if="!isInstalled(tool) || tool.updateAvailable || marketplaceCanRefresh(tool)" class="btn btn-primary btn-sm" :disabled="tool.installing" @click="installMarketTool(tool)">
                     {{ installButtonText(tool) }}
                   </button>
-                  <button v-if="isInstalled(tool)" class="btn btn-danger btn-sm" :disabled="tool.uninstalling" @click="uninstallMarketTool(tool)">
+                  <button v-if="isInstalled(tool) && !isBundledInternalMcp(tool)" class="btn btn-danger btn-sm" :disabled="tool.uninstalling" @click="uninstallMarketTool(tool)">
                     {{ tool.uninstalling ? '卸载中' : '卸载' }}
                   </button>
                 </div>

@@ -1,3 +1,4 @@
+export declare const FINAL_DISPATCH_REACTIVE_COMPACT_MAX_CONSECUTIVE_FAILURES = 3;
 export type TaskAgentMemoryContextSnapshotRef = {
     snapshotId: string;
     snapshotPath: string;
@@ -70,6 +71,7 @@ export type TaskAgentSession = {
     providerRuntimeIdentityChecksum?: string;
     providerContractHistory?: any[];
     lastProviderContractTransitionAt?: string;
+    finalDispatchReactiveCompactCircuitBreaker?: any;
 };
 export declare function verifyMemoryContextDeliveryReceiptChecksum(receipt: any): boolean;
 export declare function openTaskAgentSession(input: {
@@ -91,6 +93,12 @@ export declare function recordTaskAgentSessionTurn(sessionId: string, result?: {
     modelCapabilityRecord?: any;
     nativeModelCapabilityRecord?: any;
 }): TaskAgentSession;
+export declare function verifyTaskAgentFinalDispatchReactiveCompactCircuitBreaker(state: any, expected?: any): {
+    valid: boolean;
+    issues: string[];
+};
+export declare function inspectTaskAgentFinalDispatchReactiveCompactCircuitBreaker(sessionId: string, input?: any): any;
+export declare function recordTaskAgentFinalDispatchReactiveCompactCircuitOutcome(sessionId: string, input?: any): any;
 export declare function bindTaskAgentMemoryContextSnapshot(sessionId: string, input?: {
     taskId?: string;
     groupId?: string;
@@ -207,6 +215,51 @@ export declare function bindTaskAgentMemoryContextSnapshot(sessionId: string, in
         };
     };
     ref: TaskAgentMemoryContextSnapshotRef;
+};
+export declare function attachTaskAgentFinalDispatchPayloadGate(sessionId: string, input?: {
+    snapshotId?: string;
+    finalDispatchPayloadGate?: any;
+    final_dispatch_payload_gate?: any;
+    finalDispatchReactiveCompact?: any;
+    final_dispatch_reactive_compact?: any;
+    renderedPrompt?: string;
+    rendered_prompt?: string;
+}): {
+    updated: boolean;
+    reason: string;
+    issues?: undefined;
+    session?: undefined;
+    snapshot?: undefined;
+    gate?: undefined;
+    verification?: undefined;
+    reactiveCompact?: undefined;
+    reactiveCompactVerification?: undefined;
+} | {
+    updated: boolean;
+    reason: string;
+    issues: string[];
+    session?: undefined;
+    snapshot?: undefined;
+    gate?: undefined;
+    verification?: undefined;
+    reactiveCompact?: undefined;
+    reactiveCompactVerification?: undefined;
+} | {
+    updated: boolean;
+    session: TaskAgentSession;
+    snapshot: any;
+    gate: any;
+    verification: {
+        valid: boolean;
+        issues: string[];
+    };
+    reactiveCompact: any;
+    reactiveCompactVerification: {
+        valid: boolean;
+        issues: string[];
+    };
+    reason?: undefined;
+    issues?: undefined;
 };
 export declare function recordTaskAgentMemoryContextDelivery(sessionId: string, input?: {
     snapshotId?: string;
@@ -560,6 +613,19 @@ export declare function buildTaskAgentMemoryContextSnapshotInventory(filter?: {
         invocationLineageExpectedCount: number;
         invocationLineageBoundCount: number;
         invocationLedgerMissingCount: number;
+        finalDispatchGateReadyCount: number;
+        finalDispatchGateBlockedCount: number;
+        finalDispatchGateMissingCount: number;
+        finalDispatchGateInvalidCount: number;
+        finalDispatchPromptBoundCount: number;
+        finalDispatchLineageProofRequiredCount: number;
+        finalDispatchLineageProofCount: number;
+        finalDispatchReactiveCompactRecoveredCount: number;
+        finalDispatchReactiveCompactBlockedCount: number;
+        finalDispatchReactiveCompactInvalidCount: number;
+        finalDispatchReactiveCompactCircuitOpenCount: number;
+        finalDispatchReactiveCompactCircuitFailureCount: any;
+        finalDispatchReactiveCompactCircuitInvalidCount: number;
         invocationBranchCount: number;
         staleCount: number;
         prunableCount: number;
@@ -618,6 +684,19 @@ export declare function pruneTaskAgentMemoryContextSnapshots(options?: any): {
         invocationLineageExpectedCount: number;
         invocationLineageBoundCount: number;
         invocationLedgerMissingCount: number;
+        finalDispatchGateReadyCount: number;
+        finalDispatchGateBlockedCount: number;
+        finalDispatchGateMissingCount: number;
+        finalDispatchGateInvalidCount: number;
+        finalDispatchPromptBoundCount: number;
+        finalDispatchLineageProofRequiredCount: number;
+        finalDispatchLineageProofCount: number;
+        finalDispatchReactiveCompactRecoveredCount: number;
+        finalDispatchReactiveCompactBlockedCount: number;
+        finalDispatchReactiveCompactInvalidCount: number;
+        finalDispatchReactiveCompactCircuitOpenCount: number;
+        finalDispatchReactiveCompactCircuitFailureCount: any;
+        finalDispatchReactiveCompactCircuitInvalidCount: number;
         invocationBranchCount: number;
         staleCount: number;
         prunableCount: number;

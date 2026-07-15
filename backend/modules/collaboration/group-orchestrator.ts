@@ -2,6 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import * as crypto from "crypto";
+import { withFileLock, writeJsonAtomic } from "../../core/atomic-json-file";
 import { getConfigInfo, recordMetric } from "../../core/db";
 import { isCredentialReference, protectCredential, resolveCredential } from "../../core/credential-store";
 import {
@@ -47,6 +48,11 @@ import {
 } from "./group-memory-index";
 import { resolveTrustedModelContextCapacity } from "./model-capability-cache";
 import { buildRoleSkillPrompt } from "../../skills/role-skills";
+import {
+  claimGroupReactiveCompactRetry,
+  completeGroupReactiveCompactRetry,
+} from "./group-reactive-compact-retry-ownership";
+import { recordGroupPromptCacheUsage } from "./group-prompt-cache-break-detection";
 
 export const COORDINATOR_PROJECT = "coordinator";
 
@@ -74,7 +80,10 @@ function mergeLlmTokenUsage(...values: any[]): LlmTokenUsage | null {
   const inputTokens = usages.reduce((total, value) => total + Math.max(0, Math.floor(Number(value.inputTokens || value.input_tokens || 0) || 0)), 0);
   const outputTokens = usages.reduce((total, value) => total + Math.max(0, Math.floor(Number(value.outputTokens || value.output_tokens || 0) || 0)), 0);
   if (inputTokens <= 0 && outputTokens <= 0) return null;
-  return { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens, reported: true };
+  const directInputTokens = usages.reduce((total, value) => total + Math.max(0, Math.floor(Number(value.directInputTokens || value.direct_input_tokens || 0) || 0)), 0);
+  const cacheCreationInputTokens = usages.reduce((total, value) => total + Math.max(0, Math.floor(Number(value.cacheCreationInputTokens || value.cache_creation_input_tokens || 0) || 0)), 0);
+  const cacheReadInputTokens = usages.reduce((total, value) => total + Math.max(0, Math.floor(Number(value.cacheReadInputTokens || value.cache_read_input_tokens || 0) || 0)), 0);
+  return { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens, reported: true, directInputTokens, cacheCreationInputTokens, cacheReadInputTokens };
 }
 
 function attachLlmTokenUsage(error: any, usage: LlmTokenUsage | null) {
@@ -95,6 +104,10 @@ export function defaultOrchestratorConfig() {
     memoryContextPreset: "default",
     modelContextWindow: 0,
     modelAutoCompactTokenLimit: 0,
+    timeBasedMicrocompactEnabled: false,
+    timeBasedThinkingClearEnabled: false,
+    timeBasedMicrocompactGapMinutes: 60,
+    timeBasedMicrocompactKeepRecent: 5,
     typedMemoryDeliveryMaxDocuments: 5,
     typedMemoryDeliveryMaxBytesPerDocument: 4096,
     typedMemoryDeliveryMaxLinesPerDocument: 200,
@@ -195,6 +208,22 @@ export function saveOrchestratorConfig(updates: any) {
     const value = Number(modelAutoCompactTokenLimit || 0);
     if (!Number.isFinite(value) || value < 0 || value > 3_980_000) throw new Error("自动压缩阈值必须介于 0 和 3,980,000 token");
     next.modelAutoCompactTokenLimit = Math.floor(value);
+  }
+  const timeBasedMicrocompactEnabled = updates.timeBasedMicrocompactEnabled ?? updates.time_based_microcompact_enabled;
+  const timeBasedThinkingClearEnabled = updates.timeBasedThinkingClearEnabled ?? updates.time_based_thinking_clear_enabled;
+  const timeBasedMicrocompactGapMinutes = updates.timeBasedMicrocompactGapMinutes ?? updates.time_based_microcompact_gap_minutes;
+  const timeBasedMicrocompactKeepRecent = updates.timeBasedMicrocompactKeepRecent ?? updates.time_based_microcompact_keep_recent;
+  if (timeBasedMicrocompactEnabled !== undefined) next.timeBasedMicrocompactEnabled = timeBasedMicrocompactEnabled === true;
+  if (timeBasedThinkingClearEnabled !== undefined) next.timeBasedThinkingClearEnabled = timeBasedThinkingClearEnabled === true;
+  if (timeBasedMicrocompactGapMinutes !== undefined) {
+    const value = Number(timeBasedMicrocompactGapMinutes);
+    if (!Number.isFinite(value) || value < 1 || value > 10_080) throw new Error("时间触发 microcompact 间隔必须介于 1 和 10080 分钟");
+    next.timeBasedMicrocompactGapMinutes = Math.floor(value);
+  }
+  if (timeBasedMicrocompactKeepRecent !== undefined) {
+    const value = Number(timeBasedMicrocompactKeepRecent);
+    if (!Number.isFinite(value) || value < 1 || value > 100) throw new Error("时间触发 microcompact 保留工具结果数必须介于 1 和 100");
+    next.timeBasedMicrocompactKeepRecent = Math.floor(value);
   }
   for (const [camelKey, snakeKey, min, max, errorMessage] of typedMemoryDeliveryLimits) {
     const raw = updates[camelKey] ?? updates[snakeKey];
@@ -492,10 +521,9 @@ export function buildGroupCollaborationRules(memberList = "") {
 - 当前群聊成员：${members}
 - 这是本地 CCM 群聊协作，不是外部 IM；不要调用飞书、微信、外部机器人或 MCP 通知工具来联系其他 Agent。
 - 像团队群聊一样发言：先给出你的判断、依据和下一步，再在确实需要协作时 @ 对方。
-- 如需其他 Agent 协助，只能在本群聊里用独立一行 "@项目名 具体任务" 派发，系统会自动转发。
-- @ 后面必须写清楚可执行任务、需要确认的问题或交付物，例如：@smart-live-app 请根据后端新增字段适配用户头像展示。
-- 只有确实需要对方执行、确认、补充或适配时才 @；普通总结、技术介绍、成员列表、分类标题里不要 @。
-- 被 @ 的 Agent 只处理明确点到自己的任务；如果任务不属于自己，要说明原因，并可用独立 @ 行转给更合适的成员。
+- 只有群聊主 Agent 可以用独立一行 "@项目名 具体任务" 正式派发；@ 后必须写清背景、目标、范围和交付物。
+- 成员 Agent 不得直接 @、命令或私下派发给另一个成员；跨项目需要必须通过内部群聊协调 MCP 提交给主 Agent，由主 Agent 判断只读询问、正式工作项或用户确认。
+- 被 @ 的 Agent 只处理主 Agent 明确派给自己的工作项；如果任务不属于自己，要向主 Agent 报告阻塞，不能自行转派。
 - 不要声称其他 Agent 已完成尚未回复的工作；需要等待时明确说“已派发，等待某某回复”。`;
 }
 
@@ -522,7 +550,7 @@ export function buildMemberCollaborationInstructions(projectName: string, member
 成员 Agent 工作方式：
 1. 只对自己项目职责范围内的内容做确定回答或修改；不确定时说明需要谁补充。
 2. 回复要像群聊发言：先给结论，再列关键依据、修改点或风险。
-3. 如果需要其他项目配合，用独立一行 @项目名 具体任务；不要泛泛 @。
+3. 如果需要其他项目配合，使用内部群聊协调 MCP 描述需求、证据、所需能力和验收标准；不要直接 @ 或指派另一个成员。
 4. 如果你完成了代码或配置修改，说明改了什么、影响范围和验证方式。
 5. 如果只是提供建议，不要伪装成已执行修改。
 6. 不要重复整段群聊历史，只引用必要上下文。
@@ -554,6 +582,8 @@ export function buildCoordinatorPrompt(input: {
   maintenanceAt?: string;
   contextId?: string;
   sessionId?: string;
+  groupSessionId?: string;
+  group_session_id?: string;
 }) {
   const group = normalizeGroupOrchestrator(input.group);
   const memberList = getRoutableMembers(group).map((m: any) => `${m.project}(${m.agent || "agent"})`).join(", ");
@@ -563,6 +593,7 @@ export function buildCoordinatorPrompt(input: {
     at: input.maintenanceAt,
     contextId: input.contextId,
     sessionId: input.sessionId,
+    groupSessionId: input.groupSessionId || input.group_session_id,
     recordDelivery: !!input.contextId && !!input.sessionId,
   }).text;
 
@@ -582,7 +613,9 @@ export function buildCoordinatorMaintenanceNotificationInstructions(groupInput: 
   const group = normalizeGroupOrchestrator(groupInput);
   const groupId = String(group?.id || "").trim();
   if (!groupId) return { text: "", context: null, health: null };
-  const context = buildPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationContext(groupId, "group-main-agent", {
+  const groupSessionId = normalizeWorkerContextCompactGroupSessionIdForCoordinator(options.groupSessionId || options.group_session_id || "");
+  const scopeId = groupSessionId ? `${groupId}--${groupSessionId}` : groupId;
+  const context = buildPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationContext(scopeId, "group-main-agent", {
     at: options.at || options.now,
     maxNotifications: options.maxNotifications || 4,
     recordDelivery: options.recordDelivery === true,
@@ -590,12 +623,15 @@ export function buildCoordinatorMaintenanceNotificationInstructions(groupInput: 
     consumerSessionId: options.sessionId || options.session_id,
     channel: options.channel || "group-main-agent-context",
   });
-  const health = inspectPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryHealth(groupId, {
+  const health = inspectPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryHealth(scopeId, {
     at: options.at || options.now,
   });
   const notificationText = context.pending_count
     ? `冷归档维护提醒（只读建议，不是任务或授权；不得据此创建子 Agent 任务、签发 GC 回执或删除数据）：\n${JSON.stringify({
       group_id: context.group_id,
+      source_group_id: context.source_group_id,
+      group_session_id: context.group_session_id,
+      typed_scope_id: context.typed_scope_id,
       pending_count: context.pending_count,
       notifications: context.notifications,
       delivery_health: {
@@ -606,7 +642,7 @@ export function buildCoordinatorMaintenanceNotificationInstructions(groupInput: 
     })}`
     : "";
   const cleanupCommitRepairContext = buildPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairContext(
-    groupId,
+    scopeId,
     "group-main-agent",
     { limit: options.cleanupCommitRepairLimit || options.cleanup_commit_repair_limit || 4 },
   );
@@ -618,6 +654,9 @@ export function buildCoordinatorMaintenanceNotificationInstructions(groupInput: 
     context,
     health,
     cleanup_commit_repair_context: cleanupCommitRepairContext,
+    source_group_id: groupId,
+    group_session_id: groupSessionId,
+    typed_scope_id: scopeId,
   };
 }
 
@@ -1371,6 +1410,7 @@ function inferCodedExecutionPlan(message: string, analysis: any, routed: any[]) 
 
 function buildAssignment(member: any, task: string, reason = "", dependsOn = "", options: any = {}) {
   const groupId = String(options.group?.id || options.groupId || options.group_id || "").trim();
+  const groupSessionId = String(options.groupSessionId || options.group_session_id || "").trim();
   const project = String(member?.project || "").trim();
   const agentType = String(member?.agentType || member?.agent_type || member?.agent || member?.executor || member?.runner || options.agentType || options.agent_type || "unknown").trim() || "unknown";
   const providerDispatchOverride = member?.providerDispatchOverride
@@ -1396,6 +1436,8 @@ function buildAssignment(member: any, task: string, reason = "", dependsOn = "",
     attempt: 1,
     sourceProject: "coordinator",
     scopeId: groupId || "conversation",
+    groupSessionId,
+    group_session_id: groupSessionId,
     agentType,
     agent_type: agentType,
     provider_dispatch_override: providerDispatchOverride,
@@ -1615,6 +1657,8 @@ export function runCodedGroupOrchestrator(input: {
   workerContextRetryOptions?: any;
   providerSwitchRequests?: any;
   provider_switch_requests?: any;
+  groupSessionId?: string;
+  group_session_id?: string;
 }) {
   const group = normalizeGroupOrchestrator(input.group);
   const coordinator = getCoordinatorMember(group);
@@ -1735,6 +1779,7 @@ export function runCodedGroupOrchestrator(input: {
   const assignments = buildAssignmentsFromTargets(plannedRouted, {
     group,
     analysis,
+    groupSessionId: input.groupSessionId || input.group_session_id || "",
     workerContextUsageOptions: input.workerContextUsageOptions || null,
     autoWorkerContextCompactRetry: input.autoWorkerContextCompactRetry,
     workerContextRetryOptions: input.workerContextRetryOptions || null,
@@ -6815,7 +6860,7 @@ export function buildCodedCoordinatorSummary(group: any, outputs: string[]) {
 }
 
 // 优化2：LLM 驱动的智能汇总
-export async function runLlmCoordinatorSummary(group: any, userMessage: string, outputs: string[]) {
+export async function runLlmCoordinatorSummary(group: any, userMessage: string, outputs: string[], options: any = {}) {
   const config = loadOrchestratorConfig();
   const configIssue = getLlmConfigIssue(config);
   if (configIssue) return null; // 配置不完整时回退到模板汇总
@@ -6824,8 +6869,15 @@ export async function runLlmCoordinatorSummary(group: any, userMessage: string, 
   const validOutputs = (outputs || []).filter(Boolean);
   if (validOutputs.length === 0) return null;
   const startedAt = Date.now();
+  const groupSessionId = String(options.groupSessionId || options.group_session_id || "").trim();
+  const anthropic = shouldUseAnthropic(config);
   let tokenUsage: LlmTokenUsage | null = null;
-  const captureTokenUsage = (usage: LlmTokenUsage) => { tokenUsage = mergeLlmTokenUsage(tokenUsage, usage); };
+  const captureTokenUsage = (usage: LlmTokenUsage) => {
+    tokenUsage = mergeLlmTokenUsage(tokenUsage, usage);
+    if (groupSessionId.startsWith("gcs_")) {
+      try { recordGroupPromptCacheUsage({ groupId: group.id, groupSessionId, source: "group_main_summary", provider: anthropic ? "anthropic" : "openai", model: config.model, usage }); } catch {}
+    }
+  };
 
   const childReplies = validOutputs.map((text, i) => `--- 子 Agent task-notification ${i + 1} ---\n${String(text).slice(0, 2000)}`).join("\n\n");
 
@@ -6849,7 +6901,7 @@ export async function runLlmCoordinatorSummary(group: any, userMessage: string, 
       { role: "system", content: system },
       { role: "user", content: user },
     ];
-    const content = shouldUseAnthropic(config)
+    const content = anthropic
       ? await callAnthropicCompatibleChat(config, { messages, system, maxTokens: 1000, temperature: 0.3, defaultTimeoutMs: 30000, onUsage: captureTokenUsage })
       : await callOpenAiCompatibleChat(config, { messages, temperature: 0.3, defaultTimeoutMs: 30000, onUsage: captureTokenUsage });
 
@@ -6875,7 +6927,7 @@ export async function runLlmCoordinatorReview(
   userMessage: string,
   coordinatorPlan: string,
   outputs: string[],
-  options: { allowFollowUps?: boolean; round?: number; maxRounds?: number; requiresCodeChanges?: boolean; requiresVerification?: boolean; traceId?: string; taskId?: string; executionId?: string } = {}
+  options: { allowFollowUps?: boolean; round?: number; maxRounds?: number; requiresCodeChanges?: boolean; requiresVerification?: boolean; traceId?: string; taskId?: string; executionId?: string; groupSessionId?: string; group_session_id?: string } = {}
 ) {
   const config = loadOrchestratorConfig();
   const configIssue = getLlmConfigIssue(config);
@@ -6887,8 +6939,15 @@ export async function runLlmCoordinatorReview(
   const validOutputs = (outputs || []).filter(Boolean);
   if (validOutputs.length === 0) return null;
   const startedAt = Date.now();
+  const groupSessionId = String(options.groupSessionId || options.group_session_id || "").trim();
+  const anthropic = shouldUseAnthropic(config);
   let tokenUsage: LlmTokenUsage | null = null;
-  const captureTokenUsage = (usage: LlmTokenUsage) => { tokenUsage = mergeLlmTokenUsage(tokenUsage, usage); };
+  const captureTokenUsage = (usage: LlmTokenUsage) => {
+    tokenUsage = mergeLlmTokenUsage(tokenUsage, usage);
+    if (groupSessionId.startsWith("gcs_")) {
+      try { recordGroupPromptCacheUsage({ groupId: group.id, groupSessionId, source: "group_main_review", provider: anthropic ? "anthropic" : "openai", model: config.model, usage }); } catch {}
+    }
+  };
 
   const allowFollowUps = options.allowFollowUps !== false;
   const round = Math.max(1, Number(options.round || 1));
@@ -6972,7 +7031,7 @@ ${childReplies}
       { role: "system", content: system },
       { role: "user", content: user },
     ];
-    const content = shouldUseAnthropic(config)
+    const content = anthropic
       ? await callAnthropicCompatibleChat(config, { messages, system, maxTokens: 1400, temperature: 0.2, defaultTimeoutMs: 30000, onUsage: captureTokenUsage })
       : await callOpenAiCompatibleChat(config, { messages, temperature: 0.2, defaultTimeoutMs: 30000, onUsage: captureTokenUsage });
 
@@ -7144,14 +7203,20 @@ function buildAllowedProjectBrief(group: any) {
   }).join("\n");
 }
 
-function getReplayRepairWorkItemsFileForCoordinator(groupId: string) {
+function getReplayRepairWorkItemsFileForCoordinator(groupId: string, groupSessionId = "") {
   const safe = String(groupId || "unknown").replace(/[^a-zA-Z0-9._:-]+/g, "-").slice(0, 160) || "unknown";
-  return path.join(GROUP_MEMORY_REPLAY_REPAIR_WORK_ITEMS_DIR, `${safe}.json`);
+  const exactSessionId = normalizeWorkerContextCompactGroupSessionIdForCoordinator(groupSessionId);
+  if (!exactSessionId) return path.join(GROUP_MEMORY_REPLAY_REPAIR_WORK_ITEMS_DIR, `${safe}.json`);
+  const safeSession = String(exactSessionId).replace(/[^a-zA-Z0-9._:-]+/g, "-").slice(0, 160) || "unknown";
+  return path.join(GROUP_MEMORY_REPLAY_REPAIR_WORK_ITEMS_DIR, safe, `${safeSession}.json`);
 }
 
-function getReplayRepairDispatchPlansFileForCoordinator(groupId: string) {
+function getReplayRepairDispatchPlansFileForCoordinator(groupId: string, groupSessionId = "") {
   const safe = String(groupId || "unknown").replace(/[^a-zA-Z0-9._:-]+/g, "-").slice(0, 160) || "unknown";
-  return path.join(GROUP_MEMORY_REPLAY_REPAIR_DISPATCH_PLANS_DIR, `${safe}.json`);
+  const exactSessionId = normalizeWorkerContextCompactGroupSessionIdForCoordinator(groupSessionId);
+  if (!exactSessionId) return path.join(GROUP_MEMORY_REPLAY_REPAIR_DISPATCH_PLANS_DIR, `${safe}.json`);
+  const safeSession = String(exactSessionId).replace(/[^a-zA-Z0-9._:-]+/g, "-").slice(0, 160) || "unknown";
+  return path.join(GROUP_MEMORY_REPLAY_REPAIR_DISPATCH_PLANS_DIR, safe, `${safeSession}.json`);
 }
 
 function getReplayRepairDispatchBindingsFileForCoordinator(groupId: string) {
@@ -7164,31 +7229,55 @@ function getReplayRepairDispatchTimelineBindingsFileForCoordinator(groupId: stri
   return path.join(GROUP_MEMORY_REPLAY_REPAIR_TIMELINE_BINDINGS_DIR, `${safe}.json`);
 }
 
-function getWorkerContextCompactHookLedgerFileForCoordinator(groupId: string) {
-  const safe = String(groupId || "unknown").replace(/[^a-zA-Z0-9._:-]+/g, "-").slice(0, 160) || "unknown";
-  return path.join(GROUP_MEMORY_WORKER_CONTEXT_COMPACT_HOOKS_DIR, `${safe}.json`);
+function normalizeWorkerContextCompactGroupSessionIdForCoordinator(groupSessionId: any = "") {
+  const value = String(groupSessionId || "").trim();
+  return value.startsWith("gcs_") ? value : "";
 }
 
-function getWorkerContextCompactOutcomeLedgerFileForCoordinator(groupId: string) {
-  const safe = String(groupId || "unknown").replace(/[^a-zA-Z0-9._:-]+/g, "-").slice(0, 160) || "unknown";
-  return path.join(GROUP_MEMORY_WORKER_CONTEXT_COMPACT_OUTCOMES_DIR, `${safe}.json`);
+function safeWorkerContextCompactScopeSegmentForCoordinator(value: any, fallback = "unknown") {
+  return String(value || fallback).replace(/[^a-zA-Z0-9._:-]+/g, "-").slice(0, 160) || fallback;
 }
 
-function getWorkerContextCompactStrategyMemoryFileForCoordinator(groupId: string) {
-  const safe = String(groupId || "unknown").replace(/[^a-zA-Z0-9._:-]+/g, "-").slice(0, 160) || "unknown";
-  return path.join(GROUP_MEMORY_WORKER_CONTEXT_COMPACT_STRATEGIES_DIR, `${safe}.json`);
+function getWorkerContextCompactScopedFileForCoordinator(root: string, groupId: string, groupSessionId = "") {
+  const safeGroup = safeWorkerContextCompactScopeSegmentForCoordinator(groupId);
+  const exactSessionId = normalizeWorkerContextCompactGroupSessionIdForCoordinator(groupSessionId);
+  if (!exactSessionId) return path.join(root, `${safeGroup}.json`);
+  return path.join(root, safeGroup, `${safeWorkerContextCompactScopeSegmentForCoordinator(exactSessionId, "gcs_unknown")}.json`);
 }
 
-function getWorkerContextPtlEmergencyHintFileForCoordinator(groupId: string) {
-  const safe = String(groupId || "unknown").replace(/[^a-zA-Z0-9._:-]+/g, "-").slice(0, 160) || "unknown";
-  return path.join(GROUP_MEMORY_WORKER_CONTEXT_PTL_EMERGENCIES_DIR, `${safe}.json`);
+function getWorkerContextCompactHookLedgerFileForCoordinator(groupId: string, groupSessionId = "") {
+  return getWorkerContextCompactScopedFileForCoordinator(GROUP_MEMORY_WORKER_CONTEXT_COMPACT_HOOKS_DIR, groupId, groupSessionId);
+}
+
+function getWorkerContextCompactOutcomeLedgerFileForCoordinator(groupId: string, groupSessionId = "") {
+  return getWorkerContextCompactScopedFileForCoordinator(GROUP_MEMORY_WORKER_CONTEXT_COMPACT_OUTCOMES_DIR, groupId, groupSessionId);
+}
+
+function getWorkerContextCompactStrategyMemoryFileForCoordinator(groupId: string, groupSessionId = "") {
+  return getWorkerContextCompactScopedFileForCoordinator(GROUP_MEMORY_WORKER_CONTEXT_COMPACT_STRATEGIES_DIR, groupId, groupSessionId);
+}
+
+function getWorkerContextPtlEmergencyHintFileForCoordinator(groupId: string, groupSessionId = "") {
+  return getWorkerContextCompactScopedFileForCoordinator(GROUP_MEMORY_WORKER_CONTEXT_PTL_EMERGENCIES_DIR, groupId, groupSessionId);
 }
 
 function writeJsonAtomicForCoordinator(file: string, value: any) {
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  const temp = `${file}.${process.pid}.${Date.now()}.tmp`;
-  fs.writeFileSync(temp, JSON.stringify(value, null, 2), "utf-8");
-  fs.renameSync(temp, file);
+  writeJsonAtomic(file, value);
+}
+
+function readJsonWithBackupForCoordinator(file: string, schema: string) {
+  for (const [candidate, recoveredFromBackup] of [[file, false], [`${file}.bak`, true]] as const) {
+    try {
+      const value = JSON.parse(fs.readFileSync(candidate, "utf-8"));
+      if (value?.schema === schema) return { value, recoveredFromBackup };
+    } catch {}
+  }
+  return { value: null, recoveredFromBackup: false };
+}
+
+function workerContextCompactScopeIdForCoordinator(groupId: string, groupSessionId = "") {
+  const exactSessionId = normalizeWorkerContextCompactGroupSessionIdForCoordinator(groupSessionId);
+  return exactSessionId ? `${groupId}::${exactSessionId}` : String(groupId || "");
 }
 
 function hashCoordinator(value: any, length = 16) {
@@ -7202,6 +7291,7 @@ function normalizeWorkerContextCompactHookEntryForCoordinator(raw: any = {}) {
     entry_id: String(raw.entry_id || raw.entryId || `wcch-entry:${hashCoordinator([raw.hook_run_id, raw.phase, raw.assignment_id, raw.retry_packet_id, Date.now(), Math.random()], 14)}`),
     hook_run_id: String(raw.hook_run_id || raw.hookRunId || ""),
     group_id: String(raw.group_id || raw.groupId || ""),
+    group_session_id: String(raw.group_session_id || raw.groupSessionId || ""),
     phase: String(raw.phase || "") === "post" ? "post" : "pre",
     ok,
     status: ok ? String(raw.status || "ok") : "fail",
@@ -7245,24 +7335,30 @@ function buildWorkerContextCompactHookStatsForCoordinator(entries: any[] = []) {
   return stats;
 }
 
-export function readWorkerContextCompactHookLedgerForCoordinator(groupId: string) {
-  const file = getWorkerContextCompactHookLedgerFileForCoordinator(groupId);
-  try {
-    const ledger = JSON.parse(fs.readFileSync(file, "utf-8"));
-    if (ledger?.schema === "ccm-worker-context-compact-hook-ledger-v1") {
-      const entries = Array.isArray(ledger.entries) ? ledger.entries.map(normalizeWorkerContextCompactHookEntryForCoordinator) : [];
-      return {
-        ...ledger,
-        file,
-        entries,
-        stats: buildWorkerContextCompactHookStatsForCoordinator(entries),
-      };
-    }
-  } catch {}
+export function readWorkerContextCompactHookLedgerForCoordinator(groupId: string, groupSessionId = "") {
+  const exactSessionId = normalizeWorkerContextCompactGroupSessionIdForCoordinator(groupSessionId);
+  const file = getWorkerContextCompactHookLedgerFileForCoordinator(groupId, exactSessionId);
+  const loaded = readJsonWithBackupForCoordinator(file, "ccm-worker-context-compact-hook-ledger-v1");
+  if (loaded.value) {
+    const entries = (Array.isArray(loaded.value.entries) ? loaded.value.entries.map(normalizeWorkerContextCompactHookEntryForCoordinator) : [])
+      .filter((entry: any) => !exactSessionId || entry.group_id === groupId && entry.group_session_id === exactSessionId);
+    return {
+      ...loaded.value,
+      groupId,
+      groupSessionId: exactSessionId,
+      scopeId: workerContextCompactScopeIdForCoordinator(groupId, exactSessionId),
+      file,
+      recoveredFromBackup: loaded.recoveredFromBackup,
+      entries,
+      stats: buildWorkerContextCompactHookStatsForCoordinator(entries),
+    };
+  }
   return {
     schema: "ccm-worker-context-compact-hook-ledger-v1",
     version: 1,
     groupId,
+    groupSessionId: exactSessionId,
+    scopeId: workerContextCompactScopeIdForCoordinator(groupId, exactSessionId),
     file,
     entries: [],
     stats: buildWorkerContextCompactHookStatsForCoordinator([]),
@@ -7270,24 +7366,34 @@ export function readWorkerContextCompactHookLedgerForCoordinator(groupId: string
   };
 }
 
-function appendWorkerContextCompactHookEntriesForCoordinator(groupId: string, entries: any[] = []) {
+function appendWorkerContextCompactHookEntriesForCoordinator(groupId: string, entries: any[] = [], groupSessionId = "") {
+  const exactSessionId = normalizeWorkerContextCompactGroupSessionIdForCoordinator(groupSessionId);
   const normalized = entries
-    .map((entry: any) => normalizeWorkerContextCompactHookEntryForCoordinator({ ...entry, group_id: entry.group_id || groupId }))
-    .filter((entry: any) => entry.group_id || groupId);
-  if (!normalized.length) return readWorkerContextCompactHookLedgerForCoordinator(groupId);
-  const ledger = readWorkerContextCompactHookLedgerForCoordinator(groupId);
-  const nextEntries = [...(ledger.entries || []), ...normalized].slice(-500);
-  const next = {
-    schema: "ccm-worker-context-compact-hook-ledger-v1",
-    version: 1,
-    groupId,
-    file: ledger.file || getWorkerContextCompactHookLedgerFileForCoordinator(groupId),
-    entries: nextEntries,
-    stats: buildWorkerContextCompactHookStatsForCoordinator(nextEntries),
-    updatedAt: normalized[normalized.length - 1]?.at || new Date().toISOString(),
-  };
-  writeJsonAtomicForCoordinator(next.file, next);
-  return next;
+    .map((entry: any) => normalizeWorkerContextCompactHookEntryForCoordinator({
+      ...entry,
+      group_id: entry.group_id || groupId,
+      group_session_id: exactSessionId || "",
+    }))
+    .filter((entry: any) => entry.group_id === groupId && (!exactSessionId || entry.group_session_id === exactSessionId));
+  if (!normalized.length) return readWorkerContextCompactHookLedgerForCoordinator(groupId, exactSessionId);
+  const file = getWorkerContextCompactHookLedgerFileForCoordinator(groupId, exactSessionId);
+  return withFileLock(file, () => {
+    const ledger = readWorkerContextCompactHookLedgerForCoordinator(groupId, exactSessionId);
+    const nextEntries = [...(ledger.entries || []), ...normalized].slice(-500);
+    const next = {
+      schema: "ccm-worker-context-compact-hook-ledger-v1",
+      version: 1,
+      groupId,
+      groupSessionId: exactSessionId,
+      scopeId: workerContextCompactScopeIdForCoordinator(groupId, exactSessionId),
+      file,
+      entries: nextEntries,
+      stats: buildWorkerContextCompactHookStatsForCoordinator(nextEntries),
+      updatedAt: normalized[normalized.length - 1]?.at || new Date().toISOString(),
+    };
+    writeJsonAtomicForCoordinator(file, next);
+    return next;
+  });
 }
 
 function normalizeWorkerContextCompactOutcomeEntryForCoordinator(raw: any = {}) {
@@ -7315,6 +7421,7 @@ function normalizeWorkerContextCompactOutcomeEntryForCoordinator(raw: any = {}) 
     schema: "ccm-worker-context-compact-outcome-entry-v1",
     outcome_id: String(raw.outcome_id || raw.outcomeId || `wcco:${hashCoordinator([raw.group_id, raw.assignment_id, raw.retry_id, raw.retry_packet_id, raw.at || Date.now()], 14)}`),
     group_id: String(raw.group_id || raw.groupId || ""),
+    group_session_id: String(raw.group_session_id || raw.groupSessionId || ""),
     assignment_id: String(raw.assignment_id || raw.assignmentId || ""),
     dispatch_key: String(raw.dispatch_key || raw.dispatchKey || ""),
     project: String(raw.project || ""),
@@ -7381,7 +7488,11 @@ function normalizeWorkerContextCompactOutcomeEntryForCoordinator(raw: any = {}) 
         weighted_totals: pressureRecallUsageSummary.weighted_totals || {},
       } : null,
     } : null,
-    ptl_emergency_hint: ptlHint?.schema ? normalizeWorkerContextPtlEmergencyHintForCoordinator(ptlHint, raw.group_id || raw.groupId || "") : null,
+    ptl_emergency_hint: ptlHint?.schema ? normalizeWorkerContextPtlEmergencyHintForCoordinator(
+      ptlHint,
+      raw.group_id || raw.groupId || "",
+      raw.group_session_id || raw.groupSessionId || ""
+    ) : null,
     omitted_chars: Number(raw.omitted_chars || raw.omittedChars || 0),
     memory_omitted_chars: Number(raw.memory_omitted_chars || raw.memoryOmittedChars || 0),
     partial_omitted_chars: Number(raw.partial_omitted_chars || raw.partialOmittedChars || 0),
@@ -7450,7 +7561,8 @@ function workerContextCompactOutcomeCategoriesForCoordinator(entry: any = {}) {
     .filter((item: string) => supported.has(item)))];
 }
 
-function normalizeWorkerContextCompactStrategyMemoryForCoordinator(raw: any = {}, groupId = "") {
+function normalizeWorkerContextCompactStrategyMemoryForCoordinator(raw: any = {}, groupId = "", groupSessionId = "") {
+  const exactSessionId = normalizeWorkerContextCompactGroupSessionIdForCoordinator(groupSessionId || raw.groupSessionId || raw.group_session_id || "");
   const categories = Array.isArray(raw.categories) ? raw.categories.map((item: any = {}) => ({
     category: String(item.category || ""),
     attempts: Number(item.attempts || 0),
@@ -7471,6 +7583,8 @@ function normalizeWorkerContextCompactStrategyMemoryForCoordinator(raw: any = {}
     version: 1,
     strategy_id: String(raw.strategy_id || raw.strategyId || `wccs:${hashCoordinator([groupId || raw.groupId || raw.group_id || "", categories], 14)}`),
     groupId: String(raw.groupId || raw.group_id || groupId || ""),
+    groupSessionId: exactSessionId,
+    scopeId: workerContextCompactScopeIdForCoordinator(groupId || raw.groupId || raw.group_id || "", exactSessionId),
     file: String(raw.file || ""),
     source_ledger_file: String(raw.source_ledger_file || raw.sourceLedgerFile || ""),
     source_ledger_updated_at: String(raw.source_ledger_updated_at || raw.sourceLedgerUpdatedAt || ""),
@@ -7489,8 +7603,9 @@ function normalizeWorkerContextCompactStrategyMemoryForCoordinator(raw: any = {}
 }
 
 function buildWorkerContextCompactStrategyMemoryForCoordinator(groupId: string, entries: any[] = [], options: any = {}) {
-  const file = getWorkerContextCompactStrategyMemoryFileForCoordinator(groupId);
-  const sourceLedgerFile = String(options.sourceLedgerFile || options.source_ledger_file || getWorkerContextCompactOutcomeLedgerFileForCoordinator(groupId));
+  const groupSessionId = normalizeWorkerContextCompactGroupSessionIdForCoordinator(options.groupSessionId || options.group_session_id || "");
+  const file = getWorkerContextCompactStrategyMemoryFileForCoordinator(groupId, groupSessionId);
+  const sourceLedgerFile = String(options.sourceLedgerFile || options.source_ledger_file || getWorkerContextCompactOutcomeLedgerFileForCoordinator(groupId, groupSessionId));
   const sourceLedgerUpdatedAt = String(options.sourceLedgerUpdatedAt || options.source_ledger_updated_at || "");
   const nowIso = String(options.generatedAt || options.generated_at || new Date().toISOString());
   const supported = new Set(WORKER_CONTEXT_METADATA_COMPACT_CATEGORIES);
@@ -7573,8 +7688,9 @@ function buildWorkerContextCompactStrategyMemoryForCoordinator(groupId: string, 
   return normalizeWorkerContextCompactStrategyMemoryForCoordinator({
     schema: "ccm-worker-context-compact-strategy-memory-v1",
     version: 1,
-    strategy_id: `wccs:${hashCoordinator([groupId, sourceLedgerUpdatedAt, categories], 14)}`,
+    strategy_id: `wccs:${hashCoordinator([groupId, groupSessionId, sourceLedgerUpdatedAt, categories], 14)}`,
     groupId,
+    groupSessionId,
     file,
     source_ledger_file: sourceLedgerFile,
     source_ledger_updated_at: sourceLedgerUpdatedAt,
@@ -7585,47 +7701,59 @@ function buildWorkerContextCompactStrategyMemoryForCoordinator(groupId: string, 
     categories,
     generated_at: nowIso,
     updatedAt: nowIso,
-  }, groupId);
+  }, groupId, groupSessionId);
 }
 
 function writeWorkerContextCompactStrategyMemoryForCoordinator(groupId: string, entries: any[] = [], options: any = {}) {
+  const groupSessionId = normalizeWorkerContextCompactGroupSessionIdForCoordinator(options.groupSessionId || options.group_session_id || "");
   const strategy = buildWorkerContextCompactStrategyMemoryForCoordinator(groupId, entries, options);
-  writeJsonAtomicForCoordinator(strategy.file || getWorkerContextCompactStrategyMemoryFileForCoordinator(groupId), strategy);
+  writeJsonAtomicForCoordinator(strategy.file || getWorkerContextCompactStrategyMemoryFileForCoordinator(groupId, groupSessionId), strategy);
   return strategy;
 }
 
-export function readWorkerContextCompactStrategyMemoryForCoordinator(groupId: string) {
-  const file = getWorkerContextCompactStrategyMemoryFileForCoordinator(groupId);
-  try {
-    const strategy = JSON.parse(fs.readFileSync(file, "utf-8"));
-    if (strategy?.schema === "ccm-worker-context-compact-strategy-memory-v1") {
-      return normalizeWorkerContextCompactStrategyMemoryForCoordinator({ ...strategy, file }, groupId);
+export function readWorkerContextCompactStrategyMemoryForCoordinator(groupId: string, groupSessionId = "") {
+  const exactSessionId = normalizeWorkerContextCompactGroupSessionIdForCoordinator(groupSessionId);
+  const file = getWorkerContextCompactStrategyMemoryFileForCoordinator(groupId, exactSessionId);
+  const loaded = readJsonWithBackupForCoordinator(file, "ccm-worker-context-compact-strategy-memory-v1");
+  if (loaded.value) {
+    const storedSessionId = normalizeWorkerContextCompactGroupSessionIdForCoordinator(loaded.value.groupSessionId || loaded.value.group_session_id || "");
+    if (exactSessionId && storedSessionId !== exactSessionId) {
+      loaded.value = null;
     }
-  } catch {}
-  const outcomeLedger = readWorkerContextCompactOutcomeLedgerForCoordinator(groupId);
+  }
+  if (loaded.value) {
+    const normalized = normalizeWorkerContextCompactStrategyMemoryForCoordinator({ ...loaded.value, file }, groupId, exactSessionId);
+    return { ...normalized, recoveredFromBackup: loaded.recoveredFromBackup };
+  }
+  const outcomeLedger = readWorkerContextCompactOutcomeLedgerForCoordinator(groupId, exactSessionId);
   if (Array.isArray(outcomeLedger.entries) && outcomeLedger.entries.length) {
     return writeWorkerContextCompactStrategyMemoryForCoordinator(groupId, outcomeLedger.entries, {
+      groupSessionId: exactSessionId,
       sourceLedgerFile: outcomeLedger.file,
       sourceLedgerUpdatedAt: outcomeLedger.updatedAt || outcomeLedger.stats?.latestAt || "",
     });
   }
   return normalizeWorkerContextCompactStrategyMemoryForCoordinator({
     groupId,
+    groupSessionId: exactSessionId,
     file,
-    source_ledger_file: getWorkerContextCompactOutcomeLedgerFileForCoordinator(groupId),
+    source_ledger_file: getWorkerContextCompactOutcomeLedgerFileForCoordinator(groupId, exactSessionId),
     sample_count: 0,
     categories: [],
-  }, groupId);
+  }, groupId, exactSessionId);
 }
 
-function normalizeWorkerContextPtlEmergencyHintForCoordinator(raw: any = {}, groupId = "") {
+function normalizeWorkerContextPtlEmergencyHintForCoordinator(raw: any = {}, groupId = "", groupSessionId = "") {
+  const exactSessionId = normalizeWorkerContextCompactGroupSessionIdForCoordinator(groupSessionId || raw.groupSessionId || raw.group_session_id || "");
   const recommendedRetryOptions = raw.recommended_retry_options || raw.recommendedRetryOptions || {};
   return {
     schema: "ccm-worker-context-ptl-emergency-hint-v1",
     version: 1,
     hint_id: String(raw.hint_id || raw.hintId || `wcptl:${hashCoordinator([groupId || raw.groupId || raw.group_id || "", raw.reason || "", raw.generated_at || Date.now()], 14)}`),
     groupId: String(raw.groupId || raw.group_id || groupId || ""),
-    file: String(raw.file || getWorkerContextPtlEmergencyHintFileForCoordinator(groupId || raw.groupId || raw.group_id || "")),
+    groupSessionId: exactSessionId,
+    scopeId: workerContextCompactScopeIdForCoordinator(groupId || raw.groupId || raw.group_id || "", exactSessionId),
+    file: String(raw.file || getWorkerContextPtlEmergencyHintFileForCoordinator(groupId || raw.groupId || raw.group_id || "", exactSessionId)),
     engaged: raw.engaged === true,
     emergency_level: String(raw.emergency_level || raw.emergencyLevel || (raw.engaged ? "warning" : "none")),
     reason: String(raw.reason || ""),
@@ -7648,9 +7776,10 @@ function normalizeWorkerContextPtlEmergencyHintForCoordinator(raw: any = {}, gro
 }
 
 function buildWorkerContextPtlEmergencyHintForCoordinator(groupId: string, entries: any[] = [], strategy: any = {}, options: any = {}) {
-  const file = getWorkerContextPtlEmergencyHintFileForCoordinator(groupId);
-  const sourceLedgerFile = String(options.sourceLedgerFile || options.source_ledger_file || getWorkerContextCompactOutcomeLedgerFileForCoordinator(groupId));
-  const sourceStrategyFile = String(options.sourceStrategyFile || options.source_strategy_file || strategy?.file || getWorkerContextCompactStrategyMemoryFileForCoordinator(groupId));
+  const groupSessionId = normalizeWorkerContextCompactGroupSessionIdForCoordinator(options.groupSessionId || options.group_session_id || strategy?.groupSessionId || "");
+  const file = getWorkerContextPtlEmergencyHintFileForCoordinator(groupId, groupSessionId);
+  const sourceLedgerFile = String(options.sourceLedgerFile || options.source_ledger_file || getWorkerContextCompactOutcomeLedgerFileForCoordinator(groupId, groupSessionId));
+  const sourceStrategyFile = String(options.sourceStrategyFile || options.source_strategy_file || strategy?.file || getWorkerContextCompactStrategyMemoryFileForCoordinator(groupId, groupSessionId));
   const nowIso = String(options.generatedAt || options.generated_at || new Date().toISOString());
   const distillable = (entries || []).filter((entry: any) => entry?.distillation_candidate !== false);
   const blocked = distillable.filter((entry: any) => entry.status === "blocked" || entry.dispatch_ready === false);
@@ -7672,8 +7801,9 @@ function buildWorkerContextPtlEmergencyHintForCoordinator(groupId: string, entri
   return normalizeWorkerContextPtlEmergencyHintForCoordinator({
     schema: "ccm-worker-context-ptl-emergency-hint-v1",
     version: 1,
-    hint_id: `wcptl:${hashCoordinator([groupId, sourceLedgerFile, sourceStrategyFile, blocked.length, taskCompactedBlocked.length, repeatedFailedCategories], 14)}`,
+    hint_id: `wcptl:${hashCoordinator([groupId, groupSessionId, sourceLedgerFile, sourceStrategyFile, blocked.length, taskCompactedBlocked.length, repeatedFailedCategories], 14)}`,
     groupId,
+    groupSessionId,
     file,
     engaged,
     emergency_level: emergencyLevel,
@@ -7707,28 +7837,36 @@ function buildWorkerContextPtlEmergencyHintForCoordinator(groupId: string, entri
     },
     generated_at: nowIso,
     updatedAt: nowIso,
-  }, groupId);
+  }, groupId, groupSessionId);
 }
 
 function writeWorkerContextPtlEmergencyHintForCoordinator(groupId: string, entries: any[] = [], strategy: any = {}, options: any = {}) {
+  const groupSessionId = normalizeWorkerContextCompactGroupSessionIdForCoordinator(options.groupSessionId || options.group_session_id || strategy?.groupSessionId || "");
   const hint = buildWorkerContextPtlEmergencyHintForCoordinator(groupId, entries, strategy, options);
   if (hint.engaged || options.writeEmpty === true || options.write_empty === true) {
-    writeJsonAtomicForCoordinator(getWorkerContextPtlEmergencyHintFileForCoordinator(groupId), hint);
+    writeJsonAtomicForCoordinator(getWorkerContextPtlEmergencyHintFileForCoordinator(groupId, groupSessionId), hint);
   }
   return hint;
 }
 
-export function readWorkerContextPtlEmergencyHintForCoordinator(groupId: string) {
-  const file = getWorkerContextPtlEmergencyHintFileForCoordinator(groupId);
-  try {
-    const hint = JSON.parse(fs.readFileSync(file, "utf-8"));
-    if (hint?.schema === "ccm-worker-context-ptl-emergency-hint-v1") {
-      return normalizeWorkerContextPtlEmergencyHintForCoordinator({ ...hint, file }, groupId);
+export function readWorkerContextPtlEmergencyHintForCoordinator(groupId: string, groupSessionId = "") {
+  const exactSessionId = normalizeWorkerContextCompactGroupSessionIdForCoordinator(groupSessionId);
+  const file = getWorkerContextPtlEmergencyHintFileForCoordinator(groupId, exactSessionId);
+  const loaded = readJsonWithBackupForCoordinator(file, "ccm-worker-context-ptl-emergency-hint-v1");
+  if (loaded.value) {
+    const storedSessionId = normalizeWorkerContextCompactGroupSessionIdForCoordinator(loaded.value.groupSessionId || loaded.value.group_session_id || "");
+    if (exactSessionId && storedSessionId !== exactSessionId) {
+      loaded.value = null;
     }
-  } catch {}
-  const outcomeLedger = readWorkerContextCompactOutcomeLedgerForCoordinator(groupId);
-  const strategy = readWorkerContextCompactStrategyMemoryForCoordinator(groupId);
+  }
+  if (loaded.value) {
+    const normalized = normalizeWorkerContextPtlEmergencyHintForCoordinator({ ...loaded.value, file }, groupId, exactSessionId);
+    return { ...normalized, recoveredFromBackup: loaded.recoveredFromBackup };
+  }
+  const outcomeLedger = readWorkerContextCompactOutcomeLedgerForCoordinator(groupId, exactSessionId);
+  const strategy = readWorkerContextCompactStrategyMemoryForCoordinator(groupId, exactSessionId);
   return writeWorkerContextPtlEmergencyHintForCoordinator(groupId, outcomeLedger.entries || [], strategy, {
+    groupSessionId: exactSessionId,
     sourceLedgerFile: outcomeLedger.file,
     sourceStrategyFile: strategy.file,
     sourceLedgerUpdatedAt: outcomeLedger.updatedAt || outcomeLedger.stats?.latestAt || "",
@@ -7757,24 +7895,30 @@ function mergeWorkerContextRetryOptionsForCoordinator(base: any = {}, override: 
   };
 }
 
-export function readWorkerContextCompactOutcomeLedgerForCoordinator(groupId: string) {
-  const file = getWorkerContextCompactOutcomeLedgerFileForCoordinator(groupId);
-  try {
-    const ledger = JSON.parse(fs.readFileSync(file, "utf-8"));
-    if (ledger?.schema === "ccm-worker-context-compact-outcome-ledger-v1") {
-      const entries = Array.isArray(ledger.entries) ? ledger.entries.map(normalizeWorkerContextCompactOutcomeEntryForCoordinator) : [];
-      return {
-        ...ledger,
-        file,
-        entries,
-        stats: buildWorkerContextCompactOutcomeStatsForCoordinator(entries),
-      };
-    }
-  } catch {}
+export function readWorkerContextCompactOutcomeLedgerForCoordinator(groupId: string, groupSessionId = "") {
+  const exactSessionId = normalizeWorkerContextCompactGroupSessionIdForCoordinator(groupSessionId);
+  const file = getWorkerContextCompactOutcomeLedgerFileForCoordinator(groupId, exactSessionId);
+  const loaded = readJsonWithBackupForCoordinator(file, "ccm-worker-context-compact-outcome-ledger-v1");
+  if (loaded.value) {
+    const entries = (Array.isArray(loaded.value.entries) ? loaded.value.entries.map(normalizeWorkerContextCompactOutcomeEntryForCoordinator) : [])
+      .filter((entry: any) => !exactSessionId || entry.group_id === groupId && entry.group_session_id === exactSessionId);
+    return {
+      ...loaded.value,
+      groupId,
+      groupSessionId: exactSessionId,
+      scopeId: workerContextCompactScopeIdForCoordinator(groupId, exactSessionId),
+      file,
+      recoveredFromBackup: loaded.recoveredFromBackup,
+      entries,
+      stats: buildWorkerContextCompactOutcomeStatsForCoordinator(entries),
+    };
+  }
   return {
     schema: "ccm-worker-context-compact-outcome-ledger-v1",
     version: 1,
     groupId,
+    groupSessionId: exactSessionId,
+    scopeId: workerContextCompactScopeIdForCoordinator(groupId, exactSessionId),
     file,
     entries: [],
     stats: buildWorkerContextCompactOutcomeStatsForCoordinator([]),
@@ -7829,8 +7973,10 @@ function compactOutcomeHasStrictCorrectedCompletionProofForRetention(entry: any 
 }
 
 function retainWorkerContextCompactOutcomeEntriesForCoordinator(groupId: string, input: any[] = [], options: any = {}) {
+  const groupSessionId = normalizeWorkerContextCompactGroupSessionIdForCoordinator(options.groupSessionId || options.group_session_id || "");
   const recentLimit = Math.max(100, Number(options.recentLimit || options.recent_limit || WORKER_CONTEXT_COMPACT_OUTCOME_RECENT_RETENTION_LIMIT));
   const rejected: any[] = [];
+  const crossSessionRejected: any[] = [];
   const accepted: Array<{ entry: any; key: string; index: number }> = [];
   for (const [index, entry] of (Array.isArray(input) ? input : []).entries()) {
     const entryGroupId = String(entry?.group_id || entry?.groupId || groupId || "").trim();
@@ -7838,7 +7984,16 @@ function retainWorkerContextCompactOutcomeEntriesForCoordinator(groupId: string,
       rejected.push(entry);
       continue;
     }
-    const normalized = normalizeWorkerContextCompactOutcomeEntryForCoordinator({ ...entry, group_id: groupId });
+    const entryGroupSessionId = normalizeWorkerContextCompactGroupSessionIdForCoordinator(entry?.group_session_id || entry?.groupSessionId || "");
+    if (groupSessionId && entryGroupSessionId !== groupSessionId) {
+      crossSessionRejected.push(entry);
+      continue;
+    }
+    const normalized = normalizeWorkerContextCompactOutcomeEntryForCoordinator({
+      ...entry,
+      group_id: groupId,
+      group_session_id: groupSessionId || "",
+    });
     const key = String(normalized.outcome_id || "").trim() || `anonymous:${hashCoordinator([normalized.assignment_id, normalized.retry_id, normalized.at, index], 20)}`;
     accepted.push({ entry: normalized, key, index });
   }
@@ -7884,6 +8039,7 @@ function retainWorkerContextCompactOutcomeEntriesForCoordinator(groupId: string,
       schema: "ccm-worker-context-compact-outcome-retention-v1",
       policy: "recent_plus_unresolved_failures_latest_assignment_and_resolution",
       group_id: groupId,
+      group_session_id: groupSessionId,
       input_count: Array.isArray(input) ? input.length : 0,
       accepted_count: accepted.length,
       deduplicated_count: rows.length,
@@ -7895,51 +8051,68 @@ function retainWorkerContextCompactOutcomeEntriesForCoordinator(groupId: string,
       protected_latest_resolution_count: new Set(latestResolution.values()).size,
       dropped_unresolved_failure_count: dropped.filter(row => unresolvedFailures.includes(row.key)).length,
       cross_group_rejected_count: rejected.length,
+      cross_session_rejected_count: crossSessionRejected.length,
       dropped_digest: hashCoordinator(dropped.map(row => [row.key, row.entry.status, row.entry.retry_id]), 32),
       cross_group_rejected_digest: hashCoordinator(rejected.map((entry: any) => entry.outcome_id || entry.retry_id || ""), 32),
+      cross_session_rejected_digest: hashCoordinator(crossSessionRejected.map((entry: any) => entry.outcome_id || entry.retry_id || ""), 32),
       compacted_at: String(options.at || new Date().toISOString()),
     },
   };
 }
 
-function appendWorkerContextCompactOutcomeEntriesForCoordinator(groupId: string, entries: any[] = []) {
+function appendWorkerContextCompactOutcomeEntriesForCoordinator(groupId: string, entries: any[] = [], groupSessionId = "") {
+  const exactSessionId = normalizeWorkerContextCompactGroupSessionIdForCoordinator(groupSessionId);
   const normalized = entries
-    .map((entry: any) => normalizeWorkerContextCompactOutcomeEntryForCoordinator({ ...entry, group_id: entry.group_id || groupId }))
-    .filter((entry: any) => entry.group_id || groupId);
-  if (!normalized.length) return readWorkerContextCompactOutcomeLedgerForCoordinator(groupId);
-  const ledger = readWorkerContextCompactOutcomeLedgerForCoordinator(groupId);
-  const retained = retainWorkerContextCompactOutcomeEntriesForCoordinator(groupId, [...(ledger.entries || []), ...normalized], {
-    at: normalized[normalized.length - 1]?.at || new Date().toISOString(),
+    .map((entry: any) => normalizeWorkerContextCompactOutcomeEntryForCoordinator({
+      ...entry,
+      group_id: entry.group_id || groupId,
+      group_session_id: exactSessionId || "",
+    }))
+    .filter((entry: any) => entry.group_id === groupId && (!exactSessionId || entry.group_session_id === exactSessionId));
+  if (!normalized.length) return readWorkerContextCompactOutcomeLedgerForCoordinator(groupId, exactSessionId);
+  const file = getWorkerContextCompactOutcomeLedgerFileForCoordinator(groupId, exactSessionId);
+  return withFileLock(file, () => {
+    const ledger = readWorkerContextCompactOutcomeLedgerForCoordinator(groupId, exactSessionId);
+    const retained = retainWorkerContextCompactOutcomeEntriesForCoordinator(groupId, [...(ledger.entries || []), ...normalized], {
+      groupSessionId: exactSessionId,
+      at: normalized[normalized.length - 1]?.at || new Date().toISOString(),
+    });
+    const nextEntries = retained.entries;
+    const next = {
+      schema: "ccm-worker-context-compact-outcome-ledger-v1",
+      version: 1,
+      groupId,
+      groupSessionId: exactSessionId,
+      scopeId: workerContextCompactScopeIdForCoordinator(groupId, exactSessionId),
+      file,
+      entries: nextEntries,
+      stats: buildWorkerContextCompactOutcomeStatsForCoordinator(nextEntries),
+      retention: retained.retention,
+      updatedAt: normalized[normalized.length - 1]?.at || new Date().toISOString(),
+    };
+    writeJsonAtomicForCoordinator(file, next);
+    try {
+      const strategy = writeWorkerContextCompactStrategyMemoryForCoordinator(groupId, nextEntries, {
+        groupSessionId: exactSessionId,
+        sourceLedgerFile: file,
+        sourceLedgerUpdatedAt: next.updatedAt,
+      });
+      writeWorkerContextPtlEmergencyHintForCoordinator(groupId, nextEntries, strategy, {
+        groupSessionId: exactSessionId,
+        sourceLedgerFile: file,
+        sourceStrategyFile: strategy.file,
+        sourceLedgerUpdatedAt: next.updatedAt,
+      });
+    } catch {}
+    return next;
   });
-  const nextEntries = retained.entries;
-  const next = {
-    schema: "ccm-worker-context-compact-outcome-ledger-v1",
-    version: 1,
-    groupId,
-    file: ledger.file || getWorkerContextCompactOutcomeLedgerFileForCoordinator(groupId),
-    entries: nextEntries,
-    stats: buildWorkerContextCompactOutcomeStatsForCoordinator(nextEntries),
-    retention: retained.retention,
-    updatedAt: normalized[normalized.length - 1]?.at || new Date().toISOString(),
-  };
-  writeJsonAtomicForCoordinator(next.file, next);
-  try {
-    const strategy = writeWorkerContextCompactStrategyMemoryForCoordinator(groupId, nextEntries, {
-      sourceLedgerFile: next.file,
-      sourceLedgerUpdatedAt: next.updatedAt,
-    });
-    writeWorkerContextPtlEmergencyHintForCoordinator(groupId, nextEntries, strategy, {
-      sourceLedgerFile: next.file,
-      sourceStrategyFile: strategy.file,
-      sourceLedgerUpdatedAt: next.updatedAt,
-    });
-  } catch {}
-  return next;
 }
 
 export function compactWorkerContextCompactOutcomeLedgerRetentionForCoordinator(groupId: string, options: any = {}) {
-  const ledger = readWorkerContextCompactOutcomeLedgerForCoordinator(groupId);
+  const groupSessionId = normalizeWorkerContextCompactGroupSessionIdForCoordinator(options.groupSessionId || options.group_session_id || "");
+  const ledger = readWorkerContextCompactOutcomeLedgerForCoordinator(groupId, groupSessionId);
   const retained = retainWorkerContextCompactOutcomeEntriesForCoordinator(groupId, ledger.entries || [], {
+    groupSessionId,
     at: options.at || options.generatedAt || options.generated_at || new Date().toISOString(),
     recentLimit: options.recentLimit || options.recent_limit,
   });
@@ -7948,13 +8121,98 @@ export function compactWorkerContextCompactOutcomeLedgerRetentionForCoordinator(
     schema: "ccm-worker-context-compact-outcome-ledger-v1",
     version: 1,
     groupId,
+    groupSessionId,
+    scopeId: workerContextCompactScopeIdForCoordinator(groupId, groupSessionId),
     entries: retained.entries,
     stats: buildWorkerContextCompactOutcomeStatsForCoordinator(retained.entries),
     retention: retained.retention,
     updatedAt: options.at || options.generatedAt || options.generated_at || new Date().toISOString(),
   };
-  writeJsonAtomicForCoordinator(next.file || getWorkerContextCompactOutcomeLedgerFileForCoordinator(groupId), next);
+  writeJsonAtomicForCoordinator(next.file || getWorkerContextCompactOutcomeLedgerFileForCoordinator(groupId, groupSessionId), next);
   return next;
+}
+
+export function readWorkerContextCompactSessionArtifactsForCoordinator(groupId: string, groupSessionId: string) {
+  const exactSessionId = normalizeWorkerContextCompactGroupSessionIdForCoordinator(groupSessionId);
+  if (!exactSessionId) {
+    return {
+      schema: "ccm-worker-context-compact-session-artifacts-v1",
+      status: "exact_group_session_required",
+      groupId,
+      groupSessionId: "",
+      scopeId: String(groupId || ""),
+      hook: null,
+      outcome: null,
+      strategy: null,
+      ptlEmergency: null,
+    };
+  }
+  const hook = readWorkerContextCompactHookLedgerForCoordinator(groupId, exactSessionId);
+  const outcome = readWorkerContextCompactOutcomeLedgerForCoordinator(groupId, exactSessionId);
+  const strategy = readWorkerContextCompactStrategyMemoryForCoordinator(groupId, exactSessionId);
+  const ptlEmergency = readWorkerContextPtlEmergencyHintForCoordinator(groupId, exactSessionId);
+  return {
+    schema: "ccm-worker-context-compact-session-artifacts-v1",
+    status: "ok",
+    groupId,
+    groupSessionId: exactSessionId,
+    scopeId: workerContextCompactScopeIdForCoordinator(groupId, exactSessionId),
+    hook: {
+      file: hook.file,
+      entries: Number(hook.stats?.total || hook.entries?.length || 0),
+      recoveredFromBackup: hook.recoveredFromBackup === true,
+    },
+    outcome: {
+      file: outcome.file,
+      entries: Number(outcome.stats?.total || outcome.entries?.length || 0),
+      recovered: Number(outcome.stats?.recovered || 0),
+      blocked: Number(outcome.stats?.blocked || 0),
+      recoveredFromBackup: outcome.recoveredFromBackup === true,
+    },
+    strategy: {
+      file: strategy.file,
+      sampleCount: Number(strategy.sample_count || 0),
+      preferredCategories: strategy.preferred_categories || [],
+      avoidCategories: strategy.avoid_categories || [],
+      recoveredFromBackup: (strategy as any).recoveredFromBackup === true,
+    },
+    ptlEmergency: {
+      file: ptlEmergency.file,
+      engaged: ptlEmergency.engaged === true,
+      emergencyLevel: ptlEmergency.emergency_level || "none",
+      blockedOutcomeCount: Number(ptlEmergency.blocked_outcome_count || 0),
+      recoveredFromBackup: (ptlEmergency as any).recoveredFromBackup === true,
+    },
+  };
+}
+
+export function deleteWorkerContextCompactSessionArtifactsForCoordinator(groupId: string, groupSessionId: string) {
+  const exactSessionId = normalizeWorkerContextCompactGroupSessionIdForCoordinator(groupSessionId);
+  if (!exactSessionId) return { deleted: 0, status: "exact_group_session_required" };
+  const files = [
+    getWorkerContextCompactHookLedgerFileForCoordinator(groupId, exactSessionId),
+    getWorkerContextCompactOutcomeLedgerFileForCoordinator(groupId, exactSessionId),
+    getWorkerContextCompactStrategyMemoryFileForCoordinator(groupId, exactSessionId),
+    getWorkerContextPtlEmergencyHintFileForCoordinator(groupId, exactSessionId),
+    getReplayRepairDispatchPlansFileForCoordinator(groupId, exactSessionId),
+  ];
+  let deleted = 0;
+  for (const file of files.flatMap(item => [item, `${item}.bak`])) {
+    try {
+      if (fs.existsSync(file)) {
+        fs.unlinkSync(file);
+        deleted += 1;
+      }
+    } catch {}
+  }
+  return {
+    schema: "ccm-worker-context-compact-session-artifact-delete-v1",
+    status: "deleted",
+    groupId,
+    groupSessionId: exactSessionId,
+    scopeId: workerContextCompactScopeIdForCoordinator(groupId, exactSessionId),
+    deleted,
+  };
 }
 
 function workerContextUsagePressureStatusForCoordinator(usage: any = {}) {
@@ -8541,6 +8799,7 @@ export function buildWorkerContextPacketForAssignment(baseAssignment: any, depen
   const memory = options.memory || options.workerMemory || options.worker_memory || null;
   const memoryPolicy = options.memoryPolicy || options.memory_policy || (memory && typeof memory === "object" ? (memory.memory_policy || memory.memoryPolicy) : null) || null;
   const groupId = String(baseAssignment.scopeId || options.group?.id || options.groupId || options.group_id || "").trim();
+  const groupSessionId = String(baseAssignment.groupSessionId || baseAssignment.group_session_id || options.groupSessionId || options.group_session_id || "").trim();
   const agentType = String(baseAssignment.agentType || baseAssignment.agent_type || options.agentType || options.agent_type || "unknown").trim() || "unknown";
   const model = String(baseAssignment.model || baseAssignment.model_id || options.model || options.modelId || options.model_id || "").trim();
   const configuredCapabilities = options.workerModelCapabilities || options.worker_model_capabilities || {};
@@ -8614,6 +8873,8 @@ export function buildWorkerContextPacketForAssignment(baseAssignment: any, depen
   );
   return buildWorkerContextPacket({
     group: options.group || null,
+    groupSessionId,
+    group_session_id: groupSessionId,
     project: baseAssignment.project,
     task: baseAssignment.task,
     agentType,
@@ -9648,12 +9909,21 @@ function maybeRetryWorkerContextPacketCompactionForCoordinator(baseAssignment: a
   const partialCompactionSummaries: any[] = [];
   const originalMemory = options.memory || options.workerMemory || options.worker_memory || null;
   const groupId = String(baseAssignment.scopeId || options.group?.id || options.groupId || options.group_id || "conversation");
+  const groupSessionId = normalizeWorkerContextCompactGroupSessionIdForCoordinator(
+    baseAssignment.groupSessionId
+    || baseAssignment.group_session_id
+    || initialPacket?.group_session_id
+    || initialPacket?.groupSessionId
+    || options.groupSessionId
+    || options.group_session_id
+    || ""
+  );
   const originalPacketForProvenance = initialPacket;
   const strategyMemoryDisabled = rawRetryOptions.disableCompactStrategyMemory === true
     || rawRetryOptions.disable_compact_strategy_memory === true
     || options.disableCompactStrategyMemory === true
     || options.disable_compact_strategy_memory === true;
-  const compactStrategyMemory = strategyMemoryDisabled ? null : readWorkerContextCompactStrategyMemoryForCoordinator(groupId);
+  const compactStrategyMemory = strategyMemoryDisabled ? null : readWorkerContextCompactStrategyMemoryForCoordinator(groupId, groupSessionId);
   const pressureRecallUsageStrategyDisabled = rawRetryOptions.disablePressureRecallUsageStrategy === true
     || rawRetryOptions.disable_pressure_recall_usage_strategy === true
     || options.disablePressureRecallUsageStrategy === true
@@ -9688,17 +9958,19 @@ function maybeRetryWorkerContextPacketCompactionForCoordinator(baseAssignment: a
       });
       return crossGroupSummary?.has_history === true || Number(crossGroupSummary?.memory_count || 0) > 0 ? crossGroupSummary : null;
     })();
-  const ptlEmergencyHint = readWorkerContextPtlEmergencyHintForCoordinator(groupId);
+  const ptlEmergencyHint = readWorkerContextPtlEmergencyHintForCoordinator(groupId, groupSessionId);
   const retryOptions = ptlEmergencyHint.engaged
     ? mergeWorkerContextRetryOptionsForCoordinator(rawRetryOptions, ptlEmergencyHint.recommended_retry_options || {})
     : rawRetryOptions;
   const compactHookRunId = `wcch_${hashCoordinator([
     groupId,
+    groupSessionId,
     baseAssignment.assignmentId || baseAssignment.assignment_id || "",
     initialPacket.packet_id || "",
     "worker-context-compact-retry",
   ], 16)}`;
   appendWorkerContextCompactHookEntriesForCoordinator(groupId, [{
+    group_session_id: groupSessionId,
     hook_run_id: compactHookRunId,
     phase: "pre",
     assignment_id: baseAssignment.assignmentId || baseAssignment.assignment_id || "",
@@ -9720,7 +9992,7 @@ function maybeRetryWorkerContextPacketCompactionForCoordinator(baseAssignment: a
       ptl_emergency_level: ptlEmergencyHint.engaged ? ptlEmergencyHint.emergency_level : "",
     },
     at: new Date().toISOString(),
-  }]);
+  }], groupSessionId);
   const recordPostHook = (packet: any = initialPacket, gate: any = initialGate, retry: any = null, summary: any = {}) => {
     const at = new Date().toISOString();
     const providerRankingProvenancePreservation = retry?.provider_ranking_provenance_preservation
@@ -9738,6 +10010,7 @@ function maybeRetryWorkerContextPacketCompactionForCoordinator(baseAssignment: a
         retry_id: retry?.retry_id || retry?.retryId || "",
       });
     const hookLedger = appendWorkerContextCompactHookEntriesForCoordinator(groupId, [{
+      group_session_id: groupSessionId,
       hook_run_id: compactHookRunId,
       phase: "post",
       assignment_id: baseAssignment.assignmentId || baseAssignment.assignment_id || "",
@@ -9769,7 +10042,7 @@ function maybeRetryWorkerContextPacketCompactionForCoordinator(baseAssignment: a
         ...summary,
       },
       at,
-    }]);
+    }], groupSessionId);
     const retryObj = retry || {};
     const partialCompaction = retryObj.partial_compaction || retryObj.partialCompaction || null;
     const partialItems = Array.isArray(retryObj.partial_compactions || retryObj.partialCompactions)
@@ -9793,6 +10066,7 @@ function maybeRetryWorkerContextPacketCompactionForCoordinator(baseAssignment: a
     if (retryObj.schema || summary.retry_status) {
       appendWorkerContextCompactOutcomeEntriesForCoordinator(groupId, [{
         group_id: groupId,
+        group_session_id: groupSessionId,
         assignment_id: baseAssignment.assignmentId || baseAssignment.assignment_id || "",
         dispatch_key: baseAssignment.dispatchKey || baseAssignment.dispatch_key || "",
         project: baseAssignment.project || "",
@@ -9830,7 +10104,7 @@ function maybeRetryWorkerContextPacketCompactionForCoordinator(baseAssignment: a
         post_compact_receipt_memory_usage_repair_completion_preservation: completionMemoryPreservation,
         post_compact_receipt_memory_usage_repair_completion_preserved: completionMemoryPreservation?.preserved === true,
         at,
-      }]);
+      }], groupSessionId);
     }
     return hookLedger;
   };
@@ -10734,18 +11008,20 @@ function summarizeWorkerContextPacketTypedMemoryPressureRecallForCoordinator(pac
   };
 }
 
-export function readReplayRepairDispatchPlanLedgerForCoordinator(groupId: string) {
-  const file = getReplayRepairDispatchPlansFileForCoordinator(groupId);
+export function readReplayRepairDispatchPlanLedgerForCoordinator(groupId: string, groupSessionId = "") {
+  const exactSessionId = normalizeWorkerContextCompactGroupSessionIdForCoordinator(groupSessionId);
+  const file = getReplayRepairDispatchPlansFileForCoordinator(groupId, exactSessionId);
   try {
     const ledger = JSON.parse(fs.readFileSync(file, "utf-8"));
     if (ledger?.schema === "ccm-replay-repair-main-agent-dispatch-brief-ledger-v1") {
-      return { ...ledger, file: ledger.file || file };
+      return { ...ledger, groupSessionId: exactSessionId, file: ledger.file || file };
     }
   } catch {}
   return {
     schema: "ccm-replay-repair-main-agent-dispatch-brief-ledger-v1",
     version: 1,
     groupId,
+    groupSessionId: exactSessionId,
     file,
     updatedAt: "",
     briefCount: 0,
@@ -10795,8 +11071,18 @@ export function recordWorkerContextPacketAssignmentBindingForCoordinator(groupId
     || buildWorkerContextProviderDispatchDecisionForCoordinator(assignment, packet, gate, { at });
   let rendered = "";
   try { rendered = renderWorkerContextPacket(packet); } catch {}
+  const groupSessionId = normalizeWorkerContextCompactGroupSessionIdForCoordinator(
+    assignment.groupSessionId
+    || assignment.group_session_id
+    || packet.groupSessionId
+    || packet.group_session_id
+    || packet.memory?.session_binding?.group_session_id
+    || packet.memory?.sessionBinding?.groupSessionId
+    || ""
+  );
   const bindingId = `worker-context-packet-assignment:${hashCoordinator([
     groupId,
+    groupSessionId,
     assignment.assignmentId || assignment.assignment_id || "",
     assignment.dispatchKey || assignment.dispatch_key || "",
     packet.packet_id || "",
@@ -10805,6 +11091,8 @@ export function recordWorkerContextPacketAssignmentBindingForCoordinator(groupId
     schema: "ccm-worker-context-packet-assignment-binding-v1",
     binding_id: bindingId,
     groupId,
+    groupSessionId,
+    group_session_id: groupSessionId,
     source: "worker_context_packet_pre_dispatch_gate",
     project: assignment.project || "",
     agent_type: assignment.agentType || assignment.agent_type || assignment.executor || assignment.runner || packet.agent_type || packet.agentType || packet.memory?.session_binding?.agent_type || packet.memory?.sessionBinding?.agentType || "unknown",
@@ -11776,6 +12064,10 @@ export function recordWorkerContextProviderDispatchOverrideFollowupReceiptContra
   });
   if (index < 0) return null;
   const entry = entries[index];
+  const groupSessionId = normalizeWorkerContextCompactGroupSessionIdForCoordinator(
+    input.groupSessionId || input.group_session_id || entry.groupSessionId || entry.group_session_id || ""
+  );
+  const typedMemoryScopeId = groupSessionId ? `${groupId}--${groupSessionId}` : groupId;
   const validationBase = buildProviderDispatchOverrideFollowupReceiptContractValidationForCoordinator(entry, input, at);
   const repairWorkItem = syncProviderDispatchOverrideFollowupReceiptValidationRepairWorkItemForCoordinator(groupId, entry, validationBase, at);
   const validationDraft = {
@@ -11787,7 +12079,7 @@ export function recordWorkerContextProviderDispatchOverrideFollowupReceiptContra
   let typedMemoryDistillation: any = null;
   let typedMemoryDistillationError = "";
   try {
-    typedMemoryDistillation = distillProviderDispatchOverrideFollowupReceiptValidationToTypedMemory(groupId, {
+    typedMemoryDistillation = distillProviderDispatchOverrideFollowupReceiptValidationToTypedMemory(typedMemoryScopeId, {
       rows: [{
         entry: {
           ...entry,
@@ -11796,12 +12088,16 @@ export function recordWorkerContextProviderDispatchOverrideFollowupReceiptContra
           task_agent_session_id: input.task_agent_session_id || input.taskAgentSessionId || entry.task_agent_session_id || "",
           native_session_id: input.native_session_id || input.nativeSessionId || entry.native_session_id || "",
           execution_id: input.execution_id || input.executionId || entry.execution_id || "",
+          groupSessionId,
+          group_session_id: groupSessionId,
           at,
         },
-        validation: validationDraft,
+        validation: { ...validationDraft, groupId, groupSessionId, group_session_id: groupSessionId },
       }],
     }, {
       reason: "group-orchestrator-provider-dispatch-override-followup-receipt-validation",
+      sourceGroupId: groupId,
+      groupSessionId,
       updatedAt: at,
     });
   } catch (error: any) {
@@ -11823,6 +12119,8 @@ export function recordWorkerContextProviderDispatchOverrideFollowupReceiptContra
   };
   const nextEntry = {
     ...entry,
+    groupSessionId,
+    group_session_id: groupSessionId,
     worker_context_provider_dispatch_override_followup_receipt_contract_validation: validation,
     provider_dispatch_override_followup_receipt_contract_validation: validation,
     provider_dispatch_override_followup_receipt_contract_validation_status: validation.status,
@@ -12221,7 +12519,8 @@ function closeReplayRepairWorkItemsFromTimelineBindingForCoordinator(groupId: st
   const postCompactReinjectionTimelineClosable = timelineBindingHasRequiredPostCompactReinjectionRepairEvidence(binding);
   const postCompactReceiptMemoryUsageTimelineClosable = timelineBindingHasRequiredPostCompactReceiptMemoryUsageRepairEvidence(binding);
   if (!nativeTimelineClosable && !providerRankingTimelineClosable && !postCompactReinjectionTimelineClosable && !postCompactReceiptMemoryUsageTimelineClosable) return { closed: 0, itemIds: [] };
-  const file = getReplayRepairWorkItemsFileForCoordinator(groupId);
+  const groupSessionId = normalizeWorkerContextCompactGroupSessionIdForCoordinator(binding.groupSessionId || binding.group_session_id || "");
+  const file = getReplayRepairWorkItemsFileForCoordinator(groupId, groupSessionId);
   let ledger: any = null;
   try { ledger = JSON.parse(fs.readFileSync(file, "utf-8")); } catch { return { closed: 0, itemIds: [] }; }
   const items = Array.isArray(ledger?.items) ? ledger.items : [];
@@ -12304,6 +12603,8 @@ function closeReplayRepairWorkItemsFromTimelineBindingForCoordinator(groupId: st
         runner_request_id: binding.runner_request_id || "",
         receipt_status: binding.receipt_status || "",
         event_types: binding.event_types || [],
+        groupSessionId,
+        group_session_id: groupSessionId,
         completed_at: at,
       },
       provider_ranking_provenance_repair_receipt: closeAsProviderRanking ? {
@@ -12335,6 +12636,8 @@ function closeReplayRepairWorkItemsFromTimelineBindingForCoordinator(groupId: st
         task_agent_session_id: binding.task_agent_session_id || "",
         native_session_id: binding.native_session_id || "",
         execution_id: binding.execution_id || "",
+        groupSessionId,
+        group_session_id: groupSessionId,
         completed_at: at,
       } : item.post_compact_reinjection_repair_receipt,
       post_compact_receipt_memory_usage_repair_receipt: closeAsPostCompactReceiptMemoryUsage ? {
@@ -12360,6 +12663,8 @@ function closeReplayRepairWorkItemsFromTimelineBindingForCoordinator(groupId: st
         task_agent_session_id: binding.task_agent_session_id || "",
         native_session_id: binding.native_session_id || "",
         execution_id: binding.execution_id || "",
+        groupSessionId,
+        group_session_id: groupSessionId,
         completed_at: at,
       } : item.post_compact_receipt_memory_usage_repair_receipt,
       blockers: [],
@@ -12374,6 +12679,7 @@ function closeReplayRepairWorkItemsFromTimelineBindingForCoordinator(groupId: st
     schema: ledger.schema || "ccm-compact-boundary-replay-repair-work-items-v1",
     version: ledger.version || 1,
     groupId: ledger.groupId || groupId,
+    groupSessionId: groupSessionId || ledger.groupSessionId || "default",
     file: ledger.file || file,
     items: nextItems.slice(-160),
     stats: replayRepairWorkItemStatsForCoordinator(nextItems),
@@ -12814,6 +13120,8 @@ export function recordReplayRepairDispatchBriefTimelineBinding(groupId: string, 
   const briefId = String(brief.brief_id || brief.briefId || input.brief_id || "").trim();
   if (!groupId || !briefId) return null;
   const at = String(options.at || input.at || new Date().toISOString());
+  const groupSessionId = normalizeWorkerContextCompactGroupSessionIdForCoordinator(input.groupSessionId || input.group_session_id || brief.groupSessionId || brief.group_session_id || "");
+  const typedMemoryScopeId = groupSessionId ? `${groupId}--${groupSessionId}` : groupId;
   const event = input.timeline_event || input.timelineEvent || null;
   const eventType = String(input.timeline_event_type || input.timelineEventType || event?.type || options.timelineEventType || "").trim();
   const consumption = classifyReplayRepairBriefConsumptionForCoordinator(brief, input.receipt || input.ccm_receipt || input.delivery_summary || null);
@@ -12836,6 +13144,7 @@ export function recordReplayRepairDispatchBriefTimelineBinding(groupId: string, 
   const providerRankingProof: any = consumption?.providerRankingProof || {};
   const timelineBindingId = `replay-repair-brief-timeline:${hashCoordinator([
     groupId,
+    groupSessionId,
     taskId,
     project,
     briefId,
@@ -12846,6 +13155,8 @@ export function recordReplayRepairDispatchBriefTimelineBinding(groupId: string, 
     schema: "ccm-replay-repair-main-agent-dispatch-brief-timeline-binding-v1",
     timeline_binding_id: timelineBindingId,
     groupId,
+    groupSessionId,
+    group_session_id: groupSessionId,
     task_id: taskId,
     project,
     brief_id: briefId,
@@ -12989,8 +13300,10 @@ export function recordReplayRepairDispatchBriefTimelineBinding(groupId: string, 
   if (String(finalEntry.source || "") === "api_microcompact_native_apply_provider_reproof"
     && ["strong", "used", "verified", "ignored", "blocked"].includes(String(finalEntry.replay_repair_consumption_status || "").trim().toLowerCase())) {
     try {
-      distillProviderReproofReceiptConsumptionToTypedMemory(groupId, { rows: [finalEntry] }, {
+      distillProviderReproofReceiptConsumptionToTypedMemory(typedMemoryScopeId, { rows: [finalEntry] }, {
         reason: "replay-repair-timeline-receipt-consumption",
+        sourceGroupId: groupId,
+        groupSessionId,
         updatedAt: at,
       });
     } catch {}
@@ -12999,8 +13312,10 @@ export function recordReplayRepairDispatchBriefTimelineBinding(groupId: string, 
     && finalEntry.provider_ranking_provenance_receipt_consumption_verified === true
     && String(finalEntry.replay_repair_consumption_status || "").trim().toLowerCase() === "verified") {
     try {
-      distillProviderRankingProvenanceCompactRepairReceiptConsumptionToTypedMemory(groupId, { rows: [finalEntry] }, {
+      distillProviderRankingProvenanceCompactRepairReceiptConsumptionToTypedMemory(typedMemoryScopeId, { rows: [finalEntry] }, {
         reason: "provider-ranking-provenance-compact-repair-receipt-consumption",
+        sourceGroupId: groupId,
+        groupSessionId,
         updatedAt: at,
       });
     } catch {}
@@ -13010,7 +13325,7 @@ export function recordReplayRepairDispatchBriefTimelineBinding(groupId: string, 
     && isPostCompactReinjectionRepairForCoordinator(finalEntry)
     && timelineBindingHasRequiredPostCompactReinjectionRepairEvidence(finalEntry)) {
     try {
-      distillPostCompactReinjectionRepairReceiptConsumptionToTypedMemory(groupId, {
+      distillPostCompactReinjectionRepairReceiptConsumptionToTypedMemory(typedMemoryScopeId, {
         rows: [{
           ...finalEntry,
           completion_source: "post_compact_reinjection_replay_repair_receipt_consumption",
@@ -13019,6 +13334,8 @@ export function recordReplayRepairDispatchBriefTimelineBinding(groupId: string, 
         }],
       }, {
         reason: "post-compact-reinjection-repair-receipt-consumption",
+        sourceGroupId: groupId,
+        groupSessionId,
         updatedAt: at,
       });
     } catch {}
@@ -13027,7 +13344,7 @@ export function recordReplayRepairDispatchBriefTimelineBinding(groupId: string, 
     && isPostCompactReceiptMemoryUsageRepairForCoordinator(finalEntry)
     && timelineBindingHasRequiredPostCompactReceiptMemoryUsageRepairEvidence(finalEntry)) {
     try {
-      distillPostCompactReceiptMemoryUsageRepairCompletionToTypedMemory(groupId, {
+      distillPostCompactReceiptMemoryUsageRepairCompletionToTypedMemory(typedMemoryScopeId, {
         rows: [{
           ...finalEntry,
           completion_source: "post_compact_reinjection_receipt_memory_usage_repair_receipt_consumption",
@@ -13036,6 +13353,8 @@ export function recordReplayRepairDispatchBriefTimelineBinding(groupId: string, 
         }],
       }, {
         reason: "post-compact-receipt-memory-usage-repair-completion",
+        sourceGroupId: groupId,
+        groupSessionId,
         updatedAt: at,
       });
     } catch {}
@@ -13640,6 +13959,8 @@ export function buildReplayRepairDispatchBriefForCoordinator(groupId: string, ca
     schema: "ccm-replay-repair-main-agent-dispatch-brief-v1",
     brief_id: briefId,
     groupId,
+    groupSessionId: normalizeWorkerContextCompactGroupSessionIdForCoordinator(candidate.groupSessionId || candidate.group_session_id || ""),
+    group_session_id: normalizeWorkerContextCompactGroupSessionIdForCoordinator(candidate.groupSessionId || candidate.group_session_id || ""),
     status: "ready",
     should_create_real_task: false,
     source_candidate_id: candidate.candidate_id || "",
@@ -13799,8 +14120,9 @@ export function buildReplayRepairDispatchBriefForCoordinator(groupId: string, ca
 
 export function syncReplayRepairDispatchPlansForCoordinator(groupId: string, summaryInput: any = null, options: any = {}) {
   const at = String(options.at || new Date().toISOString());
+  const groupSessionId = normalizeWorkerContextCompactGroupSessionIdForCoordinator(options.groupSessionId || options.group_session_id || summaryInput?.groupSessionId || summaryInput?.group_session_id || "");
   const summary = summaryInput?.schema ? summaryInput : readReplayRepairDispatchCandidatesForCoordinator(groupId, Number(options.limit || 8));
-  const ledger = readReplayRepairDispatchPlanLedgerForCoordinator(groupId);
+  const ledger = readReplayRepairDispatchPlanLedgerForCoordinator(groupId, groupSessionId);
   const previous = Array.isArray(ledger.briefs) ? ledger.briefs : [];
   const previousByWorkId = new Map(previous.map((brief: any) => [String(brief.work_item_id || ""), brief]));
   const activeCandidates = Array.isArray(summary?.candidates) ? summary.candidates : [];
@@ -13829,7 +14151,9 @@ export function syncReplayRepairDispatchPlansForCoordinator(groupId: string, sum
     schema: "ccm-replay-repair-main-agent-dispatch-brief-ledger-v1",
     version: 1,
     groupId,
-    file: ledger.file || getReplayRepairDispatchPlansFileForCoordinator(groupId),
+    groupSessionId,
+    scopeId: groupSessionId ? `${groupId}::${groupSessionId}` : groupId,
+    file: ledger.file || getReplayRepairDispatchPlansFileForCoordinator(groupId, groupSessionId),
     sourceCandidateFile: summary?.file || getReplayRepairWorkItemsFileForCoordinator(groupId),
     updatedAt: at,
     briefCount: briefs.length,
@@ -14265,6 +14589,10 @@ function buildCoordinatorResultFromAnalysis(group: any, message: string, analysi
     assignments: buildAssignmentsFromTargets(effectiveTargets, {
       group,
       analysis,
+      groupSessionId: options.groupSessionId || options.group_session_id || "",
+      workerContextUsageOptions: options.workerContextUsageOptions || options.worker_context_usage_options || null,
+      autoWorkerContextCompactRetry: options.autoWorkerContextCompactRetry ?? options.auto_worker_context_compact_retry,
+      workerContextRetryOptions: options.workerContextRetryOptions || options.worker_context_retry_options || null,
       providerSwitchRequests: options.providerSwitchRequests || options.provider_switch_requests || null,
     }),
     analysis,
@@ -14298,17 +14626,35 @@ async function runLlmGroupOrchestrator(input: {
   extraInstructions?: string;
   providerSwitchRequests?: any;
   provider_switch_requests?: any;
+  groupSessionId?: string;
+  group_session_id?: string;
 }) {
   const group = normalizeGroupOrchestrator(input.group);
   const config = loadOrchestratorConfig();
   const fallbackAnalysis = buildDocumentAwareAnalysis(group, input);
 
   const messages = buildLlmCoordinatorMessages(input);
+  const groupSessionId = String(input.groupSessionId || input.group_session_id || "").trim();
+  const anthropic = shouldUseAnthropic(config);
   let tokenUsage: LlmTokenUsage | null = null;
-  const captureTokenUsage = (usage: LlmTokenUsage) => { tokenUsage = mergeLlmTokenUsage(tokenUsage, usage); };
+  const captureTokenUsage = (usage: LlmTokenUsage) => {
+    tokenUsage = mergeLlmTokenUsage(tokenUsage, usage);
+    if (groupSessionId.startsWith("gcs_")) {
+      try {
+        recordGroupPromptCacheUsage({
+          groupId: group.id,
+          groupSessionId,
+          source: "group_main_planning",
+          provider: anthropic ? "anthropic" : "openai",
+          model: config.model,
+          usage,
+        });
+      } catch {}
+    }
+  };
   let parsed: any;
   try {
-    parsed = shouldUseAnthropic(config)
+    parsed = anthropic
       ? await callAnthropicCompatibleJson(config, {
           messages,
           maxTokens: 1500,
@@ -14365,22 +14711,33 @@ export type GroupOrchestratorInput = {
   task_id?: string;
   executionId?: string;
   execution_id?: string;
+  groupSessionId?: string;
+  group_session_id?: string;
+  workerContextUsageOptions?: any;
+  worker_context_usage_options?: any;
+  autoWorkerContextCompactRetry?: boolean;
+  auto_worker_context_compact_retry?: boolean;
+  workerContextRetryOptions?: any;
+  worker_context_retry_options?: any;
 };
 
 async function runGroupOrchestratorCore(input: GroupOrchestratorInput) {
   const raggedInput = withGroupRagContext(input);
   const group = normalizeGroupOrchestrator(raggedInput.group);
+  const groupSessionId = String(raggedInput.groupSessionId || raggedInput.group_session_id || "").trim();
   const replayRepairContext = buildCoordinatorReplayRepairDispatchContext(group);
   const contextId = String(raggedInput.contextId || raggedInput.context_id || `group-main-agent-context:${hashCoordinator([
     group?.id || "",
+    groupSessionId,
     raggedInput.source || "",
     raggedInput.message || "",
     String(raggedInput.context || "").slice(-800),
   ], 24)}`);
-  const sessionId = String(raggedInput.sessionId || raggedInput.session_id || `group-main-agent:${group?.id || "unknown"}`);
+  const sessionId = String(raggedInput.sessionId || raggedInput.session_id || `group-main-agent:${group?.id || "unknown"}:${groupSessionId || "unscoped"}`);
   const maintenanceNotificationContext = buildCoordinatorMaintenanceNotificationInstructions(group, {
     contextId,
     sessionId,
+    groupSessionId,
     recordDelivery: false,
     channel: "run-group-orchestrator",
   });
@@ -14426,10 +14783,12 @@ async function runGroupOrchestratorCore(input: GroupOrchestratorInput) {
     };
   }
 
+  let reactiveCompactOwnership: any = null;
   try {
     buildCoordinatorMaintenanceNotificationInstructions(group, {
       contextId,
       sessionId,
+      groupSessionId,
       recordDelivery: true,
       channel: "run-group-orchestrator-llm",
     });
@@ -14437,28 +14796,103 @@ async function runGroupOrchestratorCore(input: GroupOrchestratorInput) {
   } catch (error: any) {
     const firstAttemptUsage = error?.usage || null;
     if (isContextLimitError(error) && enrichedInput.context) {
-      try {
+      let retryClaim: any = null;
+      if (groupSessionId.startsWith("gcs_")) {
+        try {
+          retryClaim = claimGroupReactiveCompactRetry({
+            groupId: group.id,
+            groupSessionId,
+            channel: "group_main_prompt_too_long",
+            retryEpoch: contextId,
+            requestFingerprint: `${raggedInput.source || ""}:${contextId}`,
+            contextChecksum: hashCoordinator(enrichedInput.context || "", 64),
+            inputChars: String(enrichedInput.context || "").length,
+          });
+        } catch (claimError: any) {
+          retryClaim = { status: "claim_failed", acquired: false, issues: [String(claimError?.message || claimError).slice(0, 180)] };
+        }
+      } else {
+        retryClaim = { status: "exact_group_session_required", acquired: false, issues: ["group_session_id must be gcs_*"] };
+      }
+      reactiveCompactOwnership = {
+        schema: "ccm-group-main-reactive-compact-retry-ownership-summary-v1",
+        group_id: group.id,
+        group_session_id: groupSessionId,
+        retry_epoch: contextId,
+        status: retryClaim?.status || "not_claimed",
+        acquired: retryClaim?.acquired === true,
+        entry_id: retryClaim?.entry?.entry_id || "",
+        claim_id: retryClaim?.entry?.claim_id || "",
+        fencing_token: Number(retryClaim?.entry?.fencing_token || 0),
+        claim_generation: Number(retryClaim?.entry?.claim_generation || 0),
+        issues: retryClaim?.issues || [],
+      };
+      if (retryClaim?.acquired === true) try {
         buildCoordinatorMaintenanceNotificationInstructions(group, {
           contextId,
           sessionId,
+          groupSessionId,
           recordDelivery: true,
           channel: "run-group-orchestrator-llm-context-retry",
         });
+        const recoveredContext = buildReactiveCompactionContext(enrichedInput.context || "");
         const recovered = await runLlmGroupOrchestrator({
           ...enrichedInput,
           group,
-          context: buildReactiveCompactionContext(enrichedInput.context || ""),
+          context: recoveredContext,
         });
+        const completion = completeGroupReactiveCompactRetry({
+          groupId: group.id,
+          groupSessionId,
+          channel: "group_main_prompt_too_long",
+          retryEpoch: contextId,
+          claimId: retryClaim.entry.claim_id,
+          fencingToken: retryClaim.entry.fencing_token,
+          outcome: "recovered",
+          outputChars: recoveredContext.length,
+          reason: "reactive_compact_retry_succeeded",
+        });
+        reactiveCompactOwnership = {
+          ...reactiveCompactOwnership,
+          status: completion.status,
+          completion_accepted: completion.accepted === true,
+        };
         return {
           ...recovered,
           usage: mergeLlmTokenUsage(firstAttemptUsage, recovered?.usage),
           contextRecovery: {
             type: "reactive-compact",
             originalChars: String(enrichedInput.context || "").length,
-            recoveredChars: buildReactiveCompactionContext(enrichedInput.context || "").length,
+            recoveredChars: recoveredContext.length,
+            ownership: reactiveCompactOwnership,
           },
         };
       } catch (recoveryError: any) {
+        try {
+          const completion = completeGroupReactiveCompactRetry({
+            groupId: group.id,
+            groupSessionId,
+            channel: "group_main_prompt_too_long",
+            retryEpoch: contextId,
+            claimId: retryClaim.entry.claim_id,
+            fencingToken: retryClaim.entry.fencing_token,
+            outcome: "failed",
+            reason: "reactive_compact_retry_failed",
+            errorClass: recoveryError?.name || "Error",
+            error: recoveryError?.message || String(recoveryError),
+          });
+          reactiveCompactOwnership = {
+            ...reactiveCompactOwnership,
+            status: completion.status,
+            completion_accepted: completion.accepted === true,
+          };
+        } catch (completionError: any) {
+          reactiveCompactOwnership = {
+            ...reactiveCompactOwnership,
+            status: "completion_failed",
+            completion_issue: String(completionError?.message || completionError).slice(0, 180),
+          };
+        }
         error = attachLlmTokenUsage(recoveryError, firstAttemptUsage);
       }
     }
@@ -14472,6 +14906,7 @@ async function runGroupOrchestratorCore(input: GroupOrchestratorInput) {
         ...fallback,
         runtime: "coded-fallback",
         usage: error?.usage || null,
+        contextRecovery: reactiveCompactOwnership ? { type: "reactive-compact-not-retried", ownership: reactiveCompactOwnership } : undefined,
         agentBoundary: buildGroupMainAgentBoundary("coded_fallback"),
         content: informationalFallback ? fallback.content : `${fallback.content}\n\n主 Agent API 回退：${error.message}`,
       };
@@ -14482,6 +14917,7 @@ async function runGroupOrchestratorCore(input: GroupOrchestratorInput) {
       assignments: [],
       runtime: "llm-error",
       usage: error?.usage || null,
+      contextRecovery: reactiveCompactOwnership ? { type: "reactive-compact-not-retried", ownership: reactiveCompactOwnership } : undefined,
       agentBoundary: buildGroupMainAgentBoundary("llm-error"),
       content: [
         "主 Agent 大模型调用失败，本轮不分派子 Agent。",

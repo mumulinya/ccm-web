@@ -22,6 +22,7 @@ import { loadGroups } from "../collaboration/storage";
 import { buildToolAuthorizationOptions, normalizeToolAuthorization, parseMcpGrant } from "../../tools/tool-authorization";
 import { listRecentRuntimeToolAudits, probeRuntimeToolReadiness, resyncMissingRuntimeToolSnapshots, resyncRecentRuntimeToolSnapshots, syncRuntimeToolsWithCatalog } from "../../tools/runtime-tool-sync";
 import { assertCcmInternalSkillMutable } from "../../skills/internal-skill-catalog";
+import { isInternalMcpName } from "../../tools/internal-mcp-registry";
 
 const { toolManager } = require("../../tools/tool-manager");
 const execFileAsync = promisify(execFile);
@@ -2395,6 +2396,7 @@ async function runMarketplaceInstallE2ESelfTest() {
 export async function installMarketplaceItemWithStore(rawItem: any, store: MarketplaceInstallStore = {}, mode: "install" | "update" = "install", options: any = {}) {
   const item = normalizeMarketplaceItem(rawItem, { id: "custom", label: "Custom source", kind: "direct", trust: "custom" });
   if (item.type === "skill") assertCcmInternalSkillMutable(item.name, mode === "update" ? "通过商城更新或覆盖" : "从商城安装或覆盖");
+  if (item.type === "mcp" && isInternalMcpName(item.name)) throw new Error(`内部 MCP "${item.name}" 已随项目安装，不能通过商城覆盖`);
   const now = new Date().toISOString();
   let checksum = "";
   let packagePath = "";
@@ -2478,6 +2480,7 @@ async function updateMarketplaceItem(rawItem: any) {
 export async function uninstallMarketplaceItemWithStore(payload: any, store: MarketplaceInstallStore = {}, options: any = {}) {
   const type = String(payload?.type || "").toLowerCase();
   const name = String(payload?.name || "").trim();
+  if (type === "mcp" && isInternalMcpName(name)) throw new Error(`内部 MCP "${name}" 由系统保护，不能卸载`);
   if (!["mcp", "skill"].includes(type) || !name) throw new Error("卸载参数无效");
   if (type === "skill") assertCcmInternalSkillMutable(name, "通过商城卸载");
   const skillPackagesDir = store.skillPackagesDir || SKILL_PACKAGES_DIR;

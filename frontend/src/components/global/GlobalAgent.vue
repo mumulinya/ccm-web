@@ -5,6 +5,7 @@ import { toast, confirmDialog } from '../../utils/toast.js'
 import TaskExperienceCard from '../tasks/TaskExperienceCard.vue'
 import AgentCodeChangeDrawer from '../agents/AgentCodeChangeDrawer.vue'
 import MessageNavigator from '../common/MessageNavigator.vue'
+import ConversationTurnControls from '../common/ConversationTurnControls.vue'
 import CommandResultCard from '../common/CommandResultCard.vue'
 import SlashCommandMenu from '../common/SlashCommandMenu.vue'
 import GlobalAgentSessionSidebar from './GlobalAgentSessionSidebar.vue'
@@ -14,6 +15,7 @@ import { useGlobalAgentControlCenter } from '../../composables/useGlobalAgentCon
 import { globalMissionConversationState, upsertGlobalMissionConversationNotification, useGlobalAgentSessions } from '../../composables/useGlobalAgentSessions.js'
 import { useMessageNavigation } from '../../composables/useMessageNavigation.js'
 import { usePinnedScroll } from '../../composables/usePinnedScroll.js'
+import { useConversationTurnControl } from '../../composables/useConversationTurnControl.js'
 import { useSlashCommands } from '../../composables/useSlashCommands.js'
 import { createSlashCommandClientActions } from '../../composables/useSlashCommandClientActions.js'
 import { globalAgentRunTaskCard, globalMissionTaskCard } from '../../utils/taskExperience.js'
@@ -89,6 +91,8 @@ const isSending = ref(false)
 const isSteering = ref(false)
 const activeGlobalRunId = ref('')
 const activeGlobalRunMessage = ref(null)
+const globalStreamController = ref(null)
+const stoppingGlobalTurn = ref(false)
 const pendingGlobalMissionInput = ref(null)
 const pendingGlobalClarificationInput = ref(null)
 const pendingGlobalRequestRetry = ref(null)
@@ -165,6 +169,13 @@ const isSupervisionContinuationInput = computed(() => {
 })
 
 const activeGlobalExecutionConfirmed = ref(false)
+const globalTurnBusy = computed(() => isSending.value || !!currentSupervisedRunMessage.value)
+const globalActiveRunId = computed(() => activeGlobalRunId.value || currentSupervisedRunMessage.value?.agenticRun?.id || '')
+const globalTurnControl = useConversationTurnControl({
+  scope: 'global',
+  conversationId: currentSessionId,
+  busy: globalTurnBusy,
+})
 
 const syncPendingGlobalClarificationInput = () => {
   const rows = Array.isArray(messages.value) ? messages.value : []
@@ -216,21 +227,21 @@ watch(() => props.navigateTo, () => {
 }, { immediate: true })
 
 const globalInputPlaceholder = computed(() => {
-  if (!isSending.value) {
+  if (!globalTurnBusy.value) {
     if (pendingGlobalMissionInput.value) return '补充当前任务需要的信息，发送后会继续原任务...'
     if (pendingGlobalClarificationInput.value) return '回答主 Agent 刚才的问题，发送后会接着原请求继续...'
     return isSupervisionContinuationInput.value
       ? '补充要求或调整当前任务...'
       : '对全局助手说点什么... (例如: 帮我把桌宠打开)'
   }
-  return activeGlobalRunId.value && activeGlobalExecutionConfirmed.value
-    ? '补充要求或调整当前目标...'
-    : '正在回复...'
+  return globalTurnControl.mode.value === 'queue'
+    ? '输入下一条消息，当前回复结束后会自动发送...'
+    : '补充要求或调整当前目标...'
 })
 
 const globalSendButtonLabel = computed(() => {
   if (isSteering.value) return '接收中'
-  if (isSending.value) return activeGlobalExecutionConfirmed.value ? '补充要求' : '回复中'
+  if (globalTurnBusy.value) return globalTurnControl.mode.value === 'queue' ? '排队' : '引导'
   if (pendingGlobalMissionInput.value) return '提交并继续'
   if (pendingGlobalClarificationInput.value) return '提交补充'
   return isSupervisionContinuationInput.value ? '更新任务' : '发送'
@@ -238,7 +249,7 @@ const globalSendButtonLabel = computed(() => {
 
 const canSendGlobalMessage = computed(() => {
   if (isSteering.value) return false
-  if (isSending.value) return activeGlobalExecutionConfirmed.value && !!chatInput.value.trim() && !!activeGlobalRunId.value
+  if (globalTurnBusy.value) return !!chatInput.value.trim()
   return !!chatInput.value.trim() || selectedFiles.value.length > 0
 })
 
@@ -1770,13 +1781,13 @@ const findActiveGlobalRunMessage = (runId = activeGlobalRunId.value) => {
 }
 
 const sendGlobalRunSteer = async (options = {}) => {
-  const userText = chatInput.value.trim()
+  const userText = String(options.userText ?? chatInput.value).trim()
   const runId = options.runId || activeGlobalRunId.value
   if (!userText || !runId || isSteering.value) return
   const agentMsg = options.agentMsg || findActiveGlobalRunMessage(runId)
   if (!agentMsg || !currentSession.value) {
     toast.error('当前任务还没有准备好接收补充要求')
-    return
+    return { success: false, error: '当前任务还没有准备好接收补充要求' }
   }
 
   const supervisionSteer = options.supervision === true
@@ -1795,6 +1806,8 @@ const sendGlobalRunSteer = async (options = {}) => {
   isSteering.value = true
   saveHistory()
   scrollToBottom()
+  let accepted = false
+  let failure = ''
 
   try {
     const res = await fetch('/api/global-agent/runs/steer', {
@@ -1811,6 +1824,7 @@ const sendGlobalRunSteer = async (options = {}) => {
     const data = await res.json().catch(() => ({}))
     if (!res.ok || data.success === false) throw new Error(data.error || `HTTP ${res.status}`)
     userMessage.delivery_status = 'accepted'
+    accepted = true
     if (data.run) {
       agentMsg.agenticRun = mergeGlobalRunTestAgentExecutionPlan(data.run, agentMsg.agenticRun || {})
       activeGlobalRunId.value = agentMsg.agenticRun.id || runId
@@ -1834,6 +1848,7 @@ const sendGlobalRunSteer = async (options = {}) => {
     saveHistory()
     scrollToBottom()
   } catch (error) {
+    failure = error?.message || '补充要求发送失败'
     userMessage.delivery_status = 'failed'
     if (!chatInput.value.trim()) chatInput.value = userText
     appendGlobalStreamEvent(agentMsg, {
@@ -1851,6 +1866,73 @@ const sendGlobalRunSteer = async (options = {}) => {
     }
     scrollToBottom()
   }
+  return { success: accepted, error: failure }
+}
+
+const stopGlobalCurrentWork = async () => {
+  if (!globalTurnBusy.value || stoppingGlobalTurn.value) return
+  stoppingGlobalTurn.value = true
+  try {
+    let runId = globalActiveRunId.value
+    if (!runId && currentSessionId.value) {
+      const params = new URLSearchParams({ session_id: currentSessionId.value, limit: '20' })
+      const listing = await fetch(`/api/global-agent/runs?${params.toString()}`).then(response => response.json()).catch(() => ({}))
+      runId = (listing.runs || []).find(run => ['running', 'supervising', 'paused'].includes(String(run?.status || '')))?.id || ''
+    }
+    if (runId) {
+      await fetch('/api/global-agent/runs/cancel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: runId, reason: '用户从全局 Agent 会话停止当前工作' }),
+      }).then(async (response) => {
+        const data = await response.json().catch(() => ({}))
+        if (!response.ok || data.success === false) throw new Error(data.error || '停止失败')
+      }).catch((error) => toast.warning(error?.message || '后端停止请求未完成，正在中断当前连接'))
+    }
+    globalStreamController.value?.abort()
+  } finally {
+    stoppingGlobalTurn.value = false
+  }
+}
+
+const drainGlobalTurnQueue = () => globalTurnControl.drain(async (turn) => {
+  const result = await sendMessage({ queueTurn: turn })
+  if (result?.success === false) throw new Error(result.error || '全局消息没有完成')
+  return { run_id: result?.runId || '' }
+})
+watch(
+  () => [currentSessionId.value, globalTurnBusy.value, globalTurnControl.turns.value.filter(turn => turn.status === 'queued').length],
+  ([conversationId, busy, queued]) => {
+    if (conversationId && !busy && queued) window.setTimeout(() => drainGlobalTurnQueue().catch(() => {}), 0)
+  },
+  { flush: 'post' },
+)
+
+const submitGlobalMessageWhileBusy = async () => {
+  const message = chatInput.value.trim()
+  if (!message) return
+  const requestedMode = globalTurnControl.mode.value
+  const supervisedMessage = currentSupervisedRunMessage.value
+  const runId = globalActiveRunId.value
+  const canSteer = !!runId && (activeGlobalExecutionConfirmed.value || !!supervisedMessage)
+  if (requestedMode === 'steer' && !canSteer) {
+    toast.info('当前运行还在启动，这条消息已改为排队，启动完成后不会丢失')
+  }
+  const effectiveMode = requestedMode === 'steer' && canSteer ? 'steer' : 'queue'
+  const turn = await globalTurnControl.enqueue({
+    message,
+    mode: effectiveMode,
+    activeRunId: runId,
+    metadata: { session_id: currentSessionId.value, requested_mode: requestedMode },
+  })
+  chatInput.value = ''
+  if (effectiveMode === 'steer') {
+    const result = await sendGlobalRunSteer({ userText: message, runId, agentMsg: supervisedMessage || undefined, supervision: !!supervisedMessage })
+    await globalTurnControl.settle(turn, result?.success ? 'applied' : 'failed', result?.success ? {} : { error: result?.error || '引导没有接入当前工作' })
+  } else {
+    toast.success('已加入队列，当前回复结束后会自动发送')
+  }
+  return turn
 }
 
 const beginGlobalMissionInput = async (msg, card = {}) => {
@@ -1956,9 +2038,10 @@ const sendGlobalMissionInput = async () => {
   }
 }
 
-const sendMessage = async () => {
-  if (isSending.value) return activeGlobalExecutionConfirmed.value ? sendGlobalRunSteer() : undefined
-  if (!chatInput.value.trim() && selectedFiles.value.length === 0) return
+const sendMessage = async (options = {}) => {
+  const queuedTurn = options?.queueTurn || null
+  if (globalTurnBusy.value && !queuedTurn && !pendingGlobalMissionInput.value && !pendingGlobalClarificationInput.value) return submitGlobalMessageWhileBusy()
+  if (!queuedTurn && !chatInput.value.trim() && selectedFiles.value.length === 0) return
   if (pendingGlobalMissionInput.value) return sendGlobalMissionInput()
   const supervisionTarget = currentSupervisedRunMessage.value
   if (
@@ -1976,9 +2059,9 @@ const sendMessage = async () => {
     createNewSession()
   }
   
-  const userText = chatInput.value.trim()
+  const userText = queuedTurn ? String(queuedTurn.message || '').trim() : chatInput.value.trim()
   const clarificationTarget = pendingGlobalClarificationInput.value
-  const attachedFiles = [...selectedFiles.value]
+  const attachedFiles = queuedTurn ? [] : [...selectedFiles.value]
   const retrySignature = globalRequestRetrySignature({
     sessionId: currentSessionId.value,
     message: userText,
@@ -2055,14 +2138,20 @@ const sendMessage = async () => {
       attachedFiles.forEach((f, idx) => {
         formData.append(`file_${idx}`, f.file)
       })
+      const controller = new AbortController()
+      globalStreamController.value = controller
       res = await fetch('/api/global-agent/run?stream=true', {
         method: 'POST',
-        body: formData
+        body: formData,
+        signal: controller.signal,
       })
     } else {
+      const controller = new AbortController()
+      globalStreamController.value = controller
       res = await fetch('/api/global-agent/run?stream=true', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
+        signal: controller.signal,
         body: JSON.stringify({
           message: userText,
           history: historyPayload,
@@ -2166,18 +2255,20 @@ const sendMessage = async () => {
     }
 
     saveHistory()
+    return { success: !globalStreamFailed, error: globalStreamFailed ? '全局消息没有完成' : '', runId: agentMsg.agenticRun?.id || '' }
 
   } catch (err) {
+    const stopped = err?.name === 'AbortError'
     if (currentSession.value) {
       const last = currentSession.value.messages[currentSession.value.messages.length - 1]
       if (last?.type === 'global_stream' && last.streaming) {
         last.streaming = false
         last.type = 'global_agent_error'
-        last.content = `❌ 连接服务器失败：${err.message || '请检查网络或配置'}`
+        last.content = stopped ? '本次处理已停止，你可以调整需求后继续。' : `❌ 连接服务器失败：${err.message || '请检查网络或配置'}`
         if (!chatInput.value.trim()) chatInput.value = userText
         saveHistory()
         scrollToBottom()
-        return
+        return { success: false, error: stopped ? '当前工作已停止' : (err.message || '连接服务器失败') }
       }
     }
     currentSession.value.messages.push({
@@ -2186,12 +2277,15 @@ const sendMessage = async () => {
       timestamp: new Date().toISOString()
     })
     saveHistory()
+    return { success: false, error: err?.message || '连接服务器失败' }
   } finally {
     isSending.value = false
     activeGlobalRunId.value = ''
     activeGlobalRunMessage.value = null
     activeGlobalExecutionConfirmed.value = false
+    globalStreamController.value = null
     scrollToBottom()
+    if (!queuedTurn) window.setTimeout(() => drainGlobalTurnQueue().catch(() => {}), 0)
   }
 }
 
@@ -3810,6 +3904,16 @@ const handleGitCommitCardSubmit = async (msg) => {
           </div>
         </div>
 
+        <ConversationTurnControls
+          :busy="globalTurnBusy"
+          v-model:mode="globalTurnControl.mode.value"
+          :turns="globalTurnControl.turns.value"
+          :stopping="stoppingGlobalTurn"
+          compact
+          @stop="stopGlobalCurrentWork"
+          @cancel="globalTurnControl.cancel"
+          @retry="(turn) => globalTurnControl.retry(turn).then(() => drainGlobalTurnQueue())"
+        />
                 <div class="input-wrapper" :class="{ 'steering-mode': (isSending && !!activeGlobalRunId) || isSupervisionContinuationInput }">
           <input 
             type="file" 

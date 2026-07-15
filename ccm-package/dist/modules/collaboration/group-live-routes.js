@@ -310,12 +310,13 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                 const group = groups.find(g => g.id === group_id);
                 if (!group)
                     return (0, utils_1.sendJson)(res, { error: "群聊不存在" }, 400);
-                groupSessionId = groupSessionId || (0, storage_1.getActiveGroupChatSessionId)(group_id);
-                const groupSession = (0, storage_1.listGroupChatSessions)(group_id).sessions.find((item) => item.id === groupSessionId);
-                if (!groupSession)
-                    return (0, utils_1.sendJson)(res, { error: "群聊会话不存在" }, 404);
-                if (groupSession.archived === true)
-                    return (0, utils_1.sendJson)(res, { error: "归档会话为只读状态，请恢复或新建会话后继续" }, 409);
+                try {
+                    groupSessionId = (0, storage_1.resolveWritableGroupChatSession)(group_id, groupSessionId, { title: "新会话" }).id;
+                }
+                catch (error) {
+                    const status = /不存在/.test(String(error?.message || "")) ? 404 : 409;
+                    return (0, utils_1.sendJson)(res, { error: error.message }, status);
+                }
                 (0, group_orchestrator_1.normalizeGroupOrchestrator)(group);
                 const directMemoryActionName = String(payload.memory_action || payload.memoryAction || "").trim().toLowerCase();
                 if (directMemoryActionName) {
@@ -443,6 +444,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                             messageMode,
                             forceProjectTask,
                             sharedFilesContext: uploadedFilesContext,
+                            groupSessionId,
                         });
                 const persistentTaskRequest = !!explicitContinuationTask || (!statusFollowupRequest && shouldCreatePersistentGroupTask({ isOrchestrated, messageMode, taskIntent, forceProjectTask }));
                 const projectAnalysisRequest = !statusFollowupRequest && shouldUseProjectAnalysisMode({ isOrchestrated, messageMode, taskIntent }) && !persistentTaskRequest;
@@ -982,6 +984,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                             : messageForAgent,
                         context: projectAnalysisRequest ? `${context}\n\n${projectAnalysisContext}` : context,
                         source: "user",
+                        groupSessionId,
                         sharedFilesContext: [sharedFilesContext, projectAnalysisContext].filter(Boolean).join("\n\n"),
                     });
                     try {
@@ -1149,8 +1152,9 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                         const memoryBundle = await deps.buildAgentMemoryContextBundleWithManifestSelection(group_id, member.project, messageForAgent, {
                             workDir: memberWorkDir,
                             groupSessionId,
+                            requireExactGroupSession: true,
                         });
-                        const memoryPacket = memoryBundle.rendered_text || buildAgentMemoryPacket(group_id, member.project, messageForAgent);
+                        const memoryPacket = memoryBundle.rendered_text || buildAgentMemoryPacket(group_id, member.project, messageForAgent, { groupSessionId });
                         const developmentContract = buildChildAgentDevelopmentContract(member.project, messageForAgent, {
                             source: "群聊广播",
                             verification_hints: buildProjectVerificationHints(member.project, memberWorkDir),
@@ -1256,6 +1260,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                         message: messageForAgent,
                         context,
                         source: "direct",
+                        groupSessionId,
                         sharedFilesContext: sharedFilesCtx2,
                     });
                     const responseMessageId = "m" + Date.now().toString(36) + "coord" + crypto.randomBytes(2).toString("hex");
@@ -1383,8 +1388,9 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                 const memoryBundle = await deps.buildAgentMemoryContextBundleWithManifestSelection(group_id, target_project_actual, messageForAgent, {
                     workDir,
                     groupSessionId,
+                    requireExactGroupSession: true,
                 });
-                const memoryPacket = memoryBundle.rendered_text || buildAgentMemoryPacket(group_id, target_project_actual, messageForAgent);
+                const memoryPacket = memoryBundle.rendered_text || buildAgentMemoryPacket(group_id, target_project_actual, messageForAgent, { groupSessionId });
                 const developmentContract = buildChildAgentDevelopmentContract(target_project_actual, messageForAgent, {
                     source: "群聊点名",
                     verification_hints: buildProjectVerificationHints(target_project_actual, workDir),
@@ -1539,11 +1545,18 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
         req.on("end", async () => {
             try {
                 const { group_id, message, group_session_id, groupSessionId: groupSessionIdCamel } = JSON.parse(body);
-                const groupSessionId = String(group_session_id || groupSessionIdCamel || "").trim();
+                let groupSessionId = String(group_session_id || groupSessionIdCamel || "").trim();
                 const groups = (0, storage_1.loadGroups)();
                 const group = groups.find(g => g.id === group_id);
                 if (!group)
                     return (0, utils_1.sendJson)(res, { error: "群聊不存在" }, 400);
+                try {
+                    groupSessionId = (0, storage_1.resolveWritableGroupChatSession)(group_id, groupSessionId, { title: "广播会话" }).id;
+                }
+                catch (error) {
+                    const status = /不存在/.test(String(error?.message || "")) ? 404 : 409;
+                    return (0, utils_1.sendJson)(res, { error: error.message }, status);
+                }
                 (0, storage_1.appendGroupMessage)(group_id, {
                     id: "m" + Date.now().toString(36),
                     role: "user", target: "all", content: message,
@@ -1577,8 +1590,9 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                     const memoryBundle = await deps.buildAgentMemoryContextBundleWithManifestSelection(group_id, member.project, message, {
                         workDir,
                         groupSessionId,
+                        requireExactGroupSession: true,
                     });
-                    const memoryPacket = memoryBundle.rendered_text || buildAgentMemoryPacket(group_id, member.project, message);
+                    const memoryPacket = memoryBundle.rendered_text || buildAgentMemoryPacket(group_id, member.project, message, { groupSessionId });
                     const developmentContract = buildChildAgentDevelopmentContract(member.project, message, {
                         source: "群聊广播 API",
                         verification_hints: buildProjectVerificationHints(member.project, workDir),
@@ -1619,11 +1633,18 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
         req.on("end", async () => {
             try {
                 const { group_id, requirement, group_session_id, groupSessionId: groupSessionIdCamel } = JSON.parse(body);
-                const groupSessionId = String(group_session_id || groupSessionIdCamel || "").trim();
+                let groupSessionId = String(group_session_id || groupSessionIdCamel || "").trim();
                 const groups = (0, storage_1.loadGroups)();
                 const group = groups.find(g => g.id === group_id);
                 if (!group)
                     return (0, utils_1.sendJson)(res, { error: "群聊不存在" }, 400);
+                try {
+                    groupSessionId = (0, storage_1.resolveWritableGroupChatSession)(group_id, groupSessionId, { title: "需求分解" }).id;
+                }
+                catch (error) {
+                    const status = /不存在/.test(String(error?.message || "")) ? 404 : 409;
+                    return (0, utils_1.sendJson)(res, { error: error.message }, status);
+                }
                 const configs = (0, db_1.getConfigs)();
                 const coordinator = (0, group_orchestrator_1.getCoordinatorMember)(group);
                 const members = (0, group_orchestrator_1.getRoutableMembers)(group);

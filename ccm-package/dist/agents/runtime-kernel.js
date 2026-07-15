@@ -98,11 +98,35 @@ function renderWorkerPacketMemory(memory) {
         return compactMemory(memory);
     const schema = String(memory.schema || "ccm-memory-context");
     const rendered = memory.rendered_text || memory.renderedText || memory.summary || "";
+    const invokedSkillAttachmentText = String(memory.invoked_skill_attachment_text
+        || memory.invokedSkillAttachmentText
+        || memory.group_memory?.invoked_skill_attachment_text
+        || memory.group_memory?.invokedSkillAttachmentText
+        || memory.groupMemory?.invoked_skill_attachment_text
+        || memory.groupMemory?.invokedSkillAttachmentText
+        || "").trim();
+    const planAttachmentText = String(memory.plan_attachment_text
+        || memory.planAttachmentText
+        || memory.group_memory?.plan_attachment_text
+        || memory.group_memory?.planAttachmentText
+        || memory.groupMemory?.plan_attachment_text
+        || memory.groupMemory?.planAttachmentText
+        || "").trim();
+    const dynamicContextDeltaText = String(memory.dynamic_context_delta_text
+        || memory.dynamicContextDeltaText
+        || memory.group_memory?.dynamic_context_delta_text
+        || memory.group_memory?.dynamicContextDeltaText
+        || memory.groupMemory?.dynamic_context_delta_text
+        || memory.groupMemory?.dynamicContextDeltaText
+        || "").trim();
     if (rendered) {
         return [
             `平台记忆：${schema}`,
             memory.group_id ? `group_id: ${memory.group_id}` : "",
             memory.target_project ? `target_project: ${memory.target_project}` : "",
+            invokedSkillAttachmentText && !String(rendered).includes(invokedSkillAttachmentText) ? invokedSkillAttachmentText : "",
+            planAttachmentText && !String(rendered).includes(planAttachmentText) ? planAttachmentText : "",
+            dynamicContextDeltaText && !String(rendered).includes(dynamicContextDeltaText) ? dynamicContextDeltaText : "",
             compactMemory(rendered),
         ].filter(Boolean).join("\n");
     }

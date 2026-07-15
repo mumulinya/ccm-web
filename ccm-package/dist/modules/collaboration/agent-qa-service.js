@@ -47,7 +47,6 @@ exports.emitAgentQaEvent = emitAgentQaEvent;
 exports.setAgentQaArbitration = setAgentQaArbitration;
 exports.appendAgentQaTrace = appendAgentQaTrace;
 exports.writeAcceptedAgentQaToProjectMemory = writeAcceptedAgentQaToProjectMemory;
-const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const crypto = __importStar(require("crypto"));
 const utils_1 = require("../../core/utils");
@@ -56,6 +55,7 @@ const reliability_ledger_1 = require("../../system/reliability-ledger");
 const memory_2 = require("./memory");
 const logs_1 = require("./logs");
 const display_1 = require("./display");
+const atomic_json_file_1 = require("../../core/atomic-json-file");
 exports.AGENT_QA_TIMEOUT_MS = 5 * 60 * 1000;
 const AGENT_QA_FILE = path.join(utils_1.CCM_DIR, "agent-qa.json");
 let deps = {};
@@ -63,38 +63,34 @@ function configureAgentQaService(next) {
     deps = { ...deps, ...next };
 }
 function loadAgentQaItems() {
-    if (!fs.existsSync(AGENT_QA_FILE))
-        return [];
-    try {
-        const data = JSON.parse(fs.readFileSync(AGENT_QA_FILE, "utf-8"));
-        return Array.isArray(data) ? data : [];
-    }
-    catch {
-        return [];
-    }
+    const data = (0, atomic_json_file_1.readJsonWithBackup)(AGENT_QA_FILE, []);
+    return Array.isArray(data) ? data : [];
 }
 function saveAgentQaItems(items) {
-    fs.writeFileSync(AGENT_QA_FILE, JSON.stringify((items || []).slice(-800), null, 2));
+    (0, atomic_json_file_1.withFileLock)(AGENT_QA_FILE, () => (0, atomic_json_file_1.writeJsonAtomic)(AGENT_QA_FILE, (items || []).slice(-800)));
 }
 function upsertAgentQaItem(item) {
-    const items = loadAgentQaItems();
-    const idx = items.findIndex((entry) => entry.id === item.id);
-    const existing = idx >= 0 ? items[idx] : {};
-    const now = new Date().toISOString();
-    const next = {
-        created_at: existing.created_at || item.created_at || now,
-        retry_count: Number(existing.retry_count || item.retry_count || 0),
-        manual_takeover: !!(existing.manual_takeover || item.manual_takeover),
-        ...existing,
-        ...item,
-        updated_at: now,
-    };
-    if (idx >= 0)
-        items[idx] = next;
-    else
-        items.push(next);
-    saveAgentQaItems(items);
-    return next;
+    return (0, atomic_json_file_1.withFileLock)(AGENT_QA_FILE, () => {
+        const data = (0, atomic_json_file_1.readJsonWithBackup)(AGENT_QA_FILE, []);
+        const items = Array.isArray(data) ? data : [];
+        const idx = items.findIndex((entry) => entry.id === item.id);
+        const existing = idx >= 0 ? items[idx] : {};
+        const now = new Date().toISOString();
+        const next = {
+            created_at: existing.created_at || item.created_at || now,
+            retry_count: Number(existing.retry_count || item.retry_count || 0),
+            manual_takeover: !!(existing.manual_takeover || item.manual_takeover),
+            ...existing,
+            ...item,
+            updated_at: now,
+        };
+        if (idx >= 0)
+            items[idx] = next;
+        else
+            items.push(next);
+        (0, atomic_json_file_1.writeJsonAtomic)(AGENT_QA_FILE, items.slice(-800));
+        return next;
+    });
 }
 function markExpiredAgentQaItems(groupId = "") {
     const nowMs = Date.now();
@@ -157,45 +153,65 @@ function buildAgentQaUserPreview(qa = {}, kind = "") {
     const to = sanitizeAgentQaPreviewText(qa.to_agent || qa.target || "目标执行成员", "目标执行成员", 80);
     const status = String(kind === "question" ? "waiting" : qa.status || (qa.answer ? "answered" : "waiting")).toLowerCase();
     const accepted = qa.acceptance?.accepted === true || status === "resumed" || !!qa.resumed_at;
-    const waiting = ["waiting", "asking", "queued"].includes(status);
+    const executing = ["asking", "executing", "merging"].includes(status);
+    const waiting = ["waiting", "queued"].includes(status);
     const failed = ["failed", "timeout", "rejected"].includes(status);
     const needsUser = ["needs_user", "manual"].includes(status);
     const question = sanitizeAgentQaPreviewText(qa.question || "", "问题原文已收进技术详情。", 180);
     const answer = qa.answer ? sanitizeAgentQaPreviewText(qa.answer, "目标 Agent 已返回回答，详细内容已收进技术详情。", 220) : "";
-    const typeLabel = qa.type === "request_review" ? "评审请求" : "工作询问";
+    const isImplementation = qa.coordination_kind === "implementation" || qa.permission_contract?.mode === "formal_work_item_write";
+    const typeLabel = isImplementation ? "协作工作项" : qa.type === "request_review" ? "评审请求" : "工作询问";
     const label = accepted
         ? "已采纳并继续"
-        : waiting
-            ? "等待回答"
-            : needsUser
-                ? "等待确认"
-                : failed
-                    ? "需要处理"
-                    : answer
-                        ? "已回答"
-                        : "已记录";
+        : executing
+            ? status === "merging" ? "正在安全合并" : "正在并行处理"
+            : waiting
+                ? "等待回答"
+                : needsUser
+                    ? "等待确认"
+                    : failed
+                        ? "需要处理"
+                        : answer
+                            ? "已回答"
+                            : "已记录";
     const summary = accepted
-        ? `${to} 的回答已被主 Agent 采纳，${from} 正带着结论继续执行。`
-        : waiting
-            ? `${from} 正在向 ${to} 确认依赖问题，回答到达后会自动继续。`
-            : needsUser
-                ? `${from} 和 ${to} 的协作问题需要人工确认，主 Agent 已暂停相关步骤。`
-                : failed
-                    ? `${from} 和 ${to} 的协作问答暂时没有可用结论，主 Agent 会重试、换人或等待接管。`
-                    : answer
-                        ? `${to} 已回答 ${from} 的问题，主 Agent 正在核对证据后决定是否采用。`
-                        : `${from} 与 ${to} 的协作问题已记录。`;
+        ? isImplementation
+            ? `${to} 已完成协作工作项并通过主 Agent 验收，${from} 正从原任务继续。`
+            : `${to} 的回答已被主 Agent 采纳，${from} 正带着结论继续执行。`
+        : executing
+            ? isImplementation
+                ? status === "merging"
+                    ? `${to} 已完成实现和验证，主 Agent 正在安全合并代码。`
+                    : `${to} 已在独立会话和工作区中并行处理 ${from} 的工作依赖。`
+                : `${to} 正在处理 ${from} 的工作询问。`
+            : waiting
+                ? isImplementation
+                    ? `主 Agent 已安排 ${to} 处理 ${from} 的工作依赖，验收通过后会自动继续原任务。`
+                    : `${from} 正在向 ${to} 确认依赖问题，回答到达后会自动继续。`
+                : needsUser
+                    ? `${from} 和 ${to} 的协作问题需要人工确认，主 Agent 已暂停相关步骤。`
+                    : failed
+                        ? `${from} 和 ${to} 的协作问答暂时没有可用结论，主 Agent 会重试、换人或等待接管。`
+                        : answer
+                            ? `${to} 已回答 ${from} 的问题，主 Agent 正在核对证据后决定是否采用。`
+                            : `${from} 与 ${to} 的协作问题已记录。`;
     const nextAction = accepted
         ? "继续原任务执行，后续由我汇总验收。"
-        : waiting
-            ? "等待目标 Agent 回答；回答到达后会自动唤醒原 Agent。"
-            : needsUser
-                ? "需要你或我人工确认后再继续。"
-                : failed
-                    ? "我会根据缺口重试、换人或提示人工接管。"
-                    : answer
-                        ? "我正在检查回答是否有足够证据。"
-                        : "等待我判断下一步。";
+        : executing
+            ? status === "merging"
+                ? "等待代码安全合并；完成后自动唤醒原 Agent。"
+                : "目标 Agent 正在并行实现；完成后由主 Agent 验收。"
+            : waiting
+                ? isImplementation
+                    ? "等待正式工作项完成并通过验收；通过后自动唤醒原 Agent。"
+                    : "等待目标 Agent 回答；回答到达后会自动唤醒原 Agent。"
+                : needsUser
+                    ? "需要你或我人工确认后再继续。"
+                    : failed
+                        ? "我会根据缺口重试、换人或提示人工接管。"
+                        : answer
+                            ? "我正在检查回答是否有足够证据。"
+                            : "等待我判断下一步。";
     const badges = [
         typeLabel,
         qa.blocking !== false ? "影响续跑" : "",
@@ -203,6 +219,8 @@ function buildAgentQaUserPreview(qa = {}, kind = "") {
         qa.injected_at ? "已注入上下文" : "",
         qa.resumed_at ? "已续跑" : "",
         qa.permission_contract?.mode === "advisory_read_only" ? "只读问答" : "",
+        isImplementation ? "正式可写工作项" : "",
+        qa.work_item_task_id ? "已建立任务依赖" : "",
         Array.isArray(qa.answer_evidence) && qa.answer_evidence.length ? `${qa.answer_evidence.length} 条证据已收起` : "",
     ].filter(Boolean).slice(0, 6);
     return {
@@ -238,7 +256,7 @@ function buildAgentQaMessage(kind, qa, content = "") {
         qa: {
             ...qa,
             kind,
-            status: kind === "question" ? "waiting" : qa.status || "answered",
+            status: kind === "question" ? "waiting" : qa.status || (kind === "progress" ? "executing" : "answered"),
             user_preview: preview,
         },
     };

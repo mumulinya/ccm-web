@@ -1,0 +1,36 @@
+{
+  "name": "ccm-delivery-receipt",
+  "type": "skill",
+  "description": "Produce a structured CCM implementation receipt containing actions, changed files, verification, blockers, and Skill usage.",
+  "prompt": "",
+  "enabled": true,
+  "version": "1.0.0",
+  "author": "CCM",
+  "packagePath": "C:\\Users\\admin\\.cc-connect\\ccm\\ccm-package\\templates\\skills\\ccm-delivery-receipt",
+  "skillFile": "C:\\Users\\admin\\.cc-connect\\ccm\\ccm-package\\templates\\skills\\ccm-delivery-receipt\\SKILL.md",
+  "packageStats": {
+    "files": 2,
+    "totalBytes": 1242
+  },
+  "contentHash": "8600d72434e98bb9add0",
+  "origin": "internal",
+  "scope": "ccm-internal",
+  "sourceType": "builtin",
+  "immutable": true,
+  "deletable": false,
+  "editable": false,
+  "disableable": false,
+  "systemManaged": true,
+  "roleSkill": true,
+  "marketplace": {
+    "source": {
+      "id": "ccm-role-skills",
+      "label": "CCM Role Skills",
+      "kind": "builtin",
+      "trust": "official"
+    },
+    "itemId": "ccm-role-skills:skill:ccm-delivery-receipt",
+    "homepage": ""
+  },
+  "updated_at": "2026-07-14T12:56:08.827Z"
+}

@@ -1,0 +1,179 @@
+{
+  "snapshotId": "a946ca6e2cbeb159",
+  "runtime": "codex",
+  "isolation": "strict",
+  "requested": {
+    "mcp": [],
+    "skill": [
+      "ccm-project-delivery-worker",
+      "ccm-project-source-research",
+      "ccm-delivery-receipt",
+      "ccm-acceptance-evidence",
+      "ccm-release-readiness"
+    ]
+  },
+  "synced": {
+    "mcp": [],
+    "skill": [
+      "ccm-project-delivery-worker",
+      "ccm-project-source-research",
+      "ccm-delivery-receipt",
+      "ccm-acceptance-evidence",
+      "ccm-release-readiness"
+    ]
+  },
+  "missing": {
+    "mcp": [],
+    "skill": []
+  },
+  "permission_rules": [
+    {
+      "kind": "skill",
+      "scope": "skill",
+      "raw": "ccm-project-delivery-worker",
+      "skill": "ccm-project-delivery-worker",
+      "rule": "skill:ccm-project-delivery-worker"
+    },
+    {
+      "kind": "skill",
+      "scope": "skill",
+      "raw": "ccm-project-source-research",
+      "skill": "ccm-project-source-research",
+      "rule": "skill:ccm-project-source-research"
+    },
+    {
+      "kind": "skill",
+      "scope": "skill",
+      "raw": "ccm-delivery-receipt",
+      "skill": "ccm-delivery-receipt",
+      "rule": "skill:ccm-delivery-receipt"
+    },
+    {
+      "kind": "skill",
+      "scope": "skill",
+      "raw": "ccm-acceptance-evidence",
+      "skill": "ccm-acceptance-evidence",
+      "rule": "skill:ccm-acceptance-evidence"
+    },
+    {
+      "kind": "skill",
+      "scope": "skill",
+      "raw": "ccm-release-readiness",
+      "skill": "ccm-release-readiness",
+      "rule": "skill:ccm-release-readiness"
+    }
+  ],
+  "authorization_readiness": null,
+  "dispatch_gate": {
+    "schema": "ccm-runtime-tool-dispatch-gate-v1",
+    "dispatchReady": true,
+    "status": "ready",
+    "reason": "runtime tool authorization is dispatch-ready",
+    "blockers": []
+  },
+  "catalogRevision": "42728fe4016f71b04680",
+  "mcp_statuses": [],
+  "skill_statuses": [
+    {
+      "name": "ccm-project-delivery-worker",
+      "state": "synced",
+      "skillPath": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\role-skills-selftest\\latest-run\\agent-runtime\\codex\\a946ca6e2cbeb159\\skills\\ccm-ccm-project-delivery-worker\\SKILL.md",
+      "sourcePath": "C:\\Users\\admin\\.cc-connect\\skills\\ccm-project-delivery-worker.json",
+      "sourceMtimeMs": 1784031951971.0298,
+      "description": "Execute a scoped CCM project assignment, implement and verify changes, and return a structured delivery receipt.",
+      "contentHash": "754614796555f9ca",
+      "runtimeDirectory": "ccm-ccm-project-delivery-worker",
+      "nativeSkillNames": [
+        "ccm-ccm-project-delivery-worker"
+      ],
+      "invocationAliases": [
+        "ccm-project-delivery-worker",
+        "skill:ccm-project-delivery-worker",
+        "ccm-ccm-project-delivery-worker",
+        "$ccm-ccm-project-delivery-worker"
+      ]
+    },
+    {
+      "name": "ccm-project-source-research",
+      "state": "synced",
+      "skillPath": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\role-skills-selftest\\latest-run\\agent-runtime\\codex\\a946ca6e2cbeb159\\skills\\ccm-ccm-project-source-research\\SKILL.md",
+      "sourcePath": "C:\\Users\\admin\\.cc-connect\\skills\\ccm-project-source-research.json",
+      "sourceMtimeMs": 1784031952001.1208,
+      "description": "Inspect current project source, repository state, instructions, and established patterns before implementation.",
+      "contentHash": "102d4e68841644bd",
+      "runtimeDirectory": "ccm-ccm-project-source-research",
+      "nativeSkillNames": [
+        "ccm-ccm-project-source-research"
+      ],
+      "invocationAliases": [
+        "ccm-project-source-research",
+        "skill:ccm-project-source-research",
+        "ccm-ccm-project-source-research",
+        "$ccm-ccm-project-source-research"
+      ]
+    },
+    {
+      "name": "ccm-delivery-receipt",
+      "state": "synced",
+      "skillPath": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\role-skills-selftest\\latest-run\\agent-runtime\\codex\\a946ca6e2cbeb159\\skills\\ccm-ccm-delivery-receipt\\SKILL.md",
+      "sourcePath": "C:\\Users\\admin\\.cc-connect\\skills\\ccm-delivery-receipt.json",
+      "sourceMtimeMs": 1784031951980.6548,
+      "description": "Produce a structured CCM implementation receipt containing actions, changed files, verification, blockers, and Skill usage.",
+      "contentHash": "c6b309c31aceca12",
+      "runtimeDirectory": "ccm-ccm-delivery-receipt",
+      "nativeSkillNames": [
+        "ccm-ccm-delivery-receipt"
+      ],
+      "invocationAliases": [
+        "ccm-delivery-receipt",
+        "skill:ccm-delivery-receipt",
+        "ccm-ccm-delivery-receipt",
+        "$ccm-ccm-delivery-receipt"
+      ]
+    },
+    {
+      "name": "ccm-acceptance-evidence",
+      "state": "synced",
+      "skillPath": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\role-skills-selftest\\latest-run\\agent-runtime\\codex\\a946ca6e2cbeb159\\skills\\ccm-ccm-acceptance-evidence\\SKILL.md",
+      "sourcePath": "C:\\Users\\admin\\.cc-connect\\skills\\ccm-acceptance-evidence.json",
+      "sourceMtimeMs": 1784031951985.4104,
+      "description": "Map CCM acceptance criteria to reproducible command, API, browser, screenshot, and artifact evidence.",
+      "contentHash": "3d20063aab2f8d5c",
+      "runtimeDirectory": "ccm-ccm-acceptance-evidence",
+      "nativeSkillNames": [
+        "ccm-ccm-acceptance-evidence"
+      ],
+      "invocationAliases": [
+        "ccm-acceptance-evidence",
+        "skill:ccm-acceptance-evidence",
+        "ccm-ccm-acceptance-evidence",
+        "$ccm-ccm-acceptance-evidence"
+      ]
+    },
+    {
+      "name": "ccm-release-readiness",
+      "state": "synced",
+      "skillPath": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\role-skills-selftest\\latest-run\\agent-runtime\\codex\\a946ca6e2cbeb159\\skills\\ccm-ccm-release-readiness\\SKILL.md",
+      "sourcePath": "C:\\Users\\admin\\.cc-connect\\skills\\ccm-release-readiness.json",
+      "sourceMtimeMs": 1784031952023.1575,
+      "description": "Assess build, configuration, compatibility, migration, rollout, rollback, and residual release risk.",
+      "contentHash": "bcaccd043607b41e",
+      "runtimeDirectory": "ccm-ccm-release-readiness",
+      "nativeSkillNames": [
+        "ccm-ccm-release-readiness"
+      ],
+      "invocationAliases": [
+        "ccm-release-readiness",
+        "skill:ccm-release-readiness",
+        "ccm-ccm-release-readiness",
+        "$ccm-ccm-release-readiness"
+      ]
+    }
+  ],
+  "mcpConfigPath": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\role-skills-selftest\\latest-run\\agent-runtime\\codex\\a946ca6e2cbeb159\\config.toml",
+  "runtimeHomePath": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\role-skills-selftest\\latest-run\\agent-runtime\\codex\\a946ca6e2cbeb159",
+  "isolatedHomePath": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\role-skills-selftest\\latest-run\\agent-runtime\\codex\\a946ca6e2cbeb159",
+  "pluginDirPath": "",
+  "skillRoot": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\role-skills-selftest\\latest-run\\agent-runtime\\codex\\a946ca6e2cbeb159\\skills",
+  "generatedAt": "2026-07-14T12:25:52.498Z"
+}

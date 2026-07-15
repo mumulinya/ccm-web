@@ -33,10 +33,15 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.FINAL_DISPATCH_REACTIVE_COMPACT_MAX_CONSECUTIVE_FAILURES = void 0;
 exports.verifyMemoryContextDeliveryReceiptChecksum = verifyMemoryContextDeliveryReceiptChecksum;
 exports.openTaskAgentSession = openTaskAgentSession;
 exports.recordTaskAgentSessionTurn = recordTaskAgentSessionTurn;
+exports.verifyTaskAgentFinalDispatchReactiveCompactCircuitBreaker = verifyTaskAgentFinalDispatchReactiveCompactCircuitBreaker;
+exports.inspectTaskAgentFinalDispatchReactiveCompactCircuitBreaker = inspectTaskAgentFinalDispatchReactiveCompactCircuitBreaker;
+exports.recordTaskAgentFinalDispatchReactiveCompactCircuitOutcome = recordTaskAgentFinalDispatchReactiveCompactCircuitOutcome;
 exports.bindTaskAgentMemoryContextSnapshot = bindTaskAgentMemoryContextSnapshot;
+exports.attachTaskAgentFinalDispatchPayloadGate = attachTaskAgentFinalDispatchPayloadGate;
 exports.recordTaskAgentMemoryContextDelivery = recordTaskAgentMemoryContextDelivery;
 exports.readTaskAgentMemoryContextDeliveryReceipt = readTaskAgentMemoryContextDeliveryReceipt;
 exports.advanceTaskAgentSession = advanceTaskAgentSession;
@@ -63,6 +68,8 @@ const crypto = __importStar(require("crypto"));
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const runtime_1 = require("../agents/runtime");
+const final_dispatch_payload_gate_1 = require("../agents/final-dispatch-payload-gate");
+const final_dispatch_reactive_compact_1 = require("../agents/final-dispatch-reactive-compact");
 const utils_1 = require("../core/utils");
 const group_post_turn_summary_1 = require("../modules/collaboration/group-post-turn-summary");
 const group_memory_compaction_1 = require("../modules/collaboration/group-memory-compaction");
@@ -83,6 +90,7 @@ const TASK_AGENT_MEMORY_CONTEXT_SNAPSHOT_SCHEMA = "ccm-task-agent-memory-context
 const DEFAULT_MEMORY_CONTEXT_SNAPSHOT_STALE_DAYS = 30;
 const DEFAULT_MEMORY_CONTEXT_SNAPSHOT_RETENTION_DAYS = 45;
 const DEFAULT_MEMORY_CONTEXT_SNAPSHOT_KEEP_LATEST_PER_SESSION = 5;
+exports.FINAL_DISPATCH_REACTIVE_COMPACT_MAX_CONSECUTIVE_FAILURES = 3;
 function emptyStore() {
     return { version: 1, sessions: [] };
 }
@@ -649,6 +657,150 @@ function recordTaskAgentSessionTurn(sessionId, result = {}) {
         return next;
     });
 }
+function finalDispatchReactiveCompactCircuitChecksum(state) {
+    const payload = { ...(state || {}) };
+    delete payload.state_checksum;
+    delete payload.checksum_valid;
+    delete payload.blocked;
+    delete payload.issues;
+    return hashValue(payload, 64);
+}
+function emptyFinalDispatchReactiveCompactCircuit(session, groupSessionId = "") {
+    const payload = {
+        schema: "ccm-final-dispatch-reactive-compact-circuit-breaker-v1",
+        version: 1,
+        group_id: String(session.groupId || ""),
+        group_session_id: String(groupSessionId || ""),
+        task_id: String(session.taskId || ""),
+        task_agent_session_id: String(session.id || ""),
+        scope_id: `${String(session.groupId || "")}::${String(groupSessionId || "")}::${String(session.taskId || "")}::${String(session.id || "")}`,
+        state: "closed",
+        consecutive_failures: 0,
+        max_consecutive_failures: exports.FINAL_DISPATCH_REACTIVE_COMPACT_MAX_CONSECUTIVE_FAILURES,
+        revision: 0,
+        opened_at: "",
+        last_failure_at: "",
+        last_success_at: "",
+        last_attempt_id: "",
+        recent_events: [],
+        updated_at: "",
+    };
+    return { ...payload, state_checksum: finalDispatchReactiveCompactCircuitChecksum(payload) };
+}
+function verifyTaskAgentFinalDispatchReactiveCompactCircuitBreaker(state, expected = {}) {
+    const issues = [];
+    if (state?.schema !== "ccm-final-dispatch-reactive-compact-circuit-breaker-v1" || Number(state?.version || 0) !== 1)
+        issues.push("final_dispatch_reactive_circuit_schema_invalid");
+    if (!String(state?.group_id || ""))
+        issues.push("final_dispatch_reactive_circuit_group_missing");
+    if (!String(state?.group_session_id || "").startsWith("gcs_"))
+        issues.push("final_dispatch_reactive_circuit_exact_group_session_missing");
+    if (!String(state?.task_id || ""))
+        issues.push("final_dispatch_reactive_circuit_task_missing");
+    if (!String(state?.task_agent_session_id || "").startsWith("tas_"))
+        issues.push("final_dispatch_reactive_circuit_task_session_missing");
+    if (String(state?.scope_id || "") !== `${String(state?.group_id || "")}::${String(state?.group_session_id || "")}::${String(state?.task_id || "")}::${String(state?.task_agent_session_id || "")}`)
+        issues.push("final_dispatch_reactive_circuit_scope_invalid");
+    const failures = Number(state?.consecutive_failures || 0);
+    if (!Number.isInteger(failures) || failures < 0 || failures > exports.FINAL_DISPATCH_REACTIVE_COMPACT_MAX_CONSECUTIVE_FAILURES)
+        issues.push("final_dispatch_reactive_circuit_failure_count_invalid");
+    if (!['closed', 'open'].includes(String(state?.state || "")))
+        issues.push("final_dispatch_reactive_circuit_state_invalid");
+    if ((failures >= exports.FINAL_DISPATCH_REACTIVE_COMPACT_MAX_CONSECUTIVE_FAILURES) !== (state?.state === "open"))
+        issues.push("final_dispatch_reactive_circuit_state_count_mismatch");
+    for (const [field, value] of [
+        ["group_id", expected.groupId || expected.group_id],
+        ["group_session_id", expected.groupSessionId || expected.group_session_id],
+        ["task_id", expected.taskId || expected.task_id],
+        ["task_agent_session_id", expected.taskAgentSessionId || expected.task_agent_session_id],
+    ])
+        if (value && String(state?.[field] || "") !== String(value))
+            issues.push(`final_dispatch_reactive_circuit_${field}_mismatch`);
+    if (String(state?.state_checksum || "") !== finalDispatchReactiveCompactCircuitChecksum(state))
+        issues.push("final_dispatch_reactive_circuit_checksum_invalid");
+    return { valid: issues.length === 0, issues };
+}
+function inspectTaskAgentFinalDispatchReactiveCompactCircuitBreaker(sessionId, input = {}) {
+    const session = loadStore().sessions.find((item) => item.id === String(sessionId || ""));
+    if (!session)
+        return { state: "fail_closed", blocked: true, checksum_valid: false, issues: ["task_agent_session_missing"] };
+    const groupSessionId = String(input.groupSessionId || input.group_session_id || session.finalDispatchReactiveCompactCircuitBreaker?.group_session_id || "");
+    const raw = session.finalDispatchReactiveCompactCircuitBreaker || emptyFinalDispatchReactiveCompactCircuit(session, groupSessionId);
+    const verification = verifyTaskAgentFinalDispatchReactiveCompactCircuitBreaker(raw, {
+        groupId: input.groupId || input.group_id || session.groupId,
+        groupSessionId,
+        taskId: input.taskId || input.task_id || session.taskId,
+        taskAgentSessionId: session.id,
+    });
+    if (!verification.valid)
+        return { ...raw, state: "fail_closed", blocked: true, checksum_valid: false, issues: verification.issues };
+    return { ...raw, blocked: raw.state === "open", checksum_valid: true, issues: [] };
+}
+function recordTaskAgentFinalDispatchReactiveCompactCircuitOutcome(sessionId, input = {}) {
+    const id = String(sessionId || "").trim();
+    const outcome = String(input.outcome || "").trim();
+    const attemptId = String(input.attemptId || input.attempt_id || "").trim();
+    if (!id || !attemptId || !["failure", "success"].includes(outcome))
+        throw new Error("final dispatch reactive compact circuit outcome requires session, attempt, and success/failure");
+    return withTaskAgentSessionStoreLock(() => {
+        const store = loadStore();
+        const index = store.sessions.findIndex((item) => item.id === id);
+        if (index < 0)
+            throw new Error("task agent session missing for final dispatch reactive compact circuit");
+        const session = store.sessions[index];
+        const groupSessionId = String(input.groupSessionId || input.group_session_id || "").trim();
+        if (!groupSessionId.startsWith("gcs_"))
+            throw new Error("final dispatch reactive compact circuit requires exact gcs_* session");
+        const currentRaw = session.finalDispatchReactiveCompactCircuitBreaker || emptyFinalDispatchReactiveCompactCircuit(session, groupSessionId);
+        const verification = verifyTaskAgentFinalDispatchReactiveCompactCircuitBreaker(currentRaw, {
+            groupId: input.groupId || input.group_id || session.groupId,
+            groupSessionId,
+            taskId: input.taskId || input.task_id || session.taskId,
+            taskAgentSessionId: session.id,
+        });
+        if (!verification.valid && outcome !== "success")
+            return { ...currentRaw, state: "fail_closed", blocked: true, checksum_valid: false, issues: verification.issues, recorded: false };
+        if (verification.valid && currentRaw.last_attempt_id === attemptId)
+            return { ...currentRaw, blocked: currentRaw.state === "open", checksum_valid: true, issues: [], recorded: false, idempotent: true };
+        const now = String(input.at || input.recorded_at || new Date().toISOString());
+        const previousFailures = verification.valid ? Number(currentRaw.consecutive_failures || 0) : exports.FINAL_DISPATCH_REACTIVE_COMPACT_MAX_CONSECUTIVE_FAILURES;
+        const consecutiveFailures = outcome === "success" ? 0 : Math.min(exports.FINAL_DISPATCH_REACTIVE_COMPACT_MAX_CONSECUTIVE_FAILURES, previousFailures + 1);
+        const state = consecutiveFailures >= exports.FINAL_DISPATCH_REACTIVE_COMPACT_MAX_CONSECUTIVE_FAILURES ? "open" : "closed";
+        const event = {
+            event_id: `fdrcbe_${hashValue([session.groupId, groupSessionId, session.taskId, session.id, attemptId, outcome], 24)}`,
+            attempt_id: attemptId,
+            outcome,
+            reason: String(input.reason || (outcome === "success" ? "provider_accepted_recovered_prompt" : "reactive_compact_failed")).replace(/[^a-zA-Z0-9._:-]+/g, "_").slice(0, 120),
+            error_fingerprint: input.error ? hashValue(String(input.error), 24) : "",
+            consecutive_failures: consecutiveFailures,
+            state,
+            recorded_at: now,
+        };
+        const payload = {
+            schema: "ccm-final-dispatch-reactive-compact-circuit-breaker-v1",
+            version: 1,
+            group_id: session.groupId,
+            group_session_id: groupSessionId,
+            task_id: session.taskId,
+            task_agent_session_id: session.id,
+            scope_id: `${session.groupId}::${groupSessionId}::${session.taskId}::${session.id}`,
+            state,
+            consecutive_failures: consecutiveFailures,
+            max_consecutive_failures: exports.FINAL_DISPATCH_REACTIVE_COMPACT_MAX_CONSECUTIVE_FAILURES,
+            revision: Number(currentRaw.revision || 0) + 1,
+            opened_at: state === "open" ? String(currentRaw.opened_at || now) : "",
+            last_failure_at: outcome === "failure" ? now : String(currentRaw.last_failure_at || ""),
+            last_success_at: outcome === "success" ? now : String(currentRaw.last_success_at || ""),
+            last_attempt_id: attemptId,
+            recent_events: [...(Array.isArray(currentRaw.recent_events) ? currentRaw.recent_events : []), event].slice(-40),
+            updated_at: now,
+        };
+        const saved = { ...payload, state_checksum: finalDispatchReactiveCompactCircuitChecksum(payload) };
+        store.sessions[index] = { ...session, finalDispatchReactiveCompactCircuitBreaker: saved, lastUsedAt: now };
+        saveStore(store);
+        return { ...saved, blocked: state === "open", checksum_valid: true, issues: [], recorded: true, idempotent: false };
+    });
+}
 function bindTaskAgentMemoryContextSnapshot(sessionId, input = {}) {
     const id = String(sessionId || "").trim();
     if (!id)
@@ -780,6 +932,85 @@ function bindTaskAgentMemoryContextSnapshot(sessionId, input = {}) {
         store.sessions[index] = next;
         saveStore(store);
         return { session: next, snapshot, ref };
+    });
+}
+function attachTaskAgentFinalDispatchPayloadGate(sessionId, input = {}) {
+    const id = String(sessionId || "").trim();
+    const requestedSnapshotId = String(input.snapshotId || "").trim();
+    const gate = input.finalDispatchPayloadGate || input.final_dispatch_payload_gate || null;
+    const reactiveCompact = input.finalDispatchReactiveCompact || input.final_dispatch_reactive_compact || null;
+    const renderedPrompt = String(input.renderedPrompt || input.rendered_prompt || "");
+    if (!id || !gate || !renderedPrompt)
+        return { updated: false, reason: "missing_final_dispatch_binding_input" };
+    return withTaskAgentSessionStoreLock(() => {
+        const store = loadStore();
+        const index = store.sessions.findIndex((item) => item.id === id);
+        if (index < 0)
+            return { updated: false, reason: "task_agent_session_missing" };
+        const current = store.sessions[index];
+        const refs = normalizeMemorySnapshotRefs(current.memoryContextSnapshots);
+        const ref = refs.find(item => item.snapshotId === (requestedSnapshotId || current.memoryContextSnapshotId))
+            || refs.find(item => item.snapshotId === current.memoryContextSnapshotId);
+        const snapshotFile = String(ref?.snapshotPath || current.memoryContextSnapshotPath || "").trim();
+        const snapshot = safeReadJson(snapshotFile, null);
+        if (!snapshot || !verifyMemoryContextSnapshotChecksum(snapshot))
+            return { updated: false, reason: "memory_context_snapshot_invalid" };
+        const context = snapshot.context || {};
+        const packet = context.worker_context_packet || {};
+        const verification = (0, final_dispatch_payload_gate_1.verifyFinalWorkerDispatchPayloadGate)(gate, {
+            renderedPrompt,
+            groupId: snapshot.session?.group_id || current.groupId,
+            groupSessionId: capacityRevalidationGroupSessionId(packet),
+            taskId: snapshot.session?.task_id || current.taskId,
+            taskAgentSessionId: snapshot.session?.id || current.id,
+            workerContextPacketId: context.worker_context_packet_id || packet.packet_id || current.memoryContextPacketId,
+        });
+        if (!verification.valid)
+            return { updated: false, reason: "final_dispatch_payload_gate_invalid", issues: verification.issues };
+        const reactiveCompactVerification = reactiveCompact ? (0, final_dispatch_reactive_compact_1.verifyFinalDispatchReactiveCompactReceipt)(reactiveCompact, {
+            groupId: snapshot.session?.group_id || current.groupId,
+            groupSessionId: capacityRevalidationGroupSessionId(packet),
+            taskId: snapshot.session?.task_id || current.taskId,
+            taskAgentSessionId: snapshot.session?.id || current.id,
+            workerContextPacketId: context.worker_context_packet_id || packet.packet_id || current.memoryContextPacketId,
+        }) : { valid: true, issues: [] };
+        if (!reactiveCompactVerification.valid)
+            return { updated: false, reason: "final_dispatch_reactive_compact_invalid", issues: reactiveCompactVerification.issues };
+        const nextWithoutChecksum = {
+            ...snapshot,
+            context: {
+                ...context,
+                worker_context_packet: {
+                    ...packet,
+                    final_dispatch_payload_gate: gate,
+                    ...(reactiveCompact ? { final_dispatch_reactive_compact: reactiveCompact } : {}),
+                },
+                final_dispatch_payload_gate: gate,
+                ...(reactiveCompact ? { final_dispatch_reactive_compact: reactiveCompact } : {}),
+                final_dispatch_prompt_checksum: String(gate.prompt_checksum || ""),
+                final_dispatch_prompt_tokens: Number(gate.estimated_total_input_tokens || 0),
+                final_dispatch_prompt_chars: Number(gate.prompt_chars || renderedPrompt.length),
+                final_dispatch_gate_attached_at: new Date().toISOString(),
+                rendered_prompt_checksum: hashValue(renderedPrompt),
+                rendered_prompt_excerpt: renderedPrompt.slice(0, 4000),
+            },
+        };
+        delete nextWithoutChecksum.checksum;
+        delete nextWithoutChecksum.snapshot_file;
+        const serializedPayload = JSON.parse(JSON.stringify(nextWithoutChecksum));
+        const checksum = hashValue(serializedPayload);
+        const nextSnapshot = { ...serializedPayload, checksum, snapshot_file: snapshotFile };
+        writeJsonAtomic(snapshotFile, nextSnapshot);
+        const nextRefs = refs.map(item => item.snapshotId === snapshot.snapshot_id ? { ...item, checksum } : item);
+        const nextSession = {
+            ...current,
+            memoryContextSnapshotChecksum: current.memoryContextSnapshotId === snapshot.snapshot_id ? checksum : current.memoryContextSnapshotChecksum,
+            memoryContextSnapshots: nextRefs,
+            lastUsedAt: new Date().toISOString(),
+        };
+        store.sessions[index] = nextSession;
+        saveStore(store);
+        return { updated: true, session: nextSession, snapshot: nextSnapshot, gate, verification, reactiveCompact, reactiveCompactVerification };
     });
 }
 function recordTaskAgentMemoryContextDelivery(sessionId, input = {}) {
@@ -1703,6 +1934,55 @@ function buildTaskAgentMemorySnapshotRow(input) {
         && invocationEdge.task_id === String(loadedSession.task_id || input.session?.taskId || "")
         && invocationEdge.target_project === String(loadedSession.project || input.session?.project || "");
     const groupSessionMemoryBinding = context.group_session_memory_binding || extractGroupSessionMemoryBinding(memoryContext || {});
+    const finalDispatchPayloadGate = context.final_dispatch_payload_gate
+        || context.worker_context_packet?.final_dispatch_payload_gate
+        || null;
+    const finalDispatchPayloadGatePresent = finalDispatchPayloadGate?.schema === "ccm-final-worker-dispatch-payload-gate-v1";
+    const finalDispatchPayloadGateVerification = finalDispatchPayloadGatePresent
+        ? (0, final_dispatch_payload_gate_1.verifyFinalWorkerDispatchPayloadGate)(finalDispatchPayloadGate, {
+            groupId: String(loadedSession.group_id || input.session?.groupId || ""),
+            groupSessionId: String(groupSessionMemoryBinding?.groupSessionId || capacityRevalidationGroupSessionId(context.worker_context_packet || {})),
+            taskId: String(loadedSession.task_id || input.session?.taskId || ""),
+            taskAgentSessionId: String(loadedSession.id || input.session?.id || ""),
+            workerContextPacketId: String(context.worker_context_packet_id || context.worker_context_packet?.packet_id || ""),
+        })
+        : { valid: false, issues: ["final_dispatch_payload_gate_missing"] };
+    const finalDispatchPromptBound = finalDispatchPayloadGatePresent
+        && String(finalDispatchPayloadGate.prompt_checksum || "") === String(context.final_dispatch_prompt_checksum || "")
+        && Number(finalDispatchPayloadGate.estimated_total_input_tokens || 0) === Number(context.final_dispatch_prompt_tokens || 0)
+        && Number(finalDispatchPayloadGate.prompt_chars || 0) === Number(context.final_dispatch_prompt_chars || 0);
+    const finalDispatchStatus = String(finalDispatchPayloadGate?.status || "missing");
+    const finalDispatchReactiveCompact = context.final_dispatch_reactive_compact
+        || context.worker_context_packet?.final_dispatch_reactive_compact
+        || null;
+    const finalDispatchReactiveCompactPresent = finalDispatchReactiveCompact?.schema === "ccm-final-dispatch-reactive-compact-v1";
+    const finalDispatchReactiveCompactVerification = finalDispatchReactiveCompactPresent
+        ? (0, final_dispatch_reactive_compact_1.verifyFinalDispatchReactiveCompactReceipt)(finalDispatchReactiveCompact, {
+            groupId: String(loadedSession.group_id || input.session?.groupId || ""),
+            groupSessionId: String(groupSessionMemoryBinding?.groupSessionId || capacityRevalidationGroupSessionId(context.worker_context_packet || {})),
+            taskId: String(loadedSession.task_id || input.session?.taskId || ""),
+            taskAgentSessionId: String(loadedSession.id || input.session?.id || ""),
+            workerContextPacketId: String(context.worker_context_packet_id || context.worker_context_packet?.packet_id || ""),
+        })
+        : { valid: true, issues: [] };
+    const finalDispatchReactiveCompactBound = !finalDispatchReactiveCompactPresent
+        || String(finalDispatchReactiveCompact.recovered_prompt_checksum || "") === String(finalDispatchPayloadGate?.prompt_checksum || "")
+            && Number(finalDispatchReactiveCompact.recovered_prompt_tokens || 0) === Number(finalDispatchPayloadGate?.estimated_total_input_tokens || 0)
+            && (finalDispatchReactiveCompact.status !== "recovered" || finalDispatchStatus === "ready");
+    const finalDispatchReactiveCompactCircuitBreaker = session?.finalDispatchReactiveCompactCircuitBreaker || null;
+    const finalDispatchReactiveCompactCircuitBreakerPresent = finalDispatchReactiveCompactCircuitBreaker?.schema === "ccm-final-dispatch-reactive-compact-circuit-breaker-v1";
+    const finalDispatchReactiveCompactCircuitBreakerVerification = finalDispatchReactiveCompactCircuitBreakerPresent
+        ? verifyTaskAgentFinalDispatchReactiveCompactCircuitBreaker(finalDispatchReactiveCompactCircuitBreaker, {
+            groupId: String(loadedSession.group_id || session?.groupId || ""),
+            groupSessionId: String(finalDispatchPayloadGate?.group_session_id || capacityRevalidationGroupSessionId(context.worker_context_packet || {})),
+            taskId: String(loadedSession.task_id || session?.taskId || ""),
+            taskAgentSessionId: String(loadedSession.id || session?.id || ""),
+        })
+        : { valid: true, issues: [] };
+    const finalDispatchLineageProofRequired = finalDispatchStatus === "ready" && !!invocationEdgeId;
+    const finalDispatchLineageProofValid = !finalDispatchLineageProofRequired || !!invocationEdge
+        && invocationEdge.final_dispatch_payload_gate_dispatch_valid === true
+        && String(invocationEdge.final_dispatch_payload_gate_checksum || "") === String(finalDispatchPayloadGate?.gate_checksum || "");
     const gateIds = Array.isArray(context.gate_ids || input.ref?.gateIds)
         ? (context.gate_ids || input.ref?.gateIds).map((id) => String(id || "").trim()).filter(Boolean)
         : [];
@@ -1790,6 +2070,16 @@ function buildTaskAgentMemorySnapshotRow(input) {
         hardGaps.push({ reason: "快照 invocation lineage 与摘要胶囊不一致" });
     if (loaded && invocationLineageExpected && !invocationLedgerBound)
         hardGaps.push({ reason: "快照 invocation edge 在 durable lineage ledger 中缺失或身份不一致" });
+    if (loaded && finalDispatchPayloadGatePresent && !finalDispatchPayloadGateVerification.valid)
+        hardGaps.push({ reason: `最终 prompt 容量 gate 无效：${finalDispatchPayloadGateVerification.issues.join(",") || "unknown"}` });
+    if (loaded && finalDispatchPayloadGatePresent && !finalDispatchPromptBound)
+        hardGaps.push({ reason: "最终 prompt 容量 gate 未绑定快照 checksum/token/字符计量" });
+    if (loaded && finalDispatchReactiveCompactPresent && (!finalDispatchReactiveCompactVerification.valid || !finalDispatchReactiveCompactBound))
+        hardGaps.push({ reason: `最终 prompt reactive compact receipt 无效：${finalDispatchReactiveCompactVerification.issues.join(",") || "gate_binding_mismatch"}` });
+    if (loaded && finalDispatchReactiveCompactCircuitBreakerPresent && !finalDispatchReactiveCompactCircuitBreakerVerification.valid)
+        hardGaps.push({ reason: `最终 prompt reactive compact 断路器无效：${finalDispatchReactiveCompactCircuitBreakerVerification.issues.join(",") || "unknown"}` });
+    if (loaded && finalDispatchLineageProofRequired && !finalDispatchLineageProofValid)
+        hardGaps.push({ reason: "最终 prompt 容量 gate 缺少 lineage 派发前验证证明" });
     if (deliveryReceipt && !deliveryReceiptChecksumValid)
         hardGaps.push({ reason: "runner memory delivery receipt checksum 不匹配" });
     if (deliveryReceipt && !deliverySnapshotBound)
@@ -1806,6 +2096,10 @@ function buildTaskAgentMemorySnapshotRow(input) {
         warningGaps.push({ reason: "快照尚无 runner memory delivery receipt" });
     if (loaded && !gateIds.length)
         warningGaps.push({ reason: "快照未捕获 memory gate ids" });
+    if (loaded && !finalDispatchPayloadGatePresent)
+        warningGaps.push({ reason: "快照缺少最终 Provider prompt 容量 gate（旧快照兼容）" });
+    if (loaded && finalDispatchStatus === "recompact_required")
+        warningGaps.push({ reason: "最终 Provider prompt 已被容量 gate 拦截，必须重建或重新压缩" });
     if (input.source === "orphan_file")
         warningGaps.push({ reason: "快照文件未被 task-agent-sessions 索引引用" });
     if (stale)
@@ -1846,8 +2140,8 @@ function buildTaskAgentMemorySnapshotRow(input) {
         sessionBound,
         memoryContextPresent,
         groupSessionMemoryBinding,
-        groupSessionId: String(groupSessionMemoryBinding?.groupSessionId || ""),
-        groupSessionScopeId: String(groupSessionMemoryBinding?.scopeId || ""),
+        groupSessionId: String(groupSessionMemoryBinding?.groupSessionId || finalDispatchPayloadGate?.group_session_id || capacityRevalidationGroupSessionId(context.worker_context_packet || {}) || ""),
+        groupSessionScopeId: String(groupSessionMemoryBinding?.scopeId || (finalDispatchPayloadGate?.group_session_id ? `${String(loadedSession.group_id || session?.groupId || "")}::${String(finalDispatchPayloadGate.group_session_id)}` : "")),
         sessionMemoryChecksum: String(groupSessionMemoryBinding?.sessionMemoryChecksum || ""),
         sessionMemoryHasSummary: groupSessionMemoryBinding?.sessionMemoryHasSummary === true,
         postTurnSummaryExpected,
@@ -1871,6 +2165,39 @@ function buildTaskAgentMemorySnapshotRow(input) {
         invocationBranchId: String(invocationLineage?.branch_id || ""),
         invocationBranchKind: String(invocationLineage?.branch_kind || ""),
         invocationEdgeStatus: String(invocationEdge?.status || ""),
+        finalDispatchPayloadGatePresent,
+        finalDispatchPayloadGateValid: finalDispatchPayloadGateVerification.valid === true && finalDispatchPromptBound,
+        finalDispatchPayloadGateIssues: finalDispatchPayloadGateVerification.issues,
+        finalDispatchPayloadGateId: String(finalDispatchPayloadGate?.gate_id || ""),
+        finalDispatchPayloadGateChecksum: String(finalDispatchPayloadGate?.gate_checksum || ""),
+        finalDispatchStatus,
+        finalDispatchProvider: String(finalDispatchPayloadGate?.provider || ""),
+        finalDispatchModel: String(finalDispatchPayloadGate?.model || ""),
+        finalDispatchPromptTokens: Number(finalDispatchPayloadGate?.estimated_total_input_tokens || 0),
+        finalDispatchPromptChars: Number(finalDispatchPayloadGate?.prompt_chars || 0),
+        finalDispatchAutoCompactThreshold: Number(finalDispatchPayloadGate?.auto_compact_threshold || 0),
+        finalDispatchRemainingTokens: Number(finalDispatchPayloadGate?.remaining_tokens_before_auto_compact || 0),
+        finalDispatchPromptChecksum: String(finalDispatchPayloadGate?.prompt_checksum || ""),
+        finalDispatchPromptBound,
+        finalDispatchProviderCallAllowed: finalDispatchPayloadGate?.provider_call_allowed === true,
+        finalDispatchReactiveCompactPresent,
+        finalDispatchReactiveCompactValid: finalDispatchReactiveCompactVerification.valid === true && finalDispatchReactiveCompactBound,
+        finalDispatchReactiveCompactStatus: String(finalDispatchReactiveCompact?.status || ""),
+        finalDispatchReactiveCompactReceiptId: String(finalDispatchReactiveCompact?.receipt_id || ""),
+        finalDispatchReactiveCompactOriginalTokens: Number(finalDispatchReactiveCompact?.original_prompt_tokens || 0),
+        finalDispatchReactiveCompactRecoveredTokens: Number(finalDispatchReactiveCompact?.recovered_prompt_tokens || 0),
+        finalDispatchReactiveCompactContextBudgetTokens: Number(finalDispatchReactiveCompact?.recent_context_budget_tokens || 0),
+        finalDispatchReactiveCompactOmittedLines: Number(finalDispatchReactiveCompact?.omitted_context_lines || 0),
+        finalDispatchReactiveCompactBound,
+        finalDispatchReactiveCompactCircuitBreakerPresent,
+        finalDispatchReactiveCompactCircuitBreakerValid: finalDispatchReactiveCompactCircuitBreakerVerification.valid === true,
+        finalDispatchReactiveCompactCircuitState: String(finalDispatchReactiveCompactCircuitBreaker?.state || ""),
+        finalDispatchReactiveCompactCircuitBlocked: finalDispatchReactiveCompactCircuitBreaker?.state === "open",
+        finalDispatchReactiveCompactCircuitFailures: Number(finalDispatchReactiveCompactCircuitBreaker?.consecutive_failures || 0),
+        finalDispatchReactiveCompactCircuitRevision: Number(finalDispatchReactiveCompactCircuitBreaker?.revision || 0),
+        finalDispatchReactiveCompactCircuitChecksum: String(finalDispatchReactiveCompactCircuitBreaker?.state_checksum || ""),
+        finalDispatchLineageProofRequired,
+        finalDispatchLineageProofValid,
         postTurnSummaryCapsuleInvocationKind: String(postTurnSummaryCapsule?.invocation_kind || ""),
         deliveryReceiptId: String(deliveryReceipt?.receiptId || input.ref?.deliveryReceiptId || ""),
         deliveryReceiptFile,
@@ -1985,7 +2312,7 @@ function buildTaskAgentMemoryContextSnapshotInventory(filter = {}) {
     const byGroup = new Map();
     for (const row of rows) {
         const groupId = row.groupId || "unknown";
-        const current = byGroup.get(groupId) || { groupId, snapshotCount: 0, okCount: 0, warnCount: 0, failCount: 0, prunableCount: 0, staleCount: 0, deliveredCount: 0, deliveryMissingCount: 0, deliveryFailedCount: 0, compactHeadFenceRequiredCount: 0, compactHeadFenceValidCount: 0, compactHeadFenceStaleCount: 0, sessionLifecycleFenceRequiredCount: 0, sessionLifecycleFenceValidCount: 0, sessionLifecycleFenceStaleCount: 0, postTurnSummaryCapsuleCount: 0, postTurnSummaryCapsuleValidCount: 0, postTurnSummaryCapsuleMissingCount: 0, postTurnSummaryCapsuleInvalidCount: 0, postTurnSummaryCapsulePromptBoundCount: 0, postTurnSummaryCapsuleCompactEpochMismatchCount: 0, postTurnSummaryCapsuleLedgerHeadMismatchCount: 0, invocationEdgeCount: 0, invocationLineageBoundCount: 0, invocationLedgerMissingCount: 0, invocationBranchIds: new Set(), projects: new Set() };
+        const current = byGroup.get(groupId) || { groupId, snapshotCount: 0, okCount: 0, warnCount: 0, failCount: 0, prunableCount: 0, staleCount: 0, deliveredCount: 0, deliveryMissingCount: 0, deliveryFailedCount: 0, compactHeadFenceRequiredCount: 0, compactHeadFenceValidCount: 0, compactHeadFenceStaleCount: 0, sessionLifecycleFenceRequiredCount: 0, sessionLifecycleFenceValidCount: 0, sessionLifecycleFenceStaleCount: 0, postTurnSummaryCapsuleCount: 0, postTurnSummaryCapsuleValidCount: 0, postTurnSummaryCapsuleMissingCount: 0, postTurnSummaryCapsuleInvalidCount: 0, postTurnSummaryCapsulePromptBoundCount: 0, postTurnSummaryCapsuleCompactEpochMismatchCount: 0, postTurnSummaryCapsuleLedgerHeadMismatchCount: 0, invocationEdgeCount: 0, invocationLineageBoundCount: 0, invocationLedgerMissingCount: 0, finalDispatchGateReadyCount: 0, finalDispatchGateBlockedCount: 0, finalDispatchGateMissingCount: 0, finalDispatchGateInvalidCount: 0, finalDispatchPromptBoundCount: 0, finalDispatchLineageProofCount: 0, finalDispatchReactiveCompactRecoveredCount: 0, finalDispatchReactiveCompactBlockedCount: 0, finalDispatchReactiveCompactInvalidCount: 0, finalDispatchReactiveCompactCircuitOpenCount: 0, finalDispatchReactiveCompactCircuitFailureCount: 0, finalDispatchReactiveCompactCircuitInvalidCount: 0, invocationBranchIds: new Set(), projects: new Set() };
         current.snapshotCount += 1;
         if (row.status === "ok")
             current.okCount += 1;
@@ -2035,6 +2362,29 @@ function buildTaskAgentMemoryContextSnapshotInventory(filter = {}) {
             current.invocationLineageBoundCount += 1;
         if (row.invocationLineageExpected && !row.invocationLedgerBound)
             current.invocationLedgerMissingCount += 1;
+        if (row.finalDispatchStatus === "ready")
+            current.finalDispatchGateReadyCount += 1;
+        if (row.finalDispatchStatus === "recompact_required")
+            current.finalDispatchGateBlockedCount += 1;
+        if (!row.finalDispatchPayloadGatePresent)
+            current.finalDispatchGateMissingCount += 1;
+        if (row.finalDispatchPayloadGatePresent && !row.finalDispatchPayloadGateValid)
+            current.finalDispatchGateInvalidCount += 1;
+        if (row.finalDispatchPromptBound)
+            current.finalDispatchPromptBoundCount += 1;
+        if (row.finalDispatchLineageProofRequired && row.finalDispatchLineageProofValid)
+            current.finalDispatchLineageProofCount += 1;
+        if (row.finalDispatchReactiveCompactStatus === "recovered")
+            current.finalDispatchReactiveCompactRecoveredCount += 1;
+        if (row.finalDispatchReactiveCompactStatus === "blocked")
+            current.finalDispatchReactiveCompactBlockedCount += 1;
+        if (row.finalDispatchReactiveCompactPresent && !row.finalDispatchReactiveCompactValid)
+            current.finalDispatchReactiveCompactInvalidCount += 1;
+        if (row.finalDispatchReactiveCompactCircuitBlocked)
+            current.finalDispatchReactiveCompactCircuitOpenCount += 1;
+        current.finalDispatchReactiveCompactCircuitFailureCount += Number(row.finalDispatchReactiveCompactCircuitFailures || 0);
+        if (row.finalDispatchReactiveCompactCircuitBreakerPresent && !row.finalDispatchReactiveCompactCircuitBreakerValid)
+            current.finalDispatchReactiveCompactCircuitInvalidCount += 1;
         if (row.invocationBranchId)
             current.invocationBranchIds.add(row.invocationBranchId);
         if (row.project)
@@ -2099,6 +2449,19 @@ function buildTaskAgentMemoryContextSnapshotInventory(filter = {}) {
             invocationLineageExpectedCount: rows.filter(row => row.invocationLineageExpected).length,
             invocationLineageBoundCount: rows.filter(row => row.invocationLineageExpected && row.invocationLineageBound && row.invocationLedgerBound).length,
             invocationLedgerMissingCount: rows.filter(row => row.invocationLineageExpected && !row.invocationLedgerBound).length,
+            finalDispatchGateReadyCount: rows.filter(row => row.finalDispatchStatus === "ready").length,
+            finalDispatchGateBlockedCount: rows.filter(row => row.finalDispatchStatus === "recompact_required").length,
+            finalDispatchGateMissingCount: rows.filter(row => !row.finalDispatchPayloadGatePresent).length,
+            finalDispatchGateInvalidCount: rows.filter(row => row.finalDispatchPayloadGatePresent && !row.finalDispatchPayloadGateValid).length,
+            finalDispatchPromptBoundCount: rows.filter(row => row.finalDispatchPromptBound).length,
+            finalDispatchLineageProofRequiredCount: rows.filter(row => row.finalDispatchLineageProofRequired).length,
+            finalDispatchLineageProofCount: rows.filter(row => row.finalDispatchLineageProofRequired && row.finalDispatchLineageProofValid).length,
+            finalDispatchReactiveCompactRecoveredCount: rows.filter(row => row.finalDispatchReactiveCompactStatus === "recovered").length,
+            finalDispatchReactiveCompactBlockedCount: rows.filter(row => row.finalDispatchReactiveCompactStatus === "blocked").length,
+            finalDispatchReactiveCompactInvalidCount: rows.filter(row => row.finalDispatchReactiveCompactPresent && !row.finalDispatchReactiveCompactValid).length,
+            finalDispatchReactiveCompactCircuitOpenCount: rows.filter(row => row.finalDispatchReactiveCompactCircuitBlocked).length,
+            finalDispatchReactiveCompactCircuitFailureCount: rows.reduce((sum, row) => sum + Number(row.finalDispatchReactiveCompactCircuitFailures || 0), 0),
+            finalDispatchReactiveCompactCircuitInvalidCount: rows.filter(row => row.finalDispatchReactiveCompactCircuitBreakerPresent && !row.finalDispatchReactiveCompactCircuitBreakerValid).length,
             invocationBranchCount: new Set(rows.map(row => row.invocationBranchId).filter(Boolean)).size,
             staleCount: rows.filter(row => row.stale).length,
             prunableCount: rows.filter(row => row.prunable).length,

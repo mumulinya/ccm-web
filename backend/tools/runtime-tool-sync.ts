@@ -42,6 +42,7 @@ export interface RuntimeToolSyncAudit {
   permission_rules?: RuntimeToolPermissionRule[];
   invoked_skills?: RuntimeInvokedSkill[];
   authorization_readiness?: any;
+  internal_mcp?: Array<{ name: string; protected: true; state: "synced" | "config_error"; error?: string }>;
   dispatch_gate?: RuntimeToolDispatchGate;
   reusedSnapshot?: boolean;
   catalogRevision?: string;
@@ -118,6 +119,7 @@ export interface RuntimeToolReadiness {
 
 export interface RuntimeToolSyncOptions {
   authorizationReadiness?: any;
+  internalMcpServers?: Record<string, any>;
 }
 
 export interface RuntimeToolDispatchGate {
@@ -1459,6 +1461,7 @@ export function syncRuntimeToolsWithCatalog(
     skill_statuses: [],
     permission_rules: buildPermissionRules(requested),
     authorization_readiness: getAuthorizationReadiness(options.authorizationReadiness) || undefined,
+    internal_mcp: [],
     errors: [],
     warnings: [],
     timestamp: new Date().toISOString(),
@@ -1539,12 +1542,24 @@ export function syncRuntimeToolsWithCatalog(
             invalid_mcp_grants: audit.authorization_readiness.invalid_mcp_grants,
           }
           : null,
+        internalMcpServers: options.internalMcpServers || {},
         codexGateway: codexGateway ? { apiUrl: codexGateway.apiUrl, model: codexGateway.model } : null,
       }))
       .digest("hex")
       .slice(0, 16);
     audit.snapshotId = authorizationId;
     const mcpServers: Record<string, any> = {};
+    for (const [name, server] of Object.entries(options.internalMcpServers || {})) {
+      try {
+        if (!name.startsWith(CCM_MCP_PREFIX)) throw new Error("内部 MCP 名称必须使用 ccm__ 前缀");
+        if (!server || typeof server !== "object" || !String((server as any).command || "").trim()) throw new Error("内部 MCP 缺少 command");
+        mcpServers[name] = server;
+        audit.internal_mcp?.push({ name, protected: true, state: "synced" });
+      } catch (error: any) {
+        audit.errors.push(`内部 MCP ${name}: ${error?.message || String(error)}`);
+        audit.internal_mcp?.push({ name, protected: true, state: "config_error", error: error?.message || String(error) });
+      }
+    }
     for (const tool of selectedMcp) {
       const serverName = `${CCM_MCP_PREFIX}${safeSlug(tool.name)}`;
       const grants = mcpGrantsForServer(requested.mcp, tool.name);

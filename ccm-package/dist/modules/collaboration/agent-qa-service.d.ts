@@ -28,7 +28,7 @@ export declare function buildAgentQaUserPreview(qa?: any, kind?: string): {
         hide_internal_protocols: boolean;
     };
 };
-export declare function buildAgentQaMessage(kind: "question" | "answer" | "resume", qa: any, content?: string): {
+export declare function buildAgentQaMessage(kind: "question" | "progress" | "answer" | "resume", qa: any, content?: string): {
     id: string;
     role: string;
     agent: any;
@@ -39,7 +39,7 @@ export declare function buildAgentQaMessage(kind: "question" | "answer" | "resum
     task_id: any;
     qa: any;
 };
-export declare function emitAgentQaEvent(streamRes: any, kind: "question" | "answer" | "resume", qa: any, content?: string): void;
+export declare function emitAgentQaEvent(streamRes: any, kind: "question" | "progress" | "answer" | "resume", qa: any, content?: string): void;
 export declare function setAgentQaArbitration(id: string, decision: "accept" | "reject", reason?: string): any;
 export declare function appendAgentQaTrace(taskId: string, type: string, qa: any, message: string, status?: string, data?: any): string;
 export declare function writeAcceptedAgentQaToProjectMemory(qa: any): any;

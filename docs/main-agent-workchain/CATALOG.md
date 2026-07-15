@@ -1,6 +1,6 @@
 # Main Agent Workchain 文档总目录
 
-> 共 296 篇功能与验收记录。该文件由 `node scripts/generate-main-agent-doc-catalog.mjs` 生成。
+> 共 300 篇功能与验收记录。该文件由 `node scripts/generate-main-agent-doc-catalog.mjs` 生成。
 
 ## global-agent/conversation-and-ui (21)
 
@@ -103,8 +103,10 @@
 - [群聊实时流用户可见文本消毒 v1](./group-main-agent/conversation-and-ui/2026-07-07-group-live-stream-user-text-sanitizer-v1.md)
 - [群聊历史消息可见文本清理 v1](./group-main-agent/conversation-and-ui/2026-07-07-group-history-visible-message-sanitizer-v1.md)
 
-## group-main-agent/dispatch-and-coordination (18)
+## group-main-agent/dispatch-and-coordination (20)
 
+- [群聊主 Agent MCP 协作链 v1](./group-main-agent/dispatch-and-coordination/2026-07-15-group-coordinator-mcp-collaboration-v1.md)
+- [群聊主 Agent 并行原生会话协作链 v2](./group-main-agent/dispatch-and-coordination/2026-07-15-group-coordination-parallel-native-session-v2.md)
 - [群聊派发摘要状态口径 v1](./group-main-agent/dispatch-and-coordination/2026-07-09-group-dispatch-launch-status-v1.md)
 - [协作问答消息用户友好文案](./group-main-agent/dispatch-and-coordination/2026-07-09-agent-qa-message-friendly-copy-v1.md)
 - [协调者复盘可见文本清洗 v1](./group-main-agent/dispatch-and-coordination/2026-07-08-coordinator-visible-summary-sanitizer-v1.md)
@@ -208,6 +210,11 @@
 ## operations-and-integrations/terminal (1)
 
 - [生产级内置终端工作区 v1](./operations-and-integrations/terminal/2026-07-14-production-terminal-workbench-v1.md)
+
+## operations-and-integrations/tool-configuration (2)
+
+- [主 Agent 内部工作流 MCP 套件 v1](./operations-and-integrations/tool-configuration/2026-07-15-internal-workflow-mcp-suite-v1.md)
+- [内部 MCP 随包注册与只读管理 v1](./operations-and-integrations/tool-configuration/2026-07-15-internal-mcp-readonly-catalog-v1.md)
 
 ## shared-workchain/architecture-and-validation (7)
 

@@ -20,6 +20,7 @@ export declare class McpClient {
     private buffer;
     private connected;
     private serverName;
+    private serverInstructions;
     private tools;
     private stderrBuffer;
     private lastError;
@@ -38,11 +39,13 @@ export declare class McpClient {
     callTool(name: string, args: any): Promise<McpToolResult>;
     isConnected(): boolean;
     getServerName(): string;
+    getServerInstructions(): string;
     getDiagnostics(): {
         lastError: string;
         stderr: string;
         elicitationRequired: boolean;
         elicitationMessage: string;
+        serverInstructions: string;
     };
     disconnect(): void;
 }

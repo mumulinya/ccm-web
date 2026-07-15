@@ -12,6 +12,7 @@ export declare function commitGroupCompactHead(input?: any): {
     head: any;
     file: any;
 };
+export declare function reconcileGroupCompactHeadFromMemory(input?: any): any;
 export declare function validateGroupCompactHeadBinding(input?: any): {
     schema: string;
     valid: boolean;

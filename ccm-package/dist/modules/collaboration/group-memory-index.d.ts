@@ -137,10 +137,14 @@ export declare function recordGroupTypedMemoryPressureRecallUsageLedger(groupId:
     skipped?: undefined;
     reason?: undefined;
 };
-export declare function readPostCompactCompletionMemoryPreservationClosureUsageLedger(groupId: string): any;
+export declare function readPostCompactCompletionMemoryPreservationClosureUsageLedger(groupId: string, options?: any): any;
 export declare function recordPostCompactCompletionMemoryPreservationClosureUsage(groupId: string, input?: any): {
     schema: string;
     groupId: string;
+    sourceGroupId: string;
+    groupSessionId: string;
+    typedScopeId: string;
+    exactSession: boolean;
     file: any;
     skipped: boolean;
     reason: string;
@@ -152,6 +156,10 @@ export declare function recordPostCompactCompletionMemoryPreservationClosureUsag
 } | {
     schema: string;
     groupId: string;
+    sourceGroupId: string;
+    groupSessionId: string;
+    typedScopeId: string;
+    exactSession: boolean;
     file: any;
     recordedCount: any;
     duplicateCount: number;
@@ -165,6 +173,10 @@ export declare function buildPostCompactCompletionMemoryPreservationClosureUsage
     schema: string;
     version: number;
     groupId: string;
+    sourceGroupId: string;
+    groupSessionId: string;
+    typedScopeId: string;
+    exactSession: boolean;
     targetProject: string;
     file: any;
     entryCount: any;
@@ -1151,11 +1163,15 @@ export declare function inspectPostCompactCompletionMemoryPreservationClosureCon
     entries: any;
     valid_receipt_count: any;
     invalid_receipt_count: any;
+    file: string;
+    updated_at: any;
+    source_group_id: string;
+    group_session_id: string;
+    typed_scope_id: string;
+    exact_session: boolean;
     schema: string;
     version: number;
     group_id: string;
-    file: string;
-    updated_at: any;
 };
 export declare function getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryQuarantineFile(groupId: string): string;
 export declare function verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryGenerations(groupId: string): {
@@ -1491,7 +1507,7 @@ export declare function runPostCompactCompletionMemoryPreservationClosureConflic
     pass: boolean;
     checks: {
         readyBriefInjectedIntoGroupMainAndCoordinator: boolean;
-        globalAgentSeesGroupScopedReadOnlySummary: boolean;
+        globalAgentExcludesGroupScopedRepairContext: boolean;
         globalAgentCannotClaimOrAssign: boolean;
         lifecycleTransitionsPendingClaimedDispatched: boolean;
         exactAssignmentBindingCreated: boolean;
@@ -2270,8 +2286,6 @@ export declare function runPostCompactCompletionMemoryPreservationClosureConflic
     previous_ledger_checksum: any;
     retention: any;
     health: {
-        schema: string;
-        group_id: string;
         generated_at: string;
         pending_count: number;
         delivered_pending_count: number;
@@ -2288,7 +2302,6 @@ export declare function runPostCompactCompletionMemoryPreservationClosureConflic
         unprotected_repeated_unseen_count: number;
         retention: any;
         rows: {
-            group_id: string;
             audience: any;
             notification_id: any;
             state_fingerprint: any;
@@ -2304,6 +2317,11 @@ export declare function runPostCompactCompletionMemoryPreservationClosureConflic
             repeated_unseen: boolean;
             advisory_only: boolean;
             should_create_real_task: boolean;
+            source_group_id: string;
+            group_session_id: string;
+            typed_scope_id: string;
+            exact_session: boolean;
+            group_id: string;
         }[];
         policy: string;
         destructive_action_authorized: boolean;
@@ -2311,6 +2329,12 @@ export declare function runPostCompactCompletionMemoryPreservationClosureConflic
         created_approval_receipt_count: number;
         deleted_count: number;
         file: string;
+        source_group_id: string;
+        group_session_id: string;
+        typed_scope_id: string;
+        exact_session: boolean;
+        schema: string;
+        group_id: string;
     };
     destructive_action_authorized: boolean;
     created_task_count: number;
@@ -2320,8 +2344,6 @@ export declare function runPostCompactCompletionMemoryPreservationClosureConflic
     reason?: undefined;
 };
 export declare function recordPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDelivery(groupId: string, audience: string, notifications?: any[], input?: any): {
-    schema: string;
-    group_id: string;
     audience: string;
     context_id: string;
     consumer_session_id: string;
@@ -2331,10 +2353,14 @@ export declare function recordPostCompactCompletionMemoryPreservationClosureConf
     created_task_count: number;
     created_approval_receipt_count: number;
     deleted_count: number;
-};
-export declare function inspectPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryHealth(groupId: string, options?: any): {
+    source_group_id: string;
+    group_session_id: string;
+    typed_scope_id: string;
+    exact_session: boolean;
     schema: string;
     group_id: string;
+};
+export declare function inspectPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryHealth(groupId: string, options?: any): {
     generated_at: string;
     pending_count: number;
     delivered_pending_count: number;
@@ -2351,7 +2377,6 @@ export declare function inspectPostCompactCompletionMemoryPreservationClosureCon
     unprotected_repeated_unseen_count: number;
     retention: any;
     rows: {
-        group_id: string;
         audience: any;
         notification_id: any;
         state_fingerprint: any;
@@ -2367,6 +2392,11 @@ export declare function inspectPostCompactCompletionMemoryPreservationClosureCon
         repeated_unseen: boolean;
         advisory_only: boolean;
         should_create_real_task: boolean;
+        source_group_id: string;
+        group_session_id: string;
+        typed_scope_id: string;
+        exact_session: boolean;
+        group_id: string;
     }[];
     policy: string;
     destructive_action_authorized: boolean;
@@ -2374,10 +2404,14 @@ export declare function inspectPostCompactCompletionMemoryPreservationClosureCon
     created_approval_receipt_count: number;
     deleted_count: number;
     file: string;
-};
-export declare function buildPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationContext(groupId: string, audience: string, options?: any): {
+    source_group_id: string;
+    group_session_id: string;
+    typed_scope_id: string;
+    exact_session: boolean;
     schema: string;
     group_id: string;
+};
+export declare function buildPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationContext(groupId: string, audience: string, options?: any): {
     audience: string;
     generated_at: string;
     pending_count: any;
@@ -2390,8 +2424,6 @@ export declare function buildPostCompactCompletionMemoryPreservationClosureConfl
     notification_file: string;
     receipt_file: string;
     delivery: {
-        schema: string;
-        group_id: string;
         audience: string;
         context_id: string;
         consumer_session_id: string;
@@ -2401,14 +2433,23 @@ export declare function buildPostCompactCompletionMemoryPreservationClosureConfl
         created_task_count: number;
         created_approval_receipt_count: number;
         deleted_count: number;
+        source_group_id: string;
+        group_session_id: string;
+        typed_scope_id: string;
+        exact_session: boolean;
+        schema: string;
+        group_id: string;
     };
+    source_group_id: string;
+    group_session_id: string;
+    typed_scope_id: string;
+    exact_session: boolean;
+    schema: string;
+    group_id: string;
 };
 export declare function runPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenance(groupId: string, options?: any): {
     file: string;
     ledger: {
-        schema: string;
-        version: number;
-        group_id: string;
         controller_policy: string;
         entries: any[];
         latest_run: {
@@ -2441,7 +2482,6 @@ export declare function runPostCompactCompletionMemoryPreservationClosureConflic
                 reason: string;
             };
             next_run_at: string;
-            group_id: string;
             trigger: string;
             at: string;
             current_manifest_checksum: any;
@@ -2453,12 +2493,24 @@ export declare function runPostCompactCompletionMemoryPreservationClosureConflic
             eligible_count: number;
             protected_open_repair_count: number;
             grace_period_ms: number;
+            source_group_id: string;
+            group_session_id: string;
+            typed_scope_id: string;
+            exact_session: boolean;
+            group_id: string;
             schema: string;
             version: number;
             run_id: string;
         };
         next_run_at: string;
         updated_at: string;
+        source_group_id: string;
+        group_session_id: string;
+        typed_scope_id: string;
+        exact_session: boolean;
+        schema: string;
+        version: number;
+        group_id: string;
     };
     generation: {
         schema: string;
@@ -2567,9 +2619,6 @@ export declare function runPostCompactCompletionMemoryPreservationClosureConflic
     notifications: {
         file: string;
         stateFingerprint: string;
-        schema: string;
-        version: number;
-        group_id: string;
         entries: any[];
         notification_count: number;
         new_notification_count: number;
@@ -2578,6 +2627,13 @@ export declare function runPostCompactCompletionMemoryPreservationClosureConflic
         pinned_current_notification_count: number;
         retention_policy: string;
         updated_at: string;
+        source_group_id: string;
+        group_session_id: string;
+        typed_scope_id: string;
+        exact_session: boolean;
+        schema: string;
+        version: number;
+        group_id: string;
     };
     mode: string;
     destructive_action_authorized: boolean;
@@ -2608,7 +2664,6 @@ export declare function runPostCompactCompletionMemoryPreservationClosureConflic
         reason: string;
     };
     next_run_at: string;
-    group_id: string;
     trigger: string;
     at: string;
     current_manifest_checksum: any;
@@ -2620,6 +2675,11 @@ export declare function runPostCompactCompletionMemoryPreservationClosureConflic
     eligible_count: number;
     protected_open_repair_count: number;
     grace_period_ms: number;
+    source_group_id: string;
+    group_session_id: string;
+    typed_scope_id: string;
+    exact_session: boolean;
+    group_id: string;
     schema: string;
     version: number;
     run_id: string;
@@ -2636,8 +2696,6 @@ export declare function inspectPostCompactCompletionMemoryPreservationClosureCon
     notifications: any;
     notificationCount: number;
     notificationDeliveryHealth: {
-        schema: string;
-        group_id: string;
         generated_at: string;
         pending_count: number;
         delivered_pending_count: number;
@@ -2654,7 +2712,6 @@ export declare function inspectPostCompactCompletionMemoryPreservationClosureCon
         unprotected_repeated_unseen_count: number;
         retention: any;
         rows: {
-            group_id: string;
             audience: any;
             notification_id: any;
             state_fingerprint: any;
@@ -2670,6 +2727,11 @@ export declare function inspectPostCompactCompletionMemoryPreservationClosureCon
             repeated_unseen: boolean;
             advisory_only: boolean;
             should_create_real_task: boolean;
+            source_group_id: string;
+            group_session_id: string;
+            typed_scope_id: string;
+            exact_session: boolean;
+            group_id: string;
         }[];
         policy: string;
         destructive_action_authorized: boolean;
@@ -2677,6 +2739,12 @@ export declare function inspectPostCompactCompletionMemoryPreservationClosureCon
         created_approval_receipt_count: number;
         deleted_count: number;
         file: string;
+        source_group_id: string;
+        group_session_id: string;
+        typed_scope_id: string;
+        exact_session: boolean;
+        schema: string;
+        group_id: string;
     };
     latestRun: any;
     nextRunAt: any;
@@ -2769,10 +2837,14 @@ export declare function inspectPostCompactCompletionMemoryPreservationClosureCon
     };
     gaps: string[];
 };
+export declare function listPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceScopeIds(groupIds?: string[], options?: any): string[];
 export declare function runDuePostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenance(groupIds?: string[], options?: any): {
     schema: string;
     at: string;
     groupCount: number;
+    rootGroupCount: number;
+    exactSessionCount: number;
+    legacyScopeCount: number;
     dueCount: number;
     skippedCount: number;
     destructiveActionAuthorized: boolean;
@@ -2791,9 +2863,6 @@ export declare function runDuePostCompactCompletionMemoryPreservationClosureConf
         run: {
             file: string;
             ledger: {
-                schema: string;
-                version: number;
-                group_id: string;
                 controller_policy: string;
                 entries: any[];
                 latest_run: {
@@ -2826,7 +2895,6 @@ export declare function runDuePostCompactCompletionMemoryPreservationClosureConf
                         reason: string;
                     };
                     next_run_at: string;
-                    group_id: string;
                     trigger: string;
                     at: string;
                     current_manifest_checksum: any;
@@ -2838,12 +2906,24 @@ export declare function runDuePostCompactCompletionMemoryPreservationClosureConf
                     eligible_count: number;
                     protected_open_repair_count: number;
                     grace_period_ms: number;
+                    source_group_id: string;
+                    group_session_id: string;
+                    typed_scope_id: string;
+                    exact_session: boolean;
+                    group_id: string;
                     schema: string;
                     version: number;
                     run_id: string;
                 };
                 next_run_at: string;
                 updated_at: string;
+                source_group_id: string;
+                group_session_id: string;
+                typed_scope_id: string;
+                exact_session: boolean;
+                schema: string;
+                version: number;
+                group_id: string;
             };
             generation: {
                 schema: string;
@@ -2952,9 +3032,6 @@ export declare function runDuePostCompactCompletionMemoryPreservationClosureConf
             notifications: {
                 file: string;
                 stateFingerprint: string;
-                schema: string;
-                version: number;
-                group_id: string;
                 entries: any[];
                 notification_count: number;
                 new_notification_count: number;
@@ -2963,6 +3040,13 @@ export declare function runDuePostCompactCompletionMemoryPreservationClosureConf
                 pinned_current_notification_count: number;
                 retention_policy: string;
                 updated_at: string;
+                source_group_id: string;
+                group_session_id: string;
+                typed_scope_id: string;
+                exact_session: boolean;
+                schema: string;
+                version: number;
+                group_id: string;
             };
             mode: string;
             destructive_action_authorized: boolean;
@@ -2993,7 +3077,6 @@ export declare function runDuePostCompactCompletionMemoryPreservationClosureConf
                 reason: string;
             };
             next_run_at: string;
-            group_id: string;
             trigger: string;
             at: string;
             current_manifest_checksum: any;
@@ -3005,6 +3088,11 @@ export declare function runDuePostCompactCompletionMemoryPreservationClosureConf
             eligible_count: number;
             protected_open_repair_count: number;
             grace_period_ms: number;
+            source_group_id: string;
+            group_session_id: string;
+            typed_scope_id: string;
+            exact_session: boolean;
+            group_id: string;
             schema: string;
             version: number;
             run_id: string;
@@ -3059,10 +3147,31 @@ export declare function buildCrossGroupProviderDispatchReliabilitySignal(groupId
     failed_count: number;
     passed_count: number;
     source_group_count: number;
+    source_session_count: number;
+    source_ledger_count: number;
+    fresh_source_group_count: number;
     active_failure_source_count: number;
     half_life_days: number;
     recovery_credit: number;
     minimum_source_groups: number;
+    promotion_contract: {
+        schema: string;
+        status: string;
+        exact_session_evidence_preserved: boolean;
+        distinct_root_groups_required: number;
+        distinct_root_groups_observed: number;
+        distinct_source_sessions_observed: number;
+        source_ledgers_observed: number;
+        fresh_root_groups_required: number;
+        fresh_root_groups_observed: number;
+        minimum_source_weighted_evidence: number;
+        minimum_total_weighted_evidence: number;
+        maximum_single_group_evidence_share: number;
+        observed_maximum_single_group_evidence_share: number;
+        time_decay_applied: boolean;
+        privacy_redaction_required: boolean;
+        same_group_sessions_count_as_one_group: boolean;
+    };
     actionable: boolean;
     guidance_only: boolean;
     local_policy_override_allowed: boolean;
@@ -3090,9 +3199,15 @@ export declare function buildGlobalProviderDispatchReliabilitySignals(options?: 
     source_provenance: {
         schema: string;
         source_ledger_count: number;
+        source_group_count: number;
+        source_session_count: number;
+        exact_session_ledger_count: number;
         attempt_count: number;
+        maximum_group_attempt_share: number;
         latest_source_updated_at: any;
         generation_checksum: string;
+        source_group_diversity_checksum: string;
+        source_keys_hashed: boolean;
         group_ids_included: boolean;
         project_names_included: boolean;
         private_evidence_included: boolean;
@@ -3112,10 +3227,31 @@ export declare function buildGlobalProviderDispatchReliabilitySignals(options?: 
         failed_count: number;
         passed_count: number;
         source_group_count: number;
+        source_session_count: number;
+        source_ledger_count: number;
+        fresh_source_group_count: number;
         active_failure_source_count: number;
         half_life_days: number;
         recovery_credit: number;
         minimum_source_groups: number;
+        promotion_contract: {
+            schema: string;
+            status: string;
+            exact_session_evidence_preserved: boolean;
+            distinct_root_groups_required: number;
+            distinct_root_groups_observed: number;
+            distinct_source_sessions_observed: number;
+            source_ledgers_observed: number;
+            fresh_root_groups_required: number;
+            fresh_root_groups_observed: number;
+            minimum_source_weighted_evidence: number;
+            minimum_total_weighted_evidence: number;
+            maximum_single_group_evidence_share: number;
+            observed_maximum_single_group_evidence_share: number;
+            time_decay_applied: boolean;
+            privacy_redaction_required: boolean;
+            same_group_sessions_count_as_one_group: boolean;
+        };
         actionable: boolean;
         guidance_only: boolean;
         local_policy_override_allowed: boolean;
@@ -3218,10 +3354,31 @@ export declare function buildPressureProvenancePreDispatchComplianceDispatchPoli
         failed_count: number;
         passed_count: number;
         source_group_count: number;
+        source_session_count: number;
+        source_ledger_count: number;
+        fresh_source_group_count: number;
         active_failure_source_count: number;
         half_life_days: number;
         recovery_credit: number;
         minimum_source_groups: number;
+        promotion_contract: {
+            schema: string;
+            status: string;
+            exact_session_evidence_preserved: boolean;
+            distinct_root_groups_required: number;
+            distinct_root_groups_observed: number;
+            distinct_source_sessions_observed: number;
+            source_ledgers_observed: number;
+            fresh_root_groups_required: number;
+            fresh_root_groups_observed: number;
+            minimum_source_weighted_evidence: number;
+            minimum_total_weighted_evidence: number;
+            maximum_single_group_evidence_share: number;
+            observed_maximum_single_group_evidence_share: number;
+            time_decay_applied: boolean;
+            privacy_redaction_required: boolean;
+            same_group_sessions_count_as_one_group: boolean;
+        };
         actionable: boolean;
         guidance_only: boolean;
         local_policy_override_allowed: boolean;

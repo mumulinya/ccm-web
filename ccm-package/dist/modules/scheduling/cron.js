@@ -33,6 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.deleteConflictResolutionMemoryMaintenanceSchedulerSessionState = deleteConflictResolutionMemoryMaintenanceSchedulerSessionState;
 exports.runConflictResolutionMemoryMaintenanceSchedulerTick = runConflictResolutionMemoryMaintenanceSchedulerTick;
 exports.runCronDailyDevProtocolSelfTest = runCronDailyDevProtocolSelfTest;
 exports.syncCronTaskStatus = syncCronTaskStatus;
@@ -69,6 +70,60 @@ function readConflictResolutionMaintenanceSchedulerState(file = CONFLICT_RESOLUT
 function writeConflictResolutionMaintenanceSchedulerState(value, file = CONFLICT_RESOLUTION_MAINTENANCE_SCHEDULER_STATE_FILE) {
     (0, atomic_json_file_1.writeJsonAtomic)(file, value);
 }
+function conflictResolutionMaintenanceSchedulerScopeIdentity(scopeId) {
+    const value = String(scopeId || "").trim();
+    const match = value.match(/^(.*)--(gcs_[a-zA-Z0-9._-]+)$/);
+    return {
+        typedScopeId: value,
+        rootGroupId: match?.[1] || value,
+        groupSessionId: match?.[2] || "",
+        exactSession: !!match,
+    };
+}
+function deleteConflictResolutionMemoryMaintenanceSchedulerSessionState(groupId, groupSessionId, options = {}) {
+    const rootGroupId = String(groupId || "").trim();
+    const exactSessionId = String(groupSessionId || "").trim();
+    if (!rootGroupId || !/^gcs_[a-zA-Z0-9._-]+$/.test(exactSessionId))
+        throw new Error("exact group session is required for maintenance scheduler cleanup");
+    const typedScopeId = `${rootGroupId}--${exactSessionId}`;
+    const stateFile = String(options.stateFile || options.state_file || CONFLICT_RESOLUTION_MAINTENANCE_SCHEDULER_STATE_FILE);
+    if (options.stateLockHeld !== true) {
+        return (0, atomic_json_file_1.withFileLock)(stateFile, () => deleteConflictResolutionMemoryMaintenanceSchedulerSessionState(rootGroupId, exactSessionId, {
+            ...options,
+            stateFile,
+            stateLockHeld: true,
+        }), {
+            timeoutMs: options.stateLockTimeoutMs || options.state_lock_timeout_ms,
+            staleMs: options.stateLockStaleMs || options.state_lock_stale_ms,
+        });
+    }
+    const state = readConflictResolutionMaintenanceSchedulerState(stateFile);
+    const groups = { ...(state.groups || {}) };
+    const existed = Object.prototype.hasOwnProperty.call(groups, typedScopeId);
+    delete groups[typedScopeId];
+    const value = {
+        schema: "ccm-conflict-resolution-maintenance-scheduler-state-v1",
+        version: 1,
+        groups,
+        updated_at: String(options.at || new Date().toISOString()),
+    };
+    if (existed || options.persistEmpty === true || options.persist_empty === true) {
+        writeConflictResolutionMaintenanceSchedulerState(value, stateFile);
+        try {
+            fs.copyFileSync(stateFile, `${stateFile}.bak`);
+        }
+        catch { }
+    }
+    return {
+        schema: "ccm-conflict-resolution-maintenance-scheduler-session-cleanup-v1",
+        source_group_id: rootGroupId,
+        group_session_id: exactSessionId,
+        typed_scope_id: typedScopeId,
+        removed: existed,
+        remaining_scope_count: Object.keys(groups).length,
+        state_file: stateFile,
+    };
+}
 function runConflictResolutionMemoryMaintenanceSchedulerTick(options = {}) {
     const stateFile = String(options.stateFile || options.state_file || CONFLICT_RESOLUTION_MAINTENANCE_SCHEDULER_STATE_FILE);
     if (options.persist !== false && options.stateLockHeld !== true) {
@@ -81,9 +136,24 @@ function runConflictResolutionMemoryMaintenanceSchedulerTick(options = {}) {
     const atMs = Date.parse(at);
     const state = readConflictResolutionMaintenanceSchedulerState(stateFile);
     const explicitGroupIds = Array.isArray(options.groupIds || options.group_ids) ? (options.groupIds || options.group_ids) : [];
-    const groupIds = [...new Set((explicitGroupIds.length ? explicitGroupIds : (0, storage_1.loadGroups)().map((group) => group.id || group.groupId))
+    const rootGroupIds = [...new Set((explicitGroupIds.length ? explicitGroupIds : (0, storage_1.loadGroups)().map((group) => group.id || group.groupId))
             .map((value) => String(value || "").trim())
-            .filter((groupId) => groupId && fs.existsSync((0, group_memory_index_1.getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveManifestFile)(groupId))))];
+            .filter(Boolean))];
+    const groupIds = (0, group_memory_index_1.listPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceScopeIds)(rootGroupIds, {
+        maxScopes: options.maxScopes || options.max_scopes || 1000,
+    });
+    const activeScopeIds = new Set(groupIds);
+    const selectedRootGroupIds = new Set(rootGroupIds.map(value => conflictResolutionMaintenanceSchedulerScopeIdentity(value).rootGroupId));
+    const prunedScopeIds = [];
+    const nextStateGroups = { ...(state.groups || {}) };
+    for (const scopeId of Object.keys(nextStateGroups)) {
+        const identity = conflictResolutionMaintenanceSchedulerScopeIdentity(scopeId);
+        if (!identity.exactSession || !selectedRootGroupIds.has(identity.rootGroupId) || activeScopeIds.has(scopeId))
+            continue;
+        delete nextStateGroups[scopeId];
+        prunedScopeIds.push(scopeId);
+    }
+    state.groups = nextStateGroups;
     const tickWindowMs = Math.max(60_000, Number(options.tickWindowMs || options.tick_window_ms || 5 * 60 * 1000));
     const baseBackoffMs = Math.max(1_000, Number(options.baseBackoffMs || options.base_backoff_ms || 60_000));
     const maxBackoffMs = Math.max(baseBackoffMs, Number(options.maxBackoffMs || options.max_backoff_ms || 6 * 60 * 60 * 1000));
@@ -114,6 +184,7 @@ function runConflictResolutionMemoryMaintenanceSchedulerTick(options = {}) {
     const rows = [];
     for (const groupId of groupIds) {
         const groupState = state.groups?.[groupId] || {};
+        const scopeIdentity = conflictResolutionMaintenanceSchedulerScopeIdentity(groupId);
         const nextRetryMs = Date.parse(String(groupState.next_retry_at || ""));
         if (Number.isFinite(nextRetryMs) && Number.isFinite(atMs) && atMs < nextRetryMs) {
             rows.push({ groupId, status: "backoff", skipped: true, nextRetryAt: groupState.next_retry_at, destructiveActionAuthorized: false, deletedCount: 0 });
@@ -125,7 +196,16 @@ function runConflictResolutionMemoryMaintenanceSchedulerTick(options = {}) {
             scope: "conflict-resolution-memory-maintenance",
             key: operationKey,
             leaseMs: Math.max(30_000, Math.min(tickWindowMs, 10 * 60 * 1000)),
-            metadata: { group_id: groupId, maintenance_window: windowKey, scheduler: true, destructive_action_authorized: false },
+            metadata: {
+                group_id: groupId,
+                source_group_id: scopeIdentity.rootGroupId,
+                group_session_id: scopeIdentity.groupSessionId,
+                typed_scope_id: scopeIdentity.typedScopeId,
+                exact_session: scopeIdentity.exactSession,
+                maintenance_window: windowKey,
+                scheduler: true,
+                destructive_action_authorized: false,
+            },
         });
         if (!operation.acquired) {
             rows.push({
@@ -228,6 +308,10 @@ function runConflictResolutionMemoryMaintenanceSchedulerTick(options = {}) {
                 delivery_cleanup_commit_repair_resolution_compacted_transaction_count: Number(telemetryCleanupCommitRepairResolutionTransactions?.compacted_transaction_count || 0),
             });
             state.groups = { ...(state.groups || {}), [groupId]: {
+                    source_group_id: scopeIdentity.rootGroupId,
+                    group_session_id: scopeIdentity.groupSessionId,
+                    typed_scope_id: scopeIdentity.typedScopeId,
+                    exact_session: scopeIdentity.exactSession,
                     failure_count: 0,
                     next_retry_at: "",
                     last_success_at: at,
@@ -243,6 +327,10 @@ function runConflictResolutionMemoryMaintenanceSchedulerTick(options = {}) {
             const nextRetryAt = new Date((Number.isFinite(atMs) ? atMs : Date.now()) + backoffMs).toISOString();
             state.groups = { ...(state.groups || {}), [groupId]: {
                     ...groupState,
+                    source_group_id: scopeIdentity.rootGroupId,
+                    group_session_id: scopeIdentity.groupSessionId,
+                    typed_scope_id: scopeIdentity.typedScopeId,
+                    exact_session: scopeIdentity.exactSession,
                     failure_count: failureCount,
                     next_retry_at: nextRetryAt,
                     last_failure_at: at,
@@ -265,6 +353,10 @@ function runConflictResolutionMemoryMaintenanceSchedulerTick(options = {}) {
         schema: "ccm-conflict-resolution-maintenance-scheduler-tick-v1",
         at,
         groupCount: groupIds.length,
+        exactSessionCount: groupIds.filter(groupId => conflictResolutionMaintenanceSchedulerScopeIdentity(groupId).exactSession).length,
+        legacyScopeCount: groupIds.filter(groupId => !conflictResolutionMaintenanceSchedulerScopeIdentity(groupId).exactSession).length,
+        prunedScopeCount: prunedScopeIds.length,
+        prunedScopeIds,
         completedCount: rows.filter(row => row.status === "completed").length,
         notDueCount: rows.filter(row => row.status === "not_due").length,
         duplicateSuppressedCount: rows.filter(row => row.status === "duplicate_suppressed").length,

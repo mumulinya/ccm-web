@@ -18,6 +18,7 @@ export class McpClient {
   private buffer = "";
   private connected = false;
   private serverName = "";
+  private serverInstructions = "";
   private tools: McpTool[] = [];
   private stderrBuffer = "";
   private lastError = "";
@@ -77,6 +78,7 @@ export class McpClient {
       });
 
       this.serverName = initResult?.serverInfo?.name || "unknown";
+      this.serverInstructions = String(initResult?.instructions || "").trim();
       this.connected = true;
 
       // 发送 initialized 通知
@@ -196,12 +198,17 @@ export class McpClient {
     return this.serverName;
   }
 
+  getServerInstructions(): string {
+    return this.serverInstructions;
+  }
+
   getDiagnostics() {
     return {
       lastError: this.lastError,
       stderr: this.stderrBuffer,
       elicitationRequired: this.elicitationRequired,
       elicitationMessage: this.elicitationMessage,
+      serverInstructions: this.serverInstructions,
     };
   }
 
@@ -211,6 +218,7 @@ export class McpClient {
       this.process = null;
     }
     this.connected = false;
+    this.serverInstructions = "";
     for (const [, p] of this.pending) {
       clearTimeout(p.timer);
       p.reject(new Error("Disconnected"));

@@ -74,6 +74,32 @@ export declare function listMemoryCenterGroupSessionScopes(): {
         updatedAt: string;
         error: any;
     };
+    truePostCompactPayload: {
+        schema: string;
+        groupId: string;
+        groupSessionId: string;
+        hasPayload: boolean;
+        health: string;
+        gateStatus: string;
+        action: string;
+        triggerTokens: number;
+        prePtlTokenCount: number;
+        truePostCompactTokenCount: number;
+        ptlApplied: boolean;
+        willRetriggerNextTurn: boolean;
+        safeRenderChars: number;
+        payloadChecksum: string;
+        checksumMatches: boolean;
+        components: {
+            summary: number;
+            recentWindow: number;
+            reinjection: number;
+            persistentMemory: number;
+            sessionMemoryRestore: number;
+            toolContinuityRestore: number;
+        };
+        gaps: any[];
+    };
 }[];
 export declare function buildGroupPostCompactUsageDiagnostics(groupId: string, memory?: any, sessionId?: string): {
     schema: string;
@@ -379,6 +405,32 @@ export declare function buildGroupPostCompactUsageDiagnostics(groupId: string, m
         gaps: any[];
         nextActions: any[];
     };
+    truePostCompactPayload: {
+        schema: string;
+        groupId: string;
+        groupSessionId: string;
+        hasPayload: boolean;
+        health: string;
+        gateStatus: string;
+        action: string;
+        triggerTokens: number;
+        prePtlTokenCount: number;
+        truePostCompactTokenCount: number;
+        ptlApplied: boolean;
+        willRetriggerNextTurn: boolean;
+        safeRenderChars: number;
+        payloadChecksum: string;
+        checksumMatches: boolean;
+        components: {
+            summary: number;
+            recentWindow: number;
+            reinjection: number;
+            persistentMemory: number;
+            sessionMemoryRestore: number;
+            toolContinuityRestore: number;
+        };
+        gaps: any[];
+    };
     sessionMemory: any;
     toolContinuity: any;
     compactFileReferences: any;
@@ -423,6 +475,18 @@ export declare function buildGroupPostCompactUsageDiagnostics(groupId: string, m
         invocationEdgeCount: number;
         invocationLineageBoundCount: number;
         invocationLedgerMissingCount: number;
+        finalDispatchGateReadyCount: number;
+        finalDispatchGateBlockedCount: number;
+        finalDispatchGateMissingCount: number;
+        finalDispatchGateInvalidCount: number;
+        finalDispatchPromptBoundCount: number;
+        finalDispatchLineageProofCount: number;
+        finalDispatchReactiveCompactRecoveredCount: number;
+        finalDispatchReactiveCompactBlockedCount: number;
+        finalDispatchReactiveCompactInvalidCount: number;
+        finalDispatchReactiveCompactCircuitOpenCount: number;
+        finalDispatchReactiveCompactCircuitFailureCount: number;
+        finalDispatchReactiveCompactCircuitInvalidCount: number;
         invocationBranchCount: number;
         invocationBranchIds: any;
         projects: any;
@@ -515,7 +579,12 @@ export declare function buildGroupPostCompactUsageDiagnostics(groupId: string, m
         audit: any;
         recoveryAuditLinked: boolean;
     };
+    postCompactSessionStateReset: any;
+    promptCacheCompactionNotification: any;
+    promptCacheBreakDetection: any;
     autoCompactCircuitBreaker: any;
+    reactiveCompactRetryOwnership: any;
+    workerContextCompactSessionArtifacts: any;
     apiMicroCompactEditPlan: {
         schema: string;
         groupId: string;
@@ -543,6 +612,104 @@ export declare function buildGroupPostCompactUsageDiagnostics(groupId: string, m
         planChecksum: any;
         gaps: any[];
         plan: any;
+    };
+    compactionSummaryInputProjection: {
+        schema: string;
+        groupId: string;
+        groupSessionId: string;
+        status: string;
+        receiptPresent: boolean;
+        receiptValid: boolean;
+        issues: any;
+        receipt: any;
+    };
+    postCompactTaskStatusProjection: {
+        schema: string;
+        groupId: string;
+        groupSessionId: string;
+        status: string;
+        receiptPresent: boolean;
+        receiptValid: boolean;
+        issues: any;
+        receipt: any;
+        tasks: any;
+    };
+    postCompactFileRestoreDedup: {
+        schema: string;
+        groupId: string;
+        groupSessionId: string;
+        status: string;
+        receiptPresent: boolean;
+        receiptValid: boolean;
+        issues: any;
+        receipt: any;
+    };
+    postCompactInvokedSkillAttachment: {
+        schema: string;
+        groupId: string;
+        groupSessionId: string;
+        status: string;
+        receiptPresent: boolean;
+        receiptValid: boolean;
+        issues: any;
+        receipt: any;
+    };
+    postCompactPlanAttachment: {
+        schema: string;
+        groupId: string;
+        groupSessionId: string;
+        status: string;
+        receiptPresent: boolean;
+        receiptValid: boolean;
+        issues: any;
+        receipt: any;
+    };
+    postCompactDynamicContextDelta: {
+        schema: string;
+        groupId: string;
+        groupSessionId: string;
+        status: string;
+        receiptPresent: boolean;
+        receiptValid: boolean;
+        issues: any;
+        receipt: any;
+    };
+    compactionModelUsage: {
+        schema: string;
+        groupId: string;
+        groupSessionId: string;
+        status: any;
+        receiptPresent: boolean;
+        receiptValid: boolean;
+        issues: any;
+        receipt: any;
+    };
+    timeBasedToolResultMicrocompact: {
+        schema: string;
+        groupId: string;
+        groupSessionId: string;
+        enabled: boolean;
+        gapThresholdMinutes: number;
+        keepRecent: number;
+        status: string;
+        receiptPresent: boolean;
+        receiptValid: boolean;
+        issues: any;
+        receipt: any;
+    };
+    timeBasedThinkingMicrocompact: {
+        schema: string;
+        groupId: string;
+        groupSessionId: string;
+        enabled: boolean;
+        gapThresholdMinutes: number;
+        compactEpoch: any;
+        status: string;
+        receiptPresent: boolean;
+        receiptValid: boolean;
+        compactEpochMatched: boolean;
+        issues: any;
+        receipt: any;
     };
     apiMicrocompactReceiptDiscipline: any;
     apiMicrocompactNativeApplyReadiness: any;
@@ -898,6 +1065,7 @@ export declare function buildGroupPostCompactUsageDiagnostics(groupId: string, m
     dispatch?: undefined;
     agentReliability?: undefined;
     boundaryTimeline?: undefined;
+    truePostCompactPayload?: undefined;
     sessionMemory?: undefined;
     toolContinuity?: undefined;
     compactFileReferences?: undefined;
@@ -913,8 +1081,22 @@ export declare function buildGroupPostCompactUsageDiagnostics(groupId: string, m
     taskAgentMemoryContextSnapshots?: undefined;
     compactStrategyDecision?: undefined;
     postCompactCleanupAudit?: undefined;
+    postCompactSessionStateReset?: undefined;
+    promptCacheCompactionNotification?: undefined;
+    promptCacheBreakDetection?: undefined;
     autoCompactCircuitBreaker?: undefined;
+    reactiveCompactRetryOwnership?: undefined;
+    workerContextCompactSessionArtifacts?: undefined;
     apiMicroCompactEditPlan?: undefined;
+    compactionSummaryInputProjection?: undefined;
+    postCompactTaskStatusProjection?: undefined;
+    postCompactFileRestoreDedup?: undefined;
+    postCompactInvokedSkillAttachment?: undefined;
+    postCompactPlanAttachment?: undefined;
+    postCompactDynamicContextDelta?: undefined;
+    compactionModelUsage?: undefined;
+    timeBasedToolResultMicrocompact?: undefined;
+    timeBasedThinkingMicrocompact?: undefined;
     apiMicrocompactReceiptDiscipline?: undefined;
     apiMicrocompactNativeApplyReadiness?: undefined;
     apiMicrocompactNativeApplyProof?: undefined;
@@ -1104,7 +1286,7 @@ export declare function buildChildAgentMemoryReliabilityReport(options?: any): {
 export declare function getGroupCompactBoundaryReplayRepairLedgerFile(groupId: string, sessionId?: string): string;
 export declare function readGroupCompactBoundaryReplayRepairLedger(groupId: string, sessionId?: string): any;
 export declare function getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId: string, sessionId?: string): string;
-export declare function getGroupReplayRepairDispatchPlanLedgerFile(groupId: string): string;
+export declare function getGroupReplayRepairDispatchPlanLedgerFile(groupId: string, sessionId?: string): string;
 export declare function readGroupCompactBoundaryReplayRepairWorkItems(groupId: string, sessionId?: string): any;
 export declare function compactGroupReplayRepairWorkItemLedgerRetention(groupId: string, options?: any): {
     schema: string;
@@ -2308,6 +2490,19 @@ export declare function buildTaskAgentMemoryContextSnapshotReport(options?: any)
         postTurnSummaryCapsuleCompactEpochMismatchCount: number;
         postTurnSummaryCapsuleLedgerHeadMismatchCount: number;
         postTurnSummaryCapsuleSelectionMismatchCount: number;
+        finalDispatchGateReadyCount: number;
+        finalDispatchGateBlockedCount: number;
+        finalDispatchGateMissingCount: number;
+        finalDispatchGateInvalidCount: number;
+        finalDispatchPromptBoundCount: number;
+        finalDispatchLineageProofRequiredCount: number;
+        finalDispatchLineageProofCount: number;
+        finalDispatchReactiveCompactRecoveredCount: number;
+        finalDispatchReactiveCompactBlockedCount: number;
+        finalDispatchReactiveCompactInvalidCount: number;
+        finalDispatchReactiveCompactCircuitOpenCount: number;
+        finalDispatchReactiveCompactCircuitFailureCount: number;
+        finalDispatchReactiveCompactCircuitInvalidCount: number;
         staleCount: number;
         prunableCount: number;
         retentionCandidateCount: number;
@@ -2502,6 +2697,19 @@ export declare function buildTaskAgentMemoryContextSnapshotReport(options?: any)
         postTurnSummaryCapsuleCompactEpochMismatchCount?: undefined;
         postTurnSummaryCapsuleLedgerHeadMismatchCount?: undefined;
         postTurnSummaryCapsuleSelectionMismatchCount?: undefined;
+        finalDispatchGateReadyCount?: undefined;
+        finalDispatchGateBlockedCount?: undefined;
+        finalDispatchGateMissingCount?: undefined;
+        finalDispatchGateInvalidCount?: undefined;
+        finalDispatchPromptBoundCount?: undefined;
+        finalDispatchLineageProofRequiredCount?: undefined;
+        finalDispatchLineageProofCount?: undefined;
+        finalDispatchReactiveCompactRecoveredCount?: undefined;
+        finalDispatchReactiveCompactBlockedCount?: undefined;
+        finalDispatchReactiveCompactInvalidCount?: undefined;
+        finalDispatchReactiveCompactCircuitOpenCount?: undefined;
+        finalDispatchReactiveCompactCircuitFailureCount?: undefined;
+        finalDispatchReactiveCompactCircuitInvalidCount?: undefined;
         staleCount?: undefined;
         retentionCandidateCount?: undefined;
         invocationEdgeCount?: undefined;
@@ -2694,6 +2902,32 @@ export declare function buildMemoryCenterOverview(): {
             updatedAt: string;
             error: any;
         };
+        truePostCompactPayload: {
+            schema: string;
+            groupId: string;
+            groupSessionId: string;
+            hasPayload: boolean;
+            health: string;
+            gateStatus: string;
+            action: string;
+            triggerTokens: number;
+            prePtlTokenCount: number;
+            truePostCompactTokenCount: number;
+            ptlApplied: boolean;
+            willRetriggerNextTurn: boolean;
+            safeRenderChars: number;
+            payloadChecksum: string;
+            checksumMatches: boolean;
+            components: {
+                summary: number;
+                recentWindow: number;
+                reinjection: number;
+                persistentMemory: number;
+                sessionMemoryRestore: number;
+                toolContinuityRestore: number;
+            };
+            gaps: any[];
+        };
     }[];
     projects: {
         scope: MemoryScope;
@@ -2754,6 +2988,32 @@ export declare function buildMemoryCenterOverview(): {
             updatedAt: string;
             error: any;
         };
+        truePostCompactPayload: {
+            schema: string;
+            groupId: string;
+            groupSessionId: string;
+            hasPayload: boolean;
+            health: string;
+            gateStatus: string;
+            action: string;
+            triggerTokens: number;
+            prePtlTokenCount: number;
+            truePostCompactTokenCount: number;
+            ptlApplied: boolean;
+            willRetriggerNextTurn: boolean;
+            safeRenderChars: number;
+            payloadChecksum: string;
+            checksumMatches: boolean;
+            components: {
+                summary: number;
+                recentWindow: number;
+                reinjection: number;
+                persistentMemory: number;
+                sessionMemoryRestore: number;
+                toolContinuityRestore: number;
+            };
+            gaps: any[];
+        };
     }[];
     globals: {
         scope: MemoryScope;
@@ -2813,6 +3073,32 @@ export declare function buildMemoryCenterOverview(): {
             ledgerFile: string;
             updatedAt: string;
             error: any;
+        };
+        truePostCompactPayload: {
+            schema: string;
+            groupId: string;
+            groupSessionId: string;
+            hasPayload: boolean;
+            health: string;
+            gateStatus: string;
+            action: string;
+            triggerTokens: number;
+            prePtlTokenCount: number;
+            truePostCompactTokenCount: number;
+            ptlApplied: boolean;
+            willRetriggerNextTurn: boolean;
+            safeRenderChars: number;
+            payloadChecksum: string;
+            checksumMatches: boolean;
+            components: {
+                summary: number;
+                recentWindow: number;
+                reinjection: number;
+                persistentMemory: number;
+                sessionMemoryRestore: number;
+                toolContinuityRestore: number;
+            };
+            gaps: any[];
         };
     }[];
     alerts: any[];
@@ -3688,6 +3974,46 @@ export declare function buildMemoryCenterOverview(): {
             gaps: any[];
         }[];
     };
+    truePostCompactPayloadFleetReport: {
+        schema: string;
+        generatedAt: string;
+        overall: {
+            status: string;
+            sessionCount: number;
+            payloadCount: number;
+            readyCount: number;
+            ptlReducedCount: number;
+            recompactRequiredCount: number;
+            invalidCount: number;
+        };
+        rows: {
+            schema: string;
+            groupId: string;
+            groupSessionId: string;
+            hasPayload: boolean;
+            health: string;
+            gateStatus: string;
+            action: string;
+            triggerTokens: number;
+            prePtlTokenCount: number;
+            truePostCompactTokenCount: number;
+            ptlApplied: boolean;
+            willRetriggerNextTurn: boolean;
+            safeRenderChars: number;
+            payloadChecksum: string;
+            checksumMatches: boolean;
+            components: {
+                summary: number;
+                recentWindow: number;
+                reinjection: number;
+                persistentMemory: number;
+                sessionMemoryRestore: number;
+                toolContinuityRestore: number;
+            };
+            gaps: any[];
+            scopeId: string;
+        }[];
+    };
     totals: {
         scopes: number;
         healthy: number;
@@ -4458,6 +4784,7 @@ export declare function buildMemoryCenterOverview(): {
             highRiskSignalCount: any;
             privacyGapCount: number;
             forbiddenFieldCount: number;
+            promotionGapCount: any;
         };
         guidance: {
             guidance_only: boolean;
@@ -4870,7 +5197,10 @@ export declare function buildMemoryCenterOverview(): {
         overall: {
             status: string;
             coverageRate: number;
-            groupCount: any;
+            groupCount: number;
+            scopeCount: any;
+            exactSessionCount: any;
+            legacyScopeCount: any;
             checkedGroupCount: any;
             groupsCovered: any;
             providerReproofReceiptCount: any;
@@ -5238,6 +5568,19 @@ export declare function buildMemoryCenterOverview(): {
             postTurnSummaryCapsuleCompactEpochMismatchCount: number;
             postTurnSummaryCapsuleLedgerHeadMismatchCount: number;
             postTurnSummaryCapsuleSelectionMismatchCount: number;
+            finalDispatchGateReadyCount: number;
+            finalDispatchGateBlockedCount: number;
+            finalDispatchGateMissingCount: number;
+            finalDispatchGateInvalidCount: number;
+            finalDispatchPromptBoundCount: number;
+            finalDispatchLineageProofRequiredCount: number;
+            finalDispatchLineageProofCount: number;
+            finalDispatchReactiveCompactRecoveredCount: number;
+            finalDispatchReactiveCompactBlockedCount: number;
+            finalDispatchReactiveCompactInvalidCount: number;
+            finalDispatchReactiveCompactCircuitOpenCount: number;
+            finalDispatchReactiveCompactCircuitFailureCount: number;
+            finalDispatchReactiveCompactCircuitInvalidCount: number;
             staleCount: number;
             prunableCount: number;
             retentionCandidateCount: number;
@@ -5432,6 +5775,19 @@ export declare function buildMemoryCenterOverview(): {
             postTurnSummaryCapsuleCompactEpochMismatchCount?: undefined;
             postTurnSummaryCapsuleLedgerHeadMismatchCount?: undefined;
             postTurnSummaryCapsuleSelectionMismatchCount?: undefined;
+            finalDispatchGateReadyCount?: undefined;
+            finalDispatchGateBlockedCount?: undefined;
+            finalDispatchGateMissingCount?: undefined;
+            finalDispatchGateInvalidCount?: undefined;
+            finalDispatchPromptBoundCount?: undefined;
+            finalDispatchLineageProofRequiredCount?: undefined;
+            finalDispatchLineageProofCount?: undefined;
+            finalDispatchReactiveCompactRecoveredCount?: undefined;
+            finalDispatchReactiveCompactBlockedCount?: undefined;
+            finalDispatchReactiveCompactInvalidCount?: undefined;
+            finalDispatchReactiveCompactCircuitOpenCount?: undefined;
+            finalDispatchReactiveCompactCircuitFailureCount?: undefined;
+            finalDispatchReactiveCompactCircuitInvalidCount?: undefined;
             staleCount?: undefined;
             retentionCandidateCount?: undefined;
             invocationEdgeCount?: undefined;
@@ -5629,6 +5985,32 @@ export declare function getMemoryCenterScope(scope: MemoryScope, scopeId: string
             ledgerFile: string;
             updatedAt: string;
             error: any;
+        };
+        truePostCompactPayload: {
+            schema: string;
+            groupId: string;
+            groupSessionId: string;
+            hasPayload: boolean;
+            health: string;
+            gateStatus: string;
+            action: string;
+            triggerTokens: number;
+            prePtlTokenCount: number;
+            truePostCompactTokenCount: number;
+            ptlApplied: boolean;
+            willRetriggerNextTurn: boolean;
+            safeRenderChars: number;
+            payloadChecksum: string;
+            checksumMatches: boolean;
+            components: {
+                summary: number;
+                recentWindow: number;
+                reinjection: number;
+                persistentMemory: number;
+                sessionMemoryRestore: number;
+                toolContinuityRestore: number;
+            };
+            gaps: any[];
         };
     };
     alerts: any[];
@@ -5939,6 +6321,32 @@ export declare function getMemoryCenterScope(scope: MemoryScope, scopeId: string
             gaps: any[];
             nextActions: any[];
         };
+        truePostCompactPayload: {
+            schema: string;
+            groupId: string;
+            groupSessionId: string;
+            hasPayload: boolean;
+            health: string;
+            gateStatus: string;
+            action: string;
+            triggerTokens: number;
+            prePtlTokenCount: number;
+            truePostCompactTokenCount: number;
+            ptlApplied: boolean;
+            willRetriggerNextTurn: boolean;
+            safeRenderChars: number;
+            payloadChecksum: string;
+            checksumMatches: boolean;
+            components: {
+                summary: number;
+                recentWindow: number;
+                reinjection: number;
+                persistentMemory: number;
+                sessionMemoryRestore: number;
+                toolContinuityRestore: number;
+            };
+            gaps: any[];
+        };
         sessionMemory: any;
         toolContinuity: any;
         compactFileReferences: any;
@@ -5983,6 +6391,18 @@ export declare function getMemoryCenterScope(scope: MemoryScope, scopeId: string
             invocationEdgeCount: number;
             invocationLineageBoundCount: number;
             invocationLedgerMissingCount: number;
+            finalDispatchGateReadyCount: number;
+            finalDispatchGateBlockedCount: number;
+            finalDispatchGateMissingCount: number;
+            finalDispatchGateInvalidCount: number;
+            finalDispatchPromptBoundCount: number;
+            finalDispatchLineageProofCount: number;
+            finalDispatchReactiveCompactRecoveredCount: number;
+            finalDispatchReactiveCompactBlockedCount: number;
+            finalDispatchReactiveCompactInvalidCount: number;
+            finalDispatchReactiveCompactCircuitOpenCount: number;
+            finalDispatchReactiveCompactCircuitFailureCount: number;
+            finalDispatchReactiveCompactCircuitInvalidCount: number;
             invocationBranchCount: number;
             invocationBranchIds: any;
             projects: any;
@@ -6075,7 +6495,12 @@ export declare function getMemoryCenterScope(scope: MemoryScope, scopeId: string
             audit: any;
             recoveryAuditLinked: boolean;
         };
+        postCompactSessionStateReset: any;
+        promptCacheCompactionNotification: any;
+        promptCacheBreakDetection: any;
         autoCompactCircuitBreaker: any;
+        reactiveCompactRetryOwnership: any;
+        workerContextCompactSessionArtifacts: any;
         apiMicroCompactEditPlan: {
             schema: string;
             groupId: string;
@@ -6103,6 +6528,104 @@ export declare function getMemoryCenterScope(scope: MemoryScope, scopeId: string
             planChecksum: any;
             gaps: any[];
             plan: any;
+        };
+        compactionSummaryInputProjection: {
+            schema: string;
+            groupId: string;
+            groupSessionId: string;
+            status: string;
+            receiptPresent: boolean;
+            receiptValid: boolean;
+            issues: any;
+            receipt: any;
+        };
+        postCompactTaskStatusProjection: {
+            schema: string;
+            groupId: string;
+            groupSessionId: string;
+            status: string;
+            receiptPresent: boolean;
+            receiptValid: boolean;
+            issues: any;
+            receipt: any;
+            tasks: any;
+        };
+        postCompactFileRestoreDedup: {
+            schema: string;
+            groupId: string;
+            groupSessionId: string;
+            status: string;
+            receiptPresent: boolean;
+            receiptValid: boolean;
+            issues: any;
+            receipt: any;
+        };
+        postCompactInvokedSkillAttachment: {
+            schema: string;
+            groupId: string;
+            groupSessionId: string;
+            status: string;
+            receiptPresent: boolean;
+            receiptValid: boolean;
+            issues: any;
+            receipt: any;
+        };
+        postCompactPlanAttachment: {
+            schema: string;
+            groupId: string;
+            groupSessionId: string;
+            status: string;
+            receiptPresent: boolean;
+            receiptValid: boolean;
+            issues: any;
+            receipt: any;
+        };
+        postCompactDynamicContextDelta: {
+            schema: string;
+            groupId: string;
+            groupSessionId: string;
+            status: string;
+            receiptPresent: boolean;
+            receiptValid: boolean;
+            issues: any;
+            receipt: any;
+        };
+        compactionModelUsage: {
+            schema: string;
+            groupId: string;
+            groupSessionId: string;
+            status: any;
+            receiptPresent: boolean;
+            receiptValid: boolean;
+            issues: any;
+            receipt: any;
+        };
+        timeBasedToolResultMicrocompact: {
+            schema: string;
+            groupId: string;
+            groupSessionId: string;
+            enabled: boolean;
+            gapThresholdMinutes: number;
+            keepRecent: number;
+            status: string;
+            receiptPresent: boolean;
+            receiptValid: boolean;
+            issues: any;
+            receipt: any;
+        };
+        timeBasedThinkingMicrocompact: {
+            schema: string;
+            groupId: string;
+            groupSessionId: string;
+            enabled: boolean;
+            gapThresholdMinutes: number;
+            compactEpoch: any;
+            status: string;
+            receiptPresent: boolean;
+            receiptValid: boolean;
+            compactEpochMatched: boolean;
+            issues: any;
+            receipt: any;
         };
         apiMicrocompactReceiptDiscipline: any;
         apiMicrocompactNativeApplyReadiness: any;
@@ -6458,6 +6981,7 @@ export declare function getMemoryCenterScope(scope: MemoryScope, scopeId: string
         dispatch?: undefined;
         agentReliability?: undefined;
         boundaryTimeline?: undefined;
+        truePostCompactPayload?: undefined;
         sessionMemory?: undefined;
         toolContinuity?: undefined;
         compactFileReferences?: undefined;
@@ -6473,8 +6997,22 @@ export declare function getMemoryCenterScope(scope: MemoryScope, scopeId: string
         taskAgentMemoryContextSnapshots?: undefined;
         compactStrategyDecision?: undefined;
         postCompactCleanupAudit?: undefined;
+        postCompactSessionStateReset?: undefined;
+        promptCacheCompactionNotification?: undefined;
+        promptCacheBreakDetection?: undefined;
         autoCompactCircuitBreaker?: undefined;
+        reactiveCompactRetryOwnership?: undefined;
+        workerContextCompactSessionArtifacts?: undefined;
         apiMicroCompactEditPlan?: undefined;
+        compactionSummaryInputProjection?: undefined;
+        postCompactTaskStatusProjection?: undefined;
+        postCompactFileRestoreDedup?: undefined;
+        postCompactInvokedSkillAttachment?: undefined;
+        postCompactPlanAttachment?: undefined;
+        postCompactDynamicContextDelta?: undefined;
+        compactionModelUsage?: undefined;
+        timeBasedToolResultMicrocompact?: undefined;
+        timeBasedThinkingMicrocompact?: undefined;
         apiMicrocompactReceiptDiscipline?: undefined;
         apiMicrocompactNativeApplyReadiness?: undefined;
         apiMicrocompactNativeApplyProof?: undefined;
@@ -8586,6 +9124,7 @@ export declare function runMemoryCenterWorkerContextPacketCrossGroupProviderReli
         highRiskSignalCount: any;
         privacyGapCount: number;
         forbiddenFieldCount: number;
+        promotionGapCount: any;
     };
     signal: {
         agent_type: any;
@@ -9363,7 +9902,10 @@ export declare function runMemoryCenterWorkerContextProviderRankingProvenanceCom
     report: {
         status: string;
         coverageRate: number;
-        groupCount: any;
+        groupCount: number;
+        scopeCount: any;
+        exactSessionCount: any;
+        legacyScopeCount: any;
         checkedGroupCount: any;
         groupsCovered: any;
         verifiedReceiptCount: any;
@@ -9391,24 +9933,25 @@ export declare function runMemoryCenterWorkerContextProviderRankingProvenanceCom
     pass: boolean;
     checks: {
         distillationCreatedArchive: boolean;
-        reportProvesBundleRecall: boolean;
-        reportProvesRepeatNewSessionRecall: boolean;
-        reportProvesWorkerContextPacketInjection: boolean;
-        qualityCheckRegisteredAndPasses: boolean;
+        legacyMemoryIsNotInjectedIntoUnscopedSessions: boolean;
+        qualityCheckRegistersSafeLegacyBoundary: boolean;
     };
     report: {
         status: string;
         coverageRate: number;
-        groupCount: any;
-        checkedGroupCount: any;
-        groupsCovered: any;
-        archivedReceiptCount: any;
-        recalledGroupCount: any;
-        repeatChildSessionRecallCount: any;
-        renderedContextCoveredCount: any;
-        workerContextPacketCoveredCount: any;
-        loadPlanDocCount: any;
-        metadataGapCount: any;
+        groupCount: number;
+        scopeCount: number;
+        exactSessionCount: number;
+        legacyScopeCount: number;
+        checkedGroupCount: number;
+        groupsCovered: number;
+        archivedReceiptCount: number;
+        recalledGroupCount: number;
+        repeatChildSessionRecallCount: number;
+        renderedContextCoveredCount: number;
+        workerContextPacketCoveredCount: number;
+        loadPlanDocCount: number;
+        metadataGapCount: number;
     };
     qualityCheck: {
         id: any;
@@ -9436,15 +9979,18 @@ export declare function runMemoryCenterWorkerContextProviderRankingProvenanceCom
     report: {
         status: string;
         coverageRate: number;
-        groupCount: any;
-        checkedGroupCount: any;
-        groupsCovered: any;
-        archivedReceiptCount: any;
-        contractActiveCount: any;
-        acceptanceUsageCount: any;
-        renderedContractCoveredCount: any;
-        validatorCoveredCount: any;
-        metadataGapCount: any;
+        groupCount: number;
+        scopeCount: number;
+        exactSessionCount: number;
+        legacyScopeCount: number;
+        checkedGroupCount: number;
+        groupsCovered: number;
+        archivedReceiptCount: number;
+        contractActiveCount: number;
+        acceptanceUsageCount: number;
+        renderedContractCoveredCount: number;
+        validatorCoveredCount: number;
+        metadataGapCount: number;
     };
     qualityCheck: {
         id: any;
@@ -9473,7 +10019,10 @@ export declare function runMemoryCenterWorkerContextProviderRankingProvenanceCom
     report: {
         status: string;
         coverageRate: number;
-        groupCount: any;
+        groupCount: number;
+        scopeCount: any;
+        exactSessionCount: any;
+        legacyScopeCount: any;
         checkedGroupCount: any;
         groupsCovered: any;
         receiptContractCount: any;
@@ -9514,7 +10063,10 @@ export declare function runMemoryCenterWorkerContextProviderRankingProvenanceCom
     repairReport: {
         status: string;
         coverageRate: number;
-        groupCount: any;
+        groupCount: number;
+        scopeCount: any;
+        exactSessionCount: any;
+        legacyScopeCount: any;
         checkedGroupCount: any;
         groupsNeedingRepairItems: any;
         groupsCovered: any;
@@ -9530,7 +10082,10 @@ export declare function runMemoryCenterWorkerContextProviderRankingProvenanceCom
         status: string;
         coverageRate: number;
         metadataCoverageRate: number;
-        groupCount: any;
+        groupCount: number;
+        scopeCount: any;
+        exactSessionCount: any;
+        legacyScopeCount: any;
         checkedGroupCount: any;
         groupsNeedingCandidates: any;
         groupsCovered: any;
@@ -9579,7 +10134,10 @@ export declare function runMemoryCenterWorkerContextProviderRankingProvenanceCom
         status: string;
         coverageRate: number;
         metadataCoverageRate: number;
-        groupCount: any;
+        groupCount: number;
+        scopeCount: any;
+        exactSessionCount: any;
+        legacyScopeCount: any;
         checkedGroupCount: any;
         groupsNeedingBriefs: any;
         groupsCovered: any;
@@ -9625,7 +10183,10 @@ export declare function runMemoryCenterWorkerContextProviderRankingProvenanceCom
     repairReport: {
         status: string;
         coverageRate: number;
-        groupCount: any;
+        groupCount: number;
+        scopeCount: any;
+        exactSessionCount: any;
+        legacyScopeCount: any;
         checkedGroupCount: any;
         groupsNeedingRepairItems: any;
         groupsCovered: any;
@@ -9641,7 +10202,10 @@ export declare function runMemoryCenterWorkerContextProviderRankingProvenanceCom
         status: string;
         coverageRate: number;
         metadataCoverageRate: number;
-        groupCount: any;
+        groupCount: number;
+        scopeCount: any;
+        exactSessionCount: any;
+        legacyScopeCount: any;
         checkedGroupCount: any;
         groupsNeedingCandidates: any;
         groupsCovered: any;
@@ -9661,7 +10225,10 @@ export declare function runMemoryCenterWorkerContextProviderRankingProvenanceCom
         status: string;
         coverageRate: number;
         metadataCoverageRate: number;
-        groupCount: any;
+        groupCount: number;
+        scopeCount: any;
+        exactSessionCount: any;
+        legacyScopeCount: any;
         checkedGroupCount: any;
         groupsNeedingBriefs: any;
         groupsCovered: any;
@@ -9684,6 +10251,9 @@ export declare function runMemoryCenterWorkerContextProviderRankingProvenanceCom
         status: string;
         coverageRate: number;
         groupCount: number;
+        scopeCount: number;
+        exactSessionCount: number;
+        legacyScopeCount: number;
         checkedGroupCount: number;
         groupsCovered: number;
         inputRowCount: number;
@@ -9730,6 +10300,9 @@ export declare function runMemoryCenterWorkerContextProviderRankingProvenanceCom
         status: string;
         coverageRate: number;
         groupCount: number;
+        scopeCount: number;
+        exactSessionCount: number;
+        legacyScopeCount: number;
         checkedGroupCount: number;
         groupsCovered: number;
         inputRowCount: number;
@@ -9749,16 +10322,19 @@ export declare function runMemoryCenterWorkerContextProviderRankingProvenanceCom
         status: string;
         coverageRate: number;
         groupCount: number;
-        checkedGroupCount: number;
-        groupsCovered: number;
-        archivedCount: number;
-        typedMemoryDocCount: number;
-        recallSurfacedDisciplineCount: number;
-        renderedContextCoveredCount: number;
-        workerContextPacketCoveredCount: number;
-        contextUsageContractTokens: number;
-        loadPlanDisciplineCount: number;
-        metadataGapCount: number;
+        scopeCount: any;
+        exactSessionCount: any;
+        legacyScopeCount: any;
+        checkedGroupCount: any;
+        groupsCovered: any;
+        archivedCount: any;
+        typedMemoryDocCount: any;
+        recallSurfacedDisciplineCount: any;
+        renderedContextCoveredCount: any;
+        workerContextPacketCoveredCount: any;
+        contextUsageContractTokens: any;
+        loadPlanDisciplineCount: any;
+        metadataGapCount: any;
     };
     qualityCheck: {
         id: any;
@@ -9787,7 +10363,10 @@ export declare function runMemoryCenterWorkerContextProviderRankingProvenanceCom
     receiptReport: {
         status: string;
         coverageRate: number;
-        groupCount: any;
+        groupCount: number;
+        scopeCount: any;
+        exactSessionCount: any;
+        legacyScopeCount: any;
         checkedGroupCount: any;
         groupsCovered: any;
         receiptContractCount: any;
@@ -9804,7 +10383,10 @@ export declare function runMemoryCenterWorkerContextProviderRankingProvenanceCom
     requiredDocsReport: {
         status: string;
         coverageRate: number;
-        groupCount: any;
+        groupCount: number;
+        scopeCount: any;
+        exactSessionCount: any;
+        legacyScopeCount: any;
         checkedGroupCount: any;
         groupsCovered: any;
         requiredDocReceiptCount: any;
@@ -9854,7 +10436,10 @@ export declare function runMemoryCenterWorkerContextProviderRankingProvenanceCom
     repairReport: {
         status: string;
         coverageRate: number;
-        groupCount: any;
+        groupCount: number;
+        scopeCount: any;
+        exactSessionCount: any;
+        legacyScopeCount: any;
         checkedGroupCount: any;
         groupsNeedingRepairItems: any;
         groupsCovered: any;
@@ -9870,7 +10455,10 @@ export declare function runMemoryCenterWorkerContextProviderRankingProvenanceCom
         status: string;
         coverageRate: number;
         metadataCoverageRate: number;
-        groupCount: any;
+        groupCount: number;
+        scopeCount: any;
+        exactSessionCount: any;
+        legacyScopeCount: any;
         checkedGroupCount: any;
         groupsNeedingCandidates: any;
         groupsCovered: any;
@@ -9890,7 +10478,10 @@ export declare function runMemoryCenterWorkerContextProviderRankingProvenanceCom
         status: string;
         coverageRate: number;
         metadataCoverageRate: number;
-        groupCount: any;
+        groupCount: number;
+        scopeCount: any;
+        exactSessionCount: any;
+        legacyScopeCount: any;
         checkedGroupCount: any;
         groupsNeedingBriefs: any;
         groupsCovered: any;
@@ -9912,7 +10503,10 @@ export declare function runMemoryCenterWorkerContextProviderRankingProvenanceCom
     requiredDocsReport: {
         status: string;
         coverageRate: number;
-        groupCount: any;
+        groupCount: number;
+        scopeCount: any;
+        exactSessionCount: any;
+        legacyScopeCount: any;
         checkedGroupCount: any;
         groupsCovered: any;
         requiredDocBriefCount: any;
@@ -9952,19 +10546,21 @@ export declare function runMemoryCenterWorkerContextPacketCompactStrategyMemoryS
     report: {
         status: string;
         coverageRate: number;
-        groupCount: any;
-        checkedGroupCount: any;
-        groupsCovered: any;
-        distilledOutcomeCount: any;
-        strategyMemoryCount: any;
-        categoryCount: any;
-        preferredCategoryCount: any;
-        metadataGapCount: any;
+        groupCount: number;
+        exactSessionCount: number;
+        legacyScopeCount: number;
+        checkedGroupCount: number;
+        groupsCovered: number;
+        distilledOutcomeCount: number;
+        strategyMemoryCount: number;
+        categoryCount: number;
+        preferredCategoryCount: number;
+        metadataGapCount: number;
     };
     strategy: {
         preferred_categories: any;
-        sample_count: number;
-        source_ledger_file: string;
+        sample_count: any;
+        source_ledger_file: any;
     };
     qualityCheck: {
         id: any;
@@ -10024,20 +10620,22 @@ export declare function runMemoryCenterWorkerContextPacketPtlEmergencyDowngradeS
     report: {
         status: string;
         coverageRate: number;
-        groupCount: any;
-        checkedGroupCount: any;
-        groupsCovered: any;
-        engagedCount: any;
-        criticalCount: any;
-        blockedOutcomeCount: any;
-        taskCompactedBlockedCount: any;
-        metadataGapCount: any;
+        groupCount: number;
+        exactSessionCount: number;
+        legacyScopeCount: number;
+        checkedGroupCount: number;
+        groupsCovered: number;
+        engagedCount: number;
+        criticalCount: number;
+        blockedOutcomeCount: number;
+        taskCompactedBlockedCount: number;
+        metadataGapCount: number;
     };
     hint: {
-        engaged: boolean;
-        emergency_level: string;
-        blocked_outcome_count: number;
-        maxTaskChars: number;
+        engaged: any;
+        emergency_level: any;
+        blocked_outcome_count: any;
+        maxTaskChars: any;
     };
     qualityCheck: {
         id: any;
@@ -10742,7 +11340,10 @@ export declare function runMemoryCenterApiMicrocompactNativeApplyProviderReproof
     report: {
         status: string;
         coverageRate: number;
-        groupCount: any;
+        groupCount: number;
+        scopeCount: any;
+        exactSessionCount: any;
+        legacyScopeCount: any;
         checkedGroupCount: any;
         groupsCovered: any;
         providerReproofReceiptCount: any;
@@ -11982,6 +12583,19 @@ export declare function runMemoryCenterTaskAgentMemoryContextSnapshotSelfTest():
             postTurnSummaryCapsuleCompactEpochMismatchCount: number;
             postTurnSummaryCapsuleLedgerHeadMismatchCount: number;
             postTurnSummaryCapsuleSelectionMismatchCount: number;
+            finalDispatchGateReadyCount: number;
+            finalDispatchGateBlockedCount: number;
+            finalDispatchGateMissingCount: number;
+            finalDispatchGateInvalidCount: number;
+            finalDispatchPromptBoundCount: number;
+            finalDispatchLineageProofRequiredCount: number;
+            finalDispatchLineageProofCount: number;
+            finalDispatchReactiveCompactRecoveredCount: number;
+            finalDispatchReactiveCompactBlockedCount: number;
+            finalDispatchReactiveCompactInvalidCount: number;
+            finalDispatchReactiveCompactCircuitOpenCount: number;
+            finalDispatchReactiveCompactCircuitFailureCount: number;
+            finalDispatchReactiveCompactCircuitInvalidCount: number;
             staleCount: number;
             prunableCount: number;
             retentionCandidateCount: number;
@@ -12176,6 +12790,19 @@ export declare function runMemoryCenterTaskAgentMemoryContextSnapshotSelfTest():
             postTurnSummaryCapsuleCompactEpochMismatchCount?: undefined;
             postTurnSummaryCapsuleLedgerHeadMismatchCount?: undefined;
             postTurnSummaryCapsuleSelectionMismatchCount?: undefined;
+            finalDispatchGateReadyCount?: undefined;
+            finalDispatchGateBlockedCount?: undefined;
+            finalDispatchGateMissingCount?: undefined;
+            finalDispatchGateInvalidCount?: undefined;
+            finalDispatchPromptBoundCount?: undefined;
+            finalDispatchLineageProofRequiredCount?: undefined;
+            finalDispatchLineageProofCount?: undefined;
+            finalDispatchReactiveCompactRecoveredCount?: undefined;
+            finalDispatchReactiveCompactBlockedCount?: undefined;
+            finalDispatchReactiveCompactInvalidCount?: undefined;
+            finalDispatchReactiveCompactCircuitOpenCount?: undefined;
+            finalDispatchReactiveCompactCircuitFailureCount?: undefined;
+            finalDispatchReactiveCompactCircuitInvalidCount?: undefined;
             staleCount?: undefined;
             retentionCandidateCount?: undefined;
             invocationEdgeCount?: undefined;
@@ -12546,7 +13173,10 @@ export declare function runMemoryCenterPostCompactReinjectionRepairReceiptConsum
         report: {
             status: string;
             coverageRate: number;
-            groupCount: any;
+            groupCount: number;
+            scopeCount: any;
+            exactSessionCount: any;
+            legacyScopeCount: any;
             checkedGroupCount: any;
             groupsCovered: any;
             totalVerifiedCompletionCount: any;
@@ -12627,7 +13257,10 @@ export declare function runMemoryCenterPostCompactReinjectionRepairReceiptTypedM
         report: {
             status: string;
             coverageRate: number;
-            groupCount: any;
+            groupCount: number;
+            scopeCount: any;
+            exactSessionCount: any;
+            legacyScopeCount: any;
             checkedGroupCount: any;
             groupsCovered: any;
             totalVerifiedCompletionCount: any;
@@ -12697,7 +13330,10 @@ export declare function runMemoryCenterPostCompactReinjectionRepairReceiptWorker
     receiptReport: {
         status: string;
         coverageRate: number;
-        groupCount: any;
+        groupCount: number;
+        scopeCount: any;
+        exactSessionCount: any;
+        legacyScopeCount: any;
         checkedGroupCount: any;
         groupsCovered: any;
         receiptContractCount: any;
@@ -12752,7 +13388,10 @@ export declare function runMemoryCenterPostCompactReinjectionRepairReceiptMemory
     receiptReportBefore: {
         status: string;
         coverageRate: number;
-        groupCount: any;
+        groupCount: number;
+        scopeCount: any;
+        exactSessionCount: any;
+        legacyScopeCount: any;
         checkedGroupCount: any;
         groupsCovered: any;
         receiptContractCount: any;
@@ -12800,16 +13439,23 @@ export declare function runMemoryCenterPostCompactReinjectionRepairReceiptMemory
     closureReport: {
         status: string;
         coverageRate: number;
-        checkedGroupCount: any;
-        groupsCovered: any;
-        completedReceiptRepairCount: any;
-        verifiedCompletionCount: any;
-        metadataGapCount: any;
+        groupCount: number;
+        scopeCount: number;
+        exactSessionCount: number;
+        legacyScopeCount: number;
+        checkedGroupCount: number;
+        groupsCovered: number;
+        completedReceiptRepairCount: number;
+        verifiedCompletionCount: number;
+        metadataGapCount: number;
     };
     receiptReportAfter: {
         status: string;
         coverageRate: number;
-        groupCount: any;
+        groupCount: number;
+        scopeCount: any;
+        exactSessionCount: any;
+        legacyScopeCount: any;
         checkedGroupCount: any;
         groupsCovered: any;
         receiptContractCount: any;
@@ -12881,21 +13527,28 @@ export declare function runMemoryCenterPostCompactReceiptMemoryUsageRepairComple
     report: {
         status: string;
         coverageRate: number;
-        checkedGroupCount: any;
-        groupsCovered: any;
-        archivedCompletionCount: any;
-        firstSessionRecallCount: any;
-        secondSessionRecallCount: any;
-        distinctSessionBindingCount: any;
-        completionDocCoveredCount: any;
-        historicalSessionBoundaryCoveredCount: any;
-        validatorCoveredCount: any;
-        metadataGapCount: any;
+        groupCount: number;
+        scopeCount: number;
+        exactSessionCount: number;
+        legacyScopeCount: number;
+        checkedGroupCount: number;
+        groupsCovered: number;
+        archivedCompletionCount: number;
+        firstSessionRecallCount: number;
+        secondSessionRecallCount: number;
+        distinctSessionBindingCount: number;
+        completionDocCoveredCount: number;
+        historicalSessionBoundaryCoveredCount: number;
+        validatorCoveredCount: number;
+        metadataGapCount: number;
     };
     receiptReport: {
         status: string;
         coverageRate: number;
-        groupCount: any;
+        groupCount: number;
+        scopeCount: any;
+        exactSessionCount: any;
+        legacyScopeCount: any;
         checkedGroupCount: any;
         groupsCovered: any;
         receiptContractCount: any;
@@ -12969,9 +13622,12 @@ export declare function runMemoryCenterPostCompactReceiptMemoryUsageRepairComple
     };
     workItems: {
         status: string;
-        groupCount: any;
-        checkedGroupCount: any;
-        groupsCovered: any;
+        groupCount: number;
+        scopeCount: number;
+        exactSessionCount: number;
+        legacyScopeCount: number;
+        checkedGroupCount: number;
+        groupsCovered: number;
         requiredActionCount: any;
         coveredItemCount: any;
         openItemCount: any;
@@ -12979,13 +13635,21 @@ export declare function runMemoryCenterPostCompactReceiptMemoryUsageRepairComple
     };
     candidates: {
         status: string;
-        checkedGroupCount: number;
+        groupCount: number;
+        scopeCount: any;
+        exactSessionCount: any;
+        legacyScopeCount: any;
+        checkedGroupCount: any;
         expectedCandidateCount: any;
         coveredCandidateCount: any;
         metadataGapCount: any;
     };
     briefs: {
         status: string;
+        groupCount: number;
+        scopeCount: any;
+        exactSessionCount: any;
+        legacyScopeCount: any;
         checkedGroupCount: any;
         expectedBriefCount: any;
         coveredBriefCount: any;
@@ -12993,6 +13657,10 @@ export declare function runMemoryCenterPostCompactReceiptMemoryUsageRepairComple
     };
     closure: {
         status: string;
+        groupCount: number;
+        scopeCount: any;
+        exactSessionCount: any;
+        legacyScopeCount: any;
         checkedGroupCount: any;
         correctedRetryCompletedCount: any;
         verifiedClosureCount: any;
@@ -13005,14 +13673,16 @@ export declare function runMemoryCenterPostCompactCompletionMemoryPreservationRe
         indexLayerSelfTestPasses: boolean;
         distillationIsIdempotent: boolean;
         typedMemoryQualityCoversBothGroups: boolean;
-        repeatedFreshSessionRecallCoversBothGroups: boolean;
+        legacyMemoryIsNotInjectedIntoUnscopedSessions: boolean;
         groupRecallIdentityIsIsolated: boolean;
-        packetCarriesClosureContract: boolean;
-        historicalClosureSessionsNeverBecomeCurrent: boolean;
-        renderedContextRequiresFreshUsageReceipt: boolean;
+        legacyClosureRemainsReadableForMigration: boolean;
     };
     typedMemory: {
         status: string;
+        groupCount: number;
+        scopeCount: any;
+        exactSessionCount: any;
+        legacyScopeCount: any;
         checkedGroupCount: any;
         groupsCovered: any;
         expectedClosureCount: any;
@@ -13021,19 +13691,17 @@ export declare function runMemoryCenterPostCompactCompletionMemoryPreservationRe
     };
     workerContext: {
         status: string;
+        groupCount: number;
+        scopeCount: any;
+        exactSessionCount: any;
+        legacyScopeCount: any;
         checkedGroupCount: any;
         groupsCovered: any;
         expectedClosureCount: any;
         firstSessionRecallCount: any;
         secondSessionRecallCount: any;
     };
-    contract: {
-        docRelPaths: any;
-        failedOutcomeIds: any;
-        correctedOutcomeIds: any;
-        currentTaskAgentSessionId: any;
-        currentNativeSessionId: any;
-    };
+    legacyAutoInjectionBlocked: boolean;
 };
 export declare function runMemoryCenterPostCompactCompletionMemoryPreservationClosureUsageFeedbackSelfTest(): {
     pass: boolean;
@@ -13052,7 +13720,10 @@ export declare function runMemoryCenterPostCompactCompletionMemoryPreservationCl
     receiptBefore: {
         status: string;
         coverageRate: number;
-        groupCount: any;
+        groupCount: number;
+        scopeCount: any;
+        exactSessionCount: any;
+        legacyScopeCount: any;
         checkedGroupCount: any;
         groupsCovered: any;
         receiptContractCount: any;
@@ -13070,7 +13741,11 @@ export declare function runMemoryCenterPostCompactCompletionMemoryPreservationCl
     };
     usageFeedback: {
         status: string;
-        checkedGroupCount: any;
+        groupCount: number;
+        scopeCount: number;
+        exactSessionCount: number;
+        legacyScopeCount: number;
+        checkedGroupCount: number;
         feedbackCount: any;
         validFeedbackCount: any;
         distinctTaskSessionCount: any;
@@ -13078,21 +13753,32 @@ export declare function runMemoryCenterPostCompactCompletionMemoryPreservationCl
     };
     receiptRepair: {
         status: string;
+        groupCount: number;
+        scopeCount: any;
+        exactSessionCount: any;
+        legacyScopeCount: any;
         checkedGroupCount: any;
         noncompliantFeedbackCount: any;
         repairCoveredCount: any;
     };
     recallPriority: {
         status: string;
-        checkedGroupCount: any;
-        groupsCovered: any;
-        suppressedGroupCount: any;
-        immutableArchivePreservedCount: any;
+        groupCount: number;
+        scopeCount: number;
+        exactSessionCount: number;
+        legacyScopeCount: number;
+        checkedGroupCount: number;
+        groupsCovered: number;
+        suppressedGroupCount: number;
+        immutableArchivePreservedCount: number;
     };
     correctedReceipt: {
         status: string;
         coverageRate: number;
-        groupCount: any;
+        groupCount: number;
+        scopeCount: any;
+        exactSessionCount: any;
+        legacyScopeCount: any;
         checkedGroupCount: any;
         groupsCovered: any;
         receiptContractCount: any;
@@ -13157,8 +13843,12 @@ export declare function runMemoryCenterPostCompactCompletionMemoryPreservationCl
     };
     aging: {
         status: string;
-        checkedGroupCount: any;
-        groupsCovered: any;
+        groupCount: number;
+        scopeCount: number;
+        exactSessionCount: number;
+        legacyScopeCount: number;
+        checkedGroupCount: number;
+        groupsCovered: number;
         taskFamilyCount: any;
         staleFeedbackCount: any;
         staleDecayedFamilyCount: any;
@@ -13212,8 +13902,12 @@ export declare function runMemoryCenterPostCompactCompletionMemoryPreservationCl
     };
     confidence: {
         status: string;
-        checkedGroupCount: any;
-        groupsCovered: any;
+        groupCount: number;
+        scopeCount: number;
+        exactSessionCount: number;
+        legacyScopeCount: number;
+        checkedGroupCount: number;
+        groupsCovered: number;
         taskFamilyCount: any;
         rawMatchedEntryCount: any;
         independentEvidenceCount: any;
@@ -13237,7 +13931,7 @@ export declare function runMemoryCenterPostCompactCompletionMemoryPreservationCl
         consistentIgnoredStillUsesConfidenceGate: boolean;
         staleOppositionDoesNotCreateFalseConflict: boolean;
         exactIdentityRemainsAvailable: boolean;
-        groupsRemainIsolated: any;
+        groupsRemainIsolated: boolean;
         qualityCheckAndImmutableArchivePass: boolean;
         memoryCenterCreatedNoRealTask: boolean;
     };
@@ -13260,8 +13954,12 @@ export declare function runMemoryCenterPostCompactCompletionMemoryPreservationCl
     };
     conflict: {
         status: string;
-        checkedGroupCount: any;
-        groupsCovered: any;
+        groupCount: number;
+        scopeCount: number;
+        exactSessionCount: number;
+        legacyScopeCount: number;
+        checkedGroupCount: number;
+        groupsCovered: number;
         conflictFamilyCount: any;
         coveredConflictFamilyCount: any;
     };
@@ -13302,15 +14000,51 @@ export declare function runMemoryCenterPostCompactCompletionMemoryPreservationCl
     };
     resolution: {
         status: string;
-        checkedGroupCount: any;
-        groupsCovered: any;
+        groupCount: number;
+        scopeCount: number;
+        exactSessionCount: number;
+        legacyScopeCount: number;
+        checkedGroupCount: number;
+        groupsCovered: number;
         resolutionEntryCount: any;
         archivedResolutionCount: any;
         coveredResolutionCount: any;
         activeResolutionCount: any;
         reopenedResolutionCount: any;
     };
-    resolutionGroups: any;
+    resolutionGroups: {
+        schema: string;
+        groupId: string;
+        groupSessionId: string;
+        scopeId: string;
+        typedScopeId: string;
+        exactSession: boolean;
+        status: string;
+        resolutionEntryCount: any;
+        archivedResolutionCount: number;
+        hotResolutionCount: any;
+        coldArchiveValid: boolean;
+        coveredResolutionCount: number;
+        activeResolutionCount: number;
+        reopenedResolutionCount: number;
+        typedMemoryDocFile: any;
+        historicalBranchesPreserved: any;
+        reversible: any;
+        probes: {
+            taskFamilyKey: string;
+            resolutionEntryId: any;
+            resolutionUsageState: any;
+            active: boolean;
+            reopened: boolean;
+            state: any;
+            archiveCovered: boolean;
+            archiveSource: string;
+            coldShardsRead: number;
+            covered: boolean;
+            gaps: any[];
+        }[];
+        gaps: any[];
+    }[];
     future: {
         docRelPaths: any;
         contract: any;
@@ -13383,21 +14117,24 @@ export declare function runMemoryCenterPostCompactCompletionMemoryPreservationCl
     pass: boolean;
     checks: {
         idempotentWorkItemsPerGroup: boolean;
-        candidatesCarryExactResolutionIdentity: boolean;
+        candidatesCarryExactResolutionIdentity: any;
         briefsAreSelfContainedAndNoRealTask: any;
         staleSameAndCrossGroupOutcomesCannotClose: boolean;
         oneGroupClosureCannotCloseAnother: boolean;
         activeResolutionStrictlyCloses: boolean;
-        reopenedResolutionStrictlyCloses: any;
+        reopenedResolutionStrictlyCloses: boolean;
         closureReportRequiresStrictResolutionProof: boolean;
         immutableResolutionArchivePreserved: any;
         memoryCenterCreatedNoRealTask: boolean;
     };
     workItems: {
         status: string;
-        groupCount: any;
-        checkedGroupCount: any;
-        groupsCovered: any;
+        groupCount: number;
+        scopeCount: number;
+        exactSessionCount: number;
+        legacyScopeCount: number;
+        checkedGroupCount: number;
+        groupsCovered: number;
         requiredActionCount: any;
         coveredItemCount: any;
         openItemCount: any;
@@ -13405,13 +14142,21 @@ export declare function runMemoryCenterPostCompactCompletionMemoryPreservationCl
     };
     candidates: {
         status: string;
-        checkedGroupCount: number;
+        groupCount: number;
+        scopeCount: any;
+        exactSessionCount: any;
+        legacyScopeCount: any;
+        checkedGroupCount: any;
         expectedCandidateCount: any;
         coveredCandidateCount: any;
         metadataGapCount: any;
     };
     briefs: {
         status: string;
+        groupCount: number;
+        scopeCount: any;
+        exactSessionCount: any;
+        legacyScopeCount: any;
         checkedGroupCount: any;
         expectedBriefCount: any;
         coveredBriefCount: any;
@@ -13419,6 +14164,10 @@ export declare function runMemoryCenterPostCompactCompletionMemoryPreservationCl
     };
     closure: {
         status: string;
+        groupCount: number;
+        scopeCount: any;
+        exactSessionCount: any;
+        legacyScopeCount: any;
         checkedGroupCount: any;
         correctedRetryCompletedCount: any;
         verifiedClosureCount: any;
@@ -13649,7 +14398,7 @@ export declare function runMemoryCenterConflictResolutionMaintenanceNotification
     pass: boolean;
     checks: {
         coordinatorPromptReceivesOnlyCurrentGroupNotification: boolean;
-        globalAgentReceivesBoundedMultiGroupAdvisories: any;
+        globalAgentExcludesGroupMaintenanceAdvisories: boolean;
         acknowledgementHidesExactAudienceState: boolean;
         suppressionRequiresReasonAndHidesExactAudienceState: boolean;
         wrongAudienceCrossGroupAndStaleUseRejected: boolean;
@@ -13683,7 +14432,7 @@ export declare function runMemoryCenterConflictResolutionMaintenanceNotification
         repeatedUnseenCriticalIsDiagnosedReadOnly: boolean;
         realCoordinatorContextHelperRecordsDelivery: boolean;
         repeatedContextBuildIsIdempotentlyBounded: boolean;
-        globalAgentRecordsBoundedMultiGroupDeliveryAndHealth: boolean;
+        globalAgentDoesNotConsumeGroupDeliveryContext: boolean;
         crossGroupDeliveryCannotBeRecorded: boolean;
         deliveryObservationIsNonDestructive: boolean;
         deliveryHealthQualityGatePasses: boolean;

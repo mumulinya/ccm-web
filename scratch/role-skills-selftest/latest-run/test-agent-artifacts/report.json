@@ -1,0 +1,374 @@
+{
+  "schema": "ccm-test-agent-report-v1",
+  "agent": "test-agent",
+  "id": "test-agent-report-mrkmk8r2-278520ec",
+  "workOrderId": "role-skills-test-agent-probe",
+  "taskId": "role-skills-test-agent-probe",
+  "groupId": "",
+  "originalUserGoal": "确认 TestAgent 的角色 Skill 已进入真实 work order",
+  "acceptanceCriteria": [
+    "安全验证命令能够执行并记录结果"
+  ],
+  "status": "partial",
+  "recommendation": "need_human",
+  "summary": "TestAgent execution passed, but acceptance criteria have only report-status fallback evidence and are not independently verified.",
+  "startedAt": "2026-07-14T12:25:52.538Z",
+  "finishedAt": "2026-07-14T12:25:52.710Z",
+  "durationMs": 172,
+  "artifactDir": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\role-skills-selftest\\latest-run\\test-agent-artifacts",
+  "requiredChecks": [
+    "commands"
+  ],
+  "commandResults": [
+    {
+      "project": "ccm-role-skill-probe",
+      "command": "node --version",
+      "cwd": "C:\\Users\\admin\\.cc-connect\\ccm",
+      "status": "passed",
+      "exitCode": 0,
+      "signal": null,
+      "startedAt": "2026-07-14T12:25:52.549Z",
+      "finishedAt": "2026-07-14T12:25:52.707Z",
+      "durationMs": 158,
+      "stdout": "v22.22.0\r\n",
+      "stderr": "",
+      "output": "v22.22.0\r\n",
+      "error": ""
+    }
+  ],
+  "devServerResults": [],
+  "httpResults": [],
+  "browserResults": [],
+  "browserToolCalls": [],
+  "browserResourceLifecycleEvents": [],
+  "httpConcurrencySummary": {
+    "checks": 0,
+    "requests": 0,
+    "completed": 0,
+    "passed": 0,
+    "failed": 0,
+    "blocked": 0,
+    "maxInFlight": 0,
+    "items": []
+  },
+  "browserNetworkSummary": [],
+  "browserInteractionSummary": [],
+  "browserFlowSummary": {
+    "total": 0,
+    "statusCounts": {
+      "passed": 0,
+      "failed": 0,
+      "blocked": 0,
+      "skipped": 0
+    },
+    "flowTypeCount": 0,
+    "criteriaCount": 0,
+    "actionCount": 0,
+    "assertionCount": 0,
+    "failedStepCount": 0,
+    "items": []
+  },
+  "browserMultiSessionSummary": {
+    "total": 0,
+    "statusCounts": {
+      "passed": 0,
+      "failed": 0,
+      "blocked": 0,
+      "skipped": 0
+    },
+    "sessionCount": 0,
+    "uniqueSessionCount": 0,
+    "sessionNames": [],
+    "parallelGroupCount": 0,
+    "comparisonCount": 0,
+    "failedComparisonCount": 0,
+    "actionCount": 0,
+    "assertionCount": 0,
+    "failedStepCount": 0,
+    "screenshotCount": 0,
+    "consoleErrorCount": 0,
+    "pageErrorCount": 0,
+    "networkErrorCount": 0,
+    "items": []
+  },
+  "browserStabilitySummary": {
+    "total": 0,
+    "statusCounts": {
+      "stable_pass": 0,
+      "stable_fail": 0,
+      "flaky": 0,
+      "blocked": 0
+    },
+    "expectedRunCount": 0,
+    "runCount": 0,
+    "passedRunCount": 0,
+    "failedRunCount": 0,
+    "blockedRunCount": 0,
+    "skippedRunCount": 0,
+    "screenshotCount": 0,
+    "items": []
+  },
+  "browserEvidenceTemporalIntegrity": {
+    "status": "complete",
+    "toleranceMs": 100,
+    "reportDurationMs": 172,
+    "browserResultCount": 0,
+    "browserToolCallCount": 0,
+    "invalidItemCount": 0,
+    "invalidTimestampCount": 0,
+    "durationMismatchCount": 0,
+    "outsideReportWindowCount": 0,
+    "outsideResultWindowCount": 0,
+    "planMismatchCount": 0,
+    "items": [
+      {
+        "kind": "report",
+        "id": "report",
+        "startedAt": "2026-07-14T12:25:52.538Z",
+        "finishedAt": "2026-07-14T12:25:52.710Z",
+        "durationMs": 172,
+        "status": "complete",
+        "errors": []
+      }
+    ]
+  },
+  "browserResourceLifecycleSummary": {
+    "status": "complete",
+    "eventCount": 0,
+    "ownedResourceCount": 0,
+    "externalResourceCount": 0,
+    "releasedResourceCount": 0,
+    "retainedExternalResourceCount": 0,
+    "openResourceCount": 0,
+    "cleanupFailureCount": 0,
+    "planMismatchCount": 0,
+    "duplicateResourceCount": 0,
+    "invalidOwnershipCount": 0,
+    "invalidTimestampCount": 0,
+    "outsideReportWindowCount": 0,
+    "resourceTypeCounts": {
+      "browser": 0,
+      "browser_context": 0,
+      "external_browser_session": 0
+    },
+    "events": []
+  },
+  "browserToolEvidenceLineage": {
+    "status": "complete",
+    "mcpResultCount": 0,
+    "evidenceRequiredResultCount": 0,
+    "linkedResultCount": 0,
+    "toolCallCount": 0,
+    "scopedToolCallCount": 0,
+    "linkedToolCallCount": 0,
+    "failedToolCallCount": 0,
+    "unlinkedRequiredResultCount": 0,
+    "missingToolCallReferenceCount": 0,
+    "foreignToolCallReferenceCount": 0,
+    "duplicateToolCallReferenceCount": 0,
+    "duplicateToolCallRecordCount": 0,
+    "orphanScopedToolCallCount": 0,
+    "unscopedToolCallCount": 0,
+    "statusCounts": {
+      "complete": 0,
+      "incomplete": 0,
+      "invalid": 0
+    },
+    "items": []
+  },
+  "browserToolCallTimeoutSummary": {
+    "totalCalls": 0,
+    "passedCalls": 0,
+    "failedCalls": 0,
+    "timedOutCalls": 0,
+    "abortRequestedCalls": 0,
+    "timedOutByTool": {},
+    "items": []
+  },
+  "browserRecoverySummary": {
+    "checks": 0,
+    "attempted": 0,
+    "recovered": 0,
+    "failed": 0,
+    "notRetried": 0,
+    "items": []
+  },
+  "browserActionEffectSummary": {
+    "checks": 0,
+    "actions": 0,
+    "changed": 0,
+    "unchanged": 0,
+    "unavailable": 0,
+    "failed": 0,
+    "detailSuppressed": 0,
+    "crossSession": 0,
+    "actionTypes": {},
+    "changedSignals": {
+      "url": 0,
+      "title": 0,
+      "page_text": 0,
+      "dom": 0,
+      "network": 0,
+      "dialog": 0,
+      "popup": 0,
+      "download": 0
+    },
+    "items": []
+  },
+  "adversarialEvidenceSummary": {
+    "required": false,
+    "waived": true,
+    "waiverReason": "Role Skill work-order metadata probe only.",
+    "status": "waived",
+    "total": 0,
+    "passed": 0,
+    "failed": 0,
+    "blocked": 0,
+    "skipped": 0,
+    "http": 0,
+    "browser": 0,
+    "relevant": 0,
+    "unlinked": 0,
+    "passedRelevant": 0,
+    "goalLinked": 0,
+    "criteriaCovered": [],
+    "probeTypes": [],
+    "items": []
+  },
+  "acceptanceEvidenceGateSummary": {
+    "status": "weak",
+    "canAccept": false,
+    "total": 1,
+    "verified": 1,
+    "notVerified": 0,
+    "unknown": 0,
+    "matchedEvidence": 0,
+    "fallbackEvidence": 1,
+    "missingEvidence": 0,
+    "direct": 0,
+    "token": 0,
+    "fallback": 1,
+    "none": 0,
+    "failedCriteria": [],
+    "incompleteCriteria": [],
+    "weakCriteria": [
+      "安全验证命令能够执行并记录结果"
+    ]
+  },
+  "browserProviderSummary": {
+    "preferred": "none",
+    "status": "provider_none",
+    "availableProviders": [],
+    "attemptedProviders": [],
+    "fallbackUsed": false,
+    "items": []
+  },
+  "browserProviderGaps": [],
+  "failureSummary": [],
+  "requiredCheckCoverage": [
+    {
+      "check": "commands",
+      "status": "verified",
+      "evidence": [
+        "node --version: passed - exit=0"
+      ]
+    }
+  ],
+  "acceptanceCoverage": [
+    {
+      "criterion": "安全验证命令能够执行并记录结果",
+      "status": "verified",
+      "evidence": [
+        "ccm-role-skill-probe: command node --version: exit=0; duration=158ms",
+        "ccm-role-skill-probe: node --version: exit=0; duration=158ms"
+      ],
+      "matchStrength": "fallback",
+      "matchScore": 0,
+      "evidenceSource": "single_criterion_report_status"
+    }
+  ],
+  "evidence": [
+    {
+      "type": "command",
+      "project": "ccm-role-skill-probe",
+      "title": "node --version",
+      "status": "passed",
+      "detail": "exit=0; duration=158ms"
+    },
+    {
+      "type": "artifact",
+      "title": "TestAgent JSON report",
+      "status": "partial",
+      "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\role-skills-selftest\\latest-run\\test-agent-artifacts\\report.json"
+    },
+    {
+      "type": "artifact",
+      "title": "TestAgent Markdown report",
+      "status": "partial",
+      "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\role-skills-selftest\\latest-run\\test-agent-artifacts\\report.md"
+    },
+    {
+      "type": "artifact",
+      "title": "TestAgent verdict JSON",
+      "status": "partial",
+      "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\role-skills-selftest\\latest-run\\test-agent-artifacts\\verdict.json"
+    },
+    {
+      "type": "artifact",
+      "title": "TestAgent artifact manifest",
+      "status": "partial",
+      "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\role-skills-selftest\\latest-run\\test-agent-artifacts\\artifact-manifest.json"
+    }
+  ],
+  "risks": [
+    "adversarial probe waived: Role Skill work-order metadata probe only.",
+    "acceptance criterion has only report-status fallback evidence: 安全验证命令能够执行并记录结果"
+  ],
+  "blockedReasons": [],
+  "issues": [],
+  "metadata": {
+    "roleSkills": {
+      "schema": "ccm-role-skill-selection-v1",
+      "role": "test-agent",
+      "phase": "verification",
+      "applied": true,
+      "appliedBy": "ccm-native-test-agent-engine",
+      "selected": [
+        {
+          "name": "ccm-test-acceptance-verifier",
+          "kind": "role",
+          "reason": "独立验收与保守结论"
+        },
+        {
+          "name": "ccm-acceptance-evidence",
+          "kind": "shared",
+          "reason": "验收项与真实证据绑定"
+        }
+      ]
+    },
+    "browserProviderPreflight": [],
+    "browserAuthenticationSummary": {
+      "configuredChecks": 0,
+      "managedChecks": 0,
+      "existingSessionChecks": 0,
+      "passedChecks": 0,
+      "failedChecks": 0,
+      "blockedChecks": 0,
+      "authenticatedSessions": 0,
+      "credentialEnvNames": [],
+      "storageStateCount": 0,
+      "sensitiveArtifactSuppressionCount": 0,
+      "existingSessionProviders": [],
+      "minimalEvidenceChecks": 0,
+      "fullEvidenceChecks": 0,
+      "tabContextCheckedChecks": 0,
+      "newTabChecks": 0
+    },
+    "artifactFiles": {
+      "reportJsonPath": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\role-skills-selftest\\latest-run\\test-agent-artifacts\\report.json",
+      "reportMarkdownPath": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\role-skills-selftest\\latest-run\\test-agent-artifacts\\report.md",
+      "verdictJsonPath": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\role-skills-selftest\\latest-run\\test-agent-artifacts\\verdict.json",
+      "manifestPath": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\role-skills-selftest\\latest-run\\test-agent-artifacts\\artifact-manifest.json"
+    }
+  }
+}

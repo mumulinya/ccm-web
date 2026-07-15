@@ -1,0 +1,25 @@
+# Managed by CCM. This CODEX_HOME contains only tools authorized for this invocation.
+
+[[skills.config]]
+path = "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\role-skills-selftest\\latest-run\\agent-runtime\\codex\\1894c3ddd78e7923\\skills\\ccm-ccm-project-delivery-worker\\SKILL.md"
+enabled = true
+
+[[skills.config]]
+path = "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\role-skills-selftest\\latest-run\\agent-runtime\\codex\\1894c3ddd78e7923\\skills\\ccm-ccm-project-source-research\\SKILL.md"
+enabled = true
+
+[[skills.config]]
+path = "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\role-skills-selftest\\latest-run\\agent-runtime\\codex\\1894c3ddd78e7923\\skills\\ccm-ccm-delivery-receipt\\SKILL.md"
+enabled = true
+
+[[skills.config]]
+path = "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\role-skills-selftest\\latest-run\\agent-runtime\\codex\\1894c3ddd78e7923\\skills\\ccm-ccm-document-driven-delivery\\SKILL.md"
+enabled = true
+
+[[skills.config]]
+path = "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\role-skills-selftest\\latest-run\\agent-runtime\\codex\\1894c3ddd78e7923\\skills\\ccm-ccm-frontend-visual-qa\\SKILL.md"
+enabled = true
+
+[[skills.config]]
+path = "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\role-skills-selftest\\latest-run\\agent-runtime\\codex\\1894c3ddd78e7923\\skills\\ccm-ccm-acceptance-evidence\\SKILL.md"
+enabled = true

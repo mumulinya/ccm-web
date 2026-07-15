@@ -82,6 +82,9 @@ exports.summarizeGroupCompactFileReferenceReadPlanFreshness = summarizeGroupComp
 exports.latestGroupCompactFileReferenceReadPlanRows = latestGroupCompactFileReferenceReadPlanRows;
 exports.latestGroupCompactFileReferenceReadPlanRevalidationGate = latestGroupCompactFileReferenceReadPlanRevalidationGate;
 exports.buildGroupCompactFileReferenceReadPlanRevalidationGate = buildGroupCompactFileReferenceReadPlanRevalidationGate;
+exports.renderGroupPostCompactInvokedSkillAttachments = renderGroupPostCompactInvokedSkillAttachments;
+exports.renderGroupPostCompactPlanAttachment = renderGroupPostCompactPlanAttachment;
+exports.renderGroupPostCompactDynamicContextDelta = renderGroupPostCompactDynamicContextDelta;
 exports.buildGroupMemoryContext = buildGroupMemoryContext;
 exports.deleteGroupSessionMemoryArtifacts = deleteGroupSessionMemoryArtifacts;
 exports.appendGroupMemorySnipBoundaryMarker = appendGroupMemorySnipBoundaryMarker;
@@ -102,6 +105,7 @@ exports.buildGroupApiMicrocompactNativeApplyRequestTelemetrySummary = buildGroup
 exports.recordGroupApiMicrocompactNativeApplyProofLedger = recordGroupApiMicrocompactNativeApplyProofLedger;
 exports.buildGroupApiMicrocompactNativeApplyProofSummary = buildGroupApiMicrocompactNativeApplyProofSummary;
 exports.recordGroupMemoryReloadAudit = recordGroupMemoryReloadAudit;
+exports.buildGroupPostCompactDynamicContextCatalog = buildGroupPostCompactDynamicContextCatalog;
 exports.scheduleGroupMemoryAutoCompaction = scheduleGroupMemoryAutoCompaction;
 exports.runGroupMemoryAutoCompactionNow = runGroupMemoryAutoCompactionNow;
 exports.ensureGroupMemoryAutoCompactionHook = ensureGroupMemoryAutoCompactionHook;
@@ -151,6 +155,8 @@ const db_1 = require("../../core/db");
 const utils_1 = require("../../core/utils");
 const context_budget_1 = require("../../system/context-budget");
 const tool_authorization_1 = require("../../tools/tool-authorization");
+const tool_manager_1 = require("../../tools/tool-manager");
+const runtime_1 = require("../../agents/runtime");
 const group_memory_compaction_1 = require("./group-memory-compaction");
 const group_memory_index_1 = require("./group-memory-index");
 const runtime_kernel_1 = require("../../agents/runtime-kernel");
@@ -169,6 +175,9 @@ const group_compact_head_1 = require("./group-compact-head");
 const provider_native_compact_execution_receipt_1 = require("./provider-native-compact-execution-receipt");
 const provider_native_compact_session_capacity_1 = require("./provider-native-compact-session-capacity");
 const group_memory_auto_compact_circuit_breaker_1 = require("./group-memory-auto-compact-circuit-breaker");
+const group_reactive_compact_retry_ownership_1 = require("./group-reactive-compact-retry-ownership");
+const group_prompt_cache_break_detection_1 = require("./group-prompt-cache-break-detection");
+const group_orchestrator_1 = require("./group-orchestrator");
 const GROUP_MEMORY_DIR = path.join(utils_1.CCM_DIR, "group-memory");
 const GROUP_SESSION_SCOPED_MEMORY_DIR = path.join(utils_1.CCM_DIR, "group-memory-sessions");
 exports.GROUP_MEMORY_SOURCE_MANIFEST_VERSION = 1;
@@ -2366,6 +2375,22 @@ function buildGroupSessionMemorySnapshot(groupId, memory = {}, options = {}) {
         || modelMergeQuality?.factSupersessionGraph
         || null;
     const extractionMethod = modelMarkdown ? "forked_model_session_memory" : "deterministic_structured_fallback";
+    const postCompactSessionStateReset = compaction.postCompactSessionStateReset
+        || compression.postCompactSessionStateReset
+        || boundary.postCompactSessionStateReset
+        || boundary.post_compact_restore?.postCompactSessionStateReset
+        || null;
+    const postCompactSessionStateResetVerification = postCompactSessionStateReset?.schema
+        ? (0, group_memory_compaction_1.verifyGroupPostCompactSessionStateResetReceipt)(postCompactSessionStateReset, {
+            groupId: memory.groupId,
+            groupSessionId: memory.groupSessionId,
+            boundaryId: boundary.id,
+            summaryChecksum: compaction.summaryChecksum || boundary.post_compact_restore?.summaryChecksum || "",
+        })
+        : null;
+    const extractionCursor = postCompactSessionStateResetVerification?.valid === true
+        ? String(postCompactSessionStateReset.session_memory_extraction_cursor?.message_id || "")
+        : String(compaction.lastCompactedMessageId || boundary.summarizedThroughMessageId || "");
     const sectionEvidence = options.sectionEvidence || options.section_evidence || buildGroupSessionMemorySectionEvidence(markdown, {
         sourceType: modelMarkdown ? "model_transcript_range" : "deterministic_memory_snapshot",
         sourceTranscriptChecksum: modelExtractionReceipt?.requestAudit?.sourceTranscriptChecksum || semanticSummaryChecksum,
@@ -2396,7 +2421,14 @@ function buildGroupSessionMemorySnapshot(groupId, memory = {}, options = {}) {
         },
         summaryFile: markdownFile,
         snapshotFile,
-        lastSummarizedMessageId: String(compaction.lastCompactedMessageId || boundary.summarizedThroughMessageId || ""),
+        lastSummarizedMessageId: extractionCursor,
+        durableBoundaryMessageId: String(compaction.lastCompactedMessageId || boundary.summarizedThroughMessageId || ""),
+        providerActiveLastSummarizedMessageId: postCompactSessionStateResetVerification?.valid === true ? "" : extractionCursor,
+        providerActiveCursorStatus: postCompactSessionStateResetVerification?.valid === true ? "cleared_after_compact" : "legacy_shared_cursor",
+        extractionCursorGeneration: Math.max(0, Number(postCompactSessionStateReset?.session_memory_extraction_cursor?.generation || 0)),
+        postCompactSessionStateReset,
+        postCompactSessionStateResetValid: postCompactSessionStateResetVerification?.valid === true,
+        postCompactSessionStateResetIssues: postCompactSessionStateResetVerification?.issues || [],
         summaryChecksum: String(compaction.summaryChecksum || boundary.summaryChecksum || semanticSummaryChecksum),
         markdownChecksum: hashSessionMemoryText(markdown, 24),
         markdownChars: markdown.length,
@@ -3806,6 +3838,7 @@ function summarizeMemoryItems(title, items, mapper) {
     return `${title}: ${values.join("；")}`;
 }
 function buildChildAgentSessionBinding(groupId, targetProject, task = "", options = {}) {
+    const groupSessionId = String(options.groupSessionId || options.group_session_id || "").trim();
     const taskId = String(options.taskId || options.task_id || options.task?.id || "").trim();
     const traceId = String(options.traceId || options.trace_id || options.task?.trace_id || options.task?.traceId || "").trim();
     const taskAgentSessionId = String(options.taskAgentSessionId || options.task_agent_session_id || options.sessionRecordId || options.session_record_id || "").trim();
@@ -3816,6 +3849,7 @@ function buildChildAgentSessionBinding(groupId, targetProject, task = "", option
     const turn = Number(options.taskAgentSessionTurn || options.task_agent_session_turn || options.sessionTurn || options.session_turn || 0);
     const bindingId = `csm:${crypto.createHash("sha256").update(JSON.stringify([
         groupId,
+        groupSessionId,
         targetProject,
         taskId,
         taskAgentSessionId,
@@ -3829,6 +3863,7 @@ function buildChildAgentSessionBinding(groupId, targetProject, task = "", option
         schema: "ccm-child-agent-memory-session-binding-v1",
         binding_id: bindingId,
         group_id: groupId,
+        group_session_id: groupSessionId,
         target_project: targetProject,
         task_id: taskId,
         trace_id: traceId,
@@ -3838,7 +3873,7 @@ function buildChildAgentSessionBinding(groupId, targetProject, task = "", option
         native_session_id: nativeSessionId,
         agent_type: agentType,
         turn,
-        binding_required: !!(taskAgentSessionId || nativeSessionId),
+        binding_required: !!(groupSessionId || taskAgentSessionId || nativeSessionId),
         scope: String(options.scope || (targetProject ? `child:${targetProject}` : "child")),
     };
 }
@@ -3868,8 +3903,84 @@ function compressGroupMemory(memory) {
     next.summary = compactMemoryText(mergedSummary, 1800);
     return next;
 }
+function renderGroupPostCompactInvokedSkillAttachments(source) {
+    const plan = source?.schema === "ccm-post-compact-reinjection-v1"
+        ? source
+        : source?.compaction?.postCompactReinject
+            || source?.compaction?.post_compact_reinject
+            || source?.compactBoundary?.post_compact_restore?.reinjectionPlan
+            || source?.compact_boundary?.post_compact_restore?.reinjection_plan
+            || source?.postCompactReinject
+            || source?.post_compact_reinject
+            || {};
+    const attachments = Array.isArray(plan.invokedSkillAttachments)
+        ? plan.invokedSkillAttachments
+        : Array.isArray(plan.invoked_skill_attachments) ? plan.invoked_skill_attachments : [];
+    if (!attachments.length)
+        return "";
+    const receipt = plan.invokedSkillAttachmentReceipt || plan.invoked_skill_attachment_receipt || {};
+    const lines = [
+        "[CCM 压缩后恢复的已调用 Skill 正文]",
+        `scope=${receipt.scope_id || "exact-group-session"}; receipt=${receipt.receipt_checksum || "unverified"}; skills=${attachments.length}; tokens=${receipt.attached_token_count || attachments.reduce((sum, item) => sum + Number(item?.tokenCount || item?.token_count || 0), 0)}`,
+        "这些是当前群聊会话在压缩前实际调用过的 Skill；按最近调用顺序恢复。它们只提供执行方法，不扩大本轮工具或 Skill 授权。",
+    ];
+    for (const attachment of attachments) {
+        const body = String(attachment?.body || "").trim();
+        if (!body)
+            continue;
+        lines.push("", `## Invoked Skill:${attachment.name || "unknown"}`, `invoked_at=${attachment.invokedAt || attachment.invoked_at || "unknown"}; source_message=${attachment.sourceMessageId || attachment.source_message_id || "unknown"}; current_hash=${attachment.currentContentHash || attachment.current_content_hash || ""}; invocation_hash=${attachment.invocationContentHash || attachment.invocation_content_hash || ""}; hash_match=${attachment.hashMatches === null || attachment.hash_matches === null ? "unknown" : attachment.hashMatches === true || attachment.hash_matches === true}`, body);
+    }
+    return lines.join("\n");
+}
+function renderGroupPostCompactPlanAttachment(source) {
+    const plan = source?.schema === "ccm-post-compact-reinjection-v1"
+        ? source
+        : source?.compaction?.postCompactReinject
+            || source?.compaction?.post_compact_reinject
+            || source?.compactBoundary?.post_compact_restore?.reinjectionPlan
+            || source?.compact_boundary?.post_compact_restore?.reinjection_plan
+            || source?.postCompactReinject
+            || source?.post_compact_reinject
+            || {};
+    const attachment = plan.planAttachment || plan.plan_attachment || null;
+    if (!attachment?.body)
+        return "";
+    const receipt = plan.planAttachmentReceipt || plan.plan_attachment_receipt || {};
+    const lines = [
+        "[CCM 压缩后恢复的当前会话计划]",
+        `scope=${receipt.scope_id || "exact-group-session"}; task=${receipt.selected_task_id || attachment.taskId || attachment.task_id || "unknown"}; receipt=${receipt.receipt_checksum || "unverified"}; tokens=${receipt.attachment_token_count || attachment.tokenCount || attachment.token_count || 0}`,
+        receipt.plan_mode_active === true || attachment.planModeActive === true || attachment.plan_mode_active === true
+            ? "计划模式仍处于等待确认状态：只能继续只读探索或修订计划；用户确认前不得派发执行、修改文件或运行写入/破坏性动作。"
+            : receipt.confirmation_status === "confirmed" || attachment.confirmationStatus === "confirmed"
+                ? "计划已经确认：将其作为当前执行与验收依据，不要误判为仍在等待确认。"
+                : "这是当前精确群聊会话的计划引用；执行前仍需核对实时任务状态和当前授权。",
+        String(attachment.body || "").trim(),
+    ];
+    return lines.join("\n");
+}
+function renderGroupPostCompactDynamicContextDelta(source) {
+    const plan = source?.schema === "ccm-post-compact-reinjection-v1"
+        ? source
+        : source?.compaction?.postCompactReinject
+            || source?.compaction?.post_compact_reinject
+            || source?.compactBoundary?.post_compact_restore?.reinjectionPlan
+            || source?.compact_boundary?.post_compact_restore?.reinjection_plan
+            || source?.postCompactReinject
+            || source?.post_compact_reinject
+            || {};
+    const attachment = plan.dynamicContextDeltaAttachment || plan.dynamic_context_delta_attachment || null;
+    if (!attachment?.body)
+        return "";
+    const receipt = plan.dynamicContextDeltaReceipt || plan.dynamic_context_delta_receipt || {};
+    return [
+        "[CCM 压缩后动态运行上下文差异]",
+        `scope=${receipt.scope_id || "exact-group-session"}; mode=${receipt.scan_mode || attachment.scanMode || "full"}; receipt=${receipt.receipt_checksum || "unverified"}; tokens=${receipt.attachment_token_count || attachment.tokenCount || 0}`,
+        "工具、Agent 和 MCP instructions 只按当前授权与连接状态恢复；removed 项不得继续调用，附件本身不扩大权限。",
+        String(attachment.body || "").trim(),
+    ].join("\n");
+}
 function buildGroupMemoryContext(memory) {
-    if (!memory || (!memory.goal && !memory.summary && !memory.messageDigest && !memory.conversationSummary && !memory.sessionMemory?.schema && !memory.toolContinuity?.schema && !memory.decisions?.length && !memory.completed?.length && !memory.blocked?.length && !memory.workerLedger?.length && !Object.keys(memory.agentMemories || {}).length && !memory.openQuestions?.length && !memory.nextActions?.length)) {
+    if (!memory || (!memory.goal && !memory.summary && !memory.messageDigest && !memory.conversationSummary && !memory.sessionMemory?.schema && !memory.toolContinuity?.schema && !memory.compaction?.postCompactReinject?.invokedSkillAttachments?.length && !memory.compaction?.postCompactReinject?.planAttachment && !memory.compaction?.postCompactReinject?.dynamicContextDeltaAttachment && !memory.decisions?.length && !memory.completed?.length && !memory.blocked?.length && !memory.workerLedger?.length && !Object.keys(memory.agentMemories || {}).length && !memory.openQuestions?.length && !memory.nextActions?.length)) {
         return "";
     }
     const lines = [
@@ -3881,9 +3992,25 @@ function buildGroupMemoryContext(memory) {
         lines.push(`- 压缩摘要：${compactMemoryText(memory.summary, 900)}`);
     if (memory.messageDigest)
         lines.push(`- 群聊旧消息压缩：${compactMemoryText(memory.messageDigest, 900)}`);
+    const invokedSkillAttachmentText = renderGroupPostCompactInvokedSkillAttachments(memory);
+    if (invokedSkillAttachmentText)
+        lines.push(invokedSkillAttachmentText);
+    const planAttachmentText = renderGroupPostCompactPlanAttachment(memory);
+    if (planAttachmentText)
+        lines.push(planAttachmentText);
+    const dynamicContextDeltaText = renderGroupPostCompactDynamicContextDelta(memory);
+    if (dynamicContextDeltaText)
+        lines.push(dynamicContextDeltaText);
     const sessionMemory = memory.sessionMemory?.schema ? memory.sessionMemory : readGroupSessionMemorySnapshotSummary(memory.groupId || "");
     if (sessionMemory?.schema && (sessionMemory.hasSummary || sessionMemory.markdownExists)) {
         lines.push(`- CC 风格 Session Memory：summary=${sessionMemory.summaryFile || "未记录"}；checksum=${sessionMemory.markdownChecksum || "unknown"}；last=${sessionMemory.lastSummarizedMessageId || "recent-window"}；该文件是压缩后主/子 Agent 可重注入的会话级短记忆。`);
+    }
+    const sessionMemorySelection = memory.compaction?.sessionMemoryCompactSelection
+        || memory.compactBoundary?.sessionMemoryCompactSelection
+        || memory.messageCompression?.sessionMemoryCompactSelection;
+    if (sessionMemorySelection?.schema === "ccm-group-session-memory-compact-selection-v1") {
+        const closure = sessionMemorySelection.api_invariant_closure || {};
+        lines.push(`- Session Memory 压缩选择：${sessionMemorySelection.status || "unknown"}；cursor=${sessionMemorySelection.cursor_status || "unknown"}；保留 ${sessionMemorySelection.preserved_message_count || 0} 条 / 约 ${sessionMemorySelection.preserved_token_estimate || 0} tokens；API invariant closure=${closure.pass === true ? `pass(+${closure.expanded_message_count || 0})` : closure.schema ? "fail" : "unknown"}；compaction API called=${sessionMemorySelection.compaction_api_called === true}${sessionMemorySelection.fallback_reason ? `；fallback=${sessionMemorySelection.fallback_reason}` : ""}。`);
     }
     const toolContinuity = memory.toolContinuity?.schema ? memory.toolContinuity : readGroupToolContinuitySnapshotSummary(memory.groupId || "");
     if (toolContinuity?.schema && (hasToolGrantSet(toolContinuity.allowedTools) || hasToolGrantSet(toolContinuity.requested) || (toolContinuity.invokedSkills || []).length || toolContinuity.markdownExists)) {
@@ -3917,6 +4044,10 @@ function buildGroupMemoryContext(memory) {
     addList("关键决策", memory.decisions || [], (item) => `${item.decision}${item.reason ? `（${item.reason}）` : ""}`);
     addList("已完成", memory.completed || [], (item) => `${item.project || "unknown"}：${item.summary || ""}`);
     addList("阻塞/未完成", memory.blocked || [], (item) => `${item.project || "unknown"}：${item.reason || ""}`);
+    const postCompactTaskStatuses = memory.compaction?.postCompactReinject?.taskStatuses
+        || memory.compactBoundary?.post_compact_restore?.reinjectionPlan?.taskStatuses
+        || [];
+    addList("压缩后子任务状态", postCompactTaskStatuses, (item) => item.value || `${item.task_id || item.taskId || "unknown"} [${item.status || "unknown"}] ${item.description || item.delta_summary || ""}`);
     addList("Worker scratchpad", memory.workerLedger || [], (item) => `${item.project || "unknown"} [${item.status || "unknown"}]：${item.summary || ""}${item.verification?.length ? `；验证：${item.verification.join("、")}` : ""}`);
     addList("开放问题", memory.openQuestions || [], (item) => String(item.question || item));
     addList("下一步", memory.nextActions || [], (item) => String(item.action || item));
@@ -4109,6 +4240,29 @@ function deleteGroupSessionMemoryArtifacts(groupId, sessionId) {
         ? (0, group_memory_auto_compact_circuit_breaker_1.deleteGroupMemoryAutoCompactCircuitBreaker)(groupId, cleanSessionId)
         : { deleted: 0 };
     deletedFiles += Number(autoCompactCircuitBreakerArtifacts.deleted || 0);
+    const reactiveCompactRetryOwnershipArtifacts = cleanSessionId.startsWith("gcs_")
+        ? (0, group_reactive_compact_retry_ownership_1.deleteGroupReactiveCompactRetryOwnership)(groupId, cleanSessionId)
+        : { deleted: 0 };
+    deletedFiles += Number(reactiveCompactRetryOwnershipArtifacts.deleted || 0);
+    const promptCacheBreakDetectionArtifacts = cleanSessionId.startsWith("gcs_")
+        ? (0, group_prompt_cache_break_detection_1.deleteGroupPromptCacheBreakDetection)(groupId, cleanSessionId)
+        : { deleted: 0 };
+    deletedFiles += Number(promptCacheBreakDetectionArtifacts.deleted || 0);
+    const workerContextCompactSessionArtifacts = cleanSessionId.startsWith("gcs_")
+        ? (0, group_orchestrator_1.deleteWorkerContextCompactSessionArtifactsForCoordinator)(groupId, cleanSessionId)
+        : { deleted: 0 };
+    deletedFiles += Number(workerContextCompactSessionArtifacts.deleted || 0);
+    const conflictResolutionMaintenanceSchedulerArtifacts = cleanSessionId.startsWith("gcs_")
+        ? (() => {
+            try {
+                const { deleteConflictResolutionMemoryMaintenanceSchedulerSessionState } = require("../scheduling/cron");
+                return deleteConflictResolutionMemoryMaintenanceSchedulerSessionState(groupId, cleanSessionId);
+            }
+            catch (error) {
+                return { removed: false, error: String(error?.message || error) };
+            }
+        })()
+        : { removed: false };
     return {
         schema: "ccm-group-session-memory-artifact-delete-v1",
         groupId,
@@ -4122,6 +4276,10 @@ function deleteGroupSessionMemoryArtifacts(groupId, sessionId) {
         compactHeadArtifacts,
         providerNativeCompactSessionCapacityArtifacts,
         autoCompactCircuitBreakerArtifacts,
+        reactiveCompactRetryOwnershipArtifacts,
+        promptCacheBreakDetectionArtifacts,
+        workerContextCompactSessionArtifacts,
+        conflictResolutionMaintenanceSchedulerArtifacts,
         deletedAt: new Date().toISOString(),
     };
 }
@@ -4611,9 +4769,28 @@ function refreshGroupConversationMemorySnapshot(groupId, allMessages, memory, op
         }, groupSessionId, { sessionMemoryCadenceDecision });
     }
     const conversationSummary = (0, group_memory_compaction_1.buildDeterministicConversationSummary)(messagesToSummarize, memory, memory?.conversationSummary || {});
-    const microCompact = (0, group_memory_compaction_1.buildGroupMicroCompactPlan)(messagesToSummarize);
-    const postCompactReinject = (0, group_memory_compaction_1.buildPostCompactReinjectionPlan)(messagesToSummarize, microCompact);
     const now = new Date().toISOString();
+    const currentTasks = (0, db_1.loadTasks)();
+    const postCompactTaskStatusProjection = (0, group_memory_compaction_1.buildGroupPostCompactTaskStatusProjection)(currentTasks, {
+        groupId,
+        groupSessionId,
+        taskStatusBudget: options.postCompactReinject?.taskStatusBudget || options.postCompactReinject?.task_status_budget,
+        completedMaxAgeMs: options.postCompactReinject?.completedMaxAgeMs || options.postCompactReinject?.completed_max_age_ms,
+        now,
+    });
+    const microCompact = (0, group_memory_compaction_1.buildGroupMicroCompactPlan)(messagesToSummarize);
+    const postCompactReinject = (0, group_memory_compaction_1.buildPostCompactReinjectionPlan)(messagesToSummarize, microCompact, {
+        groupId,
+        groupSessionId,
+        sessionMessages: messages,
+        preservedMessages: keptMessages,
+        taskStatuses: postCompactTaskStatusProjection.tasks,
+        tasks: currentTasks,
+        currentTaskId: options.currentTaskId || options.current_task_id,
+        dynamicContextCatalog: buildGroupPostCompactDynamicContextCatalog(groupId, memory, options),
+        dynamicContextScanMode: "full",
+        now,
+    });
     const preCompactTokenCount = messages.reduce((sum, message) => sum + (0, group_memory_compaction_1.estimateGroupMessageTokens)(message), 0);
     const postCompactTokenCount = (0, group_memory_compaction_1.estimateGroupTextTokens)(JSON.stringify(conversationSummary))
         + keptMessages.reduce((sum, message) => sum + Math.min((0, group_memory_compaction_1.estimateGroupMessageTokens)(message), 2500), 0);
@@ -4740,6 +4917,7 @@ function refreshGroupConversationMemorySnapshot(groupId, allMessages, memory, op
             transcriptPath: getGroupMessagesFileHint(groupId, groupSessionId),
             microCompact,
             reinjectionPlan: postCompactReinject,
+            postCompactTaskStatusProjection: postCompactTaskStatusProjection.receipt,
             ptlRecovery,
             recoveryAudit: null,
             cleanupAudit: null,
@@ -4795,6 +4973,7 @@ function refreshGroupConversationMemorySnapshot(groupId, allMessages, memory, op
         postCompactRecoveryAudit,
         microCompact,
         postCompactReinject,
+        postCompactTaskStatusProjection: postCompactTaskStatusProjection.receipt,
         preservedSegment,
         transcriptPath: getGroupMessagesFileHint(groupId, groupSessionId),
         summaryChecksum,
@@ -4824,6 +5003,7 @@ function refreshGroupConversationMemorySnapshot(groupId, allMessages, memory, op
         context_budget: boundary.context_budget,
         microCompact,
         postCompactReinject,
+        postCompactTaskStatusProjection: postCompactTaskStatusProjection.receipt,
         ptlEmergency: activePtlEmergency,
         ptlRecovery,
         preservedSegment,
@@ -4864,6 +5044,7 @@ function refreshGroupConversationMemorySnapshot(groupId, allMessages, memory, op
             apiMicroCompactEditPlan,
             postCompactRecoveryAudit,
             postCompactCleanupAudit,
+            postCompactTaskStatusProjection: postCompactTaskStatusProjection.receipt,
             contextPressureWarning: postCompactWarning,
             lastCompressedAt: now,
         },
@@ -6628,6 +6809,7 @@ function normalizePostCompactReinjectionRows(plan = {}) {
         ...normalize("skill", plan.skills),
         ...normalize("verification", plan.verification),
         ...normalize("blocker", plan.blockers),
+        ...normalize("task_status", plan.taskStatuses || plan.task_statuses),
     ];
 }
 function buildGroupMemoryPostCompactReinjectionGate(input = {}) {
@@ -6848,6 +7030,56 @@ function loadGroupMemoryCompactionConfig(overrides = {}) {
     catch { }
     return { ...(config || {}), ...(overrides || {}) };
 }
+function normalizeDynamicContextToolScope(value = {}) {
+    const unique = (items, prefix = "") => Array.from(new Set((Array.isArray(items) ? items : [])
+        .map(item => String(item || "").trim())
+        .filter(Boolean)
+        .map(item => prefix && item.toLowerCase().startsWith(prefix) ? item.slice(prefix.length) : item)));
+    return {
+        mcp: unique(value.mcp),
+        skill: unique(value.skill, "skill:"),
+    };
+}
+function buildGroupPostCompactDynamicContextCatalog(groupId, memory = {}, options = {}) {
+    const group = options.group || (0, storage_1.loadGroups)().find((item) => String(item?.id || "") === String(groupId || "")) || null;
+    const grants = options.allowedTools
+        || options.allowed_tools
+        || group?.tools
+        || memory?.toolContinuity?.allowedTools
+        || memory?.toolContinuity?.allowed_tools
+        || { mcp: [], skill: [] };
+    const scope = normalizeDynamicContextToolScope(grants);
+    const toolCatalog = tool_manager_1.toolManager.getPostCompactDynamicToolCatalog(scope);
+    const runtimeMap = new Map((0, runtime_1.getPublicAgentRuntimes)().map(runtime => [runtime.id, runtime]));
+    const projectConfigs = (0, db_1.loadProjectConfigs)();
+    const configuredProjects = new Set((Array.isArray(projectConfigs) ? projectConfigs : []).map((config) => String(config?.name || "")).filter(Boolean));
+    const members = Array.isArray(group?.members) ? group.members : [];
+    const agents = members
+        .filter((member) => member?.role !== "coordinator" && String(member?.project || "") !== "coordinator")
+        .filter((member) => configuredProjects.has(String(member?.project || "")) || options.includeUnconfiguredAgents === true)
+        .map((member) => {
+        const project = String(member?.project || "").trim();
+        const agentType = (0, runtime_1.normalizeAgentRuntimeId)(member?.agent || "claudecode");
+        const runtime = runtimeMap.get(agentType);
+        const role = String(member?.role || "project agent").trim();
+        return {
+            name: project,
+            project,
+            agentType,
+            line: `${project} (${agentType}${runtime?.label ? ` / ${runtime.label}` : ""}): ${role}; dispatch is limited to this configured group member`,
+        };
+    })
+        .filter((item) => !!item.name)
+        .sort((left, right) => left.name.localeCompare(right.name));
+    return {
+        schema: "ccm-group-post-compact-dynamic-context-catalog-v1",
+        groupId: String(groupId || ""),
+        tools: toolCatalog.tools,
+        skills: toolCatalog.skills,
+        mcpInstructions: toolCatalog.mcpInstructions,
+        agents,
+    };
+}
 function isGroupModelCompactionEnabled(config) {
     return config?.memoryCompactionUseModel === true
         || String(config?.memoryCompactionMode || "").toLowerCase() === "hybrid";
@@ -6921,7 +7153,13 @@ async function runGroupMemoryAutoCompactionNow(groupId, options = {}) {
     try {
         const messages = (0, storage_1.getGroupMessages)(id, sessionId).filter((message) => !String(message?.content || "").startsWith("📤"));
         const memory = loadGroupMemory(id, sessionId);
-        const config = loadGroupMemoryCompactionConfig(options.config || {});
+        const loadedConfig = loadGroupMemoryCompactionConfig(options.config || {});
+        const config = {
+            ...loadedConfig,
+            postCompactDynamicContextCatalog: buildGroupPostCompactDynamicContextCatalog(id, memory, {
+                allowedTools: loadedConfig?.postCompactDynamicContextAllowedTools,
+            }),
+        };
         const modelCompactionEnabled = isGroupModelCompactionEnabled(config);
         const previousSummarySource = String(memory?.compaction?.summarySource || "");
         const rebuild = options.rebuild === true || (modelCompactionEnabled && previousSummarySource === "deterministic-sync");
@@ -6933,6 +7171,7 @@ async function runGroupMemoryAutoCompactionNow(groupId, options = {}) {
             memory,
             config,
             transcriptPath: (0, storage_1.getGroupChatSessionMessagesFile)(id, sessionId),
+            activeTasks: (0, db_1.loadTasks)(),
             force,
             rebuild,
         });
@@ -6973,7 +7212,7 @@ async function runGroupMemoryAutoCompactionNow(groupId, options = {}) {
             throughMessageId: result.boundary?.summarizedThroughMessageId || nextMemory?.compaction?.lastCompactedMessageId || "",
             maxMessages: options.distillMaxMessages || options.distill_max_messages,
         });
-        const saved = saveGroupMemory(id, {
+        const memoryBeforePostCompactState = {
             ...nextMemory,
             longTermLogDistillation: logDistillation,
             compaction: {
@@ -6982,7 +7221,7 @@ async function runGroupMemoryAutoCompactionNow(groupId, options = {}) {
                 logDistillation,
                 providerNativeCompactSessionCapacityResetIntent,
             },
-        }, sessionId);
+        };
         const compactHead = sessionId.startsWith("gcs_") && result.compacted && result.compactTransactionReceipt
             ? (0, group_compact_head_1.commitGroupCompactHead)({ groupId: id, groupSessionId: sessionId, compactTransactionReceipt: result.compactTransactionReceipt })
             : null;
@@ -7014,15 +7253,6 @@ async function runGroupMemoryAutoCompactionNow(groupId, options = {}) {
                 };
             }
         }
-        const returnedMemory = providerNativeCompactSessionCapacityReset
-            ? {
-                ...saved,
-                compaction: {
-                    ...(saved?.compaction || {}),
-                    providerNativeCompactSessionCapacityReset,
-                },
-            }
-            : saved;
         const circuitBreaker = result.compacted === true && !!result.boundary?.id && !!compactHead?.head
             ? (0, group_memory_auto_compact_circuit_breaker_1.recordGroupMemoryAutoCompactCircuitBreakerOutcome)({
                 groupId: id,
@@ -7033,7 +7263,74 @@ async function runGroupMemoryAutoCompactionNow(groupId, options = {}) {
                 at: background.completedAt,
             })
             : (0, group_memory_auto_compact_circuit_breaker_1.readGroupMemoryAutoCompactCircuitBreaker)(id, sessionId);
-        return { success: true, compacted: !!result.compacted, boundary: result.boundary || null, keepIndex: result.keepIndex, background, memory: returnedMemory, compactHead, typedMemoryScopeId, logDistillation, providerNativeCompactSessionCapacityReset, circuitBreaker };
+        const postCompactSessionStateReset = result.compacted === true && !!result.boundary?.id
+            ? (0, group_memory_compaction_1.buildGroupPostCompactSessionStateResetReceipt)({
+                groupId: id,
+                groupSessionId: sessionId,
+                boundary: result.boundary,
+                summaryChecksum: result.memory?.compaction?.summaryChecksum || "",
+                compactTransactionReceiptChecksum: result.compactTransactionReceipt?.receipt_checksum || "",
+                sessionMemoryCompactSelection: result.sessionMemoryCompactSelection,
+                previousReceipt: memory?.compaction?.postCompactSessionStateReset || null,
+                contextPressureWarning: result.contextPressureWarning,
+                circuitBreakerBefore: initialCircuitBreaker,
+                circuitBreakerAfter: circuitBreaker,
+                providerNativeCompactSessionCapacityReset,
+                completedAt: background.completedAt,
+            })
+            : null;
+        const promptCacheCompactionNotification = postCompactSessionStateReset
+            ? (0, group_prompt_cache_break_detection_1.notifyGroupPromptCacheCompaction)({
+                groupId: id,
+                groupSessionId: sessionId,
+                boundaryId: result.boundary.id,
+                resetReceiptChecksum: postCompactSessionStateReset.receipt_checksum,
+                generation: postCompactSessionStateReset.cache_read_baseline?.generation,
+                notifiedAt: background.completedAt,
+            })
+            : null;
+        const boundaryWithPostCompactState = postCompactSessionStateReset
+            ? {
+                ...(result.boundary || {}),
+                postCompactSessionStateReset,
+                promptCacheCompactionNotification,
+                compactMetadata: {
+                    ...(result.boundary?.compactMetadata || {}),
+                    postCompactSessionStateReset,
+                    promptCacheCompactionNotification,
+                },
+                post_compact_restore: {
+                    ...(result.boundary?.post_compact_restore || {}),
+                    postCompactSessionStateReset,
+                    promptCacheCompactionNotification,
+                },
+            }
+            : result.boundary || memoryBeforePostCompactState.compactBoundary || null;
+        const memoryWithPostCompactState = {
+            ...memoryBeforePostCompactState,
+            compactBoundary: boundaryWithPostCompactState,
+            compaction: {
+                ...(memoryBeforePostCompactState?.compaction || {}),
+                providerNativeCompactSessionCapacityReset,
+                autoCompactCircuitBreaker: {
+                    schema: circuitBreaker.schema,
+                    state: circuitBreaker.state,
+                    consecutiveFailures: Number(circuitBreaker.consecutive_failures || 0),
+                    maxConsecutiveFailures: Number(circuitBreaker.max_consecutive_failures || 3),
+                    lastSuccessAt: circuitBreaker.last_success_at || "",
+                    ledgerChecksum: circuitBreaker.ledger_checksum || "",
+                },
+                postCompactSessionStateReset,
+                promptCacheCompactionNotification,
+            },
+            messageCompression: {
+                ...(memoryBeforePostCompactState?.messageCompression || {}),
+                postCompactSessionStateReset,
+                promptCacheCompactionNotification,
+            },
+        };
+        const saved = saveGroupMemory(id, memoryWithPostCompactState, sessionId);
+        return { success: true, compacted: !!result.compacted, boundary: boundaryWithPostCompactState, keepIndex: result.keepIndex, background, memory: saved, compactHead, typedMemoryScopeId, logDistillation, providerNativeCompactSessionCapacityReset, postCompactSessionStateReset, promptCacheCompactionNotification, circuitBreaker };
     }
     catch (error) {
         const memory = loadGroupMemory(id, sessionId);
@@ -8202,7 +8499,7 @@ function buildAgentMemoryContextBundle(groupId, targetProject, task = "", option
         apiMicrocompactTargetInputTokens: options.apiMicrocompactTargetInputTokens || options.api_microcompact_target_input_tokens,
         apiMicrocompactMaxInputTokens: options.apiMicrocompactMaxInputTokens || options.api_microcompact_max_input_tokens,
     });
-    const memory = resumePreparation.memory;
+    let memory = resumePreparation.memory;
     compactHead = resumePreparation.compactHeadRecovery?.head || (groupSessionId.startsWith("gcs_") ? (0, group_compact_head_1.readGroupCompactHead)(groupId, groupSessionId) : null);
     const typedMemoryRecallLedgerScope = buildChildTypedMemoryRecallLedgerScope(project, sessionBinding, memory, options);
     const postTurnSummaryDeliveryCapsule = (0, group_post_turn_summary_1.buildGroupPostTurnSummaryDeliveryCapsule)({
@@ -8243,9 +8540,62 @@ function buildAgentMemoryContextBundle(groupId, targetProject, task = "", option
         .filter((row) => !postTurnSummaryDeliveryCapsule || selectedPostTurnSummaryIds.has(String(row.summary_id || "")))
         .slice(postTurnSummaryDeliveryCapsule ? -6 : -8);
     const resumeProjection = resumePreparation.projection || {};
-    const projectedMessages = resumeProjection.useProjection === true
+    const rawProjectedMessages = resumeProjection.useProjection === true
         ? (resumeProjection.projectedMessages || [])
         : allMessages;
+    const timeBasedMicrocompactConfig = loadGroupMemoryCompactionConfig(options.compactionConfig || options.compaction_config || {});
+    const timeBasedToolResultProjection = (0, group_memory_compaction_1.buildGroupTimeBasedToolResultProjection)(rawProjectedMessages, {
+        groupId,
+        groupSessionId,
+        querySource: "group_main_thread:child_memory_projection",
+        enabled: options.timeBasedMicrocompactEnabled ?? options.time_based_microcompact_enabled ?? timeBasedMicrocompactConfig.timeBasedMicrocompactEnabled,
+        gapThresholdMinutes: options.timeBasedMicrocompactGapMinutes || options.time_based_microcompact_gap_minutes || timeBasedMicrocompactConfig.timeBasedMicrocompactGapMinutes,
+        keepRecent: options.timeBasedMicrocompactKeepRecent || options.time_based_microcompact_keep_recent || timeBasedMicrocompactConfig.timeBasedMicrocompactKeepRecent,
+        now: options.now,
+    });
+    const childCompactEpoch = (0, group_memory_compaction_1.buildGroupCompactEpoch)(String(memory.compactBoundary?.boundaryId
+        || memory.compactBoundary?.boundary_id
+        || memory.compaction?.boundaryId
+        || memory.compaction?.boundary_id
+        || ""));
+    const timeBasedThinkingProjection = (0, group_memory_compaction_1.buildGroupTimeBasedThinkingProjection)(timeBasedToolResultProjection.messages, {
+        groupId,
+        groupSessionId,
+        compactEpoch: childCompactEpoch,
+        querySource: "group_main_thread:child_memory_projection",
+        enabled: options.timeBasedThinkingClearEnabled ?? options.time_based_thinking_clear_enabled ?? timeBasedMicrocompactConfig.timeBasedThinkingClearEnabled,
+        gapThresholdMinutes: options.timeBasedMicrocompactGapMinutes || options.time_based_microcompact_gap_minutes || timeBasedMicrocompactConfig.timeBasedMicrocompactGapMinutes,
+        priorReceipt: memory.compaction?.timeBasedThinkingProjection || memory.messageCompression?.timeBasedThinkingProjection || null,
+        isRedactThinkingActive: options.isRedactThinkingActive === true || options.is_redact_thinking_active === true,
+        now: options.now,
+    });
+    const projectedMessages = timeBasedThinkingProjection.messages;
+    if (timeBasedToolResultProjection.applied) {
+        memory = saveGroupMemory(groupId, {
+            ...memory,
+            compaction: {
+                ...(memory.compaction || {}),
+                timeBasedToolResultProjection: timeBasedToolResultProjection.receipt,
+            },
+            messageCompression: {
+                ...(memory.messageCompression || {}),
+                timeBasedToolResultProjection: timeBasedToolResultProjection.receipt,
+            },
+        }, groupSessionId);
+    }
+    if (timeBasedThinkingProjection.shouldPersist) {
+        memory = saveGroupMemory(groupId, {
+            ...memory,
+            compaction: {
+                ...(memory.compaction || {}),
+                timeBasedThinkingProjection: timeBasedThinkingProjection.receipt,
+            },
+            messageCompression: {
+                ...(memory.messageCompression || {}),
+                timeBasedThinkingProjection: timeBasedThinkingProjection.receipt,
+            },
+        }, groupSessionId);
+    }
     const agentMemory = { ...createEmptyAgentMemory(project), ...((memory.agentMemories || {})[project] || {}) };
     const ownCompleted = (memory.completed || []).filter((item) => item.project === project).slice(-4);
     const otherCompleted = (memory.completed || []).filter((item) => item.project !== project).slice(-4);
@@ -8351,8 +8701,8 @@ function buildAgentMemoryContextBundle(groupId, targetProject, task = "", option
         })
         : null;
     const typedMemorySync = (0, group_memory_index_1.syncGroupTypedMemoryFromGroupMemory)(typedMemoryScopeId, memory);
-    const providerRankingCompactRepairReceiptRecall = buildProviderRankingProvenanceCompactRepairReceiptWorkerContextRecall(groupId, task, memory, options);
-    const postCompactReinjectionRepairReceiptRecall = buildPostCompactReinjectionRepairReceiptWorkerContextRecall(groupId, task, memory, options);
+    const providerRankingCompactRepairReceiptRecall = buildProviderRankingProvenanceCompactRepairReceiptWorkerContextRecall(typedMemoryScopeId, task, memory, options);
+    const postCompactReinjectionRepairReceiptRecall = buildPostCompactReinjectionRepairReceiptWorkerContextRecall(typedMemoryScopeId, task, memory, options);
     const typedMemoryRecallQuery = [
         task,
         memory.goal,
@@ -8746,6 +9096,32 @@ function buildAgentMemoryContextBundle(groupId, targetProject, task = "", option
         targetProject: project,
         planChecksums: [storedApiMicroCompactEditPlan?.planChecksum || storedApiMicroCompactEditPlan?.plan_checksum || ""].filter(Boolean),
     });
+    const storedPostCompactReinject = memory.compaction?.postCompactReinject
+        || memory.compactBoundary?.post_compact_restore?.reinjectionPlan
+        || null;
+    const liveDynamicContextDelta = groupSessionId.startsWith("gcs_")
+        ? (0, group_memory_compaction_1.buildGroupPostCompactDynamicContextDeltaProjection)(buildGroupPostCompactDynamicContextCatalog(groupId, memory, options), {
+            groupId,
+            groupSessionId,
+            scanMode: "full",
+            preCompactLoadedToolNames: memory.compaction?.postCompactReinject?.dynamicContextDeltaReceipt?.loaded_tool_state?.carried_names
+                || memory.compactBoundary?.compactMetadata?.preCompactDiscoveredTools
+                || memory.compaction?.preCompactDiscoveredTools
+                || [],
+            now: generatedAt,
+        })
+        : null;
+    const effectivePostCompactReinject = storedPostCompactReinject || liveDynamicContextDelta
+        ? {
+            ...(storedPostCompactReinject || {
+                schema: "ccm-post-compact-reinjection-v1",
+                version: 1,
+                strategy: "restore_dynamic_runtime_context_for_new_child_session",
+            }),
+            dynamicContextDeltaAttachment: liveDynamicContextDelta?.attachment || null,
+            dynamicContextDeltaReceipt: liveDynamicContextDelta?.receipt || null,
+        }
+        : null;
     const bundle = {
         schema: "ccm-group-memory-context-v1",
         version: 1,
@@ -8776,11 +9152,23 @@ function buildAgentMemoryContextBundle(groupId, targetProject, task = "", option
             downgradedByQualityGate: memory.compaction?.downgradedByQualityGate === true,
             qualityDowngradeReason: memory.compaction?.qualityDowngradeReason || memory.compaction?.quality?.downgrade_reason || "",
             microCompact: memory.compaction?.microCompact || memory.compactBoundary?.post_compact_restore?.microCompact || null,
-            postCompactReinject: memory.compaction?.postCompactReinject || memory.compactBoundary?.post_compact_restore?.reinjectionPlan || null,
+            timeBasedToolResultProjection: timeBasedToolResultProjection.receipt,
+            timeBasedThinkingProjection: timeBasedThinkingProjection.receipt,
+            postCompactReinject: effectivePostCompactReinject,
             partialCompact: memory.compaction?.partialCompact || memory.compactBoundary?.partialCompact || null,
             partialSegments: memory.compaction?.partialSegments || memory.messageCompression?.partialSegments || [],
             ptlEmergency: memory.compaction?.ptlEmergency || memory.compactBoundary?.ptlEmergency || memory.compactBoundary?.post_compact_restore?.ptlEmergency || null,
             ptlRecovery: memory.compaction?.ptlRecovery || memory.messageCompression?.ptlRecovery || memory.compactBoundary?.post_compact_restore?.ptlRecovery || null,
+            truePostCompactPayloadBudget: memory.compaction?.truePostCompactPayloadBudget
+                || memory.messageCompression?.truePostCompactPayloadBudget
+                || memory.compactBoundary?.truePostCompactPayloadBudget
+                || memory.compactBoundary?.post_compact_restore?.truePostCompactPayloadBudget
+                || null,
+            postCompactPayloadGate: memory.compaction?.postCompactPayloadGate
+                || memory.messageCompression?.postCompactPayloadGate
+                || memory.compactBoundary?.postCompactPayloadGate
+                || memory.compactBoundary?.post_compact_restore?.postCompactPayloadGate
+                || null,
             compactStrategyDecision: memory.compaction?.compactStrategyDecision
                 || memory.compactBoundary?.compactStrategyDecision
                 || memory.compactBoundary?.post_compact_restore?.strategyDecision
@@ -8790,6 +9178,37 @@ function buildAgentMemoryContextBundle(groupId, targetProject, task = "", option
                 || memory.compactBoundary?.compactTransactionReceipt
                 || memory.compactBoundary?.post_compact_restore?.compactTransactionReceipt
                 || null,
+            postCompactMessageOrderReceipt: memory.compaction?.postCompactMessageOrderReceipt
+                || memory.messageCompression?.postCompactMessageOrderReceipt
+                || memory.compactBoundary?.postCompactMessageOrderReceipt
+                || memory.compactBoundary?.post_compact_restore?.messageOrderReceipt
+                || null,
+            compactLineage: memory.compaction?.compactLineage
+                || memory.messageCompression?.compactLineage
+                || memory.compactBoundary?.compactLineage
+                || memory.compactBoundary?.compactMetadata?.compactLineage
+                || memory.compactBoundary?.post_compact_restore?.compactLineage
+                || null,
+            compactionUsage: memory.compaction?.compactionUsage
+                || memory.messageCompression?.compactionUsage
+                || memory.compactBoundary?.compactionUsage
+                || memory.compactBoundary?.compactMetadata?.compactionUsage
+                || memory.compactBoundary?.post_compact_restore?.compactionUsage
+                || null,
+            postCompactSessionStateReset: memory.compaction?.postCompactSessionStateReset
+                || memory.messageCompression?.postCompactSessionStateReset
+                || memory.compactBoundary?.postCompactSessionStateReset
+                || memory.compactBoundary?.compactMetadata?.postCompactSessionStateReset
+                || memory.compactBoundary?.post_compact_restore?.postCompactSessionStateReset
+                || null,
+            promptCacheCompactionNotification: memory.compaction?.promptCacheCompactionNotification
+                || memory.messageCompression?.promptCacheCompactionNotification
+                || memory.compactBoundary?.promptCacheCompactionNotification
+                || memory.compactBoundary?.post_compact_restore?.promptCacheCompactionNotification
+                || null,
+            promptCacheBreakDetection: groupSessionId.startsWith("gcs_")
+                ? (0, group_prompt_cache_break_detection_1.readGroupPromptCacheBreakDetection)(groupId, groupSessionId)
+                : null,
             apiMicroCompactEditPlan: storedApiMicroCompactEditPlan,
             apiMicrocompactNativeApplyPlan,
             apiMicrocompactNativeApplyProofLedger,
@@ -8959,6 +9378,8 @@ function buildAgentMemoryContextBundle(groupId, targetProject, task = "", option
             verified: resumeProjection.verified === true,
             projectedMessageCount: Number(resumeProjection.projectedMessageCount || projectedMessages.length),
             text: compactPreserveLines((0, group_memory_compaction_1.buildBoundedRecentGroupContext)(projectedMessages, Math.min(8, Math.max(3, Number(options.fullCount || options.full_count || 6)))), Number(options.maxResumeContextChars || options.max_resume_context_chars || 4200)),
+            timeBasedToolResultProjection: timeBasedToolResultProjection.receipt,
+            timeBasedThinkingProjection: timeBasedThinkingProjection.receipt,
         },
         relevant_historical_evidence: relevantHistoricalEvidence,
         raw_sources: {
@@ -9047,18 +9468,38 @@ function buildAgentMemoryContextBundle(groupId, targetProject, task = "", option
     });
     bundle.compact_file_reference_read_plan_access = summarizeGroupCompactFileReferenceReadPlanAccess(compactReferenceScopeId, bundle.compact_file_reference_read_plan, memory);
     bundle.compact_file_reference_access = summarizeGroupCompactFileReferenceAccess(compactReferenceScopeId, bundle.compact_file_references, memory);
+    const invokedSkillPlan = bundle.compaction?.postCompactReinject || {};
+    bundle.invoked_skill_attachments = Array.isArray(invokedSkillPlan.invokedSkillAttachments) ? invokedSkillPlan.invokedSkillAttachments : [];
+    bundle.invoked_skill_attachment_receipt = invokedSkillPlan.invokedSkillAttachmentReceipt || null;
+    bundle.invoked_skill_attachment_text = renderGroupPostCompactInvokedSkillAttachments(invokedSkillPlan);
+    bundle.plan_attachment = invokedSkillPlan.planAttachment || null;
+    bundle.plan_attachment_receipt = invokedSkillPlan.planAttachmentReceipt || null;
+    bundle.plan_attachment_text = renderGroupPostCompactPlanAttachment(invokedSkillPlan);
+    bundle.dynamic_context_delta_attachment = invokedSkillPlan.dynamicContextDeltaAttachment || null;
+    bundle.dynamic_context_delta_receipt = invokedSkillPlan.dynamicContextDeltaReceipt || null;
+    bundle.dynamic_context_delta_text = renderGroupPostCompactDynamicContextDelta(invokedSkillPlan);
     const renderedWithReferences = renderGroupMemoryContextBundle(bundle);
     bundle.context_budget = (0, context_budget_1.buildContextBudget)({ context: renderedWithReferences, maxChars: 36_000, maxTokens: 90_000 });
-    bundle.rendered_text = compactPreserveLines(renderedWithReferences, Number(options.maxRenderedChars || 14_000));
+    const payloadGate = bundle.compaction?.postCompactPayloadGate || {};
+    const requestedRenderedChars = Number(options.maxRenderedChars || 14_000);
+    const payloadSafeRenderedChars = payloadGate.status === "recompact_required"
+        ? Math.max(3000, Number(payloadGate.safe_render_chars || 6000))
+        : requestedRenderedChars;
+    bundle.rendered_text = compactPreserveLines(renderedWithReferences, Math.min(requestedRenderedChars, payloadSafeRenderedChars));
     return bundle;
 }
 async function buildAgentMemoryContextBundleWithManifestSelection(groupId, targetProject, task = "", options = {}) {
+    const requestedGroupSessionId = String(options.groupSessionId || options.group_session_id || "").trim();
+    const requireExactGroupSession = options.requireExactGroupSession === true || options.require_exact_group_session === true;
+    if (requireExactGroupSession && !requestedGroupSessionId.startsWith("gcs_")) {
+        throw new Error("项目子 Agent 记忆上下文缺少精确群聊会话绑定");
+    }
     if ((0, group_memory_index_1.shouldIgnoreGroupMemoryRequest)(task, options))
         return buildAgentMemoryContextBundle(groupId, targetProject, task, options);
     const suppliedSelection = options.typedMemoryManifestSelection || options.typed_memory_manifest_selection || null;
     if (suppliedSelection)
         return buildAgentMemoryContextBundle(groupId, targetProject, task, options);
-    const groupSessionId = String(options.groupSessionId || options.group_session_id || (0, storage_1.getActiveGroupChatSessionId)(groupId));
+    const groupSessionId = requestedGroupSessionId || String((0, storage_1.getActiveGroupChatSessionId)(groupId));
     if (!groupSessionId.startsWith("gcs_"))
         return buildAgentMemoryContextBundle(groupId, targetProject, task, options);
     const bootstrap = buildAgentMemoryContextBundle(groupId, targetProject, task, {
@@ -9737,6 +10178,84 @@ function renderGroupMemoryContextBundle(bundle) {
         || bundle.providerNativeCompactSessionCapacityReconciliation
         || bundle.provider_native_compact_session_capacity_reconciliation
         || {};
+    const truePostCompactPayloadBudget = compaction.truePostCompactPayloadBudget
+        || compaction.true_post_compact_payload_budget
+        || bundle.truePostCompactPayloadBudget
+        || bundle.true_post_compact_payload_budget
+        || {};
+    const postCompactPayloadGate = compaction.postCompactPayloadGate
+        || compaction.post_compact_payload_gate
+        || bundle.postCompactPayloadGate
+        || bundle.post_compact_payload_gate
+        || {};
+    const postCompactMessageOrderReceipt = compaction.postCompactMessageOrderReceipt
+        || compaction.post_compact_message_order_receipt
+        || compaction.boundary?.postCompactMessageOrderReceipt
+        || compaction.boundary?.post_compact_restore?.messageOrderReceipt
+        || {};
+    const postCompactMessageOrderVerification = postCompactMessageOrderReceipt.schema
+        ? (0, group_memory_compaction_1.verifyGroupPostCompactMessageOrderReceipt)(postCompactMessageOrderReceipt, {
+            groupId: bundle.group_id,
+            groupSessionId: bundle.group_session_id,
+            boundaryId: compaction.boundary?.id || resumeProjection.boundary?.boundaryId || "",
+            summaryChecksum: compaction.summaryChecksum || "",
+        })
+        : null;
+    const compactLineage = compaction.compactLineage
+        || compaction.compact_lineage
+        || compaction.boundary?.compactLineage
+        || compaction.boundary?.compactMetadata?.compactLineage
+        || compaction.boundary?.post_compact_restore?.compactLineage
+        || {};
+    const compactLineageVerification = compactLineage.schema
+        ? (0, group_memory_compaction_1.verifyGroupCompactLineage)(compactLineage, {
+            groupId: bundle.group_id,
+            groupSessionId: bundle.group_session_id,
+            boundaryId: compaction.boundary?.id || resumeProjection.boundary?.boundaryId || "",
+        })
+        : null;
+    const compactionUsage = compaction.compactionUsage
+        || compaction.compaction_usage
+        || compaction.boundary?.compactionUsage
+        || compaction.boundary?.compactMetadata?.compactionUsage
+        || compaction.boundary?.post_compact_restore?.compactionUsage
+        || {};
+    const compactionUsageVerification = compactionUsage.schema
+        ? (0, group_memory_compaction_1.verifyGroupCompactionModelUsageReceipt)(compactionUsage, {
+            groupId: bundle.group_id,
+            groupSessionId: bundle.group_session_id,
+        })
+        : null;
+    const postCompactSessionStateReset = compaction.postCompactSessionStateReset
+        || compaction.post_compact_session_state_reset
+        || compaction.boundary?.postCompactSessionStateReset
+        || compaction.boundary?.compactMetadata?.postCompactSessionStateReset
+        || compaction.boundary?.post_compact_restore?.postCompactSessionStateReset
+        || {};
+    const postCompactSessionStateResetVerification = postCompactSessionStateReset.schema
+        ? (0, group_memory_compaction_1.verifyGroupPostCompactSessionStateResetReceipt)(postCompactSessionStateReset, {
+            groupId: bundle.group_id,
+            groupSessionId: bundle.group_session_id,
+            boundaryId: compaction.boundary?.id || resumeProjection.boundary?.boundaryId || "",
+            summaryChecksum: compaction.summaryChecksum || "",
+        })
+        : null;
+    const promptCacheCompactionNotification = compaction.promptCacheCompactionNotification
+        || compaction.prompt_cache_compaction_notification
+        || compaction.boundary?.promptCacheCompactionNotification
+        || compaction.boundary?.post_compact_restore?.promptCacheCompactionNotification
+        || {};
+    const promptCacheCompactionNotificationVerification = promptCacheCompactionNotification.schema
+        ? (0, group_prompt_cache_break_detection_1.verifyGroupPromptCacheCompactionNotification)(promptCacheCompactionNotification, {
+            groupId: bundle.group_id,
+            groupSessionId: bundle.group_session_id,
+            boundaryId: compaction.boundary?.id || resumeProjection.boundary?.boundaryId || "",
+            resetReceiptChecksum: postCompactSessionStateReset.receipt_checksum || "",
+        })
+        : null;
+    const promptCacheBreakDetection = compaction.promptCacheBreakDetection
+        || compaction.prompt_cache_break_detection
+        || {};
     const compactFileReferences = bundle.compact_file_references || bundle.compactFileReferences || {};
     const compactFileReferenceReadPlan = bundle.compact_file_reference_read_plan || bundle.compactFileReferenceReadPlan || {};
     const compactFileReferenceReadPlanAccess = bundle.compact_file_reference_read_plan_access || bundle.compactFileReferenceReadPlanAccess || {};
@@ -9778,6 +10297,68 @@ function renderGroupMemoryContextBundle(bundle) {
         "- 记忆边界：你每轮执行都可能是新的第三方 CLI 会话；必须把本包当作当前任务上下文，不要假定 Claude Code/Cursor/Codex 内部 session 记得旧群聊。",
         "- 上下文策略：旧消息已被 CCM 压缩为摘要；近期消息保留原文窗口；本包如附带“压缩前原文证据”，该证据优先于摘要。",
     ];
+    const invokedSkillAttachmentText = String(bundle.invoked_skill_attachment_text || bundle.invokedSkillAttachmentText || renderGroupPostCompactInvokedSkillAttachments(compaction.postCompactReinject || {})).trim();
+    const planAttachmentText = String(bundle.plan_attachment_text || bundle.planAttachmentText || renderGroupPostCompactPlanAttachment(compaction.postCompactReinject || {})).trim();
+    const dynamicContextDeltaText = String(bundle.dynamic_context_delta_text || bundle.dynamicContextDeltaText || renderGroupPostCompactDynamicContextDelta(compaction.postCompactReinject || {})).trim();
+    const deferredPostCompactHookLines = [];
+    if (postCompactMessageOrderVerification) {
+        lines.push(`- 压缩后消息顺序凭证：status=${postCompactMessageOrderVerification.valid ? "verified" : "fail_closed"}；order=${(postCompactMessageOrderReceipt.order || []).join(" -> ") || "missing"}；receipt=${postCompactMessageOrderReceipt.receipt_checksum || "missing"}。`);
+        if (!postCompactMessageOrderVerification.valid) {
+            lines.push(`- 压缩后消息顺序门禁：${postCompactMessageOrderVerification.issues.join(",") || "verification_failed"}；不得把附件或 Hook 结果视为已验证的压缩恢复上下文。`);
+        }
+    }
+    if (compactLineageVerification) {
+        lines.push(`- Compact lineage：status=${compactLineageVerification.valid ? "verified" : "fail_closed"}；trigger=${compactLineage.trigger || "unknown"}；epoch=${compactLineage.compact_epoch || "unknown"}；turn=${compactLineage.compact_turn_id || "unknown"}；previous=${compactLineage.previous_compact_turn_id || "none"}；turnsSincePrevious=${compactLineage.turns_since_previous_compact ?? -1}；recompact=${compactLineage.is_recompaction_in_chain === true}。`);
+        if (!compactLineageVerification.valid) {
+            lines.push(`- Compact lineage 门禁：${compactLineageVerification.issues.join(",") || "verification_failed"}；不得依据该 lineage 判断重压缩代际或容量信用。`);
+        }
+    }
+    if (compactionUsageVerification) {
+        lines.push(`- Compaction model usage：status=${compactionUsageVerification.valid ? compactionUsage.status || "verified" : "fail_closed"}；provider=${compactionUsage.provider || "unknown"}；model=${compactionUsage.model || "unknown"}；input=${compactionUsage.input_tokens || 0}；output=${compactionUsage.output_tokens || 0}；cacheRead=${compactionUsage.cache_read_input_tokens || 0}；cacheCreate=${compactionUsage.cache_creation_input_tokens || 0}；total=${compactionUsage.accounted_total_tokens || 0}；estimatedInput=${compactionUsage.estimated_input_tokens || 0}。`);
+        if (!compactionUsageVerification.valid) {
+            lines.push(`- Compaction usage 门禁：${compactionUsageVerification.issues.join(",") || "verification_failed"}；不得把该用量作为模型容量、成本或 provider 可靠性证据。`);
+        }
+    }
+    if (postCompactSessionStateResetVerification) {
+        const reset = postCompactSessionStateReset;
+        lines.push(`- 压缩后会话状态重置：status=${postCompactSessionStateResetVerification.valid ? "verified" : "fail_closed"}；path=${reset.compact_path || "unknown"}；generation=${reset.post_compact_mark?.generation || 0}；durableCursor=${reset.durable_boundary_cursor?.message_id || "missing"}；providerCursor=${reset.provider_active_cursor?.status || "missing"}；cache=${reset.cache_read_baseline?.status || "missing"}；warning=${reset.compact_warning?.status || "missing"}；failures=${reset.auto_compact_failure_state?.consecutive_failures ?? "unknown"}。`);
+        if (!postCompactSessionStateResetVerification.valid) {
+            lines.push(`- 压缩后会话状态门禁：${postCompactSessionStateResetVerification.issues.join(",") || "verification_failed"}；不得沿用旧 provider cursor 或旧 cache baseline。`);
+        }
+    }
+    if (promptCacheCompactionNotificationVerification) {
+        lines.push(`- Prompt cache 压缩通知：status=${promptCacheCompactionNotificationVerification.valid ? "verified" : "fail_closed"}；generation=${promptCacheCompactionNotification.baseline_generation || 0}；baseline=${promptCacheCompactionNotification.baseline_status || "unknown"}；receipt=${promptCacheCompactionNotification.receipt_checksum || "missing"}。`);
+    }
+    if (promptCacheBreakDetection.schema) {
+        const event = promptCacheBreakDetection.last_event || {};
+        const deletion = promptCacheBreakDetection.pending_cache_deletion?.notification || {};
+        lines.push(`- Prompt cache 运行时：status=${promptCacheBreakDetection.status || "unknown"}；calls=${promptCacheBreakDetection.call_count || 0}；breaks=${promptCacheBreakDetection.cache_break_count || 0}；generation=${promptCacheBreakDetection.baseline_generation || 0}；last=${event.classification || (promptCacheBreakDetection.pending_post_compaction ? "post_compaction_pending" : deletion.schema ? "cache_deletion_pending" : "none")}；postCompact=${event.is_post_compaction === true}；microcompactDeletion=${deletion.schema ? "pending" : event.cache_deletion_applied === true ? "consumed" : "none"}；executionReceipt=${deletion.execution_receipt_id || event.microcompact_execution_receipt_id || "none"}。`);
+    }
+    const criticalPostCompactTaskStatuses = (Array.isArray(reinjectionGate.candidates) ? reinjectionGate.candidates : [])
+        .filter((candidate) => candidate.kind === "task_status")
+        .slice(0, 12);
+    if (criticalPostCompactTaskStatuses.length) {
+        lines.push("- 压缩后子任务状态（避免重复派发；执行前按 task_id 核对当前状态）：");
+        for (const candidate of criticalPostCompactTaskStatuses) {
+            lines.push(`  - candidate_id=${candidate.candidate_id || ""}；${candidate.value || ""}`);
+        }
+    }
+    const criticalPostCompactFiles = (Array.isArray(reinjectionGate.candidates) ? reinjectionGate.candidates : [])
+        .filter((candidate) => candidate.kind === "file")
+        .slice(0, 5);
+    if (criticalPostCompactFiles.length) {
+        lines.push("- 压缩后文件恢复候选（已与 preserved tail 完整 Read 去重；使用前读取当前文件）：");
+        for (const candidate of criticalPostCompactFiles) {
+            lines.push(`  - candidate_id=${candidate.candidate_id || ""}；file=${candidate.value || ""}`);
+        }
+    }
+    if (truePostCompactPayloadBudget.schema) {
+        const components = truePostCompactPayloadBudget.components || {};
+        lines.push(`- True post-compact payload：tokens=${truePostCompactPayloadBudget.true_post_compact_token_count || 0}/${truePostCompactPayloadBudget.trigger_tokens || 0}；summary=${components.summary || 0}；recent=${components.recent_window || 0}；reinjection=${components.reinjection || 0}；session/tool=${Number(components.session_memory_restore || 0) + Number(components.tool_continuity_restore || 0)}；nextTurnRetrigger=${truePostCompactPayloadBudget.will_retrigger_next_turn === true}。`);
+    }
+    if (postCompactPayloadGate.schema) {
+        lines.push(`- 压缩后 payload 门禁：status=${postCompactPayloadGate.status || "unknown"}；action=${postCompactPayloadGate.action || "unknown"}；prePTL=${postCompactPayloadGate.pre_ptl_token_count || 0}；final=${postCompactPayloadGate.true_post_compact_token_count || 0}；ptl=${postCompactPayloadGate.ptl_applied === true}。`);
+    }
     if (providerNativeCompactSessionCapacityReconciliation.schema) {
         lines.push(`- Provider compact generation 对账：status=${providerNativeCompactSessionCapacityReconciliation.status || "unknown"}；boundary=${providerNativeCompactSessionCapacityReconciliation.boundary_id || "none"}；compactHeadGeneration=${providerNativeCompactSessionCapacityReconciliation.compact_head_generation || 0}；capacityGeneration=${providerNativeCompactSessionCapacityReconciliation.generation || 0}；recovered=${providerNativeCompactSessionCapacityReconciliation.recovered === true}。`);
         if (["failed", "fail_closed"].includes(String(providerNativeCompactSessionCapacityReconciliation.status || ""))) {
@@ -9832,8 +10413,6 @@ function renderGroupMemoryContextBundle(bundle) {
     }
     if (bundle.task_query)
         lines.push(`- 你本次任务：${bundle.task_query}`);
-    if (resumeContext.text)
-        lines.push(`- 已验证的会话恢复原文窗口：\n${resumeContext.text}`);
     if (typedPressureRepairMatches.length) {
         const primary = typedPressureRepairMatches[0];
         lines.push(`- pressure repair ${primary.gapType}:${primary.status}：typed MEMORY.md pressure provenance under repair；docs=${typedPressureRepairMatches.map((item) => item.relPath).filter(Boolean).join(",") || "unknown"}；work_item=${primary.workItemId || "unknown"}；provenance=${primary.provenanceStatus || "under_repair"}。`);
@@ -10148,7 +10727,7 @@ function renderGroupMemoryContextBundle(bundle) {
         const audit = compaction.postCompactRecoveryAudit;
         const failed = Array.isArray(audit.failedChecks) ? audit.failedChecks : [];
         const candidates = audit.candidateCounts || {};
-        const candidateCount = Number(candidates.files || 0) + Number(candidates.skills || 0) + Number(candidates.verification || 0) + Number(candidates.blockers || 0);
+        const candidateCount = Number(candidates.files || 0) + Number(candidates.skills || 0) + Number(candidates.verification || 0) + Number(candidates.blockers || 0) + Number(candidates.taskStatuses || candidates.task_statuses || 0);
         lines.push(`- 压缩后恢复审计：${audit.status || "unknown"}；通过 ${audit.passedChecks || 0}/${audit.checkCount || 0}；重注入候选 ${candidateCount} 条；raw transcript ${audit.transcriptPath || "未记录"}；动作 ${audit.action || "unknown"}。`);
         if (failed.length)
             lines.push(`- 压缩后恢复风险：${failed.slice(0, 5).join("、")}；需要优先按 raw transcript / typed MEMORY.md 回溯后再执行。`);
@@ -10262,13 +10841,13 @@ function renderGroupMemoryContextBundle(bundle) {
         const stats = hookLedger.stats || {};
         const pre = stats.pre || {};
         const post = stats.post || {};
-        lines.push(`- 压缩 Hook Ledger：run=${hookLedger.hookRunId || "unknown"}；pre ${pre.ok || 0}/${pre.total || 0}；post ${post.ok || 0}/${post.total || 0}；failed=${stats.failed || 0}；ledger=${hookLedger.file || "未记录"}。`);
+        deferredPostCompactHookLines.push(`- 压缩 Hook Ledger：run=${hookLedger.hookRunId || "unknown"}；pre ${pre.ok || 0}/${pre.total || 0}；post ${post.ok || 0}/${post.total || 0}；failed=${stats.failed || 0}；ledger=${hookLedger.file || "未记录"}。`);
         for (const entry of Array.isArray(hookLedger.recentEntries) ? hookLedger.recentEntries.slice(-4) : []) {
             const summary = entry.result_summary || entry.resultSummary || {};
             const keys = Array.isArray(summary.keys) ? summary.keys.slice(0, 5).join(",") : "";
             const phase = entry.phase || "hook";
             const status = entry.ok === false || entry.status === "fail" ? "fail" : "ok";
-            lines.push(`  - hook ${phase} ${status}；${entry.duration_ms || entry.durationMs || 0}ms${keys ? `；keys=${keys}` : ""}${entry.error ? `；error=${entry.error}` : ""}`);
+            deferredPostCompactHookLines.push(`  - hook ${phase} ${status}；${entry.duration_ms || entry.durationMs || 0}ms${keys ? `；keys=${keys}` : ""}${entry.error ? `；error=${entry.error}` : ""}`);
         }
     }
     if (compaction.quality || compaction.qualityStatus || compaction.driftDetected || compaction.downgradedByQualityGate) {
@@ -10309,6 +10888,7 @@ function renderGroupMemoryContextBundle(bundle) {
         Array.isArray(reinject.skills) && reinject.skills.length ? `技能 ${reinject.skills.length}` : "",
         Array.isArray(reinject.verification) && reinject.verification.length ? `验证 ${reinject.verification.length}` : "",
         Array.isArray(reinject.blockers) && reinject.blockers.length ? `阻塞 ${reinject.blockers.length}` : "",
+        Array.isArray(reinject.taskStatuses) && reinject.taskStatuses.length ? `子任务状态 ${reinject.taskStatuses.length}` : "",
     ].filter(Boolean);
     if (reinjectParts.length) {
         lines.push(`- 压缩后重注入候选：${reinjectParts.join("、")}；这些是旧消息压缩后仍建议优先恢复到本轮任务上下文的线索。`);
@@ -10392,6 +10972,8 @@ function renderGroupMemoryContextBundle(bundle) {
     }
     if (groupState.summaryText)
         lines.push(`- 群聊压缩摘要：\n${compactPreserveLines(groupState.summaryText, 3200)}`);
+    if (resumeContext.text)
+        lines.push(`- 已验证的会话恢复原文窗口：\n${resumeContext.text}`);
     const addList = (title, items, mapper, limit = 6) => {
         const list = (items || []).filter(Boolean).slice(-limit);
         if (!list.length)
@@ -10423,8 +11005,18 @@ function renderGroupMemoryContextBundle(bundle) {
     addList("应重注入的旧技能/工具线索", reinject.skills || [], (item) => `${item.value || item}${item.sourceMessageId ? `（#${item.sourceMessageId}）` : ""}`, 5);
     addList("应重注入的旧验证线索", reinject.verification || [], (item) => `${item.value || item}${item.sourceMessageId ? `（#${item.sourceMessageId}）` : ""}`, 6);
     addList("应重注入的旧阻塞线索", reinject.blockers || [], (item) => `${item.value || item}${item.sourceMessageId ? `（#${item.sourceMessageId}）` : ""}`, 6);
+    addList("压缩后子任务状态", reinject.taskStatuses || reinject.task_statuses || [], (item) => item.value || `${item.task_id || item.taskId || "unknown"} [${item.status || "unknown"}] ${item.description || item.delta_summary || ""}`, 12);
     if (bundle.relevant_historical_evidence)
         lines.push(bundle.relevant_historical_evidence);
+    if (!postCompactMessageOrderVerification || postCompactMessageOrderVerification.valid) {
+        if (invokedSkillAttachmentText)
+            lines.push(invokedSkillAttachmentText);
+        if (planAttachmentText)
+            lines.push(planAttachmentText);
+        if (dynamicContextDeltaText)
+            lines.push(dynamicContextDeltaText);
+        lines.push(...deferredPostCompactHookLines);
+    }
     if (bundle.task_query)
         lines.push(`- 你本次任务：${bundle.task_query}`);
     lines.push("- 回执要求：回复末尾必须包含 CCM_AGENT_RECEIPT；不能编造未执行的验证或文件修改；必须用 memoryUsed / memoryIgnored 声明本轮是否使用了本记忆包、项目记忆、历史结论、共享文档或知识库；如本轮 surfaced MEMORY.md，必须用 typedMemoryUsage 覆盖每个 relPath 并逐项声明 used / ignored / verified 和 reason，不能声明未下发路径；verified 必须附可复算的 currentSourceEvidence；如存在 global_memory_id，必须用 globalMemoryUsage 逐条声明 used / ignored / verified / background / advisory；如存在 API microcompact edit plan，必须用 apiMicrocompactUsage 或 memoryUsed/memoryIgnored 声明 planChecksum 和 native_applied/advisory/ignored/not_supported，并绑定本轮 taskAgentSessionId/nativeSessionId/memoryContextSnapshotId；如存在 compact read plan revalidation gate，必须声明 gate/read_plan_id 以及是否已 re-read/current source verified；如存在压缩重注入候选，必须用 postCompactCandidateUsage 逐条声明 used / ignored / verified。");
@@ -10758,6 +11350,15 @@ function buildGlobalGroupMemoryContext(query = "", options = {}) {
                     : [],
                 ptl_emergency: memory.compaction?.ptlEmergency || memory.compactBoundary?.ptlEmergency || null,
                 ptl_recovery: memory.compaction?.ptlRecovery || memory.messageCompression?.ptlRecovery || null,
+                session_memory_compact_selection: memory.compaction?.sessionMemoryCompactSelection
+                    || memory.compactBoundary?.sessionMemoryCompactSelection
+                    || memory.messageCompression?.sessionMemoryCompactSelection
+                    || null,
+                post_compact_session_state_reset: memory.compaction?.postCompactSessionStateReset
+                    || memory.compactBoundary?.postCompactSessionStateReset
+                    || memory.compactBoundary?.post_compact_restore?.postCompactSessionStateReset
+                    || memory.messageCompression?.postCompactSessionStateReset
+                    || null,
                 session_memory: sessionMemory,
                 tool_continuity: toolContinuity,
             },
@@ -10907,6 +11508,21 @@ function renderGlobalGroupMemoryContextBundle(bundle) {
             lines.push(`  - 压缩边界：最近至 message id ${compaction.last_compacted_message_id}`);
         if (compaction.session_memory?.schema)
             lines.push(`  - CC 风格 Session Memory：summary=${compaction.session_memory.summaryFile || "未记录"}；checksum=${compaction.session_memory.markdownChecksum || "unknown"}；last=${compaction.session_memory.lastSummarizedMessageId || "recent-window"}`);
+        if (compaction.session_memory_compact_selection?.schema) {
+            const selection = compaction.session_memory_compact_selection;
+            const closure = selection.api_invariant_closure || {};
+            lines.push(`  - Session Memory compact selection：status=${selection.status || "unknown"}；cursor=${selection.cursor_status || "unknown"}；kept=${selection.preserved_message_count || 0}/${selection.preserved_token_estimate || 0} tokens；API closure=${closure.pass === true ? `pass(+${closure.expanded_message_count || 0})` : closure.schema ? "fail" : "unknown"}；API called=${selection.compaction_api_called === true}${selection.fallback_reason ? `；fallback=${selection.fallback_reason}` : ""}。`);
+        }
+        if (compaction.post_compact_session_state_reset?.schema) {
+            const reset = compaction.post_compact_session_state_reset;
+            const verification = (0, group_memory_compaction_1.verifyGroupPostCompactSessionStateResetReceipt)(reset, {
+                groupId: item.group_id,
+                groupSessionId: reset.group_session_id,
+                boundaryId: reset.boundary_id,
+                summaryChecksum: reset.summary_checksum,
+            });
+            lines.push(`  - Post-compact session reset：${verification.valid ? "verified" : "fail_closed"}；path=${reset.compact_path || "unknown"}；generation=${reset.post_compact_mark?.generation || 0}；provider cursor=${reset.provider_active_cursor?.status || "unknown"}；cache baseline=${reset.cache_read_baseline?.status || "unknown"}；failures=${reset.auto_compact_failure_state?.consecutive_failures ?? "unknown"}。`);
+        }
         if (compaction.tool_continuity?.schema) {
             const continuity = compaction.tool_continuity || {};
             const allowed = continuity.allowedTools || {};
@@ -12960,9 +13576,36 @@ function buildGroupContextPacket(groupId, options = {}) {
     });
     const snapshotMemory = resumePreparation.memory;
     const resumeProjection = resumePreparation.projection || {};
-    const recentMessages = resumeProjection.useProjection === true
+    const rawRecentMessages = resumeProjection.useProjection === true
         ? (resumeProjection.projectedMessages || [])
         : allMessages.slice(-recentLimit);
+    const timeBasedMicrocompactConfig = loadGroupMemoryCompactionConfig(options.compactionConfig || options.compaction_config || {});
+    const timeBasedToolResultProjection = (0, group_memory_compaction_1.buildGroupTimeBasedToolResultProjection)(rawRecentMessages, {
+        groupId,
+        groupSessionId,
+        querySource: "group_main_thread:context_packet",
+        enabled: options.timeBasedMicrocompactEnabled ?? options.time_based_microcompact_enabled ?? timeBasedMicrocompactConfig.timeBasedMicrocompactEnabled,
+        gapThresholdMinutes: options.timeBasedMicrocompactGapMinutes || options.time_based_microcompact_gap_minutes || timeBasedMicrocompactConfig.timeBasedMicrocompactGapMinutes,
+        keepRecent: options.timeBasedMicrocompactKeepRecent || options.time_based_microcompact_keep_recent || timeBasedMicrocompactConfig.timeBasedMicrocompactKeepRecent,
+        now: options.now,
+    });
+    const mainCompactEpoch = (0, group_memory_compaction_1.buildGroupCompactEpoch)(String(snapshotMemory.compactBoundary?.boundaryId
+        || snapshotMemory.compactBoundary?.boundary_id
+        || snapshotMemory.compaction?.boundaryId
+        || snapshotMemory.compaction?.boundary_id
+        || ""));
+    const timeBasedThinkingProjection = (0, group_memory_compaction_1.buildGroupTimeBasedThinkingProjection)(timeBasedToolResultProjection.messages, {
+        groupId,
+        groupSessionId,
+        compactEpoch: mainCompactEpoch,
+        querySource: "group_main_thread:context_packet",
+        enabled: options.timeBasedThinkingClearEnabled ?? options.time_based_thinking_clear_enabled ?? timeBasedMicrocompactConfig.timeBasedThinkingClearEnabled,
+        gapThresholdMinutes: options.timeBasedMicrocompactGapMinutes || options.time_based_microcompact_gap_minutes || timeBasedMicrocompactConfig.timeBasedMicrocompactGapMinutes,
+        priorReceipt: snapshotMemory.compaction?.timeBasedThinkingProjection || snapshotMemory.messageCompression?.timeBasedThinkingProjection || null,
+        isRedactThinkingActive: options.isRedactThinkingActive === true || options.is_redact_thinking_active === true,
+        now: options.now,
+    });
+    const recentMessages = timeBasedThinkingProjection.messages;
     const olderMessages = resumeProjection.useProjection === true
         ? allMessages.slice(0, Number(resumeProjection.omittedMessageCount || 0))
         : allMessages.slice(0, Math.max(0, allMessages.length - recentLimit));
@@ -12983,7 +13626,16 @@ function buildGroupContextPacket(groupId, options = {}) {
     const memory = saveGroupMemory(groupId, {
         ...snapshotMemory,
         messageDigest: digest,
-        messageCompression: compression,
+        compaction: {
+            ...(snapshotMemory.compaction || {}),
+            ...(timeBasedToolResultProjection.applied ? { timeBasedToolResultProjection: timeBasedToolResultProjection.receipt } : {}),
+            ...(timeBasedThinkingProjection.shouldPersist ? { timeBasedThinkingProjection: timeBasedThinkingProjection.receipt } : {}),
+        },
+        messageCompression: {
+            ...compression,
+            ...(timeBasedToolResultProjection.applied ? { timeBasedToolResultProjection: timeBasedToolResultProjection.receipt } : {}),
+            ...(timeBasedThinkingProjection.shouldPersist ? { timeBasedThinkingProjection: timeBasedThinkingProjection.receipt } : {}),
+        },
     }, groupSessionId, {
         sessionMemoryCadenceDecision: snapshotMemory.sessionMemory?.updateCadence || null,
     });
@@ -13017,7 +13669,23 @@ function buildGroupContextPacket(groupId, options = {}) {
             (0, group_memory_compaction_1.buildBoundedRecentGroupContext)(recentMessages, fullCount),
         ].join("\n"));
     }
-    return sections.filter(Boolean).join("\n\n");
+    if (timeBasedToolResultProjection.receipt.enabled) {
+        const receipt = timeBasedToolResultProjection.receipt;
+        sections.push(`时间触发 microcompact：status=${receipt.status}; gap=${receipt.gap_minutes}/${receipt.gap_threshold_minutes}min; tool_results cleared=${receipt.cleared_tool_result_count}, kept=${receipt.kept_tool_count}; tokens_saved=${receipt.tokens_saved}; raw_transcript_preserved=true。`);
+    }
+    if (timeBasedThinkingProjection.receipt.enabled) {
+        const receipt = timeBasedThinkingProjection.receipt;
+        sections.push(`时间触发 thinking clear：status=${receipt.status}; latched=${receipt.latched === true}; compact_epoch=${receipt.compact_epoch}; thinking_turns cleared=${receipt.cleared_thinking_turn_count}, kept=${receipt.kept_thinking_turn_count}; tokens_saved=${receipt.tokens_saved}; raw_transcript_preserved=true。`);
+    }
+    const rendered = sections.filter(Boolean).join("\n\n");
+    const postCompactPayloadGate = memory.compaction?.postCompactPayloadGate
+        || memory.messageCompression?.postCompactPayloadGate
+        || memory.compactBoundary?.postCompactPayloadGate
+        || memory.compactBoundary?.post_compact_restore?.postCompactPayloadGate
+        || null;
+    if (postCompactPayloadGate?.status !== "recompact_required")
+        return rendered;
+    return compactPreserveLines(rendered, Math.max(4000, Number(postCompactPayloadGate.safe_render_chars || 6000)));
 }
 function normalizeMemoryStringArray(value) {
     if (!Array.isArray(value))

@@ -65,11 +65,13 @@
 ## 截图证据
 
 - [桌面运行概览](evidence/auto-dev-v2/01-overview-desktop.png)
-- [桌面报告](evidence/auto-dev-v2/02-reports-desktop.png)
-- [桌面通知设置](evidence/auto-dev-v2/03-notifications-desktop.png)
-- [手机运行概览](evidence/auto-dev-v2/04-overview-mobile.png)
-- [手机报告](evidence/auto-dev-v2/05-reports-mobile.png)
-- [手机通知设置](evidence/auto-dev-v2/06-notifications-mobile.png)
+- [桌面日报](evidence/auto-dev-v2/02-daily-report-desktop.png)
+- [桌面周报](evidence/auto-dev-v2/03-weekly-report-desktop.png)
+- [桌面通知设置](evidence/auto-dev-v2/04-notifications-desktop.png)
+- [手机运行概览](evidence/auto-dev-v2/05-overview-mobile.png)
+- [手机日报](evidence/auto-dev-v2/06-daily-report-mobile.png)
+- [手机周报](evidence/auto-dev-v2/07-weekly-report-mobile.png)
+- [手机通知设置](evidence/auto-dev-v2/08-notifications-mobile.png)
 
 ## 当前运行数据说明
 

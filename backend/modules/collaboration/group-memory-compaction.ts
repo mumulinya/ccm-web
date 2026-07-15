@@ -2,8 +2,14 @@ import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
 import { CCM_DIR } from "../../core/utils";
+import { loadSkills, SKILL_PACKAGES_DIR } from "../../core/db";
+import { isCcmInternalSkillName } from "../../skills/internal-skill-catalog";
 import { buildContextBudget, compactPreserveEdges, estimateTextTokens, getAutoCompactThreshold, microCompactText } from "../../system/context-budget";
 import { resolveTrustedModelContextCapacity } from "./model-capability-cache";
+import {
+  readGroupSessionMemoryExtractionState,
+  waitForGroupSessionMemoryExtraction,
+} from "./group-session-memory-extraction";
 
 export const GROUP_MEMORY_COMPACTION_VERSION = 3;
 export const GROUP_COMPACT_TRIGGER_TOKENS = 167_000;
@@ -29,20 +35,47 @@ export const GROUP_API_MICROCOMPACT_DEFAULT_TARGET_INPUT_TOKENS = 40_000;
 export const GROUP_API_MICROCOMPACT_CONTEXT_MANAGEMENT_BETA = "context-management-2025-06-27";
 export const GROUP_TIME_BASED_MICRO_COMPACT_VERSION = 1;
 export const GROUP_TIME_BASED_MC_CLEARED_MESSAGE = "[Old group Agent result content cleared]";
+export const GROUP_TIME_BASED_TOOL_RESULT_PROJECTION_VERSION = 1;
+export const GROUP_TIME_BASED_TOOL_RESULT_CLEARED_MESSAGE = "[Old tool result content cleared]";
+export const GROUP_TIME_BASED_THINKING_PROJECTION_VERSION = 1;
+export const GROUP_TIME_BASED_THINKING_CLEARED_MESSAGE = "[Old thinking content cleared]";
+export const GROUP_COMPACTION_SUMMARY_INPUT_PROJECTION_VERSION = 1;
+export const GROUP_COMPACTION_SUMMARY_IMAGE_MARKER = "[image]";
+export const GROUP_COMPACTION_SUMMARY_DOCUMENT_MARKER = "[document]";
+export const GROUP_COMPACTION_SUMMARY_BINARY_MARKER = "[binary data removed]";
 export const GROUP_POST_COMPACT_REINJECT_VERSION = 1;
 export const GROUP_POST_COMPACT_RECOVERY_AUDIT_VERSION = 1;
-export const GROUP_POST_COMPACT_CLEANUP_AUDIT_VERSION = 1;
+export const GROUP_POST_COMPACT_CLEANUP_AUDIT_VERSION = 2;
 export const GROUP_POST_COMPACT_FILE_BUDGET = 5;
 export const GROUP_POST_COMPACT_SKILL_BUDGET = 5;
 export const GROUP_POST_COMPACT_VERIFICATION_BUDGET = 8;
+export const GROUP_POST_COMPACT_TASK_STATUS_PROJECTION_VERSION = 1;
+export const GROUP_POST_COMPACT_TASK_STATUS_BUDGET = 12;
+export const GROUP_POST_COMPACT_FILE_RESTORE_DEDUP_VERSION = 1;
+export const GROUP_POST_COMPACT_INVOKED_SKILL_ATTACHMENT_VERSION = 1;
+export const GROUP_POST_COMPACT_INVOKED_SKILL_MAX_TOKENS = 5_000;
+export const GROUP_POST_COMPACT_INVOKED_SKILLS_TOTAL_MAX_TOKENS = 25_000;
+export const GROUP_POST_COMPACT_PLAN_ATTACHMENT_VERSION = 1;
+export const GROUP_POST_COMPACT_PLAN_MAX_TOKENS = 50_000;
+export const GROUP_POST_COMPACT_DYNAMIC_CONTEXT_DELTA_VERSION = 1;
+export const GROUP_POST_COMPACT_LOADED_TOOL_STATE_VERSION = 1;
+export const GROUP_POST_COMPACT_DYNAMIC_CONTEXT_MAX_TOKENS = 20_000;
+export const GROUP_FILE_UNCHANGED_STUB_PREFIX = "File unchanged since last read.";
 export const GROUP_PARTIAL_COMPACT_VERSION = 1;
 export const GROUP_PARTIAL_COMPACT_SEGMENT_LIMIT = 12;
 export const GROUP_PTL_EMERGENCY_VERSION = 1;
 export const GROUP_PTL_RECOVERY_VERSION = 1;
 export const GROUP_PRESERVED_SEGMENT_VERSION = 2;
 export const GROUP_COMPACT_STRATEGY_DECISION_VERSION = 1;
-export const GROUP_COMPACTION_HOOK_LEDGER_VERSION = 1;
-export const GROUP_COMPACT_TRANSACTION_RECEIPT_VERSION = 1;
+export const GROUP_COMPACTION_HOOK_LEDGER_VERSION = 2;
+export const GROUP_COMPACT_TRANSACTION_RECEIPT_VERSION = 3;
+export const GROUP_POST_COMPACT_MESSAGE_ORDER_VERSION = 1;
+export const GROUP_COMPACT_LINEAGE_VERSION = 1;
+export const GROUP_COMPACTION_MODEL_USAGE_VERSION = 1;
+export const GROUP_SESSION_MEMORY_COMPACT_SELECTION_VERSION = 1;
+export const GROUP_SESSION_MEMORY_API_INVARIANT_CLOSURE_VERSION = 1;
+export const GROUP_POST_COMPACT_SESSION_STATE_RESET_VERSION = 1;
+export const GROUP_TRUE_POST_COMPACT_PAYLOAD_VERSION = 1;
 export const GROUP_COMPACTION_MODEL_MAX_SUMMARY_TOKENS = 5_000;
 export const GROUP_COMPACTION_MODEL_INPUT_SAFETY_TOKENS = 13_000;
 const GROUP_COMPACTION_HOOK_LEDGER_DIR = path.join(CCM_DIR, "group-memory-compaction-hooks");
@@ -112,18 +145,450 @@ function groupCompactTransactionReceiptChecksum(receipt: any) {
   return crypto.createHash("sha256").update(JSON.stringify(payload)).digest("hex");
 }
 
+export function groupPostCompactCleanupAuditChecksum(audit: any) {
+  const payload = { ...(audit || {}) };
+  delete payload.audit_checksum;
+  delete payload.checksum_valid;
+  return crypto.createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+}
+
+export function verifyGroupPostCompactCleanupAudit(audit: any, expected: any = {}) {
+  const issues: string[] = [];
+  const version = Number(audit?.version || 0);
+  const legacy = audit?.schema === "ccm-post-compact-cleanup-audit-v1" && version === 1;
+  const current = audit?.schema === "ccm-post-compact-cleanup-audit-v2" && version === GROUP_POST_COMPACT_CLEANUP_AUDIT_VERSION;
+  if (!legacy && !current) issues.push("post_compact_cleanup_audit_schema_invalid");
+  if (!String(audit?.groupId || "")) issues.push("post_compact_cleanup_group_missing");
+  if (!String(audit?.boundaryId || "")) issues.push("post_compact_cleanup_boundary_missing");
+  if (current) {
+    if (!String(audit?.groupSessionId || "").startsWith("gcs_")) issues.push("post_compact_cleanup_exact_group_session_missing");
+    if (String(audit?.scopeId || "") !== `${String(audit?.groupId || "")}::${String(audit?.groupSessionId || "")}`) issues.push("post_compact_cleanup_scope_invalid");
+    if (String(audit?.compactSource?.kind || "") !== "group_main_agent") issues.push("post_compact_cleanup_source_invalid");
+    if (audit?.compactSource?.mainThreadEquivalent !== true) issues.push("post_compact_cleanup_main_thread_equivalent_missing");
+    if (String(audit?.compactSource?.querySource || "") !== `group_main:${String(audit?.scopeId || "")}`) issues.push("post_compact_cleanup_query_source_invalid");
+    if (String(audit?.cleanupScope?.groupId || "") !== String(audit?.groupId || "")
+      || String(audit?.cleanupScope?.groupSessionId || "") !== String(audit?.groupSessionId || "")
+      || String(audit?.cleanupScope?.scopeId || "") !== String(audit?.scopeId || "")) issues.push("post_compact_cleanup_scope_binding_invalid");
+    if (audit?.cleanupScope?.allowsGlobalReset !== false) issues.push("post_compact_cleanup_global_reset_not_forbidden");
+    if (audit?.cleanupScope?.allowsOtherGroupSessionReset !== false) issues.push("post_compact_cleanup_cross_session_reset_not_forbidden");
+    if (audit?.partialSidecarOnly === true && audit?.resetDerivedCompactState !== false) issues.push("post_compact_cleanup_partial_sidecar_reset_invalid");
+    if (audit?.partialSidecarOnly !== true && audit?.resetDerivedCompactState !== true) issues.push("post_compact_cleanup_primary_reset_missing");
+    if (String(audit?.audit_checksum || "") !== groupPostCompactCleanupAuditChecksum(audit)) issues.push("post_compact_cleanup_audit_checksum_invalid");
+  }
+  if (expected.groupId && String(audit?.groupId || "") !== String(expected.groupId)) issues.push("post_compact_cleanup_group_mismatch");
+  if (expected.groupSessionId && String(audit?.groupSessionId || "") !== String(expected.groupSessionId)) issues.push("post_compact_cleanup_group_session_mismatch");
+  if (expected.boundaryId && String(audit?.boundaryId || "") !== String(expected.boundaryId)) issues.push("post_compact_cleanup_boundary_mismatch");
+  if (expected.auditChecksum && String(audit?.audit_checksum || "") !== String(expected.auditChecksum)) issues.push("post_compact_cleanup_checksum_mismatch");
+  return { valid: issues.length === 0, issues, legacy, current };
+}
+
 export function buildGroupCompactEpoch(boundaryId: string) {
   const id = String(boundaryId || "").trim();
   return id ? `cmp_${crypto.createHash("sha256").update(id).digest("hex").slice(0, 16)}` : "precompact";
 }
 
+function groupCompactLineageChecksum(lineage: any) {
+  const payload = { ...(lineage || {}) };
+  delete payload.lineage_checksum;
+  delete payload.checksum_valid;
+  return crypto.createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+}
+
+function groupCompactTurnId(groupId: string, groupSessionId: string, boundaryId: string) {
+  const identity = `${String(groupId || "")}\0${String(groupSessionId || "")}\0${String(boundaryId || "")}`;
+  return boundaryId ? `gct_${crypto.createHash("sha256").update(identity).digest("hex").slice(0, 24)}` : "";
+}
+
+export function buildGroupCompactLineage(input: any = {}) {
+  const boundary = input.boundary || {};
+  const previousBoundary = input.previousBoundary || input.previous_boundary || {};
+  const groupId = String(input.groupId || input.group_id || "");
+  const groupSessionId = String(input.groupSessionId || input.group_session_id || "");
+  const boundaryId = String(boundary.id || input.boundaryId || input.boundary_id || "");
+  const previousBoundaryId = String(previousBoundary.id || input.previousBoundaryId || input.previous_boundary_id || "");
+  const checkpointKnown = input.checkpointKnown === true || input.checkpoint_known === true;
+  const turnsSincePreviousCompact = previousBoundaryId
+    ? checkpointKnown ? Math.max(0, Number(input.turnsSincePreviousCompact || input.turns_since_previous_compact || 0)) : -1
+    : -1;
+  const newMessageCount = previousBoundaryId && checkpointKnown
+    ? Math.max(0, Number(input.newMessageCountSincePreviousCompact || input.new_message_count_since_previous_compact || 0))
+    : previousBoundaryId ? -1 : 0;
+  const previousCompactTurnId = previousBoundaryId
+    ? String(
+      input.previousCompactTurnId
+        || input.previous_compact_turn_id
+        || previousBoundary.compactLineage?.compact_turn_id
+        || previousBoundary.compactMetadata?.compactLineage?.compact_turn_id
+        || groupCompactTurnId(groupId, groupSessionId, previousBoundaryId)
+    )
+    : "";
+  const trigger = String(input.trigger || boundary.compactMetadata?.trigger || (boundary.type === "auto" ? "auto" : "manual"));
+  const payload: any = {
+    schema: "ccm-group-compact-lineage-v1",
+    version: GROUP_COMPACT_LINEAGE_VERSION,
+    group_id: groupId,
+    group_session_id: groupSessionId,
+    boundary_id: boundaryId,
+    compact_epoch: buildGroupCompactEpoch(boundaryId),
+    compact_turn_id: groupCompactTurnId(groupId, groupSessionId, boundaryId),
+    trigger: trigger === "auto" ? "auto" : "manual",
+    query_source: String(input.querySource || input.query_source || `group_main:${groupId}::${groupSessionId}`),
+    previous_boundary_id: previousBoundaryId,
+    previous_compact_epoch: previousBoundaryId ? buildGroupCompactEpoch(previousBoundaryId) : "",
+    previous_compact_turn_id: previousCompactTurnId,
+    checkpoint_basis: previousBoundaryId ? checkpointKnown ? "message_count_checkpoint" : "legacy_unknown" : "first_compact",
+    turns_since_previous_compact: turnsSincePreviousCompact,
+    new_message_count_since_previous_compact: newMessageCount,
+    is_recompaction_in_chain: !!previousBoundaryId && checkpointKnown && turnsSincePreviousCompact === 0,
+    messages_summarized: Number(input.messagesSummarized || input.messages_summarized || boundary.summarizedMessageCount || 0),
+    pre_compact_tokens: Number(input.preCompactTokens || input.pre_compact_tokens || boundary.preCompactTokenCount || 0),
+    true_post_compact_tokens: Number(input.truePostCompactTokens || input.true_post_compact_tokens || boundary.postCompactTokenCount || 0),
+    auto_compact_threshold: Number(input.autoCompactThreshold || input.auto_compact_threshold || 0),
+    will_retrigger_next_turn: input.willRetriggerNextTurn === true || input.will_retrigger_next_turn === true,
+  };
+  return { ...payload, lineage_checksum: groupCompactLineageChecksum(payload) };
+}
+
+export function verifyGroupCompactLineage(lineage: any, expected: any = {}) {
+  const issues: string[] = [];
+  if (lineage?.schema !== "ccm-group-compact-lineage-v1"
+    || Number(lineage?.version || 0) !== GROUP_COMPACT_LINEAGE_VERSION) issues.push("compact_lineage_schema_invalid");
+  if (!String(lineage?.group_id || "")) issues.push("compact_lineage_group_missing");
+  if (!String(lineage?.group_session_id || "").startsWith("gcs_")) issues.push("compact_lineage_exact_session_missing");
+  if (!String(lineage?.boundary_id || "")) issues.push("compact_lineage_boundary_missing");
+  if (String(lineage?.compact_epoch || "") !== buildGroupCompactEpoch(String(lineage?.boundary_id || ""))) issues.push("compact_lineage_epoch_invalid");
+  if (String(lineage?.compact_turn_id || "") !== groupCompactTurnId(String(lineage?.group_id || ""), String(lineage?.group_session_id || ""), String(lineage?.boundary_id || ""))) issues.push("compact_lineage_turn_id_invalid");
+  if (!["manual", "auto"].includes(String(lineage?.trigger || ""))) issues.push("compact_lineage_trigger_invalid");
+  if (String(lineage?.lineage_checksum || "") !== groupCompactLineageChecksum(lineage)) issues.push("compact_lineage_checksum_invalid");
+  const previousBoundaryId = String(lineage?.previous_boundary_id || "");
+  if (previousBoundaryId) {
+    if (String(lineage?.previous_compact_epoch || "") !== buildGroupCompactEpoch(previousBoundaryId)) issues.push("compact_lineage_previous_epoch_invalid");
+    if (!String(lineage?.previous_compact_turn_id || "")) issues.push("compact_lineage_previous_turn_missing");
+    if (lineage?.checkpoint_basis === "message_count_checkpoint" && Number(lineage?.turns_since_previous_compact ?? -1) < 0) issues.push("compact_lineage_turn_count_invalid");
+    if (lineage?.is_recompaction_in_chain === true && Number(lineage?.turns_since_previous_compact ?? -1) !== 0) issues.push("compact_lineage_recompaction_invalid");
+  } else if (Number(lineage?.turns_since_previous_compact ?? -1) !== -1 || String(lineage?.previous_compact_turn_id || "")) {
+    issues.push("compact_lineage_first_compact_invalid");
+  }
+  if (expected.groupId && String(lineage?.group_id || "") !== String(expected.groupId)) issues.push("compact_lineage_group_mismatch");
+  if (expected.groupSessionId && String(lineage?.group_session_id || "") !== String(expected.groupSessionId)) issues.push("compact_lineage_session_mismatch");
+  if (expected.boundaryId && String(lineage?.boundary_id || "") !== String(expected.boundaryId)) issues.push("compact_lineage_boundary_mismatch");
+  if (expected.previousBoundaryId !== undefined && previousBoundaryId !== String(expected.previousBoundaryId || "")) issues.push("compact_lineage_previous_boundary_mismatch");
+  return { valid: issues.length === 0, issues };
+}
+
+function groupCompactionModelUsageChecksum(receipt: any) {
+  const payload = { ...(receipt || {}) };
+  delete payload.usage_checksum;
+  delete payload.checksum_valid;
+  return crypto.createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+}
+
+function finiteUsageToken(value: any) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? Math.floor(number) : 0;
+}
+
+export function buildGroupCompactionModelUsageReceipt(input: any = {}) {
+  const raw = input.usage && typeof input.usage === "object" ? input.usage : {};
+  const provider = String(input.provider || "unknown").toLowerCase() === "anthropic" ? "anthropic" : "openai";
+  const inputTokens = Math.max(
+    finiteUsageToken(raw.input_tokens),
+    finiteUsageToken(raw.inputTokens),
+    finiteUsageToken(raw.prompt_tokens),
+    finiteUsageToken(raw.promptTokens),
+  );
+  const outputTokens = Math.max(
+    finiteUsageToken(raw.output_tokens),
+    finiteUsageToken(raw.outputTokens),
+    finiteUsageToken(raw.completion_tokens),
+    finiteUsageToken(raw.completionTokens),
+  );
+  const cacheReadTokens = Math.max(
+    finiteUsageToken(raw.cache_read_input_tokens),
+    finiteUsageToken(raw.cacheReadInputTokens),
+    finiteUsageToken(raw.prompt_tokens_details?.cached_tokens),
+    finiteUsageToken(raw.promptTokensDetails?.cachedTokens),
+  );
+  const cacheCreationTokens = Math.max(
+    finiteUsageToken(raw.cache_creation_input_tokens),
+    finiteUsageToken(raw.cacheCreationInputTokens),
+  );
+  const rawTotalTokens = Math.max(finiteUsageToken(raw.total_tokens), finiteUsageToken(raw.totalTokens));
+  const cacheReadIncludedInInput = provider === "openai"
+    && cacheReadTokens > 0
+    && !finiteUsageToken(raw.input_tokens)
+    && !finiteUsageToken(raw.inputTokens);
+  const calculatedTotalTokens = inputTokens + outputTokens + cacheCreationTokens + (cacheReadIncludedInInput ? 0 : cacheReadTokens);
+  const accountedTotalTokens = rawTotalTokens || calculatedTotalTokens;
+  const reported = inputTokens > 0 || outputTokens > 0 || cacheReadTokens > 0 || cacheCreationTokens > 0 || rawTotalTokens > 0;
+  const estimatedInputTokens = Math.max(0, Number(input.requestAudit?.estimatedInputTokens || input.estimatedInputTokens || 0));
+  const status = String(input.status || (reported ? "reported" : "unreported"));
+  const payload: any = {
+    schema: "ccm-group-compaction-model-usage-v1",
+    version: GROUP_COMPACTION_MODEL_USAGE_VERSION,
+    group_id: String(input.groupId || input.group_id || ""),
+    group_session_id: String(input.groupSessionId || input.group_session_id || ""),
+    provider,
+    model: String(input.model || ""),
+    status: ["reported", "unreported", "failed"].includes(status) ? status : reported ? "reported" : "unreported",
+    reported,
+    input_tokens: inputTokens,
+    output_tokens: outputTokens,
+    cache_read_input_tokens: cacheReadTokens,
+    cache_creation_input_tokens: cacheCreationTokens,
+    cache_read_included_in_input: cacheReadIncludedInInput,
+    provider_total_tokens: rawTotalTokens,
+    accounted_total_tokens: accountedTotalTokens,
+    estimated_input_tokens: estimatedInputTokens,
+    input_estimate_delta: reported && inputTokens > 0 ? inputTokens - estimatedInputTokens : null,
+    input_estimate_ratio: reported && inputTokens > 0 && estimatedInputTokens > 0
+      ? Math.round((inputTokens / estimatedInputTokens) * 10_000) / 10_000
+      : null,
+    request_clipped: input.requestAudit?.clipped === true,
+    response_id: String(input.responseId || input.response_id || ""),
+    stop_reason: String(input.stopReason || input.stop_reason || ""),
+    body_free: true,
+  };
+  return { ...payload, usage_checksum: groupCompactionModelUsageChecksum(payload) };
+}
+
+export function verifyGroupCompactionModelUsageReceipt(receipt: any, expected: any = {}) {
+  const issues: string[] = [];
+  if (receipt?.schema !== "ccm-group-compaction-model-usage-v1"
+    || Number(receipt?.version || 0) !== GROUP_COMPACTION_MODEL_USAGE_VERSION) issues.push("compaction_model_usage_schema_invalid");
+  if (!String(receipt?.group_id || "")) issues.push("compaction_model_usage_group_missing");
+  if (!String(receipt?.group_session_id || "").startsWith("gcs_")) issues.push("compaction_model_usage_exact_session_missing");
+  if (!["reported", "unreported", "failed"].includes(String(receipt?.status || ""))) issues.push("compaction_model_usage_status_invalid");
+  if (receipt?.body_free !== true) issues.push("compaction_model_usage_body_free_missing");
+  if (Number(receipt?.accounted_total_tokens || 0) < Number(receipt?.input_tokens || 0) + Number(receipt?.output_tokens || 0)) issues.push("compaction_model_usage_total_invalid");
+  if (String(receipt?.usage_checksum || "") !== groupCompactionModelUsageChecksum(receipt)) issues.push("compaction_model_usage_checksum_invalid");
+  if (expected.groupId && String(receipt?.group_id || "") !== String(expected.groupId)) issues.push("compaction_model_usage_group_mismatch");
+  if (expected.groupSessionId && String(receipt?.group_session_id || "") !== String(expected.groupSessionId)) issues.push("compaction_model_usage_session_mismatch");
+  if (expected.provider && String(receipt?.provider || "") !== String(expected.provider)) issues.push("compaction_model_usage_provider_mismatch");
+  if (expected.model && String(receipt?.model || "") !== String(expected.model)) issues.push("compaction_model_usage_model_mismatch");
+  return { valid: issues.length === 0, issues };
+}
+
+function groupPostCompactMessageOrderReceiptChecksum(receipt: any) {
+  const payload = { ...(receipt || {}) };
+  delete payload.receipt_checksum;
+  delete payload.checksum_valid;
+  return crypto.createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+}
+
+export function buildGroupPostCompactMessageOrderReceipt(input: any = {}) {
+  const boundary = input.boundary || {};
+  const reinjectionPlan = input.postCompactReinject
+    || input.post_compact_reinject
+    || boundary.post_compact_restore?.reinjectionPlan
+    || {};
+  const preservedSegment = input.preservedSegment || boundary.preservedSegment || boundary.post_compact_restore?.preservedSegment || {};
+  const attachmentReceipts = [
+    ["invoked_skills", reinjectionPlan.invokedSkillAttachmentReceipt || reinjectionPlan.invoked_skill_attachment_receipt],
+    ["current_plan", reinjectionPlan.planAttachmentReceipt || reinjectionPlan.plan_attachment_receipt],
+    ["dynamic_context", reinjectionPlan.dynamicContextDeltaReceipt || reinjectionPlan.dynamic_context_delta_receipt],
+  ].map(([kind, receipt]: any[]) => ({
+    kind,
+    receipt_checksum: String(receipt?.receipt_checksum || ""),
+    present: !!String(receipt?.receipt_checksum || ""),
+  }));
+  const postHookRows = (Array.isArray(input.postHookResults) ? input.postHookResults : []).map((row: any) => ({
+    phase: String(row?.ledgerEntry?.phase || "post"),
+    hook_index: Number(row?.ledgerEntry?.hook_index ?? -1),
+    ok: row?.ok === true,
+    boundary_id: String(row?.ledgerEntry?.boundary_id || boundary.id || ""),
+    summary_checksum: String(row?.ledgerEntry?.summary_checksum || input.summaryChecksum || ""),
+  }));
+  const payload: any = {
+    schema: "ccm-group-post-compact-message-order-receipt-v1",
+    version: GROUP_POST_COMPACT_MESSAGE_ORDER_VERSION,
+    group_id: String(input.groupId || ""),
+    group_session_id: String(input.groupSessionId || input.group_session_id || ""),
+    boundary_id: String(boundary.id || ""),
+    boundary_type: String(boundary.type || ""),
+    compact_epoch: buildGroupCompactEpoch(String(boundary.id || "")),
+    order: ["compact_boundary", "summary", "preserved_messages", "attachments", "post_compact_hooks"],
+    summary_checksum: String(input.summaryChecksum || boundary.post_compact_restore?.summaryChecksum || ""),
+    preserved_segment: {
+      head_message_id: String(preservedSegment.headMessageId || preservedSegment.head_message_id || preservedSegment.firstPreservedMessageId || ""),
+      anchor_message_id: String(preservedSegment.anchorMessageId || preservedSegment.anchor_message_id || preservedSegment.summaryMessageId || ""),
+      tail_message_id: String(preservedSegment.tailMessageId || preservedSegment.tail_message_id || preservedSegment.lastPreservedMessageId || ""),
+      checksum: Object.keys(preservedSegment).length
+        ? crypto.createHash("sha256").update(JSON.stringify(preservedSegment)).digest("hex")
+        : "",
+    },
+    attachment_receipts: attachmentReceipts,
+    hook_run_id: String(input.hookRunId || ""),
+    post_hook_result_count: postHookRows.length,
+    post_hook_result_checksum: crypto.createHash("sha256").update(JSON.stringify(postHookRows)).digest("hex"),
+  };
+  return { ...payload, receipt_checksum: groupPostCompactMessageOrderReceiptChecksum(payload) };
+}
+
+export function verifyGroupPostCompactMessageOrderReceipt(receipt: any, expected: any = {}) {
+  const issues: string[] = [];
+  const expectedOrder = ["compact_boundary", "summary", "preserved_messages", "attachments", "post_compact_hooks"];
+  if (receipt?.schema !== "ccm-group-post-compact-message-order-receipt-v1"
+    || Number(receipt?.version || 0) !== GROUP_POST_COMPACT_MESSAGE_ORDER_VERSION) issues.push("post_compact_message_order_schema_invalid");
+  if (!String(receipt?.group_id || "")) issues.push("post_compact_message_order_group_missing");
+  if (!String(receipt?.group_session_id || "").startsWith("gcs_")) issues.push("post_compact_message_order_exact_session_missing");
+  if (!String(receipt?.boundary_id || "")) issues.push("post_compact_message_order_boundary_missing");
+  if (JSON.stringify(receipt?.order || []) !== JSON.stringify(expectedOrder)) issues.push("post_compact_message_order_invalid");
+  if (!String(receipt?.summary_checksum || "")) issues.push("post_compact_message_order_summary_missing");
+  if (String(receipt?.compact_epoch || "") !== buildGroupCompactEpoch(String(receipt?.boundary_id || ""))) issues.push("post_compact_message_order_epoch_invalid");
+  if (String(receipt?.receipt_checksum || "") !== groupPostCompactMessageOrderReceiptChecksum(receipt)) issues.push("post_compact_message_order_checksum_invalid");
+  if (expected.groupId && String(receipt?.group_id || "") !== String(expected.groupId)) issues.push("post_compact_message_order_group_mismatch");
+  if (expected.groupSessionId && String(receipt?.group_session_id || "") !== String(expected.groupSessionId)) issues.push("post_compact_message_order_session_mismatch");
+  if (expected.boundaryId && String(receipt?.boundary_id || "") !== String(expected.boundaryId)) issues.push("post_compact_message_order_boundary_mismatch");
+  if (expected.summaryChecksum && String(receipt?.summary_checksum || "") !== String(expected.summaryChecksum)) issues.push("post_compact_message_order_summary_mismatch");
+  return { valid: issues.length === 0, issues };
+}
+
+function groupPostCompactSessionStateResetChecksum(receipt: any) {
+  const payload = { ...(receipt || {}) };
+  delete payload.receipt_checksum;
+  delete payload.checksum_valid;
+  return crypto.createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+}
+
+/** Claude Code clears provider-active compact cursors and cache baselines after compact.
+ * CCM keeps the raw-transcript boundary cursor durable and records the provider lifecycle separately. */
+export function buildGroupPostCompactSessionStateResetReceipt(input: any = {}) {
+  const boundary = input.boundary || {};
+  const selection = input.sessionMemoryCompactSelection || input.session_memory_compact_selection || {};
+  const previousReceipt = input.previousReceipt || input.previous_receipt || {};
+  const providerReset = input.providerNativeCompactSessionCapacityReset
+    || input.provider_native_compact_session_capacity_reset
+    || {};
+  const circuitBefore = input.circuitBreakerBefore || input.circuit_breaker_before || {};
+  const circuitAfter = input.circuitBreakerAfter || input.circuit_breaker_after || {};
+  const previousGeneration = Math.max(0, Number(
+    previousReceipt?.cache_read_baseline?.generation
+      || previousReceipt?.post_compact_mark?.generation
+      || 0
+  ));
+  const generation = previousGeneration + 1;
+  const durableCursor = String(
+    input.durableBoundaryCursor
+      || input.durable_boundary_cursor
+      || boundary.summarizedThroughMessageId
+      || ""
+  );
+  const compactTransactionReceiptChecksum = String(
+    input.compactTransactionReceiptChecksum
+      || input.compact_transaction_receipt_checksum
+      || boundary.compactTransactionReceipt?.receipt_checksum
+      || boundary.post_compact_restore?.compactTransactionReceipt?.receipt_checksum
+      || ""
+  );
+  const warning = input.contextPressureWarning || input.context_pressure_warning || {};
+  const compactPath = selection?.selected === true ? "session_memory_reuse" : "traditional";
+  const payload: any = {
+    schema: "ccm-group-post-compact-session-state-reset-v1",
+    version: GROUP_POST_COMPACT_SESSION_STATE_RESET_VERSION,
+    group_id: String(input.groupId || input.group_id || ""),
+    group_session_id: String(input.groupSessionId || input.group_session_id || ""),
+    scope_id: String(input.scopeId || input.scope_id || `${input.groupId || input.group_id || ""}--${input.groupSessionId || input.group_session_id || ""}`),
+    boundary_id: String(boundary.id || input.boundaryId || input.boundary_id || ""),
+    compact_epoch: buildGroupCompactEpoch(String(boundary.id || input.boundaryId || input.boundary_id || "")),
+    summary_checksum: String(input.summaryChecksum || input.summary_checksum || boundary.post_compact_restore?.summaryChecksum || ""),
+    compact_transaction_receipt_checksum: compactTransactionReceiptChecksum,
+    compact_path: compactPath,
+    durable_boundary_cursor: {
+      status: "preserved",
+      message_id: durableCursor,
+    },
+    provider_active_cursor: {
+      status: "cleared",
+      previous_message_id: String(selection.last_summarized_message_id || input.previousProviderCursor || input.previous_provider_cursor || ""),
+      message_id: "",
+    },
+    session_memory_extraction_cursor: {
+      status: "rebased_on_post_compact_snapshot",
+      message_id: durableCursor,
+      generation,
+    },
+    cache_read_baseline: {
+      status: "reset",
+      previous_generation: previousGeneration,
+      generation,
+    },
+    compact_warning: {
+      status: warning?.suppressed === true ? "suppressed" : "not_suppressed",
+      suppressed: warning?.suppressed === true,
+    },
+    auto_compact_failure_state: {
+      status: Number(circuitAfter.consecutive_failures || 0) === 0 ? "reset" : "not_reset",
+      previous_consecutive_failures: Math.max(0, Number(circuitBefore.consecutive_failures || 0)),
+      consecutive_failures: Math.max(0, Number(circuitAfter.consecutive_failures || 0)),
+      ledger_checksum: String(circuitAfter.ledger_checksum || ""),
+    },
+    provider_capacity_reset: {
+      status: String(providerReset.status || (providerReset.reset === true ? "reset" : "unknown")),
+      reset: providerReset.reset === true || providerReset.idempotent === true,
+      generation: Math.max(0, Number(providerReset.generation || 0)),
+      reset_checksum: String(providerReset.reset_checksum || ""),
+      compact_head_generation: Math.max(0, Number(providerReset.compact_head_generation || 0)),
+    },
+    post_compact_mark: {
+      status: "marked",
+      generation,
+    },
+    body_free: true,
+    completed_at: String(input.completedAt || input.completed_at || new Date().toISOString()),
+  };
+  return { ...payload, receipt_checksum: groupPostCompactSessionStateResetChecksum(payload) };
+}
+
+export function verifyGroupPostCompactSessionStateResetReceipt(receipt: any, expected: any = {}) {
+  const issues: string[] = [];
+  if (receipt?.schema !== "ccm-group-post-compact-session-state-reset-v1"
+    || Number(receipt?.version || 0) !== GROUP_POST_COMPACT_SESSION_STATE_RESET_VERSION) issues.push("post_compact_session_state_reset_schema_invalid");
+  if (!String(receipt?.group_id || "")) issues.push("post_compact_session_state_reset_group_missing");
+  if (!String(receipt?.group_session_id || "").startsWith("gcs_")) issues.push("post_compact_session_state_reset_exact_session_missing");
+  if (String(receipt?.scope_id || "") !== `${String(receipt?.group_id || "")}--${String(receipt?.group_session_id || "")}`) issues.push("post_compact_session_state_reset_scope_invalid");
+  if (!String(receipt?.boundary_id || "")) issues.push("post_compact_session_state_reset_boundary_missing");
+  if (String(receipt?.compact_epoch || "") !== buildGroupCompactEpoch(String(receipt?.boundary_id || ""))) issues.push("post_compact_session_state_reset_epoch_invalid");
+  if (!String(receipt?.summary_checksum || "")) issues.push("post_compact_session_state_reset_summary_missing");
+  if (!String(receipt?.compact_transaction_receipt_checksum || "")) issues.push("post_compact_session_state_reset_transaction_missing");
+  if (!["session_memory_reuse", "traditional"].includes(String(receipt?.compact_path || ""))) issues.push("post_compact_session_state_reset_path_invalid");
+  if (receipt?.durable_boundary_cursor?.status !== "preserved" || !String(receipt?.durable_boundary_cursor?.message_id || "")) issues.push("post_compact_session_state_reset_durable_cursor_invalid");
+  if (receipt?.provider_active_cursor?.status !== "cleared" || String(receipt?.provider_active_cursor?.message_id || "")) issues.push("post_compact_session_state_reset_provider_cursor_not_cleared");
+  if (receipt?.session_memory_extraction_cursor?.status !== "rebased_on_post_compact_snapshot"
+    || String(receipt?.session_memory_extraction_cursor?.message_id || "") !== String(receipt?.durable_boundary_cursor?.message_id || "")) issues.push("post_compact_session_state_reset_extraction_cursor_invalid");
+  const generation = Math.max(0, Number(receipt?.cache_read_baseline?.generation || 0));
+  if (receipt?.cache_read_baseline?.status !== "reset"
+    || generation !== Math.max(0, Number(receipt?.cache_read_baseline?.previous_generation || 0)) + 1) issues.push("post_compact_session_state_reset_cache_baseline_invalid");
+  if (Number(receipt?.session_memory_extraction_cursor?.generation || 0) !== generation
+    || receipt?.post_compact_mark?.status !== "marked"
+    || Number(receipt?.post_compact_mark?.generation || 0) !== generation) issues.push("post_compact_session_state_reset_generation_invalid");
+  if (receipt?.compact_warning?.suppressed !== true || receipt?.compact_warning?.status !== "suppressed") issues.push("post_compact_session_state_reset_warning_not_suppressed");
+  if (receipt?.auto_compact_failure_state?.status !== "reset"
+    || Number(receipt?.auto_compact_failure_state?.consecutive_failures || 0) !== 0) issues.push("post_compact_session_state_reset_failure_count_not_reset");
+  if (receipt?.provider_capacity_reset?.reset !== true) issues.push("post_compact_session_state_reset_provider_capacity_not_reset");
+  if (receipt?.body_free !== true) issues.push("post_compact_session_state_reset_body_free_missing");
+  if (String(receipt?.receipt_checksum || "") !== groupPostCompactSessionStateResetChecksum(receipt)) issues.push("post_compact_session_state_reset_checksum_invalid");
+  if (expected.groupId && String(receipt?.group_id || "") !== String(expected.groupId)) issues.push("post_compact_session_state_reset_group_mismatch");
+  if (expected.groupSessionId && String(receipt?.group_session_id || "") !== String(expected.groupSessionId)) issues.push("post_compact_session_state_reset_session_mismatch");
+  if (expected.boundaryId && String(receipt?.boundary_id || "") !== String(expected.boundaryId)) issues.push("post_compact_session_state_reset_boundary_mismatch");
+  if (expected.summaryChecksum && String(receipt?.summary_checksum || "") !== String(expected.summaryChecksum)) issues.push("post_compact_session_state_reset_summary_mismatch");
+  return { valid: issues.length === 0, issues };
+}
+
 export function verifyGroupCompactTransactionReceipt(receipt: any, expected: any = {}) {
   const issues: string[] = [];
-  if (receipt?.schema !== "ccm-group-memory-compact-transaction-receipt-v1"
-    || Number(receipt?.version || 0) !== GROUP_COMPACT_TRANSACTION_RECEIPT_VERSION) issues.push("compact_transaction_receipt_schema_invalid");
-  const expectedReceiptId = `gctr_${crypto.createHash("sha256").update(`${receipt?.group_id || ""}\0${receipt?.boundary_id || ""}\0${receipt?.hook_run_id || ""}\0${receipt?.committed_at || ""}`).digest("hex").slice(0, 24)}`;
+  const receiptVersion = Number(receipt?.version || 0);
+  const supportedSchema = (receipt?.schema === "ccm-group-memory-compact-transaction-receipt-v1" && receiptVersion === 1)
+    || (receipt?.schema === "ccm-group-memory-compact-transaction-receipt-v2" && receiptVersion === 2)
+    || (receipt?.schema === "ccm-group-memory-compact-transaction-receipt-v3" && receiptVersion === GROUP_COMPACT_TRANSACTION_RECEIPT_VERSION);
+  if (!supportedSchema) issues.push("compact_transaction_receipt_schema_invalid");
+  const receiptIdentity = receiptVersion >= 2
+    ? `${receipt?.group_id || ""}\0${receipt?.group_session_id || ""}\0${receipt?.boundary_id || ""}\0${receipt?.hook_run_id || ""}\0${receipt?.committed_at || ""}`
+    : `${receipt?.group_id || ""}\0${receipt?.boundary_id || ""}\0${receipt?.hook_run_id || ""}\0${receipt?.committed_at || ""}`;
+  const expectedReceiptId = `gctr_${crypto.createHash("sha256").update(receiptIdentity).digest("hex").slice(0, 24)}`;
   if (String(receipt?.receipt_id || "") !== expectedReceiptId) issues.push("compact_transaction_receipt_id_invalid");
   if (!String(receipt?.group_id || "")) issues.push("compact_transaction_group_missing");
+  if (!String(receipt?.group_session_id || "").startsWith("gcs_")) issues.push("compact_transaction_exact_group_session_missing");
   if (!String(receipt?.boundary_id || "")) issues.push("compact_transaction_boundary_missing");
   if (!String(receipt?.summary_checksum || "")) issues.push("compact_transaction_summary_missing");
   if (Number(receipt?.summarized_message_count || 0) < 1) issues.push("compact_transaction_range_empty");
@@ -131,6 +596,7 @@ export function verifyGroupCompactTransactionReceipt(receipt: any, expected: any
   if (Number(receipt?.hook_failure_count || 0) > 0) issues.push("compact_transaction_hook_failure");
   if (receipt?.recovery_audit_passed !== true) issues.push("compact_transaction_recovery_audit_failed");
   if (receipt?.cleanup_audit_passed !== true) issues.push("compact_transaction_cleanup_audit_failed");
+  if (receiptVersion >= 3 && !String(receipt?.cleanup_audit_checksum || "")) issues.push("compact_transaction_cleanup_audit_checksum_missing");
   if (!String(receipt?.transcript_path || "")) issues.push("compact_transaction_transcript_missing");
   if (String(receipt?.compact_epoch || "") !== buildGroupCompactEpoch(String(receipt?.boundary_id || ""))) issues.push("compact_transaction_epoch_invalid");
   if (String(receipt?.receipt_checksum || "") !== groupCompactTransactionReceiptChecksum(receipt)) issues.push("compact_transaction_receipt_checksum_invalid");
@@ -139,11 +605,13 @@ export function verifyGroupCompactTransactionReceipt(receipt: any, expected: any
   if (expected.boundaryId && String(receipt?.boundary_id || "") !== String(expected.boundaryId)) issues.push("compact_transaction_boundary_mismatch");
   if (expected.compactEpoch && String(receipt?.compact_epoch || "") !== String(expected.compactEpoch)) issues.push("compact_transaction_epoch_mismatch");
   if (expected.summaryChecksum && String(receipt?.summary_checksum || "") !== String(expected.summaryChecksum)) issues.push("compact_transaction_summary_mismatch");
+  if (expected.cleanupAuditChecksum && String(receipt?.cleanup_audit_checksum || "") !== String(expected.cleanupAuditChecksum)) issues.push("compact_transaction_cleanup_audit_mismatch");
   return { valid: issues.length === 0, issues };
 }
 
 export function buildGroupCompactTransactionReceipt(input: any = {}) {
   const boundary = input.boundary || {};
+  const groupSessionId = String(input.groupSessionId || input.group_session_id || "");
   const hookRows = [...(input.preHookResults || []), ...(input.postHookResults || [])].map((row: any) => ({
     phase: String(row?.ledgerEntry?.phase || ""),
     hook_index: Number(row?.ledgerEntry?.hook_index ?? -1),
@@ -152,11 +620,11 @@ export function buildGroupCompactTransactionReceipt(input: any = {}) {
     summary_checksum: String(row?.ledgerEntry?.summary_checksum || ""),
   }));
   const payload: any = {
-    schema: "ccm-group-memory-compact-transaction-receipt-v1",
+    schema: "ccm-group-memory-compact-transaction-receipt-v3",
     version: GROUP_COMPACT_TRANSACTION_RECEIPT_VERSION,
-    receipt_id: `gctr_${crypto.createHash("sha256").update(`${input.groupId || ""}\0${boundary.id || ""}\0${input.hookRunId || ""}\0${input.createdAt || boundary.createdAt || ""}`).digest("hex").slice(0, 24)}`,
+    receipt_id: `gctr_${crypto.createHash("sha256").update(`${input.groupId || ""}\0${groupSessionId}\0${boundary.id || ""}\0${input.hookRunId || ""}\0${input.createdAt || boundary.createdAt || ""}`).digest("hex").slice(0, 24)}`,
     group_id: String(input.groupId || ""),
-    group_session_id: String(input.groupSessionId || input.group_session_id || ""),
+    group_session_id: groupSessionId,
     boundary_id: String(boundary.id || ""),
     boundary_type: String(boundary.type || ""),
     compact_epoch: buildGroupCompactEpoch(String(boundary.id || "")),
@@ -176,6 +644,7 @@ export function buildGroupCompactTransactionReceipt(input: any = {}) {
     hook_evidence_checksum: crypto.createHash("sha256").update(JSON.stringify(hookRows)).digest("hex"),
     recovery_audit_passed: boundary.post_compact_restore?.recoveryAudit?.pass === true,
     cleanup_audit_passed: boundary.post_compact_restore?.cleanupAudit?.pass === true,
+    cleanup_audit_checksum: String(boundary.post_compact_restore?.cleanupAudit?.audit_checksum || ""),
     transcript_path: String(input.transcriptPath || boundary.post_compact_restore?.transcriptPath || ""),
     committed_at: String(input.createdAt || boundary.createdAt || new Date().toISOString()),
   };
@@ -186,32 +655,74 @@ function cleanHookLedgerGroupId(groupId: string) {
   return String(groupId || "unknown").replace(/[^a-zA-Z0-9._:-]+/g, "-");
 }
 
-export function getGroupMemoryCompactionHookLedgerFile(groupId: string) {
-  return path.join(GROUP_COMPACTION_HOOK_LEDGER_DIR, `${cleanHookLedgerGroupId(groupId)}.json`);
+function exactHookLedgerSessionId(groupSessionId: string) {
+  const id = String(groupSessionId || "").trim();
+  return id.startsWith("gcs_") ? id : "";
 }
 
-function readHookLedgerFile(file: string, groupId = "") {
-  try {
-    if (fs.existsSync(file)) {
-      const parsed = JSON.parse(fs.readFileSync(file, "utf-8"));
-      return {
-        schema: "ccm-group-memory-compaction-hook-ledger-v1",
-        version: GROUP_COMPACTION_HOOK_LEDGER_VERSION,
-        groupId: String(parsed.groupId || groupId || ""),
-        entries: Array.isArray(parsed.entries) ? parsed.entries : [],
-        stats: parsed.stats && typeof parsed.stats === "object" ? parsed.stats : {},
-        updatedAt: String(parsed.updatedAt || ""),
-      };
-    }
-  } catch {}
+export function getGroupMemoryCompactionHookLedgerFile(groupId: string, groupSessionId: string) {
+  const id = String(groupId || "").trim();
+  const sessionId = exactHookLedgerSessionId(groupSessionId);
+  if (!id || !sessionId) throw new Error("exact_group_session_required_for_compaction_hook_ledger");
+  return path.join(
+    GROUP_COMPACTION_HOOK_LEDGER_DIR,
+    cleanHookLedgerGroupId(id),
+    `${cleanHookLedgerGroupId(sessionId)}.json`,
+  );
+}
+
+function emptyHookLedger(groupId = "", groupSessionId = "", file = "", scopeIssues: string[] = []) {
+  const sessionId = exactHookLedgerSessionId(groupSessionId);
   return {
-    schema: "ccm-group-memory-compaction-hook-ledger-v1",
+    schema: "ccm-group-memory-compaction-hook-ledger-v2",
     version: GROUP_COMPACTION_HOOK_LEDGER_VERSION,
     groupId: String(groupId || ""),
+    groupSessionId: sessionId,
+    scopeId: sessionId ? `${String(groupId || "")}::${sessionId}` : "",
+    scopeValid: scopeIssues.length === 0 && !!String(groupId || "") && !!sessionId,
+    scopeIssues,
+    rejectedEntryCount: 0,
     entries: [] as any[],
     stats: {},
     updatedAt: "",
+    file,
   };
+}
+
+function readHookLedgerFile(file: string, groupId = "", groupSessionId = "") {
+  const sessionId = exactHookLedgerSessionId(groupSessionId);
+  try {
+    if (fs.existsSync(file)) {
+      const parsed = JSON.parse(fs.readFileSync(file, "utf-8"));
+      const issues: string[] = [];
+      if (parsed.schema !== "ccm-group-memory-compaction-hook-ledger-v2"
+        || Number(parsed.version || 0) !== GROUP_COMPACTION_HOOK_LEDGER_VERSION) issues.push("hook_ledger_schema_invalid");
+      if (String(parsed.groupId || "") !== String(groupId || "")) issues.push("hook_ledger_group_mismatch");
+      if (String(parsed.groupSessionId || "") !== sessionId) issues.push("hook_ledger_group_session_mismatch");
+      if (String(parsed.scopeId || "") !== `${String(groupId || "")}::${sessionId}`) issues.push("hook_ledger_scope_mismatch");
+      const rawEntries = Array.isArray(parsed.entries) ? parsed.entries : [];
+      const entries = rawEntries.filter((entry: any) => String(entry?.group_id || "") === String(groupId || "")
+        && String(entry?.group_session_id || "") === sessionId);
+      if (entries.length !== rawEntries.length) issues.push("hook_ledger_mixed_session_entries");
+      return {
+        schema: "ccm-group-memory-compaction-hook-ledger-v2",
+        version: GROUP_COMPACTION_HOOK_LEDGER_VERSION,
+        groupId: String(groupId || ""),
+        groupSessionId: sessionId,
+        scopeId: `${String(groupId || "")}::${sessionId}`,
+        scopeValid: issues.length === 0,
+        scopeIssues: issues,
+        rejectedEntryCount: rawEntries.length - entries.length,
+        entries: issues.length ? [] : entries,
+        stats: issues.length ? {} : buildHookLedgerStats(entries),
+        updatedAt: String(parsed.updatedAt || ""),
+        file,
+      };
+    }
+  } catch {
+    return emptyHookLedger(groupId, sessionId, file, ["hook_ledger_unreadable"]);
+  }
+  return emptyHookLedger(groupId, sessionId, file);
 }
 
 function writeHookLedgerFile(file: string, ledger: any) {
@@ -245,6 +756,7 @@ function normalizeHookLedgerEntry(raw: any = {}) {
     entry_id: String(raw.entry_id || raw.entryId || `hook_${Date.now().toString(36)}_${Math.random().toString(16).slice(2, 8)}`),
     hook_run_id: String(raw.hook_run_id || raw.hookRunId || ""),
     group_id: String(raw.group_id || raw.groupId || ""),
+    group_session_id: String(raw.group_session_id || raw.groupSessionId || ""),
     phase: String(raw.phase || ""),
     hook_index: Number(raw.hook_index ?? raw.hookIndex ?? 0),
     ok: raw.ok === true,
@@ -289,16 +801,31 @@ function buildHookLedgerStats(entries: any[] = []) {
   return stats;
 }
 
-function appendGroupMemoryCompactionHookLedgerEntries(groupId: string, entries: any[] = []) {
+function appendGroupMemoryCompactionHookLedgerEntries(groupId: string, groupSessionId: string, entries: any[] = []) {
+  const sessionId = exactHookLedgerSessionId(groupSessionId);
+  if (!sessionId) throw new Error("exact_group_session_required_for_compaction_hook_ledger");
   const normalized = entries.map(normalizeHookLedgerEntry).filter(entry => entry.group_id || groupId);
-  if (!normalized.length) return readGroupMemoryCompactionHookLedger(groupId);
-  const file = getGroupMemoryCompactionHookLedgerFile(groupId);
-  const ledger = readHookLedgerFile(file, groupId);
-  const allEntries = [...(ledger.entries || []), ...normalized.map(entry => ({ ...entry, group_id: entry.group_id || groupId }))].slice(-500);
+  if (!normalized.length) return readGroupMemoryCompactionHookLedger(groupId, sessionId);
+  if (normalized.some(entry => entry.group_session_id && entry.group_session_id !== sessionId)) {
+    throw new Error("compaction_hook_ledger_cross_session_entry_rejected");
+  }
+  const file = getGroupMemoryCompactionHookLedgerFile(groupId, sessionId);
+  const ledger = readHookLedgerFile(file, groupId, sessionId);
+  if (ledger.scopeValid === false && fs.existsSync(file)) throw new Error(`compaction_hook_ledger_scope_invalid:${ledger.scopeIssues.join(",")}`);
+  const allEntries = [...(ledger.entries || []), ...normalized.map(entry => ({
+    ...entry,
+    group_id: entry.group_id || groupId,
+    group_session_id: sessionId,
+  }))].slice(-500);
   const next = {
-    schema: "ccm-group-memory-compaction-hook-ledger-v1",
+    schema: "ccm-group-memory-compaction-hook-ledger-v2",
     version: GROUP_COMPACTION_HOOK_LEDGER_VERSION,
     groupId,
+    groupSessionId: sessionId,
+    scopeId: `${groupId}::${sessionId}`,
+    scopeValid: true,
+    scopeIssues: [] as string[],
+    rejectedEntryCount: 0,
     entries: allEntries,
     stats: buildHookLedgerStats(allEntries),
     updatedAt: normalized[normalized.length - 1]?.at || new Date().toISOString(),
@@ -307,10 +834,12 @@ function appendGroupMemoryCompactionHookLedgerEntries(groupId: string, entries: 
   return { ...next, file };
 }
 
-export function readGroupMemoryCompactionHookLedger(groupId: string) {
+export function readGroupMemoryCompactionHookLedger(groupId: string, groupSessionId: string) {
   const id = String(groupId || "").trim();
-  const file = getGroupMemoryCompactionHookLedgerFile(id);
-  const ledger = readHookLedgerFile(file, id);
+  const sessionId = exactHookLedgerSessionId(groupSessionId);
+  if (!id || !sessionId) return emptyHookLedger(id, sessionId, "", ["exact_group_session_required"]);
+  const file = getGroupMemoryCompactionHookLedgerFile(id, sessionId);
+  const ledger = readHookLedgerFile(file, id, sessionId);
   return {
     ...ledger,
     file,
@@ -333,6 +862,7 @@ async function runGroupMemoryCompactionHooks(phase: GroupMemoryCompactionHookPha
     const entry = normalizeHookLedgerEntry({
       hook_run_id: hookRunId,
       group_id: input.groupId,
+      group_session_id: input.groupSessionId,
       phase,
       hook_index: -1,
       ok: true,
@@ -343,7 +873,7 @@ async function runGroupMemoryCompactionHooks(phase: GroupMemoryCompactionHookPha
       summarized_through_message_id: input.boundary?.summarizedThroughMessageId || "",
       summary_checksum: input.boundary?.summaryChecksum || input.summaryChecksum || "",
     });
-    if (input.groupId) appendGroupMemoryCompactionHookLedgerEntries(String(input.groupId), [entry]);
+    if (input.groupId) appendGroupMemoryCompactionHookLedgerEntries(String(input.groupId), String(input.groupSessionId || ""), [entry]);
     return [{ ok: true, result: { noHooksRegistered: true }, hookRunId, ledgerEntry: entry }];
   }
   for (let index = 0; index < hooks.length; index += 1) {
@@ -355,6 +885,7 @@ async function runGroupMemoryCompactionHooks(phase: GroupMemoryCompactionHookPha
       const entry = normalizeHookLedgerEntry({
         hook_run_id: hookRunId,
         group_id: input.groupId,
+        group_session_id: input.groupSessionId,
         phase,
         hook_index: index,
         ok: true,
@@ -371,6 +902,7 @@ async function runGroupMemoryCompactionHooks(phase: GroupMemoryCompactionHookPha
       const entry = normalizeHookLedgerEntry({
         hook_run_id: hookRunId,
         group_id: input.groupId,
+        group_session_id: input.groupSessionId,
         phase,
         hook_index: index,
         ok: false,
@@ -385,7 +917,7 @@ async function runGroupMemoryCompactionHooks(phase: GroupMemoryCompactionHookPha
       results.push({ ok: false, error: entry.error, hookRunId, ledgerEntry: entry });
     }
   }
-  if (ledgerEntries.length && input.groupId) appendGroupMemoryCompactionHookLedgerEntries(String(input.groupId), ledgerEntries);
+  if (ledgerEntries.length && input.groupId) appendGroupMemoryCompactionHookLedgerEntries(String(input.groupId), String(input.groupSessionId || ""), ledgerEntries);
   return results;
 }
 
@@ -397,8 +929,162 @@ function compactText(value: any, max = 800) {
   return `${text.slice(0, head)} …[已压缩]… ${text.slice(-tail)}`;
 }
 
+function renderMessageContentValue(value: any): string {
+  if (value == null) return "";
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) return value.map(renderMessageContentValue).filter(Boolean).join("\n");
+  if (typeof value !== "object") return String(value);
+  const type = String(value.type || "");
+  if (type === "text") return String(value.text || "");
+  if (type === "thinking" || type === "redacted_thinking") return String(value.thinking || value.data || "");
+  if (type === "tool_use" || type === "server_tool_use") {
+    const id = String(value.id || value.tool_use_id || value.toolUseId || "");
+    const name = String(value.name || value.tool || value.tool_name || "tool");
+    const input = value.input == null ? "" : ` ${JSON.stringify(value.input)}`;
+    return `[tool_use ${name}${id ? ` #${id}` : ""}]${input}`;
+  }
+  if (type === "tool_result" || type === "web_search_tool_result") {
+    const id = String(value.tool_use_id || value.toolUseId || value.id || "");
+    return `[tool_result${id ? ` #${id}` : ""}] ${renderMessageContentValue(value.content ?? value.output ?? value.result ?? value.text)}`;
+  }
+  try { return JSON.stringify(value); } catch { return String(value); }
+}
+
 function messageContent(message: any) {
-  return String(message?.content || message?.delivery_summary?.headline || message?.result || "").trim();
+  return renderMessageContentValue(message?.content ?? message?.message?.content ?? message?.delivery_summary?.headline ?? message?.result ?? "").trim();
+}
+
+function compactionSummaryInputProjectionChecksum(receipt: any) {
+  const payload = { ...(receipt || {}) };
+  delete payload.receipt_checksum;
+  delete payload.checksum_valid;
+  delete payload.issues;
+  return crypto.createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+}
+
+export function verifyGroupCompactionSummaryInputProjectionReceipt(receipt: any, expected: any = {}) {
+  const issues: string[] = [];
+  if (receipt?.schema !== "ccm-group-compaction-summary-input-projection-v1" || Number(receipt?.version || 0) !== GROUP_COMPACTION_SUMMARY_INPUT_PROJECTION_VERSION) issues.push("compaction_summary_input_schema_invalid");
+  if (receipt?.summarizer_only !== true) issues.push("compaction_summary_input_scope_invalid");
+  if (receipt?.raw_transcript_preserved !== true) issues.push("compaction_summary_input_raw_preservation_missing");
+  if (Number(receipt?.source_message_count || 0) < Number(receipt?.projected_message_count || 0)) issues.push("compaction_summary_input_message_count_invalid");
+  if (Number(receipt?.estimated_tokens_before || 0) < Number(receipt?.estimated_tokens_after || 0)) issues.push("compaction_summary_input_token_estimate_invalid");
+  if (Number(receipt?.estimated_tokens_saved || 0) !== Math.max(0, Number(receipt?.estimated_tokens_before || 0) - Number(receipt?.estimated_tokens_after || 0))) issues.push("compaction_summary_input_saved_tokens_invalid");
+  if (String(receipt?.receipt_checksum || "") !== compactionSummaryInputProjectionChecksum(receipt)) issues.push("compaction_summary_input_checksum_invalid");
+  if (expected.sourceMessageCount !== undefined && Number(receipt?.source_message_count || 0) !== Number(expected.sourceMessageCount)) issues.push("compaction_summary_input_source_count_mismatch");
+  return { valid: issues.length === 0, issues };
+}
+
+type CompactionSummaryInputProjectionState = {
+  imageBlocksStripped: number;
+  documentBlocksStripped: number;
+  binarySegmentsStripped: number;
+};
+
+const GROUP_COMPACTION_IMAGE_BLOCK_TYPES = new Set(["image", "image_url", "input_image"]);
+const GROUP_COMPACTION_DOCUMENT_BLOCK_TYPES = new Set(["document", "input_file"]);
+const GROUP_COMPACTION_REINJECTED_ATTACHMENT_TYPES = new Set(["skill_discovery", "skill_listing"]);
+const GROUP_COMPACTION_BINARY_VALUE_KEYS = new Set(["data", "base64", "image_data", "file_data", "bytes"]);
+
+function sanitizeCompactionSummaryString(value: string, state: CompactionSummaryInputProjectionState, key = "") {
+  let output = String(value || "");
+  output = output.replace(/data:image\/[a-z0-9.+-]+;base64,[a-z0-9+/=]{64,}/gi, () => {
+    state.binarySegmentsStripped += 1;
+    return GROUP_COMPACTION_SUMMARY_IMAGE_MARKER;
+  });
+  output = output.replace(/data:(?:application\/pdf|application\/[a-z0-9.+-]+);base64,[a-z0-9+/=]{64,}/gi, () => {
+    state.binarySegmentsStripped += 1;
+    return GROUP_COMPACTION_SUMMARY_DOCUMENT_MARKER;
+  });
+  output = output.replace(/[a-z0-9+/]{256,}={0,2}/gi, () => {
+    state.binarySegmentsStripped += 1;
+    return GROUP_COMPACTION_SUMMARY_BINARY_MARKER;
+  });
+  if (GROUP_COMPACTION_BINARY_VALUE_KEYS.has(String(key || "").toLowerCase())
+    && output.length >= 256
+    && /^[a-z0-9+/=\s]+$/i.test(output)) {
+    state.binarySegmentsStripped += 1;
+    return GROUP_COMPACTION_SUMMARY_BINARY_MARKER;
+  }
+  return output;
+}
+
+function sanitizeCompactionSummaryValue(value: any, state: CompactionSummaryInputProjectionState, key = ""): any {
+  if (value == null) return value;
+  if (typeof value === "string") return sanitizeCompactionSummaryString(value, state, key);
+  if (Array.isArray(value)) return value.map(item => sanitizeCompactionSummaryValue(item, state));
+  if (typeof value !== "object") return value;
+  const type = String(value.type || "").toLowerCase();
+  if (GROUP_COMPACTION_IMAGE_BLOCK_TYPES.has(type)) {
+    state.imageBlocksStripped += 1;
+    return { type: "text", text: GROUP_COMPACTION_SUMMARY_IMAGE_MARKER };
+  }
+  if (GROUP_COMPACTION_DOCUMENT_BLOCK_TYPES.has(type)) {
+    state.documentBlocksStripped += 1;
+    return { type: "text", text: GROUP_COMPACTION_SUMMARY_DOCUMENT_MARKER };
+  }
+  const next: any = {};
+  for (const [entryKey, entryValue] of Object.entries(value)) {
+    next[entryKey] = sanitizeCompactionSummaryValue(entryValue, state, entryKey);
+  }
+  return next;
+}
+
+function isReinjectedCompactionAttachment(message: any) {
+  if (String(message?.type || "").toLowerCase() !== "attachment") return false;
+  const attachmentType = String(message?.attachment?.type || message?.attachment_type || message?.attachmentType || "").toLowerCase();
+  return GROUP_COMPACTION_REINJECTED_ATTACHMENT_TYPES.has(attachmentType);
+}
+
+export function buildGroupCompactionSummaryInputProjection(messages: any[] = [], options: any = {}) {
+  const state: CompactionSummaryInputProjectionState = {
+    imageBlocksStripped: 0,
+    documentBlocksStripped: 0,
+    binarySegmentsStripped: 0,
+  };
+  const sourceMessages = Array.isArray(messages) ? messages : [];
+  const stripReinjectedAttachments = options.stripReinjectedAttachments !== false && options.strip_reinjected_attachments !== false;
+  let reinjectedAttachmentsStripped = 0;
+  const projectedMessages = sourceMessages.flatMap((message: any) => {
+    if (stripReinjectedAttachments && isReinjectedCompactionAttachment(message)) {
+      reinjectedAttachmentsStripped += 1;
+      return [];
+    }
+    return [sanitizeCompactionSummaryValue(message, state)];
+  });
+  const previousSummary = sanitizeCompactionSummaryValue(options.previousSummary || options.previous_summary || {}, state);
+  const sanitizedFallbackSummary = sanitizeCompactionSummaryValue(options.fallbackSummary || options.fallback_summary || {}, state);
+  const fallbackSummary = options.rebuildFallbackFromProjectedMessages === true || options.rebuild_fallback_from_projected_messages === true
+    ? buildDeterministicConversationSummary(projectedMessages, options.memory || {}, previousSummary)
+    : sanitizedFallbackSummary;
+  const beforePayload = {
+    messages: sourceMessages,
+    previousSummary: options.previousSummary || options.previous_summary || {},
+    fallbackSummary: options.fallbackSummary || options.fallback_summary || {},
+  };
+  const afterPayload = { messages: projectedMessages, previousSummary, fallbackSummary };
+  const estimatedTokensBefore = estimateGroupTextTokens(JSON.stringify(beforePayload));
+  const estimatedTokensAfter = estimateGroupTextTokens(JSON.stringify(afterPayload));
+  const payload: any = {
+    schema: "ccm-group-compaction-summary-input-projection-v1",
+    version: GROUP_COMPACTION_SUMMARY_INPUT_PROJECTION_VERSION,
+    summarizer_only: true,
+    source_message_count: sourceMessages.length,
+    projected_message_count: projectedMessages.length,
+    image_blocks_stripped: state.imageBlocksStripped,
+    document_blocks_stripped: state.documentBlocksStripped,
+    binary_segments_stripped: state.binarySegmentsStripped,
+    reinjected_attachments_stripped: reinjectedAttachmentsStripped,
+    estimated_tokens_before: estimatedTokensBefore,
+    estimated_tokens_after: estimatedTokensAfter,
+    estimated_tokens_saved: Math.max(0, estimatedTokensBefore - estimatedTokensAfter),
+    raw_transcript_preserved: true,
+    image_marker: GROUP_COMPACTION_SUMMARY_IMAGE_MARKER,
+    document_marker: GROUP_COMPACTION_SUMMARY_DOCUMENT_MARKER,
+    binary_marker: GROUP_COMPACTION_SUMMARY_BINARY_MARKER,
+  };
+  const receipt = { ...payload, receipt_checksum: compactionSummaryInputProjectionChecksum(payload) };
+  return { messages: projectedMessages, previousSummary, fallbackSummary, receipt };
 }
 
 function messageIdentity(message: any, index = 0) {
@@ -803,6 +1489,152 @@ function groupMessageTaskId(message: any) {
   ).trim();
 }
 
+function groupProviderMessageId(message: any) {
+  return String(
+    message?.message?.id
+      || message?.provider_message_id
+      || message?.providerMessageId
+      || message?.response_message_id
+      || message?.responseMessageId
+      || ""
+  ).trim();
+}
+
+function groupMessageToolUseIds(message: any) {
+  const ids = new Set<string>();
+  for (const call of Array.isArray(message?.tool_calls || message?.toolCalls) ? (message.tool_calls || message.toolCalls) : []) {
+    const id = String(call?.id || call?.tool_use_id || call?.toolUseId || "").trim();
+    if (id) ids.add(id);
+  }
+  for (const block of messageContentBlocks(message)) {
+    if (!["tool_use", "server_tool_use"].includes(String(block?.type || ""))) continue;
+    const id = String(block?.id || block?.tool_use_id || block?.toolUseId || "").trim();
+    if (id) ids.add(id);
+  }
+  return ids;
+}
+
+function groupMessageToolResultIds(message: any) {
+  const ids = new Set<string>();
+  for (const result of Array.isArray(message?.tool_results || message?.toolResults) ? (message.tool_results || message.toolResults) : []) {
+    const id = String(result?.tool_use_id || result?.toolUseId || result?.id || "").trim();
+    if (id) ids.add(id);
+  }
+  for (const block of messageContentBlocks(message)) {
+    if (!["tool_result", "web_search_tool_result"].includes(String(block?.type || ""))) continue;
+    const id = String(block?.tool_use_id || block?.toolUseId || block?.id || "").trim();
+    if (id) ids.add(id);
+  }
+  return ids;
+}
+
+function groupSessionMemoryApiInvariantClosureChecksum(receipt: any) {
+  const payload = { ...(receipt || {}) };
+  delete payload.receipt_checksum;
+  delete payload.checksum_valid;
+  return crypto.createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+}
+
+export function verifyGroupSessionMemoryApiInvariantClosure(receipt: any) {
+  const issues: string[] = [];
+  if (receipt?.schema !== "ccm-group-session-memory-api-invariant-closure-v1"
+    || Number(receipt?.version || 0) !== GROUP_SESSION_MEMORY_API_INVARIANT_CLOSURE_VERSION) issues.push("session_memory_api_invariant_closure_schema_invalid");
+  if (!Number.isFinite(Number(receipt?.original_keep_index)) || !Number.isFinite(Number(receipt?.adjusted_keep_index))) issues.push("session_memory_api_invariant_closure_index_invalid");
+  if (Number(receipt?.adjusted_keep_index || 0) > Number(receipt?.original_keep_index || 0)) issues.push("session_memory_api_invariant_closure_direction_invalid");
+  if (receipt?.pass !== true || (receipt?.unresolved_tool_use_ids || []).length || (receipt?.split_provider_message_ids || []).length || receipt?.split_task_transaction === true) issues.push("session_memory_api_invariant_closure_incomplete");
+  if (receipt?.body_free !== true) issues.push("session_memory_api_invariant_closure_body_free_missing");
+  if (String(receipt?.receipt_checksum || "") !== groupSessionMemoryApiInvariantClosureChecksum(receipt)) issues.push("session_memory_api_invariant_closure_checksum_invalid");
+  return { valid: issues.length === 0, issues };
+}
+
+export function adjustGroupSessionMemoryKeepIndexToPreserveApiInvariants(messages: any[], startIndex: number, options: any = {}) {
+  const originalKeepIndex = Math.max(0, Math.min(messages.length, Number(startIndex || 0)));
+  const floorIndex = Math.max(0, Math.min(originalKeepIndex, Number(options.floorIndex ?? 0)));
+  let adjustedKeepIndex = originalKeepIndex;
+  const includedToolUseIds = new Set<string>();
+  const includedProviderMessageIds = new Set<string>();
+  const includedTaskIds = new Set<string>();
+
+  for (let pass = 0; pass < messages.length + 1; pass += 1) {
+    const keptToolUseIds = new Set<string>();
+    const keptToolResultIds = new Set<string>();
+    const keptProviderMessageIds = new Set<string>();
+    for (let index = adjustedKeepIndex; index < messages.length; index += 1) {
+      for (const id of groupMessageToolUseIds(messages[index])) keptToolUseIds.add(id);
+      for (const id of groupMessageToolResultIds(messages[index])) keptToolResultIds.add(id);
+      const providerMessageId = groupProviderMessageId(messages[index]);
+      if (providerMessageId) keptProviderMessageIds.add(providerMessageId);
+    }
+    const neededToolUseIds = new Set([...keptToolResultIds].filter(id => !keptToolUseIds.has(id)));
+    let nextIndex = adjustedKeepIndex;
+    for (let index = adjustedKeepIndex - 1; index >= floorIndex; index -= 1) {
+      const toolUseIds = groupMessageToolUseIds(messages[index]);
+      const matchedToolUseIds = [...toolUseIds].filter(id => neededToolUseIds.has(id));
+      const providerMessageId = groupProviderMessageId(messages[index]);
+      const providerFragmentRequired = !!providerMessageId && keptProviderMessageIds.has(providerMessageId);
+      if (!matchedToolUseIds.length && !providerFragmentRequired) continue;
+      nextIndex = index;
+      for (const id of matchedToolUseIds) {
+        neededToolUseIds.delete(id);
+        includedToolUseIds.add(id);
+      }
+      if (providerFragmentRequired) includedProviderMessageIds.add(providerMessageId);
+    }
+    const firstTaskId = groupMessageTaskId(messages[nextIndex]);
+    while (firstTaskId && nextIndex > floorIndex && groupMessageTaskId(messages[nextIndex - 1]) === firstTaskId) {
+      nextIndex -= 1;
+      includedTaskIds.add(firstTaskId);
+    }
+    if (nextIndex === adjustedKeepIndex) break;
+    adjustedKeepIndex = nextIndex;
+  }
+
+  const keptToolUseIds = new Set<string>();
+  const keptToolResultIds = new Set<string>();
+  const keptProviderMessageIds = new Set<string>();
+  const compactedProviderMessageIds = new Set<string>();
+  for (let index = adjustedKeepIndex; index < messages.length; index += 1) {
+    for (const id of groupMessageToolUseIds(messages[index])) keptToolUseIds.add(id);
+    for (const id of groupMessageToolResultIds(messages[index])) keptToolResultIds.add(id);
+    const providerMessageId = groupProviderMessageId(messages[index]);
+    if (providerMessageId) keptProviderMessageIds.add(providerMessageId);
+  }
+  for (let index = floorIndex; index < adjustedKeepIndex; index += 1) {
+    const providerMessageId = groupProviderMessageId(messages[index]);
+    if (providerMessageId) compactedProviderMessageIds.add(providerMessageId);
+  }
+  const unresolvedToolUseIds = [...keptToolResultIds].filter(id => !keptToolUseIds.has(id));
+  const splitProviderMessageIds = [...keptProviderMessageIds].filter(id => compactedProviderMessageIds.has(id));
+  const firstKeptTaskId = groupMessageTaskId(messages[adjustedKeepIndex]);
+  const previousTaskId = adjustedKeepIndex > floorIndex ? groupMessageTaskId(messages[adjustedKeepIndex - 1]) : "";
+  const splitTaskTransaction = !!firstKeptTaskId && firstKeptTaskId === previousTaskId;
+  for (let index = adjustedKeepIndex; index < originalKeepIndex; index += 1) {
+    for (const id of groupMessageToolUseIds(messages[index])) includedToolUseIds.add(id);
+    const providerMessageId = groupProviderMessageId(messages[index]);
+    if (providerMessageId) includedProviderMessageIds.add(providerMessageId);
+    const taskId = groupMessageTaskId(messages[index]);
+    if (taskId) includedTaskIds.add(taskId);
+  }
+  const core: any = {
+    schema: "ccm-group-session-memory-api-invariant-closure-v1",
+    version: GROUP_SESSION_MEMORY_API_INVARIANT_CLOSURE_VERSION,
+    original_keep_index: originalKeepIndex,
+    adjusted_keep_index: adjustedKeepIndex,
+    floor_index: floorIndex,
+    expanded_message_count: Math.max(0, originalKeepIndex - adjustedKeepIndex),
+    included_tool_use_ids: [...includedToolUseIds].slice(0, 40),
+    included_provider_message_ids: [...includedProviderMessageIds].slice(0, 40),
+    included_task_ids: [...includedTaskIds].slice(0, 40),
+    unresolved_tool_use_ids: unresolvedToolUseIds.slice(0, 40),
+    split_provider_message_ids: splitProviderMessageIds.slice(0, 40),
+    split_task_transaction: splitTaskTransaction,
+    pass: unresolvedToolUseIds.length === 0 && splitProviderMessageIds.length === 0 && !splitTaskTransaction,
+    body_free: true,
+  };
+  const receipt = { ...core, receipt_checksum: groupSessionMemoryApiInvariantClosureChecksum(core) };
+  return { keepIndex: adjustedKeepIndex, receipt };
+}
+
 /** Claude Code session-memory style retained window adapted to group messages:
  * keep 10K/5 text messages, cap near 40K, and preserve task transactions. */
 export function calculateGroupMessagesToKeepIndex(messages: any[], options: any = {}) {
@@ -830,6 +1662,254 @@ export function calculateGroupMessagesToKeepIndex(messages: any[], options: any 
   }
   if (startIndex > floorIndex && messages[startIndex]?.role !== "user" && messages[startIndex - 1]?.role === "user") startIndex--;
   return startIndex;
+}
+
+/** Calculate the CC session-memory retained window from an extraction cursor. */
+export function calculateGroupSessionMemoryMessagesToKeepIndex(messages: any[], lastSummarizedMessageId: string, options: any = {}) {
+  const cursor = String(lastSummarizedMessageId || "").trim();
+  if (!messages.length || !cursor) return -1;
+  const lastSummarizedIndex = messages.findIndex((message: any, index: number) => messageIdentity(message, index) === cursor);
+  if (lastSummarizedIndex < 0) return -1;
+  const minMessages = Math.max(1, Number(options.minMessages || GROUP_COMPACT_MIN_KEEP_MESSAGES));
+  const minTokens = Math.max(1, Number(options.minTokens || GROUP_COMPACT_MIN_KEEP_TOKENS));
+  const maxTokens = Math.max(minTokens, Number(options.maxTokens || GROUP_COMPACT_MAX_KEEP_TOKENS));
+  const floorIndex = Math.max(0, Math.min(lastSummarizedIndex + 1, Number(options.floorIndex ?? 0)));
+  let startIndex = lastSummarizedIndex + 1;
+  let totalTokens = 0;
+  let textMessages = 0;
+  for (let index = startIndex; index < messages.length; index += 1) {
+    totalTokens += estimateGroupMessageTokens(messages[index]);
+    if (messageHasText(messages[index])) textMessages += 1;
+  }
+  if (totalTokens < maxTokens && (totalTokens < minTokens || textMessages < minMessages)) {
+    for (let index = startIndex - 1; index >= floorIndex; index -= 1) {
+      totalTokens += estimateGroupMessageTokens(messages[index]);
+      if (messageHasText(messages[index])) textMessages += 1;
+      startIndex = index;
+      if (totalTokens >= maxTokens || (totalTokens >= minTokens && textMessages >= minMessages)) break;
+    }
+  }
+  if (options.skipInvariantClosure === true || options.skip_invariant_closure === true) return startIndex;
+  return adjustGroupSessionMemoryKeepIndexToPreserveApiInvariants(messages, startIndex, { floorIndex }).keepIndex;
+}
+
+function groupSessionMemoryCompactSelectionChecksum(receipt: any) {
+  const payload = { ...(receipt || {}) };
+  delete payload.selection_checksum;
+  delete payload.checksum_valid;
+  return crypto.createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+}
+
+export function buildGroupSessionMemoryCompactSelectionReceipt(input: any = {}) {
+  const selected = input.selected === true;
+  const payload: any = {
+    schema: "ccm-group-session-memory-compact-selection-v1",
+    version: GROUP_SESSION_MEMORY_COMPACT_SELECTION_VERSION,
+    group_id: String(input.groupId || input.group_id || ""),
+    group_session_id: String(input.groupSessionId || input.group_session_id || ""),
+    scope_id: String(input.scopeId || input.scope_id || ""),
+    status: selected ? "selected" : "fallback",
+    selected,
+    fallback_reason: selected ? "" : String(input.fallbackReason || input.fallback_reason || "session_memory_unavailable"),
+    custom_instructions_present: input.customInstructionsPresent === true || input.custom_instructions_present === true,
+    extraction_status: String(input.extractionStatus || input.extraction_status || "unknown"),
+    extraction_wait_completed: input.extractionWaitCompleted === true || input.extraction_wait_completed === true,
+    extraction_wait_timed_out: input.extractionWaitTimedOut === true || input.extraction_wait_timed_out === true,
+    snapshot_file: String(input.snapshotFile || input.snapshot_file || ""),
+    summary_file: String(input.summaryFile || input.summary_file || ""),
+    snapshot_scope_matches: input.snapshotScopeMatches === true || input.snapshot_scope_matches === true,
+    markdown_exists: input.markdownExists === true || input.markdown_exists === true,
+    markdown_checksum_matches: input.markdownChecksumMatches === true || input.markdown_checksum_matches === true,
+    declared_markdown_checksum: String(input.declaredMarkdownChecksum || input.declared_markdown_checksum || ""),
+    actual_markdown_checksum: String(input.actualMarkdownChecksum || input.actual_markdown_checksum || ""),
+    last_summarized_message_id: String(input.lastSummarizedMessageId || input.last_summarized_message_id || ""),
+    cursor_status: String(input.cursorStatus || input.cursor_status || "unknown"),
+    keep_index: Math.max(0, Number(input.keepIndex || input.keep_index || 0)),
+    preserved_message_count: Math.max(0, Number(input.preservedMessageCount || input.preserved_message_count || 0)),
+    preserved_token_estimate: Math.max(0, Number(input.preservedTokenEstimate || input.preserved_token_estimate || 0)),
+    api_invariant_closure: input.apiInvariantClosure || input.api_invariant_closure || null,
+    projected_post_compact_tokens: Math.max(0, Number(input.projectedPostCompactTokens || input.projected_post_compact_tokens || 0)),
+    auto_compact_threshold: Math.max(0, Number(input.autoCompactThreshold || input.auto_compact_threshold || 0)),
+    compaction_api_called: selected ? false : input.compactionApiCalled === true || input.compaction_api_called === true,
+    usage_attribution: selected
+      ? "not_applicable_session_memory_reused"
+      : input.compactionApiCalled === true || input.compaction_api_called === true
+        ? "compaction_model_call"
+        : "traditional_deterministic_compaction",
+    body_free: true,
+    created_at: String(input.createdAt || input.created_at || new Date().toISOString()),
+  };
+  return { ...payload, selection_checksum: groupSessionMemoryCompactSelectionChecksum(payload) };
+}
+
+export function verifyGroupSessionMemoryCompactSelectionReceipt(receipt: any, expected: any = {}) {
+  const issues: string[] = [];
+  if (receipt?.schema !== "ccm-group-session-memory-compact-selection-v1"
+    || Number(receipt?.version || 0) !== GROUP_SESSION_MEMORY_COMPACT_SELECTION_VERSION) issues.push("session_memory_selection_schema_invalid");
+  if (!String(receipt?.group_id || "")) issues.push("session_memory_selection_group_missing");
+  if (!String(receipt?.group_session_id || "").startsWith("gcs_")) issues.push("session_memory_selection_exact_session_missing");
+  if (String(receipt?.scope_id || "") !== `${String(receipt?.group_id || "")}--${String(receipt?.group_session_id || "")}`) issues.push("session_memory_selection_scope_invalid");
+  if (!['selected', 'fallback'].includes(String(receipt?.status || ""))) issues.push("session_memory_selection_status_invalid");
+  if (receipt?.selected === true && String(receipt?.status || "") !== "selected") issues.push("session_memory_selection_selected_status_invalid");
+  if (receipt?.selected === true && (!receipt?.markdown_checksum_matches || receipt?.cursor_status !== "resolved")) issues.push("session_memory_selection_unverified_source");
+  if (receipt?.selected === true && !verifyGroupSessionMemoryApiInvariantClosure(receipt?.api_invariant_closure).valid) issues.push("session_memory_selection_api_invariant_closure_invalid");
+  if (receipt?.selected === true && receipt?.compaction_api_called !== false) issues.push("session_memory_selection_api_call_invalid");
+  if (receipt?.body_free !== true) issues.push("session_memory_selection_body_free_missing");
+  if (String(receipt?.selection_checksum || "") !== groupSessionMemoryCompactSelectionChecksum(receipt)) issues.push("session_memory_selection_checksum_invalid");
+  if (expected.groupId && String(receipt?.group_id || "") !== String(expected.groupId)) issues.push("session_memory_selection_group_mismatch");
+  if (expected.groupSessionId && String(receipt?.group_session_id || "") !== String(expected.groupSessionId)) issues.push("session_memory_selection_session_mismatch");
+  return { valid: issues.length === 0, issues };
+}
+
+async function selectGroupSessionMemoryForCompact(input: any = {}) {
+  const groupId = String(input.groupId || "").trim();
+  const groupSessionId = String(input.groupSessionId || "").trim();
+  const scopeId = `${groupId}--${groupSessionId}`;
+  const cleanScope = scopeId.replace(/[^a-zA-Z0-9._:-]+/g, "-").slice(0, 160) || "unknown";
+  const expectedDir = path.join(CCM_DIR, "group-session-memory", cleanScope);
+  const snapshotFile = path.join(expectedDir, "snapshot.json");
+  const summaryFile = path.join(expectedDir, "summary.md");
+  const config = input.config || {};
+  const customInstructions = String(
+    config.compactInstructions || config.compact_instructions
+      || config.customCompactInstructions || config.custom_compact_instructions
+      || ""
+  ).trim();
+  const base: any = {
+    groupId,
+    groupSessionId,
+    scopeId,
+    snapshotFile,
+    summaryFile,
+    customInstructionsPresent: !!customInstructions,
+    autoCompactThreshold: input.triggerTokens,
+    createdAt: input.now,
+  };
+  const fallback = (reason: string, extra: any = {}) => ({
+    selected: false,
+    markdown: "",
+    keepIndex: Number(input.defaultKeepIndex || 0),
+    receipt: buildGroupSessionMemoryCompactSelectionReceipt({ ...base, ...extra, fallbackReason: reason }),
+  });
+  if (config.sessionMemoryCompactEnabled === false || config.session_memory_compact_enabled === false) return fallback("disabled_by_configuration");
+  if (input.primaryPartialCompact === true) return fallback("partial_compact_requested");
+  if (customInstructions) return fallback("custom_instructions_present");
+
+  const wait = await waitForGroupSessionMemoryExtraction(scopeId, {
+    timeoutMs: Number(config.sessionMemoryCompactWaitTimeoutMs || config.session_memory_compact_wait_timeout_ms || 15_000),
+    pollMs: Number(config.sessionMemoryCompactPollMs || config.session_memory_compact_poll_ms || 100),
+  });
+  const extraction = readGroupSessionMemoryExtractionState(scopeId);
+  const waitFields = {
+    extractionStatus: extraction.status || "unknown",
+    extractionWaitCompleted: wait.completed === true,
+    extractionWaitTimedOut: wait.timedOut === true,
+  };
+  if (wait.timedOut) return fallback("extraction_wait_timeout", waitFields);
+  if (wait.status?.present && wait.status?.valid !== true) return fallback("extraction_lease_invalid", waitFields);
+
+  let snapshot: any = null;
+  let markdown = "";
+  try { snapshot = JSON.parse(fs.readFileSync(snapshotFile, "utf-8")); } catch {}
+  try { markdown = fs.readFileSync(summaryFile, "utf-8").trim(); } catch {}
+  const declaredChecksum = String(snapshot?.markdownChecksum || "");
+  const actualChecksum = markdown ? crypto.createHash("sha256").update(markdown).digest("hex").slice(0, 24) : "";
+  const snapshotScopeMatches = String(snapshot?.groupId || "") === scopeId
+    && path.resolve(String(snapshot?.snapshotFile || snapshotFile)) === path.resolve(snapshotFile)
+    && path.resolve(String(snapshot?.summaryFile || summaryFile)) === path.resolve(summaryFile);
+  const sourceFields = {
+    ...waitFields,
+    snapshotScopeMatches,
+    markdownExists: !!markdown,
+    markdownChecksumMatches: !!markdown && !!declaredChecksum && declaredChecksum === actualChecksum,
+    declaredMarkdownChecksum: declaredChecksum,
+    actualMarkdownChecksum: actualChecksum,
+    lastSummarizedMessageId: snapshot?.lastSummarizedMessageId || "",
+  };
+  if (!snapshot) return fallback("snapshot_missing_or_invalid", sourceFields);
+  if (!snapshotScopeMatches) return fallback("snapshot_scope_mismatch", sourceFields);
+  if (!markdown) return fallback("summary_markdown_missing_or_empty", sourceFields);
+  if (snapshot.hasSummary !== true) return fallback("session_memory_empty_template", sourceFields);
+  if (!sourceFields.markdownChecksumMatches) return fallback("summary_markdown_checksum_mismatch", sourceFields);
+  const currentPostCompactReset = input.memory?.compaction?.postCompactSessionStateReset
+    || input.memory?.messageCompression?.postCompactSessionStateReset
+    || input.memory?.compactBoundary?.postCompactSessionStateReset
+    || input.memory?.compactBoundary?.post_compact_restore?.postCompactSessionStateReset
+    || null;
+  if (currentPostCompactReset?.schema) {
+    const currentResetVerification = verifyGroupPostCompactSessionStateResetReceipt(currentPostCompactReset, {
+      groupId,
+      groupSessionId,
+      boundaryId: input.memory?.compactBoundary?.id || "",
+      summaryChecksum: input.memory?.compaction?.summaryChecksum || "",
+    });
+    const snapshotReset = snapshot.postCompactSessionStateReset || null;
+    const snapshotResetVerification = verifyGroupPostCompactSessionStateResetReceipt(snapshotReset, {
+      groupId,
+      groupSessionId,
+      boundaryId: input.memory?.compactBoundary?.id || "",
+      summaryChecksum: input.memory?.compaction?.summaryChecksum || "",
+    });
+    const resetMatches = currentResetVerification.valid
+      && snapshotResetVerification.valid
+      && String(snapshotReset?.receipt_checksum || "") === String(currentPostCompactReset.receipt_checksum || "")
+      && Number(snapshot.extractionCursorGeneration || 0) === Number(currentPostCompactReset.session_memory_extraction_cursor?.generation || 0)
+      && String(snapshot.providerActiveLastSummarizedMessageId || "") === ""
+      && String(snapshot.providerActiveCursorStatus || "") === "cleared_after_compact";
+    if (!resetMatches) return fallback("post_compact_session_state_reset_mismatch", sourceFields);
+  }
+  const cursor = String(snapshot.lastSummarizedMessageId || "").trim();
+  if (!cursor) return fallback("last_summarized_cursor_missing", { ...sourceFields, cursorStatus: "missing" });
+  const candidateKeepIndex = calculateGroupSessionMemoryMessagesToKeepIndex(input.messages || [], cursor, {
+    ...(input.keepWindowOptions || {}),
+    skipInvariantClosure: true,
+  });
+  if (candidateKeepIndex < 0) return fallback("last_summarized_cursor_not_found", { ...sourceFields, cursorStatus: "not_found" });
+  const invariantClosure = adjustGroupSessionMemoryKeepIndexToPreserveApiInvariants(
+    input.messages || [],
+    candidateKeepIndex,
+    { floorIndex: input.keepWindowOptions?.floorIndex ?? 0 },
+  );
+  const keepIndex = invariantClosure.keepIndex;
+  if (!verifyGroupSessionMemoryApiInvariantClosure(invariantClosure.receipt).valid) {
+    return fallback("api_invariant_closure_unresolved", {
+      ...sourceFields,
+      cursorStatus: "resolved",
+      keepIndex,
+      apiInvariantClosure: invariantClosure.receipt,
+    });
+  }
+  const keptMessages = (input.messages || []).slice(keepIndex);
+  const projected = buildGroupTruePostCompactPayloadBudget({
+    groupId,
+    groupSessionId,
+    triggerTokens: input.triggerTokens,
+    summaryText: markdown,
+    keptMessages,
+    postCompactReinject: input.memory?.compaction?.postCompactReinject || null,
+    persistentRequirements: input.memory?.persistentRequirements || [],
+    factAnchors: input.memory?.factAnchors || [],
+    sessionMemory: null,
+    toolContinuity: input.memory?.toolContinuity || null,
+  });
+  const projectedTokens = Number(projected.true_post_compact_token_count || 0);
+  const selectedFields = {
+    ...sourceFields,
+    cursorStatus: "resolved",
+    keepIndex,
+    preservedMessageCount: keptMessages.length,
+    preservedTokenEstimate: keptMessages.reduce((sum: number, message: any) => sum + estimateGroupMessageTokens(message), 0),
+    apiInvariantClosure: invariantClosure.receipt,
+    projectedPostCompactTokens: projectedTokens,
+  };
+  if (projected.will_retrigger_next_turn === true) return fallback("projected_payload_reaches_auto_compact_threshold", selectedFields);
+  return {
+    selected: true,
+    markdown,
+    keepIndex,
+    snapshot,
+    receipt: buildGroupSessionMemoryCompactSelectionReceipt({ ...base, ...selectedFields, selected: true }),
+  };
 }
 
 export function buildGroupPreservedSegment(messages: any[], keepIndex: number, options: any = {}) {
@@ -912,19 +1992,27 @@ function collectWindowBlockRefs(messages: any[], offset = 0) {
   (messages || []).forEach((message, localIndex) => {
     const index = offset + localIndex;
     const messageId = messageIdentity(message, index);
+    const providerMessageId = groupProviderMessageId(message);
+    if (providerMessageId) thinkingMessageIds.add(providerMessageId);
+    for (const id of groupMessageToolUseIds(message)) {
+      toolUseIds.add(id);
+      rows.push({ type: "tool_use", id, messageId, providerMessageId, index });
+    }
+    for (const id of groupMessageToolResultIds(message)) {
+      toolResultIds.add(id);
+      rows.push({ type: "tool_result", id, messageId, providerMessageId, index });
+    }
     for (const block of messageContentBlocks(message)) {
       const type = String(block?.type || "");
       if (type === "tool_use" || type === "server_tool_use") {
         const id = String(block.id || block.tool_use_id || block.toolUseId || "").trim();
-        if (id) toolUseIds.add(id);
-        rows.push({ type, id, messageId, index });
+        rows.push({ type, id, messageId, providerMessageId, index });
       } else if (type === "tool_result" || type === "web_search_tool_result") {
         const id = String(block.tool_use_id || block.toolUseId || block.id || "").trim();
-        if (id) toolResultIds.add(id);
-        rows.push({ type, id, messageId, index });
+        rows.push({ type, id, messageId, providerMessageId, index });
       } else if (type === "thinking" || type === "redacted_thinking") {
-        thinkingMessageIds.add(messageId);
-        rows.push({ type, id: messageId, messageId, index });
+        thinkingMessageIds.add(providerMessageId || messageId);
+        rows.push({ type, id: providerMessageId || messageId, messageId, providerMessageId, index });
       }
     }
   });
@@ -991,6 +2079,297 @@ function collectApiMicroCompactSignals(messages: any[] = []) {
     hasThinking: thinkingBlockCount > 0,
     hasToolUses: toolUseBlockCount > 0,
     hasToolResults: toolResultBlockCount > 0,
+  };
+}
+
+const GROUP_TIME_BASED_COMPACTABLE_TOOL_NAMES = new Set([
+  "read", "fileread", "bash", "shell", "powershell", "grep", "glob",
+  "websearch", "webfetch", "edit", "fileedit", "write", "filewrite", "notebookedit",
+]);
+
+function normalizedToolName(value: any) {
+  return String(value || "").replace(/[^a-zA-Z0-9]+/g, "").toLowerCase();
+}
+
+function timeBasedToolResultReceiptChecksum(receipt: any) {
+  const payload = { ...(receipt || {}) };
+  delete payload.receipt_checksum;
+  delete payload.checksum_valid;
+  delete payload.issues;
+  return crypto.createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+}
+
+export function verifyGroupTimeBasedToolResultProjectionReceipt(receipt: any, expected: any = {}) {
+  const issues: string[] = [];
+  if (receipt?.schema !== "ccm-group-time-based-tool-result-projection-v1" || Number(receipt?.version || 0) !== GROUP_TIME_BASED_TOOL_RESULT_PROJECTION_VERSION) issues.push("time_based_tool_result_schema_invalid");
+  if (!String(receipt?.group_id || "")) issues.push("time_based_tool_result_group_missing");
+  if (!String(receipt?.group_session_id || "").startsWith("gcs_")) issues.push("time_based_tool_result_exact_session_missing");
+  if (String(receipt?.scope_id || "") !== `${String(receipt?.group_id || "")}::${String(receipt?.group_session_id || "")}`) issues.push("time_based_tool_result_scope_invalid");
+  if (!["applied", "skipped"].includes(String(receipt?.status || ""))) issues.push("time_based_tool_result_status_invalid");
+  if (Number(receipt?.keep_recent || 0) < 1) issues.push("time_based_tool_result_keep_recent_invalid");
+  if (receipt?.raw_transcript_preserved !== true) issues.push("time_based_tool_result_raw_preservation_missing");
+  if (receipt?.status === "applied" && Number(receipt?.cleared_tool_result_count || 0) < 1) issues.push("time_based_tool_result_clear_count_missing");
+  if (receipt?.status === "applied" && Number(receipt?.tokens_saved || 0) < 1) issues.push("time_based_tool_result_tokens_saved_missing");
+  if (String(receipt?.receipt_checksum || "") !== timeBasedToolResultReceiptChecksum(receipt)) issues.push("time_based_tool_result_checksum_invalid");
+  if (expected.groupId && String(receipt?.group_id || "") !== String(expected.groupId)) issues.push("time_based_tool_result_group_mismatch");
+  if (expected.groupSessionId && String(receipt?.group_session_id || "") !== String(expected.groupSessionId)) issues.push("time_based_tool_result_session_mismatch");
+  return { valid: issues.length === 0, issues };
+}
+
+function clearProjectedToolResultValue(value: any, clearIds: Set<string>, state: { tokensSaved: number; cleared: number }): any {
+  if (Array.isArray(value)) return value.map(item => clearProjectedToolResultValue(item, clearIds, state));
+  if (!value || typeof value !== "object") return value;
+  const type = String(value.type || "");
+  const id = String(value.tool_use_id || value.toolUseId || value.id || "").trim();
+  if ((type === "tool_result" || type === "web_search_tool_result") && clearIds.has(id)) {
+    const current = value.content ?? value.output ?? value.result ?? value.text ?? "";
+    if (current === GROUP_TIME_BASED_TOOL_RESULT_CLEARED_MESSAGE) return value;
+    state.tokensSaved += Math.max(0, estimateGroupTextTokens(renderMessageContentValue(current)) - estimateGroupTextTokens(GROUP_TIME_BASED_TOOL_RESULT_CLEARED_MESSAGE));
+    state.cleared += 1;
+    return { ...value, content: GROUP_TIME_BASED_TOOL_RESULT_CLEARED_MESSAGE, output: undefined, result: undefined, text: undefined };
+  }
+  const next: any = { ...value };
+  if (Array.isArray(value.content) || value.content && typeof value.content === "object") next.content = clearProjectedToolResultValue(value.content, clearIds, state);
+  if (Array.isArray(value.blocks)) next.blocks = clearProjectedToolResultValue(value.blocks, clearIds, state);
+  return next;
+}
+
+export function buildGroupTimeBasedToolResultProjection(messages: any[] = [], options: any = {}) {
+  const groupId = String(options.groupId || options.group_id || "").trim();
+  const groupSessionId = String(options.groupSessionId || options.group_session_id || "").trim();
+  const enabled = options.enabled === true;
+  const gapThresholdMinutes = Math.max(1, Math.min(10_080, Math.floor(Number(options.gapThresholdMinutes || options.gap_threshold_minutes || 60))));
+  const keepRecent = Math.max(1, Math.min(100, Math.floor(Number(options.keepRecent || options.keep_recent || 5))));
+  const querySource = String(options.querySource || options.query_source || "");
+  const nowMs = Date.parse(String(options.now || "")) || Date.now();
+  const toolNamesById = new Map<string, string>();
+  const compactableIds: string[] = [];
+  for (const message of messages || []) {
+    const explicitCalls = Array.isArray(message?.tool_calls || message?.toolCalls) ? (message.tool_calls || message.toolCalls) : [];
+    for (const call of explicitCalls) {
+      const id = String(call?.id || call?.tool_use_id || call?.toolUseId || "").trim();
+      const name = String(call?.name || call?.function?.name || call?.tool || "").trim();
+      if (id) toolNamesById.set(id, name);
+    }
+    for (const block of messageContentBlocks(message)) {
+      const type = String(block?.type || "");
+      if (type !== "tool_use" && type !== "server_tool_use") continue;
+      const id = String(block.id || block.tool_use_id || block.toolUseId || "").trim();
+      const name = String(block.name || block.tool || block.tool_name || "").trim();
+      if (id) toolNamesById.set(id, name);
+    }
+  }
+  for (const [id, name] of toolNamesById) if (GROUP_TIME_BASED_COMPACTABLE_TOOL_NAMES.has(normalizedToolName(name))) compactableIds.push(id);
+  const lastAssistant = [...(messages || [])].reverse().find(message => message?.role === "assistant" || (!!message?.agent && message?.role !== "user"));
+  const lastAssistantMs = messageTimestampMs(lastAssistant);
+  const gapMinutes = lastAssistantMs ? Math.max(0, Math.round(((nowMs - lastAssistantMs) / 60_000) * 10) / 10) : 0;
+  const sourceAllowed = querySource === "group_main_thread" || querySource.startsWith("group_main_thread:");
+  const exactSession = groupSessionId.startsWith("gcs_");
+  const triggered = enabled && exactSession && sourceAllowed && !!lastAssistantMs && gapMinutes >= gapThresholdMinutes && compactableIds.length > keepRecent;
+  const keepIds = new Set(compactableIds.slice(-keepRecent));
+  const clearIds = new Set(triggered ? compactableIds.filter(id => !keepIds.has(id)) : []);
+  const state = { tokensSaved: 0, cleared: 0 };
+  const projectedMessages = clearIds.size ? (messages || []).map(message => {
+    const next: any = { ...message };
+    if (message?.content != null) next.content = clearProjectedToolResultValue(message.content, clearIds, state);
+    if (message?.message?.content != null) next.message = { ...message.message, content: clearProjectedToolResultValue(message.message.content, clearIds, state) };
+    if (Array.isArray(message?.blocks)) next.blocks = clearProjectedToolResultValue(message.blocks, clearIds, state);
+    if (Array.isArray(message?.tool_results || message?.toolResults)) {
+      const key = Array.isArray(message.tool_results) ? "tool_results" : "toolResults";
+      next[key] = (message.tool_results || message.toolResults).map((result: any) => {
+        const id = String(result?.tool_use_id || result?.toolUseId || result?.id || "").trim();
+        if (!clearIds.has(id)) return result;
+        const current = result.content ?? result.output ?? result.result ?? result.text ?? "";
+        if (current === GROUP_TIME_BASED_TOOL_RESULT_CLEARED_MESSAGE) return result;
+        state.tokensSaved += Math.max(0, estimateGroupTextTokens(renderMessageContentValue(current)) - estimateGroupTextTokens(GROUP_TIME_BASED_TOOL_RESULT_CLEARED_MESSAGE));
+        state.cleared += 1;
+        return { ...result, content: GROUP_TIME_BASED_TOOL_RESULT_CLEARED_MESSAGE, output: undefined, result: undefined, text: undefined };
+      });
+    }
+    return next;
+  }) : messages;
+  const reason = !enabled ? "disabled"
+    : !exactSession ? "exact_group_session_required"
+      : !sourceAllowed ? "main_thread_source_required"
+        : !lastAssistantMs ? "last_assistant_timestamp_missing"
+          : gapMinutes < gapThresholdMinutes ? "gap_under_threshold"
+            : compactableIds.length <= keepRecent ? "not_enough_compactable_tool_results"
+              : state.cleared < 1 ? "matching_tool_results_missing"
+                : "assistant_gap_exceeded_threshold";
+  const payload: any = {
+    schema: "ccm-group-time-based-tool-result-projection-v1",
+    version: GROUP_TIME_BASED_TOOL_RESULT_PROJECTION_VERSION,
+    group_id: groupId,
+    group_session_id: groupSessionId,
+    scope_id: `${groupId}::${groupSessionId}`,
+    query_source: querySource,
+    enabled,
+    status: triggered && state.cleared > 0 ? "applied" : "skipped",
+    reason,
+    gap_minutes: gapMinutes,
+    gap_threshold_minutes: gapThresholdMinutes,
+    keep_recent: keepRecent,
+    compactable_tool_count: compactableIds.length,
+    cleared_tool_result_count: state.cleared,
+    kept_tool_count: Math.min(keepRecent, compactableIds.length),
+    tokens_saved: state.tokensSaved,
+    last_assistant_message_id: lastAssistant ? messageIdentity(lastAssistant, Math.max(0, (messages || []).indexOf(lastAssistant))) : "",
+    last_assistant_at: lastAssistant ? String(lastAssistant.timestamp || lastAssistant.time || lastAssistant.created_at || "") : "",
+    evaluated_at: new Date(nowMs).toISOString(),
+    raw_transcript_preserved: true,
+    cleared_content_marker: GROUP_TIME_BASED_TOOL_RESULT_CLEARED_MESSAGE,
+    cleared_tool_ids: [...clearIds].slice(0, 100),
+  };
+  const receipt = { ...payload, receipt_checksum: timeBasedToolResultReceiptChecksum(payload) };
+  return { messages: projectedMessages, receipt, applied: receipt.status === "applied" };
+}
+
+function timeBasedThinkingReceiptChecksum(receipt: any) {
+  const payload = { ...(receipt || {}) };
+  delete payload.receipt_checksum;
+  delete payload.checksum_valid;
+  delete payload.issues;
+  return crypto.createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+}
+
+export function verifyGroupTimeBasedThinkingProjectionReceipt(receipt: any, expected: any = {}) {
+  const issues: string[] = [];
+  if (receipt?.schema !== "ccm-group-time-based-thinking-projection-v1" || Number(receipt?.version || 0) !== GROUP_TIME_BASED_THINKING_PROJECTION_VERSION) issues.push("time_based_thinking_schema_invalid");
+  if (!String(receipt?.group_id || "")) issues.push("time_based_thinking_group_missing");
+  if (!String(receipt?.group_session_id || "").startsWith("gcs_")) issues.push("time_based_thinking_exact_session_missing");
+  if (String(receipt?.scope_id || "") !== `${String(receipt?.group_id || "")}::${String(receipt?.group_session_id || "")}`) issues.push("time_based_thinking_scope_invalid");
+  if (!String(receipt?.compact_epoch || "")) issues.push("time_based_thinking_compact_epoch_missing");
+  if (!["applied", "latched", "skipped"].includes(String(receipt?.status || ""))) issues.push("time_based_thinking_status_invalid");
+  if (Number(receipt?.keep_thinking_turns || 0) !== 1) issues.push("time_based_thinking_keep_invalid");
+  if (receipt?.raw_transcript_preserved !== true) issues.push("time_based_thinking_raw_preservation_missing");
+  if (receipt?.status === "applied" && receipt?.latched !== true) issues.push("time_based_thinking_applied_without_latch");
+  if (receipt?.status === "applied" && Number(receipt?.cleared_thinking_turn_count || 0) < 1) issues.push("time_based_thinking_clear_count_missing");
+  if (String(receipt?.receipt_checksum || "") !== timeBasedThinkingReceiptChecksum(receipt)) issues.push("time_based_thinking_checksum_invalid");
+  if (expected.groupId && String(receipt?.group_id || "") !== String(expected.groupId)) issues.push("time_based_thinking_group_mismatch");
+  if (expected.groupSessionId && String(receipt?.group_session_id || "") !== String(expected.groupSessionId)) issues.push("time_based_thinking_session_mismatch");
+  if (expected.compactEpoch && String(receipt?.compact_epoch || "") !== String(expected.compactEpoch)) issues.push("time_based_thinking_compact_epoch_mismatch");
+  return { valid: issues.length === 0, issues };
+}
+
+function hasModelVisibleThinking(message: any) {
+  if (String(message?.role || "").toLowerCase() === "thinking") return true;
+  return messageContentBlocks(message).some(block => String(block?.type || "") === "thinking");
+}
+
+function clearProjectedThinkingValue(value: any, state: { tokensSaved: number; clearedBlocks: number }): any {
+  if (Array.isArray(value)) return value.map(item => clearProjectedThinkingValue(item, state));
+  if (!value || typeof value !== "object") return value;
+  if (String(value.type || "") === "thinking") {
+    const current = value.thinking ?? value.content ?? value.text ?? "";
+    state.tokensSaved += Math.max(0, estimateGroupTextTokens(renderMessageContentValue(current)) - estimateGroupTextTokens(GROUP_TIME_BASED_THINKING_CLEARED_MESSAGE));
+    state.clearedBlocks += 1;
+    return { type: "text", text: GROUP_TIME_BASED_THINKING_CLEARED_MESSAGE };
+  }
+  const next: any = { ...value };
+  if (Array.isArray(value.content) || value.content && typeof value.content === "object") next.content = clearProjectedThinkingValue(value.content, state);
+  if (Array.isArray(value.blocks)) next.blocks = clearProjectedThinkingValue(value.blocks, state);
+  return next;
+}
+
+export function buildGroupTimeBasedThinkingProjection(messages: any[] = [], options: any = {}) {
+  const groupId = String(options.groupId || options.group_id || "").trim();
+  const groupSessionId = String(options.groupSessionId || options.group_session_id || "").trim();
+  const compactEpoch = String(options.compactEpoch || options.compact_epoch || "precompact").trim() || "precompact";
+  const enabled = options.enabled === true;
+  const gapThresholdMinutes = Math.max(1, Math.min(10_080, Math.floor(Number(options.gapThresholdMinutes || options.gap_threshold_minutes || 60))));
+  const querySource = String(options.querySource || options.query_source || "");
+  const isRedactThinkingActive = options.isRedactThinkingActive === true || options.is_redact_thinking_active === true;
+  const nowMs = Date.parse(String(options.now || "")) || Date.now();
+  const priorReceipt = options.priorReceipt || options.prior_receipt || null;
+  const priorVerification = priorReceipt
+    ? verifyGroupTimeBasedThinkingProjectionReceipt(priorReceipt, { groupId, groupSessionId })
+    : { valid: false, issues: [] as string[] };
+  const priorLatchSameEpoch = priorVerification.valid === true
+    && priorReceipt?.latched === true
+    && String(priorReceipt?.compact_epoch || "") === compactEpoch;
+  const exactSession = groupSessionId.startsWith("gcs_");
+  const sourceAllowed = querySource === "group_main_thread" || querySource.startsWith("group_main_thread:");
+  const lastAssistant = [...(messages || [])].reverse().find(message => message?.role === "assistant" || (!!message?.agent && message?.role !== "user"));
+  const lastAssistantMs = messageTimestampMs(lastAssistant);
+  const gapMinutes = lastAssistantMs ? Math.max(0, Math.round(((nowMs - lastAssistantMs) / 60_000) * 10) / 10) : 0;
+  const gapLatch = enabled && exactSession && sourceAllowed && !!lastAssistantMs && gapMinutes >= gapThresholdMinutes;
+  const latched = enabled && exactSession && sourceAllowed && !isRedactThinkingActive && (priorLatchSameEpoch || gapLatch);
+  const thinkingRows = (messages || []).map((message: any, index: number) => ({ message, index, id: messageIdentity(message, index) }))
+    .filter(row => hasModelVisibleThinking(row.message));
+  const keepThinkingMessageId = thinkingRows.length ? thinkingRows[thinkingRows.length - 1].id : "";
+  const clearThinkingMessageIds = new Set(latched ? thinkingRows.slice(0, -1).map(row => row.id) : []);
+  const state = { tokensSaved: 0, clearedBlocks: 0 };
+  let clearedThinkingTurns = 0;
+  const projectedMessages = clearThinkingMessageIds.size ? (messages || []).map((message: any, index: number) => {
+    const messageId = messageIdentity(message, index);
+    if (!clearThinkingMessageIds.has(messageId)) return message;
+    clearedThinkingTurns += 1;
+    const next: any = { ...message };
+    if (String(message?.role || "").toLowerCase() === "thinking") {
+      const current = message?.content ?? message?.thinking ?? "";
+      state.tokensSaved += Math.max(0, estimateGroupTextTokens(renderMessageContentValue(current)) - estimateGroupTextTokens(GROUP_TIME_BASED_THINKING_CLEARED_MESSAGE));
+      state.clearedBlocks += 1;
+      next.content = GROUP_TIME_BASED_THINKING_CLEARED_MESSAGE;
+      if ("thinking" in next) next.thinking = undefined;
+    } else {
+      if (message?.content != null) next.content = clearProjectedThinkingValue(message.content, state);
+      if (message?.message?.content != null) next.message = { ...message.message, content: clearProjectedThinkingValue(message.message.content, state) };
+      if (Array.isArray(message?.blocks)) next.blocks = clearProjectedThinkingValue(message.blocks, state);
+    }
+    return next;
+  }) : messages;
+  const resetByCompact = priorVerification.valid === true
+    && priorReceipt?.latched === true
+    && String(priorReceipt?.compact_epoch || "") !== compactEpoch;
+  const reason = !enabled ? "disabled"
+    : !exactSession ? "exact_group_session_required"
+      : !sourceAllowed ? "main_thread_source_required"
+        : isRedactThinkingActive ? "redacted_thinking_not_model_visible"
+          : resetByCompact && !gapLatch ? "compact_epoch_changed_latch_reset"
+            : !lastAssistantMs && !priorLatchSameEpoch ? "last_assistant_timestamp_missing"
+              : !latched ? "gap_under_threshold"
+                : gapLatch && !priorLatchSameEpoch ? "assistant_gap_exceeded_threshold_latched"
+                  : "exact_session_latch_reused";
+  const status = latched
+    ? clearedThinkingTurns > 0 ? "applied" : "latched"
+    : "skipped";
+  const payload: any = {
+    schema: "ccm-group-time-based-thinking-projection-v1",
+    version: GROUP_TIME_BASED_THINKING_PROJECTION_VERSION,
+    group_id: groupId,
+    group_session_id: groupSessionId,
+    scope_id: `${groupId}::${groupSessionId}`,
+    query_source: querySource,
+    compact_epoch: compactEpoch,
+    enabled,
+    status,
+    reason,
+    latched,
+    newly_latched: gapLatch && !priorLatchSameEpoch,
+    prior_latch_reused: priorLatchSameEpoch,
+    reset_by_compact: resetByCompact,
+    gap_minutes: gapMinutes,
+    gap_threshold_minutes: gapThresholdMinutes,
+    keep_thinking_turns: 1,
+    thinking_turn_count: thinkingRows.length,
+    cleared_thinking_turn_count: clearedThinkingTurns,
+    cleared_thinking_block_count: state.clearedBlocks,
+    kept_thinking_turn_count: thinkingRows.length ? 1 : 0,
+    tokens_saved: state.tokensSaved,
+    last_assistant_message_id: lastAssistant ? messageIdentity(lastAssistant, Math.max(0, (messages || []).indexOf(lastAssistant))) : "",
+    last_assistant_at: lastAssistant ? String(lastAssistant.timestamp || lastAssistant.time || lastAssistant.created_at || "") : "",
+    kept_thinking_message_id: keepThinkingMessageId,
+    cleared_thinking_message_ids: [...clearThinkingMessageIds].slice(0, 100),
+    evaluated_at: new Date(nowMs).toISOString(),
+    raw_transcript_preserved: true,
+    cleared_content_marker: GROUP_TIME_BASED_THINKING_CLEARED_MESSAGE,
+  };
+  const receipt = { ...payload, receipt_checksum: timeBasedThinkingReceiptChecksum(payload) };
+  return {
+    messages: projectedMessages,
+    receipt,
+    applied: status === "applied",
+    shouldPersist: enabled && (status === "applied" || receipt.newly_latched === true || resetByCompact),
   };
 }
 
@@ -1107,6 +2486,29 @@ export function buildGroupApiMicrocompactNativeApplyPlan(apiEditPlan: any = {}, 
   const betaHeaders = [
     ...(Array.isArray(options.betaHeaders || options.beta_headers) ? (options.betaHeaders || options.beta_headers) : []),
   ].map((item: any) => String(item || "").trim()).filter(Boolean);
+  const providerSessionCapacity = options.providerNativeCompactSessionCapacity
+    || options.provider_native_compact_session_capacity
+    || null;
+  const providerSessionGenerationFence = options.providerNativeCompactSessionGenerationFence
+    || options.provider_native_compact_session_generation_fence
+    || null;
+  const providerCapacityValid = providerSessionCapacity?.schema === "ccm-provider-native-compact-session-capacity-v1"
+    && String(providerSessionCapacity?.group_id || "") === String(options.groupId || options.group_id || apiEditPlan?.groupId || apiEditPlan?.group_id || "")
+    && String(providerSessionCapacity?.group_session_id || "") === String(options.groupSessionId || options.group_session_id || options.sessionBinding?.group_session_id || options.session_binding?.group_session_id || "")
+    && String(providerSessionCapacity?.task_agent_session_id || "") === String(options.taskAgentSessionId || options.task_agent_session_id || options.sessionBinding?.task_agent_session_id || options.session_binding?.task_agent_session_id || "")
+    && String(providerSessionCapacity?.native_session_id || "") === String(options.nativeSessionId || options.native_session_id || options.sessionBinding?.native_session_id || options.session_binding?.native_session_id || "");
+  const providerClearedInputTokens = providerCapacityValid
+    ? Math.max(0, Number(providerSessionCapacity.provider_cleared_input_tokens || 0))
+    : 0;
+  const rawActiveTokens = Math.max(0, Number(apiEditPlan?.activeTokens || apiEditPlan?.active_tokens || 0));
+  const effectiveActiveTokens = providerCapacityValid && Number(providerSessionCapacity.effective_context_tokens || 0) > 0
+    ? Number(providerSessionCapacity.effective_context_tokens || 0)
+    : Math.max(0, rawActiveTokens - providerClearedInputTokens);
+  const providerSessionCapacityGeneration = Math.max(1, Number(
+    providerCapacityValid && providerSessionCapacity.generation
+    || providerSessionGenerationFence?.generation
+    || 1
+  ));
   const planValid = apiEditPlan?.schema === "ccm-api-microcompact-edit-plan-v1";
   const contextManagement = apiEditPlan?.contextManagement || apiEditPlan?.context_management || null;
   const planHasEdits = planValid && Array.isArray(contextManagement?.edits) && contextManagement.edits.length > 0;
@@ -1120,9 +2522,11 @@ export function buildGroupApiMicrocompactNativeApplyPlan(apiEditPlan: any = {}, 
     || (apiRuntimes.has(agentType) && apiTransport);
   const betaHeaderEnabled = options.contextManagementBetaHeaderEnabled === true
     || options.context_management_beta_header_enabled === true
-    || betaHeaders.includes(GROUP_API_MICROCOMPACT_CONTEXT_MANAGEMENT_BETA);
+    || betaHeaders.includes(GROUP_API_MICROCOMPACT_CONTEXT_MANAGEMENT_BETA)
+    || providerCapacityValid && providerSessionCapacity.sticky_beta_latched === true;
   const featureEnabled = options.enabled !== false && options.featureEnabled !== false && options.feature_enabled !== false;
   const cliAdvisoryBoundary = cliRuntimes.has(agentType) || transport === "cli" || transport === "external_cli";
+  const providerSupportsContextManagement = ["anthropic", "anthropic-compatible", "claude"].includes(provider);
   const sessionBinding = options.sessionBinding || options.session_binding || null;
   const taskAgentSessionId = String(
     options.taskAgentSessionId
@@ -1138,12 +2542,16 @@ export function buildGroupApiMicrocompactNativeApplyPlan(apiEditPlan: any = {}, 
     || sessionBinding?.nativeSessionId
     || ""
   ).trim();
+  const groupSessionId = String(options.groupSessionId || options.group_session_id || sessionBinding?.group_session_id || sessionBinding?.groupSessionId || "").trim();
+  const executionId = String(options.executionId || options.execution_id || sessionBinding?.execution_id || sessionBinding?.executionId || "").trim();
+  const runnerRequestId = String(options.runnerRequestId || options.runner_request_id || options.externalRunnerRequestId || options.external_runner_request_id || "").trim();
   const memoryContextSnapshotId = String(options.memoryContextSnapshotId || options.memory_context_snapshot_id || "").trim();
   const memoryContextSnapshotChecksum = String(options.memoryContextSnapshotChecksum || options.memory_context_snapshot_checksum || "").trim();
   const nativeApplyReady = planHasEdits
     && explicitCapability
     && requestLayerAvailable
     && apiTransport
+    && providerSupportsContextManagement
     && betaHeaderEnabled
     && featureEnabled
     && !cliAdvisoryBoundary;
@@ -1153,6 +2561,7 @@ export function buildGroupApiMicrocompactNativeApplyPlan(apiEditPlan: any = {}, 
     { id: "executor_capability_declared", pass: explicitCapability, evidence: explicitCapability ? "supports_api_context_management" : "not_declared" },
     { id: "native_api_request_layer_available", pass: requestLayerAvailable, evidence: transport || "unknown" },
     { id: "api_transport_selected", pass: apiTransport && !cliAdvisoryBoundary, evidence: `${agentType}:${transport}` },
+    { id: "provider_context_management_supported", pass: providerSupportsContextManagement, evidence: provider || "unknown" },
     { id: "context_management_beta_enabled", pass: betaHeaderEnabled, evidence: GROUP_API_MICROCOMPACT_CONTEXT_MANAGEMENT_BETA },
     { id: "feature_enabled", pass: featureEnabled, evidence: featureEnabled ? "enabled" : "disabled" },
   ];
@@ -1167,6 +2576,8 @@ export function buildGroupApiMicrocompactNativeApplyPlan(apiEditPlan: any = {}, 
     schema: "ccm-api-microcompact-native-apply-plan-v1",
     version: GROUP_API_MICROCOMPACT_NATIVE_APPLY_PLAN_VERSION,
     groupId: String(options.groupId || options.group_id || apiEditPlan?.groupId || apiEditPlan?.group_id || ""),
+    groupSessionId,
+    group_session_id: groupSessionId,
     targetProject: String(options.targetProject || options.target_project || apiEditPlan?.targetProject || apiEditPlan?.target_project || ""),
     apiEditPlanChecksum: String(apiEditPlan?.planChecksum || apiEditPlan?.plan_checksum || ""),
     executor: {
@@ -1181,6 +2592,30 @@ export function buildGroupApiMicrocompactNativeApplyPlan(apiEditPlan: any = {}, 
       contextManagementBetaHeaderEnabled: betaHeaderEnabled,
       requiredBetaHeader: GROUP_API_MICROCOMPACT_CONTEXT_MANAGEMENT_BETA,
     },
+    providerSessionCapacity: providerCapacityValid ? {
+      schema: String(providerSessionCapacity.schema || ""),
+      baselineChecksum: String(providerSessionCapacity.baseline_checksum || ""),
+      sourceReceiptId: String(providerSessionCapacity.source_receipt_id || ""),
+      sourceReceiptChecksum: String(providerSessionCapacity.source_receipt_checksum || ""),
+      tokenBasis: String(providerSessionCapacity.token_basis || ""),
+      rawActiveTokens,
+      effectiveActiveTokens,
+      providerClearedInputTokens,
+      providerResponseInputTokens: Math.max(0, Number(providerSessionCapacity.provider_response_input_tokens || 0)),
+      stickyBetaLatched: providerSessionCapacity.sticky_beta_latched === true,
+      capacityFeedbackApplied: true,
+      note: "context_management remains a per-request provider policy; capacity feedback does not mutate the local transcript",
+    } : null,
+    providerSessionCapacityGeneration,
+    provider_session_capacity_generation: providerSessionCapacityGeneration,
+    providerSessionGenerationFence: providerSessionGenerationFence?.schema === "ccm-provider-native-compact-session-generation-fence-v1" ? {
+      schema: String(providerSessionGenerationFence.schema || ""),
+      generation: providerSessionCapacityGeneration,
+      lastResetId: String(providerSessionGenerationFence.last_reset_id || ""),
+      lastResetAt: String(providerSessionGenerationFence.last_reset_at || ""),
+      ledgerChecksum: String(providerSessionGenerationFence.ledger_checksum || ""),
+      ledgerChecksumValid: providerSessionGenerationFence.ledger_checksum_valid === true,
+    } : null,
     mode: nativeApplyReady ? "native_api_context_management" : "advisory_only",
     nativeApplyReady,
     advisoryOnly: !nativeApplyReady,
@@ -1193,17 +2628,24 @@ export function buildGroupApiMicrocompactNativeApplyPlan(apiEditPlan: any = {}, 
     task_agent_session_id: taskAgentSessionId,
     nativeSessionId,
     native_session_id: nativeSessionId,
+    executionId,
+    execution_id: executionId,
+    runnerRequestId,
+    runner_request_id: runnerRequestId,
     memoryContextSnapshotId,
     memory_context_snapshot_id: memoryContextSnapshotId,
     memoryContextSnapshotChecksum,
     memory_context_snapshot_checksum: memoryContextSnapshotChecksum,
     receiptContract: {
-      required_receipt_fields: ["apiMicrocompactUsage", "task_agent_session_id", "memory_context_snapshot_id"],
+      required_receipt_fields: ["apiMicrocompactUsage", "group_session_id", "task_agent_session_id", "native_session_id", "execution_id", "runner_request_id", "memory_context_snapshot_id", "memory_context_snapshot_checksum"],
+      required_group_session_id: groupSessionId,
       required_plan_checksum: String(apiEditPlan?.planChecksum || apiEditPlan?.plan_checksum || ""),
       required_apply_plan_checksum: "",
       required_request_patch_checksum: "",
       required_task_agent_session_id: taskAgentSessionId,
       required_native_session_id: nativeSessionId,
+      required_execution_id: executionId,
+      required_runner_request_id: runnerRequestId,
       required_memory_context_snapshot_id: memoryContextSnapshotId,
       required_memory_context_snapshot_checksum: memoryContextSnapshotChecksum,
       receipt_should_match_session: !!(taskAgentSessionId || nativeSessionId),
@@ -1232,6 +2674,57 @@ export function buildGroupApiMicrocompactNativeApplyPlan(apiEditPlan: any = {}, 
       required_apply_plan_checksum: crypto.createHash("sha256").update(JSON.stringify(base)).digest("hex").slice(0, 24),
       required_request_patch_checksum: base.requestPatchChecksum,
     },
+  };
+}
+
+export function verifyGroupApiMicrocompactNativeApplyPlan(plan: any = {}, expected: any = {}) {
+  const issues: string[] = [];
+  if (plan?.schema !== "ccm-api-microcompact-native-apply-plan-v1"
+    || Number(plan?.version || 0) !== GROUP_API_MICROCOMPACT_NATIVE_APPLY_PLAN_VERSION) issues.push("schema");
+  const { applyPlanChecksum: suppliedApplyPlanChecksum, ...planWithoutChecksum } = plan || {};
+  const checksumBase = {
+    ...planWithoutChecksum,
+    receiptContract: {
+      ...(planWithoutChecksum.receiptContract || {}),
+      required_apply_plan_checksum: "",
+      required_request_patch_checksum: "",
+    },
+  };
+  const computedApplyPlanChecksum = crypto.createHash("sha256").update(JSON.stringify(checksumBase)).digest("hex").slice(0, 24);
+  if (!suppliedApplyPlanChecksum || suppliedApplyPlanChecksum !== computedApplyPlanChecksum) issues.push("apply_plan_checksum");
+  const requestPatch = plan.requestPatch || plan.request_patch || null;
+  const computedRequestPatchChecksum = requestPatch
+    ? crypto.createHash("sha256").update(JSON.stringify(requestPatch)).digest("hex").slice(0, 24)
+    : "";
+  if (String(plan.requestPatchChecksum || plan.request_patch_checksum || "") !== computedRequestPatchChecksum) issues.push("request_patch_checksum");
+  if (String(plan.receiptContract?.required_apply_plan_checksum || "") !== String(suppliedApplyPlanChecksum || "")) issues.push("receipt_contract_apply_plan_checksum");
+  if (String(plan.receiptContract?.required_request_patch_checksum || "") !== computedRequestPatchChecksum) issues.push("receipt_contract_request_patch_checksum");
+  if (plan.nativeApplyReady === true) {
+    if (plan.mode !== "native_api_context_management") issues.push("native_mode");
+    if (!requestPatch?.body?.context_management) issues.push("context_management");
+    if (!Array.isArray(requestPatch?.beta_headers) || !requestPatch.beta_headers.includes(GROUP_API_MICROCOMPACT_CONTEXT_MANAGEMENT_BETA)) issues.push("context_management_beta");
+    if (plan.executor?.cli === true || ["cli", "external_cli"].includes(String(plan.executor?.transport || ""))) issues.push("cli_native_boundary");
+  } else if (requestPatch) {
+    issues.push("advisory_request_patch");
+  }
+  const expectedBindings = [
+    ["groupId", expected.groupId || expected.group_id, plan.groupId || plan.group_id],
+    ["groupSessionId", expected.groupSessionId || expected.group_session_id, plan.groupSessionId || plan.group_session_id],
+    ["taskAgentSessionId", expected.taskAgentSessionId || expected.task_agent_session_id, plan.taskAgentSessionId || plan.task_agent_session_id],
+    ["nativeSessionId", expected.nativeSessionId || expected.native_session_id, plan.nativeSessionId || plan.native_session_id],
+    ["executionId", expected.executionId || expected.execution_id, plan.executionId || plan.execution_id],
+    ["runnerRequestId", expected.runnerRequestId || expected.runner_request_id, plan.runnerRequestId || plan.runner_request_id],
+    ["memoryContextSnapshotId", expected.memoryContextSnapshotId || expected.memory_context_snapshot_id, plan.memoryContextSnapshotId || plan.memory_context_snapshot_id],
+    ["memoryContextSnapshotChecksum", expected.memoryContextSnapshotChecksum || expected.memory_context_snapshot_checksum, plan.memoryContextSnapshotChecksum || plan.memory_context_snapshot_checksum],
+  ];
+  for (const [name, wanted, actual] of expectedBindings) {
+    if (String(wanted || "").trim() && String(actual || "") !== String(wanted)) issues.push(`${name}_mismatch`);
+  }
+  return {
+    valid: issues.length === 0,
+    issues,
+    computedApplyPlanChecksum,
+    computedRequestPatchChecksum,
   };
 }
 
@@ -1296,6 +2789,9 @@ export function buildGroupCompactStrategyDecision(input: any = {}) {
   if (!compacted) {
     mode = messagesToCompact.length <= 0 ? "recent_window_only" : "skip_below_threshold";
     reasons.push(messagesToCompact.length <= 0 ? "no eligible older messages beyond preserved window" : "below auto compact pressure threshold");
+  } else if (input.sessionMemoryCompactSelection?.selected === true) {
+    mode = "session_memory_reuse";
+    reasons.push("verified exact-session Session Memory reused without a compaction API call");
   } else if (ptlEmergency?.engaged) {
     mode = "ptl_emergency";
     reasons.push(ptlEmergency.reason || "post compact token pressure still too high");
@@ -1362,6 +2858,8 @@ export function buildGroupCompactStrategyDecision(input: any = {}) {
     lastKeptMessageId: keptMessages.length ? messageIdentity(keptMessages[keptMessages.length - 1], messages.length - 1) : "",
     preCompactTokenCount,
     postCompactTokenEstimate,
+    truePostCompactPayloadBudget: input.truePostCompactPayloadBudget || input.true_post_compact_payload_budget || null,
+    postCompactPayloadGate: input.postCompactPayloadGate || input.post_compact_payload_gate || null,
     activeTokensBeforeCompact: Number(input.activeTokens || preCompactTokenCount || 0),
     triggerTokens,
     tokenPressurePercent,
@@ -1369,6 +2867,7 @@ export function buildGroupCompactStrategyDecision(input: any = {}) {
       ? Math.round(Math.max(0, 1 - postCompactTokenEstimate / preCompactTokenCount) * 1000) / 1000
       : null,
     sessionMemoryAvailable: input.sessionMemoryAvailable === true || !!input.sessionMemory?.schema || !!input.memory?.sessionMemory?.schema,
+    sessionMemoryCompactSelection: input.sessionMemoryCompactSelection || null,
     preservedSegment,
     microCompact: microCompact ? {
       schema: microCompact.schema || "",
@@ -1904,6 +3403,1233 @@ function extractPostCompactArtifacts(message: any) {
   return { files, skills, verification, blockers };
 }
 
+function postCompactTaskStatusReceiptChecksum(receipt: any) {
+  const payload = { ...(receipt || {}) };
+  delete payload.receipt_checksum;
+  delete payload.checksum_valid;
+  delete payload.issues;
+  return crypto.createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+}
+
+function normalizePostCompactTaskStatus(value: any) {
+  const status = String(value || "").trim().toLowerCase();
+  if (["in_progress", "executing", "spawning", "ready", "prompt_accepted", "open", "active"].includes(status)) return "running";
+  if (["done", "success", "succeeded"].includes(status)) return "completed";
+  if (["error"].includes(status)) return "failed";
+  return status;
+}
+
+function postCompactTaskUpdatedAtMs(task: any) {
+  const raw = task?.updated_at || task?.updatedAt || task?.completed_at || task?.completedAt || task?.created_at || task?.createdAt || "";
+  const parsed = Date.parse(String(raw || ""));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function postCompactTaskWasRetrieved(task: any) {
+  return task?.retrieved === true
+    || task?.result_retrieved === true
+    || task?.resultRetrieved === true
+    || task?.receipt_retrieved === true
+    || task?.receiptRetrieved === true
+    || !!String(task?.retrieved_at || task?.retrievedAt || "").trim();
+}
+
+export function verifyGroupPostCompactTaskStatusProjectionReceipt(receipt: any, expected: any = {}) {
+  const issues: string[] = [];
+  if (receipt?.schema !== "ccm-group-post-compact-task-status-projection-v1"
+    || Number(receipt?.version || 0) !== GROUP_POST_COMPACT_TASK_STATUS_PROJECTION_VERSION) issues.push("post_compact_task_status_schema_invalid");
+  if (!String(receipt?.group_id || "").trim()) issues.push("post_compact_task_status_group_missing");
+  if (!String(receipt?.group_session_id || "").startsWith("gcs_")) issues.push("post_compact_task_status_exact_session_missing");
+  if (receipt?.raw_tasks_preserved !== true) issues.push("post_compact_task_status_raw_preservation_missing");
+  if (receipt?.projection_only !== true) issues.push("post_compact_task_status_projection_scope_invalid");
+  if (Number(receipt?.included_task_count || 0) > Number(receipt?.matched_task_count || 0)) issues.push("post_compact_task_status_count_invalid");
+  if (Number(receipt?.running_task_count || 0)
+    + Number(receipt?.completed_unretrieved_count || 0)
+    + Number(receipt?.blocked_task_count || 0) > Number(receipt?.included_task_count || 0)) issues.push("post_compact_task_status_breakdown_invalid");
+  if (!String(receipt?.projection_checksum || "").trim()) issues.push("post_compact_task_status_projection_checksum_missing");
+  if (String(receipt?.receipt_checksum || "") !== postCompactTaskStatusReceiptChecksum(receipt)) issues.push("post_compact_task_status_receipt_checksum_invalid");
+  if (expected.groupId !== undefined && String(receipt?.group_id || "") !== String(expected.groupId || "")) issues.push("post_compact_task_status_group_mismatch");
+  if (expected.groupSessionId !== undefined && String(receipt?.group_session_id || "") !== String(expected.groupSessionId || "")) issues.push("post_compact_task_status_session_mismatch");
+  if (expected.projectionChecksum !== undefined && String(receipt?.projection_checksum || "") !== String(expected.projectionChecksum || "")) issues.push("post_compact_task_status_projection_checksum_mismatch");
+  return { valid: issues.length === 0, issues };
+}
+
+export function buildGroupPostCompactTaskStatusProjection(tasks: any[] = [], options: any = {}) {
+  const groupId = String(options.groupId || options.group_id || "").trim();
+  const groupSessionId = String(options.groupSessionId || options.group_session_id || "").trim();
+  if (!groupId || !groupSessionId.startsWith("gcs_")) throw new Error("exact_group_session_required_for_post_compact_task_status_projection");
+  const currentTaskId = String(options.currentTaskId || options.current_task_id || "").trim();
+  const budget = Math.max(1, Math.min(40, Number(options.taskStatusBudget || options.task_status_budget || GROUP_POST_COMPACT_TASK_STATUS_BUDGET)));
+  const completedMaxAgeMs = Math.max(0, Number(options.completedMaxAgeMs || options.completed_max_age_ms || 24 * 60 * 60 * 1000));
+  const nowMs = Date.parse(String(options.now || "")) || Date.now();
+  const counts = {
+    source: Array.isArray(tasks) ? tasks.length : 0,
+    matched: 0,
+    excludedScope: 0,
+    excludedPending: 0,
+    excludedRetrieved: 0,
+    excludedSelf: 0,
+    excludedNonChild: 0,
+    excludedStaleCompleted: 0,
+  };
+  const rows: any[] = [];
+  for (const task of Array.isArray(tasks) ? tasks : []) {
+    const taskGroupId = String(task?.group_id || task?.groupId || "").trim();
+    const taskGroupSessionId = String(task?.group_session_id || task?.groupSessionId || "").trim();
+    if (taskGroupId !== groupId || taskGroupSessionId !== groupSessionId) {
+      counts.excludedScope += 1;
+      continue;
+    }
+    counts.matched += 1;
+    const taskId = String(task?.id || task?.task_id || task?.taskId || "").trim();
+    if (currentTaskId && taskId === currentTaskId) {
+      counts.excludedSelf += 1;
+      continue;
+    }
+    const targetProject = String(task?.target_project || task?.targetProject || task?.project || task?.agent || "").trim();
+    if (!targetProject) {
+      counts.excludedNonChild += 1;
+      continue;
+    }
+    const status = normalizePostCompactTaskStatus(task?.status || task?.execution_state || task?.executionState);
+    if (!status || ["pending", "queued"].includes(status)) {
+      counts.excludedPending += 1;
+      continue;
+    }
+    if (postCompactTaskWasRetrieved(task)) {
+      counts.excludedRetrieved += 1;
+      continue;
+    }
+    const updatedAtMs = postCompactTaskUpdatedAtMs(task);
+    if (["completed", "failed", "cancelled"].includes(status)
+      && completedMaxAgeMs > 0
+      && updatedAtMs > 0
+      && nowMs - updatedAtMs > completedMaxAgeMs) {
+      counts.excludedStaleCompleted += 1;
+      continue;
+    }
+    const description = compactText(task?.description || task?.title || task?.task || "", 360);
+    const deltaSummary = compactText(
+      task?.progress?.summary
+        || task?.progress_summary
+        || task?.progressSummary
+        || task?.delivery_summary?.headline
+        || task?.deliverySummary?.headline
+        || task?.receipt?.summary
+        || task?.error
+        || task?.last_error
+        || "",
+      360
+    );
+    const outputReference = compactText(
+      task?.output_file_path
+        || task?.outputFilePath
+        || task?.result_file
+        || task?.resultFile
+        || task?.execution?.output_file_path
+        || task?.execution?.outputFilePath
+        || "",
+      260
+    );
+    rows.push({
+      task_id: taskId || `task-${rows.length + 1}`,
+      target_project: targetProject,
+      status,
+      description,
+      delta_summary: deltaSummary,
+      output_reference: outputReference,
+      task_agent_session_id: String(task?.task_agent_session_id || task?.taskAgentSessionId || ""),
+      native_session_id: String(task?.native_session_id || task?.nativeSessionId || ""),
+      updated_at: String(task?.updated_at || task?.updatedAt || task?.completed_at || task?.completedAt || ""),
+      updated_at_ms: updatedAtMs,
+    });
+  }
+  const selected = rows
+    .sort((a, b) => Number(b.updated_at_ms || 0) - Number(a.updated_at_ms || 0) || String(a.task_id).localeCompare(String(b.task_id)))
+    .slice(0, budget)
+    .map((row: any) => {
+      const value = [
+        `task_id=${row.task_id}`,
+        `project=${row.target_project}`,
+        `status=${row.status}`,
+        row.description ? `description=${row.description}` : "",
+        row.delta_summary ? `progress=${row.delta_summary}` : "",
+        row.output_reference ? `output=${row.output_reference}` : "",
+      ].filter(Boolean).join("; ");
+      const { updated_at_ms, ...safeRow } = row;
+      return { ...safeRow, kind: "task_status", value };
+    });
+  const projectionChecksum = crypto.createHash("sha256").update(JSON.stringify(selected)).digest("hex");
+  const payload: any = {
+    schema: "ccm-group-post-compact-task-status-projection-v1",
+    version: GROUP_POST_COMPACT_TASK_STATUS_PROJECTION_VERSION,
+    group_id: groupId,
+    group_session_id: groupSessionId,
+    projection_only: true,
+    raw_tasks_preserved: true,
+    source_task_count: counts.source,
+    matched_task_count: counts.matched,
+    included_task_count: selected.length,
+    running_task_count: selected.filter((row: any) => row.status === "running").length,
+    completed_unretrieved_count: selected.filter((row: any) => row.status === "completed").length,
+    blocked_task_count: selected.filter((row: any) => ["blocked", "failed", "needs_info", "partial"].includes(row.status)).length,
+    excluded_scope_count: counts.excludedScope,
+    excluded_pending_count: counts.excludedPending,
+    excluded_retrieved_count: counts.excludedRetrieved,
+    excluded_self_count: counts.excludedSelf,
+    excluded_non_child_count: counts.excludedNonChild,
+    excluded_stale_completed_count: counts.excludedStaleCompleted,
+    budget,
+    task_ids: selected.map((row: any) => row.task_id),
+    projection_checksum: projectionChecksum,
+    created_at: new Date(nowMs).toISOString(),
+  };
+  const receipt = { ...payload, receipt_checksum: postCompactTaskStatusReceiptChecksum(payload) };
+  return { tasks: selected, receipt };
+}
+
+function normalizePostCompactReadPath(value: any) {
+  const clean = String(value || "").trim().replace(/^["']|["']$/g, "");
+  if (!clean) return "";
+  const normalized = path.posix.normalize(clean.replace(/\\/g, "/"));
+  return process.platform === "win32" ? normalized.toLowerCase() : normalized;
+}
+
+function postCompactMessageBlocks(message: any) {
+  const content = message?.content ?? message?.message?.content;
+  return Array.isArray(content) ? content : [];
+}
+
+function collectPreservedReadPaths(messages: any[] = []) {
+  const unchangedStubToolIds = new Set<string>();
+  for (const message of Array.isArray(messages) ? messages : []) {
+    for (const block of postCompactMessageBlocks(message)) {
+      const type = String(block?.type || "").toLowerCase();
+      if (type !== "tool_result" && type !== "web_search_tool_result") continue;
+      const resultText = renderMessageContentValue(block?.content ?? block?.output ?? block?.result ?? block?.text).trim();
+      if (!resultText.startsWith(GROUP_FILE_UNCHANGED_STUB_PREFIX)) continue;
+      const toolUseId = String(block?.tool_use_id || block?.toolUseId || block?.id || "").trim();
+      if (toolUseId) unchangedStubToolIds.add(toolUseId);
+    }
+  }
+  const paths = new Set<string>();
+  let readToolUseCount = 0;
+  for (const message of Array.isArray(messages) ? messages : []) {
+    for (const block of postCompactMessageBlocks(message)) {
+      const type = String(block?.type || "").toLowerCase();
+      const name = String(block?.name || block?.tool || block?.tool_name || "").trim().toLowerCase();
+      if (!["tool_use", "server_tool_use"].includes(type) || !["read", "fileread", "file_read"].includes(name)) continue;
+      readToolUseCount += 1;
+      const toolUseId = String(block?.id || block?.tool_use_id || block?.toolUseId || "").trim();
+      if (toolUseId && unchangedStubToolIds.has(toolUseId)) continue;
+      const input = block?.input && typeof block.input === "object" ? block.input : {};
+      const filePath = normalizePostCompactReadPath(input.file_path || input.filePath || input.path || "");
+      if (filePath) paths.add(filePath);
+    }
+  }
+  return { paths, readToolUseCount, unchangedStubToolIds };
+}
+
+function postCompactFileRestoreDedupReceiptChecksum(receipt: any) {
+  const payload = { ...(receipt || {}) };
+  delete payload.receipt_checksum;
+  delete payload.checksum_valid;
+  delete payload.issues;
+  return crypto.createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+}
+
+export function verifyGroupPostCompactFileRestoreDedupReceipt(receipt: any, expected: any = {}) {
+  const issues: string[] = [];
+  if (receipt?.schema !== "ccm-group-post-compact-file-restore-dedup-v1"
+    || Number(receipt?.version || 0) !== GROUP_POST_COMPACT_FILE_RESTORE_DEDUP_VERSION) issues.push("post_compact_file_restore_dedup_schema_invalid");
+  if (!String(receipt?.group_id || "").trim()) issues.push("post_compact_file_restore_dedup_group_missing");
+  if (!String(receipt?.group_session_id || "").startsWith("gcs_")) issues.push("post_compact_file_restore_dedup_exact_session_missing");
+  if (receipt?.raw_transcript_preserved !== true) issues.push("post_compact_file_restore_dedup_raw_preservation_missing");
+  if (receipt?.projection_only !== true) issues.push("post_compact_file_restore_dedup_projection_scope_invalid");
+  if (Number(receipt?.deduped_file_candidate_count || 0) + Number(receipt?.eligible_file_candidate_count || 0) !== Number(receipt?.source_file_candidate_count || 0)) issues.push("post_compact_file_restore_dedup_candidate_count_invalid");
+  if (Number(receipt?.restored_file_candidate_count || 0) > Number(receipt?.eligible_file_candidate_count || 0)) issues.push("post_compact_file_restore_dedup_budget_count_invalid");
+  if (!String(receipt?.projection_checksum || "").trim()) issues.push("post_compact_file_restore_dedup_projection_checksum_missing");
+  if (String(receipt?.receipt_checksum || "") !== postCompactFileRestoreDedupReceiptChecksum(receipt)) issues.push("post_compact_file_restore_dedup_receipt_checksum_invalid");
+  if (expected.groupId !== undefined && String(receipt?.group_id || "") !== String(expected.groupId || "")) issues.push("post_compact_file_restore_dedup_group_mismatch");
+  if (expected.groupSessionId !== undefined && String(receipt?.group_session_id || "") !== String(expected.groupSessionId || "")) issues.push("post_compact_file_restore_dedup_session_mismatch");
+  if (expected.projectionChecksum !== undefined && String(receipt?.projection_checksum || "") !== String(expected.projectionChecksum || "")) issues.push("post_compact_file_restore_dedup_projection_checksum_mismatch");
+  return { valid: issues.length === 0, issues };
+}
+
+export function buildGroupPostCompactFileRestoreDedupProjection(fileCandidates: any[] = [], preservedMessages: any[] = [], options: any = {}) {
+  const groupId = String(options.groupId || options.group_id || "").trim();
+  const groupSessionId = String(options.groupSessionId || options.group_session_id || "").trim();
+  if (!groupId || !groupSessionId.startsWith("gcs_")) throw new Error("exact_group_session_required_for_post_compact_file_restore_dedup");
+  const fileBudget = Math.max(1, Number(options.fileBudget || options.file_budget || GROUP_POST_COMPACT_FILE_BUDGET));
+  const preserved = collectPreservedReadPaths(preservedMessages);
+  const deduped: any[] = [];
+  const eligible: any[] = [];
+  for (const row of Array.isArray(fileCandidates) ? fileCandidates : []) {
+    const key = normalizePostCompactReadPath(row?.value || row);
+    if (key && preserved.paths.has(key)) deduped.push(row);
+    else eligible.push(row);
+  }
+  const restored = eligible.slice(-fileBudget);
+  const projectionChecksum = crypto.createHash("sha256").update(JSON.stringify(restored.map((row: any) => [
+    normalizePostCompactReadPath(row?.value || row),
+    String(row?.sourceMessageId || row?.source_message_id || ""),
+  ]))).digest("hex");
+  const payload: any = {
+    schema: "ccm-group-post-compact-file-restore-dedup-v1",
+    version: GROUP_POST_COMPACT_FILE_RESTORE_DEDUP_VERSION,
+    group_id: groupId,
+    group_session_id: groupSessionId,
+    projection_only: true,
+    raw_transcript_preserved: true,
+    source_file_candidate_count: Array.isArray(fileCandidates) ? fileCandidates.length : 0,
+    preserved_message_count: Array.isArray(preservedMessages) ? preservedMessages.length : 0,
+    preserved_read_tool_use_count: preserved.readToolUseCount,
+    preserved_full_read_path_count: preserved.paths.size,
+    unchanged_stub_exemption_count: preserved.unchangedStubToolIds.size,
+    deduped_file_candidate_count: deduped.length,
+    eligible_file_candidate_count: eligible.length,
+    restored_file_candidate_count: restored.length,
+    file_budget: fileBudget,
+    deduped_path_hashes: deduped.map((row: any) => crypto.createHash("sha256").update(normalizePostCompactReadPath(row?.value || row)).digest("hex").slice(0, 16)).slice(0, 12),
+    projection_checksum: projectionChecksum,
+    created_at: String(options.now || new Date().toISOString()),
+  };
+  const receipt = { ...payload, receipt_checksum: postCompactFileRestoreDedupReceiptChecksum(payload) };
+  return { files: restored, receipt };
+}
+
+function invokedSkillAttachmentReceiptChecksum(receipt: any) {
+  const payload = { ...(receipt || {}) };
+  delete payload.receipt_checksum;
+  delete payload.checksum_valid;
+  delete payload.issues;
+  return crypto.createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+}
+
+function invokedSkillNameAndHash(value: any) {
+  if (!value) return null;
+  if (typeof value === "string") {
+    const clean = value.trim().replace(/^Skill\s*[:：]\s*/i, "");
+    if (!clean) return null;
+    const match = clean.match(/^(.+?)#([a-f0-9]{6,128})$/i);
+    return { name: String(match?.[1] || clean).trim(), contentHash: String(match?.[2] || "").trim() };
+  }
+  const name = String(value.name || value.skill || value.skillName || value.skill_name || "").trim().replace(/^Skill\s*[:：]\s*/i, "");
+  if (!name) return null;
+  return {
+    name,
+    contentHash: String(value.contentHash || value.content_hash || value.hash || value.checksum || "").trim(),
+    invokedAt: String(value.invokedAt || value.invoked_at || value.timestamp || value.time || value.at || "").trim(),
+  };
+}
+
+function collectExactSessionInvokedSkills(messages: any[] = []) {
+  const rows: any[] = [];
+  const add = (value: any, message: any, index: number, source: string, fallbackAt = "") => {
+    const normalized = invokedSkillNameAndHash(value);
+    if (!normalized?.name) return;
+    const invokedAt = normalized.invokedAt || fallbackAt || String(message?.timestamp || message?.time || message?.created_at || message?.updated_at || "");
+    rows.push({
+      ...normalized,
+      source,
+      sourceMessageId: messageIdentity(message, index),
+      actor: messageActor(message),
+      invokedAt,
+      invokedAtMs: Date.parse(invokedAt) || 0,
+      sourceIndex: index,
+      sequence: rows.length,
+    });
+  };
+  const addList = (value: any, message: any, index: number, source: string, fallbackAt = "") => {
+    for (const item of Array.isArray(value) ? value : []) add(item, message, index, source, fallbackAt);
+  };
+  for (let index = 0; index < (Array.isArray(messages) ? messages.length : 0); index += 1) {
+    const message = messages[index] || {};
+    addList(message.invokedSkills || message.invoked_skills, message, index, "message");
+    addList(message.receipt?.invokedSkills || message.receipt?.invoked_skills, message, index, "receipt");
+    addList(message.runtime_tooling?.invoked_skills || message.runtimeTooling?.invokedSkills, message, index, "runtime_tooling");
+    addList(message.delivery_summary?.runtime_tooling?.invoked_skills || message.deliverySummary?.runtimeTooling?.invokedSkills, message, index, "delivery_summary");
+    for (const item of Array.isArray(message.receipt?.memoryUsed || message.receipt?.memory_used) ? (message.receipt.memoryUsed || message.receipt.memory_used) : []) {
+      if (/Skill\s*[:：]/i.test(String(item || ""))) add(item, message, index, "receipt_memory_used");
+    }
+    const events = [
+      ...(Array.isArray(message.work_events) ? message.work_events : []),
+      ...(Array.isArray(message.workEvents) ? message.workEvents : []),
+      ...(Array.isArray(message.events) ? message.events : []),
+      ...(Array.isArray(message.delivery_summary?.work_events) ? message.delivery_summary.work_events : []),
+    ];
+    for (const event of events) {
+      const eventAt = String(event?.invoked_at || event?.invokedAt || event?.timestamp || event?.time || event?.at || "");
+      addList(event?.invokedSkills || event?.invoked_skills || event?.data?.invokedSkills || event?.data?.invoked_skills, message, index, "work_event", eventAt);
+      addList(event?.runtime_tooling?.invoked_skills || event?.runtimeTooling?.invokedSkills, message, index, "work_event_runtime_tooling", eventAt);
+    }
+  }
+  const latest = new Map<string, any>();
+  for (const row of rows) {
+    const key = row.name.toLowerCase();
+    const previous = latest.get(key);
+    const rank = [row.invokedAtMs, row.sourceIndex, row.sequence];
+    const previousRank = previous ? [previous.invokedAtMs, previous.sourceIndex, previous.sequence] : [-1, -1, -1];
+    if (!previous || rank[0] > previousRank[0] || (rank[0] === previousRank[0] && (rank[1] > previousRank[1] || (rank[1] === previousRank[1] && rank[2] > previousRank[2])))) latest.set(key, row);
+  }
+  return [...latest.values()].sort((a, b) => b.invokedAtMs - a.invokedAtMs || b.sourceIndex - a.sourceIndex || b.sequence - a.sequence);
+}
+
+function isPathWithin(root: string, candidate: string) {
+  const relative = path.relative(path.resolve(root), path.resolve(candidate));
+  return !!relative && !relative.startsWith("..") && !path.isAbsolute(relative);
+}
+
+function currentControlledSkillBody(skillName: string, catalog: any[]) {
+  const normalizedName = String(skillName || "").trim();
+  const skill = (Array.isArray(catalog) ? catalog : []).find((item: any) => String(item?.name || "").trim().toLowerCase() === normalizedName.toLowerCase());
+  if (!skill) return { status: "catalog_missing", body: "", skill: null, sourcePath: "", sourceKind: "missing" };
+  if (skill.enabled === false) return { status: "catalog_disabled", body: "", skill, sourcePath: "", sourceKind: "disabled" };
+  let sourcePath = "";
+  let sourceKind = "prompt";
+  if (isCcmInternalSkillName(normalizedName)) {
+    sourcePath = path.resolve(__dirname, "..", "..", "..", "templates", "skills", normalizedName.toLowerCase(), "SKILL.md");
+    sourceKind = "ccm_internal_skill_md";
+  } else {
+    const packagePath = String(skill.packagePath || "").trim();
+    const skillFile = String(skill.skillFile || skill.skill_file || "").trim();
+    if (packagePath && isPathWithin(SKILL_PACKAGES_DIR, packagePath)) {
+      sourcePath = path.join(path.resolve(packagePath), "SKILL.md");
+      sourceKind = "managed_package_skill_md";
+    } else if (skillFile && isPathWithin(SKILL_PACKAGES_DIR, skillFile)) {
+      sourcePath = path.resolve(skillFile);
+      sourceKind = "managed_skill_file";
+    }
+  }
+  if (sourcePath) {
+    try {
+      if (!fs.existsSync(sourcePath) || !fs.statSync(sourcePath).isFile()) return { status: "skill_file_missing", body: "", skill, sourcePath, sourceKind };
+      if (fs.statSync(sourcePath).size > 1024 * 1024) return { status: "skill_file_too_large", body: "", skill, sourcePath, sourceKind };
+      return { status: "loaded", body: fs.readFileSync(sourcePath, "utf-8").replace(/^\uFEFF/, ""), skill, sourcePath, sourceKind };
+    } catch {
+      return { status: "skill_file_read_failed", body: "", skill, sourcePath, sourceKind };
+    }
+  }
+  const prompt = String(skill.prompt || "").trim();
+  if (!prompt) return { status: "skill_body_missing", body: "", skill, sourcePath: "", sourceKind };
+  const description = String(skill.description || "").replace(/[\r\n]+/g, " ").trim();
+  return {
+    status: "loaded",
+    body: `---\nname: ${normalizedName}\ndescription: ${description}\n---\n\n${prompt}`,
+    skill,
+    sourcePath: "",
+    sourceKind,
+  };
+}
+
+function truncateSkillBodyToTokens(body: string, maxTokens: number) {
+  const text = String(body || "");
+  const originalTokens = estimateGroupTextTokens(text);
+  if (originalTokens <= maxTokens) return { text, originalTokens, tokens: originalTokens, truncated: false };
+  const marker = `\n\n[Skill content truncated to ${maxTokens} tokens by CCM post-compact budget]`;
+  let low = 0;
+  let high = text.length;
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    if (estimateGroupTextTokens(`${text.slice(0, middle).trimEnd()}${marker}`) <= maxTokens) low = middle;
+    else high = middle - 1;
+  }
+  const truncatedText = `${text.slice(0, low).trimEnd()}${marker}`;
+  return { text: truncatedText, originalTokens, tokens: estimateGroupTextTokens(truncatedText), truncated: true };
+}
+
+function truncatePostCompactBodyPreservingEdges(body: string, maxTokens: number) {
+  const text = String(body || "");
+  const originalTokens = estimateGroupTextTokens(text);
+  if (originalTokens <= maxTokens) return { text, originalTokens, tokens: originalTokens, truncated: false };
+  let low = 1000;
+  let high = text.length;
+  let selected = compactPreserveEdges(text, low);
+  while (low <= high) {
+    const middle = Math.floor((low + high) / 2);
+    const candidate = compactPreserveEdges(text, middle);
+    if (estimateGroupTextTokens(candidate) <= maxTokens) {
+      selected = candidate;
+      low = middle + 1;
+    } else {
+      high = middle - 1;
+    }
+  }
+  return { text: selected, originalTokens, tokens: estimateGroupTextTokens(selected), truncated: true };
+}
+
+export function verifyGroupPostCompactInvokedSkillAttachmentReceipt(receipt: any, expected: any = {}) {
+  const issues: string[] = [];
+  if (receipt?.schema !== "ccm-group-post-compact-invoked-skill-attachment-v1"
+    || Number(receipt?.version || 0) !== GROUP_POST_COMPACT_INVOKED_SKILL_ATTACHMENT_VERSION) issues.push("post_compact_invoked_skill_attachment_schema_invalid");
+  if (!String(receipt?.group_id || "").trim()) issues.push("post_compact_invoked_skill_attachment_group_missing");
+  if (!String(receipt?.group_session_id || "").startsWith("gcs_")) issues.push("post_compact_invoked_skill_attachment_exact_session_missing");
+  if (String(receipt?.scope_id || "") !== `${String(receipt?.group_id || "")}::${String(receipt?.group_session_id || "")}`) issues.push("post_compact_invoked_skill_attachment_scope_invalid");
+  if (receipt?.exact_session_only !== true || receipt?.cross_session_fallback_allowed !== false) issues.push("post_compact_invoked_skill_attachment_isolation_invalid");
+  if (receipt?.body_free !== true) issues.push("post_compact_invoked_skill_attachment_receipt_body_policy_invalid");
+  if (Number(receipt?.single_skill_max_tokens || 0) !== GROUP_POST_COMPACT_INVOKED_SKILL_MAX_TOKENS) issues.push("post_compact_invoked_skill_attachment_single_budget_invalid");
+  if (Number(receipt?.total_max_tokens || 0) !== GROUP_POST_COMPACT_INVOKED_SKILLS_TOTAL_MAX_TOKENS) issues.push("post_compact_invoked_skill_attachment_total_budget_invalid");
+  if (Number(receipt?.attached_token_count || 0) > Number(receipt?.total_max_tokens || 0)) issues.push("post_compact_invoked_skill_attachment_budget_exceeded");
+  const forbiddenKeys = new Set(["body", "content", "prompt", "markdown", "attachments", "attachment_bodies"]);
+  const visit = (value: any): boolean => {
+    if (!value || typeof value !== "object") return false;
+    for (const [key, nested] of Object.entries(value)) {
+      if (forbiddenKeys.has(String(key).toLowerCase())) return true;
+      if (visit(nested)) return true;
+    }
+    return false;
+  };
+  if (visit(receipt)) issues.push("post_compact_invoked_skill_attachment_receipt_contains_body");
+  if (String(receipt?.receipt_checksum || "") !== invokedSkillAttachmentReceiptChecksum(receipt)) issues.push("post_compact_invoked_skill_attachment_receipt_checksum_invalid");
+  if (expected.groupId !== undefined && String(receipt?.group_id || "") !== String(expected.groupId || "")) issues.push("post_compact_invoked_skill_attachment_group_mismatch");
+  if (expected.groupSessionId !== undefined && String(receipt?.group_session_id || "") !== String(expected.groupSessionId || "")) issues.push("post_compact_invoked_skill_attachment_session_mismatch");
+  if (Array.isArray(expected.attachments)) {
+    const manifest = expected.attachments.map((item: any) => ({
+      name: String(item?.name || ""),
+      current_content_hash: String(item?.currentContentHash || item?.current_content_hash || ""),
+      invocation_content_hash: String(item?.invocationContentHash || item?.invocation_content_hash || ""),
+      token_count: Number(item?.tokenCount || item?.token_count || 0),
+      truncated: item?.truncated === true,
+    }));
+    const manifestChecksum = crypto.createHash("sha256").update(JSON.stringify(manifest)).digest("hex");
+    if (manifest.length !== Number(receipt?.attachment_count || 0)) issues.push("post_compact_invoked_skill_attachment_count_mismatch");
+    if (manifestChecksum !== String(receipt?.attachment_manifest_checksum || "")) issues.push("post_compact_invoked_skill_attachment_manifest_mismatch");
+    if (manifest.reduce((sum: number, item: any) => sum + item.token_count, 0) !== Number(receipt?.attached_token_count || 0)) issues.push("post_compact_invoked_skill_attachment_token_count_mismatch");
+  }
+  return { valid: issues.length === 0, issues };
+}
+
+export function buildGroupPostCompactInvokedSkillAttachmentProjection(messages: any[] = [], options: any = {}) {
+  const groupId = String(options.groupId || options.group_id || "").trim();
+  const groupSessionId = String(options.groupSessionId || options.group_session_id || "").trim();
+  if (!groupId || !groupSessionId.startsWith("gcs_")) throw new Error("exact_group_session_required_for_post_compact_invoked_skill_attachment");
+  const singleSkillMaxTokens = Math.max(1, Math.min(GROUP_POST_COMPACT_INVOKED_SKILL_MAX_TOKENS, Number(options.singleSkillMaxTokens || options.single_skill_max_tokens || GROUP_POST_COMPACT_INVOKED_SKILL_MAX_TOKENS)));
+  const totalMaxTokens = Math.max(1, Math.min(GROUP_POST_COMPACT_INVOKED_SKILLS_TOTAL_MAX_TOKENS, Number(options.totalMaxTokens || options.total_max_tokens || GROUP_POST_COMPACT_INVOKED_SKILLS_TOTAL_MAX_TOKENS)));
+  const catalog = Array.isArray(options.skillCatalog || options.skill_catalog) ? (options.skillCatalog || options.skill_catalog) : loadSkills();
+  const invocations = collectExactSessionInvokedSkills(messages);
+  const attachments: any[] = [];
+  const missingSkillNames: string[] = [];
+  const driftSkillNames: string[] = [];
+  let remainingTokens = totalMaxTokens;
+  for (const invocation of invocations) {
+    if (remainingTokens <= 0) break;
+    const loaded = currentControlledSkillBody(invocation.name, catalog);
+    if (loaded.status !== "loaded" || !loaded.body) {
+      missingSkillNames.push(invocation.name);
+      continue;
+    }
+    const currentContentHash = crypto.createHash("sha256").update(loaded.body).digest("hex");
+    const catalogContentHash = String(loaded.skill?.contentHash || loaded.skill?.content_hash || "").trim();
+    const invocationContentHash = String(invocation.contentHash || "").trim();
+    const hashMatches = invocationContentHash
+      ? [currentContentHash, catalogContentHash].filter(Boolean).some(value => value === invocationContentHash || value.startsWith(invocationContentHash) || invocationContentHash.startsWith(value))
+      : null;
+    if (hashMatches === false) driftSkillNames.push(invocation.name);
+    const bounded = truncateSkillBodyToTokens(loaded.body, Math.min(singleSkillMaxTokens, remainingTokens));
+    if (!bounded.text || bounded.tokens <= 0) continue;
+    attachments.push({
+      schema: "ccm-group-post-compact-invoked-skill-body-v1",
+      name: invocation.name,
+      body: bounded.text,
+      currentContentHash,
+      catalogContentHash,
+      invocationContentHash,
+      hashMatches,
+      sourceKind: loaded.sourceKind,
+      sourceMessageId: invocation.sourceMessageId,
+      invocationSource: invocation.source,
+      invokedAt: invocation.invokedAt,
+      tokenCount: bounded.tokens,
+      originalTokenCount: bounded.originalTokens,
+      truncated: bounded.truncated,
+    });
+    remainingTokens -= bounded.tokens;
+  }
+  const manifest = attachments.map(item => ({
+    name: item.name,
+    current_content_hash: item.currentContentHash,
+    invocation_content_hash: item.invocationContentHash,
+    token_count: item.tokenCount,
+    truncated: item.truncated,
+  }));
+  const payload: any = {
+    schema: "ccm-group-post-compact-invoked-skill-attachment-v1",
+    version: GROUP_POST_COMPACT_INVOKED_SKILL_ATTACHMENT_VERSION,
+    group_id: groupId,
+    group_session_id: groupSessionId,
+    scope_id: `${groupId}::${groupSessionId}`,
+    exact_session_only: true,
+    cross_session_fallback_allowed: false,
+    body_free: true,
+    invocation_count: invocations.length,
+    attachment_count: attachments.length,
+    attached_token_count: attachments.reduce((sum, item) => sum + Number(item.tokenCount || 0), 0),
+    single_skill_max_tokens: singleSkillMaxTokens,
+    total_max_tokens: totalMaxTokens,
+    truncated_skill_count: attachments.filter(item => item.truncated).length,
+    catalog_drift_count: driftSkillNames.length,
+    missing_skill_count: missingSkillNames.length,
+    skill_names: attachments.map(item => item.name),
+    current_content_hashes: attachments.map(item => item.currentContentHash),
+    invocation_content_hashes: attachments.map(item => item.invocationContentHash),
+    drift_skill_names: driftSkillNames,
+    missing_skill_names: missingSkillNames,
+    attachment_manifest_checksum: crypto.createHash("sha256").update(JSON.stringify(manifest)).digest("hex"),
+    created_at: String(options.now || new Date().toISOString()),
+  };
+  const receipt = { ...payload, receipt_checksum: invokedSkillAttachmentReceiptChecksum(payload) };
+  return { attachments, receipt };
+}
+
+function postCompactPlanAttachmentReceiptChecksum(receipt: any) {
+  const payload = { ...(receipt || {}) };
+  delete payload.receipt_checksum;
+  delete payload.checksum_valid;
+  delete payload.issues;
+  return crypto.createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+}
+
+function postCompactPlanObject(task: any) {
+  const candidates = [
+    ["workflow_meta.plan_mode", task?.workflow_meta?.plan_mode],
+    ["workflow_meta.intake.plan_mode", task?.workflow_meta?.intake?.plan_mode],
+    ["intake_draft", task?.intake_draft],
+    ["plan_mode", task?.plan_mode],
+    ["planMode", task?.planMode],
+    ["plan", task?.plan],
+  ];
+  for (const [source, value] of candidates) {
+    if (value && typeof value === "object" && !Array.isArray(value) && Object.keys(value).length) return { source, plan: value };
+  }
+  return null;
+}
+
+function postCompactPlanTaskId(task: any) {
+  return String(task?.id || task?.task_id || task?.taskId || "").trim();
+}
+
+function postCompactPlanTaskStatus(task: any) {
+  return normalizePostCompactTaskStatus(task?.status || task?.execution_state || task?.executionState || "pending") || "pending";
+}
+
+function postCompactPlanTaskIsTerminal(task: any) {
+  return task?.archived === true || ["completed", "failed", "cancelled", "archived"].includes(postCompactPlanTaskStatus(task));
+}
+
+function postCompactPlanConfirmationState(task: any, plan: any) {
+  const intakeState = String(task?.intake_state || task?.intakeState || "").trim().toLowerCase();
+  const confirmationStatus = String(plan?.confirmation_status || plan?.confirmationStatus || "").trim().toLowerCase();
+  const controlState = String(plan?.control_state || plan?.controlState || task?.workflow_meta?.project_mission?.control_state || "").trim().toLowerCase();
+  const explicitlyConfirmed = intakeState === "confirmed"
+    || confirmationStatus === "confirmed"
+    || (!!String(plan?.confirmed_at || plan?.confirmedAt || plan?.accepted_at || plan?.acceptedAt || "").trim() && plan?.requires_confirmation !== true);
+  const explicitTaskMode = String(
+    (typeof task?.plan_mode === "string" ? task.plan_mode : "")
+      || (typeof task?.planMode === "string" ? task.planMode : "")
+      || task?.mode
+      || task?.agent_mode
+      || ""
+  ).trim().toLowerCase();
+  const awaiting = !explicitlyConfirmed && (
+    intakeState === "awaiting_confirmation"
+    || plan?.requires_confirmation === true
+    || ["awaiting_confirmation", "plan_revision_requested", "revision_requested"].includes(controlState)
+    || ["plan", "plan_mode", "planning"].includes(explicitTaskMode)
+  );
+  return {
+    intakeState,
+    confirmed: explicitlyConfirmed,
+    planModeActive: awaiting,
+    confirmationStatus: awaiting ? "awaiting_confirmation" : explicitlyConfirmed ? "confirmed" : "plan_reference",
+  };
+}
+
+function compactPostCompactPlanBody(body: string) {
+  const originalTokens = estimateGroupTextTokens(body);
+  if (originalTokens <= GROUP_POST_COMPACT_PLAN_MAX_TOKENS) {
+    return { text: body, originalTokens, tokens: originalTokens, truncated: false };
+  }
+  let low = 1_000;
+  let high = body.length;
+  let selected = compactPreserveEdges(body, low);
+  while (low <= high) {
+    const middle = Math.floor((low + high) / 2);
+    const candidate = compactPreserveEdges(body, middle);
+    if (estimateGroupTextTokens(candidate) <= GROUP_POST_COMPACT_PLAN_MAX_TOKENS) {
+      selected = candidate;
+      low = middle + 1;
+    } else {
+      high = middle - 1;
+    }
+  }
+  return {
+    text: selected,
+    originalTokens,
+    tokens: estimateGroupTextTokens(selected),
+    truncated: true,
+  };
+}
+
+export function verifyGroupPostCompactPlanAttachmentReceipt(receipt: any, expected: any = {}) {
+  const issues: string[] = [];
+  if (receipt?.schema !== "ccm-group-post-compact-plan-attachment-v1"
+    || Number(receipt?.version || 0) !== GROUP_POST_COMPACT_PLAN_ATTACHMENT_VERSION) issues.push("post_compact_plan_attachment_schema_invalid");
+  if (!String(receipt?.group_id || "").trim()) issues.push("post_compact_plan_attachment_group_missing");
+  if (!String(receipt?.group_session_id || "").startsWith("gcs_")) issues.push("post_compact_plan_attachment_exact_session_missing");
+  if (String(receipt?.scope_id || "") !== `${String(receipt?.group_id || "")}::${String(receipt?.group_session_id || "")}`) issues.push("post_compact_plan_attachment_scope_invalid");
+  if (receipt?.exact_session_only !== true || receipt?.cross_session_fallback_allowed !== false) issues.push("post_compact_plan_attachment_isolation_invalid");
+  if (receipt?.body_free !== true) issues.push("post_compact_plan_attachment_receipt_body_policy_invalid");
+  if (Number(receipt?.max_plan_tokens || 0) !== GROUP_POST_COMPACT_PLAN_MAX_TOKENS) issues.push("post_compact_plan_attachment_budget_invalid");
+  if (Number(receipt?.attachment_token_count || 0) > GROUP_POST_COMPACT_PLAN_MAX_TOKENS) issues.push("post_compact_plan_attachment_budget_exceeded");
+  if (![0, 1].includes(Number(receipt?.attachment_count || 0))) issues.push("post_compact_plan_attachment_count_invalid");
+  if (Number(receipt?.attachment_count || 0) === 1 && (!String(receipt?.selected_task_id || "") || !String(receipt?.plan_hash || "") || !String(receipt?.attachment_body_checksum || ""))) {
+    issues.push("post_compact_plan_attachment_manifest_incomplete");
+  }
+  const forbiddenKeys = new Set(["body", "content", "plan", "plan_body", "plan_snapshot", "attachment"]);
+  const visit = (value: any): boolean => {
+    if (!value || typeof value !== "object") return false;
+    for (const [key, nested] of Object.entries(value)) {
+      if (forbiddenKeys.has(String(key).toLowerCase())) return true;
+      if (visit(nested)) return true;
+    }
+    return false;
+  };
+  if (visit(receipt)) issues.push("post_compact_plan_attachment_receipt_contains_body");
+  if (String(receipt?.receipt_checksum || "") !== postCompactPlanAttachmentReceiptChecksum(receipt)) issues.push("post_compact_plan_attachment_receipt_checksum_invalid");
+  if (expected.groupId !== undefined && String(receipt?.group_id || "") !== String(expected.groupId || "")) issues.push("post_compact_plan_attachment_group_mismatch");
+  if (expected.groupSessionId !== undefined && String(receipt?.group_session_id || "") !== String(expected.groupSessionId || "")) issues.push("post_compact_plan_attachment_session_mismatch");
+  if (expected.attachment !== undefined) {
+    const attachment = expected.attachment || null;
+    const attachmentCount = attachment ? 1 : 0;
+    const bodyChecksum = attachment ? crypto.createHash("sha256").update(String(attachment.body || "")).digest("hex") : "";
+    const manifest = attachment ? {
+      task_id: String(attachment.taskId || attachment.task_id || ""),
+      plan_hash: String(attachment.planHash || attachment.plan_hash || ""),
+      body_checksum: bodyChecksum,
+      token_count: Number(attachment.tokenCount || attachment.token_count || 0),
+      plan_mode_active: attachment.planModeActive === true || attachment.plan_mode_active === true,
+      truncated: attachment.truncated === true,
+    } : null;
+    const manifestChecksum = crypto.createHash("sha256").update(JSON.stringify(manifest)).digest("hex");
+    if (attachmentCount !== Number(receipt?.attachment_count || 0)) issues.push("post_compact_plan_attachment_count_mismatch");
+    if (manifestChecksum !== String(receipt?.attachment_manifest_checksum || "")) issues.push("post_compact_plan_attachment_manifest_mismatch");
+    if (bodyChecksum !== String(receipt?.attachment_body_checksum || "")) issues.push("post_compact_plan_attachment_body_checksum_mismatch");
+  }
+  return { valid: issues.length === 0, issues };
+}
+
+export function buildGroupPostCompactPlanAttachmentProjection(tasks: any[] = [], options: any = {}) {
+  const groupId = String(options.groupId || options.group_id || "").trim();
+  const groupSessionId = String(options.groupSessionId || options.group_session_id || "").trim();
+  if (!groupId || !groupSessionId.startsWith("gcs_")) throw new Error("exact_group_session_required_for_post_compact_plan_attachment");
+  const sourceTasks = Array.isArray(tasks) ? tasks : [];
+  const exactTasks = sourceTasks.filter((task: any) => String(task?.group_id || task?.groupId || "").trim() === groupId
+    && String(task?.group_session_id || task?.groupSessionId || "").trim() === groupSessionId);
+  const planRows = exactTasks.map((task: any) => ({ task, planSource: postCompactPlanObject(task) })).filter((row: any) => !!row.planSource);
+  const activeRows = planRows.filter((row: any) => !postCompactPlanTaskIsTerminal(row.task));
+  const explicitCurrentTaskId = String(options.currentTaskId || options.current_task_id || "").trim();
+  const sessionMessages = Array.isArray(options.sessionMessages || options.session_messages) ? (options.sessionMessages || options.session_messages) : [];
+  const recentMessageTaskIds = [...sessionMessages].reverse().map((message: any) => String(
+    message?.task_id || message?.taskId || message?.receipt?.taskId || message?.receipt?.task_id || message?.delivery_summary?.task_id || ""
+  ).trim()).filter(Boolean);
+  let selectedRow: any = null;
+  let selectionReason = "no_active_plan";
+  if (explicitCurrentTaskId) {
+    selectedRow = planRows.find((row: any) => postCompactPlanTaskId(row.task) === explicitCurrentTaskId) || null;
+    if (selectedRow) selectionReason = "explicit_current_task";
+  }
+  if (!selectedRow) {
+    for (const taskId of recentMessageTaskIds) {
+      selectedRow = activeRows.find((row: any) => postCompactPlanTaskId(row.task) === taskId) || null;
+      if (selectedRow) {
+        selectionReason = "latest_session_message_task";
+        break;
+      }
+    }
+  }
+  if (!selectedRow && activeRows.length) {
+    selectedRow = [...activeRows].sort((a: any, b: any) => {
+      const aState = postCompactPlanConfirmationState(a.task, a.planSource.plan);
+      const bState = postCompactPlanConfirmationState(b.task, b.planSource.plan);
+      return Number(bState.planModeActive) - Number(aState.planModeActive)
+        || postCompactTaskUpdatedAtMs(b.task) - postCompactTaskUpdatedAtMs(a.task)
+        || postCompactPlanTaskId(b.task).localeCompare(postCompactPlanTaskId(a.task));
+    })[0];
+    selectionReason = "latest_active_session_plan";
+  }
+
+  let attachment: any = null;
+  let confirmation = { intakeState: "", confirmed: false, planModeActive: false, confirmationStatus: "none" };
+  if (selectedRow) {
+    const task = selectedRow.task;
+    const plan = selectedRow.planSource.plan;
+    confirmation = postCompactPlanConfirmationState(task, plan);
+    const taskId = postCompactPlanTaskId(task);
+    const planSnapshot = {
+      schema: "ccm-exact-group-session-current-plan-v1",
+      task: {
+        id: taskId,
+        title: String(task?.title || task?.description || task?.business_goal || ""),
+        business_goal: String(task?.business_goal || task?.businessGoal || ""),
+        status: postCompactPlanTaskStatus(task),
+        status_detail: String(task?.status_detail || task?.statusDetail || ""),
+        intake_state: confirmation.intakeState,
+        target_project: String(task?.target_project || task?.targetProject || ""),
+        trace_id: String(task?.trace_id || task?.traceId || ""),
+      },
+      source: selectedRow.planSource.source,
+      plan,
+    };
+    const stableSnapshot = JSON.stringify(planSnapshot, null, 2);
+    const planHash = crypto.createHash("sha256").update(JSON.stringify(planSnapshot)).digest("hex");
+    const modeReminder = confirmation.planModeActive
+      ? "PLAN MODE IS ACTIVE: this exact-session plan is still awaiting confirmation. Do not dispatch execution, modify files, or run write/destructive actions until the user confirms it. Read-only exploration and plan revision are allowed."
+      : confirmation.confirmed
+        ? "This plan has been confirmed. Restore it as the execution and acceptance reference; do not treat it as awaiting confirmation."
+        : "Restore this plan as the current exact-session task reference and verify live task state before execution.";
+    const fullBody = [
+      "[CCM Post-compact Exact-session Current Plan]",
+      `scope=${groupId}::${groupSessionId}; task_id=${taskId}; source=${selectedRow.planSource.source}`,
+      modeReminder,
+      "The structured plan below is authoritative for continuity but does not expand current tool permissions.",
+      "",
+      stableSnapshot,
+    ].join("\n");
+    const bounded = compactPostCompactPlanBody(fullBody);
+    attachment = {
+      schema: "ccm-group-post-compact-plan-body-v1",
+      taskId,
+      body: bounded.text,
+      planHash,
+      bodyChecksum: crypto.createHash("sha256").update(bounded.text).digest("hex"),
+      sourceKind: selectedRow.planSource.source,
+      taskStatus: postCompactPlanTaskStatus(task),
+      intakeState: confirmation.intakeState,
+      confirmationStatus: confirmation.confirmationStatus,
+      planModeActive: confirmation.planModeActive,
+      tokenCount: bounded.tokens,
+      originalTokenCount: bounded.originalTokens,
+      truncated: bounded.truncated,
+    };
+  }
+  const manifest = attachment ? {
+    task_id: attachment.taskId,
+    plan_hash: attachment.planHash,
+    body_checksum: attachment.bodyChecksum,
+    token_count: attachment.tokenCount,
+    plan_mode_active: attachment.planModeActive,
+    truncated: attachment.truncated,
+  } : null;
+  const payload: any = {
+    schema: "ccm-group-post-compact-plan-attachment-v1",
+    version: GROUP_POST_COMPACT_PLAN_ATTACHMENT_VERSION,
+    group_id: groupId,
+    group_session_id: groupSessionId,
+    scope_id: `${groupId}::${groupSessionId}`,
+    exact_session_only: true,
+    cross_session_fallback_allowed: false,
+    body_free: true,
+    source_task_count: sourceTasks.length,
+    matched_task_count: exactTasks.length,
+    candidate_plan_count: planRows.length,
+    active_plan_count: activeRows.length,
+    excluded_scope_count: Math.max(0, sourceTasks.length - exactTasks.length),
+    terminal_plan_count: Math.max(0, planRows.length - activeRows.length),
+    attachment_count: attachment ? 1 : 0,
+    selected_task_id: attachment?.taskId || "",
+    selection_reason: selectionReason,
+    task_status: attachment?.taskStatus || "",
+    intake_state: attachment?.intakeState || "",
+    confirmation_status: attachment?.confirmationStatus || "none",
+    plan_mode_active: attachment?.planModeActive === true,
+    plan_hash: attachment?.planHash || "",
+    attachment_body_checksum: attachment?.bodyChecksum || "",
+    attachment_token_count: Number(attachment?.tokenCount || 0),
+    original_token_count: Number(attachment?.originalTokenCount || 0),
+    max_plan_tokens: GROUP_POST_COMPACT_PLAN_MAX_TOKENS,
+    budget_source: "claude_code_POST_COMPACT_TOKEN_BUDGET",
+    truncated: attachment?.truncated === true,
+    attachment_manifest_checksum: crypto.createHash("sha256").update(JSON.stringify(manifest)).digest("hex"),
+    created_at: String(options.now || new Date().toISOString()),
+  };
+  const receipt = { ...payload, receipt_checksum: postCompactPlanAttachmentReceiptChecksum(payload) };
+  return { attachment, receipt };
+}
+
+function postCompactDynamicContextDeltaReceiptChecksum(receipt: any) {
+  const payload = { ...(receipt || {}) };
+  delete payload.receipt_checksum;
+  delete payload.checksum_valid;
+  delete payload.issues;
+  return crypto.createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+}
+
+function dynamicContextTextHash(value: any) {
+  return crypto.createHash("sha256").update(String(value || "")).digest("hex");
+}
+
+function normalizeDynamicContextRows(values: any, kind: "line" | "block") {
+  const rows = new Map<string, any>();
+  for (const raw of Array.isArray(values) ? values : []) {
+    const name = String(raw?.name || raw?.targetId || raw?.target_id || raw?.agentType || raw?.agent_type || "").trim();
+    const text = String(raw?.[kind] || raw?.text || raw?.description || raw?.instructions || "").trim();
+    if (!name || !text) continue;
+    rows.set(name, { name, text, hash: dynamicContextTextHash(text) });
+  }
+  return [...rows.values()].sort((left, right) => left.name.localeCompare(right.name));
+}
+
+function collectToolReferenceNames(value: any, names: Set<string>, depth = 0) {
+  if (!value || depth > 8) return;
+  if (Array.isArray(value)) {
+    value.forEach(item => collectToolReferenceNames(item, names, depth + 1));
+    return;
+  }
+  if (typeof value !== "object") return;
+  const type = String(value.type || "").toLowerCase();
+  if (["tool_use", "server_tool_use"].includes(type)) {
+    const name = String(value.name || value.tool || value.tool_name || "").trim();
+    if (name) names.add(name);
+  }
+  if (type === "tool_reference") {
+    const name = String(value.tool_name || value.toolName || value.name || "").trim();
+    if (name) names.add(name);
+  }
+  for (const key of ["content", "blocks", "items", "result", "tool_result", "toolResult"]) {
+    if (value[key] !== undefined) collectToolReferenceNames(value[key], names, depth + 1);
+  }
+}
+
+export function extractGroupPreCompactLoadedToolNames(messages: any[] = [], carriedValues: any[] = []) {
+  const names = new Set<string>();
+  const addNames = (values: any) => {
+    for (const value of Array.isArray(values) ? values : []) {
+      const name = String(value || "").trim();
+      if (name) names.add(name);
+    }
+  };
+  addNames(carriedValues);
+  for (const message of messages || []) {
+    addNames(message?.compactMetadata?.preCompactDiscoveredTools);
+    addNames(message?.compact_metadata?.pre_compact_discovered_tools);
+    addNames(message?.preCompactDiscoveredTools || message?.pre_compact_discovered_tools);
+    addNames(message?.dynamicContextDeltaAttachment?.loadedToolState?.carriedNames);
+    addNames(message?.dynamic_context_delta_attachment?.loaded_tool_state?.carried_names);
+    const explicitCalls = Array.isArray(message?.tool_calls || message?.toolCalls)
+      ? (message.tool_calls || message.toolCalls)
+      : [];
+    for (const call of explicitCalls) {
+      const name = String(call?.name || call?.function?.name || call?.tool || call?.tool_name || "").trim();
+      if (name) names.add(name);
+    }
+    collectToolReferenceNames(messageContentBlocks(message), names);
+  }
+  return [...names].sort();
+}
+
+function buildPreCompactLoadedToolState(catalogTools: any[], messages: any[], carriedValues: any[] = []) {
+  const catalogRows = normalizeDynamicContextRows(catalogTools, "line");
+  const current = new Map(catalogRows.map(row => [row.name, row]));
+  const discoveredNames = extractGroupPreCompactLoadedToolNames(messages, carriedValues)
+    .filter(name => current.has(name) || /^mcp__/i.test(name));
+  const carried = discoveredNames.filter(name => current.has(name));
+  const dropped = discoveredNames.filter(name => !current.has(name));
+  return {
+    schema: "ccm-group-post-compact-loaded-tool-state-v1",
+    version: GROUP_POST_COMPACT_LOADED_TOOL_STATE_VERSION,
+    sourceCount: discoveredNames.length,
+    carriedNames: carried,
+    carriedHashes: carried.map(name => current.get(name)?.hash || ""),
+    droppedNames: dropped,
+  };
+}
+
+function collectDynamicContextDeltaAttachments(values: any[]) {
+  const attachments: any[] = [];
+  const add = (candidate: any) => {
+    if (candidate?.schema === "ccm-group-post-compact-dynamic-context-delta-body-v1") attachments.push(candidate);
+  };
+  for (const value of values || []) {
+    add(value);
+    add(value?.attachment);
+    add(value?.dynamicContextDeltaAttachment || value?.dynamic_context_delta_attachment);
+    add(value?.postCompactDynamicContextDelta || value?.post_compact_dynamic_context_delta);
+    add(value?.postCompactReinject?.dynamicContextDeltaAttachment || value?.post_compact_reinject?.dynamic_context_delta_attachment);
+    for (const candidate of Array.isArray(value?.attachments) ? value.attachments : []) add(candidate);
+  }
+  return attachments;
+}
+
+function reconstructDynamicContextAnnouncements(attachments: any[]) {
+  const createState = () => new Map<string, string>();
+  const state = {
+    deferredTools: createState(),
+    agentListing: createState(),
+    mcpInstructions: createState(),
+  };
+  const apply = (target: Map<string, string>, delta: any) => {
+    const names = Array.isArray(delta?.addedNames) ? delta.addedNames : [];
+    const hashes = Array.isArray(delta?.addedHashes) ? delta.addedHashes : [];
+    names.forEach((name: any, index: number) => target.set(String(name || ""), String(hashes[index] || "")));
+    for (const name of Array.isArray(delta?.removedNames) ? delta.removedNames : []) target.delete(String(name || ""));
+  };
+  for (const attachment of attachments || []) {
+    apply(state.deferredTools, attachment?.deferredTools || attachment?.deferred_tools);
+    apply(state.agentListing, attachment?.agentListing || attachment?.agent_listing);
+    apply(state.mcpInstructions, attachment?.mcpInstructions || attachment?.mcp_instructions);
+  }
+  return state;
+}
+
+function buildDynamicContextCategory(rows: any[], announced: Map<string, string>) {
+  const current = new Map(rows.map(row => [row.name, row]));
+  const added = rows.filter(row => !announced.has(row.name) || (!!announced.get(row.name) && announced.get(row.name) !== row.hash));
+  const removed = [...announced.keys()].filter(name => !current.has(name)).sort();
+  return {
+    addedNames: added.map(row => row.name),
+    addedHashes: added.map(row => row.hash),
+    addedTexts: added.map(row => row.text),
+    removedNames: removed,
+    isInitial: announced.size === 0,
+  };
+}
+
+function dynamicContextAttachmentManifest(attachment: any) {
+  if (!attachment) return null;
+  const category = (value: any) => ({
+    added_names: Array.isArray(value?.addedNames) ? value.addedNames : [],
+    added_hashes: Array.isArray(value?.addedHashes) ? value.addedHashes : [],
+    removed_names: Array.isArray(value?.removedNames) ? value.removedNames : [],
+  });
+  const manifest: any = {
+    deferred_tools: category(attachment.deferredTools || attachment.deferred_tools),
+    agent_listing: category(attachment.agentListing || attachment.agent_listing),
+    mcp_instructions: category(attachment.mcpInstructions || attachment.mcp_instructions),
+    body_checksum: dynamicContextTextHash(attachment.body || ""),
+    token_count: Number(attachment.tokenCount || attachment.token_count || 0),
+    truncated: attachment.truncated === true,
+  };
+  const loadedToolState = attachment.loadedToolState || attachment.loaded_tool_state;
+  if (loadedToolState) {
+    manifest.loaded_tool_state = {
+      schema: String(attachment.loadedToolState?.schema || attachment.loaded_tool_state?.schema || ""),
+      carried_names: Array.isArray(attachment.loadedToolState?.carriedNames)
+        ? attachment.loadedToolState.carriedNames
+        : Array.isArray(attachment.loaded_tool_state?.carried_names) ? attachment.loaded_tool_state.carried_names : [],
+      carried_hashes: Array.isArray(attachment.loadedToolState?.carriedHashes)
+        ? attachment.loadedToolState.carriedHashes
+        : Array.isArray(attachment.loaded_tool_state?.carried_hashes) ? attachment.loaded_tool_state.carried_hashes : [],
+      dropped_names: Array.isArray(attachment.loadedToolState?.droppedNames)
+        ? attachment.loadedToolState.droppedNames
+        : Array.isArray(attachment.loaded_tool_state?.dropped_names) ? attachment.loaded_tool_state.dropped_names : [],
+    };
+  }
+  return manifest;
+}
+
+export function verifyGroupPostCompactDynamicContextDeltaReceipt(receipt: any, expected: any = {}) {
+  const issues: string[] = [];
+  if (receipt?.schema !== "ccm-group-post-compact-dynamic-context-delta-v1"
+    || Number(receipt?.version || 0) !== GROUP_POST_COMPACT_DYNAMIC_CONTEXT_DELTA_VERSION) issues.push("post_compact_dynamic_context_delta_schema_invalid");
+  if (!String(receipt?.group_id || "").trim()) issues.push("post_compact_dynamic_context_delta_group_missing");
+  if (!String(receipt?.group_session_id || "").startsWith("gcs_")) issues.push("post_compact_dynamic_context_delta_exact_session_missing");
+  if (String(receipt?.scope_id || "") !== `${String(receipt?.group_id || "")}::${String(receipt?.group_session_id || "")}`) issues.push("post_compact_dynamic_context_delta_scope_invalid");
+  if (receipt?.exact_session_only !== true || receipt?.cross_session_fallback_allowed !== false) issues.push("post_compact_dynamic_context_delta_isolation_invalid");
+  if (receipt?.body_free !== true) issues.push("post_compact_dynamic_context_delta_receipt_body_policy_invalid");
+  if (!["full", "partial"].includes(String(receipt?.scan_mode || ""))) issues.push("post_compact_dynamic_context_delta_scan_mode_invalid");
+  if (Number(receipt?.max_attachment_tokens || 0) !== GROUP_POST_COMPACT_DYNAMIC_CONTEXT_MAX_TOKENS) issues.push("post_compact_dynamic_context_delta_budget_invalid");
+  if (Number(receipt?.attachment_token_count || 0) > GROUP_POST_COMPACT_DYNAMIC_CONTEXT_MAX_TOKENS) issues.push("post_compact_dynamic_context_delta_budget_exceeded");
+  if (![0, 1].includes(Number(receipt?.attachment_count || 0))) issues.push("post_compact_dynamic_context_delta_attachment_count_invalid");
+  const loadedToolState = receipt?.loaded_tool_state;
+  if (loadedToolState !== undefined && loadedToolState !== null) {
+    if (loadedToolState?.schema !== "ccm-group-post-compact-loaded-tool-state-v1"
+      || Number(loadedToolState?.version || 0) !== GROUP_POST_COMPACT_LOADED_TOOL_STATE_VERSION) issues.push("post_compact_loaded_tool_state_schema_invalid");
+    const carriedNames = Array.isArray(loadedToolState?.carried_names) ? loadedToolState.carried_names.map((name: any) => String(name || "")) : [];
+    const carriedHashes = Array.isArray(loadedToolState?.carried_hashes) ? loadedToolState.carried_hashes.map((hash: any) => String(hash || "")) : [];
+    const droppedNames = Array.isArray(loadedToolState?.dropped_names) ? loadedToolState.dropped_names.map((name: any) => String(name || "")) : [];
+    if (Number(loadedToolState?.carried_count || 0) !== carriedNames.length
+      || carriedHashes.length !== carriedNames.length
+      || Number(loadedToolState?.dropped_count || 0) !== droppedNames.length
+      || Number(loadedToolState?.source_count || 0) !== carriedNames.length + droppedNames.length) issues.push("post_compact_loaded_tool_state_count_invalid");
+    if (new Set(carriedNames).size !== carriedNames.length
+      || new Set(droppedNames).size !== droppedNames.length
+      || carriedNames.some((name: string) => droppedNames.includes(name))) issues.push("post_compact_loaded_tool_state_names_invalid");
+    const stateChecksum = dynamicContextTextHash(JSON.stringify({ carried_names: carriedNames, carried_hashes: carriedHashes, dropped_names: droppedNames }));
+    if (String(loadedToolState?.state_checksum || "") !== stateChecksum) issues.push("post_compact_loaded_tool_state_checksum_invalid");
+  }
+  const forbiddenKeys = new Set(["body", "content", "line", "lines", "block", "blocks", "description", "descriptions", "instructions", "addedtexts", "added_texts"]);
+  const visit = (value: any): boolean => {
+    if (!value || typeof value !== "object") return false;
+    for (const [key, nested] of Object.entries(value)) {
+      if (forbiddenKeys.has(String(key).toLowerCase())) return true;
+      if (visit(nested)) return true;
+    }
+    return false;
+  };
+  if (visit(receipt)) issues.push("post_compact_dynamic_context_delta_receipt_contains_body");
+  if (String(receipt?.receipt_checksum || "") !== postCompactDynamicContextDeltaReceiptChecksum(receipt)) issues.push("post_compact_dynamic_context_delta_receipt_checksum_invalid");
+  if (expected.groupId !== undefined && String(receipt?.group_id || "") !== String(expected.groupId || "")) issues.push("post_compact_dynamic_context_delta_group_mismatch");
+  if (expected.groupSessionId !== undefined && String(receipt?.group_session_id || "") !== String(expected.groupSessionId || "")) issues.push("post_compact_dynamic_context_delta_session_mismatch");
+  if (expected.attachment !== undefined) {
+    const attachment = expected.attachment || null;
+    const manifest = dynamicContextAttachmentManifest(attachment);
+    const manifestChecksum = crypto.createHash("sha256").update(JSON.stringify(manifest)).digest("hex");
+    if (Number(receipt?.attachment_count || 0) !== (attachment ? 1 : 0)) issues.push("post_compact_dynamic_context_delta_attachment_count_mismatch");
+    if (String(receipt?.attachment_manifest_checksum || "") !== manifestChecksum) issues.push("post_compact_dynamic_context_delta_manifest_mismatch");
+    if (String(receipt?.attachment_body_checksum || "") !== (attachment ? dynamicContextTextHash(attachment.body || "") : "")) issues.push("post_compact_dynamic_context_delta_body_checksum_mismatch");
+  }
+  return { valid: issues.length === 0, issues };
+}
+
+export function buildGroupPostCompactDynamicContextDeltaProjection(catalog: any = {}, options: any = {}) {
+  const groupId = String(options.groupId || options.group_id || "").trim();
+  const groupSessionId = String(options.groupSessionId || options.group_session_id || "").trim();
+  if (!groupId || !groupSessionId.startsWith("gcs_")) throw new Error("exact_group_session_required_for_post_compact_dynamic_context_delta");
+  const scanMode = String(options.scanMode || options.scan_mode || "full").toLowerCase() === "partial" ? "partial" : "full";
+  const priorValues = scanMode === "partial" ? [
+    ...(Array.isArray(options.preservedMessages || options.preserved_messages) ? (options.preservedMessages || options.preserved_messages) : []),
+    ...(Array.isArray(options.priorAttachments || options.prior_attachments) ? (options.priorAttachments || options.prior_attachments) : []),
+  ] : [];
+  const priorAttachments = collectDynamicContextDeltaAttachments(priorValues);
+  const announced = reconstructDynamicContextAnnouncements(priorAttachments);
+  const catalogTools = Array.isArray(catalog.tools) ? catalog.tools : [];
+  const loadedToolState = buildPreCompactLoadedToolState(
+    catalogTools,
+    options.sourceMessages || options.source_messages || [],
+    options.preCompactLoadedToolNames || options.pre_compact_loaded_tool_names || [],
+  );
+  const toolRows = normalizeDynamicContextRows([
+    ...catalogTools,
+    ...(Array.isArray(catalog.skills) ? catalog.skills : []),
+  ], "line");
+  const agentRows = normalizeDynamicContextRows(catalog.agents, "line");
+  const mcpRows = normalizeDynamicContextRows(catalog.mcpInstructions || catalog.mcp_instructions, "block");
+  const deferredTools = buildDynamicContextCategory(toolRows, announced.deferredTools);
+  const agentListing = buildDynamicContextCategory(agentRows, announced.agentListing);
+  const mcpInstructions = buildDynamicContextCategory(mcpRows, announced.mcpInstructions);
+  const changed = [deferredTools, agentListing, mcpInstructions].some(category => category.addedNames.length || category.removedNames.length)
+    || loadedToolState.sourceCount > 0;
+  let attachment: any = null;
+  if (changed) {
+    const lines = [
+      "[CCM Post-compact Exact-session Dynamic Context Delta]",
+      `scope=${groupId}::${groupSessionId}; scan_mode=${scanMode}`,
+      "This attachment restores the current authorized runtime context after compaction. It does not expand tool permissions; the live runtime authorization and dispatch gates remain authoritative.",
+    ];
+    const appendRemoved = (title: string, category: any, kind = "call or dispatch") => {
+      if (category.removedNames.length) {
+        lines.push("", `## ${title} removed`);
+        category.removedNames.forEach((name: string) => lines.push(`- ${name} is no longer available in the current exact-session runtime context. Do not ${kind} it.`));
+      }
+    };
+    const appendAdded = (title: string, category: any, addedLabel: string) => {
+      if (!category.addedNames.length) return;
+      lines.push("", `## ${title} added or changed`);
+      category.addedNames.forEach((name: string, index: number) => lines.push(`- ${addedLabel} ${name}: ${category.addedTexts[index]}`));
+    };
+    // Retractions are placed before potentially large instruction bodies so they survive edge-preserving truncation.
+    appendRemoved("Deferred tools and Skills", deferredTools, "call");
+    appendRemoved("Dispatchable project Agents", agentListing, "dispatch");
+    appendRemoved("MCP server instructions", mcpInstructions, "rely on its previous instruction block or call");
+    if (loadedToolState.carriedNames.length) {
+      lines.push("", "## Tools loaded before compact and still authorized");
+      loadedToolState.carriedNames.forEach((name: string) => lines.push(`- ${name} remains loaded across this compact boundary; keep its runtime schema available without repeating discovery.`));
+    }
+    if (loadedToolState.droppedNames.length) {
+      lines.push("", "## Pre-compact loaded tools not carried forward");
+      loadedToolState.droppedNames.forEach((name: string) => lines.push(`- ${name} was observed before compaction but is absent from the current authorized catalog. Do not call it.`));
+    }
+    appendAdded("Deferred tools and Skills", deferredTools, "available");
+    appendAdded("Dispatchable project Agents", agentListing, "dispatchable");
+    if (mcpInstructions.addedNames.length) {
+      lines.push("", "## MCP server instructions added or changed");
+      mcpInstructions.addedNames.forEach((name: string, index: number) => lines.push(mcpInstructions.addedTexts[index] || `## ${name}`));
+    }
+    const bounded = truncatePostCompactBodyPreservingEdges(lines.join("\n"), GROUP_POST_COMPACT_DYNAMIC_CONTEXT_MAX_TOKENS);
+    attachment = {
+      schema: "ccm-group-post-compact-dynamic-context-delta-body-v1",
+      scanMode,
+      deferredTools: { ...deferredTools, addedLines: deferredTools.addedTexts, addedTexts: undefined },
+      agentListing: { ...agentListing, addedLines: agentListing.addedTexts, addedTexts: undefined },
+      mcpInstructions: { ...mcpInstructions, addedBlocks: mcpInstructions.addedTexts, addedTexts: undefined },
+      loadedToolState,
+      body: bounded.text,
+      bodyChecksum: dynamicContextTextHash(bounded.text),
+      tokenCount: bounded.tokens,
+      originalTokenCount: bounded.originalTokens,
+      truncated: bounded.truncated,
+    };
+  }
+  const manifest = dynamicContextAttachmentManifest(attachment);
+  const catalogManifest = {
+    tools: toolRows.map(row => ({ name: row.name, hash: row.hash })),
+    agents: agentRows.map(row => ({ name: row.name, hash: row.hash })),
+    mcp_instructions: mcpRows.map(row => ({ name: row.name, hash: row.hash })),
+  };
+  const announcedManifest = {
+    tools: [...announced.deferredTools.entries()].sort(),
+    agents: [...announced.agentListing.entries()].sort(),
+    mcp_instructions: [...announced.mcpInstructions.entries()].sort(),
+  };
+  const payload: any = {
+    schema: "ccm-group-post-compact-dynamic-context-delta-v1",
+    version: GROUP_POST_COMPACT_DYNAMIC_CONTEXT_DELTA_VERSION,
+    group_id: groupId,
+    group_session_id: groupSessionId,
+    scope_id: `${groupId}::${groupSessionId}`,
+    exact_session_only: true,
+    cross_session_fallback_allowed: false,
+    body_free: true,
+    scan_mode: scanMode,
+    prior_attachment_count: priorAttachments.length,
+    attachment_count: attachment ? 1 : 0,
+    max_attachment_tokens: GROUP_POST_COMPACT_DYNAMIC_CONTEXT_MAX_TOKENS,
+    attachment_token_count: Number(attachment?.tokenCount || 0),
+    original_token_count: Number(attachment?.originalTokenCount || 0),
+    truncated: attachment?.truncated === true,
+    deferred_tools: {
+      current_count: toolRows.length,
+      added_names: deferredTools.addedNames,
+      added_hashes: deferredTools.addedHashes,
+      removed_names: deferredTools.removedNames,
+    },
+    agent_listing: {
+      current_count: agentRows.length,
+      added_names: agentListing.addedNames,
+      added_hashes: agentListing.addedHashes,
+      removed_names: agentListing.removedNames,
+    },
+    mcp_instructions: {
+      current_count: mcpRows.length,
+      added_names: mcpInstructions.addedNames,
+      added_hashes: mcpInstructions.addedHashes,
+      removed_names: mcpInstructions.removedNames,
+    },
+    loaded_tool_state: {
+      schema: loadedToolState.schema,
+      version: loadedToolState.version,
+      source_count: loadedToolState.sourceCount,
+      carried_count: loadedToolState.carriedNames.length,
+      carried_names: loadedToolState.carriedNames,
+      carried_hashes: loadedToolState.carriedHashes,
+      dropped_count: loadedToolState.droppedNames.length,
+      dropped_names: loadedToolState.droppedNames,
+      state_checksum: dynamicContextTextHash(JSON.stringify({
+        carried_names: loadedToolState.carriedNames,
+        carried_hashes: loadedToolState.carriedHashes,
+        dropped_names: loadedToolState.droppedNames,
+      })),
+    },
+    catalog_checksum: crypto.createHash("sha256").update(JSON.stringify(catalogManifest)).digest("hex"),
+    announced_state_checksum: crypto.createHash("sha256").update(JSON.stringify(announcedManifest)).digest("hex"),
+    attachment_body_checksum: attachment ? dynamicContextTextHash(attachment.body || "") : "",
+    attachment_manifest_checksum: crypto.createHash("sha256").update(JSON.stringify(manifest)).digest("hex"),
+    created_at: String(options.now || new Date().toISOString()),
+  };
+  const receipt = { ...payload, receipt_checksum: postCompactDynamicContextDeltaReceiptChecksum(payload) };
+  return { attachment, receipt };
+}
+
 export function buildGroupMicroCompactPlan(messages: any[], options: any = {}) {
   const maxChars = Math.max(600, Number(options.maxChars || options.max_chars || 1800));
   const includeUser = options.includeUser === true || options.include_user === true;
@@ -1974,6 +4700,7 @@ export function buildPostCompactReinjectionPlan(messages: any[], microCompact: a
   const fileBudget = Math.max(1, Number(options.fileBudget || options.file_budget || GROUP_POST_COMPACT_FILE_BUDGET));
   const skillBudget = Math.max(1, Number(options.skillBudget || options.skill_budget || GROUP_POST_COMPACT_SKILL_BUDGET));
   const verificationBudget = Math.max(1, Number(options.verificationBudget || options.verification_budget || GROUP_POST_COMPACT_VERIFICATION_BUDGET));
+  const taskStatusBudget = Math.max(1, Number(options.taskStatusBudget || options.task_status_budget || GROUP_POST_COMPACT_TASK_STATUS_BUDGET));
   const fileRows: any[] = [];
   const skillRows: any[] = [];
   const verificationRows: any[] = [];
@@ -2020,20 +4747,88 @@ export function buildPostCompactReinjectionPlan(messages: any[], microCompact: a
     }
     return result;
   };
-  const files = uniqueRows(fileRows, fileBudget);
+  const fileCandidates = uniqueRows(fileRows, Math.max(fileBudget, fileRows.length || fileBudget));
+  const exactGroupId = String(options.groupId || options.group_id || "").trim();
+  const exactGroupSessionId = String(options.groupSessionId || options.group_session_id || "").trim();
+  const preservedFileDedupProjection = exactGroupId && exactGroupSessionId.startsWith("gcs_")
+    ? buildGroupPostCompactFileRestoreDedupProjection(fileCandidates, options.preservedMessages || options.preserved_messages || [], {
+      groupId: exactGroupId,
+      groupSessionId: exactGroupSessionId,
+      fileBudget,
+      now: options.now,
+    })
+    : null;
+  const invokedSkillAttachmentProjection = exactGroupId && exactGroupSessionId.startsWith("gcs_")
+    ? buildGroupPostCompactInvokedSkillAttachmentProjection(options.sessionMessages || options.session_messages || messages, {
+      groupId: exactGroupId,
+      groupSessionId: exactGroupSessionId,
+      singleSkillMaxTokens: options.invokedSkillSingleMaxTokens || options.invoked_skill_single_max_tokens,
+      totalMaxTokens: options.invokedSkillsTotalMaxTokens || options.invoked_skills_total_max_tokens,
+      skillCatalog: options.skillCatalog || options.skill_catalog,
+      now: options.now,
+    })
+    : null;
+  const planAttachmentProjection = exactGroupId && exactGroupSessionId.startsWith("gcs_")
+    ? buildGroupPostCompactPlanAttachmentProjection(options.tasks || options.activeTasks || options.active_tasks || [], {
+      groupId: exactGroupId,
+      groupSessionId: exactGroupSessionId,
+      currentTaskId: options.currentTaskId || options.current_task_id,
+      sessionMessages: options.sessionMessages || options.session_messages || messages,
+      now: options.now,
+    })
+    : null;
+  const dynamicContextDeltaProjection = exactGroupId && exactGroupSessionId.startsWith("gcs_")
+    ? buildGroupPostCompactDynamicContextDeltaProjection(options.dynamicContextCatalog || options.dynamic_context_catalog || {}, {
+      groupId: exactGroupId,
+      groupSessionId: exactGroupSessionId,
+      scanMode: options.dynamicContextScanMode || options.dynamic_context_scan_mode || "full",
+      sourceMessages: options.sessionMessages || options.session_messages || messages,
+      preCompactLoadedToolNames: options.preCompactLoadedToolNames || options.pre_compact_loaded_tool_names || [],
+      preservedMessages: options.preservedMessages || options.preserved_messages || [],
+      priorAttachments: options.priorDynamicContextAttachments || options.prior_dynamic_context_attachments || [],
+      now: options.now,
+    })
+    : null;
+  const files = preservedFileDedupProjection?.files || fileCandidates.slice(-fileBudget);
   const skills = uniqueRows(skillRows, skillBudget);
   const verification = uniqueRows(verificationRows, verificationBudget);
   const blockers = uniqueRows(blockerRows, verificationBudget);
+  const taskStatusMap = new Map<string, any>();
+  for (const row of Array.isArray(options.taskStatuses || options.task_statuses) ? (options.taskStatuses || options.task_statuses) : []) {
+    const taskId = String(row?.task_id || row?.taskId || "").trim();
+    const value = compactText(row?.value || "", 1200);
+    if (!taskId || !value) continue;
+    taskStatusMap.delete(taskId);
+    taskStatusMap.set(taskId, { ...row, task_id: taskId, kind: "task_status", value });
+  }
+  const taskStatuses = [...taskStatusMap.values()].slice(-taskStatusBudget);
   return {
     schema: "ccm-post-compact-reinjection-v1",
     version: GROUP_POST_COMPACT_REINJECT_VERSION,
     strategy: "restore_artifact_hints_after_summary_compact",
-    budgets: { files: fileBudget, skills: skillBudget, verification: verificationBudget },
+    budgets: {
+      files: fileBudget,
+      skills: skillBudget,
+      verification: verificationBudget,
+      taskStatuses: taskStatusBudget,
+      invokedSkillSingleTokens: GROUP_POST_COMPACT_INVOKED_SKILL_MAX_TOKENS,
+      invokedSkillsTotalTokens: GROUP_POST_COMPACT_INVOKED_SKILLS_TOTAL_MAX_TOKENS,
+      currentPlanTokens: GROUP_POST_COMPACT_PLAN_MAX_TOKENS,
+      dynamicContextTokens: GROUP_POST_COMPACT_DYNAMIC_CONTEXT_MAX_TOKENS,
+    },
     files,
     skills,
     verification,
     blockers,
-    hasCandidates: !!(files.length || skills.length || verification.length || blockers.length),
+    taskStatuses,
+    preservedFileDedup: preservedFileDedupProjection?.receipt || null,
+    invokedSkillAttachments: invokedSkillAttachmentProjection?.attachments || [],
+    invokedSkillAttachmentReceipt: invokedSkillAttachmentProjection?.receipt || null,
+    planAttachment: planAttachmentProjection?.attachment || null,
+    planAttachmentReceipt: planAttachmentProjection?.receipt || null,
+    dynamicContextDeltaAttachment: dynamicContextDeltaProjection?.attachment || null,
+    dynamicContextDeltaReceipt: dynamicContextDeltaProjection?.receipt || null,
+    hasCandidates: !!(files.length || skills.length || verification.length || blockers.length || taskStatuses.length || invokedSkillAttachmentProjection?.attachments?.length || planAttachmentProjection?.attachment || dynamicContextDeltaProjection?.attachment),
   };
 }
 
@@ -2057,6 +4852,7 @@ export function buildGroupPostCompactRecoveryAudit(input: any = {}) {
     skills: Array.isArray(reinjectionPlan?.skills) ? reinjectionPlan.skills.length : 0,
     verification: Array.isArray(reinjectionPlan?.verification) ? reinjectionPlan.verification.length : 0,
     blockers: Array.isArray(reinjectionPlan?.blockers) ? reinjectionPlan.blockers.length : 0,
+    taskStatuses: Array.isArray(reinjectionPlan?.taskStatuses) ? reinjectionPlan.taskStatuses.length : 0,
   };
   const addCheck = (checks: any[], id: string, label: string, pass: boolean, severity: string, detail: string, evidence: any[] = []) => {
     checks.push({
@@ -2075,7 +4871,7 @@ export function buildGroupPostCompactRecoveryAudit(input: any = {}) {
   addCheck(checks, "summary_checksum_present", "summary checksum present", summaryChecksum.length >= 12, "fatal", summaryChecksum ? `checksum=${summaryChecksum}` : "missing summary checksum");
   addCheck(checks, "summary_digest_available", "summary digest available", !!String(input.messageDigest || "").trim() || !!Object.keys(input.conversationSummary || {}).length, "high", "conversation summary can be rendered for child-agent packet");
   addCheck(checks, "preserved_segment_recorded", "preserved raw segment recorded", preservedSegment?.schema === "ccm-group-preserved-segment-v1" && Number(preservedSegment.preservedMessageCount || 0) > 0, "high", preservedSegment?.schema ? `preserved=${preservedSegment.preservedMessageCount || 0}, first=${preservedSegment.firstPreservedMessageId || ""}, last=${preservedSegment.lastPreservedMessageId || ""}` : "missing preservedSegment");
-  addCheck(checks, "post_compact_reinject_plan_recorded", "post compact reinjection plan recorded", reinjectionPlan?.schema === "ccm-post-compact-reinjection-v1", "high", reinjectionPlan?.schema ? `candidates=${candidateCounts.files + candidateCounts.skills + candidateCounts.verification + candidateCounts.blockers}` : "missing reinjection plan");
+  addCheck(checks, "post_compact_reinject_plan_recorded", "post compact reinjection plan recorded", reinjectionPlan?.schema === "ccm-post-compact-reinjection-v1", "high", reinjectionPlan?.schema ? `candidates=${candidateCounts.files + candidateCounts.skills + candidateCounts.verification + candidateCounts.blockers + candidateCounts.taskStatuses}` : "missing reinjection plan");
   addCheck(checks, "context_budget_recorded", "context budget recorded", Number(contextBudget?.estimated_tokens || 0) > 0 && Number(contextBudget?.max_tokens || 0) > 0, "medium", `estimated=${contextBudget?.estimated_tokens || 0}, max=${contextBudget?.max_tokens || 0}, pressure=${contextBudget?.pressure ?? ""}`);
   addCheck(checks, "post_compact_warning_suppressed", "post compact warning suppressed until next sample", contextPressureWarning?.schema === "ccm-group-compact-warning-v1" && contextPressureWarning.suppressed === true, "medium", contextPressureWarning?.schema ? `level=${contextPressureWarning.level || ""}, suppressed=${contextPressureWarning.suppressed === true}` : "missing context pressure warning");
   addCheck(checks, "ptl_state_consistent", "PTL emergency and recovery are mutually exclusive", !(ptlEmergency?.engaged && ptlRecovery?.recovered), "fatal", `emergency=${ptlEmergency?.engaged === true}, recovery=${ptlRecovery?.recovered === true}`);
@@ -2121,6 +4917,27 @@ export function buildGroupPostCompactRecoveryAudit(input: any = {}) {
 export function buildGroupPostCompactCleanupAudit(input: any = {}) {
   const boundary = input.boundary || {};
   const restore = boundary.post_compact_restore || {};
+  const groupId = String(input.groupId || "");
+  const groupSessionId = String(input.groupSessionId || input.group_session_id || "");
+  const partialSidecarOnly = input.partialSidecarOnly === true;
+  const scopeId = groupId && groupSessionId ? `${groupId}::${groupSessionId}` : "";
+  const compactSource = {
+    kind: "group_main_agent",
+    querySource: `group_main:${scopeId}`,
+    mainThreadEquivalent: true,
+    taskAgentSessionId: "",
+    nativeSessionId: "",
+  };
+  const cleanupScope = {
+    kind: partialSidecarOnly ? "exact_group_session_partial_sidecar" : "exact_group_session_and_descendant_provider_state",
+    groupId,
+    groupSessionId,
+    scopeId,
+    allowsExactGroupSessionReset: !partialSidecarOnly,
+    allowsDescendantProviderReset: !partialSidecarOnly,
+    allowsOtherGroupSessionReset: false,
+    allowsGlobalReset: false,
+  };
   const microCompact = input.microCompact || restore.microCompact || null;
   const reinjectionPlan = input.postCompactReinject || restore.reinjectionPlan || null;
   const recoveryAudit = input.postCompactRecoveryAudit || restore.recoveryAudit || null;
@@ -2143,6 +4960,27 @@ export function buildGroupPostCompactCleanupAudit(input: any = {}) {
       evidence: evidence.map(item => compactText(item, 260)).filter(Boolean).slice(0, 6),
     });
   };
+  addCheck(
+    "exact_group_session_bound",
+    "cleanup is bound to one exact group session",
+    !!groupId && groupSessionId.startsWith("gcs_") && scopeId === `${groupId}::${groupSessionId}`,
+    "fatal",
+    scopeId || "missing exact group-session scope"
+  );
+  addCheck(
+    "main_agent_source_qualified",
+    "cleanup source is the group main Agent",
+    compactSource.kind === "group_main_agent" && compactSource.mainThreadEquivalent === true,
+    "fatal",
+    `${compactSource.kind}; querySource=${compactSource.querySource}`
+  );
+  addCheck(
+    "cross_scope_reset_forbidden",
+    "cleanup cannot reset other group sessions or global Agent state",
+    cleanupScope.allowsOtherGroupSessionReset === false && cleanupScope.allowsGlobalReset === false,
+    "fatal",
+    `otherGroupSession=${cleanupScope.allowsOtherGroupSessionReset}; global=${cleanupScope.allowsGlobalReset}`
+  );
   addCheck(
     "microcompact_tracking_reset_policy",
     "microcompact tracking reset policy recorded",
@@ -2224,8 +5062,8 @@ export function buildGroupPostCompactCleanupAudit(input: any = {}) {
   const cleanupActions = [
     {
       id: "reset_microcompact_tracking",
-      action: "reset_derived_microcompact_state",
-      status: "recorded",
+      action: partialSidecarOnly ? "retain_derived_state_without_primary_boundary" : "reset_exact_group_session_derived_microcompact_state",
+      status: partialSidecarOnly ? "not_applicable" : "recorded",
       evidence: microCompact?.schema || "no_microcompact_records",
     },
     {
@@ -2259,8 +5097,8 @@ export function buildGroupPostCompactCleanupAudit(input: any = {}) {
       evidence: apiMicroCompactEditPlan?.planChecksum || "",
     },
   ];
-  return {
-    schema: "ccm-post-compact-cleanup-audit-v1",
+  const payload: any = {
+    schema: "ccm-post-compact-cleanup-audit-v2",
     version: GROUP_POST_COMPACT_CLEANUP_AUDIT_VERSION,
     status,
     pass: status === "pass",
@@ -2270,18 +5108,22 @@ export function buildGroupPostCompactCleanupAudit(input: any = {}) {
         ? "dispatch_with_cleanup_warning_and_rebuild_context"
         : "repair_cleanup_contract_before_dispatch",
     createdAt: input.now || new Date().toISOString(),
-    groupId: String(input.groupId || ""),
+    groupId,
+    groupSessionId,
+    scopeId,
+    compactSource,
+    cleanupScope,
     boundaryId: String(boundary.id || ""),
     compactStrategyDecisionId: String(compactStrategyDecision?.decisionId || ""),
     apiMicroCompactEditPlanId: String(apiMicroCompactEditPlan?.planChecksum || ""),
     mode: String(compactStrategyDecision?.mode || ""),
     transcriptPath,
     summaryChecksum: String(input.summaryChecksum || restore.summaryChecksum || compactStrategyDecision?.summaryChecksum || ""),
-    partialSidecarOnly: input.partialSidecarOnly === true,
+    partialSidecarOnly,
     preserveInvokedSkills: true,
     preserveToolContinuity: true,
-    resetDerivedCompactState: true,
-    childAgentIsolation: "subagent_or_third_party_cli_session_cleanup_must_not_clobber_group_or_global_memory",
+    resetDerivedCompactState: !partialSidecarOnly,
+    childAgentIsolation: "child_provider_compact_may_only_reset_its_exact_tas_native_scope_and_must_not_clobber_group_or_global_memory",
     sourceOfTruth: "group memory json + group messages transcript + typed MEMORY.md sidecars",
     skillHints,
     apiMicroCompactEditPlan,
@@ -2291,6 +5133,7 @@ export function buildGroupPostCompactCleanupAudit(input: any = {}) {
     passedChecks: checks.length - failed.length,
     checkCount: checks.length,
   };
+  return { ...payload, audit_checksum: groupPostCompactCleanupAuditChecksum(payload) };
 }
 
 function buildGroupPartialCompactSidecarSegment(input: any) {
@@ -2310,7 +5153,30 @@ function buildGroupPartialCompactSidecarSegment(input: any) {
     persistentRequirements,
   });
   const microCompact = buildGroupMicroCompactPlan(messagesToSummarize, input.config?.microCompact || input.config?.groupMicroCompact || {});
-  const reinjectionPlan = buildPostCompactReinjectionPlan(messagesToSummarize, microCompact, input.config?.postCompactReinject || {});
+  const reinjectionPlan = buildPostCompactReinjectionPlan(messagesToSummarize, microCompact, {
+    ...(input.config?.postCompactReinject || {}),
+    groupId: input.groupId,
+    groupSessionId: input.groupSessionId,
+    sessionMessages: input.messages || [],
+    preservedMessages: [
+      ...(input.messages || []).slice(0, start),
+      ...(input.messages || []).slice(end + 1),
+    ],
+    taskStatuses: input.postCompactTaskStatuses || input.post_compact_task_statuses || [],
+    tasks: input.activeTasks || input.active_tasks || [],
+    currentTaskId: input.currentTaskId || input.current_task_id || input.config?.currentTaskId || input.config?.current_task_id,
+    dynamicContextCatalog: input.config?.postCompactDynamicContextCatalog || input.config?.post_compact_dynamic_context_catalog || {},
+    dynamicContextScanMode: "partial",
+    preCompactLoadedToolNames: [
+      ...(input.memory?.compactBoundary?.compactMetadata?.preCompactDiscoveredTools || []),
+      ...(input.memory?.compaction?.preCompactDiscoveredTools || []),
+    ],
+    priorDynamicContextAttachments: [
+      input.memory?.compaction?.postCompactReinject?.dynamicContextDeltaAttachment,
+      input.memory?.compactBoundary?.post_compact_restore?.reinjectionPlan?.dynamicContextDeltaAttachment,
+    ].filter(Boolean),
+    now: input.now,
+  });
   const sourceTokens = messagesToSummarize.reduce((sum: number, message: any) => sum + estimateGroupMessageTokens(message), 0);
   const summaryChecksum = crypto.createHash("sha256").update(JSON.stringify(fallback)).digest("hex").slice(0, 24);
   const segmentKey = crypto.createHash("sha256").update([
@@ -2393,6 +5259,7 @@ function buildPartialSidecarOnlyMemory(input: any) {
       transcriptPath: input.transcriptPath,
       compactStrategyDecision,
       postCompactCleanupAudit,
+      postCompactTaskStatusProjection: input.postCompactTaskStatusProjection || previousState.postCompactTaskStatusProjection || null,
       apiMicroCompactEditPlan,
     },
     messageCompression: {
@@ -2404,6 +5271,7 @@ function buildPartialSidecarOnlyMemory(input: any) {
       partialSegments: partialSegments.slice(-GROUP_PARTIAL_COMPACT_SEGMENT_LIMIT),
       compactStrategyDecision,
       postCompactCleanupAudit,
+      postCompactTaskStatusProjection: input.postCompactTaskStatusProjection || input.memory?.messageCompression?.postCompactTaskStatusProjection || null,
       apiMicroCompactEditPlan,
       lastCompressedAt: input.now,
     },
@@ -2625,7 +5493,14 @@ async function callCompactionModel(config: any, system: string, user: string, ma
     const content = anthropic
       ? (data?.content || []).map((part: any) => part?.type === "text" ? part.text : "").join("")
       : data?.choices?.[0]?.message?.content || "";
-    return extractJsonObject(content);
+    return {
+      summary: extractJsonObject(content),
+      usage: data?.usage || null,
+      provider: anthropic ? "anthropic" : "openai",
+      model: String(data?.model || config.model || ""),
+      responseId: String(data?.id || response.headers.get("request-id") || response.headers.get("x-request-id") || ""),
+      stopReason: String(anthropic ? data?.stop_reason || "" : data?.choices?.[0]?.finish_reason || ""),
+    };
   } finally {
     clearTimeout(timeout);
   }
@@ -2655,17 +5530,25 @@ function fitCompactionPromptToTokenBudget(system: string, user: string, maxInput
 
 export function buildGroupCompactionModelRequest(messages: any[], memory: any, fallback: ConversationSummary, config: any = {}) {
   const previous = memory?.conversationSummary || createEmptyConversationSummary();
-  const timeline = buildCompactionTimeline(messages);
+  const summaryInputProjection = buildGroupCompactionSummaryInputProjection(messages, {
+    previousSummary: previous,
+    fallbackSummary: fallback,
+    rebuildFallbackFromProjectedMessages: true,
+    memory,
+    stripReinjectedAttachments: config?.stripReinjectedCompactionAttachments !== false
+      && config?.strip_reinjected_compaction_attachments !== false,
+  });
+  const timeline = buildCompactionTimeline(summaryInputProjection.messages);
   const system = `你是群聊 Agent 会话压缩器。只生成 JSON，不调用工具，不创建任务，不向任何 Agent 派发。
 你的摘要会替代压缩边界之前的原始消息，因此必须保真并支持主 Agent 无缝续跑。
 参考 Claude Code compaction：保留用户明确要求、意图变化、技术决策、文件/代码、错误与修复、已完成、未完成、当前工作和下一步。
 必须合并旧摘要，不能因为新消息覆盖仍有效的旧约束；已完成与待办冲突时，以时间较新的证据为准。
 不要编造文件变更、测试或完成状态。`;
   const candidateUser = `旧结构化摘要：
-${JSON.stringify(previous)}
+${JSON.stringify(summaryInputProjection.previousSummary)}
 
 平台结构化保底摘要：
-${JSON.stringify(fallback)}
+${JSON.stringify(summaryInputProjection.fallbackSummary)}
 
 本次被压缩区间内的全部用户消息（已做长度保护）：
 ${timeline.userMessages.join("\n") || "无"}
@@ -2704,17 +5587,43 @@ ${timeline.timeline.join("\n") || "无"}
       userMessageLimit: 40,
       sourceStrategy: "deterministic_full_history_aggregate_plus_bounded_recent_evidence",
       rawTranscriptPreserved: true,
+      summaryInputProjection: summaryInputProjection.receipt,
     },
   };
 }
 
 async function summarizeWithModel(messages: any[], memory: any, fallback: ConversationSummary, config: any) {
   const request = buildGroupCompactionModelRequest(messages, memory, fallback, config);
-  const result = await callCompactionModel(config, request.system, request.user, request.maxOutputTokens);
-  return {
-    summary: result ? normalizeSummary(result, createEmptyConversationSummary()) : null,
-    requestAudit: request.audit,
-  };
+  try {
+    const result = await callCompactionModel(config, request.system, request.user, request.maxOutputTokens);
+    const compactionUsage = buildGroupCompactionModelUsageReceipt({
+      groupId: config?.groupId || config?.group_id || "",
+      groupSessionId: config?.groupSessionId || config?.group_session_id || "",
+      usage: result?.usage,
+      provider: result?.provider || (config?.format === "anthropic-compatible" ? "anthropic" : "openai"),
+      model: result?.model || config?.model || "",
+      responseId: result?.responseId || "",
+      stopReason: result?.stopReason || "",
+      requestAudit: request.audit,
+      status: result?.usage ? "reported" : "unreported",
+    });
+    return {
+      summary: result?.summary ? normalizeSummary(result.summary, createEmptyConversationSummary()) : null,
+      requestAudit: request.audit,
+      compactionUsage,
+    };
+  } catch (error: any) {
+    error.compactionRequestAudit = request.audit;
+    error.compactionUsage = buildGroupCompactionModelUsageReceipt({
+      groupId: config?.groupId || config?.group_id || "",
+      groupSessionId: config?.groupSessionId || config?.group_session_id || "",
+      provider: config?.format === "anthropic-compatible" ? "anthropic" : "openai",
+      model: config?.model || "",
+      requestAudit: request.audit,
+      status: "failed",
+    });
+    throw error;
+  }
 }
 
 export function buildBoundedRecentGroupContext(messages: any[], fullCount = 5) {
@@ -2729,6 +5638,60 @@ export function buildBoundedRecentGroupContext(messages: any[], fullCount = 5) {
     return `${who} ${content}${suffix}`;
   });
   return rows.join("\n");
+}
+
+export function buildGroupTruePostCompactPayloadBudget(input: any = {}) {
+  const triggerTokens = Math.max(1, Number(input.triggerTokens || input.autoCompactThreshold || GROUP_COMPACT_TRIGGER_TOKENS));
+  const summaryText = String(input.summaryText || input.messageDigest || "");
+  const recentContext = buildBoundedRecentGroupContext(
+    Array.isArray(input.keptMessages) ? input.keptMessages : [],
+    Math.max(3, Number(input.fullCount || 5)),
+  );
+  const components = {
+    summary: estimateGroupTextTokens(summaryText),
+    recent_window: estimateGroupTextTokens(recentContext),
+    reinjection: estimateGroupTextTokens(JSON.stringify(input.postCompactReinject || input.post_compact_reinject || {})),
+    persistent_memory: estimateGroupTextTokens(JSON.stringify({
+      persistentRequirements: Array.isArray(input.persistentRequirements) ? input.persistentRequirements.slice(-12) : [],
+      factAnchors: Array.isArray(input.factAnchors) ? input.factAnchors.slice(-12) : [],
+    })),
+    session_memory_restore: input.sessionMemory || input.session_memory
+      ? estimateGroupTextTokens(JSON.stringify(input.sessionMemory || input.session_memory))
+      : 0,
+    tool_continuity_restore: estimateGroupTextTokens(JSON.stringify(input.toolContinuity || input.tool_continuity || {})),
+  };
+  const payloadProjection = {
+    summaryText,
+    recentContext,
+    postCompactReinject: input.postCompactReinject || input.post_compact_reinject || null,
+    persistentRequirements: Array.isArray(input.persistentRequirements) ? input.persistentRequirements.slice(-12) : [],
+    factAnchors: Array.isArray(input.factAnchors) ? input.factAnchors.slice(-12) : [],
+    sessionMemory: input.sessionMemory || input.session_memory || null,
+    toolContinuity: input.toolContinuity || input.tool_continuity || null,
+  };
+  const contextBudget = buildContextBudget({
+    context: payloadProjection,
+    maxChars: Math.max(48_000, triggerTokens * 4),
+    maxTokens: triggerTokens,
+  });
+  const truePostCompactTokenCount = Number(contextBudget.estimated_tokens || 0);
+  const willRetriggerNextTurn = truePostCompactTokenCount >= triggerTokens;
+  const core = {
+    schema: "ccm-group-true-post-compact-payload-budget-v1",
+    version: GROUP_TRUE_POST_COMPACT_PAYLOAD_VERSION,
+    group_id: String(input.groupId || input.group_id || ""),
+    group_session_id: String(input.groupSessionId || input.group_session_id || ""),
+    trigger_tokens: triggerTokens,
+    true_post_compact_token_count: truePostCompactTokenCount,
+    will_retrigger_next_turn: willRetriggerNextTurn,
+    status: willRetriggerNextTurn ? "recompact_required" : "ready",
+    components,
+    context_budget: contextBudget,
+  };
+  return {
+    ...core,
+    payload_checksum: crypto.createHash("sha256").update(JSON.stringify(core)).digest("hex").slice(0, 24),
+  };
 }
 
 export function buildRelevantHistoricalGroupContext(messages: any[], boundaryIndex: number, query: string, options: any = {}) {
@@ -2775,7 +5738,11 @@ export async function compactGroupConversationMemory(input: {
   force?: boolean;
   rebuild?: boolean;
   partialCompact?: any;
+  activeTasks?: any[];
 }) {
+  const groupId = String(input.groupId || "").trim();
+  const groupSessionId = exactHookLedgerSessionId(String(input.groupSessionId || ""));
+  if (!groupId || !groupSessionId) throw new Error("exact_group_session_required_for_group_memory_compaction");
   const messages = input.messages || [];
   const memory = input.memory || {};
   const previousState = memory.compaction || {};
@@ -2790,6 +5757,14 @@ export async function compactGroupConversationMemory(input: {
 
   const nowMs = Date.now();
   const now = new Date(nowMs).toISOString();
+  const postCompactTaskStatusProjection = buildGroupPostCompactTaskStatusProjection(input.activeTasks || [], {
+    groupId,
+    groupSessionId,
+    currentTaskId: input.config?.currentTaskId || input.config?.current_task_id,
+    taskStatusBudget: input.config?.postCompactReinject?.taskStatusBudget || input.config?.postCompactReinject?.task_status_budget,
+    completedMaxAgeMs: input.config?.postCompactReinject?.completedMaxAgeMs || input.config?.postCompactReinject?.completed_max_age_ms,
+    now,
+  });
   const partialCompact: any = resolvePartialCompactWindow(messages, summarizedThroughIndex, {
     ...(input.config || {}),
     partialCompact: input.partialCompact || input.config?.partialCompact,
@@ -2797,11 +5772,15 @@ export async function compactGroupConversationMemory(input: {
   const partialSidecarSegment = partialCompact?.sidecar
     ? buildGroupPartialCompactSidecarSegment({
       groupId: input.groupId,
+      groupSessionId,
       messages,
       memory,
       partialCompact,
       transcriptPath: input.transcriptPath,
       config: input.config,
+      postCompactTaskStatuses: postCompactTaskStatusProjection.tasks,
+      activeTasks: input.activeTasks || [],
+      currentTaskId: input.config?.currentTaskId || input.config?.current_task_id,
       now,
     })
     : null;
@@ -2813,10 +5792,10 @@ export async function compactGroupConversationMemory(input: {
   };
   const defaultKeepIndex = calculateGroupMessagesToKeepIndex(messages, keepWindowOptions);
   const primaryPartialCompact = partialCompact?.enabled === true && partialCompact?.sidecar !== true;
-  const keepIndex = primaryPartialCompact ? partialCompact.keepIndex : defaultKeepIndex;
-  const messagesToCompact = messages.slice(summarizedThroughIndex + 1, keepIndex);
-  const sourceTokens = messagesToCompact.reduce((sum, message) => sum + estimateGroupMessageTokens(message), 0);
-  const keptActiveTokens = messages.slice(keepIndex).reduce((sum, message) => sum + estimateGroupMessageTokens(message), 0);
+  let keepIndex = primaryPartialCompact ? partialCompact.keepIndex : defaultKeepIndex;
+  let messagesToCompact = messages.slice(summarizedThroughIndex + 1, keepIndex);
+  let sourceTokens = messagesToCompact.reduce((sum, message) => sum + estimateGroupMessageTokens(message), 0);
+  let keptActiveTokens = messages.slice(keepIndex).reduce((sum, message) => sum + estimateGroupMessageTokens(message), 0);
   const previousSummaryTokens = estimateGroupTextTokens(JSON.stringify(memory.conversationSummary || {}));
   const activeTokens = sourceTokens + keptActiveTokens + previousSummaryTokens;
   const triggerTokens = getGroupAutoCompactThreshold(input.config);
@@ -2847,6 +5826,30 @@ export async function compactGroupConversationMemory(input: {
     || primaryPartialCompact
     || preCompactWarning.flags.isAboveAutoCompactThreshold
     || activeMessageCount >= GROUP_COMPACT_MAX_ACTIVE_MESSAGES;
+  let sessionMemoryCompactSelection: any = null;
+  let selectedSessionMemoryMarkdown = "";
+  if (shouldCompactPrimary && messagesToCompact.length > 0) {
+    const selection = await selectGroupSessionMemoryForCompact({
+      groupId,
+      groupSessionId,
+      messages,
+      memory,
+      config: input.config,
+      primaryPartialCompact,
+      defaultKeepIndex,
+      keepWindowOptions,
+      triggerTokens,
+      now,
+    });
+    sessionMemoryCompactSelection = selection.receipt;
+    if (selection.selected === true) {
+      keepIndex = selection.keepIndex;
+      messagesToCompact = messages.slice(summarizedThroughIndex + 1, keepIndex);
+      sourceTokens = messagesToCompact.reduce((sum, message) => sum + estimateGroupMessageTokens(message), 0);
+      keptActiveTokens = messages.slice(keepIndex).reduce((sum, message) => sum + estimateGroupMessageTokens(message), 0);
+      selectedSessionMemoryMarkdown = selection.markdown;
+    }
+  }
   const buildStrategyDecision = (overrides: any = {}) => buildGroupCompactStrategyDecision({
     groupId: input.groupId,
     messages,
@@ -2885,6 +5888,7 @@ export async function compactGroupConversationMemory(input: {
     });
     const postCompactCleanupAudit = buildGroupPostCompactCleanupAudit({
       groupId: input.groupId,
+      groupSessionId,
       boundary: {
         id: partialSidecarSegment.id || "",
         type: "partial-sidecar",
@@ -2916,9 +5920,10 @@ export async function compactGroupConversationMemory(input: {
       now,
       compactStrategyDecision,
       postCompactCleanupAudit,
+      postCompactTaskStatusProjection: postCompactTaskStatusProjection.receipt,
       apiMicroCompactEditPlan,
     });
-    return { compacted: true, partialCompacted: true, memory: nextMemory, keepIndex, partialCompact, partialSegment: partialSidecarSegment, compactStrategyDecision, postCompactCleanupAudit, apiMicroCompactEditPlan };
+    return { compacted: true, partialCompacted: true, memory: nextMemory, keepIndex, partialCompact, partialSegment: partialSidecarSegment, compactStrategyDecision, postCompactCleanupAudit, postCompactTaskStatusProjection: postCompactTaskStatusProjection.receipt, apiMicroCompactEditPlan };
   }
   if (!shouldCompactPrimary || !messagesToCompact.length) {
     const compactStrategyDecision = buildStrategyDecision({
@@ -2951,10 +5956,11 @@ export async function compactGroupConversationMemory(input: {
   }
 
   const failures = Number(previousState.consecutiveFailures || 0);
-  const compactionHookRunId = `gmch_${Date.now().toString(36)}_${crypto.createHash("sha1").update(`${input.groupId || ""}:${now}:${messages.length}`).digest("hex").slice(0, 8)}`;
+  const compactionHookRunId = `gmch_${Date.now().toString(36)}_${crypto.createHash("sha1").update(`${input.groupId || ""}:${groupSessionId}:${now}:${messages.length}`).digest("hex").slice(0, 8)}`;
   const preHookResults = await runGroupMemoryCompactionHooks("pre", {
     hookRunId: compactionHookRunId,
     groupId: input.groupId,
+    groupSessionId,
     messages,
     messagesToCompact,
     memory,
@@ -2975,18 +5981,27 @@ export async function compactGroupConversationMemory(input: {
   let summarySource = "structured";
   let failure = "";
   let modelRequestAudit: any = null;
+  let compactionUsage: any = null;
   let validation = validateSummaryPreservesFallback(conversationSummary, fallback);
   let rejectedModelValidation: any = null;
   const lastFailureAtMs = Date.parse(String(previousState.lastFailureAt || "")) || 0;
   const retryWindowExpired = lastFailureAtMs > 0 && nowMs - lastFailureAtMs >= GROUP_COMPACT_MODEL_RETRY_MS;
   const modelCompactionEnabled = input.config?.memoryCompactionUseModel === true
     || String(input.config?.memoryCompactionMode || "").toLowerCase() === "hybrid";
-  const shouldAttemptModel = modelCompactionEnabled && (failures < GROUP_COMPACT_MAX_FAILURES || retryWindowExpired);
+  if (sessionMemoryCompactSelection?.selected === true) summarySource = "session-memory";
+  const shouldAttemptModel = sessionMemoryCompactSelection?.selected !== true
+    && modelCompactionEnabled
+    && (failures < GROUP_COMPACT_MAX_FAILURES || retryWindowExpired);
   if (shouldAttemptModel) {
     try {
-      const modelResult = await summarizeWithModel(messagesToCompact, memory, fallback, input.config);
+      const modelResult = await summarizeWithModel(messagesToCompact, memory, fallback, {
+        ...(input.config || {}),
+        groupId,
+        groupSessionId,
+      });
       const modelSummary = modelResult.summary;
       modelRequestAudit = modelResult.requestAudit;
+      compactionUsage = modelResult.compactionUsage;
       if (modelSummary) {
         conversationSummary = mergeSafeConversationSummary(previousSummary, fallback, modelSummary, messagesToCompact);
         summarySource = "hybrid";
@@ -2999,8 +6014,19 @@ export async function compactGroupConversationMemory(input: {
         }
       }
     } catch (error: any) {
+      modelRequestAudit = error?.compactionRequestAudit || modelRequestAudit;
+      compactionUsage = error?.compactionUsage || compactionUsage;
       failure = compactText(error?.message || error, 400);
     }
+  }
+  if (sessionMemoryCompactSelection?.schema && sessionMemoryCompactSelection.selected !== true) {
+    sessionMemoryCompactSelection = buildGroupSessionMemoryCompactSelectionReceipt({
+      ...sessionMemoryCompactSelection,
+      selected: false,
+      fallbackReason: sessionMemoryCompactSelection.fallback_reason,
+      compactionApiCalled: shouldAttemptModel,
+      createdAt: now,
+    });
   }
 
   const compactedFactAnchors = extractFactAnchors(messagesToCompact);
@@ -3047,41 +6073,41 @@ export async function compactGroupConversationMemory(input: {
   const boundaryMessage = messages[keepIndex - 1];
   const keptMessages = messages.slice(keepIndex);
   const microCompact = buildGroupMicroCompactPlan(messagesToCompact, input.config?.microCompact || input.config?.groupMicroCompact || {});
-  const postCompactReinject = buildPostCompactReinjectionPlan(messagesToCompact, microCompact, input.config?.postCompactReinject || {});
-  const preCompactTokenCount = messages.reduce((sum, message) => sum + estimateGroupMessageTokens(message), 0);
-  const postCompactTokenCount = estimateGroupTextTokens(JSON.stringify(conversationSummary))
-    + keptMessages.reduce((sum, message) => sum + Math.min(estimateGroupMessageTokens(message), 2500), 0);
-  const summaryChecksum = crypto.createHash("sha256").update(JSON.stringify(conversationSummary)).digest("hex").slice(0, 24);
-  const postCompactWarning = calculateGroupCompactWarningState({
-    activeTokens: postCompactTokenCount,
-    activeMessageCount: keptMessages.length,
-    autoCompactThreshold: triggerTokens,
-    config: input.config,
-    suppressed: true,
-    suppressReason: "post_compaction_until_next_group_memory_pressure_sample",
+  const postCompactReinject = buildPostCompactReinjectionPlan(messagesToCompact, microCompact, {
+    ...(input.config?.postCompactReinject || {}),
+    groupId,
+    groupSessionId,
+    sessionMessages: messages,
+    preservedMessages: keptMessages,
+    taskStatuses: postCompactTaskStatusProjection.tasks,
+    tasks: input.activeTasks || [],
+    currentTaskId: input.config?.currentTaskId || input.config?.current_task_id,
+    dynamicContextCatalog: input.config?.postCompactDynamicContextCatalog || input.config?.post_compact_dynamic_context_catalog || {},
+    dynamicContextScanMode: primaryPartialCompact ? "partial" : "full",
+    preCompactLoadedToolNames: [
+      ...(memory?.compactBoundary?.compactMetadata?.preCompactDiscoveredTools || []),
+      ...(previousState?.preCompactDiscoveredTools || []),
+    ],
     now,
   });
-  const reductionRatio = preCompactTokenCount > 0 ? Math.max(0, 1 - postCompactTokenCount / preCompactTokenCount) : 0;
-  const pressurePercent = triggerTokens > 0 ? Math.round((activeTokens / triggerTokens) * 1000) / 10 : 0;
-  const contextBudget = buildContextBudget({
-    context: {
-      conversationSummary,
-      microCompact: {
-        compactedMessageCount: microCompact.compactedMessageCount,
-        tokensFreed: microCompact.tokensFreed,
-        records: (microCompact.records || []).slice(-12),
-      },
-      postCompactReinject,
-      keptRecent: keptMessages.map((message, index) => ({
-        id: messageIdentity(message, keepIndex + index),
-        role: message?.role,
-        agent: message?.agent,
-        content: microCompactText(messageContent(message), 1800).text,
-      })),
-    },
-    maxChars: 48_000,
-    maxTokens: triggerTokens,
+  const preCompactTokenCount = messages.reduce((sum, message) => sum + estimateGroupMessageTokens(message), 0);
+  const summaryChecksum = crypto.createHash("sha256").update(JSON.stringify(conversationSummary)).digest("hex").slice(0, 24);
+  const initialMessageDigest = sessionMemoryCompactSelection?.selected === true
+    ? selectedSessionMemoryMarkdown
+    : renderConversationSummary(conversationSummary, 14_000);
+  const prePtlPostCompactPayloadBudget = buildGroupTruePostCompactPayloadBudget({
+    groupId: input.groupId,
+    groupSessionId,
+    triggerTokens,
+    summaryText: initialMessageDigest,
+    keptMessages,
+    postCompactReinject,
+    persistentRequirements: nextPersistentRequirements,
+    factAnchors: nextFactAnchors,
+    sessionMemory: sessionMemoryCompactSelection?.selected === true ? null : memory.sessionMemory,
+    toolContinuity: memory.toolContinuity,
   });
+  const prePtlPostCompactTokenCount = Number(prePtlPostCompactPayloadBudget.true_post_compact_token_count || 0);
   const ptlEmergency = buildGroupPtlEmergencyPlan({
     groupId: input.groupId,
     messages,
@@ -3093,12 +6119,98 @@ export async function compactGroupConversationMemory(input: {
     triggerTokens,
     activeTokens,
     preCompactTokenCount,
-    postCompactTokenCount,
-    contextBudget,
+    postCompactTokenCount: prePtlPostCompactTokenCount,
+    contextBudget: prePtlPostCompactPayloadBudget.context_budget,
     transcriptPath: input.transcriptPath,
     config: input.config,
     now,
   });
+  let messageDigest = sessionMemoryCompactSelection?.selected === true
+    ? selectedSessionMemoryMarkdown
+    : renderConversationSummary(conversationSummary, ptlEmergency?.messageDigestMaxChars || 14_000);
+  let postCompactPayloadBudget = buildGroupTruePostCompactPayloadBudget({
+    groupId: input.groupId,
+    groupSessionId,
+    triggerTokens,
+    summaryText: messageDigest,
+    keptMessages,
+    postCompactReinject,
+    persistentRequirements: nextPersistentRequirements,
+    factAnchors: nextFactAnchors,
+    sessionMemory: sessionMemoryCompactSelection?.selected === true ? null : memory.sessionMemory,
+    toolContinuity: memory.toolContinuity,
+  });
+  if (sessionMemoryCompactSelection?.selected === true && postCompactPayloadBudget.will_retrigger_next_turn === true) {
+    sessionMemoryCompactSelection = buildGroupSessionMemoryCompactSelectionReceipt({
+      ...sessionMemoryCompactSelection,
+      selected: false,
+      fallbackReason: "true_post_compact_payload_reaches_auto_compact_threshold",
+      projectedPostCompactTokens: postCompactPayloadBudget.true_post_compact_token_count,
+      createdAt: now,
+    });
+    summarySource = "structured-session-memory-threshold-fallback";
+    messageDigest = renderConversationSummary(conversationSummary, ptlEmergency?.messageDigestMaxChars || 14_000);
+    postCompactPayloadBudget = buildGroupTruePostCompactPayloadBudget({
+      groupId: input.groupId,
+      groupSessionId,
+      triggerTokens,
+      summaryText: messageDigest,
+      keptMessages,
+      postCompactReinject,
+      persistentRequirements: nextPersistentRequirements,
+      factAnchors: nextFactAnchors,
+      sessionMemory: memory.sessionMemory,
+      toolContinuity: memory.toolContinuity,
+    });
+  }
+  if (sessionMemoryCompactSelection?.schema) {
+    sessionMemoryCompactSelection = buildGroupSessionMemoryCompactSelectionReceipt({
+      ...sessionMemoryCompactSelection,
+      selected: sessionMemoryCompactSelection.selected === true,
+      fallbackReason: sessionMemoryCompactSelection.fallback_reason,
+      compactionApiCalled: sessionMemoryCompactSelection.compaction_api_called === true,
+      projectedPostCompactTokens: postCompactPayloadBudget.true_post_compact_token_count,
+      createdAt: now,
+    });
+  }
+  const postCompactTokenCount = Number(postCompactPayloadBudget.true_post_compact_token_count || 0);
+  const postCompactPayloadGate = {
+    schema: "ccm-group-post-compact-payload-gate-v1",
+    group_id: String(input.groupId || ""),
+    group_session_id: groupSessionId,
+    status: postCompactPayloadBudget.will_retrigger_next_turn === true
+      ? "recompact_required"
+      : ptlEmergency?.engaged ? "ptl_reduced" : "ready",
+    action: postCompactPayloadBudget.will_retrigger_next_turn === true
+      ? "reduce_restored_context_before_child_dispatch"
+      : "dispatch_ready",
+    trigger_tokens: triggerTokens,
+    pre_ptl_token_count: prePtlPostCompactTokenCount,
+    true_post_compact_token_count: postCompactTokenCount,
+    ptl_applied: ptlEmergency?.engaged === true,
+    safe_render_chars: postCompactPayloadBudget.will_retrigger_next_turn === true ? 6000 : 14_000,
+    payload_checksum: postCompactPayloadBudget.payload_checksum,
+  };
+  const postCompactWarning = calculateGroupCompactWarningState({
+    activeTokens: postCompactTokenCount,
+    activeMessageCount: keptMessages.length,
+    autoCompactThreshold: triggerTokens,
+    config: input.config,
+    suppressed: postCompactPayloadGate.status !== "recompact_required",
+    suppressReason: postCompactPayloadGate.status !== "recompact_required"
+      ? "post_compaction_until_next_group_memory_pressure_sample"
+      : "",
+    now,
+  });
+  const reductionRatio = preCompactTokenCount > 0 ? Math.max(0, 1 - postCompactTokenCount / preCompactTokenCount) : 0;
+  const pressurePercent = triggerTokens > 0 ? Math.round((activeTokens / triggerTokens) * 1000) / 10 : 0;
+  const contextBudget = {
+    ...postCompactPayloadBudget.context_budget,
+    pre_ptl_estimated_tokens: prePtlPostCompactTokenCount,
+    true_post_compact_token_count: postCompactTokenCount,
+    will_retrigger_next_turn: postCompactPayloadBudget.will_retrigger_next_turn === true,
+    payload_checksum: postCompactPayloadBudget.payload_checksum,
+  };
   const ptlRecovery = buildGroupPtlRecoveryPlan({
     previousPtlEmergency: previousState.ptlEmergency,
     currentPtlEmergency: ptlEmergency,
@@ -3134,7 +6246,9 @@ export async function compactGroupConversationMemory(input: {
     : contextBudget;
   const previousThrashCount = Number(previousState.thrashCount || 0);
   const thrashCount = reductionRatio < 0.2 ? previousThrashCount + 1 : 0;
-  const health = ptlEmergency
+  const health = postCompactPayloadGate.status === "recompact_required"
+    ? "recompact_required"
+    : ptlEmergency
     ? "ptl_emergency"
     : ptlRecovery
       ? "healthy"
@@ -3151,7 +6265,6 @@ export async function compactGroupConversationMemory(input: {
     transcriptPath: input.transcriptPath,
     now,
   });
-  const messageDigest = renderConversationSummary(conversationSummary, ptlEmergency?.messageDigestMaxChars || 14_000);
   const compactStrategyDecision = buildStrategyDecision({
     compacted: true,
     primaryCompact: true,
@@ -3160,6 +6273,9 @@ export async function compactGroupConversationMemory(input: {
     postCompactReinject,
     ptlEmergency,
     ptlRecovery,
+    truePostCompactPayloadBudget: postCompactPayloadBudget,
+    postCompactPayloadGate,
+    sessionMemoryCompactSelection,
     preservedSegment,
     preCompactTokenCount,
     postCompactTokenCount,
@@ -3178,18 +6294,52 @@ export async function compactGroupConversationMemory(input: {
     force: input.force,
     now,
   });
+  const preCompactDiscoveredTools = Array.isArray(postCompactReinject?.dynamicContextDeltaReceipt?.loaded_tool_state?.carried_names)
+    ? postCompactReinject.dynamicContextDeltaReceipt.loaded_tool_state.carried_names
+    : [];
+  const previousBoundary = memory?.compactBoundary?.id
+    ? memory.compactBoundary
+    : Array.isArray(previousState.boundaries) ? previousState.boundaries.at(-1) || null : null;
+  const previousTotalMessagesSeen = Number(previousState.totalMessagesSeen || 0);
+  const lineageCheckpointKnown = !!previousBoundary?.id
+    && previousTotalMessagesSeen > 0
+    && previousTotalMessagesSeen <= messages.length;
+  const messagesSincePreviousCompact = lineageCheckpointKnown ? messages.slice(previousTotalMessagesSeen) : [];
+  const turnsSincePreviousCompact = messagesSincePreviousCompact.filter((message: any) => {
+    if (message?.isMeta === true || String(message?.role || message?.type || "") !== "user") return false;
+    const content = message?.content ?? message?.message?.content;
+    return !(Array.isArray(content) && content.length > 0 && content.every((block: any) => block?.type === "tool_result"));
+  }).length;
+  const compactTrigger = primaryPartialCompact || input.force ? "manual" : "auto";
   const boundary: any = {
-    id: `compact-${Date.now().toString(36)}`,
+    id: `compact-${Date.now().toString(36)}-${crypto.createHash("sha256").update(`${input.groupId || ""}\0${groupSessionId}\0${now}\0${messageIdentity(boundaryMessage, keepIndex - 1)}`).digest("hex").slice(0, 10)}`,
     type: primaryPartialCompact ? "partial-up-to" : input.force ? "manual" : "auto",
     summarizedFromMessageId: messageIdentity(messages[summarizedThroughIndex + 1], summarizedThroughIndex + 1),
     summarizedThroughMessageId: messageIdentity(boundaryMessage, keepIndex - 1),
     summarizedMessageCount: messagesToCompact.length,
     preservedMessageIds: keptMessages.slice(-40).map((message, index) => messageIdentity(message, keepIndex + index)),
+    compactMetadata: {
+      trigger: compactTrigger,
+      preTokens: preCompactTokenCount,
+      messagesSummarized: messagesToCompact.length,
+      preCompactDiscoveredTools,
+      compactionUsage,
+      sessionMemoryCompactSelection,
+      preservedSegment: {
+        headUuid: String(preservedSegment?.headMessageId || preservedSegment?.firstPreservedMessageId || ""),
+        anchorUuid: String(preservedSegment?.anchorMessageId || preservedSegment?.summaryMessageId || ""),
+        tailUuid: String(preservedSegment?.tailMessageId || preservedSegment?.lastPreservedMessageId || ""),
+      },
+    },
     preservedSegment,
     preCompactTokenCount,
     postCompactTokenCount,
+    prePtlPostCompactTokenCount,
+    truePostCompactPayloadBudget: postCompactPayloadBudget,
+    postCompactPayloadGate,
     compactStrategyDecision,
     apiMicroCompactEditPlan,
+    postCompactTaskStatusProjection: postCompactTaskStatusProjection.receipt,
     post_compact_restore: {
       strategy: "conversation_summary_recent_reinject",
       preservedMessageIds: keptMessages.slice(-20).map((message, index) => messageIdentity(message, keepIndex + index)),
@@ -3197,12 +6347,18 @@ export async function compactGroupConversationMemory(input: {
       strategyDecision: compactStrategyDecision,
       apiMicroCompactEditPlan,
       summaryChecksum,
+      preCompactDiscoveredTools,
       transcriptPath: input.transcriptPath,
       microCompact,
       reinjectionPlan: postCompactReinject,
+      postCompactTaskStatusProjection: postCompactTaskStatusProjection.receipt,
       partialSidecarSegment,
       ptlEmergency,
       ptlRecovery,
+      truePostCompactPayloadBudget: postCompactPayloadBudget,
+      postCompactPayloadGate,
+      compactionUsage,
+      sessionMemoryCompactSelection,
       recoveryAudit: null as any,
       cleanupAudit: null as any,
     },
@@ -3213,6 +6369,8 @@ export async function compactGroupConversationMemory(input: {
     ptlRecovery,
     summarySource,
     modelRequestAudit,
+    compactionUsage,
+    sessionMemoryCompactSelection,
     quality: {
       score: quality.score,
       status: quality.status,
@@ -3221,6 +6379,25 @@ export async function compactGroupConversationMemory(input: {
     },
     createdAt: now,
   };
+  const compactLineage = buildGroupCompactLineage({
+    groupId: input.groupId,
+    groupSessionId,
+    boundary,
+    previousBoundary,
+    checkpointKnown: lineageCheckpointKnown,
+    turnsSincePreviousCompact,
+    newMessageCountSincePreviousCompact: messagesSincePreviousCompact.length,
+    trigger: compactTrigger,
+    querySource: `group_main:${String(input.groupId || "")}::${groupSessionId}`,
+    messagesSummarized: messagesToCompact.length,
+    preCompactTokens: preCompactTokenCount,
+    truePostCompactTokens: postCompactTokenCount,
+    autoCompactThreshold: triggerTokens,
+    willRetriggerNextTurn: postCompactPayloadBudget.will_retrigger_next_turn === true,
+  });
+  boundary.compactLineage = compactLineage;
+  boundary.compactMetadata.compactLineage = compactLineage;
+  boundary.post_compact_restore.compactLineage = compactLineage;
   const postCompactRecoveryAudit = buildGroupPostCompactRecoveryAudit({
     groupId: input.groupId,
     messages,
@@ -3238,12 +6415,15 @@ export async function compactGroupConversationMemory(input: {
     partialSidecarSegment,
     ptlEmergency,
     ptlRecovery,
+    truePostCompactPayloadBudget: postCompactPayloadBudget,
+    postCompactPayloadGate,
     now,
   });
   boundary.post_compact_restore.recoveryAudit = postCompactRecoveryAudit;
   const postHookResults = await runGroupMemoryCompactionHooks("post", {
     hookRunId: compactionHookRunId,
     groupId: input.groupId,
+    groupSessionId,
     messages,
     messagesToCompact,
     keptMessages,
@@ -3255,15 +6435,31 @@ export async function compactGroupConversationMemory(input: {
     boundary,
     microCompact,
     postCompactReinject,
+    postCompactTaskStatusProjection: postCompactTaskStatusProjection.receipt,
     partialCompact,
     partialSidecarSegment,
     ptlEmergency,
     ptlRecovery,
     summaryChecksum,
     compactStrategyDecision,
+    truePostCompactPayloadBudget: postCompactPayloadBudget,
+    postCompactPayloadGate,
   });
+  const postCompactMessageOrderReceipt = buildGroupPostCompactMessageOrderReceipt({
+    groupId: input.groupId,
+    groupSessionId,
+    boundary,
+    summaryChecksum,
+    preservedSegment,
+    postCompactReinject,
+    postHookResults,
+    hookRunId: compactionHookRunId,
+  });
+  boundary.postCompactMessageOrderReceipt = postCompactMessageOrderReceipt;
+  boundary.post_compact_restore.messageOrderReceipt = postCompactMessageOrderReceipt;
   const postCompactCleanupAudit = buildGroupPostCompactCleanupAudit({
     groupId: input.groupId,
+    groupSessionId,
     boundary,
     compactStrategyDecision,
     apiMicroCompactEditPlan,
@@ -3277,10 +6473,10 @@ export async function compactGroupConversationMemory(input: {
     now,
   });
   boundary.post_compact_restore.cleanupAudit = postCompactCleanupAudit;
-  const latestHookLedger = readGroupMemoryCompactionHookLedger(String(input.groupId || ""));
+  const latestHookLedger = readGroupMemoryCompactionHookLedger(String(input.groupId || ""), groupSessionId);
   const compactTransactionReceipt = buildGroupCompactTransactionReceipt({
     groupId: input.groupId,
-    groupSessionId: input.groupSessionId,
+    groupSessionId,
     boundary,
     summaryChecksum,
     hookRunId: compactionHookRunId,
@@ -3314,6 +6510,9 @@ export async function compactGroupConversationMemory(input: {
       preservedRecentMessages: keptMessages.length,
       preCompactTokenCount,
       postCompactTokenCount,
+      prePtlPostCompactTokenCount,
+      truePostCompactPayloadBudget: postCompactPayloadBudget,
+      postCompactPayloadGate,
       context_budget: effectiveContextBudget,
       activeTokensBeforeCompact: activeTokens,
       triggerTokens,
@@ -3324,11 +6523,17 @@ export async function compactGroupConversationMemory(input: {
       postCompactRecoveryAudit,
       postCompactCleanupAudit,
       summarySource,
-      modelMode: modelCompactionEnabled ? "hybrid-opt-in" : "session-memory-first",
+      modelMode: sessionMemoryCompactSelection?.selected === true
+        ? "session-memory-reused"
+        : modelCompactionEnabled ? "hybrid-opt-in" : "session-memory-first",
       modelAttempted: shouldAttemptModel,
       modelRequestAudit,
+      compactionUsage,
+      sessionMemoryCompactSelection,
       summaryChecksum,
       compactTransactionReceipt,
+      postCompactMessageOrderReceipt,
+      compactLineage,
       deterministicFactsPreserved: true,
       validation,
       qualityGateVersion: quality.schema,
@@ -3338,6 +6543,8 @@ export async function compactGroupConversationMemory(input: {
       driftDetected: quality.drift.detected,
       microCompact,
       postCompactReinject,
+      preCompactDiscoveredTools,
+      postCompactTaskStatusProjection: postCompactTaskStatusProjection.receipt,
       partialCompact,
       partialSegments,
       lastPartialCompactedAt: partialSidecarSegment ? now : String(previousState.lastPartialCompactedAt || ""),
@@ -3383,6 +6590,9 @@ export async function compactGroupConversationMemory(input: {
       olderLimit: totalCompacted,
       preCompactTokenCount,
       postCompactTokenCount,
+      prePtlPostCompactTokenCount,
+      truePostCompactPayloadBudget: postCompactPayloadBudget,
+      postCompactPayloadGate,
       microCompactTokensFreed: microCompact.tokensFreed,
       partialCompact,
       partialSegments: partialSegments.slice(-GROUP_PARTIAL_COMPACT_SEGMENT_LIMIT),
@@ -3390,15 +6600,20 @@ export async function compactGroupConversationMemory(input: {
       ptlRecovery,
       preservedSegment,
       postCompactRecoveryAudit,
+      postCompactTaskStatusProjection: postCompactTaskStatusProjection.receipt,
       compactStrategyDecision,
       apiMicroCompactEditPlan,
       postCompactCleanupAudit,
       compactTransactionReceipt,
+      postCompactMessageOrderReceipt,
+      compactLineage,
+      compactionUsage,
+      sessionMemoryCompactSelection,
       contextPressureWarning: postCompactWarning,
       lastCompressedAt: now,
     },
   };
-  return { compacted: true, memory: nextMemory, boundary, keepIndex, contextPressureWarning: postCompactWarning, preCompactWarning, postCompactRecoveryAudit, postCompactCleanupAudit, compactStrategyDecision, apiMicroCompactEditPlan, compactTransactionReceipt };
+  return { compacted: true, memory: nextMemory, boundary, keepIndex, contextPressureWarning: postCompactWarning, preCompactWarning, postCompactRecoveryAudit, postCompactCleanupAudit, postCompactTaskStatusProjection: postCompactTaskStatusProjection.receipt, compactStrategyDecision, apiMicroCompactEditPlan, compactTransactionReceipt, postCompactMessageOrderReceipt, compactLineage, compactionUsage, sessionMemoryCompactSelection, truePostCompactPayloadBudget: postCompactPayloadBudget, postCompactPayloadGate };
 }
 
 export async function runGroupMemoryPreservedSegmentSelfTest() {
@@ -3436,6 +6651,7 @@ export async function runGroupMemoryPreservedSegmentSelfTest() {
   });
   const result: any = await compactGroupConversationMemory({
     groupId: "preserved-segment-self-test",
+    groupSessionId: "gcs_preserved_segment_selftest",
     messages,
     memory: { goal: "preserved segment selftest", compaction: {} },
     transcriptPath: "preserved-segment-raw.json",
@@ -3486,6 +6702,7 @@ export async function runGroupMemoryPostCompactRecoveryAuditSelfTest() {
   const originalMessages = JSON.stringify(messages);
   const result: any = await compactGroupConversationMemory({
     groupId: "post-compact-recovery-audit-self-test",
+    groupSessionId: "gcs_post_compact_recovery_selftest",
     messages,
     memory: { goal: "压缩后恢复审计自测" },
     config: { memoryCompactionUseModel: false, minKeepMessages: 2, minKeepTokens: 1, maxKeepTokens: 3200 },
@@ -3689,6 +6906,7 @@ export async function runGroupCompactStrategyDecisionSelfTest() {
   });
   const compacted: any = await compactGroupConversationMemory({
     groupId: `compact-strategy-selftest-${process.pid}`,
+    groupSessionId: "gcs_compact_strategy_selftest",
     messages,
     memory: { goal: "compact strategy decision selftest", compaction: {} },
     transcriptPath: "compact-strategy-selftest-raw.json",
@@ -3719,6 +6937,8 @@ export async function runGroupCompactStrategyDecisionSelfTest() {
 }
 
 export async function runGroupPostCompactCleanupAuditSelfTest() {
+  const groupId = `post-compact-cleanup-selftest-${process.pid}`;
+  const groupSessionId = "gcs_post_compact_cleanup_selftest";
   const messages: any[] = [];
   for (let i = 0; i < 20; i++) {
     messages.push({
@@ -3740,7 +6960,8 @@ export async function runGroupPostCompactCleanupAuditSelfTest() {
     });
   }
   const result: any = await compactGroupConversationMemory({
-    groupId: `post-compact-cleanup-selftest-${process.pid}`,
+    groupId,
+    groupSessionId,
     messages,
     memory: { goal: "post compact cleanup audit selftest", compaction: {} },
     transcriptPath: "post-compact-cleanup-selftest-raw.json",
@@ -3750,12 +6971,48 @@ export async function runGroupPostCompactCleanupAuditSelfTest() {
   const audit = result.memory?.compaction?.postCompactCleanupAudit || {};
   const boundaryAudit = result.boundary?.post_compact_restore?.cleanupAudit || {};
   const messageCompressionAudit = result.memory?.messageCompression?.postCompactCleanupAudit || {};
+  const receipt = result.compactTransactionReceipt || result.memory?.compaction?.compactTransactionReceipt || {};
   const actionIds = (audit.cleanupActions || []).map((item: any) => item.id);
   const checkById = new Map<string, any>((audit.checks || []).map((check: any) => [check.id, check]));
+  const auditVerification = verifyGroupPostCompactCleanupAudit(audit, { groupId, groupSessionId, boundaryId: result.boundary?.id });
+  const receiptVerification = verifyGroupCompactTransactionReceipt(receipt, {
+    groupId,
+    groupSessionId,
+    boundaryId: result.boundary?.id,
+    cleanupAuditChecksum: audit.audit_checksum,
+  });
+  const tamperedAudit = {
+    ...audit,
+    groupSessionId: "gcs_post_compact_cleanup_other",
+    scopeId: `${groupId}::gcs_post_compact_cleanup_other`,
+    compactSource: {
+      ...(audit.compactSource || {}),
+      querySource: `group_main:${groupId}::gcs_post_compact_cleanup_other`,
+    },
+    cleanupScope: {
+      ...(audit.cleanupScope || {}),
+      groupSessionId: "gcs_post_compact_cleanup_other",
+      scopeId: `${groupId}::gcs_post_compact_cleanup_other`,
+    },
+  };
+  tamperedAudit.audit_checksum = groupPostCompactCleanupAuditChecksum(tamperedAudit);
+  const crossSessionVerification = verifyGroupPostCompactCleanupAudit(tamperedAudit, { groupId, groupSessionId, boundaryId: result.boundary?.id });
+  const reboundReceiptVerification = verifyGroupCompactTransactionReceipt(receipt, {
+    groupId,
+    groupSessionId,
+    boundaryId: result.boundary?.id,
+    cleanupAuditChecksum: tamperedAudit.audit_checksum,
+  });
   const checks = {
-    cleanupAuditHasSchema: audit.schema === "ccm-post-compact-cleanup-audit-v1"
+    cleanupAuditHasSchema: audit.schema === "ccm-post-compact-cleanup-audit-v2"
       && audit.status === "pass"
       && audit.action === "cleanup_recorded_and_safe_to_dispatch_fresh_child_context",
+    cleanupAuditBindsExactMainAgentSession: auditVerification.valid === true
+      && audit.groupSessionId === groupSessionId
+      && audit.scopeId === `${groupId}::${groupSessionId}`
+      && audit.compactSource?.kind === "group_main_agent"
+      && audit.cleanupScope?.allowsOtherGroupSessionReset === false
+      && audit.cleanupScope?.allowsGlobalReset === false,
     cleanupAuditRecordedEverywhere: boundaryAudit.schema === audit.schema
       && boundaryAudit.summaryChecksum === audit.summaryChecksum
       && messageCompressionAudit.schema === audit.schema,
@@ -3770,6 +7027,13 @@ export async function runGroupPostCompactCleanupAuditSelfTest() {
     cleanupActionsCoverCcStyleState: ["reset_microcompact_tracking", "rebuild_child_context_packets", "preserve_skill_continuity", "preserve_raw_recovery_sources", "do_not_delete_ledgers"].every(id => actionIds.includes(id)),
     cleanupDoesNotMutateRawMessages: messages[0].content.includes("POST_COMPACT_CLEANUP_SENTINEL")
       && messages.length === 40,
+    compactReceiptBindsCleanupAuditChecksum: receipt.schema === "ccm-group-memory-compact-transaction-receipt-v3"
+      && receipt.cleanup_audit_checksum === audit.audit_checksum
+      && receiptVerification.valid === true,
+    crossSessionAuditCopyFailsClosed: crossSessionVerification.valid === false
+      && crossSessionVerification.issues.includes("post_compact_cleanup_group_session_mismatch"),
+    recomputedTamperedAuditCannotRebindReceipt: reboundReceiptVerification.valid === false
+      && reboundReceiptVerification.issues.includes("compact_transaction_cleanup_audit_mismatch"),
   };
   return { pass: Object.values(checks).every(Boolean), checks, audit: { status: audit.status, actionIds, failedChecks: audit.failedChecks || [] } };
 }
@@ -3810,6 +7074,7 @@ export async function runGroupApiMicroCompactEditPlanSelfTest() {
   });
   const compacted: any = await compactGroupConversationMemory({
     groupId: `api-microcompact-selftest-${process.pid}`,
+    groupSessionId: "gcs_api_microcompact_selftest",
     messages,
     memory: { goal: "api microcompact edit plan selftest", compaction: {} },
     transcriptPath: "api-microcompact-selftest-raw.json",
@@ -4071,7 +7336,8 @@ export function runGroupMemoryTimeBasedMicroCompactSelfTest() {
 
 export async function runGroupMemoryCompactionHookSelfTest() {
   const groupId = `hook-self-test-${process.pid}-${Date.now().toString(36)}`;
-  const ledgerFile = getGroupMemoryCompactionHookLedgerFile(groupId);
+  const groupSessionId = "gcs_hook_selftest";
+  const ledgerFile = getGroupMemoryCompactionHookLedgerFile(groupId, groupSessionId);
   const messages = Array.from({ length: 90 }, (_, index) => ({
     id: `hook-${index}`,
     role: index % 2 ? "assistant" : "user",
@@ -4091,6 +7357,7 @@ export async function runGroupMemoryCompactionHookSelfTest() {
   try {
     const result: any = await compactGroupConversationMemory({
       groupId,
+      groupSessionId,
       messages,
       memory: { goal: "hook 自测" },
       config: { memoryCompactionUseModel: false },
@@ -4108,9 +7375,9 @@ export async function runGroupMemoryCompactionHookSelfTest() {
       hookLedgerStored: result.memory?.compaction?.hookLedger?.schema === "ccm-group-memory-compaction-hook-ledger-summary-v1"
         && result.memory.compaction.hookLedger?.recentEntries?.some((entry: any) => entry.phase === "pre")
         && result.memory.compaction.hookLedger?.recentEntries?.some((entry: any) => entry.phase === "post"),
-      hookLedgerReadable: readGroupMemoryCompactionHookLedger(groupId).entries?.length >= 2
-        && readGroupMemoryCompactionHookLedger(groupId).stats?.pre?.ok >= 1
-        && readGroupMemoryCompactionHookLedger(groupId).stats?.post?.ok >= 1,
+      hookLedgerReadable: readGroupMemoryCompactionHookLedger(groupId, groupSessionId).entries?.length >= 2
+        && readGroupMemoryCompactionHookLedger(groupId, groupSessionId).stats?.pre?.ok >= 1
+        && readGroupMemoryCompactionHookLedger(groupId, groupSessionId).stats?.post?.ok >= 1,
     };
     return { pass: Object.values(checks).every(Boolean), checks };
   } finally {
@@ -4133,6 +7400,7 @@ export async function runGroupMemoryPartialCompactSelfTest() {
   const originalMessages = JSON.stringify(messages);
   const result: any = await compactGroupConversationMemory({
     groupId: "partial-compact-self-test",
+    groupSessionId: "gcs_partial_compact_selftest",
     messages,
     memory: { goal: "选择性压缩自测" },
     config: { memoryCompactionUseModel: false },
@@ -4175,6 +7443,7 @@ export async function runGroupMemoryPartialCompactSidecarSelfTest() {
   const originalMessages = JSON.stringify(messages);
   const result: any = await compactGroupConversationMemory({
     groupId: "partial-sidecar-self-test",
+    groupSessionId: "gcs_partial_sidecar_selftest",
     messages,
     memory: {
       goal: "选择性 sidecar 压缩自测",
@@ -4189,6 +7458,12 @@ export async function runGroupMemoryPartialCompactSidecarSelfTest() {
     partialCompact: { direction: "range", fromMessageId: "s20", throughMessageId: "s30", reason: "selftest sidecar range" },
   });
   const segment = result.memory?.compaction?.partialSegments?.[0] || {};
+  const cleanupAudit = result.postCompactCleanupAudit || result.memory?.compaction?.postCompactCleanupAudit || {};
+  const cleanupVerification = verifyGroupPostCompactCleanupAudit(cleanupAudit, {
+    groupId: "partial-sidecar-self-test",
+    groupSessionId: "gcs_partial_sidecar_selftest",
+    boundaryId: segment.id,
+  });
   const checks = {
     sidecarCompacted: result.compacted === true && result.partialCompacted === true,
     primaryBoundaryUnchanged: !result.boundary && result.memory?.compaction?.lastCompactedMessageId === "s5"
@@ -4202,6 +7477,11 @@ export async function runGroupMemoryPartialCompactSidecarSelfTest() {
     sidecarQualityPasses: segment.quality?.pass === true && Number(segment.quality?.score || 0) >= 80,
     sidecarReinjectsFile: JSON.stringify(segment.reinjectionPlan || {}).includes("src/sidecar-"),
     sidecarFactMerged: JSON.stringify(result.memory?.persistentRequirements || []).includes("PARTIAL_SIDECAR_SENTINEL_20260707"),
+    sidecarCleanupDoesNotResetPrimaryDerivedState: cleanupVerification.valid === true
+      && cleanupAudit.partialSidecarOnly === true
+      && cleanupAudit.resetDerivedCompactState === false
+      && cleanupAudit.cleanupScope?.allowsExactGroupSessionReset === false
+      && cleanupAudit.cleanupScope?.allowsDescendantProviderReset === false,
     rawTranscriptUntouched: JSON.stringify(messages) === originalMessages,
   };
   return {
@@ -4224,6 +7504,7 @@ export async function runGroupMemoryPtlEmergencySelfTest() {
   const originalMessages = JSON.stringify(messages);
   const result: any = await compactGroupConversationMemory({
     groupId: "ptl-emergency-self-test",
+    groupSessionId: "gcs_ptl_emergency_selftest",
     messages,
     memory: { goal: "PTL 紧急降级自测" },
     config: { memoryCompactionUseModel: false, ptlEmergency: true },
@@ -4273,6 +7554,7 @@ export async function runGroupMemoryPtlRecoverySelfTest() {
   };
   const result: any = await compactGroupConversationMemory({
     groupId: "ptl-recovery-self-test",
+    groupSessionId: "gcs_ptl_recovery_selftest",
     messages,
     memory: {
       goal: "PTL 自动恢复自测",
@@ -4317,6 +7599,7 @@ export async function runGroupMemoryCompactionIntegrationSelfTest() {
   const originalMessages = JSON.stringify(messages);
   const first: any = await compactGroupConversationMemory({
     groupId: "compaction-self-test",
+    groupSessionId: "gcs_compaction_selftest",
     messages,
     memory: { goal: "支付回调", nextActions: [{ action: "继续验签测试" }] },
     config: {},
@@ -4332,6 +7615,7 @@ export async function runGroupMemoryCompactionIntegrationSelfTest() {
   const second: any = first.compacted
     ? await compactGroupConversationMemory({
       groupId: "compaction-self-test",
+      groupSessionId: "gcs_compaction_selftest",
       messages: appended,
       memory: first.memory,
       config: {},
@@ -4341,6 +7625,7 @@ export async function runGroupMemoryCompactionIntegrationSelfTest() {
     : { compacted: false };
   const migrated: any = await compactGroupConversationMemory({
     groupId: "compaction-migration-self-test",
+    groupSessionId: "gcs_compaction_migration_selftest",
     messages,
     memory: { compaction: { version: 2, lastCompactedMessageId: "m60" } },
     config: {},
@@ -4396,6 +7681,7 @@ export async function runGroupMemoryCompactionStressSelfTest() {
     }
     const result: any = await compactGroupConversationMemory({
       groupId: "compaction-stress-test",
+      groupSessionId: "gcs_compaction_stress_selftest",
       messages,
       memory,
       config: {},

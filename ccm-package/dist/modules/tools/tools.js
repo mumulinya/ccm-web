@@ -51,6 +51,7 @@ const terminal_1 = require("./terminal");
 const marketplace_1 = require("./marketplace");
 const tool_catalog_management_1 = require("../../tools/tool-catalog-management");
 const internal_skill_catalog_1 = require("../../skills/internal-skill-catalog");
+const internal_mcp_registry_1 = require("../../tools/internal-mcp-registry");
 const { toolManager } = require("../../tools/tool-manager");
 const TOOL_CATALOG_AUDIT_FILE = path.join(os.homedir(), ".cc-connect", "tools", "catalog-operations.jsonl");
 const TOOL_INVOCATION_AUDIT_FILES = {
@@ -1435,6 +1436,11 @@ function handleToolsAndMetricsApi(pathname, req, res, parsed) {
         (0, utils_1.sendJson)(res, { success: true, ...toolManager.getToolList() });
         return true;
     }
+    if (pathname === "/api/tools/internal-mcp" && req.method === "GET") {
+        const runtime = toolManager.getToolList();
+        (0, utils_1.sendJson)(res, (0, internal_mcp_registry_1.buildInternalMcpCatalog)({ feishuConfig: (0, db_1.loadFeishuConfig)(), runtimeServers: runtime.servers || [] }));
+        return true;
+    }
     if (pathname === "/api/tools/authorization-options" && req.method === "GET") {
         (0, utils_1.sendJson)(res, (0, tool_authorization_1.buildToolAuthorizationOptions)({
             mcpTools: (0, db_1.loadMcpTools)(),
@@ -1601,7 +1607,7 @@ function handleToolsAndMetricsApi(pathname, req, res, parsed) {
     }
     // === MCP 工具管理 API ===
     if (pathname === "/api/mcp" && req.method === "GET") {
-        (0, utils_1.sendJson)(res, { success: true, tools: (0, db_1.loadMcpTools)().map(tool_catalog_management_1.redactMcpToolForDisplay) });
+        (0, utils_1.sendJson)(res, { success: true, tools: (0, db_1.loadMcpTools)().filter(tool => !(0, internal_mcp_registry_1.isInternalMcpName)(tool?.name)).map(tool_catalog_management_1.redactMcpToolForDisplay) });
         return true;
     }
     if (pathname === "/api/mcp" && req.method === "POST") {
@@ -1611,6 +1617,8 @@ function handleToolsAndMetricsApi(pathname, req, res, parsed) {
             try {
                 const payload = JSON.parse(body || "{}");
                 const name = (0, tool_catalog_management_1.normalizeToolCatalogName)(payload.name);
+                if ((0, internal_mcp_registry_1.isInternalMcpName)(name))
+                    return (0, utils_1.sendJson)(res, { success: false, error: "内部 MCP 随项目安装并由系统管理，不能在外部 MCP 连接中心编辑" }, 409);
                 const previous = (0, db_1.loadMcpTools)().find(item => String(item.name) === name) || null;
                 if (payload.createOnly === true && previous)
                     return (0, utils_1.sendJson)(res, { success: false, error: "同名 MCP 服务器已存在" }, 409);
@@ -1643,6 +1651,8 @@ function handleToolsAndMetricsApi(pathname, req, res, parsed) {
             try {
                 const { name: rawName } = JSON.parse(body || "{}");
                 const name = (0, tool_catalog_management_1.normalizeToolCatalogName)(rawName);
+                if ((0, internal_mcp_registry_1.isInternalMcpName)(name))
+                    return (0, utils_1.sendJson)(res, { success: false, error: "内部 MCP 是项目运行链路的一部分，不能删除" }, 409);
                 const previous = (0, db_1.loadMcpTools)().find(item => String(item.name) === name) || null;
                 const impact = (0, marketplace_1.previewToolCatalogMutationImpact)({ action: "delete", type: "mcp", name });
                 (0, db_1.deleteMcpTool)(name);

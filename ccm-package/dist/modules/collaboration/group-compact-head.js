@@ -38,6 +38,7 @@ exports.getGroupCompactHeadFile = getGroupCompactHeadFile;
 exports.verifyGroupCompactHead = verifyGroupCompactHead;
 exports.readGroupCompactHead = readGroupCompactHead;
 exports.commitGroupCompactHead = commitGroupCompactHead;
+exports.reconcileGroupCompactHeadFromMemory = reconcileGroupCompactHeadFromMemory;
 exports.validateGroupCompactHeadBinding = validateGroupCompactHeadBinding;
 exports.deleteGroupCompactHead = deleteGroupCompactHead;
 const crypto = __importStar(require("crypto"));
@@ -46,6 +47,7 @@ const path = __importStar(require("path"));
 const atomic_json_file_1 = require("../../core/atomic-json-file");
 const utils_1 = require("../../core/utils");
 const group_memory_compaction_1 = require("./group-memory-compaction");
+const group_memory_boundary_journal_1 = require("./group-memory-boundary-journal");
 exports.GROUP_COMPACT_HEAD_SCHEMA = "ccm-group-compact-head-v1";
 exports.GROUP_COMPACT_HEAD_DIR = path.join(utils_1.CCM_DIR, "group-compact-heads");
 function canonical(value) {
@@ -73,6 +75,7 @@ function headChecksum(head) {
     delete payload.head_checksum;
     delete payload.checksum_valid;
     delete payload.file;
+    delete payload.recovered_from_backup;
     return checksum(payload);
 }
 function verifyGroupCompactHead(head, expected = {}) {
@@ -148,6 +151,7 @@ function commitGroupCompactHead(input = {}) {
             compact_epoch: compactEpoch,
             compact_transaction_receipt_id: String(receipt.receipt_id || ""),
             compact_transaction_receipt_checksum: receiptChecksum,
+            cleanup_audit_checksum: String(receipt.cleanup_audit_checksum || ""),
             summary_checksum: String(receipt.summary_checksum || ""),
             previous_head_checksum: String(previous?.head_checksum || ""),
             committed_at: committedAt,
@@ -156,6 +160,92 @@ function commitGroupCompactHead(input = {}) {
         (0, atomic_json_file_1.writeJsonAtomic)(file, head);
         return { committed: true, idempotent: false, head: { ...head, checksum_valid: true, file }, file };
     });
+}
+function reconcileGroupCompactHeadFromMemory(input = {}) {
+    const memory = input.memory || {};
+    const groupId = String(input.groupId || input.group_id || memory.groupId || "").trim();
+    const groupSessionId = String(input.groupSessionId || input.group_session_id || memory.groupSessionId || "").trim();
+    const currentHead = groupId && groupSessionId.startsWith("gcs_") ? readGroupCompactHead(groupId, groupSessionId) : null;
+    const receipt = memory?.compaction?.compactTransactionReceipt
+        || memory?.compactBoundary?.compactTransactionReceipt
+        || memory?.compactBoundary?.post_compact_restore?.compactTransactionReceipt
+        || memory?.messageCompression?.compactTransactionReceipt
+        || null;
+    const boundaryId = String(memory?.compactBoundary?.id || receipt?.boundary_id || "");
+    const cleanupAudit = memory?.compaction?.postCompactCleanupAudit
+        || memory?.compactBoundary?.post_compact_restore?.cleanupAudit
+        || memory?.messageCompression?.postCompactCleanupAudit
+        || null;
+    const receiptRequiresCleanupBinding = Number(receipt?.version || 0) >= 3;
+    const cleanupAuditVerification = receiptRequiresCleanupBinding
+        ? (0, group_memory_compaction_1.verifyGroupPostCompactCleanupAudit)(cleanupAudit, { groupId, groupSessionId, boundaryId })
+        : { valid: true, issues: [] };
+    const auditBase = {
+        schema: "ccm-group-compact-head-restart-recovery-v1",
+        version: 1,
+        groupId,
+        groupSessionId,
+        boundaryId,
+        receiptId: String(receipt?.receipt_id || ""),
+        receiptChecksum: String(receipt?.receipt_checksum || ""),
+        priorHeadId: String(currentHead?.head_id || ""),
+        priorHeadGeneration: Number(currentHead?.generation || 0),
+        priorHeadBoundaryId: String(currentHead?.boundary_id || ""),
+    };
+    if (!groupId || !groupSessionId.startsWith("gcs_"))
+        return { ...auditBase, status: "rejected", recovered: false, issues: ["exact_group_session_required"] };
+    if (!receipt || !boundaryId)
+        return { ...auditBase, status: "not_applicable", recovered: false, issues: ["durable_compact_receipt_missing"] };
+    const receiptVerification = (0, group_memory_compaction_1.verifyGroupCompactTransactionReceipt)(receipt, {
+        groupId,
+        groupSessionId,
+        boundaryId,
+        summaryChecksum: memory?.compaction?.summaryChecksum || memory?.compactBoundary?.summaryChecksum || "",
+        cleanupAuditChecksum: receiptRequiresCleanupBinding ? String(cleanupAudit?.audit_checksum || "") : "",
+    });
+    const journal = (0, group_memory_boundary_journal_1.readGroupMemoryBoundaryJournal)(groupId, groupSessionId, input);
+    const issues = [...receiptVerification.issues, ...cleanupAuditVerification.issues];
+    if (!journal.valid)
+        issues.push("boundary_journal_invalid");
+    if (!journal.latestCommit)
+        issues.push("boundary_commit_missing");
+    if (journal.latestCommit && String(journal.latestCommit.boundaryId || "") !== boundaryId)
+        issues.push("boundary_journal_head_mismatch");
+    if (journal.latestCommit && String(journal.latestCommit.summaryChecksum || "") !== String(receipt.summary_checksum || ""))
+        issues.push("boundary_journal_summary_mismatch");
+    if (issues.length) {
+        return {
+            ...auditBase,
+            status: "fail_closed",
+            recovered: false,
+            issues: [...new Set(issues)],
+            journal: { status: journal.status, valid: journal.valid, commitCount: journal.commitCount, file: journal.file },
+        };
+    }
+    if (currentHead
+        && String(currentHead.boundary_id || "") === boundaryId
+        && String(currentHead.compact_transaction_receipt_checksum || "") === String(receipt.receipt_checksum || "")) {
+        return {
+            ...auditBase,
+            status: "current",
+            recovered: false,
+            idempotent: true,
+            issues: [],
+            head: currentHead,
+            journal: { status: journal.status, valid: journal.valid, commitCount: journal.commitCount, file: journal.file },
+        };
+    }
+    const committed = commitGroupCompactHead({ groupId, groupSessionId, compactTransactionReceipt: receipt });
+    return {
+        ...auditBase,
+        status: "recovered",
+        recovered: true,
+        idempotent: committed.idempotent === true,
+        issues: [],
+        head: committed.head,
+        journal: { status: journal.status, valid: journal.valid, commitCount: journal.commitCount, file: journal.file },
+        recoveredAt: new Date().toISOString(),
+    };
 }
 function validateGroupCompactHeadBinding(input = {}) {
     const groupId = String(input.groupId || input.group_id || "").trim();

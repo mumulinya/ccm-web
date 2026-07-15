@@ -77,6 +77,9 @@ import {
   recordGroupApiMicrocompactNativeApplyProofLedger,
   recordGroupApiMicrocompactNativeApplyRequestTelemetryLedger,
   recordGroupPostCompactCandidateUsageLedger,
+  renderGroupPostCompactInvokedSkillAttachments,
+  renderGroupPostCompactPlanAttachment,
+  renderGroupPostCompactDynamicContextDelta,
   saveGroupMemory,
   uniqueByKey,
   updateGroupMemory,
@@ -98,6 +101,14 @@ import {
 import { hasFeishuTaskBinding } from "./feishu-channel";
 import { handleFeishuRoutes } from "./feishu-routes";
 import { handleAgentQaRoutes } from "./agent-qa-routes";
+import { GROUP_COORDINATION_MCP_SERVER_NAME } from "../../integrations/group-coordination-mcp";
+import { buildTaskBoundInternalMcpServers } from "../../integrations/agent-internal-mcp";
+import {
+  claimSubmittedGroupCoordinationRequests,
+  listGroupCoordinationRequests,
+  submitGroupCoordinationRequest,
+  updateGroupCoordinationRequest,
+} from "./group-coordination-store";
 import { handleGroupLiveRoutes } from "./group-live-routes";
 import {
   AGENT_QA_TIMEOUT_MS,
@@ -191,6 +202,7 @@ import {
   findGroupChatSessionContainingMessage,
   getGroupMessages,
   loadGroups,
+  resolveWritableGroupChatSession,
   saveGroupMessages,
   saveGroups,
 } from "./storage";
@@ -239,17 +251,20 @@ import {
   transitionExecution,
 } from "../../agents/execution-kernel";
 import {
+  attachTaskAgentFinalDispatchPayloadGate,
   commitTaskAgentSessionCapacityRevalidation,
   bindTaskAgentMemoryContextSnapshot,
   closeTaskAgentSessions,
   getTaskAgentSessionOptions,
   getTaskAgentSessionContinuity,
+  inspectTaskAgentFinalDispatchReactiveCompactCircuitBreaker,
   listTaskAgentMemoryContextSnapshots,
   listTaskAgentSessions,
   openTaskAgentSession,
   prepareTaskAgentSessionCapacityRevalidation,
   purgeTaskAgentSessions,
   recordTaskAgentMemoryContextDelivery,
+  recordTaskAgentFinalDispatchReactiveCompactCircuitOutcome,
   recordTaskAgentSessionTurn,
   reopenTaskAgentSessions,
 } from "../../tasks/agent-sessions";
@@ -332,6 +347,14 @@ import {
   summarizeWorkerHandoffForUser,
 } from "../../agents/worker-handoff";
 import {
+  buildFinalWorkerDispatchPayloadGate,
+  verifyFinalWorkerDispatchPayloadGate,
+} from "../../agents/final-dispatch-payload-gate";
+import {
+  isProviderPromptTooLongFailure,
+  recoverFinalWorkerDispatchPayload,
+} from "../../agents/final-dispatch-reactive-compact";
+import {
   buildMainAgentWorkItems,
   buildMainAgentWorkItemClaimSummary,
   buildMainAgentWorkItemSummary,
@@ -356,6 +379,7 @@ export {
 const taskQueues = new Map<string, string[]>(); // 每个目标（群聊/Agent）独立队列
 const runningTasks = new Map<string, boolean>(); // 正在运行的任务目标
 const runningTaskIds = new Set<string>(); // 正在运行的任务 ID
+const coordinationSettlementInFlight = new Set<string>();
 const TASK_WATCHDOG_INTERVAL_MS = 60 * 1000;
 const TASK_WATCHDOG_STALE_MS = 15 * 60 * 1000;
 const TASK_WATCHDOG_GAP_REWORK_COOLDOWN_MS = 60 * 1000;
@@ -7029,6 +7053,8 @@ async function classifyGroupProjectTaskIntentWithAgent(input: {
   messageMode?: string;
   forceProjectTask?: boolean;
   sharedFilesContext?: string;
+  groupSessionId?: string;
+  group_session_id?: string;
 }) {
   const fallback = classifyGroupProjectTaskIntent(input.message, input.uploadedFiles || []);
   const mode = String(input.messageMode || "conversation").trim().toLowerCase();
@@ -7041,6 +7067,7 @@ async function classifyGroupProjectTaskIntentWithAgent(input: {
       message: input.message,
       source: "intent-gateway",
       sharedFilesContext: input.sharedFilesContext || "",
+      groupSessionId: input.groupSessionId || input.group_session_id || "",
     });
     return normalizeGroupAgentGatewayTaskIntent(fallback, coordinatorResult, mode);
   } catch (error: any) {
@@ -9259,6 +9286,9 @@ function syncTaskBacklogStatus(task: any, status: "queued" | "in_progress" | "do
 
 // === 协作与辅助规则 ===
 function getTaskTargetKey(task: any) {
+  if (task?.queue_scope === "isolated_parallel" && task?.id) {
+    return `isolated:${task.target_project || "unknown"}:${task.id}`;
+  }
   if (task.assign_type === "group" && task.group_id) {
     return `group:${task.group_id}`;
   }
@@ -9327,17 +9357,15 @@ function buildAgentQaProtocolInstructions(currentAgent: string, memberList: stri
   const members = memberList || "暂无可询问成员";
   return [
     "",
-    "[Agent-to-Agent 工作中询问协议]",
-    `- 你是 ${currentAgent || "当前子 Agent"}。如果执行中被其他 Agent 的接口、字段、约束、评审结论阻塞，不要臆测，可以向群聊内其他子 Agent 提问。可询问成员：${members}`,
-    "- 首选使用内部工具协议：在回复末尾输出 <tool_call> JSON，系统会记录问题、转交目标 Agent、收到回答后自动把答案注入给你同 Agent 续跑。",
-    "- ask_agent 示例：<tool_call>{\"name\":\"ask_agent\",\"arguments\":{\"target\":\"后端Agent\",\"question\":\"请确认 POST /api/orders 的字段和响应结构\",\"reason\":\"前端联调需要契约\",\"evidence\":[\"src/orders/api.ts\"],\"required_capabilities\":[\"api\"],\"blocking\":true}}</tool_call>",
-    "- 不确定该问谁时 target 可以写 auto，主 Agent 会按能力标签和当前问答负载选择；回答必须尽量附文件、接口、文档或验证证据。",
-    "- request_review 示例：<tool_call>{\"name\":\"request_review\",\"arguments\":{\"target\":\"测试Agent\",\"question\":\"请评审这次变更是否覆盖订单创建失败分支\",\"blocking\":true}}</tool_call>",
+    "[群聊主 Agent 协调协议]",
+    `- 你是 ${currentAgent || "当前子 Agent"}。可协作成员仅用于了解团队能力：${members}。你不能直接给其他子 Agent 派活，也不能私下扩大其他 Agent 的写权限。`,
+    `- 需要跨 Agent 信息、实现、评审或风险确认时，必须调用内部 MCP ${GROUP_COORDINATION_MCP_SERVER_NAME} 的 request_coordination、request_review 或 report_blocker。只描述需求、证据、能力和验收标准，由群聊主 Agent 选择执行者、建立依赖并验收。`,
+    "- 前端需要后端新增接口等写依赖时，kind 必须填 implementation，并给出 acceptance_criteria/requested_write_paths；主 Agent 会创建正式工作项，完成验收后再恢复你的原任务会话。",
+    "- 只需要接口解释、字段确认或代码评审时，使用 information/review；目标 Agent 只能只读回答。涉及账号、密钥、生产数据、业务方向或高风险权限时使用 risk/report_blocker，由主 Agent 询问用户。",
+    "- target_hint 只是能力建议，不是派发命令；主 Agent 可以改派。回答或实现结果必须尽量附文件、接口、文档、命令或截图证据。",
     "- 如果你正在回答其他 Agent 的问题，可以直接自然语言回答；也可以用 reply_agent：<tool_call>{\"name\":\"reply_agent\",\"arguments\":{\"answer\":\"结论...\",\"evidence\":\"接口/文件/验证证据...\"}}</tool_call>",
-    "- 兼容旧格式：CCM_AGENT_REQUESTS [{\"type\":\"ask_agent\",\"target\":\"后端Agent\",\"question\":\"...\",\"reason\":\"...\",\"blocking\":true}]",
-    "- target 必须是群聊成员名或 auto；question 要具体到接口、文件、字段、验收点或风险。涉及高风险操作、账号密钥、生产数据、业务方向不明确时，说明需要用户确认，不要让其他 Agent 代替用户拍板。",
-    "- Agent 问答是 advisory_read_only：被询问 Agent 只能给结论和证据，不能借询问修改文件、扩大 MCP/工具权限或跨项目操作。",
-    "- 如果没有阻塞，请不要输出 ask_agent/request_review/CCM_AGENT_REQUESTS。",
+    "- 兼容旧运行时的降级格式：CCM_COORDINATION_REQUESTS [{\"kind\":\"information\",\"summary\":\"确认订单接口契约\",\"question\":\"...\",\"required_capabilities\":[\"api\"],\"blocking\":true}]。旧 ask_agent 会被平台转换为主 Agent 协调请求，不再视为直接派发。",
+    "- 如果没有真实依赖或阻塞，不要调用协调 MCP，也不要输出协调标记。",
     "",
   ].join("\n");
 }
@@ -9373,11 +9401,19 @@ function normalizeAgentQaRequest(raw: any, group: any, sourceProject = "") {
   const targetName = String(raw.target || raw.to || raw.to_agent || raw.agent || raw.project || raw.targetName || "auto").trim();
   const question = String(raw.question || raw.message || raw.prompt || raw.request || "").trim();
   const type = String(raw.type || raw.kind || "ask_agent").trim() || "ask_agent";
+  const kind = /implementation|write|implement|开发|实现|修改/i.test(String(raw.kind || raw.request_kind || raw.requestKind || type))
+    ? "implementation"
+    : /risk|user|风险|确认/i.test(String(raw.kind || raw.request_kind || raw.requestKind || type))
+      ? "risk"
+      : /review|评审|复核/i.test(String(raw.kind || raw.request_kind || raw.requestKind || type))
+        ? "review"
+        : "information";
   if (!question || question.length < 4) return null;
   const members = new Set((group.members || []).map((m: any) => String(m.project || "").trim()).filter(Boolean));
   if (targetName.toLowerCase() !== "auto" && (!members.has(targetName) || targetName === sourceProject)) return null;
   return {
     type: /review/i.test(type) ? "request_review" : "ask_agent",
+    kind,
     targetName,
     question: compactMemoryText(question, 1600),
     reason: compactMemoryText(String(raw.reason || raw.context || raw.evidence || "").trim(), 500),
@@ -9388,6 +9424,9 @@ function normalizeAgentQaRequest(raw: any, group: any, sourceProject = "") {
     depth: Math.max(0, Number(raw.depth || 0)),
     hop_path: Array.isArray(raw.hop_path || raw.hopPath) ? (raw.hop_path || raw.hopPath) : [],
     blocking: raw.blocking !== false,
+    acceptance_criteria: uniqueStrings(raw.acceptance_criteria || raw.acceptanceCriteria || []).slice(0, 30),
+    requested_write_paths: uniqueStrings(raw.requested_write_paths || raw.requestedWritePaths || []).slice(0, 40),
+    coordination_request_id: String(raw.coordination_request_id || raw.coordinationRequestId || raw.id || "").trim(),
   };
 }
 
@@ -9410,7 +9449,7 @@ function extractAgentQaRequests(text: string, group: any, sourceProject = "") {
     push({ ...(call.arguments || {}), type: name });
   }
 
-  const markerRegex = /CCM_AGENT_REQUESTS\s*[:：]?\s*([\s\S]*?)(?=\n\s*(?:CCM_AGENT_RECEIPT|CCM_AGENT_REQUESTS|$))/gi;
+  const markerRegex = /CCM_(?:AGENT|COORDINATION)_REQUESTS\s*[:：]?\s*([\s\S]*?)(?=\n\s*(?:CCM_AGENT_RECEIPT|CCM_(?:AGENT|COORDINATION)_REQUESTS|$))/gi;
   let markerMatch: RegExpExecArray | null;
   while ((markerMatch = markerRegex.exec(rawText)) !== null) {
     const candidate = stripCodeFence(markerMatch[1]);
@@ -9459,6 +9498,7 @@ function stripAgentQaProtocolBlocks(text: string) {
       return calls.some(call => ["ask_agent", "request_review", "reply_agent"].includes(call.name.toLowerCase())) ? "" : block;
     })
     .replace(/\n?CCM_AGENT_REQUESTS\s*[:：]?\s*[\s\S]*?(?=\n\s*(?:CCM_AGENT_RECEIPT|$))/gi, "")
+    .replace(/\n?CCM_COORDINATION_REQUESTS\s*[:：]?\s*[\s\S]*?(?=\n\s*(?:CCM_AGENT_RECEIPT|$))/gi, "")
     .replace(/^\s*CCM_(?:ASK_AGENT|REQUEST_REVIEW)\s+@[^\n]+\n?/gim, "")
     .trim();
 }
@@ -9597,10 +9637,13 @@ function summarizeReplayRepairTimelineBindingsForEvent(mention: any, context: an
   const workerHandoff = context.workerHandoff || null;
   const snapshot = context.memoryContextSnapshot || context.taskAgentMemoryContextSnapshot || null;
   const session = context.taskAgentSession || null;
+  const groupSessionId = String(context.groupSessionId || context.group_session_id || "").trim();
   return replayRepairDispatchBriefRefsForMention(mention, context).map((brief: any) => ({
     brief_id: brief.brief_id,
     work_item_id: brief.work_item_id,
     source: brief.source,
+    groupSessionId: groupSessionId.startsWith("gcs_") ? groupSessionId : "",
+    group_session_id: groupSessionId.startsWith("gcs_") ? groupSessionId : "",
     project: context.targetName || mention?.targetName || mention?.project || brief.target_project || "",
     assignment_id: mention?.assignmentId || mention?.assignment_id || context.assignmentId || context.assignment_id || "",
     dispatch_key: mention?.dispatchKey || mention?.dispatch_key || context.dispatchKey || context.dispatch_key || "",
@@ -9626,11 +9669,17 @@ function summarizeReplayRepairTimelineBindingsForEvent(mention: any, context: an
 
 function recordReplayRepairTimelineBindingsForMention(groupId: string, mention: any, context: any = {}) {
   if (!groupId) return [];
-  const refs = summarizeReplayRepairTimelineBindingsForEvent(mention, context);
-  const event = context.timelineEvent || context.timeline_event || null;
+  const task = context.taskId ? loadTasks().find((item: any) => item.id === context.taskId) : null;
+  const candidateGroupSessionId = String(context.groupSessionId || context.group_session_id || task?.group_session_id || task?.groupSessionId || "").trim();
+  const groupSessionId = candidateGroupSessionId.startsWith("gcs_") ? candidateGroupSessionId : "";
+  const scopedContext = { ...context, groupSessionId, group_session_id: groupSessionId };
+  const refs = summarizeReplayRepairTimelineBindingsForEvent(mention, scopedContext);
+  const event = scopedContext.timelineEvent || scopedContext.timeline_event || null;
   return refs.map((ref: any) => recordReplayRepairDispatchBriefTimelineBinding(groupId, {
     ...ref,
     brief: ref,
+    groupSessionId,
+    group_session_id: groupSessionId,
     task_id: context.taskId || mention?.taskId || mention?.task_id || "",
     project: ref.project,
     assignment_id: ref.assignment_id,
@@ -15146,11 +15195,24 @@ async function processCrossAgents(
       agentType: activeTaskSession?.agentType || tAgentType,
       modelContextWindow: activeTaskSession?.modelContextWindow || 0,
       groupSessionId: sourceTask?.group_session_id || sourceTask?.groupSessionId || "",
+      requireExactGroupSession: true,
       parentRunId: sourceTask?.parent_run_id || sourceTask?.global_mission_id || "",
       task: sourceTask,
       ...taskAgentInvocationMemoryOptions(activeInvocationEdge),
     });
     let memoryPacket = groupMemoryBundle.rendered_text || buildAgentMemoryPacket(groupId, targetName, childTaskText, { groupSessionId: sourceTask?.group_session_id || sourceTask?.groupSessionId || "" });
+    const initialInvokedSkillAttachmentText = String(groupMemoryBundle.invoked_skill_attachment_text || renderGroupPostCompactInvokedSkillAttachments(groupMemoryBundle)).trim();
+    if (initialInvokedSkillAttachmentText && !memoryPacket.includes(initialInvokedSkillAttachmentText)) {
+      memoryPacket = `${initialInvokedSkillAttachmentText}\n\n${memoryPacket}`;
+    }
+    const initialPlanAttachmentText = String(groupMemoryBundle.plan_attachment_text || renderGroupPostCompactPlanAttachment(groupMemoryBundle)).trim();
+    if (initialPlanAttachmentText && !memoryPacket.includes(initialPlanAttachmentText)) {
+      memoryPacket = `${initialPlanAttachmentText}\n\n${memoryPacket}`;
+    }
+    const initialDynamicContextDeltaText = String(groupMemoryBundle.dynamic_context_delta_text || renderGroupPostCompactDynamicContextDelta(groupMemoryBundle)).trim();
+    if (initialDynamicContextDeltaText && !memoryPacket.includes(initialDynamicContextDeltaText)) {
+      memoryPacket = `${initialDynamicContextDeltaText}\n\n${memoryPacket}`;
+    }
     const globalMissionHandoff = sourceTask?.mission_handoff || sourceTask?.missionHandoff || null;
     const globalMissionMemory = globalMissionHandoff ? [
       "[全局任务交接摘要]",
@@ -15191,6 +15253,7 @@ async function processCrossAgents(
         context: tContext,
         source: sourceProject,
         sharedFilesContext,
+        groupSessionId: activeGroupSessionId,
         providerSwitchRequests: buildTaskProviderSwitchRequests(sourceTask),
       });
       const planAssignments = normalizePlanAssignments((result as any).assignments || []);
@@ -15269,7 +15332,17 @@ async function processCrossAgents(
       : buildAgentToolContext(ctx, group, targetName, childTaskText);
     let runtimeToolContext = nativeTestAgentDispatch
       ? buildNativeTestAgentRuntimeToolContext(targetName, tWorkDir)
-      : prepareAgentRuntimeTools(groupId, targetName, tWorkDir, tAgentType, toolContext.allowedTools, streamRes, { taskId, task: sourceTask, toolAudit: toolContext.toolAudit, authorizationReadiness: toolContext.authorizationReadiness });
+      : prepareAgentRuntimeTools(groupId, targetName, tWorkDir, tAgentType, toolContext.allowedTools, streamRes, {
+        taskId,
+        task: sourceTask,
+        toolAudit: toolContext.toolAudit,
+        authorizationReadiness: toolContext.authorizationReadiness,
+        disableTaskBoundInternalMcp: advisoryOnly,
+        internalAgentRole: targetName === coordinatorProject ? "group-main-agent" : "project-child-agent",
+        groupSessionId: sourceTask?.group_session_id || sourceTask?.groupSessionId || "",
+        taskAgentSessionId: activeTaskSession?.id || "",
+        nativeSessionId: activeTaskSession?.nativeSessionId || "",
+      });
     if (runtimeToolContext.dispatchBlocked) {
       const blockedReceipt = runtimeToolDispatchBlockedReceipt(targetName, runtimeToolContext);
       const blockedOutput = blockedReceipt.summary;
@@ -15446,7 +15519,9 @@ async function processCrossAgents(
       query: childTaskText,
       verificationHints: buildProjectVerificationHints(targetName, tWorkDir),
     });
-    const renderCrossAgentPrompt = () => `你正在 CCM 群聊中被 @ 请求协作。${collaborationInstructions}${buildAgentQaProtocolInstructions(targetName, memberList)}${toolContext.prompt}${runtimeToolContext.prompt}
+    const renderCrossAgentPrompt = (renderOptions: any = {}) => {
+      const recentGroupContext = renderOptions.recentGroupContext ?? tContext;
+      return `你正在 CCM 群聊中被 @ 请求协作。${collaborationInstructions}${buildAgentQaProtocolInstructions(targetName, memberList)}${toolContext.prompt}${runtimeToolContext.prompt}
 
 ${developmentContract}
 
@@ -15480,12 +15555,13 @@ ${activeTaskSession ? `[任务级原生会话]
 - 此会话只在主 Agent 最终验收完成后关闭；返工必须承接上一轮结论，不得从零重做。` : ""}
 
 以下是群聊最近的消息记录：
-${tContext}
+${recentGroupContext}
 
 ${sourceProject} 刚才 @ 了你，请根据上下文回复他的请求：
 ${childTaskText}
 
 请直接回复本次请求：给出结论、必要的执行/修改说明、风险、汇总意见，或需要继续 @ 的成员。`;
+    };
     let tPrompt = renderCrossAgentPrompt();
 
     let activeMemoryContextSnapshot: any = null;
@@ -15605,6 +15681,8 @@ ${childTaskText}
       let tOutput = "";
       let previousOutput = "";
       let previousReceipt: any = null;
+      let providerPromptTooLongReactiveRetryAttempted = false;
+      let forceProviderPromptTooLongReactiveCompact = false;
       let targetReceipt: any = null;
       let targetInvokedSkills: any[] = [];
       let testAgentNativeReport: TestAgentReport | null = null;
@@ -15952,6 +16030,8 @@ ${childTaskText}
       } else {
         for (let attemptIndex = 0; attemptIndex < runtimeCandidates.length; attemptIndex++) {
         activeRuntime = runtimeCandidates[attemptIndex];
+        const forceReactiveCompactThisAttempt = forceProviderPromptTooLongReactiveCompact;
+        forceProviderPromptTooLongReactiveCompact = false;
         if (attemptIndex > 0) {
           const previousRuntime = runtimeCandidates[attemptIndex - 1];
           const sameRuntimeResume = activeRuntime === previousRuntime;
@@ -15992,11 +16072,24 @@ ${childTaskText}
             agentType: activeRuntime,
             modelContextWindow: activeTaskSession?.modelContextWindow || 0,
             groupSessionId: activeGroupSessionId,
+            requireExactGroupSession: true,
             parentRunId: sourceTask?.parent_run_id || sourceTask?.global_mission_id || "",
             task: sourceTask,
             ...taskAgentInvocationMemoryOptions(activeInvocationEdge),
           });
           memoryPacket = groupMemoryBundle.rendered_text || buildAgentMemoryPacket(groupId, targetName, childTaskText, { groupSessionId: activeGroupSessionId });
+          const resumedInvokedSkillAttachmentText = String(groupMemoryBundle.invoked_skill_attachment_text || renderGroupPostCompactInvokedSkillAttachments(groupMemoryBundle)).trim();
+          if (resumedInvokedSkillAttachmentText && !memoryPacket.includes(resumedInvokedSkillAttachmentText)) {
+            memoryPacket = `${resumedInvokedSkillAttachmentText}\n\n${memoryPacket}`;
+          }
+          const resumedPlanAttachmentText = String(groupMemoryBundle.plan_attachment_text || renderGroupPostCompactPlanAttachment(groupMemoryBundle)).trim();
+          if (resumedPlanAttachmentText && !memoryPacket.includes(resumedPlanAttachmentText)) {
+            memoryPacket = `${resumedPlanAttachmentText}\n\n${memoryPacket}`;
+          }
+          const resumedDynamicContextDeltaText = String(groupMemoryBundle.dynamic_context_delta_text || renderGroupPostCompactDynamicContextDelta(groupMemoryBundle)).trim();
+          if (resumedDynamicContextDeltaText && !memoryPacket.includes(resumedDynamicContextDeltaText)) {
+            memoryPacket = `${resumedDynamicContextDeltaText}\n\n${memoryPacket}`;
+          }
           workerMemoryPacket = [memoryPacket, globalMissionMemory].filter(Boolean).join("\n\n");
           workerMemoryContext = globalMissionMemory
             ? { schema: "ccm-worker-memory-context-v1", group_memory: groupMemoryBundle, global_mission_memory: globalMissionMemory }
@@ -16169,8 +16262,10 @@ ${childTaskText}
           "继续前必须重新读取当前文件/分支状态，只处理仍未满足的缺口，并在回执中说明目标是否仍一致。",
         ].join("\n") : "";
         const currentMemoryAttemptSequence = activeTaskSession ? activeTaskSession.turnCount + 1 : memoryDeliveryAttemptSequence;
-        const attemptPrompt = attemptIndex === 0 ? tPrompt : `${buildRuntimeRecoveryPrompt({
-          originalPrompt: tPrompt,
+        const renderAttemptPrompt = (recentGroupContext: string) => attemptIndex === 0
+          ? renderCrossAgentPrompt({ recentGroupContext })
+          : `${buildRuntimeRecoveryPrompt({
+          originalPrompt: renderCrossAgentPrompt({ recentGroupContext }),
           previousOutput,
           previousReceipt,
           failure: previousOutput,
@@ -16178,12 +16273,139 @@ ${childTaskText}
           toRuntime: activeRuntime,
           attempt: attemptIndex + 1,
         })}\n\n${recoveryAuditPacket}`;
+        let attemptPrompt = renderAttemptPrompt(tContext);
         targetNativeSessionId = "";
         targetNativeContinuationEvidence = null;
         targetNativeModelCapabilityReceipt = null;
         targetSessionSucceeded = true;
         targetSessionError = "";
         let targetRunnerStarted = false;
+        let finalDispatchPayloadGate = buildFinalWorkerDispatchPayloadGate({
+          renderedPrompt: attemptPrompt,
+          workerHandoff,
+          provider: activeRuntime,
+          model: activeTaskSession?.modelId || "",
+          groupId,
+          groupSessionId: activeGroupSessionId,
+          taskId,
+          taskAgentSessionId: activeTaskSession?.id || "",
+        });
+        let finalDispatchPayloadGateVerification = verifyFinalWorkerDispatchPayloadGate(finalDispatchPayloadGate, {
+          renderedPrompt: attemptPrompt,
+          groupId,
+          groupSessionId: activeGroupSessionId,
+          taskId,
+          taskAgentSessionId: activeTaskSession?.id || "",
+          workerContextPacketId: workerHandoff.worker_context_packet?.packet_id || "",
+        });
+        let finalDispatchReactiveCompactReceipt: any = null;
+        let finalDispatchReactiveCompactCircuitBreaker: any = activeTaskSession && activeGroupSessionId.startsWith("gcs_")
+          ? inspectTaskAgentFinalDispatchReactiveCompactCircuitBreaker(activeTaskSession.id, {
+            groupId,
+            groupSessionId: activeGroupSessionId,
+            taskId,
+          })
+          : null;
+        const finalDispatchRecoveryRequested = finalDispatchPayloadGateVerification.valid
+          && (finalDispatchPayloadGate.status === "recompact_required" || forceReactiveCompactThisAttempt);
+        if (finalDispatchRecoveryRequested && finalDispatchReactiveCompactCircuitBreaker?.blocked !== true) {
+          const finalDispatchRecovery = recoverFinalWorkerDispatchPayload({
+            renderedPrompt: attemptPrompt,
+            recentContext: tContext,
+            renderPrompt: renderAttemptPrompt,
+            workerHandoff,
+            provider: activeRuntime,
+            model: activeTaskSession?.modelId || "",
+            groupId,
+            groupSessionId: activeGroupSessionId,
+            taskId,
+            taskAgentSessionId: activeTaskSession?.id || "",
+            forceReactiveCompact: forceReactiveCompactThisAttempt,
+          });
+          finalDispatchReactiveCompactReceipt = finalDispatchRecovery.receipt || null;
+          if (finalDispatchRecovery.recovered === true) {
+            attemptPrompt = finalDispatchRecovery.prompt;
+            finalDispatchPayloadGate = finalDispatchRecovery.gate;
+            finalDispatchPayloadGateVerification = verifyFinalWorkerDispatchPayloadGate(finalDispatchPayloadGate, {
+              renderedPrompt: attemptPrompt,
+              groupId,
+              groupSessionId: activeGroupSessionId,
+              taskId,
+              taskAgentSessionId: activeTaskSession?.id || "",
+              workerContextPacketId: workerHandoff.worker_context_packet?.packet_id || "",
+            });
+            if (taskId) appendTaskTimelineEvent(taskId, {
+              type: "final_worker_dispatch_reactive_compact_recovered",
+              title: `${targetName} 最终上下文已自动重压缩`,
+              detail: `${finalDispatchReactiveCompactReceipt.original_prompt_tokens || 0} -> ${finalDispatchReactiveCompactReceipt.recovered_prompt_tokens || 0} tokens`,
+              status: "ok",
+              phase: "dispatching",
+              agent: targetName,
+              data: { final_dispatch_reactive_compact: finalDispatchReactiveCompactReceipt },
+            });
+          }
+        }
+        if (finalDispatchReactiveCompactReceipt?.status === "blocked" && activeTaskSession && activeGroupSessionId.startsWith("gcs_")) {
+          finalDispatchReactiveCompactCircuitBreaker = recordTaskAgentFinalDispatchReactiveCompactCircuitOutcome(activeTaskSession.id, {
+            groupId,
+            groupSessionId: activeGroupSessionId,
+            taskId,
+            attemptId: finalDispatchReactiveCompactReceipt.receipt_id,
+            outcome: "failure",
+            reason: "final_prompt_recovery_failed_before_provider",
+            error: finalDispatchReactiveCompactReceipt.action,
+          });
+        }
+        workerHandoff = {
+          ...workerHandoff,
+          worker_context_packet: {
+            ...(workerHandoff.worker_context_packet || {}),
+            final_dispatch_payload_gate: finalDispatchPayloadGate,
+            ...(finalDispatchReactiveCompactReceipt ? { final_dispatch_reactive_compact: finalDispatchReactiveCompactReceipt } : {}),
+          },
+        };
+        workerHandoffSummary = summarizeWorkerHandoffForUser(workerHandoff);
+        if (activeTaskSession && activeMemoryContextSnapshot?.snapshot_id) {
+          const finalGateBinding = attachTaskAgentFinalDispatchPayloadGate(activeTaskSession.id, {
+            snapshotId: activeMemoryContextSnapshot.snapshot_id,
+            finalDispatchPayloadGate,
+            finalDispatchReactiveCompact: finalDispatchReactiveCompactReceipt,
+            renderedPrompt: attemptPrompt,
+          });
+          if (finalGateBinding?.updated !== true) {
+            const error: any = new Error(`FINAL_WORKER_DISPATCH_SNAPSHOT_BINDING_FAILED:${finalGateBinding?.reason || "unknown"}`);
+            error.code = "FINAL_WORKER_DISPATCH_SNAPSHOT_BINDING_FAILED";
+            error.finalDispatchPayloadGate = finalDispatchPayloadGate;
+            error.binding = finalGateBinding;
+            throw error;
+          }
+          activeTaskSession = finalGateBinding.session || activeTaskSession;
+          activeMemoryContextSnapshot = summarizeTaskAgentMemoryContextSnapshot(finalGateBinding.snapshot);
+          if (typeof mention !== "string") mention.task_agent_memory_context_snapshot = activeMemoryContextSnapshot;
+        }
+        if (!finalDispatchPayloadGateVerification.valid || finalDispatchPayloadGate.provider_call_allowed !== true) {
+          const reason = !finalDispatchPayloadGateVerification.valid
+            ? `gate_invalid:${finalDispatchPayloadGateVerification.issues.join(",")}`
+            : finalDispatchRecoveryRequested && finalDispatchReactiveCompactCircuitBreaker?.blocked === true && !finalDispatchReactiveCompactReceipt
+              ? `reactive_compact_circuit_open:failures=${finalDispatchReactiveCompactCircuitBreaker.consecutive_failures || 0}`
+            : `prompt_tokens=${finalDispatchPayloadGate.estimated_total_input_tokens};threshold=${finalDispatchPayloadGate.auto_compact_threshold}`;
+          if (taskId) {
+            addTaskLog(taskId, "error", `${targetName} 最终派发上下文超过模型自动压缩触发线，已在 Provider 调用前拦截：${reason}`);
+            appendTaskTimelineEvent(taskId, {
+              type: "final_worker_dispatch_payload_blocked",
+              title: `${targetName} 最终上下文派发已拦截`,
+              detail: reason,
+              status: "fail",
+              phase: "dispatching",
+              agent: targetName,
+              data: { final_dispatch_payload_gate: finalDispatchPayloadGate },
+            });
+          }
+          const error: any = new Error(`FINAL_WORKER_DISPATCH_PAYLOAD_BLOCKED:${reason}`);
+          error.code = "FINAL_WORKER_DISPATCH_PAYLOAD_BLOCKED";
+          error.finalDispatchPayloadGate = finalDispatchPayloadGate;
+          throw error;
+        }
         const typedMemoryDispatchAdmission = admitChildTypedMemoryDelivery(groupMemoryBundle, {
           workerContextPacket: workerHandoff.worker_context_packet,
           renderedPrompt: attemptPrompt,
@@ -16197,7 +16419,7 @@ ${childTaskText}
           memoryBundle: groupMemoryBundle,
           workerContextPacket: workerHandoff.worker_context_packet,
           renderedPrompt: attemptPrompt,
-          snapshotRenderedPrompt: tPrompt,
+          snapshotRenderedPrompt: attemptPrompt,
           executionId: laneExecutionId,
           capacityRevalidationProof: capacityRevalidationPreparation?.proof || null,
         });
@@ -16239,6 +16461,7 @@ ${childTaskText}
             groupSessionMemoryBinding: activeMemoryContextSnapshot?.context?.group_session_memory_binding || null,
             summaryCapsuleChecksum: workerHandoff.worker_context_packet?.post_turn_summary_delivery_capsule?.capsule_checksum || "",
             typedMemoryDeliveryCapsule: workerHandoff.worker_context_packet?.typed_memory_delivery_capsule || null,
+            finalDispatchPayloadGate,
             renderedPrompt: attemptPrompt,
             compact_epoch: workerHandoff.worker_context_packet?.post_turn_summary_delivery_capsule?.compact_epoch || "",
           });
@@ -16351,7 +16574,7 @@ ${childTaskText}
           const delivery = recordTaskAgentMemoryContextDelivery(activeTaskSession.id, {
             snapshotId: activeMemoryContextSnapshot?.snapshot_id || activeTaskSession.memoryContextSnapshotId || "",
             renderedPrompt: attemptPrompt,
-            snapshotRenderedPrompt: tPrompt,
+            snapshotRenderedPrompt: attemptPrompt,
             executionId: laneExecutionId,
             traceId: sourceTask?.trace_id || "",
             runtime: activeRuntime,
@@ -16440,9 +16663,57 @@ ${childTaskText}
             deliveryReceipt: activeMemoryContextDelivery,
           });
         }
-        if (!effectiveFailedAttempt) { tOutput = attemptOutput; break; }
+        if (!effectiveFailedAttempt) {
+          if (activeTaskSession && activeGroupSessionId.startsWith("gcs_")
+            && (finalDispatchReactiveCompactReceipt || Number(finalDispatchReactiveCompactCircuitBreaker?.consecutive_failures || 0) > 0)) {
+            finalDispatchReactiveCompactCircuitBreaker = recordTaskAgentFinalDispatchReactiveCompactCircuitOutcome(activeTaskSession.id, {
+              groupId,
+              groupSessionId: activeGroupSessionId,
+              taskId,
+              attemptId: `${finalDispatchReactiveCompactReceipt?.receipt_id || finalDispatchPayloadGate.gate_id}:provider_accepted`,
+              outcome: "success",
+              reason: "provider_accepted_final_prompt",
+            });
+          }
+          tOutput = attemptOutput;
+          break;
+        }
         previousOutput = attemptOutput;
         previousReceipt = extractAgentReceipt(attemptOutput, targetName);
+        const providerPromptTooLong = isProviderPromptTooLongFailure(targetSessionError || attemptOutput);
+        if (activeTaskSession && activeGroupSessionId.startsWith("gcs_") && forceReactiveCompactThisAttempt && providerPromptTooLong) {
+          finalDispatchReactiveCompactCircuitBreaker = recordTaskAgentFinalDispatchReactiveCompactCircuitOutcome(activeTaskSession.id, {
+            groupId,
+            groupSessionId: activeGroupSessionId,
+            taskId,
+            attemptId: `${finalDispatchReactiveCompactReceipt?.receipt_id || finalDispatchPayloadGate.gate_id}:provider_ptl`,
+            outcome: "failure",
+            reason: "provider_prompt_too_long_after_reactive_compact",
+            error: targetSessionError || attemptOutput,
+          });
+        }
+        if (providerPromptTooLong && !providerPromptTooLongReactiveRetryAttempted) {
+          const retryCircuit = activeTaskSession && activeGroupSessionId.startsWith("gcs_")
+            ? inspectTaskAgentFinalDispatchReactiveCompactCircuitBreaker(activeTaskSession.id, { groupId, groupSessionId: activeGroupSessionId, taskId })
+            : null;
+          if (retryCircuit?.blocked === true) {
+            if (taskId) addTaskLog(taskId, "error", `${targetName} 最终上下文自动恢复断路器已打开，本会话不再重复 Provider PTL 重试`);
+          } else {
+            providerPromptTooLongReactiveRetryAttempted = true;
+            forceProviderPromptTooLongReactiveCompact = true;
+            runtimeCandidates.splice(attemptIndex + 1, 0, normalizeAgentRuntimeId(activeRuntime));
+            if (taskId) appendTaskTimelineEvent(taskId, {
+              type: "final_worker_provider_prompt_too_long_recovery_scheduled",
+              title: `${targetName} Provider 上下文超限，正在自动恢复`,
+              detail: `provider=${activeRuntime}；同一任务会话仅重试一次`,
+              status: "warn",
+              phase: "reworking",
+              agent: targetName,
+              data: { provider: activeRuntime, task_agent_session_id: activeTaskSession?.id || "", group_session_id: activeGroupSessionId },
+            });
+            continue;
+          }
+        }
         const fallbackDecision = attemptRecoveryDecision;
         if (!fallbackDecision.switchRuntime || attemptIndex >= runtimeCandidates.length - 1) { tOutput = attemptOutput; break; }
       }
@@ -16950,6 +17221,8 @@ ${childTaskText}
         ctx,
         streamRes,
         taskId,
+        sourceTaskAgentSessionId: activeTaskSession?.id || targetReceipt?.task_agent_session_id || "",
+        sourceNativeSessionId: targetNativeSessionId || activeTaskSession?.nativeSessionId || targetReceipt?.native_session_id || "",
         qaDepth: depth,
       });
       if (qaResult.outputs.length) outputs.push(...qaResult.outputs);
@@ -17090,7 +17363,7 @@ function arbitrateAgentQaRequest(request: any, group: any, sourceProject = "") {
   if (request.targetName === sourceProject) {
     return { decision: "reject", reason: "不能把问题发回给自己" };
   }
-  if (/用户确认|业务方确认|产品确认|人工确认|生产数据|密钥|token|密码|支付|扣款|删除生产|合规|隐私/i.test(text)) {
+  if (request.kind === "risk" || /用户确认|业务方确认|产品确认|人工确认|生产数据|密钥|token|密码|支付|扣款|删除生产|合规|隐私/i.test(text)) {
     return { decision: "ask_user", reason: "问题涉及用户/业务/高风险确认，需要主 Agent 暂停并让用户拍板" };
   }
   return { decision: "ask_agent", reason: request.reason || "目标 Agent 具备该问题的上下文" };
@@ -17251,15 +17524,61 @@ async function handleAgentQaRequests(input: {
   ctx: CollabCtx;
   streamRes?: any;
   taskId?: string;
+  sourceTaskAgentSessionId?: string;
+  sourceNativeSessionId?: string;
   qaDepth?: number;
 }) {
   markExpiredAgentQaItems(input.groupId);
   const qaDepth = Number(input.qaDepth || 0);
-  const requests = qaDepth > 0 ? [] : extractAgentQaRequests(input.sourceOutput, input.group, input.sourceProject);
+  const coordinationContext = {
+    groupId: input.groupId,
+    taskId: input.taskId || `conversation:${input.groupId}`,
+    groupSessionId: getTaskById(input.taskId || "")?.group_session_id || "",
+    sourceProject: input.sourceProject,
+    sourceAgentType: input.sourceAgentType,
+    sourceTaskAgentSessionId: input.sourceTaskAgentSessionId || "",
+    sourceNativeSessionId: input.sourceNativeSessionId || "",
+    sourceWorkDir: input.sourceWorkDir,
+  };
+  if (qaDepth === 0) {
+    for (const legacy of extractAgentQaRequests(input.sourceOutput, input.group, input.sourceProject)) {
+      submitGroupCoordinationRequest(coordinationContext, {
+        kind: legacy.kind,
+        summary: legacy.question,
+        question: legacy.question,
+        reason: legacy.reason,
+        blocking: legacy.blocking,
+        requiredCapabilities: legacy.required_capabilities,
+        targetHint: legacy.targetName === "auto" ? "" : legacy.targetName,
+        evidence: legacy.evidence,
+        acceptanceCriteria: legacy.acceptance_criteria,
+        requestedWritePaths: legacy.requested_write_paths,
+        idempotencyKey: legacy.coordination_request_id || undefined,
+        metadata: { legacy_protocol: true, legacy_type: legacy.type },
+      });
+    }
+  }
+  const claimId = `group-main:${input.groupId}:${input.taskId || "conversation"}:${Date.now().toString(36)}`;
+  const claimedCoordination = qaDepth > 0 ? [] : claimSubmittedGroupCoordinationRequests(coordinationContext, claimId);
+  const requests = claimedCoordination.map((row: any) => ({
+    type: row.kind === "review" ? "request_review" : "ask_agent",
+    kind: row.kind,
+    targetName: row.target_hint || "auto",
+    question: row.question || row.summary,
+    reason: row.reason,
+    evidence: row.evidence || [],
+    required_capabilities: row.required_capabilities || [],
+    blocking: row.blocking !== false,
+    acceptance_criteria: row.acceptance_criteria || [],
+    requested_write_paths: row.requested_write_paths || [],
+    coordination_request_id: row.id,
+    coordination_record: row,
+  }));
   if (!requests.length) return { outputs: [], resumedOutput: "" };
 
   const outputs: string[] = [];
   const answers: any[] = [];
+  let coordinationResumedOutput = "";
   for (const rawRequest of requests.slice(0, 5)) {
     const now = new Date().toISOString();
     const openItems = loadAgentQaItems();
@@ -17279,6 +17598,18 @@ async function handleAgentQaRequests(input: {
       from_agent: input.sourceProject,
       to_agent: request.targetName,
     });
+    if (request.kind === "implementation") {
+      contract.permission_contract = {
+        mode: "formal_work_item_write",
+        inherited_from: "group_main_agent",
+        target_project: request.targetName,
+        write_scope_expanded: true,
+        mcp_scope_expanded: false,
+        tool_scope_expanded: false,
+        requested_write_paths: request.requested_write_paths || [],
+        rule: "写权限仅由群聊主 Agent 通过正式项目工作项授予；原子 Agent 的请求本身不授予写权限。",
+      };
+    }
     const admission = evaluateCollaborationQuestionAdmission(contract, openItems);
     const arbitration = arbitrateAgentQaRequest(request, input.group, input.sourceProject);
     if (!admission.allowed) {
@@ -17288,6 +17619,8 @@ async function handleAgentQaRequests(input: {
     const qaBase = {
       ...contract,
       id: contract.question_id,
+      coordination_request_id: request.coordination_request_id || "",
+      coordination_kind: request.kind || "information",
       status: arbitration.decision === "ask_agent" ? "waiting" : arbitration.decision,
       timeout_at: contract.deadline_at,
       routing,
@@ -17300,6 +17633,8 @@ async function handleAgentQaRequests(input: {
         allowed_tools: input.allowedTools || { mcp: [], skill: [] },
         mcp_config_path: input.mcpConfigPath || "",
         runtime_tool_snapshot: input.runtimeToolSnapshot || null,
+        source_task_agent_session_id: input.sourceTaskAgentSessionId || "",
+        source_native_session_id: input.sourceNativeSessionId || "",
       },
       retry_count: 0,
       manual_takeover: false,
@@ -17325,6 +17660,111 @@ async function handleAgentQaRequests(input: {
       appendTaskTimelineEvent(input.taskId, { type: "agent_qa_waiting", title: `${input.sourceProject} 等待 ${request.targetName}`, detail: `问题 ${qa.id} 已进入等待；回答到达后自动唤醒原会话`, status: "active", phase: "waiting_dependency", agent: input.sourceProject, data: { qa_id: qa.id, deadline_at: qa.deadline_at } });
     }
 
+    if (request.kind === "implementation" && arbitration.decision === "ask_agent") {
+      const coordinator = getCoordinatorMember(input.group)?.project || "coordinator";
+      const dependencyTask = createTask({
+        title: `协作依赖：${compactMemoryText(request.question || request.reason, 80)}`,
+        description: [
+          "【群聊主 Agent 正式协作工作项】",
+          `业务目标：${request.question}`,
+          request.reason ? `背景：${request.reason}` : "",
+          request.requested_write_paths?.length ? `授权修改范围：${request.requested_write_paths.join("；")}` : "",
+          request.acceptance_criteria?.length ? `验收标准：${request.acceptance_criteria.join("；")}` : "",
+          request.evidence?.length ? `已有证据：${request.evidence.join("；")}` : "",
+          "这是由群聊主 Agent 授权的正式可写工作项。只在授权范围内实现，并提交真实 filesChanged 和 verification 结果说明。",
+        ].filter(Boolean).join("\n"),
+        business_goal: request.question,
+        acceptance_criteria: (request.acceptance_criteria || []).join("\n"),
+        target_project: request.targetName,
+        group_id: input.groupId,
+        group_session_id: sourceTask?.group_session_id || "",
+        assign_type: "project",
+        workflow_type: "agent_coordination_dependency",
+        parent_task_id: input.taskId || null,
+        priority: sourceTask?.priority || "normal",
+        auto_execute: true,
+        queue_scope: "isolated_parallel",
+        child_agent_isolation: "worktree",
+        branch_policy: "worktree",
+        commit_policy: "verified_commit",
+        allowed_paths: request.requested_write_paths?.length ? request.requested_write_paths : ["."],
+        requires_code_changes: true,
+        requires_verification: true,
+        requires_independent_review: false,
+        idempotency_key: `group-coordination:${request.coordination_request_id || qa.id}`,
+        workflow_meta: {
+          coordination_request_id: request.coordination_request_id || "",
+          requested_by_agent: input.sourceProject,
+          dispatched_by: "group_main_agent",
+          requested_write_paths: request.requested_write_paths || [],
+          required_capabilities: request.required_capabilities || [],
+          execution_mode: "parallel_isolated_native_session",
+          source_task_agent_session_id: input.sourceTaskAgentSessionId || "",
+          source_native_session_id: input.sourceNativeSessionId || "",
+        },
+      });
+      updateTask(dependencyTask.id, { status: "pending", status_detail: `正在为 ${request.targetName} 准备独立会话和工作区` });
+      if (sourceTask) updateTask(sourceTask.id, {
+        child_task_ids: uniqueStrings([...(Array.isArray(sourceTask.child_task_ids) ? sourceTask.child_task_ids : []), dependencyTask.id]),
+        collaboration_state: {
+          ...(sourceTask.collaboration_state || {}),
+          phase: "waiting_dependency",
+          coordination_request_id: request.coordination_request_id,
+          dependency_task_id: dependencyTask.id,
+          dependency_project: request.targetName,
+          updated_at: new Date().toISOString(),
+        },
+        status_detail: `等待 ${request.targetName} 完成协作工作项`,
+      });
+      updateGroupCoordinationRequest(request.coordination_request_id, {
+        status: "work_item_created",
+        work_item_task_id: dependencyTask.id,
+        auditType: "formal_work_item_created",
+        auditDetail: `群聊主 Agent 已创建正式可写工作项并派发给 ${request.targetName}`,
+      });
+      if (input.taskId) appendTaskTimelineEvent(input.taskId, {
+        type: "coordination_work_item_created",
+        title: `主 Agent 已安排 ${request.targetName} 处理依赖`,
+        detail: request.question,
+        status: "active",
+        phase: "waiting_dependency",
+        agent: coordinator,
+        data: { coordination_request_id: request.coordination_request_id, work_item_task_id: dependencyTask.id, target_project: request.targetName },
+      });
+      const queuedQa = upsertAgentQaItem({
+        ...qa,
+        status: "queued",
+        work_item_task_id: dependencyTask.id,
+        execution_mode: "parallel_isolated_native_session",
+        audit: [...(Array.isArray(qa.audit) ? qa.audit : []), { at: new Date().toISOString(), type: "parallel_work_item_queued", detail: `已为 ${request.targetName} 准备独立会话执行通道` }].slice(-30),
+      });
+      const queueResult = enqueueTask(dependencyTask.id, input.ctx);
+      updateGroupCoordinationRequest(request.coordination_request_id, {
+        status: queueResult.queued ? "work_item_created" : "waiting_agent",
+        resolution: {
+          target_project: request.targetName,
+          work_item_task_id: dependencyTask.id,
+          execution_mode: "parallel_isolated_native_session",
+          queue: queueResult,
+        },
+        auditType: queueResult.queued ? "parallel_work_item_queued" : "parallel_work_item_waiting",
+        auditDetail: queueResult.queued
+          ? `已为 ${request.targetName} 创建独立第三方 Agent 会话执行通道，不等待其现有会话结束`
+          : queueResult.message || `等待 ${request.targetName} 执行通道就绪`,
+      });
+      emitAgentQaEvent(input.streamRes, "progress", queuedQa, queueResult.queued ? `${request.targetName} 的独立协作会话正在启动` : queueResult.message || "协作会话等待启动");
+      if (input.taskId) appendTaskTimelineEvent(input.taskId, {
+        type: queueResult.queued ? "coordination_parallel_session_queued" : "coordination_parallel_session_waiting",
+        title: queueResult.queued ? `${request.targetName} 的独立协作会话正在启动` : `${request.targetName} 的执行通道暂未就绪`,
+        detail: queueResult.queued ? "该工作项使用独立 worktree 和原生会话并行执行，不会打断正在工作的会话" : queueResult.message || "等待执行通道恢复",
+        status: queueResult.queued ? "active" : "warn",
+        phase: "waiting_dependency",
+        agent: coordinator,
+        data: { coordination_request_id: request.coordination_request_id, work_item_task_id: dependencyTask.id, target_project: request.targetName, execution_mode: "parallel_isolated_native_session", queue: queueResult },
+      });
+      continue;
+    }
+
     if (arbitration.decision === "ask_user") {
       const needsUser = upsertAgentQaItem({
         ...qa,
@@ -17334,6 +17774,7 @@ async function handleAgentQaRequests(input: {
       });
       appendGroupMessage(input.groupId, buildAgentQaMessage("answer", needsUser, `主 Agent 仲裁：${arbitration.reason}\n需要用户确认后再继续。`));
       emitAgentQaEvent(input.streamRes, "answer", needsUser, `主 Agent 仲裁：${arbitration.reason}\n需要用户确认后再继续。`);
+      updateGroupCoordinationRequest(request.coordination_request_id, { status: "needs_user", auditType: "needs_user", auditDetail: arbitration.reason });
       continue;
     }
     if (arbitration.decision !== "ask_agent") {
@@ -17346,6 +17787,7 @@ async function handleAgentQaRequests(input: {
       });
       appendGroupMessage(input.groupId, buildAgentQaMessage("answer", rejected, arbitration.reason));
       emitAgentQaEvent(input.streamRes, "answer", rejected, arbitration.reason);
+      updateGroupCoordinationRequest(request.coordination_request_id, { status: "failed", auditType: "rejected", auditDetail: arbitration.reason });
       continue;
     }
 
@@ -17395,6 +17837,12 @@ async function handleAgentQaRequests(input: {
       answered_at: new Date().toISOString(),
       audit: [...(Array.isArray(askingQa.audit) ? askingQa.audit : []), { at: new Date().toISOString(), type: answerText && acceptance.accepted ? "accepted" : answerText ? "rejected" : "failed", detail: acceptance.reason || (answerText ? "目标 Agent 已回答" : "目标 Agent 未返回可用回答") }].slice(-30),
     });
+    updateGroupCoordinationRequest(request.coordination_request_id, {
+      status: acceptance.accepted ? "resolved" : "failed",
+      resolution: { target_project: request.targetName, answer: completedQa.answer, acceptance },
+      auditType: acceptance.accepted ? "read_only_answer_accepted" : "read_only_answer_rejected",
+      auditDetail: acceptance.reason,
+    });
     appendGroupMessage(input.groupId, buildAgentQaMessage("answer", completedQa, completedQa.answer));
     emitAgentQaEvent(input.streamRes, "answer", completedQa, completedQa.answer);
     if (completedQa.acceptance?.accepted) writeAcceptedAgentQaToProjectMemory(completedQa);
@@ -17405,7 +17853,7 @@ async function handleAgentQaRequests(input: {
   }
 
   const blockingAnswers = answers.filter(item => item.blocking !== false && item.status === "answered");
-  if (!blockingAnswers.length) return { outputs, resumedOutput: "" };
+  if (!blockingAnswers.length) return { outputs, resumedOutput: coordinationResumedOutput };
 
   const injectedAt = new Date().toISOString();
   const injectedAnswers = blockingAnswers.map((item: any) => upsertAgentQaItem({
@@ -17478,6 +17926,7 @@ async function handleAgentQaRequests(input: {
       resume_message_id: resumeMessageId,
       audit: [...(Array.isArray(item.audit) ? item.audit : []), { at: resumedAt, type: "resumed", detail: "原 Agent 已拿到回答并续跑" }].slice(-30),
     });
+    if (updated.coordination_request_id) updateGroupCoordinationRequest(updated.coordination_request_id, { status: "resumed", auditType: "source_agent_resumed", auditDetail: "只读协作结论已注入原 Agent 会话" });
     return updated.id;
   });
   appendGroupMessage(input.groupId, {
@@ -17526,7 +17975,352 @@ async function handleAgentQaRequests(input: {
     },
     nextAction: `主 Agent 等待 ${input.sourceProject} 续跑结果说明并进行最终验收`,
   });
-  return { outputs, resumedOutput };
+  return { outputs, resumedOutput: resumedOutput || coordinationResumedOutput };
+}
+
+function evaluateCoordinationImplementationReceipt(receipt: any, request: any) {
+  const status = String(receipt?.status || "").toLowerCase();
+  const filesChanged = uniqueStrings((receipt?.filesChanged || receipt?.files_changed || []).map((item: any) => typeof item === "string" ? item : item?.path)).slice(0, 80);
+  const verification = uniqueStrings(receipt?.verification || receipt?.tests || []).slice(0, 60);
+  const blockers = uniqueStrings(receipt?.blockers || []).slice(0, 30);
+  const requiresFiles = Array.isArray(request.requested_write_paths) && request.requested_write_paths.length > 0;
+  const accepted = status === "done" && blockers.length === 0 && (!requiresFiles || filesChanged.length > 0) && verification.length > 0;
+  const gaps = [
+    status !== "done" ? `结果状态为 ${status || "missing"}` : "",
+    blockers.length ? `仍有阻塞：${blockers.join("；")}` : "",
+    requiresFiles && !filesChanged.length ? "未提供实际代码变更证据" : "",
+    !verification.length ? "未提供验证证据" : "",
+  ].filter(Boolean);
+  return {
+    status: accepted ? "accepted" : "needs_evidence",
+    accepted,
+    score: accepted ? 100 : Math.max(0, 100 - gaps.length * 25),
+    evidence: [...filesChanged, ...verification].slice(0, 100),
+    files_changed: filesChanged,
+    verification,
+    gaps,
+    reason: accepted ? "正式工作项已完成，代码变更和验证证据均通过群聊主 Agent 验收" : `正式工作项尚未通过验收：${gaps.join("；")}`,
+    arbitrated_by: "group_main_agent_work_item_gate",
+    arbitrated_at: new Date().toISOString(),
+  };
+}
+
+function inspectCoordinationWorkspaceChanges(execution: any) {
+  const workDir = String(execution?.workspace?.worktreePath || execution?.packet?.workDir || "").trim();
+  if (!workDir || !fs.existsSync(workDir)) return [];
+  const result = spawnSync("git", ["status", "--porcelain=v1", "--untracked-files=all", "-z"], { cwd: workDir, encoding: "utf-8", windowsHide: true });
+  if (result.status !== 0) return [];
+  const entries = String(result.stdout || "").split("\0").filter(Boolean);
+  const files: any[] = [];
+  for (let index = 0; index < entries.length; index++) {
+    const entry = entries[index];
+    const status = entry.slice(0, 2).trim() || "modified";
+    const filePath = entry.slice(3).replace(/\\/g, "/").trim();
+    if (!filePath) continue;
+    files.push({ path: filePath, status, source: "git_worktree" });
+    if (/R|C/.test(entry.slice(0, 2)) && entries[index + 1]) index++;
+  }
+  return files;
+}
+
+function evaluateCoordinationTaskEvidence(task: any, request: any, receipt: any, execution: any) {
+  const base = evaluateCoordinationImplementationReceipt(receipt, request);
+  const inspectedWorkspaceFiles = inspectCoordinationWorkspaceChanges(execution);
+  const persistedAcceptance = task?.coordination_acceptance || request?.resolution?.acceptance || execution?.data?.coordination_acceptance || {};
+  const workspaceFiles = inspectedWorkspaceFiles.length
+    ? inspectedWorkspaceFiles
+    : execution?.workspace?.mergedAt && execution?.workspace?.mergeCommit && Array.isArray(persistedAcceptance.workspace_files)
+      ? persistedAcceptance.workspace_files
+      : [];
+  const declaredFiles = uniqueStrings(base.files_changed || []);
+  const actualFiles = uniqueStrings(workspaceFiles.map((item: any) => item.path));
+  const requiresFiles = Array.isArray(request?.requested_write_paths) && request.requested_write_paths.length > 0;
+  const declaredMatch = !requiresFiles || declaredFiles.some((file: string) => actualFiles.includes(file));
+  const gaps = uniqueStrings([
+    ...(base.gaps || []),
+    requiresFiles && !actualFiles.length ? "独立 worktree 未检测到真实代码差异" : "",
+    requiresFiles && actualFiles.length > 0 && !declaredMatch ? "结果说明中的文件与 worktree 实际差异不一致" : "",
+  ]).filter(Boolean);
+  const accepted = base.accepted && gaps.length === 0;
+  return {
+    ...base,
+    status: accepted ? "accepted" : "needs_evidence",
+    accepted,
+    score: accepted ? 100 : Math.min(Number(base.score || 0), Math.max(0, 100 - gaps.length * 25)),
+    gaps,
+    workspace_files: workspaceFiles,
+    evidence: uniqueStrings([...(base.evidence || []), ...actualFiles]).slice(0, 120),
+    reason: accepted
+      ? "正式工作项已完成，真实代码差异和验证证据均通过群聊主 Agent 验收"
+      : `正式工作项尚未通过验收：${gaps.join("；")}`,
+  };
+}
+
+function getCoordinationRequestForTask(task: any) {
+  const requestId = String(task?.workflow_meta?.coordination_request_id || "").trim();
+  if (!requestId) return null;
+  return listGroupCoordinationRequests({ groupId: task.group_id || "", taskId: task.parent_task_id || "" })
+    .find((item: any) => item.id === requestId)
+    || listGroupCoordinationRequests({ groupId: task.group_id || "" }).find((item: any) => item.id === requestId)
+    || null;
+}
+
+function getCoordinationQaForRequest(requestId: string) {
+  return loadAgentQaItems().find((item: any) => String(item.coordination_request_id || "") === String(requestId || "")) || null;
+}
+
+function coordinationAuditHas(request: any, type: string) {
+  return Array.isArray(request?.audit) && request.audit.some((item: any) => item?.type === type);
+}
+
+function markGroupCoordinationDependencyStarted(task: any, workspace: any, session: any) {
+  if (task?.workflow_type !== "agent_coordination_dependency") return null;
+  const request = getCoordinationRequestForTask(task);
+  if (!request || ["resumed", "failed", "cancelled", "timeout"].includes(request.status)) return request;
+  const qa = getCoordinationQaForRequest(request.id);
+  const execution = {
+    mode: "parallel_isolated_native_session",
+    target_project: task.target_project || request.target_hint || "",
+    work_item_task_id: task.id,
+    task_agent_session_id: session?.id || "",
+    native_session_id: session?.nativeSessionId || "",
+    agent_type: session?.agentType || "",
+    workspace_mode: workspace?.mode || "",
+    worktree_path: workspace?.worktreePath || "",
+    worktree_branch: workspace?.worktreeBranch || "",
+    original_work_dir: workspace?.originalWorkDir || "",
+    started_at: new Date().toISOString(),
+  };
+  updateGroupCoordinationRequest(request.id, {
+    status: "executing",
+    resolution: { ...(request.resolution || {}), execution },
+    auditType: coordinationAuditHas(request, "parallel_session_started") ? "parallel_session_heartbeat" : "parallel_session_started",
+    auditDetail: `${task.target_project} 已在独立第三方 Agent 会话和 worktree 中并行执行`,
+  });
+  if (!coordinationAuditHas(request, "parallel_session_started")) {
+    const runningQa = qa ? upsertAgentQaItem({
+      ...qa,
+      status: "executing",
+      execution_mode: execution.mode,
+      coordination_execution: execution,
+      work_item_task_id: task.id,
+      audit: [...(Array.isArray(qa.audit) ? qa.audit : []), { at: execution.started_at, type: "parallel_session_started", detail: `${task.target_project} 已在独立会话开始实现` }].slice(-30),
+    }) : null;
+    if (runningQa) appendGroupMessage(task.group_id, buildAgentQaMessage("progress", runningQa, `${task.target_project} 已在独立会话并行处理`));
+    if (task.parent_task_id) appendTaskTimelineEvent(task.parent_task_id, {
+      type: "coordination_parallel_session_started",
+      title: `${task.target_project} 已在独立会话开始处理`,
+      detail: "该协作工作项与目标 Agent 的原有会话并行运行，完成后由主 Agent 验收和合并",
+      status: "active",
+      phase: "waiting_dependency",
+      agent: task.target_project,
+      data: { coordination_request_id: request.id, execution },
+    });
+    appendTaskTimelineEvent(task.id, {
+      type: "coordination_isolated_workspace_ready",
+      title: "独立会话和工作区已准备",
+      detail: `${session?.agentType || "第三方 Agent"} 已启动，代码修改已与其他会话隔离`,
+      status: "ok",
+      phase: "executing",
+      agent: task.target_project,
+      data: execution,
+    });
+    safeAddGroupLog(task.group_id, "info", "agent_coordination", `${task.target_project} 已在独立会话并行处理协作依赖`, { coordination_request_id: request.id, execution });
+  }
+  return execution;
+}
+
+function buildRejectedCoordinationAcceptance(task: any, request: any, receipt: any, reason: string) {
+  const base = evaluateCoordinationImplementationReceipt(receipt, request);
+  const gaps = uniqueStrings([...(base.gaps || []), reason]).filter(Boolean);
+  return {
+    ...base,
+    status: "needs_evidence",
+    accepted: false,
+    score: Math.min(Number(base.score || 0), 50),
+    gaps,
+    reason: `正式工作项尚未通过验收：${gaps.join("；")}`,
+  };
+}
+
+async function settleGroupCoordinationDependency(task: any, ctx: CollabCtx, streamRes: any = null) {
+  if (task?.workflow_type !== "agent_coordination_dependency") return { handled: false, reason: "not_coordination_dependency" };
+  const request = getCoordinationRequestForTask(task);
+  if (!request) return { handled: false, reason: "coordination_request_missing" };
+  if (request.status === "resumed") return { handled: true, duplicate: true, status: "resumed" };
+  if (request.status === "merge_conflict" && task.status === "failed") {
+    return { handled: true, pending: true, status: "merge_conflict", reason: task.status_detail || "等待处理代码合并冲突" };
+  }
+  if (coordinationSettlementInFlight.has(request.id)) return { handled: true, duplicate: true, status: "settling" };
+  coordinationSettlementInFlight.add(request.id);
+  try {
+    const qa = getCoordinationQaForRequest(request.id);
+    if (!qa) return { handled: false, reason: "coordination_qa_missing" };
+    if (request.status === "resolved" && qa.status === "resumed") {
+      updateGroupCoordinationRequest(request.id, { status: "resumed", auditType: "source_agent_resume_reconciled", auditDetail: "重启恢复时已确认原 Agent 会话此前完成续跑" });
+      return { handled: true, duplicate: true, accepted: true, resumed: true, status: "resumed" };
+    }
+    if (request.status === "resolved" && qa.acceptance?.accepted) {
+      const group = loadGroups().find((item: any) => item.id === task.group_id);
+      if (!group) return { handled: true, accepted: true, resumed: false, reason: "group_missing" };
+      const wakeup = await resumeAgentQaFromStoredContinuation(qa, group, ctx, streamRes);
+      updateGroupCoordinationRequest(request.id, {
+        status: wakeup.resumed ? "resumed" : "resolved",
+        auditType: wakeup.resumed ? "source_agent_resumed_after_restart" : "source_agent_resume_waiting",
+        auditDetail: wakeup.resumed ? "服务恢复后，原 Agent 已收到合并结果并继续原任务" : wakeup.reason || "原 Agent 暂未恢复，等待自动重试",
+      });
+      return { handled: true, accepted: true, resumed: wakeup.resumed, wakeup, reason: wakeup.reason };
+    }
+    const execution = loadExecution(task.id);
+    const receipt = task.receipt || execution?.receipt || null;
+    const hasReturned = ["done", "failed", "cancelled"].includes(String(task.status || ""))
+      || (!!receipt && !runningTaskIds.has(task.id) && !isTaskQueuedInMemory(task.id));
+    if (!hasReturned) return { handled: true, pending: true, status: task.status };
+
+    let acceptance: any = evaluateCoordinationTaskEvidence(task, request, receipt, execution);
+    if (task.status !== "done") {
+      acceptance = buildRejectedCoordinationAcceptance(task, request, receipt, `执行状态为 ${task.status || "unknown"}`);
+    }
+    updateGroupCoordinationRequest(request.id, {
+      status: "evidence_review",
+      resolution: { ...(request.resolution || {}), target_project: task.target_project, work_item_task_id: task.id, receipt, acceptance },
+      auditType: "evidence_review",
+      auditDetail: acceptance.reason,
+    });
+    if (task.parent_task_id) appendTaskTimelineEvent(task.parent_task_id, {
+      type: "coordination_evidence_review",
+      title: `主 Agent 正在验收 ${task.target_project} 的协作结果`,
+      detail: acceptance.accepted ? "代码变更和验证证据已齐全，准备安全合并" : acceptance.reason,
+      status: acceptance.accepted ? "active" : "warn",
+      phase: "reviewing",
+      agent: "coordinator",
+      data: { coordination_request_id: request.id, work_item_task_id: task.id, acceptance },
+    });
+
+    let mergeResult: any = { required: false, success: true };
+    if (acceptance.accepted && execution?.workspace?.mode === "worktree") {
+      const mergingQa = upsertAgentQaItem({
+        ...qa,
+        status: "merging",
+        work_item_task_id: task.id,
+        acceptance,
+        coordination_execution: { ...(qa.coordination_execution || {}), workspace: execution.workspace },
+      });
+      updateGroupCoordinationRequest(request.id, {
+        status: "merging",
+        auditType: "worktree_merge_started",
+        auditDetail: `主 Agent 开始把 ${task.target_project} 的已验证变更安全合并回项目`,
+      });
+      if (!coordinationAuditHas(request, "worktree_merge_started")) {
+        appendGroupMessage(task.group_id, buildAgentQaMessage("progress", mergingQa, "实现和验证已完成，正在安全合并代码"));
+      }
+      try {
+        mergeResult = mergeExecutionWorktree(task.id, {
+          message: `feat: complete coordination dependency ${task.id}`,
+          mergeMessage: `merge: coordination dependency ${task.id}`,
+        });
+        if (!loadExecution(task.id)?.workspace?.cleanedAt) {
+          try { cleanupExecutionWorktree(task.id); } catch (cleanupError: any) {
+            addTaskLog(task.id, "warning", `协作 worktree 已合并但清理失败：${cleanupError?.message || cleanupError}`);
+          }
+        }
+      } catch (error: any) {
+        mergeResult = { required: true, success: false, error: error?.message || String(error) };
+        acceptance = buildRejectedCoordinationAcceptance(task, request, receipt, `代码安全合并失败：${mergeResult.error}`);
+        updateTask(task.id, { status: "failed", status_detail: acceptance.reason, merge_result: mergeResult });
+        updateGroupCoordinationRequest(request.id, {
+          status: "merge_conflict",
+          resolution: { ...(request.resolution || {}), receipt, acceptance, merge: mergeResult },
+          auditType: "worktree_merge_failed",
+          auditDetail: acceptance.reason,
+        });
+      }
+    }
+
+    const latestQa = getCoordinationQaForRequest(request.id) || qa;
+    const completedQa = upsertAgentQaItem({
+      ...latestQa,
+      status: acceptance.accepted ? "answered" : "rejected",
+      answer: compactMemoryText(receipt?.summary || acceptance.reason, 4000),
+      answer_evidence: acceptance.evidence,
+      acceptance: { ...acceptance, merge: mergeResult },
+      work_item_task_id: task.id,
+      answered_at: new Date().toISOString(),
+      audit: [...(Array.isArray(latestQa.audit) ? latestQa.audit : []), { at: new Date().toISOString(), type: acceptance.accepted ? "work_item_accepted" : "work_item_rejected", detail: acceptance.reason }].slice(-30),
+    });
+    appendGroupMessage(task.group_id, buildAgentQaMessage("answer", completedQa, completedQa.answer));
+    emitAgentQaEvent(streamRes, "answer", completedQa, completedQa.answer);
+    appendAgentQaTrace(task.parent_task_id || "", "agent.coordination.work_item_review", completedQa, acceptance.reason, acceptance.accepted ? "ok" : "warn", { coordination_request_id: request.id, work_item_task_id: task.id, acceptance, merge: mergeResult });
+
+    const sourceTask = getTaskById(task.parent_task_id || "");
+    if (sourceTask) updateTask(sourceTask.id, {
+      collaboration_state: {
+        ...(sourceTask.collaboration_state || {}),
+        phase: acceptance.accepted ? "executing" : "waiting_dependency",
+        dependency_status: acceptance.accepted ? "accepted" : "rejected",
+        dependency_task_id: task.id,
+        coordination_request_id: request.id,
+        merge_result: mergeResult,
+        updated_at: new Date().toISOString(),
+      },
+      status_detail: acceptance.accepted ? `${task.target_project} 的协作代码已验收并合并，正在恢复原任务` : acceptance.reason,
+    });
+    if (task.parent_task_id) appendTaskTimelineEvent(task.parent_task_id, {
+      type: acceptance.accepted ? "coordination_dependency_merged" : "coordination_dependency_rejected",
+      title: acceptance.accepted ? `${task.target_project} 的协作代码已验收并合并` : `${task.target_project} 的协作结果需要处理`,
+      detail: acceptance.reason,
+      status: acceptance.accepted ? "ok" : "warn",
+      phase: acceptance.accepted ? "executing" : "waiting_dependency",
+      agent: "coordinator",
+      data: { coordination_request_id: request.id, work_item_task_id: task.id, acceptance, merge: mergeResult },
+    });
+    if (!acceptance.accepted) {
+      const mergeConflict = mergeResult?.required === true && mergeResult?.success === false;
+      updateGroupCoordinationRequest(request.id, { status: mergeConflict ? "merge_conflict" : "failed", auditType: mergeConflict ? "merge_conflict_waiting_rework" : "acceptance_failed", auditDetail: acceptance.reason });
+      return { handled: true, accepted: false, acceptance, merge: mergeResult };
+    }
+
+    updateGroupCoordinationRequest(request.id, {
+      status: "resolved",
+      resolution: { ...(request.resolution || {}), receipt, acceptance, merge: mergeResult },
+      auditType: "resolved",
+      auditDetail: "正式工作项已通过主 Agent 验收并安全合并，准备恢复原 Agent",
+    });
+    const group = loadGroups().find((item: any) => item.id === task.group_id);
+    if (!group) return { handled: true, accepted: true, resumed: false, reason: "group_missing" };
+    const wakeup = await resumeAgentQaFromStoredContinuation(completedQa, group, ctx, streamRes);
+    if (wakeup.resumed) {
+      updateGroupCoordinationRequest(request.id, { status: "resumed", auditType: "source_agent_resumed", auditDetail: "原 Agent 已收到合并后的依赖结果并从原任务会话继续" });
+      return { handled: true, accepted: true, resumed: true, wakeup, merge: mergeResult };
+    }
+    updateGroupCoordinationRequest(request.id, { status: "resolved", auditType: "source_agent_resume_waiting", auditDetail: wakeup.reason || "原 Agent 暂未恢复，等待自动重试" });
+    return { handled: true, accepted: true, resumed: false, reason: wakeup.reason, merge: mergeResult };
+  } finally {
+    coordinationSettlementInFlight.delete(request.id);
+  }
+}
+
+export async function recoverGroupCoordinationDependencies(ctx: CollabCtx) {
+  const requests = listGroupCoordinationRequests({}).filter((item: any) => ["work_item_created", "executing", "evidence_review", "merging", "merge_conflict", "resolved"].includes(item.status));
+  const results: any[] = [];
+  for (const request of requests) {
+    const task = getTaskById(request.work_item_task_id || "");
+    if (!task) {
+      results.push({ request_id: request.id, recovered: false, reason: "work_item_missing" });
+      continue;
+    }
+    if (["pending", "queued"].includes(task.status) && task.auto_execute !== false && !isTaskQueuedInMemory(task.id) && !runningTaskIds.has(task.id)) {
+      results.push({ request_id: request.id, task_id: task.id, ...enqueueTask(task.id, ctx) });
+      continue;
+    }
+    const settled = await settleGroupCoordinationDependency(task, ctx);
+    results.push({ request_id: request.id, task_id: task.id, ...settled });
+  }
+  return { total: requests.length, results };
+}
+
+export async function runGroupCoordinationBusinessChainTestTurn(input: any) {
+  return handleAgentQaRequests(input);
 }
 
 function buildCoordinatorVisibleMessageContent(content: any, fallback = "我已整理这次协作进展，技术细节已放入技术详情。", maxLength = 4000) {
@@ -21642,6 +22436,7 @@ async function runCoordinatorReviewLoop(input: {
   streamRes?: any;
   executionOrder?: string;
   taskId?: string;
+  groupSessionId?: string;
 }) {
   const coordinator = getCoordinatorMember(input.group);
   const seenMentions = new Set<string>();
@@ -21667,7 +22462,7 @@ async function runCoordinatorReviewLoop(input: {
       input.userMessage,
       input.coordinatorOutput,
       allOutputs,
-      { allowFollowUps, round, maxRounds: maxReviewRounds, taskId: input.taskId || "", executionId: input.taskId || "" }
+      { allowFollowUps, round, maxRounds: maxReviewRounds, taskId: input.taskId || "", executionId: input.taskId || "", groupSessionId: input.groupSessionId || "" }
     );
 
     if (!review) {
@@ -21867,7 +22662,7 @@ async function runCoordinatorReviewLoop(input: {
   }
 
   const finalSummary = lastReview
-    || await runLlmCoordinatorSummary(input.group, input.userMessage, allOutputs)
+    || await runLlmCoordinatorSummary(input.group, input.userMessage, allOutputs, { groupSessionId: input.groupSessionId || "" })
     || buildCodedCoordinatorSummary(input.group, allOutputs);
 
   if (finalSummary) {
@@ -21934,6 +22729,7 @@ async function executeTask(task: any, ctx: CollabCtx) {
       message,
       context,
       source: "task",
+      groupSessionId: groupSessionIdForTask(task),
       sharedFilesContext,
       providerSwitchRequests: buildTaskProviderSwitchRequests(task),
       traceId: task.trace_id || task.traceId || "",
@@ -22131,6 +22927,7 @@ async function executeTask(task: any, ctx: CollabCtx) {
         ctx,
         executionOrder: (coordinatorResult as any).executionOrder || "parallel",
         taskId: task.id,
+        groupSessionId: task.group_session_id || task.groupSessionId || "",
       });
       appendTaskTimelineEvent(task.id, { type: "coordinator_review", title: "主 Agent 验收", detail: compactMemoryText(reviewResult?.content || reviewResult?.detail || "", 500), status: reviewResult?.status === "done" ? "ok" : "warn", phase: "reviewing", agent: coordinatorProject, data: { review: reviewResult?.review || reviewResult } });
     }
@@ -22236,9 +23033,10 @@ async function executeTask(task: any, ctx: CollabCtx) {
       project: task.target_project,
       agentType,
     });
+    markGroupCoordinationDependencyStarted(task, preparedWorkDir, directTaskSession);
     const directMemoryDeliveryAttemptSequence = directTaskSession ? directTaskSession.turnCount + 1 : 0;
     const directGroupSessionId = String(task.group_session_id || task.groupSessionId || "");
-    let directInvocationEdge: any = task.group_id && directTaskSession && directGroupSessionId.startsWith("gcs_") ? prepareTaskAgentInvocationEdge({
+    let directInvocationEdge: any = task.workflow_type !== "agent_coordination_dependency" && task.group_id && directTaskSession && directGroupSessionId.startsWith("gcs_") ? prepareTaskAgentInvocationEdge({
       groupId: task.group_id,
       groupSessionId: directGroupSessionId,
       taskId: task.id,
@@ -22251,7 +23049,7 @@ async function executeTask(task: any, ctx: CollabCtx) {
       invocationKind: directMemoryDeliveryAttemptSequence > 1 ? "resume" : "spawn",
       branchKind: "main",
     }) : null;
-    const directGroupMemoryContext = task.group_id
+    const directGroupMemoryContext = task.group_id && task.workflow_type !== "agent_coordination_dependency"
       ? await buildAgentMemoryContextBundleWithManifestSelection(task.group_id, task.target_project, directTaskText, {
         taskId: task.id,
         traceId: task.trace_id || "",
@@ -22261,6 +23059,7 @@ async function executeTask(task: any, ctx: CollabCtx) {
         taskAgentSessionTurn: directMemoryDeliveryAttemptSequence,
         modelContextWindow: directTaskSession?.modelContextWindow || 0,
         groupSessionId: task.group_session_id || task.groupSessionId || "",
+        requireExactGroupSession: true,
         task,
         ...taskAgentInvocationMemoryOptions(directInvocationEdge),
       })
@@ -22869,6 +23668,52 @@ async function processTargetQueue(targetKey: string, ctx: CollabCtx) {
 
       addTaskLog(taskId, "response", `Agent 响应:\n${result.substring(0, 1000)}`);
 
+      if (task.workflow_type === "agent_coordination_dependency") {
+        const coordinationRequest = getCoordinationRequestForTask(task);
+        const coordinationReceipt = execution.receipt || null;
+        const coordinationKernel = loadExecution(task.id);
+        const coordinationAcceptance: any = coordinationRequest
+          ? evaluateCoordinationTaskEvidence(task, coordinationRequest, coordinationReceipt, coordinationKernel)
+          : buildRejectedCoordinationAcceptance(task, {}, coordinationReceipt, "找不到协调请求记录");
+        const workspaceFiles = coordinationAcceptance.workspace_files || [];
+        const green = evaluateGreenContract({
+          receipt: coordinationReceipt,
+          fileChanges: workspaceFiles,
+          requiresChanges: taskRequiresCodeChanges(task),
+          requiresVerification: task.requires_verification !== false,
+          workspacePassed: coordinationAcceptance.accepted,
+          branchFresh: true,
+          reviewPassed: coordinationAcceptance.accepted,
+          requiredLevel: coordinationKernel?.workspace?.mode === "worktree" ? "merge_ready" : "project",
+        });
+        const completedAt = new Date().toISOString();
+        transitionExecution(task.id, coordinationAcceptance.accepted ? "succeeded" : "failed", coordinationAcceptance.reason, {
+          green,
+          receipt: coordinationReceipt,
+          fileChanges: { files: workspaceFiles },
+          runnerVerification: { status: coordinationAcceptance.accepted ? "passed" : "failed", verification: coordinationAcceptance.verification || [] },
+          outputPreview: result,
+          data: { coordination_acceptance: coordinationAcceptance },
+        });
+        const settledTask = updateTask(task.id, {
+          status: coordinationAcceptance.accepted ? "done" : "failed",
+          result: result.substring(0, 500),
+          final_report: execution.report || result,
+          status_detail: coordinationAcceptance.reason,
+          receipt: coordinationReceipt,
+          file_changes: { files: workspaceFiles },
+          coordination_acceptance: coordinationAcceptance,
+          completed_at: coordinationAcceptance.accepted ? completedAt : undefined,
+          failed_at: coordinationAcceptance.accepted ? undefined : completedAt,
+          execution_kernel: { execution_id: task.id, state: coordinationAcceptance.accepted ? "succeeded" : "failed", green, updated_at: completedAt },
+        }) || task;
+        closeTaskAgentSessions({ taskId, groupId: task.group_id || undefined }, coordinationAcceptance.accepted ? "协作工作项已交付，等待主 Agent 合并" : "协作工作项未通过证据门禁");
+        updateGroupTaskInlineStatus(settledTask, coordinationAcceptance.accepted ? "done" : "failed", coordinationAcceptance.reason);
+        addTaskLog(task.id, coordinationAcceptance.accepted ? "success" : "warning", coordinationAcceptance.reason);
+        await ctx.onTaskStatusChange?.(settledTask, coordinationAcceptance.accepted ? "done" : "failed", coordinationAcceptance.reason);
+        continue;
+      }
+
       if (execution.status === "failed") {
         const deliverySummary = buildDeliverySummary(task, execution, "failed");
         appendTaskTimelineEvent(taskId, { type: "acceptance_gate", title: "代码变更验收门禁", detail: `${deliverySummary.acceptance_gate?.failed_count || 0} 项未通过`, status: "fail", phase: "reviewing", data: deliverySummary.acceptance_gate || {} });
@@ -23075,6 +23920,10 @@ async function processTargetQueue(targetKey: string, ctx: CollabCtx) {
       if (leaseHeartbeat) clearInterval(leaseHeartbeat);
       runningTaskIds.delete(taskId);
       const finalTask = loadTasks().find((item: any) => item.id === taskId);
+      if (finalTask?.workflow_type === "agent_coordination_dependency") {
+        try { await settleGroupCoordinationDependency(finalTask, ctx); }
+        catch (error: any) { addTaskLog(taskId, "error", `协作工作项收口失败：${error?.message || error}`); }
+      }
       releaseTaskLease(taskId, finalTask?.status || "unknown");
       if (enqueueFollowupAfterRound && finalTask && finalTask.status !== "cancelled") enqueueTask(taskId, ctx);
     }
@@ -23344,6 +24193,9 @@ export function resumeTaskQueues(ctx: CollabCtx, options: any = {}) {
   const resumed = results.filter(item => item.queued).length;
   const manualPending = results.filter(item => item.manual_recovery_required).length;
   const skipped = results.filter(item => item.skipped || item.active_elsewhere).length;
+  void recoverGroupCoordinationDependencies(ctx).catch((error: any) => {
+    console.error("[群聊协作恢复]", error?.message || error);
+  });
   return {
     resumed,
     auto_resumed: resumed,
@@ -23385,6 +24237,7 @@ function getQueueStatus(taskSnapshot?: any[]) {
 }
 
 function getTaskTargetKeyFromTask(task: any) {
+  if (task?.queue_scope === "isolated_parallel" && task?.id) return `isolated:${task.target_project || "unknown"}:${task.id}`;
   if (task?.assign_type === "group" && task?.group_id) return `group:${task.group_id}`;
   return `project:${task?.target_project || "unknown"}`;
 }
@@ -27419,7 +28272,42 @@ function prepareAgentRuntimeTools(
   options: any = {}
 ) {
   const authorizationReadiness = getRuntimeAuthorizationReadiness(allowedTools, options);
-  const audit = syncRuntimeTools(workDir, agentType, allowedTools, { authorizationReadiness });
+  const sourceTask = options.task || getTaskById(options.taskId || "");
+  const group = groupId ? loadGroups().find((item: any) => String(item?.id || "") === String(groupId)) || null : null;
+  const coordinatorProject = group ? String(getCoordinatorMember(group)?.project || group?.orchestrator?.coordinatorProject || "") : "";
+  const internalAgentRole = options.internalAgentRole
+    || (projectName && coordinatorProject && projectName === coordinatorProject ? "group-main-agent" : "project-child-agent");
+  const internalProjects = group
+    ? (group.members || []).filter((member: any) => member?.project && member.project !== coordinatorProject).map((member: any) => {
+      const project = String(member.project);
+      const extra = getProjectExtraConfig(project);
+      return {
+        name: project,
+        workDir: configuredProjectWorkDir(project),
+        verificationCommands: Array.isArray(extra?.verification_commands) ? extra.verification_commands : [],
+        targetUrl: String(extra?.target_url || extra?.targetUrl || ""),
+      };
+    }).filter((project: any) => project.workDir)
+    : [];
+  const taskBoundInternalMcpServers = !options.disableTaskBoundInternalMcp && sourceTask?.id && workDir
+    ? buildTaskBoundInternalMcpServers({
+      taskId: String(sourceTask.id),
+      groupId: String(groupId || sourceTask.group_id || ""),
+      groupSessionId: String(options.groupSessionId || sourceTask.group_session_id || sourceTask.groupSessionId || ""),
+      project: projectName,
+      role: internalAgentRole,
+      agentType,
+      taskAgentSessionId: String(options.taskAgentSessionId || ""),
+      nativeSessionId: String(options.nativeSessionId || ""),
+      workDir,
+      baseWorkDir: configuredProjectWorkDir(projectName) || workDir,
+      projects: internalProjects,
+    })
+    : {};
+  const audit = syncRuntimeTools(workDir, agentType, allowedTools, {
+    authorizationReadiness,
+    internalMcpServers: { ...taskBoundInternalMcpServers, ...(options.internalMcpServers || {}) },
+  });
   audit.authorization_readiness = authorizationReadiness;
   mergeRuntimeToolManagerAudit(audit, options.toolAudit);
   audit.dispatch_gate = buildRuntimeToolDispatchGate(audit);
@@ -27438,7 +28326,6 @@ function prepareAgentRuntimeTools(
     : audit.mode === "ccm-proxy-only"
       ? `${projectName} (${audit.runtime}) 使用 CCM 工具代理模式${authorizationSuffix}`
       : `${projectName} Runtime 工具同步失败：${audit.errors.join("；") || "未知错误"}`;
-  const sourceTask = options.task || getTaskById(options.taskId || "");
   const traceId = options.traceId || sourceTask?.trace_id || "";
   if (traceId) {
     recordAgentRuntimeLifecycle({
@@ -27581,21 +28468,28 @@ function buildTaskContinuationBlock(message: string) {
   ].join("\n");
 }
 
-function createTask(task: any) {
+export function createTask(task: any) {
   const tasks = loadTasks();
   const idempotencyKey = String(task.idempotency_key || task.idempotencyKey || "").trim();
   if (idempotencyKey) {
     const existing = tasks.find((item: any) => String(item.idempotency_key || "") === idempotencyKey);
     if (existing) return existing;
   }
+  const taskGroupId = String(task.group_id || task.groupId || "").trim();
+  const taskGroupSession = taskGroupId
+    ? resolveWritableGroupChatSession(taskGroupId, task.group_session_id || task.groupSessionId || "", {
+      title: compactMemoryText(task.title || "任务会话", 80),
+    })
+    : null;
+  const taskGroupSessionId = String(taskGroupSession?.id || "");
   const semanticGoal = compactFormText(task.business_goal || task.businessGoal || task.description || task.title, "").toLowerCase().replace(/\s+/g, " ");
-  const semanticTarget = [task.group_id || task.groupId || "", task.target_project || task.targetProject || "", task.workflow_type || task.workflowType || "general"].join("|").toLowerCase();
+  const semanticTarget = [taskGroupId, taskGroupSessionId, task.target_project || task.targetProject || "", task.workflow_type || task.workflowType || "general"].join("|").toLowerCase();
   if (semanticGoal && task.allow_duplicate !== true && task.allowDuplicate !== true) {
     const duplicate = [...tasks].reverse().find((item: any) => {
       if (item.archived || item.deleted_at || ["done", "cancelled", "archived", "failed"].includes(String(item.status || ""))) return false;
       if (Date.now() - Date.parse(item.created_at || "") > 5 * 60 * 1000) return false;
       const itemGoal = compactFormText(item.business_goal || item.description || item.title, "").toLowerCase().replace(/\s+/g, " ");
-      const itemTarget = [item.group_id || "", item.target_project || "", item.workflow_type || "general"].join("|").toLowerCase();
+      const itemTarget = [item.group_id || "", item.group_session_id || item.groupSessionId || "", item.target_project || "", item.workflow_type || "general"].join("|").toLowerCase();
       return itemGoal === semanticGoal && itemTarget === semanticTarget;
     });
     if (duplicate) return { ...duplicate, deduplicated: true, duplicate_reason: "5 分钟内已存在相同目标与执行范围的活动任务" };
@@ -27606,11 +28500,17 @@ function createTask(task: any) {
     title: task.title,
     description: task.description || "",
     target_project: task.target_project,
-    group_id: task.group_id || null,
+    group_id: taskGroupId || null,
+    group_session_id: taskGroupSessionId || null,
     assign_type: task.assign_type || "project",
     status: "pending",
     priority: task.priority || "normal",
     auto_execute: !!(task.auto_execute || task.autoExecute),
+    queue_scope: task.queue_scope || task.queueScope || "",
+    child_agent_isolation: task.child_agent_isolation || task.childAgentIsolation || "",
+    branch_policy: task.branch_policy || task.branchPolicy || "",
+    commit_policy: task.commit_policy || task.commitPolicy || "",
+    allowed_paths: Array.isArray(task.allowed_paths || task.allowedPaths) ? (task.allowed_paths || task.allowedPaths) : [],
     workflow_type: task.workflow_type || task.workflowType || "general",
     business_goal: task.business_goal || task.businessGoal || "",
     acceptance_criteria: task.acceptance_criteria || task.acceptanceCriteria || "",
@@ -27648,7 +28548,7 @@ function createTask(task: any) {
   newTask.work_item_summary = buildMainAgentWorkItemSummary(newTask.work_items);
   tasks.push(newTask);
   saveTasks(tasks);
-  appendTraceEvent(traceId, { id: `task:${newTask.id}:created`, type: "task.created", status: "ok", task_id: newTask.id, group_id: newTask.group_id || "", agent: newTask.target_project || "", message: newTask.title, data: { workflow_type: newTask.workflow_type, assign_type: newTask.assign_type, idempotency_key: idempotencyKey ? "present" : "absent" } });
+  appendTraceEvent(traceId, { id: `task:${newTask.id}:created`, type: "task.created", status: "ok", task_id: newTask.id, group_id: newTask.group_id || "", agent: newTask.target_project || "", message: newTask.title, data: { workflow_type: newTask.workflow_type, assign_type: newTask.assign_type, group_session_id: newTask.group_session_id || "", idempotency_key: idempotencyKey ? "present" : "absent" } });
   return newTask;
 }
 
@@ -31317,6 +32217,7 @@ export function handleCollaborationApi(
     resumeAgentQaFromStoredContinuation,
     setAgentQaManualTakeover,
     retryAgentQaItem,
+    listGroupCoordinationRequests,
   })) return true;
 
   if (handleGroupLiveRoutes(req, res, parsed, ctx, {
@@ -31429,6 +32330,7 @@ export function handleCollaborationApi(
             taskAgentSessionTurn: autoAssignMemoryDeliveryAttemptSequence,
             modelContextWindow: autoAssignTaskSession?.modelContextWindow || 0,
             groupSessionId: task.group_session_id || task.groupSessionId || "",
+            requireExactGroupSession: true,
             task,
             ...taskAgentInvocationMemoryOptions(autoAssignInvocationEdge),
           })

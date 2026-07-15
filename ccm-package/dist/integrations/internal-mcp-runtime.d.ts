@@ -1,0 +1,52 @@
+export type InternalMcpAgentRole = "global-agent" | "group-main-agent" | "project-child-agent" | "test-agent";
+export type InternalMcpProjectBinding = {
+    name: string;
+    workDir: string;
+    verificationCommands?: string[];
+    targetUrl?: string;
+};
+export type InternalMcpTaskContext = {
+    schema: "ccm-internal-mcp-task-context-v1";
+    taskId: string;
+    groupId: string;
+    groupSessionId?: string;
+    project: string;
+    role: InternalMcpAgentRole;
+    agentType?: string;
+    taskAgentSessionId?: string;
+    nativeSessionId?: string;
+    workDir: string;
+    baseWorkDir: string;
+    projects?: InternalMcpProjectBinding[];
+    issuedAt: string;
+    expiresAt: string;
+};
+export type InternalMcpToolDefinition = {
+    name: string;
+    description: string;
+    inputSchema: Record<string, any>;
+    roles?: InternalMcpAgentRole[];
+};
+export declare function sealInternalMcpTaskContext(input: Omit<InternalMcpTaskContext, "schema" | "issuedAt" | "expiresAt"> & Partial<Pick<InternalMcpTaskContext, "issuedAt" | "expiresAt">>): string;
+export declare function openInternalMcpTaskContext(token?: string): InternalMcpTaskContext;
+export declare function buildInternalMcpServerConfig(entryFile: string, context: Omit<InternalMcpTaskContext, "schema" | "issuedAt" | "expiresAt">): {
+    command: string;
+    args: string[];
+    env: {
+        CCM_INTERNAL_MCP_CONTEXT: string;
+    };
+};
+export declare function assertInternalMcpRole(context: InternalMcpTaskContext, roles: InternalMcpAgentRole[], action: string): void;
+export declare function internalMcpTextResult(value: any, isError?: boolean): {
+    content: {
+        type: string;
+        text: string;
+    }[];
+    isError: boolean;
+};
+export declare function runInternalMcpServer(options: {
+    name: string;
+    version?: string;
+    tools: InternalMcpToolDefinition[] | ((context: InternalMcpTaskContext) => InternalMcpToolDefinition[]);
+    callTool: (context: InternalMcpTaskContext, name: string, args: any) => any | Promise<any>;
+}): void;

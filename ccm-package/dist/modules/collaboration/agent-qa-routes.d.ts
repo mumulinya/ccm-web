@@ -7,6 +7,7 @@ type AgentQaRouteDeps = {
     resumeAgentQaFromStoredContinuation: (item: any, group: any, ctx: any, streamRes: any) => Promise<any>;
     setAgentQaManualTakeover: (id: string, reason: string) => any;
     retryAgentQaItem: (id: string, ctx: any, streamRes: any) => Promise<any>;
+    listGroupCoordinationRequests?: (query: any) => any[];
 };
 export declare function handleAgentQaRoutes(req: IncomingMessage, res: ServerResponse, parsed: UrlWithParsedQuery, ctx: any, deps: AgentQaRouteDeps): boolean;
 export {};

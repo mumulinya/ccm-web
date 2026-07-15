@@ -1,0 +1,16 @@
+{
+  "schema": "ccm-internal-mcp-v1",
+  "name": "mcp-feishu",
+  "display_name": "飞书协作 MCP",
+  "description": "读取飞书群聊、历史消息和消息详情，为 Agent 提供飞书业务上下文。",
+  "version": "1.0.0",
+  "entry": "dist/index.js",
+  "configuration": "feishu_settings",
+  "scopes": ["全局 Agent", "群聊主 Agent", "项目子 Agent"],
+  "tools": [
+    { "name": "list_chats", "label": "群聊列表", "description": "查看机器人所在的飞书群聊。" },
+    { "name": "get_chat_history", "label": "群聊历史", "description": "读取指定群聊的历史消息。" },
+    { "name": "search_messages", "label": "搜索消息", "description": "按关键词检索飞书消息。" },
+    { "name": "get_message_detail", "label": "消息详情", "description": "读取消息正文、附件和发送信息。" }
+  ]
+}

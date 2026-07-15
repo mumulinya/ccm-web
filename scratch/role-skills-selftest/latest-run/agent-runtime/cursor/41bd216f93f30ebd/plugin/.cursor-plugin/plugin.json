@@ -1,0 +1,8 @@
+{
+  "name": "ccm-runtime-41bd216f93f30ebd",
+  "displayName": "CCM Runtime Tools",
+  "version": "1.0.0",
+  "description": "CCM invocation-scoped MCP and Skill authorization snapshot",
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json"
+}

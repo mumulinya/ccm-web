@@ -1,0 +1,36 @@
+export declare const FINAL_WORKER_DISPATCH_PAYLOAD_GATE_SCHEMA = "ccm-final-worker-dispatch-payload-gate-v1";
+export declare function verifyFinalWorkerDispatchPayloadGate(gate: any, expected?: any): {
+    valid: boolean;
+    issues: string[];
+};
+export declare function buildFinalWorkerDispatchPayloadGate(input?: any): {
+    gate_checksum: string;
+    schema: string;
+    version: number;
+    gate_id: string;
+    group_id: string;
+    group_session_id: string;
+    task_id: string;
+    task_agent_session_id: string;
+    worker_context_packet_id: string;
+    provider: string;
+    model: string;
+    model_context_window: number;
+    reserved_output_tokens: number;
+    effective_context_window: number;
+    auto_compact_buffer_tokens: number;
+    auto_compact_threshold: number;
+    estimated_prompt_tokens: number;
+    provider_envelope_tokens: number;
+    estimated_total_input_tokens: number;
+    remaining_tokens_before_auto_compact: number;
+    prompt_chars: number;
+    prompt_checksum: string;
+    worker_packet_estimated_tokens: number;
+    capacity_evidence_checksum: string;
+    capacity_source: string;
+    status: string;
+    action: string;
+    provider_call_allowed: boolean;
+    checked_at: string;
+};

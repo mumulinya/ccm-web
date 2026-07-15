@@ -4,7 +4,7 @@
 
 ## 背景
 
-另一个 Agent 已在 `docs/test-agent/2026-07-08-execution-plan-dry-run.md` 中把 TestAgent 的执行计划做成稳定 CLI 契约：
+另一个 Agent 已在 `docs/test-agent/contracts-and-cli/2026-07-08-execution-plan-dry-run.md` 中把 TestAgent 的执行计划做成稳定 CLI 契约：
 
 - `node dist/test-agent/cli.js --from-handoff <handoff.json> --plan-only`
 - 输出 schema 为 `ccm-test-agent-execution-plan-v1`

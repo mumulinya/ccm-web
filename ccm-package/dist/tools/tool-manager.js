@@ -478,6 +478,39 @@ class ToolManager {
             invokeToolName: "invoke_skill",
         }));
     }
+    getPostCompactDynamicToolCatalog(scope) {
+        const tools = (scope ? this.tools.filter(tool => isMcpToolAllowed(scope, tool)) : this.tools)
+            .map(tool => ({
+            name: `mcp__ccm__${safeSlug(tool.serverName)}__${tool.name}`,
+            description: String(tool.description || "").replace(/[\r\n\t]+/g, " ").trim(),
+            server: tool.serverName,
+            line: `${tool.name} (${tool.serverName}): ${String(tool.description || "").replace(/[\r\n\t]+/g, " ").trim() || "No description"}`,
+        }))
+            .sort((left, right) => left.name.localeCompare(right.name));
+        const skills = (scope ? this.skills.filter(skill => isSkillAllowed(scope, skill.name)) : this.skills)
+            .map(skill => ({
+            name: `skill:${skill.name}`,
+            description: String(skill.description || "").replace(/[\r\n\t]+/g, " ").trim(),
+            contentHash: String(skill.contentHash || contentHash(skill)),
+            line: `skill:${skill.name}: ${String(skill.description || "").replace(/[\r\n\t]+/g, " ").trim() || "No description"}`,
+        }))
+            .sort((left, right) => left.name.localeCompare(right.name));
+        const allowedServers = new Set(tools.map(tool => tool.server));
+        for (const raw of normalizeScopeList(scope?.mcp)) {
+            const grant = parseMcpGrant(raw);
+            if (grant.server)
+                allowedServers.add(grant.server);
+        }
+        const mcpInstructions = Array.from(this.clients.entries())
+            .filter(([name, client]) => client.isConnected() && (!scope || [...allowedServers].some(server => serverMatches(server, name))))
+            .map(([name, client]) => {
+            const instructions = String(client.getServerInstructions?.() || "").trim();
+            return { name, instructions, block: instructions ? `## ${name}\n${instructions}` : "" };
+        })
+            .filter(item => !!item.instructions)
+            .sort((left, right) => left.name.localeCompare(right.name));
+        return { tools, skills, mcpInstructions };
+    }
     invokeSkill(name, input = "", scope) {
         const skillName = String(name || "").replace(/^Skill\s*[:：]\s*/i, "").replace(/^skill:/i, "").trim();
         const skill = this.skills.find(item => item.name === skillName && item.enabled !== false);
@@ -697,6 +730,7 @@ class ToolManager {
                     lastConnectedAt: status?.lastConnectedAt || "",
                     lastErrorAt: status?.lastErrorAt || "",
                     retryCount: status?.retryCount || 0,
+                    instructions: client?.isConnected() ? String(client.getServerInstructions?.() || "") : "",
                     auth: status?.auth || deriveMcpAuthStatus(this.serverConfigs.get(name) || {}),
                 };
             }),

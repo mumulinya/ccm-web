@@ -7,6 +7,25 @@ interface SkillDef {
     sourcePath?: string;
     contentHash?: string;
 }
+export interface PostCompactDynamicToolCatalog {
+    tools: Array<{
+        name: string;
+        description: string;
+        server: string;
+        line: string;
+    }>;
+    skills: Array<{
+        name: string;
+        description: string;
+        contentHash: string;
+        line: string;
+    }>;
+    mcpInstructions: Array<{
+        name: string;
+        instructions: string;
+        block: string;
+    }>;
+}
 export interface ToolScope {
     mcp?: string[];
     skill?: string[];
@@ -102,6 +121,7 @@ export declare class ToolManager {
         toolName: string;
         invokeToolName: string;
     }[];
+    getPostCompactDynamicToolCatalog(scope?: ToolScope): PostCompactDynamicToolCatalog;
     invokeSkill(name: string, input?: any, scope?: ToolScope): {
         ok: boolean;
         name: string;
@@ -154,11 +174,12 @@ export declare class ToolManager {
             name: string;
             connected: boolean;
             toolsCount: number;
-            state: "pending" | "connected" | "failed" | "disconnected" | "auth_required";
+            state: "pending" | "connected" | "disconnected" | "failed" | "auth_required";
             error: string;
             lastConnectedAt: string;
             lastErrorAt: string;
             retryCount: number;
+            instructions: string;
             auth: McpAuthStatus;
         }[];
     };

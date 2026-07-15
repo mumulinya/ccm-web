@@ -12952,6 +12952,14 @@ export declare function runPostCompactDispatchMarkerVisibleSelfTest(): {
     markerSummary: any;
 };
 export declare function buildEvidenceGateFollowUps(group: any, outputs: string[]): any[];
+export declare function recoverGroupCoordinationDependencies(ctx: CollabCtx): Promise<{
+    total: number;
+    results: any[];
+}>;
+export declare function runGroupCoordinationBusinessChainTestTurn(input: any): Promise<{
+    outputs: string[];
+    resumedOutput: string;
+}>;
 export declare function runCoordinatorReworkProtocolSelfTest(): {
     pass: boolean;
     checks: {
@@ -13996,6 +14004,7 @@ export declare function runCollaborationProtocolSelfTest(): {
         targetRequirementOverridesMissionDefault: boolean;
     };
 };
+export declare function createTask(task: any): any;
 export declare function updateTask(id: string, updates: any): any;
 export declare function refreshGlobalDevelopmentMissions(): any[];
 export declare function getGlobalDevelopmentMission(id: string): {

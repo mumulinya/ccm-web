@@ -38,6 +38,7 @@ exports.saveGroups = saveGroups;
 exports.getGroupChatSessionMessagesFile = getGroupChatSessionMessagesFile;
 exports.listGroupChatSessions = listGroupChatSessions;
 exports.getActiveGroupChatSessionId = getActiveGroupChatSessionId;
+exports.resolveWritableGroupChatSession = resolveWritableGroupChatSession;
 exports.findGroupChatSessionContainingMessage = findGroupChatSessionContainingMessage;
 exports.createGroupChatSession = createGroupChatSession;
 exports.selectGroupChatSession = selectGroupChatSession;
@@ -227,6 +228,30 @@ function listGroupChatSessions(groupId) {
 }
 function getActiveGroupChatSessionId(groupId) {
     return readGroupSessionManifest(groupId).activeSessionId || GROUP_DEFAULT_SESSION_ID;
+}
+function resolveWritableGroupChatSession(groupId, requestedSessionId = "", options = {}) {
+    const id = String(groupId || "").trim();
+    if (!id)
+        throw new Error("群聊 ID 不能为空");
+    const requested = String(requestedSessionId || "").trim();
+    const manifest = listGroupChatSessions(id);
+    const candidateId = requested || String(manifest.activeSessionId || "").trim();
+    const candidate = manifest.sessions.find((item) => item.id === candidateId) || null;
+    if (candidate && candidate.id.startsWith("gcs_") && candidate.archived !== true)
+        return candidate;
+    if (requested) {
+        if (!candidate)
+            throw new Error("群聊会话不存在");
+        if (!candidate.id.startsWith("gcs_"))
+            throw new Error("旧群聊会话不再接收新任务，请新建会话");
+        throw new Error("归档会话为只读状态，请恢复或新建会话后继续");
+    }
+    if (options.createIfMissing === false) {
+        if (candidate?.archived === true)
+            throw new Error("归档会话为只读状态，请恢复或新建会话后继续");
+        throw new Error("当前群聊没有可写会话，请新建会话");
+    }
+    return createGroupChatSession(id, String(options.title || "新会话"));
 }
 function findGroupChatSessionContainingMessage(groupId, messageId) {
     const targetId = String(messageId || "").trim();

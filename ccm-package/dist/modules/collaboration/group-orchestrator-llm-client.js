@@ -47,6 +47,9 @@ exports.runLlmTokenUsageSelfTest = runLlmTokenUsageSelfTest;
 exports.runGroupOrchestratorApiMicrocompactNativeAdapterTelemetrySelfTest = runGroupOrchestratorApiMicrocompactNativeAdapterTelemetrySelfTest;
 const http = __importStar(require("http"));
 const https = __importStar(require("https"));
+const provider_native_compact_execution_receipt_1 = require("./provider-native-compact-execution-receipt");
+const group_memory_compaction_1 = require("./group-memory-compaction");
+const group_prompt_cache_break_detection_1 = require("./group-prompt-cache-break-detection");
 function finiteTokenCount(value) {
     const number = Number(value);
     return Number.isFinite(number) && number > 0 ? Math.floor(number) : 0;
@@ -68,6 +71,9 @@ function normalizeLlmTokenUsage(value, provider = "openai") {
         outputTokens,
         totalTokens: inputTokens + outputTokens,
         reported,
+        directInputTokens,
+        cacheCreationInputTokens: cacheCreationTokens,
+        cacheReadInputTokens: cacheReadTokens,
     };
 }
 function reportTokenUsage(options, usage) {
@@ -240,11 +246,13 @@ function applyApiMicrocompactNativeRequestPatch(bodyObj, headers, options) {
     const betaHeaders = Array.isArray(requestPatch?.beta_headers || requestPatch?.betaHeaders)
         ? (requestPatch.beta_headers || requestPatch.betaHeaders).map((item) => String(item || "").trim()).filter(Boolean)
         : [];
+    const verification = (0, group_memory_compaction_1.verifyGroupApiMicrocompactNativeApplyPlan)(plan || {});
     const canApply = plan?.nativeApplyReady === true
         && plan?.mode === "native_api_context_management"
+        && verification.valid
         && !!contextManagement;
     if (!canApply) {
-        return { applied: false, plan, requestPatch, body: bodyObj, headers };
+        return { applied: false, plan, requestPatch, verification, body: bodyObj, headers };
     }
     const nextBody = {
         ...bodyObj,
@@ -252,7 +260,7 @@ function applyApiMicrocompactNativeRequestPatch(bodyObj, headers, options) {
         context_management: contextManagement,
     };
     const nextHeaders = appendCsvHeader({ ...headers }, "anthropic-beta", betaHeaders);
-    return { applied: true, plan, requestPatch, body: nextBody, headers: nextHeaders };
+    return { applied: true, plan, requestPatch, verification, body: nextBody, headers: nextHeaders };
 }
 function responseHeader(response, name) {
     try {
@@ -272,19 +280,41 @@ function recordApiMicrocompactNativeAdapterTelemetry(options, input = {}) {
     const plan = getApiMicrocompactNativeApplyPlan(options);
     if (!plan?.schema)
         return null;
+    const nativeInput = {
+        ...getApiMicrocompactNativeTelemetryOptions(options),
+        apiMicrocompactNativeApplyPlan: plan,
+        telemetrySource: "native_request_adapter",
+        transport: plan?.executor?.transport || "anthropic_api",
+        ...input,
+    };
+    let executionReceipt = null;
+    let cacheDeletionNotification = null;
+    try {
+        executionReceipt = (0, provider_native_compact_execution_receipt_1.recordProviderNativeCompactExecutionReceipt)(nativeInput);
+    }
+    catch { }
+    const appliedReceipt = executionReceipt?.receipt;
+    if (executionReceipt?.verification?.valid === true
+        && appliedReceipt?.status === "native_applied"
+        && appliedReceipt?.strong_proof === true
+        && appliedReceipt?.provider_outcome_verified === true
+        && Number(appliedReceipt?.applied_edit_count || 0) >= 1
+        && Number(appliedReceipt?.cleared_input_tokens || 0) > 0
+        && String(appliedReceipt?.group_session_id || "").startsWith("gcs_")) {
+        try {
+            cacheDeletionNotification = (0, group_prompt_cache_break_detection_1.notifyGroupPromptCacheDeletion)({ executionReceipt: appliedReceipt });
+        }
+        catch { }
+    }
     try {
         const api = require("./memory");
         if (typeof api.recordGroupApiMicrocompactNativeApplyAdapterTelemetry !== "function")
-            return null;
-        return api.recordGroupApiMicrocompactNativeApplyAdapterTelemetry({
-            ...getApiMicrocompactNativeTelemetryOptions(options),
-            apiMicrocompactNativeApplyPlan: plan,
-            telemetrySource: "native_request_adapter",
-            ...input,
-        });
+            return { executionReceipt, cacheDeletionNotification };
+        const requestTelemetry = api.recordGroupApiMicrocompactNativeApplyAdapterTelemetry(nativeInput);
+        return { executionReceipt, requestTelemetry, cacheDeletionNotification };
     }
     catch {
-        return null;
+        return { executionReceipt, cacheDeletionNotification };
     }
 }
 async function callOpenAiCompatibleChat(config, options) {
@@ -366,6 +396,45 @@ async function callAnthropicCompatibleChat(config, options) {
             });
             throw error;
         }
+        const text = await response.text();
+        if (!response.ok) {
+            recordApiMicrocompactNativeAdapterTelemetry(options, {
+                requestPatch: patched.requestPatch,
+                requestBody: patched.body,
+                headers: patched.headers,
+                provider: "anthropic",
+                model: config.model,
+                endpoint,
+                method: "POST",
+                responseStatus: response.status,
+                requestId: providerRequestId(response),
+                sentAt,
+                ok: false,
+                error: `HTTP ${response.status}`,
+            });
+            throw new Error(formatHttpError(options.httpErrorPrefix || "HTTP", response.status, text));
+        }
+        let data = null;
+        try {
+            data = JSON.parse(text);
+        }
+        catch (error) {
+            recordApiMicrocompactNativeAdapterTelemetry(options, {
+                requestPatch: patched.requestPatch,
+                requestBody: patched.body,
+                headers: patched.headers,
+                provider: "anthropic",
+                model: config.model,
+                endpoint,
+                method: "POST",
+                responseStatus: response.status,
+                requestId: providerRequestId(response),
+                sentAt,
+                ok: true,
+                responseParseError: error?.message || String(error),
+            });
+            throw error;
+        }
         recordApiMicrocompactNativeAdapterTelemetry(options, {
             requestPatch: patched.requestPatch,
             requestBody: patched.body,
@@ -376,15 +445,10 @@ async function callAnthropicCompatibleChat(config, options) {
             method: "POST",
             responseStatus: response.status,
             requestId: providerRequestId(response),
+            responseBody: data,
             sentAt,
-            ok: response.ok,
-            error: response.ok ? "" : `HTTP ${response.status}`,
+            ok: true,
         });
-        const text = await response.text();
-        if (!response.ok) {
-            throw new Error(formatHttpError(options.httpErrorPrefix || "HTTP", response.status, text));
-        }
-        const data = JSON.parse(text);
         reportTokenUsage(options, normalizeLlmTokenUsage(data?.usage, "anthropic"));
         return (data?.content || [])
             .map((part) => part?.type === "text" ? part.text : "")
@@ -473,8 +537,10 @@ async function runLlmTokenUsageSelfTest() {
 }
 async function runGroupOrchestratorApiMicrocompactNativeAdapterTelemetrySelfTest() {
     const groupId = `group-orchestrator-api-microcompact-native-adapter-selftest-${process.pid}-${Date.now()}`;
+    const groupSessionId = `gcs-${groupId}`;
     const taskId = `task-${groupId}`;
     const executionId = `execution-${groupId}`;
+    const runnerRequestId = `runner-${groupId}`;
     const memoryApi = require("./memory");
     const compactionApi = require("./group-memory-compaction");
     const editPlan = compactionApi.buildGroupApiMicroCompactEditPlan([
@@ -495,6 +561,7 @@ async function runGroupOrchestratorApiMicrocompactNativeAdapterTelemetrySelfTest
         },
     ], {
         groupId,
+        groupSessionId,
         targetProject: "api",
         activeTokens: 220000,
         force: true,
@@ -502,6 +569,7 @@ async function runGroupOrchestratorApiMicrocompactNativeAdapterTelemetrySelfTest
     });
     const nativePlan = compactionApi.buildGroupApiMicrocompactNativeApplyPlan(editPlan, {
         groupId,
+        groupSessionId,
         targetProject: "api",
         agentType: "anthropic-api",
         transport: "anthropic_api",
@@ -517,9 +585,13 @@ async function runGroupOrchestratorApiMicrocompactNativeAdapterTelemetrySelfTest
         },
         memoryContextSnapshotId: `snapshot-${groupId}`,
         memoryContextSnapshotChecksum: `snapshot-checksum-${groupId}`,
+        executionId,
+        runnerRequestId,
         now: "2026-07-08T09:01:00.000Z",
     });
-    const ledgerFile = memoryApi.getGroupApiMicrocompactNativeApplyRequestTelemetryLedgerFile(groupId);
+    const ledgerFile = memoryApi.getGroupApiMicrocompactNativeApplyRequestTelemetryLedgerFile(groupId, groupSessionId);
+    const executionReceiptApi = require("./provider-native-compact-execution-receipt");
+    const executionReceiptFile = executionReceiptApi.getProviderNativeCompactExecutionReceiptLedgerFile(groupId, groupSessionId);
     const originalFetch = globalThis.fetch;
     let captured = null;
     try {
@@ -538,7 +610,12 @@ async function runGroupOrchestratorApiMicrocompactNativeAdapterTelemetrySelfTest
                     },
                 },
                 async text() {
-                    return JSON.stringify({ content: [{ type: "text", text: "adapter ok" }] });
+                    return JSON.stringify({
+                        content: [{ type: "text", text: "adapter ok" }],
+                        context_management: {
+                            applied_edits: [{ type: "clear_tool_uses_20250919", cleared_tool_uses: 4, cleared_input_tokens: 24000 }],
+                        },
+                    });
                 },
             };
         };
@@ -552,12 +629,20 @@ async function runGroupOrchestratorApiMicrocompactNativeAdapterTelemetrySelfTest
             apiMicrocompactNativeApplyPlan: nativePlan,
             apiMicrocompactNativeApplyTelemetry: {
                 groupId,
+                groupSessionId,
                 targetProject: "api",
                 taskId,
                 executionId,
+                runnerRequestId,
+                taskAgentSessionId: nativePlan.task_agent_session_id,
+                nativeSessionId: nativePlan.native_session_id,
+                memoryContextSnapshotId: nativePlan.memory_context_snapshot_id,
+                memoryContextSnapshotChecksum: nativePlan.memory_context_snapshot_checksum,
             },
         });
-        const ledger = memoryApi.readGroupApiMicrocompactNativeApplyRequestTelemetryLedger(groupId);
+        const ledger = memoryApi.readGroupApiMicrocompactNativeApplyRequestTelemetryLedger(groupId, groupSessionId);
+        const executionReceiptLedger = executionReceiptApi.readProviderNativeCompactExecutionReceiptLedger(groupId, groupSessionId);
+        const executionReceipt = executionReceiptLedger.entries?.at(-1);
         const entry = (ledger.entries || []).find((item) => item.task_id === taskId);
         const checks = {
             modelReturned: content === "adapter ok",
@@ -569,6 +654,12 @@ async function runGroupOrchestratorApiMicrocompactNativeAdapterTelemetrySelfTest
                 && entry?.request_patch_checksum === nativePlan.requestPatchChecksum,
             ledgerBindsSessionAndSnapshot: entry?.task_agent_session_id === nativePlan.task_agent_session_id
                 && entry?.memory_context_snapshot_id === nativePlan.memory_context_snapshot_id,
+            platformExecutionReceiptIsStrong: executionReceipt?.status === "native_applied"
+                && executionReceipt?.strong_proof === true
+                && executionReceipt?.provider_outcome_verified === true
+                && executionReceipt?.applied_edit_count === 1
+                && executionReceipt?.execution_id === executionId
+                && executionReceipt?.runner_request_id === runnerRequestId,
         };
         return {
             pass: Object.values(checks).every(Boolean),
@@ -586,7 +677,7 @@ async function runGroupOrchestratorApiMicrocompactNativeAdapterTelemetrySelfTest
     }
     finally {
         globalThis.fetch = originalFetch;
-        for (const file of [ledgerFile, `${ledgerFile}.bak`]) {
+        for (const file of [ledgerFile, `${ledgerFile}.bak`, executionReceiptFile, `${executionReceiptFile}.bak`]) {
             try {
                 if (file && require("fs").existsSync(file))
                     require("fs").unlinkSync(file);

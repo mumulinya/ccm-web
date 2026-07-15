@@ -10,6 +10,7 @@ type AgentQaRouteDeps = {
   resumeAgentQaFromStoredContinuation: (item: any, group: any, ctx: any, streamRes: any) => Promise<any>;
   setAgentQaManualTakeover: (id: string, reason: string) => any;
   retryAgentQaItem: (id: string, ctx: any, streamRes: any) => Promise<any>;
+  listGroupCoordinationRequests?: (query: any) => any[];
 };
 
 export function handleAgentQaRoutes(
@@ -23,10 +24,11 @@ export function handleAgentQaRoutes(
 
   if (pathname === "/api/agent-collaboration/protocol" && req.method === "GET") {
     const items = deps.getAgentQaItemsForGroup(String(parsed.query.group_id || parsed.query.id || ""), parseInt(String(parsed.query.limit || "")) || 100);
+    const coordination = deps.listGroupCoordinationRequests?.({ groupId: String(parsed.query.group_id || parsed.query.id || "") }) || [];
     sendJson(res, {
       success: true,
-      version: "8.0",
-      mode: "task_bound_structured_collaboration",
+      version: "9.0",
+      mode: "group_main_agent_mcp_coordination",
       selftest: deps.runAgentCollaborationProtocolSelfTest(),
       summary: {
         total: items.length,
@@ -35,9 +37,21 @@ export function handleAgentQaRoutes(
         rejected: items.filter((item: any) => item.acceptance?.accepted === false).length,
         resumed: items.filter((item: any) => item.status === "resumed").length,
         permission_violations: items.filter((item: any) => item.permission_boundary?.pass === false).length,
+        coordination_requests: coordination.length,
+        formal_work_items: coordination.filter((item: any) => !!item.work_item_task_id).length,
       },
       items,
+      coordination_requests: coordination,
     });
+    return true;
+  }
+
+  if (pathname === "/api/group-coordination/requests" && req.method === "GET") {
+    const groupId = String(parsed.query.group_id || parsed.query.groupId || "");
+    const taskId = String(parsed.query.task_id || parsed.query.taskId || "");
+    const sourceProject = String(parsed.query.source_project || parsed.query.sourceProject || "");
+    const items = deps.listGroupCoordinationRequests?.({ groupId, taskId, sourceProject }) || [];
+    sendJson(res, { success: true, items: items.slice(-(parseInt(String(parsed.query.limit || "")) || 100)) });
     return true;
   }
 

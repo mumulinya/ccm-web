@@ -324,6 +324,20 @@ const toggleTheme = () => {
   }
 }
 
+const DARK_THEME_PRESETS = new Set(['deep-void', 'cyberpunk', 'deep-ocean'])
+
+const applyStoredThemePreferences = () => {
+  const preset = localStorage.getItem('theme-preset') || 'default'
+  const storedTheme = localStorage.getItem('theme') === 'dark' ? 'dark' : 'light'
+  const effectiveTheme = DARK_THEME_PRESETS.has(preset)
+    ? 'dark'
+    : (preset === 'aurora' ? 'light' : storedTheme)
+
+  isDark.value = effectiveTheme === 'dark'
+  document.documentElement.setAttribute('data-theme', effectiveTheme)
+  document.documentElement.setAttribute('data-theme-preset', preset)
+}
+
 // 防止页面滚动（音乐播放器等场景）
 const preventPageScroll = () => {
   window.scrollTo(0, 0)
@@ -338,14 +352,7 @@ watch(currentTab, () => {
 
 const handleSettingsStorage = (e) => {
   if (e?.key === MENU_CONFIG_KEY) handleMenuConfigurationEvent(loadMenuConfiguration(DEFAULT_TABS))
-  if (!e || e.key === 'theme') {
-    isDark.value = localStorage.getItem('theme') === 'dark'
-    document.documentElement.setAttribute('data-theme', isDark.value ? 'dark' : 'light')
-  }
-  if (!e || e.key === 'theme-preset') {
-    const preset = localStorage.getItem('theme-preset') || 'default'
-    document.documentElement.setAttribute('data-theme-preset', preset)
-  }
+  if (!e || e.key === 'theme' || e.key === 'theme-preset') applyStoredThemePreferences()
   if (!e || e.key === 'app-low-perf') {
     const lowPerf = localStorage.getItem('app-low-perf') === 'true'
     document.documentElement.classList.toggle('low-perf', lowPerf)
@@ -353,12 +360,10 @@ const handleSettingsStorage = (e) => {
 }
 
 onMounted(async () => {
-  // 应用保存的主题
-  document.documentElement.setAttribute('data-theme', isDark.value ? 'dark' : 'light')
-  
-  // 应用保存的个性化预设主题及硬件加速模式
-  const preset = localStorage.getItem('theme-preset') || 'default'
-  document.documentElement.setAttribute('data-theme-preset', preset)
+  // 预设主题会决定有效明暗模式，避免深色预设与浅色组件样式混用。
+  applyStoredThemePreferences()
+
+  // 应用保存的硬件加速模式
   const lowPerf = localStorage.getItem('app-low-perf') === 'true'
   document.documentElement.classList.toggle('low-perf', lowPerf)
   window.addEventListener('storage', handleSettingsStorage)

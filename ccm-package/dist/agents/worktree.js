@@ -55,6 +55,16 @@ function slugifyWorktreePart(value) {
         .replace(/^-+|-+$/g, "")
         .slice(0, 48);
 }
+function ensureManagedWorktreesIgnored(repoRoot) {
+    const rawExcludePath = runGit(repoRoot, ["rev-parse", "--git-path", "info/exclude"]);
+    const excludePath = path.isAbsolute(rawExcludePath) ? rawExcludePath : path.resolve(repoRoot, rawExcludePath);
+    const pattern = ".cc-connect/worktrees/";
+    const current = fs.existsSync(excludePath) ? fs.readFileSync(excludePath, "utf-8") : "";
+    if (current.split(/\r?\n/).some(line => line.trim() === pattern))
+        return;
+    fs.mkdirSync(path.dirname(excludePath), { recursive: true });
+    fs.appendFileSync(excludePath, `${current && !current.endsWith("\n") ? "\n" : ""}${pattern}\n`, "utf-8");
+}
 function normalizeChildAgentIsolationMode(value) {
     return String(value || "").trim().toLowerCase() === "worktree" ? "worktree" : "shared";
 }
@@ -78,6 +88,7 @@ function createChildAgentWorktree(baseWorkDir, options = {}) {
     const worktreesDir = path.join(repoRoot, ".cc-connect", "worktrees");
     const worktreePath = path.join(worktreesDir, slug);
     const worktreeBranch = `ccm/${slug}`;
+    ensureManagedWorktreesIgnored(repoRoot);
     if (fs.existsSync(worktreePath)) {
         return { worktreePath, worktreeBranch, reused: true, baseHead, baseBranch };
     }

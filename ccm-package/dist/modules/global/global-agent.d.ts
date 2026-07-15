@@ -162,6 +162,24 @@ export declare function bootstrapGlobalAgentMemoryForServer(): {
     results: any[];
 };
 export declare function stopGlobalMissionSupervisionForServer(): void;
+type FeishuTurnCommand = {
+    kind: "normal" | "steer" | "queue" | "stop";
+    message: string;
+};
+export declare function parseFeishuConversationTurnCommand(value: any): FeishuTurnCommand;
+export declare function startFeishuConversationTurnRecoveryForServer(baseUrl: string, ctx: CollabCtx): {
+    started: boolean;
+};
+export declare function stopFeishuConversationTurnRecoveryForServer(): void;
+export declare function runFeishuConversationTurnCommandSelfTest(): {
+    pass: boolean;
+    checks: {
+        stop: boolean;
+        steer: boolean;
+        queue: boolean;
+        ordinaryDefaultsToNormal: boolean;
+    };
+};
 export declare function handleGlobalAgentApi(pathname: string, req: any, res: any, parsed: any, ctx: CollabCtx): boolean;
 export declare function runGlobalModelRetrySelfTest(): Promise<{
     pass: boolean;
@@ -170,3 +188,4 @@ export declare function runGlobalModelRetrySelfTest(): Promise<{
         permanentClientErrorDoesNotRetry: boolean;
     };
 }>;
+export {};

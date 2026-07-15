@@ -29,6 +29,12 @@ export interface RuntimeToolSyncAudit {
     permission_rules?: RuntimeToolPermissionRule[];
     invoked_skills?: RuntimeInvokedSkill[];
     authorization_readiness?: any;
+    internal_mcp?: Array<{
+        name: string;
+        protected: true;
+        state: "synced" | "config_error";
+        error?: string;
+    }>;
     dispatch_gate?: RuntimeToolDispatchGate;
     reusedSnapshot?: boolean;
     catalogRevision?: string;
@@ -117,6 +123,7 @@ export interface RuntimeToolReadiness {
 }
 export interface RuntimeToolSyncOptions {
     authorizationReadiness?: any;
+    internalMcpServers?: Record<string, any>;
 }
 export interface RuntimeToolDispatchGate {
     schema: "ccm-runtime-tool-dispatch-gate-v1";

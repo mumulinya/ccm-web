@@ -69,6 +69,7 @@ const runtime_1 = require("../agents/runtime");
 const task_agent_continuation_soak_1 = require("./task-agent-continuation-soak");
 const group_compact_head_1 = require("../modules/collaboration/group-compact-head");
 const group_session_lifecycle_head_1 = require("../modules/collaboration/group-session-lifecycle-head");
+const final_dispatch_payload_gate_1 = require("../agents/final-dispatch-payload-gate");
 exports.TASK_AGENT_INVOCATION_EDGE_SCHEMA = "ccm-task-agent-invocation-edge-v1";
 exports.TASK_AGENT_INVOCATION_EVENT_SCHEMA = "ccm-task-agent-invocation-lineage-event-v1";
 exports.TASK_AGENT_INVOCATION_LINEAGE_DIR = path.join(utils_1.CCM_DIR, "task-agent-invocation-lineage");
@@ -397,6 +398,14 @@ function transitionEdge(edgeOrId, status, evidence = {}) {
 function bindTaskAgentInvocationContext(edgeOrId, evidence = {}) {
     const deliveryCapsule = evidence.typedMemoryDeliveryCapsule || evidence.typed_memory_delivery_capsule || null;
     const deliveryBudget = deliveryCapsule?.budget || {};
+    const finalDispatchPayloadGate = evidence.finalDispatchPayloadGate
+        || evidence.final_dispatch_payload_gate
+        || evidence.workerContextPacket?.final_dispatch_payload_gate
+        || evidence.worker_context_packet?.final_dispatch_payload_gate
+        || null;
+    const finalDispatchPayloadGateVerification = finalDispatchPayloadGate
+        ? (0, final_dispatch_payload_gate_1.verifyFinalWorkerDispatchPayloadGate)(finalDispatchPayloadGate)
+        : { valid: false, issues: ["final_dispatch_payload_gate_missing"] };
     const memoryBinding = evidence.groupSessionMemoryBinding || evidence.group_session_memory_binding || {};
     const compactTransactionReceipt = evidence.compactTransactionReceipt
         || evidence.compact_transaction_receipt
@@ -428,6 +437,15 @@ function bindTaskAgentInvocationContext(edgeOrId, evidence = {}) {
         dispatch_configured_memory_tokens: Number(deliveryBudget.configured_max_tokens || deliveryCapsule?.configured_max_tokens || evidence.configuredMaxTokens || evidence.configured_max_tokens || 0),
         dispatch_effective_memory_tokens: Number(deliveryBudget.effective_max_tokens || deliveryCapsule?.effective_max_tokens || evidence.effectiveMaxTokens || evidence.effective_max_tokens || 0),
         dispatch_memory_budget_formula: String(deliveryBudget.token_budget_formula || ""),
+        final_dispatch_payload_gate_required: !!finalDispatchPayloadGate,
+        final_dispatch_payload_gate: finalDispatchPayloadGate,
+        final_dispatch_payload_gate_valid: finalDispatchPayloadGateVerification.valid === true,
+        final_dispatch_payload_gate_issues: finalDispatchPayloadGateVerification.issues,
+        final_dispatch_payload_gate_id: String(finalDispatchPayloadGate?.gate_id || ""),
+        final_dispatch_payload_gate_checksum: String(finalDispatchPayloadGate?.gate_checksum || ""),
+        final_dispatch_payload_gate_status: String(finalDispatchPayloadGate?.status || ""),
+        final_dispatch_payload_tokens: Number(finalDispatchPayloadGate?.estimated_total_input_tokens || 0),
+        final_dispatch_payload_threshold: Number(finalDispatchPayloadGate?.auto_compact_threshold || 0),
         context_bound_at: new Date().toISOString(),
     });
     recordInvocationSoakPhase(next, "context_bound", "bound");
@@ -464,6 +482,16 @@ function dispatchTaskAgentInvocationEdge(edgeOrId, evidence = {}) {
             lifecycleHeadChecksum: edge.session_lifecycle_head_checksum,
         })
         : { valid: true, status: "exempt", issues: [], expected: null };
+    const finalDispatchPayloadGateRequired = edge.final_dispatch_payload_gate_required === true;
+    const finalDispatchPayloadGateValidation = finalDispatchPayloadGateRequired
+        ? (0, final_dispatch_payload_gate_1.verifyFinalWorkerDispatchPayloadGate)(edge.final_dispatch_payload_gate, {
+            groupId: edge.group_id,
+            groupSessionId: edge.group_session_id,
+            taskId: edge.task_id,
+            taskAgentSessionId: edge.task_agent_session_id,
+            workerContextPacketId: edge.worker_context_packet_id,
+        })
+        : { valid: true, issues: [] };
     edge = transitionEdge(edge, String(edge.status || "prepared"), {
         compact_head_dispatch_fence_valid: compactHeadValidation.valid === true,
         compact_head_dispatch_fence_status: compactHeadValidation.status,
@@ -476,9 +504,25 @@ function dispatchTaskAgentInvocationEdge(edgeOrId, evidence = {}) {
         session_lifecycle_dispatch_fence_issues: sessionLifecycleValidation.issues,
         session_lifecycle_dispatch_expected: sessionLifecycleValidation.expected,
         session_lifecycle_dispatch_checked_at: new Date().toISOString(),
+        final_dispatch_payload_gate_dispatch_valid: finalDispatchPayloadGateValidation.valid === true,
+        final_dispatch_payload_gate_dispatch_issues: finalDispatchPayloadGateValidation.issues,
+        final_dispatch_payload_gate_dispatch_checked_at: new Date().toISOString(),
     });
     recordInvocationSoakPhase(edge, "compact_head_dispatch_fence", compactHeadValidation.valid ? "current" : "stale", compactHeadValidation);
     recordInvocationSoakPhase(edge, "session_lifecycle_dispatch_fence", sessionLifecycleValidation.valid ? "current" : "stale", sessionLifecycleValidation);
+    recordInvocationSoakPhase(edge, "final_dispatch_payload_gate", finalDispatchPayloadGateValidation.valid && edge.final_dispatch_payload_gate?.provider_call_allowed === true ? "ready" : "blocked", {
+        gate_id: edge.final_dispatch_payload_gate_id || "",
+        status: edge.final_dispatch_payload_gate_status || "",
+        estimated_total_input_tokens: edge.final_dispatch_payload_tokens || 0,
+        auto_compact_threshold: edge.final_dispatch_payload_threshold || 0,
+        issues: finalDispatchPayloadGateValidation.issues,
+    });
+    if (finalDispatchPayloadGateRequired && (!finalDispatchPayloadGateValidation.valid || edge.final_dispatch_payload_gate?.provider_call_allowed !== true || edge.final_dispatch_payload_gate?.status !== "ready")) {
+        const error = new Error(`task-agent final dispatch payload blocked: ${finalDispatchPayloadGateValidation.issues.join(",") || edge.final_dispatch_payload_gate?.status || "unknown"}`);
+        error.code = "TASK_AGENT_FINAL_DISPATCH_PAYLOAD_BLOCKED";
+        error.finalDispatchPayloadGate = edge.final_dispatch_payload_gate;
+        throw error;
+    }
     if (!compactHeadValidation.valid) {
         const error = new Error(`task-agent compact head stale: ${compactHeadValidation.issues.join(",")}`);
         error.code = "TASK_AGENT_COMPACT_HEAD_STALE";
@@ -1570,6 +1614,21 @@ function verifyTaskAgentInvocationEdge(edge, options = {}) {
         issues.push("parent_identity_mismatch");
     if (parent && String(parent.edge_checksum || "") !== String(edge.expected_lineage_head_checksum || ""))
         issues.push("lineage_head_mismatch");
+    if (edge.final_dispatch_payload_gate_required === true) {
+        const gateVerification = (0, final_dispatch_payload_gate_1.verifyFinalWorkerDispatchPayloadGate)(edge.final_dispatch_payload_gate, {
+            groupId: edge.group_id,
+            groupSessionId: edge.group_session_id,
+            taskId: edge.task_id,
+            taskAgentSessionId: edge.task_agent_session_id,
+            workerContextPacketId: edge.worker_context_packet_id,
+        });
+        if (!gateVerification.valid)
+            issues.push(...gateVerification.issues);
+        if (["dispatched", "completed", "failed"].includes(String(edge.status || "")) && edge.final_dispatch_payload_gate?.provider_call_allowed !== true)
+            issues.push("final_dispatch_payload_not_ready");
+        if (["dispatched", "completed", "failed"].includes(String(edge.status || "")) && edge.final_dispatch_payload_gate_dispatch_valid !== true)
+            issues.push("final_dispatch_payload_gate_dispatch_proof_missing");
+    }
     return { valid: issues.length === 0, checksumValid, issues, parent };
 }
 function buildTaskAgentInvocationLineageReport(filter = {}) {

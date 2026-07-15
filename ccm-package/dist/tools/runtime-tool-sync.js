@@ -1277,6 +1277,7 @@ function syncRuntimeToolsWithCatalog(workDir, agentType, allowedTools, catalog =
         skill_statuses: [],
         permission_rules: buildPermissionRules(requested),
         authorization_readiness: getAuthorizationReadiness(options.authorizationReadiness) || undefined,
+        internal_mcp: [],
         errors: [],
         warnings: [],
         timestamp: new Date().toISOString(),
@@ -1354,12 +1355,27 @@ function syncRuntimeToolsWithCatalog(workDir, agentType, allowedTools, catalog =
                     invalid_mcp_grants: audit.authorization_readiness.invalid_mcp_grants,
                 }
                 : null,
+            internalMcpServers: options.internalMcpServers || {},
             codexGateway: codexGateway ? { apiUrl: codexGateway.apiUrl, model: codexGateway.model } : null,
         }))
             .digest("hex")
             .slice(0, 16);
         audit.snapshotId = authorizationId;
         const mcpServers = {};
+        for (const [name, server] of Object.entries(options.internalMcpServers || {})) {
+            try {
+                if (!name.startsWith(CCM_MCP_PREFIX))
+                    throw new Error("内部 MCP 名称必须使用 ccm__ 前缀");
+                if (!server || typeof server !== "object" || !String(server.command || "").trim())
+                    throw new Error("内部 MCP 缺少 command");
+                mcpServers[name] = server;
+                audit.internal_mcp?.push({ name, protected: true, state: "synced" });
+            }
+            catch (error) {
+                audit.errors.push(`内部 MCP ${name}: ${error?.message || String(error)}`);
+                audit.internal_mcp?.push({ name, protected: true, state: "config_error", error: error?.message || String(error) });
+            }
+        }
         for (const tool of selectedMcp) {
             const serverName = `${CCM_MCP_PREFIX}${safeSlug(tool.name)}`;
             const grants = mcpGrantsForServer(requested.mcp, tool.name);

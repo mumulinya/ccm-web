@@ -46,8 +46,14 @@ function projection(input, rootDir = tempRoot) {
 
 try {
   const groupId = "group-a";
-  const sessionId = "session-a";
+  const sessionId = "gcs_session_a";
   const initialRows = messages("m1", "m2", "m3", "m4", "m5");
+  initialRows[2] = {
+    ...initialRows[2],
+    role: "assistant",
+    usage: { input_tokens: 100_000, output_tokens: 10_000, cache_read_input_tokens: 20_000 },
+    message: { usage: { input_tokens: 50_000, cache_creation_input_tokens: 10_000 } },
+  };
   const initialMemory = memoryFor(groupId, sessionId, initialRows, 1, "boundary-1");
   const firstCommit = api.commitGroupMemoryCompactBoundary({ groupId, sessionId, messages: initialRows, memory: initialMemory, rootDir: tempRoot });
   const normal = projection({ groupId, sessionId, messages: initialRows, memory: initialMemory });
@@ -69,10 +75,11 @@ try {
   const crashWindow = projection({ groupId, sessionId, messages: appendedRows, memory: uncommittedMemory }, crashRoot);
 
   const crossRoot = path.join(tempRoot, "cross-session");
-  api.commitGroupMemoryCompactBoundary({ groupId, sessionId: "session-a", messages: initialRows, memory: initialMemory, rootDir: crossRoot });
-  const sessionBMemory = memoryFor(groupId, "session-b", initialRows, 1, "boundary-b");
-  const sessionAProjection = projection({ groupId, sessionId: "session-a", messages: initialRows, memory: initialMemory }, crossRoot);
-  const sessionBProjection = projection({ groupId, sessionId: "session-b", messages: initialRows, memory: sessionBMemory }, crossRoot);
+  const sessionBId = "gcs_session_b";
+  api.commitGroupMemoryCompactBoundary({ groupId, sessionId, messages: initialRows, memory: initialMemory, rootDir: crossRoot });
+  const sessionBMemory = memoryFor(groupId, sessionBId, initialRows, 1, "boundary-b");
+  const sessionAProjection = projection({ groupId, sessionId, messages: initialRows, memory: initialMemory }, crossRoot);
+  const sessionBProjection = projection({ groupId, sessionId: sessionBId, messages: initialRows, memory: sessionBMemory }, crossRoot);
 
   const tamperRoot = path.join(tempRoot, "tamper");
   api.commitGroupMemoryCompactBoundary({ groupId, sessionId, messages: initialRows, memory: initialMemory, rootDir: tamperRoot });
@@ -94,6 +101,13 @@ try {
     boundaryCommitIsDurable: firstCommit.committed === true && fs.existsSync(firstCommit.journal.file),
     normalResumeUsesProjection: normal.status === "verified" && normal.useProjection === true && normal.omittedMessageCount === 2,
     preBoundaryMessagesAreNotProjected: normal.projectedMessageIds.join(",") === "m3,m4,m5",
+    preservedProviderUsageIsSanitized: normal.preservedUsageSanitized === true
+      && normal.usageSanitizedMessageCount === 1
+      && normal.staleProviderUsageTokensExcluded === 190_000
+      && normal.projectedMessages[0].usage.input_tokens === 0
+      && normal.projectedMessages[0].message.usage.input_tokens === 0,
+    rawTranscriptProviderUsageIsUnchanged: initialRows[2].usage.input_tokens === 100_000
+      && initialRows[2].message.usage.input_tokens === 50_000,
     appendAfterCompactKeepsCommittedPrefixValid: appended.status === "verified" && appended.messagesAfterBoundaryCount === 1 && appended.projectedMessageIds.at(-1) === "m6",
     missingHeadFailsClosed: headMissing.status === "fail_closed_rebuild_required" && headMissing.mustUseFullRawTranscript === true,
     missingTailFailsClosed: tailMissing.status === "fail_closed_rebuild_required" && tailMissing.mustUseFullRawTranscript === true,

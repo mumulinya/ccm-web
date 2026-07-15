@@ -15,7 +15,9 @@ const emit = defineEmits(['action'])
 const qa = computed(() => props.msg?.qa || {})
 const userPreview = computed(() => qa.value.user_preview || qa.value.userPreview || {})
 const kind = computed(() => qa.value.kind || (props.msg?.type === 'agent_qa_resume' ? 'resume' : ''))
+const isImplementation = computed(() => qa.value.coordination_kind === 'implementation' || qa.value.permission_contract?.mode === 'formal_work_item_write')
 const kindLabel = computed(() => {
+  if (isImplementation.value) return '工作项'
   if (kind.value === 'question') return '提问'
   if (kind.value === 'answer') return '回答'
   if (kind.value === 'resume') return '续跑'
@@ -24,6 +26,15 @@ const kindLabel = computed(() => {
 const title = computed(() => {
   const from = props.getAgentDisplayName(qa.value.from_agent || props.msg.agent)
   const to = props.getAgentDisplayName(qa.value.to_agent || qa.value.target || '')
+  if (isImplementation.value) {
+    if (kind.value === 'resume' || props.msg?.type === 'agent_qa_resume') return `${from} 已解除依赖并继续执行`
+    if (kind.value === 'progress') {
+      if (qa.value.status === 'merging') return `主 Agent 正在安全合并 ${to} 的代码`
+      return `${to} 已在独立会话并行处理`
+    }
+    if (kind.value === 'answer') return `${to} 已提交工作项结果`
+    return `主 Agent 已安排 ${to} 处理 ${from} 的依赖`
+  }
   if (kind.value === 'answer') return `${to} 回答 ${from}`
   if (kind.value === 'resume' || props.msg?.type === 'agent_qa_resume') return `${from} 已拿到回答并继续执行`
   return `${from} 向 ${to} 提问`
@@ -40,7 +51,13 @@ const statusLabelMap = {
   manual: '人工接手',
   rejected: '已拒绝',
 }
-const statusLabel = computed(() => statusLabelMap[qa.value.status] || qa.value.status || '问答中')
+const statusLabel = computed(() => {
+  if (isImplementation.value) {
+    const labels = { waiting: '等待派发', queued: '准备独立会话', asking: '独立会话执行中', executing: '独立会话执行中', merging: '正在安全合并', answered: '已通过验收', injected: '准备继续', resumed: '原任务已继续', failed: '工作项失败', timeout: '工作项超时', needs_user: '等待用户确认', manual: '人工接手', rejected: '未通过验收' }
+    return labels[qa.value.status] || qa.value.status || '协调中'
+  }
+  return statusLabelMap[qa.value.status] || qa.value.status || '问答中'
+})
 const statusTone = computed(() => {
   if (['answered', 'injected', 'resumed'].includes(qa.value.status)) return 'ok'
   if (['failed', 'timeout', 'rejected'].includes(qa.value.status)) return 'fail'
@@ -52,7 +69,8 @@ const meta = computed(() => {
     ? userPreview.value.badges.slice(0, 6)
     : []
   if (!parts.length) {
-    if (qa.value.type === 'request_review') parts.push('评审请求')
+    if (isImplementation.value) parts.push('协作工作项')
+    else if (qa.value.type === 'request_review') parts.push('评审请求')
     else parts.push('工作询问')
     if (qa.value.blocking !== false) parts.push('影响续跑')
     if (qa.value.retry_count) parts.push(`已重试 ${qa.value.retry_count} 次`)
@@ -69,6 +87,8 @@ const visibleNextAction = computed(() => userPreview.value.next_action || '')
 const contentHtml = computed(() => props.highlightMentions(visibleSummary.value || ''))
 const evidenceText = computed(() => Array.isArray(qa.value.answer_evidence) ? qa.value.answer_evidence.slice(0, 4).join(' · ') : '')
 const technicalRows = computed(() => [
+  { label: '协调请求', value: qa.value.coordination_request_id },
+  { label: '工作项', value: qa.value.work_item_task_id },
   { label: '问题 ID', value: qa.value.id },
   { label: '执行', value: qa.value.execution_id },
   { label: '路由', value: qa.value.routing?.strategy },

@@ -149,6 +149,7 @@ exports.runPostCompactCompletionMemoryPreservationClosureConflictResolutionMaint
 exports.createPostCompactCompletionMemoryPreservationClosureConflictResolutionGcApprovalReceipt = createPostCompactCompletionMemoryPreservationClosureConflictResolutionGcApprovalReceipt;
 exports.executePostCompactCompletionMemoryPreservationClosureConflictResolutionGcApprovalReceipt = executePostCompactCompletionMemoryPreservationClosureConflictResolutionGcApprovalReceipt;
 exports.inspectPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenance = inspectPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenance;
+exports.listPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceScopeIds = listPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceScopeIds;
 exports.runDuePostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenance = runDuePostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenance;
 exports.lookupPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchive = lookupPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchive;
 exports.restorePostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveRows = restorePostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveRows;
@@ -1988,12 +1989,21 @@ function postCompactCompletionMemoryPreservationClosureUsageRecommendation(stats
         return "caution_stale_history_reverify_current_source";
     return "neutral_reverify_current_source";
 }
-function readPostCompactCompletionMemoryPreservationClosureUsageLedger(groupId) {
-    const file = getPostCompactCompletionMemoryPreservationClosureUsageLedgerFile(groupId);
+function readPostCompactCompletionMemoryPreservationClosureUsageLedger(groupId, options = {}) {
+    const scopeIdentity = typedMemorySessionScopeIdentity(groupId, options);
+    const sourceGroupId = String(options.sourceGroupId || options.source_group_id || scopeIdentity.rootGroupId || groupId).trim();
+    const groupSessionId = String(options.groupSessionId || options.group_session_id || scopeIdentity.groupSessionId || "").trim();
+    const typedScopeId = groupSessionId ? `${sourceGroupId}--${groupSessionId}` : String(groupId || sourceGroupId).trim();
+    const file = getPostCompactCompletionMemoryPreservationClosureUsageLedgerFile(typedScopeId);
     const parsed = readJson(file, null);
     if (parsed?.schema === "ccm-post-compact-completion-memory-preservation-closure-usage-ledger-v1") {
         return {
             ...parsed,
+            groupId: sourceGroupId,
+            sourceGroupId,
+            groupSessionId,
+            typedScopeId,
+            exactSession: !!groupSessionId,
             file,
             entries: Array.isArray(parsed.entries) ? parsed.entries : [],
             stats: parsed.stats && typeof parsed.stats === "object" ? parsed.stats : {},
@@ -2003,7 +2013,11 @@ function readPostCompactCompletionMemoryPreservationClosureUsageLedger(groupId) 
     return {
         schema: "ccm-post-compact-completion-memory-preservation-closure-usage-ledger-v1",
         version: 1,
-        groupId,
+        groupId: sourceGroupId,
+        sourceGroupId,
+        groupSessionId,
+        typedScopeId,
+        exactSession: !!groupSessionId,
         file,
         entries: [],
         stats: {},
@@ -2016,6 +2030,10 @@ function recordPostCompactCompletionMemoryPreservationClosureUsage(groupId, inpu
     const closureRelPath = "post-compact-completion-memory-preservation-repair-closures.md";
     if (!groupId || input.disabled === true || input.disableLedger === true || input.disable_ledger === true)
         return null;
+    const scopeIdentity = typedMemorySessionScopeIdentity(groupId, input);
+    const sourceGroupId = String(input.sourceGroupId || input.source_group_id || scopeIdentity.rootGroupId || groupId).trim();
+    const groupSessionId = String(input.groupSessionId || input.group_session_id || scopeIdentity.groupSessionId || "").trim();
+    const typedScopeId = groupSessionId ? `${sourceGroupId}--${groupSessionId}` : groupId;
     const generatedAt = String(input.generatedAt || input.generated_at || now());
     const rows = (Array.isArray(input.rows) ? input.rows : [])
         .map((raw) => {
@@ -2035,7 +2053,10 @@ function recordPostCompactCompletionMemoryPreservationClosureUsage(groupId, inpu
             && !!String(raw.task_agent_session_id || raw.taskAgentSessionId || input.taskAgentSessionId || input.task_agent_session_id || "").trim()
             && !!String(raw.native_session_id || raw.nativeSessionId || input.nativeSessionId || input.native_session_id || "").trim();
         const entryCore = {
-            group_id: groupId,
+            group_id: sourceGroupId,
+            source_group_id: sourceGroupId,
+            group_session_id: groupSessionId,
+            typed_scope_id: typedScopeId,
             target_project: String(raw.target_project || raw.targetProject || input.targetProject || input.target_project || "").trim(),
             agent: String(raw.agent || raw.agent_type || raw.agentType || input.agent || input.agentType || input.agent_type || "").trim(),
             task_id: String(raw.task_id || raw.taskId || input.taskId || input.task_id || "").trim(),
@@ -2070,6 +2091,8 @@ function recordPostCompactCompletionMemoryPreservationClosureUsage(groupId, inpu
             schema: "ccm-post-compact-completion-memory-preservation-closure-usage-entry-v1",
             entry_id: `pccmpu_${checksum([
                 entryCore.group_id,
+                entryCore.group_session_id,
+                entryCore.typed_scope_id,
                 entryCore.target_project,
                 entryCore.task_id,
                 entryCore.task_family_key,
@@ -2091,11 +2114,18 @@ function recordPostCompactCompletionMemoryPreservationClosureUsage(groupId, inpu
         };
     })
         .filter(Boolean);
-    const ledger = readPostCompactCompletionMemoryPreservationClosureUsageLedger(groupId);
+    const ledger = readPostCompactCompletionMemoryPreservationClosureUsageLedger(typedScopeId, {
+        sourceGroupId,
+        groupSessionId,
+    });
     if (!rows.length)
         return {
             schema: "ccm-post-compact-completion-memory-preservation-closure-usage-record-v1",
-            groupId,
+            groupId: sourceGroupId,
+            sourceGroupId,
+            groupSessionId,
+            typedScopeId,
+            exactSession: !!groupSessionId,
             file: ledger.file,
             skipped: true,
             reason: "no_closure_usage_rows",
@@ -2151,7 +2181,11 @@ function recordPostCompactCompletionMemoryPreservationClosureUsage(groupId, inpu
     writeJsonAtomic(ledger.file, {
         schema: "ccm-post-compact-completion-memory-preservation-closure-usage-ledger-v1",
         version: 1,
-        groupId,
+        groupId: sourceGroupId,
+        sourceGroupId,
+        groupSessionId,
+        typedScopeId,
+        exactSession: !!groupSessionId,
         entries,
         stats,
         totals,
@@ -2161,9 +2195,11 @@ function recordPostCompactCompletionMemoryPreservationClosureUsage(groupId, inpu
     let conflictResolutionDistillation = null;
     if (conflictResolutionRows.length) {
         try {
-            conflictResolutionDistillation = distillPostCompactCompletionMemoryPreservationClosureConflictResolutionToTypedMemory(groupId, {
+            conflictResolutionDistillation = distillPostCompactCompletionMemoryPreservationClosureConflictResolutionToTypedMemory(typedScopeId, {
                 rows: conflictResolutionRows,
             }, {
+                sourceGroupId,
+                groupSessionId,
                 reason: "closure-feedback-conflict-current-session-resolution",
                 updatedAt: generatedAt,
             });
@@ -2177,7 +2213,11 @@ function recordPostCompactCompletionMemoryPreservationClosureUsage(groupId, inpu
     }
     return {
         schema: "ccm-post-compact-completion-memory-preservation-closure-usage-record-v1",
-        groupId,
+        groupId: sourceGroupId,
+        sourceGroupId,
+        groupSessionId,
+        typedScopeId,
+        exactSession: !!groupSessionId,
         file: ledger.file,
         recordedCount: newEntries.length,
         duplicateCount: rows.length - newEntries.length,
@@ -2187,7 +2227,11 @@ function recordPostCompactCompletionMemoryPreservationClosureUsage(groupId, inpu
     };
 }
 function buildPostCompactCompletionMemoryPreservationClosureUsageSummary(groupId, options = {}) {
-    const ledger = readPostCompactCompletionMemoryPreservationClosureUsageLedger(groupId);
+    const scopeIdentity = typedMemorySessionScopeIdentity(groupId, options);
+    const sourceGroupId = String(options.sourceGroupId || options.source_group_id || scopeIdentity.rootGroupId || groupId).trim();
+    const groupSessionId = String(options.groupSessionId || options.group_session_id || scopeIdentity.groupSessionId || "").trim();
+    const typedScopeId = groupSessionId ? `${sourceGroupId}--${groupSessionId}` : groupId;
+    const ledger = readPostCompactCompletionMemoryPreservationClosureUsageLedger(typedScopeId, { sourceGroupId, groupSessionId });
     const targetProject = String(options.targetProject || options.target_project || "").trim().toLowerCase();
     const closureRelPath = "post-compact-completion-memory-preservation-repair-closures.md";
     const taskText = compactText(options.task || options.taskText || options.task_text || options.taskQuery || options.task_query || "", 1200);
@@ -2321,7 +2365,11 @@ function buildPostCompactCompletionMemoryPreservationClosureUsageSummary(groupId
     return {
         schema: "ccm-post-compact-completion-memory-preservation-closure-usage-summary-v1",
         version: 2,
-        groupId,
+        groupId: sourceGroupId,
+        sourceGroupId,
+        groupSessionId,
+        typedScopeId,
+        exactSession: !!groupSessionId,
         targetProject: String(options.targetProject || options.target_project || ""),
         file: ledger.file,
         entryCount: sourceEntries.length,
@@ -7059,6 +7107,8 @@ function providerReproofReceiptConsumptionRecommendation(row = {}) {
 }
 function providerReproofReceiptConsumptionRowId(row = {}) {
     return `provider-reproof-receipt:${checksum([
+        row.groupId,
+        row.groupSessionId,
         row.timeline_binding_id,
         row.brief_id,
         row.work_item_id,
@@ -7083,6 +7133,7 @@ function providerReproofReceiptConsumptionInputRows(input = {}) {
 }
 function normalizeProviderReproofReceiptConsumptionRows(input = {}, options = {}) {
     const fallbackGroupId = String(options.groupId || options.group_id || input.groupId || input.group_id || "").trim();
+    const fallbackGroupSessionId = String(options.groupSessionId || options.group_session_id || input.groupSessionId || input.group_session_id || "").trim();
     return providerReproofReceiptConsumptionInputRows(input).map((raw, index) => {
         const entry = raw?.entry || raw?.binding || raw || {};
         const dispatchSource = String(entry.source || entry.dispatch_source || raw?.source || "").trim();
@@ -7094,7 +7145,8 @@ function normalizeProviderReproofReceiptConsumptionRows(input = {}, options = {}
         const row = {
             schema: "ccm-provider-reproof-receipt-consumption-distilled-row-v1",
             version: exports.GROUP_PROVIDER_REPROOF_RECEIPT_CONSUMPTION_DISTILLATION_VERSION,
-            groupId: String(entry.groupId || entry.group_id || raw?.groupId || raw?.group_id || fallbackGroupId || "").trim(),
+            groupId: String(fallbackGroupId || entry.groupId || entry.group_id || raw?.groupId || raw?.group_id || "").trim(),
+            groupSessionId: String(fallbackGroupSessionId || entry.groupSessionId || entry.group_session_id || raw?.groupSessionId || raw?.group_session_id || "").trim(),
             timeline_binding_id: String(entry.timeline_binding_id || entry.timelineBindingId || raw?.timeline_binding_id || raw?.timelineBindingId || "").trim(),
             brief_id: String(entry.brief_id || entry.briefId || raw?.brief_id || raw?.briefId || "").trim(),
             work_item_id: String(entry.work_item_id || entry.workItemId || raw?.work_item_id || raw?.workItemId || "").trim(),
@@ -7165,6 +7217,7 @@ function renderProviderReproofReceiptConsumptionBody(title, rows = [], options =
         `# ${title}`,
         "",
         `Generated by CCM provider re-proof receipt consumption distillation at ${options.updatedAt || now()}.`,
+        options.groupSessionId ? `Exact group-chat session: ${options.groupSessionId}.` : "Legacy unscoped provider re-proof feedback.",
         "Each row came from a child Agent receipt after a provider re-proof dispatch brief was injected into its WorkerContextPacket.",
         "A receipt strong claim is not native provider strong proof; future agents must still verify the native proof/request telemetry ledger before closing provider re-proof.",
         "",
@@ -7221,12 +7274,19 @@ function distillProviderReproofReceiptConsumptionToTypedMemory(groupId, input = 
         };
     }
     const updatedAt = String(options.updatedAt || options.updated_at || now());
+    const scopeIdentity = typedMemorySessionScopeIdentity(groupId, {
+        groupId,
+        sourceGroupId: options.sourceGroupId || options.source_group_id || "",
+        groupSessionId: options.groupSessionId || options.group_session_id || "",
+    });
+    const sourceGroupId = scopeIdentity.rootGroupId || groupId;
+    const groupSessionId = scopeIdentity.groupSessionId;
     const ledger = readGroupTypedMemoryDistillationLedger(groupId);
-    const incomingRows = normalizeProviderReproofReceiptConsumptionRows(input, { ...options, groupId, updatedAt });
+    const incomingRows = normalizeProviderReproofReceiptConsumptionRows(input, { ...options, groupId: sourceGroupId, groupSessionId, updatedAt });
     const previousArchive = ledger.providerReproofReceiptConsumptionArchive || {};
     const previousRows = Array.isArray(previousArchive.rows) ? previousArchive.rows : [];
     const merged = mergeProviderReproofReceiptConsumptionRows(previousRows, incomingRows, { ...options, updatedAt });
-    const archive = providerReproofReceiptConsumptionArchive(merged.rows, { updatedAt });
+    const archive = { ...providerReproofReceiptConsumptionArchive(merged.rows, { updatedAt }), sourceGroupId, groupSessionId, exactSession: !!groupSessionId };
     const writes = [];
     const promotedRows = archive.rows.filter((row) => row.category === "promoted");
     const cautionRows = archive.rows.filter((row) => row.category === "caution");
@@ -7238,7 +7298,7 @@ function distillProviderReproofReceiptConsumptionToTypedMemory(groupId, input = 
             description: "Provider re-proof dispatch briefs that child Agents actually used, verified, or claimed strong after WorkerContextPacket injection.",
             source: "auto:provider-reproof-receipt-consumption-distillation",
             updatedAt,
-            body: renderProviderReproofReceiptConsumptionBody("Provider Re-proof Receipt Consumption Recall", promotedRows, { updatedAt }),
+            body: renderProviderReproofReceiptConsumptionBody("Provider Re-proof Receipt Consumption Recall", promotedRows, { updatedAt, groupSessionId }),
             maxBodyChars: Number(options.maxBodyChars || options.max_body_chars || 18_000),
         }));
     }
@@ -7250,7 +7310,7 @@ function distillProviderReproofReceiptConsumptionToTypedMemory(groupId, input = 
             description: "Provider re-proof dispatch briefs that child Agents ignored or blocked; keep them as cautionary memory, not promoted context.",
             source: "auto:provider-reproof-receipt-consumption-distillation",
             updatedAt,
-            body: renderProviderReproofReceiptConsumptionBody("Provider Re-proof Receipt Consumption Cautions", cautionRows, { updatedAt }),
+            body: renderProviderReproofReceiptConsumptionBody("Provider Re-proof Receipt Consumption Cautions", cautionRows, { updatedAt, groupSessionId }),
             maxBodyChars: Number(options.maxBodyChars || options.max_body_chars || 18_000),
         }));
     }
@@ -7261,6 +7321,8 @@ function distillProviderReproofReceiptConsumptionToTypedMemory(groupId, input = 
         schema: "ccm-group-typed-memory-distillation-ledger-v1",
         version: exports.GROUP_TYPED_MEMORY_DISTILLATION_VERSION,
         groupId,
+        sourceGroupId,
+        groupSessionId,
         facts: ledger.facts || {},
         providerReproofReceiptConsumptionArchive: archive,
         updatedAt,
@@ -7270,6 +7332,8 @@ function distillProviderReproofReceiptConsumptionToTypedMemory(groupId, input = 
         schema: "ccm-provider-reproof-receipt-consumption-distillation-v1",
         version: exports.GROUP_PROVIDER_REPROOF_RECEIPT_CONSUMPTION_DISTILLATION_VERSION,
         groupId,
+        sourceGroupId,
+        groupSessionId,
         skipped: false,
         reason: compactText(options.reason || "", 220),
         ledgerFile: ledger.file,
@@ -7312,6 +7376,8 @@ function providerRankingProvenanceStringList(...values) {
 }
 function providerRankingProvenanceCompactRepairReceiptConsumptionRowId(row = {}) {
     return `provider-ranking-compact-repair-receipt:${checksum([
+        row.groupId,
+        row.groupSessionId,
         row.timeline_binding_id,
         row.brief_id,
         row.work_item_id,
@@ -7325,6 +7391,7 @@ function providerRankingProvenanceCompactRepairReceiptConsumptionRowId(row = {})
 }
 function normalizeProviderRankingProvenanceCompactRepairReceiptConsumptionRows(input = {}, options = {}) {
     const fallbackGroupId = String(options.groupId || options.group_id || input.groupId || input.group_id || "").trim();
+    const fallbackGroupSessionId = String(options.groupSessionId || options.group_session_id || input.groupSessionId || input.group_session_id || "").trim();
     return providerRankingProvenanceCompactRepairReceiptConsumptionInputRows(input).map((raw, index) => {
         const entry = raw?.entry || raw?.binding || raw || {};
         const source = String(entry.source || entry.dispatch_source || raw?.source || "").trim();
@@ -7347,7 +7414,8 @@ function normalizeProviderRankingProvenanceCompactRepairReceiptConsumptionRows(i
         const row = {
             schema: "ccm-provider-ranking-provenance-compact-repair-receipt-consumption-distilled-row-v1",
             version: exports.GROUP_PROVIDER_RANKING_PROVENANCE_COMPACT_REPAIR_RECEIPT_CONSUMPTION_DISTILLATION_VERSION,
-            groupId: String(entry.groupId || entry.group_id || raw?.groupId || raw?.group_id || fallbackGroupId || "").trim(),
+            groupId: String(fallbackGroupId || entry.groupId || entry.group_id || raw?.groupId || raw?.group_id || "").trim(),
+            groupSessionId: String(fallbackGroupSessionId || entry.groupSessionId || entry.group_session_id || raw?.groupSessionId || raw?.group_session_id || "").trim(),
             timeline_binding_id: String(entry.timeline_binding_id || entry.timelineBindingId || raw?.timeline_binding_id || "").trim(),
             brief_id: String(entry.brief_id || entry.briefId || raw?.brief_id || "").trim(),
             work_item_id: String(entry.work_item_id || entry.workItemId || raw?.work_item_id || "").trim(),
@@ -7445,6 +7513,7 @@ function renderProviderRankingProvenanceCompactRepairReceiptConsumptionBody(arch
         "# Provider Ranking Provenance Compact Repair Receipt Memory",
         "",
         `Generated by CCM provider ranking provenance compact repair receipt distillation at ${options.updatedAt || now()}.`,
+        archive.groupSessionId ? `Exact group-chat session: ${archive.groupSessionId}.` : "Legacy unscoped provider ranking repair feedback.",
         "Each row came from a verified replayRepairDispatchBriefUsage receipt after a provider ranking provenance compact repair brief was injected into a child Agent WorkerContextPacket.",
         "Stable rule: provider switch execution history is ranking evidence only, not authorization. These rows help future Agents recall how to preserve typed MEMORY.md provider ranking provenance through compact retry; they do not authorize provider switches.",
         "",
@@ -7488,12 +7557,19 @@ function distillProviderRankingProvenanceCompactRepairReceiptConsumptionToTypedM
         };
     }
     const updatedAt = String(options.updatedAt || options.updated_at || now());
+    const scopeIdentity = typedMemorySessionScopeIdentity(groupId, {
+        groupId,
+        sourceGroupId: options.sourceGroupId || options.source_group_id || "",
+        groupSessionId: options.groupSessionId || options.group_session_id || "",
+    });
+    const sourceGroupId = scopeIdentity.rootGroupId || groupId;
+    const groupSessionId = scopeIdentity.groupSessionId;
     const ledger = readGroupTypedMemoryDistillationLedger(groupId);
-    const incomingRows = normalizeProviderRankingProvenanceCompactRepairReceiptConsumptionRows(input, { ...options, groupId, updatedAt });
+    const incomingRows = normalizeProviderRankingProvenanceCompactRepairReceiptConsumptionRows(input, { ...options, groupId: sourceGroupId, groupSessionId, updatedAt });
     const previousArchive = ledger.providerRankingProvenanceCompactRepairReceiptConsumptionArchive || {};
     const previousRows = Array.isArray(previousArchive.rows) ? previousArchive.rows : [];
     const merged = mergeProviderRankingProvenanceCompactRepairReceiptConsumptionRows(previousRows, incomingRows, { ...options, updatedAt });
-    const archive = providerRankingProvenanceCompactRepairReceiptConsumptionArchive(merged.rows, { updatedAt });
+    const archive = { ...providerRankingProvenanceCompactRepairReceiptConsumptionArchive(merged.rows, { updatedAt }), sourceGroupId, groupSessionId, exactSession: !!groupSessionId };
     const writes = [];
     if (archive.rows.length) {
         writes.push(upsertGroupTypedMemoryDocument(groupId, {
@@ -7514,6 +7590,8 @@ function distillProviderRankingProvenanceCompactRepairReceiptConsumptionToTypedM
         schema: "ccm-group-typed-memory-distillation-ledger-v1",
         version: exports.GROUP_TYPED_MEMORY_DISTILLATION_VERSION,
         groupId,
+        sourceGroupId,
+        groupSessionId,
         facts: ledger.facts || {},
         providerRankingProvenanceCompactRepairReceiptConsumptionArchive: archive,
         updatedAt,
@@ -7523,6 +7601,8 @@ function distillProviderRankingProvenanceCompactRepairReceiptConsumptionToTypedM
         schema: "ccm-provider-ranking-provenance-compact-repair-receipt-consumption-distillation-v1",
         version: exports.GROUP_PROVIDER_RANKING_PROVENANCE_COMPACT_REPAIR_RECEIPT_CONSUMPTION_DISTILLATION_VERSION,
         groupId,
+        sourceGroupId,
+        groupSessionId,
         skipped: false,
         reason: compactText(options.reason || "", 220),
         ledgerFile: ledger.file,
@@ -7557,7 +7637,11 @@ function postCompactReinjectionRepairReceiptConsumptionInputRows(input = {}) {
     return groups.flatMap((group) => [
         ...(Array.isArray(group.rows) ? group.rows : []),
         ...(Array.isArray(group.bindings) ? group.bindings : []),
-    ].map((row) => ({ ...row, groupId: row.groupId || group.groupId || group.group_id || "" })));
+    ].map((row) => ({
+        ...row,
+        groupId: row.groupId || row.group_id || group.groupId || group.group_id || "",
+        groupSessionId: row.groupSessionId || row.group_session_id || group.groupSessionId || group.group_session_id || "",
+    })));
 }
 function normalizePostCompactReinjectionRepairReceiptUsageState(value) {
     const state = String(value || "").trim().toLowerCase();
@@ -7571,6 +7655,9 @@ function normalizePostCompactReinjectionRepairReceiptUsageState(value) {
 }
 function postCompactReinjectionRepairReceiptConsumptionRowId(row = {}) {
     return `post-compact-reinjection-repair-receipt:${checksum([
+        row.groupId,
+        row.groupSessionId,
+        row.groupSessionId,
         row.timeline_binding_id,
         row.brief_id,
         row.work_item_id,
@@ -7584,6 +7671,7 @@ function postCompactReinjectionRepairReceiptConsumptionRowId(row = {}) {
 }
 function normalizePostCompactReinjectionRepairReceiptConsumptionRows(input = {}, options = {}) {
     const fallbackGroupId = String(options.groupId || options.group_id || input.groupId || input.group_id || "").trim();
+    const fallbackGroupSessionId = String(options.groupSessionId || options.group_session_id || input.groupSessionId || input.group_session_id || "").trim();
     return postCompactReinjectionRepairReceiptConsumptionInputRows(input).map((raw, index) => {
         const entry = raw?.entry || raw?.binding || raw || {};
         const workItem = raw?.work_item || raw?.workItem || {};
@@ -7608,7 +7696,8 @@ function normalizePostCompactReinjectionRepairReceiptConsumptionRows(input = {},
         const row = {
             schema: "ccm-post-compact-reinjection-repair-receipt-consumption-distilled-row-v1",
             version: exports.GROUP_POST_COMPACT_REINJECTION_REPAIR_RECEIPT_CONSUMPTION_DISTILLATION_VERSION,
-            groupId: String(entry.groupId || entry.group_id || raw?.groupId || raw?.group_id || fallbackGroupId || "").trim(),
+            groupId: String(fallbackGroupId || entry.groupId || entry.group_id || raw?.groupId || raw?.group_id || "").trim(),
+            groupSessionId: String(fallbackGroupSessionId || entry.groupSessionId || entry.group_session_id || raw?.groupSessionId || raw?.group_session_id || "").trim(),
             timeline_binding_id: String(entry.timeline_binding_id || entry.timelineBindingId || raw?.timeline_binding_id || "").trim(),
             brief_id: String(entry.brief_id || entry.briefId || raw?.brief_id || "").trim(),
             work_item_id: String(entry.work_item_id || entry.workItemId || workItem.work_item_id || workItem.id || raw?.work_item_id || "").trim(),
@@ -7732,6 +7821,7 @@ function renderPostCompactReinjectionRepairReceiptConsumptionBody(title, rows = 
         `# ${title}`,
         "",
         `Generated by CCM post-compact reinjection repair receipt distillation at ${options.updatedAt || now()}.`,
+        options.groupSessionId ? `Exact group-chat session: ${options.groupSessionId}.` : "Legacy unscoped post-compact reinjection feedback.",
         "Each row is a verified completion from the exact bound child Agent task/native session after the exact reinjection gate and candidate were classified with postCompactCandidateUsage plus matching memoryUsed or memoryIgnored evidence.",
         "Stable boundary: historical repair completion is recovery evidence, not permanent repository truth. Future use must reverify the current source before treating the recovered candidate as fresh task context.",
         "",
@@ -7771,12 +7861,19 @@ function distillPostCompactReinjectionRepairReceiptConsumptionToTypedMemory(grou
         };
     }
     const updatedAt = String(options.updatedAt || options.updated_at || now());
+    const scopeIdentity = typedMemorySessionScopeIdentity(groupId, {
+        groupId,
+        sourceGroupId: options.sourceGroupId || options.source_group_id || "",
+        groupSessionId: options.groupSessionId || options.group_session_id || "",
+    });
+    const sourceGroupId = scopeIdentity.rootGroupId || groupId;
+    const groupSessionId = scopeIdentity.groupSessionId;
     const ledger = readGroupTypedMemoryDistillationLedger(groupId);
-    const incomingRows = normalizePostCompactReinjectionRepairReceiptConsumptionRows(input, { ...options, groupId, updatedAt });
+    const incomingRows = normalizePostCompactReinjectionRepairReceiptConsumptionRows(input, { ...options, groupId: sourceGroupId, groupSessionId, updatedAt });
     const previousArchive = ledger.postCompactReinjectionRepairReceiptConsumptionArchive || {};
     const previousRows = Array.isArray(previousArchive.rows) ? previousArchive.rows : [];
     const merged = mergePostCompactReinjectionRepairReceiptConsumptionRows(previousRows, incomingRows, { ...options, updatedAt });
-    const archive = postCompactReinjectionRepairReceiptConsumptionArchive(merged.rows, { updatedAt });
+    const archive = { ...postCompactReinjectionRepairReceiptConsumptionArchive(merged.rows, { updatedAt }), sourceGroupId, groupSessionId, exactSession: !!groupSessionId };
     const writes = [];
     const restoredRows = archive.rows.filter((row) => row.category === "restored");
     const cautionRows = archive.rows.filter((row) => row.category === "caution");
@@ -7788,7 +7885,7 @@ function distillPostCompactReinjectionRepairReceiptConsumptionToTypedMemory(grou
             description: "Verified exact gate/candidate repair completions bound to child Agent task and native sessions; historical recovery evidence requires current-source revalidation before reuse.",
             source: "auto:post-compact-reinjection-repair-receipt-consumption-distillation",
             updatedAt,
-            body: renderPostCompactReinjectionRepairReceiptConsumptionBody("Post-Compact Reinjection Repair Receipt Memory", restoredRows, { updatedAt }),
+            body: renderPostCompactReinjectionRepairReceiptConsumptionBody("Post-Compact Reinjection Repair Receipt Memory", restoredRows, { updatedAt, groupSessionId }),
             maxBodyChars: Number(options.maxBodyChars || options.max_body_chars || 24_000),
         }));
     }
@@ -7800,7 +7897,7 @@ function distillPostCompactReinjectionRepairReceiptConsumptionToTypedMemory(grou
             description: "Verified ignored post-compact reinjection candidates; retain the closure evidence without promoting the ignored candidate into future task context.",
             source: "auto:post-compact-reinjection-repair-receipt-consumption-distillation",
             updatedAt,
-            body: renderPostCompactReinjectionRepairReceiptConsumptionBody("Post-Compact Reinjection Repair Receipt Cautions", cautionRows, { updatedAt }),
+            body: renderPostCompactReinjectionRepairReceiptConsumptionBody("Post-Compact Reinjection Repair Receipt Cautions", cautionRows, { updatedAt, groupSessionId }),
             maxBodyChars: Number(options.maxBodyChars || options.max_body_chars || 24_000),
         }));
     }
@@ -7811,6 +7908,8 @@ function distillPostCompactReinjectionRepairReceiptConsumptionToTypedMemory(grou
         schema: "ccm-group-typed-memory-distillation-ledger-v1",
         version: exports.GROUP_TYPED_MEMORY_DISTILLATION_VERSION,
         groupId,
+        sourceGroupId,
+        groupSessionId,
         facts: ledger.facts || {},
         postCompactReinjectionRepairReceiptConsumptionArchive: archive,
         updatedAt,
@@ -7820,6 +7919,8 @@ function distillPostCompactReinjectionRepairReceiptConsumptionToTypedMemory(grou
         schema: "ccm-post-compact-reinjection-repair-receipt-consumption-distillation-v1",
         version: exports.GROUP_POST_COMPACT_REINJECTION_REPAIR_RECEIPT_CONSUMPTION_DISTILLATION_VERSION,
         groupId,
+        sourceGroupId,
+        groupSessionId,
         skipped: false,
         reason: compactText(options.reason || "", 220),
         ledgerFile: ledger.file,
@@ -7856,6 +7957,7 @@ function postCompactReceiptMemoryUsageRepairCompletionInputRows(input = {}) {
 function postCompactReceiptMemoryUsageRepairCompletionRowId(row = {}) {
     return `post-compact-receipt-memory-usage-repair-completion:${checksum([
         row.groupId,
+        row.groupSessionId,
         row.work_item_id,
         row.brief_id,
         row.timeline_binding_id,
@@ -7868,6 +7970,7 @@ function postCompactReceiptMemoryUsageRepairCompletionRowId(row = {}) {
 }
 function normalizePostCompactReceiptMemoryUsageRepairCompletionRows(input = {}, options = {}) {
     const fallbackGroupId = String(options.groupId || options.group_id || input.groupId || input.group_id || "").trim();
+    const fallbackGroupSessionId = String(options.groupSessionId || options.group_session_id || input.groupSessionId || input.group_session_id || "").trim();
     const requiredEvents = ["dispatch", "child_agent_start", "worker_handoff_ready", "task_agent_memory_context_snapshot", "child_agent_receipt"];
     return postCompactReceiptMemoryUsageRepairCompletionInputRows(input).map((raw, index) => {
         const item = raw?.work_item || raw?.workItem || raw?.item || raw || {};
@@ -7913,7 +8016,8 @@ function normalizePostCompactReceiptMemoryUsageRepairCompletionRows(input = {}, 
         const row = {
             schema: "ccm-post-compact-receipt-memory-usage-repair-completion-distilled-row-v1",
             version: exports.GROUP_POST_COMPACT_RECEIPT_MEMORY_USAGE_REPAIR_COMPLETION_DISTILLATION_VERSION,
-            groupId: String(entry.groupId || entry.group_id || item.groupId || item.group_id || fallbackGroupId || "").trim(),
+            groupId: String(fallbackGroupId || entry.groupId || entry.group_id || item.groupId || item.group_id || "").trim(),
+            groupSessionId: String(fallbackGroupSessionId || entry.groupSessionId || entry.group_session_id || item.groupSessionId || item.group_session_id || "").trim(),
             source: String(entry.source || item.source || "").trim(),
             project: String(entry.project || item.target_project || item.project || "").trim(),
             task_id: String(entry.task_id || "").trim(),
@@ -8021,6 +8125,7 @@ function renderPostCompactReceiptMemoryUsageRepairCompletionBody(archive = {}, o
         "# Post-Compact Receipt Memory Usage Repair Completions",
         "",
         `Generated by CCM corrected-receipt completion distillation at ${options.updatedAt || now()}.`,
+        archive.groupSessionId ? `Exact group-chat session: ${archive.groupSessionId}.` : "Legacy unscoped corrected-receipt completion feedback.",
         "Each row proves that a child Agent receipt-memory usage gap was corrected in a newly bound repair task/native session after the complete dispatch timeline was observed.",
         "Stable boundary: historical repair completion is recovery evidence, not permanent repository truth. Every future child Agent session must independently classify recalled memory in memoryUsed or memoryIgnored and reverify the current source before used/verified memory is accepted.",
         "Historical task/native session ids are evidence only and never authorize a future session.",
@@ -8056,12 +8161,19 @@ function distillPostCompactReceiptMemoryUsageRepairCompletionToTypedMemory(group
         };
     }
     const updatedAt = String(options.updatedAt || options.updated_at || now());
+    const scopeIdentity = typedMemorySessionScopeIdentity(groupId, {
+        groupId,
+        sourceGroupId: options.sourceGroupId || options.source_group_id || "",
+        groupSessionId: options.groupSessionId || options.group_session_id || "",
+    });
+    const sourceGroupId = scopeIdentity.rootGroupId || groupId;
+    const groupSessionId = scopeIdentity.groupSessionId;
     const ledger = readGroupTypedMemoryDistillationLedger(groupId);
-    const incomingRows = normalizePostCompactReceiptMemoryUsageRepairCompletionRows(input, { ...options, groupId, updatedAt });
+    const incomingRows = normalizePostCompactReceiptMemoryUsageRepairCompletionRows(input, { ...options, groupId: sourceGroupId, groupSessionId, updatedAt });
     const previousArchive = ledger.postCompactReceiptMemoryUsageRepairCompletionArchive || {};
     const previousRows = Array.isArray(previousArchive.rows) ? previousArchive.rows : [];
     const merged = mergePostCompactReceiptMemoryUsageRepairCompletionRows(previousRows, incomingRows, { ...options, updatedAt });
-    const archive = postCompactReceiptMemoryUsageRepairCompletionArchive(merged.rows, { updatedAt });
+    const archive = { ...postCompactReceiptMemoryUsageRepairCompletionArchive(merged.rows, { updatedAt }), sourceGroupId, groupSessionId, exactSession: !!groupSessionId };
     const writes = [];
     if (archive.rows.length) {
         writes.push(upsertGroupTypedMemoryDocument(groupId, {
@@ -8082,6 +8194,8 @@ function distillPostCompactReceiptMemoryUsageRepairCompletionToTypedMemory(group
         schema: "ccm-group-typed-memory-distillation-ledger-v1",
         version: exports.GROUP_TYPED_MEMORY_DISTILLATION_VERSION,
         groupId,
+        sourceGroupId,
+        groupSessionId,
         facts: ledger.facts || {},
         postCompactReceiptMemoryUsageRepairCompletionArchive: archive,
         updatedAt,
@@ -8091,6 +8205,8 @@ function distillPostCompactReceiptMemoryUsageRepairCompletionToTypedMemory(group
         schema: "ccm-post-compact-receipt-memory-usage-repair-completion-distillation-v1",
         version: exports.GROUP_POST_COMPACT_RECEIPT_MEMORY_USAGE_REPAIR_COMPLETION_DISTILLATION_VERSION,
         groupId,
+        sourceGroupId,
+        groupSessionId,
         skipped: false,
         reason: compactText(options.reason || "", 220),
         ledgerFile: ledger.file,
@@ -8124,11 +8240,13 @@ function postCompactCompletionMemoryPreservationRepairClosureInputRows(input = {
     return groups.flatMap((group) => (Array.isArray(group.items) ? group.items : []).map((row) => ({
         ...row,
         groupId: row.groupId || row.group_id || group.groupId || group.group_id || "",
+        groupSessionId: row.groupSessionId || row.group_session_id || group.groupSessionId || group.group_session_id || "",
     })));
 }
 function postCompactCompletionMemoryPreservationRepairClosureRowId(row = {}) {
     return `post-compact-completion-memory-preservation-repair-closure:${checksum([
         row.groupId,
+        row.groupSessionId,
         row.work_item_id,
         row.failed_outcome_id,
         row.corrected_outcome_id,
@@ -8142,6 +8260,7 @@ function postCompactCompletionMemoryPreservationRepairClosureRowId(row = {}) {
 }
 function normalizePostCompactCompletionMemoryPreservationRepairClosureRows(input = {}, options = {}) {
     const fallbackGroupId = String(options.groupId || options.group_id || input.groupId || input.group_id || "").trim();
+    const forcedGroupSessionId = String(options.groupSessionId || options.group_session_id || "").trim();
     return postCompactCompletionMemoryPreservationRepairClosureInputRows(input).map((raw, index) => {
         const item = raw?.item || raw?.completion || raw || {};
         const proof = item.corrected_retry_proof || item.correctedRetryProof || {};
@@ -8151,6 +8270,7 @@ function normalizePostCompactCompletionMemoryPreservationRepairClosureRows(input
             schema: "ccm-post-compact-completion-memory-preservation-repair-closure-distilled-row-v1",
             version: exports.GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_REPAIR_CLOSURE_DISTILLATION_VERSION,
             groupId: String(item.groupId || item.group_id || item.scopeId || item.scope_id || fallbackGroupId).trim(),
+            groupSessionId: forcedGroupSessionId || String(item.groupSessionId || item.group_session_id || "").trim(),
             source: String(item.source || "").trim(),
             component: String(item.component || "").trim(),
             project: String(item.target_project || item.project || item.target || "").trim(),
@@ -8188,6 +8308,7 @@ function normalizePostCompactCompletionMemoryPreservationRepairClosureRows(input
         return row;
     })
         .filter((row) => row.groupId === fallbackGroupId || (!fallbackGroupId && !!row.groupId))
+        .filter((row) => !forcedGroupSessionId || row.groupSessionId === forcedGroupSessionId)
         .filter((row) => row.source === "post_compact_receipt_memory_usage_repair_completion_compaction_preservation_repair")
         .filter((row) => row.component === "post_compact_receipt_memory_usage_repair_completion_compaction_preservation")
         .filter((row) => row.completion_source === "post_compact_receipt_memory_usage_repair_completion_compaction_preservation_corrected_retry")
@@ -8255,6 +8376,9 @@ function renderPostCompactCompletionMemoryPreservationRepairClosureBody(archive 
         "# Post-Compact Completion Memory Preservation Repair Closures",
         "",
         `Generated by CCM compact-preservation repair closure distillation at ${options.updatedAt || now()}.`,
+        options.groupSessionId
+            ? `Exact group-chat session: ${options.groupSessionId}. Root group: ${options.sourceGroupId || "unknown"}.`
+            : "Legacy unscoped group memory: no exact group-chat session was recorded.",
         "Each row records a failed compact outcome whose corrected-receipt completion memory was restored only by a newer, different compact retry/outcome with exact identity and current-session authority proof.",
         "Stable boundary: historical repair completion is recovery evidence, not permanent repository truth. Every future child Agent session must reverify the current source and classify this recalled MEMORY.md in memoryUsed or memoryIgnored.",
         "All task/native sessions listed here are historical evidence in a future child session and never authorize that future session.",
@@ -8288,10 +8412,23 @@ function distillPostCompactCompletionMemoryPreservationRepairClosureToTypedMemor
     }
     const updatedAt = String(options.updatedAt || options.updated_at || now());
     const ledger = readGroupTypedMemoryDistillationLedger(groupId);
-    const incomingRows = normalizePostCompactCompletionMemoryPreservationRepairClosureRows(input, { ...options, groupId, updatedAt });
+    const scopeIdentity = typedMemorySessionScopeIdentity(groupId, ledger);
+    const sourceGroupId = String(options.sourceGroupId || options.source_group_id || scopeIdentity.rootGroupId || groupId).trim();
+    const groupSessionId = String(options.groupSessionId || options.group_session_id || scopeIdentity.groupSessionId || "").trim();
+    const incomingRows = normalizePostCompactCompletionMemoryPreservationRepairClosureRows(input, {
+        ...options,
+        groupId: sourceGroupId,
+        groupSessionId,
+        updatedAt,
+    });
     const previousArchive = ledger.postCompactCompletionMemoryPreservationRepairClosureArchive || {};
     const merged = mergePostCompactCompletionMemoryPreservationRepairClosureRows(Array.isArray(previousArchive.rows) ? previousArchive.rows : [], incomingRows, { ...options, updatedAt });
-    const archive = postCompactCompletionMemoryPreservationRepairClosureArchive(merged.rows, { updatedAt });
+    const archive = {
+        ...postCompactCompletionMemoryPreservationRepairClosureArchive(merged.rows, { updatedAt }),
+        sourceGroupId,
+        groupSessionId,
+        exactSession: !!groupSessionId,
+    };
     const writes = [];
     if (archive.rows.length) {
         writes.push(upsertGroupTypedMemoryDocument(groupId, {
@@ -8301,7 +8438,7 @@ function distillPostCompactCompletionMemoryPreservationRepairClosureToTypedMemor
             description: "Verified newer compact outcomes that restored corrected-receipt completion identity and session authority, with mandatory future current-source reverification.",
             source: "auto:post-compact-completion-memory-preservation-repair-closure-distillation",
             updatedAt,
-            body: renderPostCompactCompletionMemoryPreservationRepairClosureBody(archive, { updatedAt }),
+            body: renderPostCompactCompletionMemoryPreservationRepairClosureBody(archive, { updatedAt, sourceGroupId, groupSessionId }),
             maxBodyChars: Number(options.maxBodyChars || options.max_body_chars || 24_000),
         }));
     }
@@ -8312,6 +8449,8 @@ function distillPostCompactCompletionMemoryPreservationRepairClosureToTypedMemor
         schema: "ccm-group-typed-memory-distillation-ledger-v1",
         version: exports.GROUP_TYPED_MEMORY_DISTILLATION_VERSION,
         groupId,
+        sourceGroupId,
+        groupSessionId,
         facts: ledger.facts || {},
         postCompactCompletionMemoryPreservationRepairClosureArchive: archive,
         updatedAt,
@@ -8321,6 +8460,8 @@ function distillPostCompactCompletionMemoryPreservationRepairClosureToTypedMemor
         schema: "ccm-post-compact-completion-memory-preservation-repair-closure-distillation-v1",
         version: exports.GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_REPAIR_CLOSURE_DISTILLATION_VERSION,
         groupId,
+        sourceGroupId,
+        groupSessionId,
         skipped: false,
         reason: compactText(options.reason || "", 220),
         ledgerFile: ledger.file,
@@ -8344,11 +8485,17 @@ function distillPostCompactCompletionMemoryPreservationRepairClosureToTypedMemor
 }
 function normalizePostCompactCompletionMemoryPreservationClosureConflictResolutionRows(groupId, input = {}, options = {}) {
     const rows = Array.isArray(input) ? input : Array.isArray(input.rows) ? input.rows : [];
+    const scopeIdentity = typedMemorySessionScopeIdentity(groupId, options);
+    const sourceGroupId = String(options.sourceGroupId || options.source_group_id || scopeIdentity.rootGroupId || groupId).trim();
+    const groupSessionId = String(options.groupSessionId || options.group_session_id || scopeIdentity.groupSessionId || "").trim();
     return rows.map((entry) => {
         const row = {
             schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-row-v1",
             version: exports.GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_CONFLICT_RESOLUTION_DISTILLATION_VERSION,
-            group_id: String(entry.group_id || entry.groupId || groupId || "").trim(),
+            group_id: String(entry.group_id || entry.groupId || sourceGroupId || "").trim(),
+            source_group_id: sourceGroupId,
+            group_session_id: String(entry.group_session_id || entry.groupSessionId || groupSessionId || "").trim(),
+            typed_scope_id: groupId,
             target_project: String(entry.target_project || entry.targetProject || "").trim(),
             task_id: String(entry.task_id || entry.taskId || "").trim(),
             task_text: compactText(entry.task_text || entry.taskText || "", 900),
@@ -8377,6 +8524,8 @@ function normalizePostCompactCompletionMemoryPreservationClosureConflictResoluti
         };
         row.row_id = `post-compact-closure-conflict-resolution:${checksum([
             row.group_id,
+            row.group_session_id,
+            row.typed_scope_id,
             row.task_family_key,
             row.resolution_entry_id,
             row.task_agent_session_id,
@@ -8384,7 +8533,8 @@ function normalizePostCompactCompletionMemoryPreservationClosureConflictResoluti
             row.parent_conflict_fingerprint,
         ], 24)}`;
         return row;
-    }).filter((row) => row.group_id === groupId)
+    }).filter((row) => row.group_id === sourceGroupId && row.typed_scope_id === groupId)
+        .filter((row) => groupSessionId ? row.group_session_id === groupSessionId : !row.group_session_id)
         .filter((row) => row.resolution_entry_id && row.task_family_key)
         .filter((row) => row.task_agent_session_id && row.native_session_id)
         .filter((row) => row.parent_arbitration_state === "contradictory_reverify_current_session" && row.parent_conflict_fingerprint)
@@ -8397,6 +8547,9 @@ function renderPostCompactCompletionMemoryPreservationClosureConflictResolutionB
         "# Post-Compact Completion Memory Preservation Closure Conflict Resolutions",
         "",
         `Generated by CCM closure conflict-resolution distillation at ${options.updatedAt || now()}.`,
+        options.groupSessionId
+            ? `Exact group-chat session: ${options.groupSessionId}. Root group: ${options.sourceGroupId || "unknown"}.`
+            : "Legacy unscoped group memory: automatic fresh-child injection remains blocked until exact session ownership is known.",
         "Each row records a newer current-session decision that resolved a contradictory used/verified versus ignored closure-memory history for one task family.",
         "Stable boundary: the resolution is session-bound recovery evidence, not permanent repository truth or authorization. Historical branches remain immutable and a later reliable contradiction may reopen arbitration.",
         "",
@@ -8890,6 +9043,16 @@ function getPostCompactCompletionMemoryPreservationClosureConflictResolutionMain
 function getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryFile(groupId) {
     return path.join(getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveDir(groupId), "maintenance-notification-deliveries.json");
 }
+function conflictResolutionMaintenanceScopeMetadata(scopeId) {
+    const ledger = readJson(getGroupTypedMemoryDistillationLedgerFile(scopeId), {});
+    const identity = typedMemorySessionScopeIdentity(scopeId, ledger);
+    return {
+        source_group_id: identity.rootGroupId,
+        group_session_id: identity.groupSessionId,
+        typed_scope_id: identity.ledgerScopeId || scopeId,
+        exact_session: identity.exactSession,
+    };
+}
 function conflictResolutionMaintenanceState(groupId, options = {}) {
     const at = String(options.at || options.now || now());
     const generation = verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionManifestGenerations(groupId);
@@ -8910,6 +9073,7 @@ function conflictResolutionMaintenanceState(groupId, options = {}) {
     return {
         at,
         group_id: groupId,
+        ...conflictResolutionMaintenanceScopeMetadata(groupId),
         current_manifest_checksum: generation.currentManifestChecksum || "",
         previous_manifest_checksum: generation.previousManifestChecksum || "",
         quarantine_checksum: quarantine.quarantine_checksum || "",
@@ -8950,6 +9114,7 @@ function readConflictResolutionMaintenanceNotificationReceiptLedger(groupId) {
         schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-receipt-ledger-v1",
         version: 1,
         group_id: groupId,
+        ...conflictResolutionMaintenanceScopeMetadata(groupId),
         entries: Array.isArray(ledger.entries) ? ledger.entries : [],
         file,
         updated_at: ledger.updated_at || "",
@@ -8961,6 +9126,7 @@ function writeConflictResolutionMaintenanceNotificationReceiptLedger(groupId, en
         schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-receipt-ledger-v1",
         version: 1,
         group_id: groupId,
+        ...conflictResolutionMaintenanceScopeMetadata(groupId),
         entries: entries.slice(-320),
         receipt_count: Math.min(entries.length, 320),
         updated_at: at,
@@ -9013,6 +9179,7 @@ function createConflictResolutionMaintenanceNotificationReceipt(groupId, kind, i
         receipt_id: `conflict-resolution-maintenance-notification-${kind}:${checksum([groupId, audience, notificationId, state.state_fingerprint, actorId, sessionId, at], 24)}`,
         receipt_kind: kind,
         group_id: groupId,
+        ...conflictResolutionMaintenanceScopeMetadata(groupId),
         audience,
         notification_id: notificationId,
         state_fingerprint: state.state_fingerprint,
@@ -11651,7 +11818,7 @@ function runPostCompactCompletionMemoryPreservationClosureConflictResolutionMain
         const { buildCoordinatorMaintenanceNotificationInstructions, buildWorkerContextPacketForAssignment } = require("./group-orchestrator");
         const { buildAgenticContext } = require("../global/global-agent");
         const mainBefore = buildPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairContext(groupA, "group-main-agent");
-        const globalBefore = buildAgenticContext("", "", { groups: [group, { id: groupB, name: "Other group", members: [] }] }).cleanup_commit_repair_context;
+        const globalBefore = buildAgenticContext("", "", { groups: [group, { id: groupB, name: "Other group", members: [] }] }).cleanup_commit_repair_context || null;
         const coordinatorBefore = buildCoordinatorMaintenanceNotificationInstructions(group, { at }).cleanup_commit_repair_context;
         const globalClaimBlocked = throws(() => updatePostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairWorkItem(groupA, {
             at: "2026-07-12T14:00:10.000Z", workItemId, action: "claim", actorRole: "global-agent", actorId: "global", reason: "not authorized", explicitAction: true,
@@ -11713,13 +11880,12 @@ function runPostCompactCompletionMemoryPreservationClosureConflictResolutionMain
         const mainAfter = buildPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairContext(groupA, "group-main-agent");
         const childAfter = buildPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairContext(groupA, "project-child-agent", childOptions);
         const coordinatorAfter = buildCoordinatorMaintenanceNotificationInstructions(group, { at: "2026-07-12T14:03:30.000Z" }).cleanup_commit_repair_context;
-        const globalAfter = buildAgenticContext("", "", { groups: [group] }).cleanup_commit_repair_context;
+        const globalAfter = buildAgenticContext("", "", { groups: [group] }).cleanup_commit_repair_context || null;
         const quarantineAfter = readJson(quarantineFile, {});
         const approvalsAfter = (readJson(approvalFileA, {}).entries || []).length + (readJson(approvalFileB, {}).entries || []).length;
         const checks = {
             readyBriefInjectedIntoGroupMainAndCoordinator: mainBefore.brief_count === 1 && coordinatorBefore.brief_count === 1,
-            globalAgentSeesGroupScopedReadOnlySummary: globalBefore.group_count === 1 && globalBefore.groups[0]?.group_id === groupA
-                && globalBefore.can_claim_or_dispatch === false && globalBefore.cross_group_authorization_allowed === false,
+            globalAgentExcludesGroupScopedRepairContext: globalBefore == null,
             globalAgentCannotClaimOrAssign: globalClaimBlocked && unauthorizedAssignmentBlocked,
             lifecycleTransitionsPendingClaimedDispatched: claimed.status === "claimed" && dispatched.status === "dispatched",
             exactAssignmentBindingCreated: assignment.group_id === groupA && assignment.assignment_id === assignmentId && assignment.child_session_id === "child-session-1",
@@ -11731,7 +11897,7 @@ function runPostCompactCompletionMemoryPreservationClosureConflictResolutionMain
             replayAndConsumedStateTamperBlocked: replayBlocked && consumedStateTamperBlocked,
             persistentQualityGateAcceptsHealthyAndRejectsTamper: qualityBeforeTamper.id === qualityCheckId && qualityBeforeTamper.status === "ok"
                 && qualityAfterTamper.id === qualityCheckId && qualityAfterTamper.status === "fail",
-            resolvedBriefRemovedFromAllContexts: mainAfter.brief_count === 0 && childAfter.brief_count === 0 && coordinatorAfter.brief_count === 0 && globalAfter.group_count === 0,
+            resolvedBriefRemovedFromAllContexts: mainAfter.brief_count === 0 && childAfter.brief_count === 0 && coordinatorAfter.brief_count === 0 && globalAfter == null,
             evidenceTasksAndApprovalsPreserved: quarantineAfter.entries?.[0]?.evidence_checksum === evidence.evidence_checksum
                 && require("../../core/db").loadTasks().length === tasksBefore && approvalsAfter === approvalsBefore,
         };
@@ -13656,6 +13822,7 @@ function recordPostCompactCompletionMemoryPreservationClosureConflictResolutionM
             version: 1,
             delivery_id: deliveryId,
             group_id: groupId,
+            ...conflictResolutionMaintenanceScopeMetadata(groupId),
             audience: normalizedAudience,
             notification_id: notification.notification_id,
             state_fingerprint: notification.state_fingerprint,
@@ -13680,6 +13847,7 @@ function recordPostCompactCompletionMemoryPreservationClosureConflictResolutionM
     return {
         schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-result-v1",
         group_id: groupId,
+        ...conflictResolutionMaintenanceScopeMetadata(groupId),
         audience: normalizedAudience,
         context_id: contextId,
         consumer_session_id: consumerSessionId,
@@ -13742,6 +13910,7 @@ function inspectPostCompactCompletionMemoryPreservationClosureConflictResolution
         const repeatedUnseen = !delivered && severe && ageMs >= unseenAfterMs && Number(notification.seen_count || 0) >= repeatThreshold;
         return {
             group_id: groupId,
+            ...conflictResolutionMaintenanceScopeMetadata(groupId),
             audience: notification.audience,
             notification_id: notification.notification_id,
             state_fingerprint: notification.state_fingerprint,
@@ -13767,6 +13936,7 @@ function inspectPostCompactCompletionMemoryPreservationClosureConflictResolution
     return {
         schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-health-v1",
         group_id: groupId,
+        ...conflictResolutionMaintenanceScopeMetadata(groupId),
         generated_at: at,
         pending_count: rows.length,
         delivered_pending_count: rows.filter((row) => row.delivered).length,
@@ -13832,6 +14002,7 @@ function buildPostCompactCompletionMemoryPreservationClosureConflictResolutionMa
         .map((entry) => ({
         notification_id: entry.notification_id,
         group_id: groupId,
+        ...conflictResolutionMaintenanceScopeMetadata(groupId),
         audience: normalizedAudience,
         state_fingerprint: entry.state_fingerprint,
         severity: entry.severity || "info",
@@ -13857,6 +14028,7 @@ function buildPostCompactCompletionMemoryPreservationClosureConflictResolutionMa
     return {
         schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-context-v1",
         group_id: groupId,
+        ...conflictResolutionMaintenanceScopeMetadata(groupId),
         audience: normalizedAudience,
         generated_at: at,
         pending_count: pending.length,
@@ -13894,6 +14066,7 @@ function emitConflictResolutionMaintenanceNotifications(groupId, run = {}, optio
             version: 1,
             notification_id: notificationId,
             group_id: groupId,
+            ...conflictResolutionMaintenanceScopeMetadata(groupId),
             audience: draft.audience,
             state_fingerprint: stateFingerprint,
             severity: draft.recommendation.severity || "info",
@@ -13946,6 +14119,7 @@ function emitConflictResolutionMaintenanceNotifications(groupId, run = {}, optio
         schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-ledger-v1",
         version: 1,
         group_id: groupId,
+        ...conflictResolutionMaintenanceScopeMetadata(groupId),
         entries,
         notification_count: entries.length,
         new_notification_count: newCount,
@@ -14009,6 +14183,7 @@ function runPostCompactCompletionMemoryPreservationClosureConflictResolutionMain
     const intervalMs = Math.max(60_000, Number(options.intervalMs || options.interval_ms || 6 * 60 * 60 * 1000));
     const runCore = {
         group_id: groupId,
+        ...conflictResolutionMaintenanceScopeMetadata(groupId),
         trigger,
         at,
         current_manifest_checksum: generation.currentManifestChecksum || "",
@@ -14053,6 +14228,7 @@ function runPostCompactCompletionMemoryPreservationClosureConflictResolutionMain
         schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-ledger-v1",
         version: 1,
         group_id: groupId,
+        ...conflictResolutionMaintenanceScopeMetadata(groupId),
         controller_policy: "background_verify_and_dry_run_never_delete",
         entries,
         latest_run: run,
@@ -14341,10 +14517,43 @@ function inspectPostCompactCompletionMemoryPreservationClosureConflictResolution
         ],
     };
 }
+function listPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceScopeIds(groupIds = [], options = {}) {
+    const requested = uniqueStrings(groupIds, 1000);
+    const requestedKeys = new Set(requested.flatMap((value) => [value.toLowerCase(), safeSegment(value).toLowerCase()]));
+    const candidates = new Set();
+    for (const value of requested) {
+        if (fs.existsSync(getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveManifestFile(value)))
+            candidates.add(value);
+    }
+    try {
+        for (const entry of fs.readdirSync(GROUP_TYPED_MEMORY_DIR, { withFileTypes: true })) {
+            if (!entry.isDirectory())
+                continue;
+            const scopeId = entry.name;
+            if (!fs.existsSync(getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveManifestFile(scopeId)))
+                continue;
+            const ledger = readJson(getGroupTypedMemoryDistillationLedgerFile(scopeId), {});
+            const identity = typedMemorySessionScopeIdentity(scopeId, ledger);
+            if (requestedKeys.size
+                && !requestedKeys.has(scopeId.toLowerCase())
+                && !requestedKeys.has(safeSegment(scopeId).toLowerCase())
+                && !requestedKeys.has(identity.rootGroupId.toLowerCase())
+                && !requestedKeys.has(safeSegment(identity.rootGroupId).toLowerCase()))
+                continue;
+            candidates.add(scopeId);
+        }
+    }
+    catch { }
+    const maxScopes = Math.max(1, Math.min(5000, Number(options.maxScopes || options.max_scopes || 1000)));
+    return [...candidates].sort().slice(0, maxScopes);
+}
 function runDuePostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenance(groupIds = [], options = {}) {
     const at = String(options.at || options.now || now());
     const atMs = Date.parse(at);
-    const rows = uniqueStrings(groupIds, 500).map((groupId) => {
+    const scopeIds = options.expandScopes === false || options.expand_scopes === false
+        ? uniqueStrings(groupIds, 1000)
+        : listPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceScopeIds(groupIds, options);
+    const rows = scopeIds.map((groupId) => {
         const file = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceLedgerFile(groupId);
         const ledger = readJson(file, {});
         const nextRunAt = String(ledger.next_run_at || "");
@@ -14366,6 +14575,9 @@ function runDuePostCompactCompletionMemoryPreservationClosureConflictResolutionM
         schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-due-maintenance-v1",
         at,
         groupCount: rows.length,
+        rootGroupCount: new Set(rows.map((row) => typedMemorySessionScopeIdentity(row.groupId, readJson(getGroupTypedMemoryDistillationLedgerFile(row.groupId), {})).rootGroupId)).size,
+        exactSessionCount: rows.filter((row) => typedMemorySessionScopeIdentity(row.groupId, readJson(getGroupTypedMemoryDistillationLedgerFile(row.groupId), {})).exactSession).length,
+        legacyScopeCount: rows.filter((row) => !typedMemorySessionScopeIdentity(row.groupId, readJson(getGroupTypedMemoryDistillationLedgerFile(row.groupId), {})).exactSession).length,
         dueCount: rows.filter(row => row.due).length,
         skippedCount: rows.filter(row => row.skipped).length,
         destructiveActionAuthorized: false,
@@ -14384,7 +14596,7 @@ function loadPostCompactCompletionMemoryPreservationClosureConflictResolutionCol
 }
 function writePostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchive(groupId, inputRows = [], options = {}) {
     const rows = [...inputRows]
-        .filter((row) => String(row.group_id || "") === groupId && row.row_id)
+        .filter((row) => String(row.typed_scope_id || row.group_id || "") === groupId && row.row_id)
         .sort((a, b) => String(a.row_id || "").localeCompare(String(b.row_id || "")));
     const currentManifest = readConflictResolutionColdArchiveManifest(groupId);
     if (currentManifest) {
@@ -14633,7 +14845,15 @@ function distillPostCompactCompletionMemoryPreservationClosureConflictResolution
         return runGroupTypedMemoryDistillationMutation(groupId, "post_compact_completion_conflict_resolution", options, () => distillPostCompactCompletionMemoryPreservationClosureConflictResolutionToTypedMemory(groupId, input, { ...options, __distillationMutationCoordinator: true }));
     const updatedAt = String(options.updatedAt || options.updated_at || now());
     const ledger = readGroupTypedMemoryDistillationLedger(groupId);
-    const incomingRows = normalizePostCompactCompletionMemoryPreservationClosureConflictResolutionRows(groupId, input, { ...options, updatedAt });
+    const scopeIdentity = typedMemorySessionScopeIdentity(groupId, ledger);
+    const sourceGroupId = String(options.sourceGroupId || options.source_group_id || scopeIdentity.rootGroupId || groupId).trim();
+    const groupSessionId = String(options.groupSessionId || options.group_session_id || scopeIdentity.groupSessionId || "").trim();
+    const incomingRows = normalizePostCompactCompletionMemoryPreservationClosureConflictResolutionRows(groupId, input, {
+        ...options,
+        sourceGroupId,
+        groupSessionId,
+        updatedAt,
+    });
     const previousArchive = ledger.postCompactCompletionMemoryPreservationClosureConflictResolutionArchive || {};
     const previousColdRows = loadPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveRows(groupId);
     const merged = new Map();
@@ -14659,6 +14879,9 @@ function distillPostCompactCompletionMemoryPreservationClosureConflictResolution
     const archive = {
         schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-distillation-v1",
         version: exports.GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_CONFLICT_RESOLUTION_DISTILLATION_VERSION,
+        sourceGroupId,
+        groupSessionId,
+        exactSession: !!groupSessionId,
         archived_count: rows.length,
         resolved_used_or_verified_count: rows.filter((row) => ["used", "verified"].includes(row.resolution_usage_state)).length,
         resolved_ignored_count: rows.filter((row) => row.resolution_usage_state === "ignored").length,
@@ -14687,7 +14910,7 @@ function distillPostCompactCompletionMemoryPreservationClosureConflictResolution
             description: "Session-bound, reversible current-source decisions resolving contradictory closure-memory feedback without erasing historical branches.",
             source: "auto:post-compact-completion-memory-preservation-closure-conflict-resolution-distillation",
             updatedAt,
-            body: renderPostCompactCompletionMemoryPreservationClosureConflictResolutionBody(archive, { updatedAt }),
+            body: renderPostCompactCompletionMemoryPreservationClosureConflictResolutionBody(archive, { updatedAt, sourceGroupId, groupSessionId }),
             maxBodyChars: Number(options.maxBodyChars || options.max_body_chars || 24_000),
         }));
     }
@@ -14698,6 +14921,8 @@ function distillPostCompactCompletionMemoryPreservationClosureConflictResolution
         schema: "ccm-group-typed-memory-distillation-ledger-v1",
         version: exports.GROUP_TYPED_MEMORY_DISTILLATION_VERSION,
         groupId,
+        sourceGroupId,
+        groupSessionId,
         facts: ledger.facts || {},
         postCompactCompletionMemoryPreservationClosureConflictResolutionArchive: archive,
         updatedAt,
@@ -14707,6 +14932,8 @@ function distillPostCompactCompletionMemoryPreservationClosureConflictResolution
         schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-distillation-v1",
         version: exports.GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_CONFLICT_RESOLUTION_DISTILLATION_VERSION,
         groupId,
+        sourceGroupId,
+        groupSessionId,
         incomingRowCount: incomingRows.length,
         archivedCount: archive.archived_count,
         newRowCount: rows.filter((row) => !previousIds.has(row.row_id)).length,
@@ -14752,6 +14979,7 @@ function providerRankingMemoryUsageReceiptRepairRowId(row = {}) {
 }
 function normalizeProviderRankingMemoryUsageReceiptRepairRows(input = {}, options = {}) {
     const fallbackGroupId = String(options.groupId || options.group_id || input.groupId || input.group_id || "").trim();
+    const forcedGroupSessionId = String(options.groupSessionId || options.group_session_id || "").trim();
     return providerRankingMemoryUsageReceiptRepairInputRows(input).map((raw, index) => {
         const entry = raw?.entry || raw?.item || raw?.candidate || raw?.brief || raw || {};
         const source = String(entry.source || raw?.source || "").trim();
@@ -14773,6 +15001,7 @@ function normalizeProviderRankingMemoryUsageReceiptRepairRows(input = {}, option
             schema: "ccm-provider-ranking-memory-usage-receipt-repair-distilled-row-v1",
             version: exports.GROUP_PROVIDER_RANKING_MEMORY_USAGE_RECEIPT_REPAIR_DISTILLATION_VERSION,
             groupId: String(entry.groupId || entry.group_id || raw?.groupId || raw?.group_id || fallbackGroupId || "").trim(),
+            groupSessionId: String(entry.groupSessionId || entry.group_session_id || raw?.groupSessionId || raw?.group_session_id || forcedGroupSessionId || "").trim(),
             work_item_id: String(entry.work_item_id || entry.workItemId || entry.id || raw?.work_item_id || raw?.id || "").trim(),
             brief_id: String(entry.brief_id || entry.briefId || raw?.brief_id || raw?.briefId || "").trim(),
             candidate_id: String(entry.candidate_id || entry.candidateId || raw?.candidate_id || raw?.candidateId || "").trim(),
@@ -14804,6 +15033,7 @@ function normalizeProviderRankingMemoryUsageReceiptRepairRows(input = {}, option
         return { ...row, row_id: providerRankingMemoryUsageReceiptRepairRowId(row) };
     })
         .filter((row) => row.groupId || fallbackGroupId)
+        .filter((row) => !forcedGroupSessionId || row.groupSessionId === forcedGroupSessionId)
         .filter((row) => row.source === "worker_context_provider_ranking_compact_repair_receipt_memory_usage_receipt_repair"
         || row.component === "worker_context_provider_ranking_compact_repair_receipt_memory_usage_receipt_contract"
         || /provider ranking.*memory usage|memoryUsed|memoryIgnored|fresh valid provider switch decision receipt|ranking evidence only, not authorization/i.test(`${row.reason}\n${row.expected}\n${row.prompt_patch}\n${row.worker_task}`));
@@ -14865,6 +15095,7 @@ function renderProviderRankingMemoryUsageReceiptRepairBody(archive = {}, options
         "# Provider Ranking Memory Usage Receipt Discipline",
         "",
         `Generated by CCM provider ranking memory usage receipt repair distillation at ${options.updatedAt || now()}.`,
+        options.groupSessionId ? `Exact group-chat session: ${options.groupSessionId}.` : "Legacy unscoped provider ranking receipt-discipline feedback.",
         "This feedback memory records corrected-receipt repair briefs for child Agents that received provider ranking compact repair typed memory but failed to cite it in CCM_AGENT_RECEIPT.memoryUsed or memoryIgnored.",
         "Stable rule: if provider-ranking-provenance-compact-repair-receipt-memory.md is present in WorkerContextPacket, the final receipt must explicitly mention it in memoryUsed or memoryIgnored, declare usageState, and restate that provider ranking history is ranking evidence only, not authorization.",
         "Any explicit provider switch still requires a fresh valid provider switch decision receipt.",
@@ -14902,12 +15133,19 @@ function distillProviderRankingMemoryUsageReceiptRepairToTypedMemory(groupId, in
         };
     }
     const updatedAt = String(options.updatedAt || options.updated_at || now());
+    const scopeIdentity = typedMemorySessionScopeIdentity(groupId, {
+        groupId,
+        sourceGroupId: options.sourceGroupId || options.source_group_id || "",
+        groupSessionId: options.groupSessionId || options.group_session_id || "",
+    });
+    const sourceGroupId = scopeIdentity.rootGroupId || groupId;
+    const groupSessionId = scopeIdentity.groupSessionId;
     const ledger = readGroupTypedMemoryDistillationLedger(groupId);
-    const incomingRows = normalizeProviderRankingMemoryUsageReceiptRepairRows(input, { ...options, groupId, updatedAt });
+    const incomingRows = normalizeProviderRankingMemoryUsageReceiptRepairRows(input, { ...options, groupId: sourceGroupId, groupSessionId, updatedAt });
     const previousArchive = ledger.providerRankingMemoryUsageReceiptRepairArchive || {};
     const previousRows = Array.isArray(previousArchive.rows) ? previousArchive.rows : [];
     const merged = mergeProviderRankingMemoryUsageReceiptRepairRows(previousRows, incomingRows, { ...options, updatedAt });
-    const archive = providerRankingMemoryUsageReceiptRepairArchive(merged.rows, { updatedAt });
+    const archive = { ...providerRankingMemoryUsageReceiptRepairArchive(merged.rows, { updatedAt }), sourceGroupId, groupSessionId, exactSession: !!groupSessionId };
     const writes = [];
     if (archive.rows.length) {
         writes.push(upsertGroupTypedMemoryDocument(groupId, {
@@ -14917,7 +15155,7 @@ function distillProviderRankingMemoryUsageReceiptRepairToTypedMemory(groupId, in
             description: "Child Agent receipt discipline for provider ranking compact repair typed memory usage.",
             source: "auto:provider-ranking-memory-usage-receipt-repair-distillation",
             updatedAt,
-            body: renderProviderRankingMemoryUsageReceiptRepairBody(archive, { updatedAt }),
+            body: renderProviderRankingMemoryUsageReceiptRepairBody(archive, { updatedAt, groupSessionId }),
             maxBodyChars: Number(options.maxBodyChars || options.max_body_chars || 18_000),
         }));
     }
@@ -14928,6 +15166,8 @@ function distillProviderRankingMemoryUsageReceiptRepairToTypedMemory(groupId, in
         schema: "ccm-group-typed-memory-distillation-ledger-v1",
         version: exports.GROUP_TYPED_MEMORY_DISTILLATION_VERSION,
         groupId,
+        sourceGroupId,
+        groupSessionId,
         facts: ledger.facts || {},
         providerRankingMemoryUsageReceiptRepairArchive: archive,
         updatedAt,
@@ -14937,6 +15177,8 @@ function distillProviderRankingMemoryUsageReceiptRepairToTypedMemory(groupId, in
         schema: "ccm-provider-ranking-memory-usage-receipt-repair-distillation-v1",
         version: exports.GROUP_PROVIDER_RANKING_MEMORY_USAGE_RECEIPT_REPAIR_DISTILLATION_VERSION,
         groupId,
+        sourceGroupId,
+        groupSessionId,
         skipped: false,
         reason: compactText(options.reason || "", 220),
         ledgerFile: ledger.file,
@@ -15652,6 +15894,7 @@ function providerDispatchOverrideFollowupReceiptValidationInputRows(input = {}) 
 function providerDispatchOverrideFollowupReceiptValidationRowId(row = {}) {
     return `provider-dispatch-override-followup-receipt-validation:${checksum([
         row.groupId,
+        row.groupSessionId,
         row.validation_id,
         row.binding_id,
         row.execution_id,
@@ -15660,6 +15903,7 @@ function providerDispatchOverrideFollowupReceiptValidationRowId(row = {}) {
 }
 function normalizeProviderDispatchOverrideFollowupReceiptValidationRows(input = {}, options = {}) {
     const fallbackGroupId = String(options.groupId || options.group_id || input.groupId || input.group_id || "").trim();
+    const fallbackGroupSessionId = String(options.groupSessionId || options.group_session_id || input.groupSessionId || input.group_session_id || "").trim();
     return providerDispatchOverrideFollowupReceiptValidationInputRows(input).map((raw, index) => {
         const entry = raw?.entry || raw?.binding || raw || {};
         const validation = raw?.validation
@@ -15682,7 +15926,8 @@ function normalizeProviderDispatchOverrideFollowupReceiptValidationRows(input = 
         const row = {
             schema: "ccm-pressure-provenance-provider-dispatch-override-followup-receipt-validation-distilled-row-v1",
             version: exports.GROUP_PRESSURE_PROVENANCE_PROVIDER_DISPATCH_OVERRIDE_FOLLOWUP_RECEIPT_VALIDATION_DISTILLATION_VERSION,
-            groupId: String(validation.groupId || validation.group_id || entry.groupId || entry.group_id || raw?.groupId || raw?.group_id || fallbackGroupId || "").trim(),
+            groupId: String(fallbackGroupId || validation.groupId || validation.group_id || entry.groupId || entry.group_id || raw?.groupId || raw?.group_id || "").trim(),
+            groupSessionId: String(fallbackGroupSessionId || validation.groupSessionId || validation.group_session_id || entry.groupSessionId || entry.group_session_id || raw?.groupSessionId || raw?.group_session_id || "").trim(),
             project: String(validation.project || entry.project || raw?.project || "").trim(),
             agent_type: String(validation.agent_type || validation.agentType || entry.agent_type || entry.agentType || raw?.agent_type || raw?.agentType || "unknown").trim() || "unknown",
             validation_id: String(validation.validation_id || validation.validationId || raw?.validation_id || raw?.validationId || "").trim(),
@@ -15800,6 +16045,9 @@ function pressureProvenanceProviderDispatchOverrideFollowupReceiptValidationArch
     return {
         schema: "ccm-pressure-provenance-provider-dispatch-override-followup-receipt-validation-distillation-v1",
         version: exports.GROUP_PRESSURE_PROVENANCE_PROVIDER_DISPATCH_OVERRIDE_FOLLOWUP_RECEIPT_VALIDATION_DISTILLATION_VERSION,
+        sourceGroupId: String(options.sourceGroupId || options.source_group_id || options.groupId || options.group_id || "").trim(),
+        groupSessionId: String(options.groupSessionId || options.group_session_id || "").trim(),
+        exactSession: !!String(options.groupSessionId || options.group_session_id || "").trim(),
         archived_count: rows.length,
         attempt_count: rows.length,
         failed_count: rows.filter((row) => row.attempt_status === "failed").length,
@@ -15819,6 +16067,7 @@ function renderPressureProvenanceProviderDispatchOverrideFollowupReceiptValidati
         "# Provider Dispatch Override Follow-up Receipt Validation History",
         "",
         `Generated by CCM corrected-receipt validation distillation at ${options.updatedAt || now()}.`,
+        archive.groupSessionId ? `Exact group-chat session: ${archive.groupSessionId}.` : "Legacy unscoped provider validation memory.",
         "This feedback memory preserves every provider override follow-up receipt validation attempt across child Agent sessions.",
         "Stable rule: repeated failed corrected receipts for the same agentType/project must escalate the next provider dispatch from sampling to hold. A later verified receipt clears the active failure streak and returns the provider to monitored sampling, while the failed attempts remain auditable.",
         "",
@@ -15860,12 +16109,19 @@ function distillProviderDispatchOverrideFollowupReceiptValidationToTypedMemory(g
         };
     }
     const updatedAt = String(options.updatedAt || options.updated_at || now());
+    const scopeIdentity = typedMemorySessionScopeIdentity(groupId, {
+        groupId,
+        sourceGroupId: options.sourceGroupId || options.source_group_id || "",
+        groupSessionId: options.groupSessionId || options.group_session_id || "",
+    });
+    const sourceGroupId = scopeIdentity.rootGroupId || groupId;
+    const groupSessionId = scopeIdentity.groupSessionId;
     const ledger = readGroupTypedMemoryDistillationLedger(groupId);
-    const incomingRows = normalizeProviderDispatchOverrideFollowupReceiptValidationRows(input, { ...options, groupId, updatedAt });
+    const incomingRows = normalizeProviderDispatchOverrideFollowupReceiptValidationRows(input, { ...options, groupId: sourceGroupId, groupSessionId, updatedAt });
     const previousArchive = ledger.pressureProvenanceProviderDispatchOverrideFollowupReceiptValidationArchive || {};
     const previousRows = Array.isArray(previousArchive.rows) ? previousArchive.rows : [];
     const merged = mergeProviderDispatchOverrideFollowupReceiptValidationRows(previousRows, incomingRows, { ...options, updatedAt });
-    const archive = pressureProvenanceProviderDispatchOverrideFollowupReceiptValidationArchive(merged.rows, { ...options, updatedAt });
+    const archive = pressureProvenanceProviderDispatchOverrideFollowupReceiptValidationArchive(merged.rows, { ...options, sourceGroupId, groupSessionId, updatedAt });
     const writes = [];
     if (archive.rows.length) {
         writes.push(upsertGroupTypedMemoryDocument(groupId, {
@@ -15886,6 +16142,8 @@ function distillProviderDispatchOverrideFollowupReceiptValidationToTypedMemory(g
         schema: "ccm-group-typed-memory-distillation-ledger-v1",
         version: exports.GROUP_TYPED_MEMORY_DISTILLATION_VERSION,
         groupId,
+        sourceGroupId,
+        groupSessionId,
         facts: ledger.facts || {},
         pressureProvenanceProviderDispatchOverrideFollowupReceiptValidationArchive: archive,
         updatedAt,
@@ -15895,6 +16153,8 @@ function distillProviderDispatchOverrideFollowupReceiptValidationToTypedMemory(g
         schema: "ccm-pressure-provenance-provider-dispatch-override-followup-receipt-validation-distillation-v1",
         version: exports.GROUP_PRESSURE_PROVENANCE_PROVIDER_DISPATCH_OVERRIDE_FOLLOWUP_RECEIPT_VALIDATION_DISTILLATION_VERSION,
         groupId,
+        sourceGroupId,
+        groupSessionId,
         skipped: false,
         reason: compactText(options.reason || "", 220),
         ledgerFile: ledger.file,
@@ -17091,6 +17351,38 @@ function scoreProviderDispatchReliabilityRows(rows = [], options = {}) {
         oldestAttemptAt,
     };
 }
+function typedMemorySessionScopeIdentity(scopeId, ledger = {}) {
+    const ledgerScopeId = String(ledger.groupId || ledger.group_id || scopeId || "").trim();
+    const exactMatch = ledgerScopeId.match(/^(.*)--(gcs_[a-zA-Z0-9._-]+)$/);
+    const explicitSessionId = String(ledger.groupSessionId
+        || ledger.group_session_id
+        || ledger.pressureProvenanceProviderDispatchOverrideFollowupReceiptValidationArchive?.groupSessionId
+        || ledger.pressureProvenanceProviderDispatchOverrideFollowupReceiptValidationArchive?.group_session_id
+        || "").trim();
+    const groupSessionId = /^gcs_[a-zA-Z0-9._-]+$/.test(explicitSessionId)
+        ? explicitSessionId
+        : exactMatch?.[2] || "";
+    const explicitRootGroupId = String(ledger.sourceGroupId
+        || ledger.source_group_id
+        || ledger.pressureProvenanceProviderDispatchOverrideFollowupReceiptValidationArchive?.sourceGroupId
+        || ledger.pressureProvenanceProviderDispatchOverrideFollowupReceiptValidationArchive?.source_group_id
+        || "").trim();
+    const rootGroupId = explicitRootGroupId || exactMatch?.[1] || ledgerScopeId;
+    const rootGroupKey = checksum(["provider-reliability-root-group", rootGroupId.toLowerCase()], 24);
+    const sourceSessionKey = checksum([
+        "provider-reliability-source-session",
+        rootGroupId.toLowerCase(),
+        groupSessionId || "legacy-unscoped",
+    ], 24);
+    return {
+        ledgerScopeId,
+        rootGroupId,
+        rootGroupKey,
+        groupSessionId,
+        sourceSessionKey,
+        exactSession: !!groupSessionId,
+    };
+}
 function listProviderDispatchReliabilityDistillationLedgers(options = {}) {
     const explicitGroupIds = Array.isArray(options.crossGroupProviderReliabilityGroupIds || options.cross_group_provider_reliability_group_ids)
         ? (options.crossGroupProviderReliabilityGroupIds || options.cross_group_provider_reliability_group_ids)
@@ -17100,19 +17392,27 @@ function listProviderDispatchReliabilityDistillationLedgers(options = {}) {
         .flatMap((item) => [String(item || "").trim().toLowerCase(), safeSegment(item).toLowerCase()])
         .filter(Boolean));
     const maxGroups = Math.max(1, Math.min(200, Number(options.maxGroups || options.max_groups || exports.GROUP_PROVIDER_DISPATCH_RELIABILITY_MAX_SOURCE_GROUPS)));
-    const candidates = explicitGroupIds.length
-        ? explicitGroupIds.map((groupId) => ({ groupId, file: getGroupTypedMemoryDistillationLedgerFile(groupId) }))
-        : (() => {
-            try {
-                return fs.readdirSync(GROUP_TYPED_MEMORY_DIR, { withFileTypes: true })
-                    .filter(entry => entry.isDirectory())
-                    .map(entry => ({ groupId: entry.name, file: path.join(GROUP_TYPED_MEMORY_DIR, entry.name, exports.GROUP_TYPED_MEMORY_DISTILLATION_LEDGER) }));
-            }
-            catch {
-                return [];
-            }
-        })();
-    return candidates
+    const maxLedgersPerGroup = Math.max(1, Math.min(100, Number(options.maxLedgersPerGroup || options.max_ledgers_per_group || 24)));
+    const candidates = (() => {
+        try {
+            return fs.readdirSync(GROUP_TYPED_MEMORY_DIR, { withFileTypes: true })
+                .filter(entry => entry.isDirectory())
+                .map(entry => ({ groupId: entry.name, file: path.join(GROUP_TYPED_MEMORY_DIR, entry.name, exports.GROUP_TYPED_MEMORY_DISTILLATION_LEDGER) }));
+        }
+        catch {
+            return [];
+        }
+    })();
+    const explicitKeys = new Set(explicitGroupIds.flatMap((item) => [item.toLowerCase(), safeSegment(item).toLowerCase()]));
+    const sortedCandidates = candidates
+        .filter((item) => {
+        if (!explicitKeys.size)
+            return true;
+        const identity = typedMemorySessionScopeIdentity(item.groupId, { groupId: item.groupId });
+        return explicitKeys.has(String(item.groupId || "").toLowerCase())
+            || explicitKeys.has(identity.rootGroupId.toLowerCase())
+            || explicitKeys.has(safeSegment(identity.rootGroupId).toLowerCase());
+    })
         .filter((item) => item.file && fs.existsSync(item.file))
         .map((item) => {
         try {
@@ -17123,9 +17423,29 @@ function listProviderDispatchReliabilityDistillationLedgers(options = {}) {
             return { ...item, mtimeMs: 0 };
         }
     })
-        .filter((item) => !excluded.has(String(item.groupId || "").toLowerCase()))
-        .sort((a, b) => Number(b.mtimeMs || 0) - Number(a.mtimeMs || 0))
-        .slice(0, maxGroups);
+        .filter((item) => {
+        const identity = typedMemorySessionScopeIdentity(item.groupId, { groupId: item.groupId });
+        return !excluded.has(String(item.groupId || "").toLowerCase())
+            && !excluded.has(identity.rootGroupId.toLowerCase())
+            && !excluded.has(safeSegment(identity.rootGroupId).toLowerCase());
+    })
+        .sort((a, b) => Number(b.mtimeMs || 0) - Number(a.mtimeMs || 0));
+    const selected = [];
+    const selectedRootGroups = new Set();
+    const selectedLedgersPerGroup = new Map();
+    for (const item of sortedCandidates) {
+        const identity = typedMemorySessionScopeIdentity(item.groupId, { groupId: item.groupId });
+        const rootKey = identity.rootGroupId.toLowerCase();
+        const isNewRoot = !selectedRootGroups.has(rootKey);
+        if (isNewRoot && selectedRootGroups.size >= maxGroups)
+            continue;
+        if (Number(selectedLedgersPerGroup.get(rootKey) || 0) >= maxLedgersPerGroup)
+            continue;
+        selectedRootGroups.add(rootKey);
+        selectedLedgersPerGroup.set(rootKey, Number(selectedLedgersPerGroup.get(rootKey) || 0) + 1);
+        selected.push(item);
+    }
+    return selected;
 }
 function loadProviderDispatchReliabilitySources(options = {}) {
     const targetGroupId = String(options.targetGroupId || options.target_group_id || options.groupId || options.group_id || "").trim();
@@ -17142,14 +17462,22 @@ function loadProviderDispatchReliabilitySources(options = {}) {
         try {
             const parsed = readJson(item.file, {});
             const ledgerGroupId = String(parsed.groupId || parsed.group_id || item.groupId || "").trim();
-            if (targetKeys.has(ledgerGroupId.toLowerCase()) || targetKeys.has(safeSegment(ledgerGroupId).toLowerCase()))
-                continue;
             const archive = parsed.pressureProvenanceProviderDispatchOverrideFollowupReceiptValidationArchive || {};
             const rows = Array.isArray(archive.rows) ? archive.rows : [];
             if (!rows.length)
                 continue;
+            const identity = typedMemorySessionScopeIdentity(ledgerGroupId || item.groupId, {
+                ...parsed,
+                sourceGroupId: parsed.sourceGroupId || parsed.source_group_id || archive.sourceGroupId || archive.source_group_id || rows[0]?.groupId || rows[0]?.group_id || "",
+                groupSessionId: parsed.groupSessionId || parsed.group_session_id || archive.groupSessionId || archive.group_session_id || rows[0]?.groupSessionId || rows[0]?.group_session_id || "",
+            });
+            if (targetKeys.has(identity.rootGroupId.toLowerCase()) || targetKeys.has(safeSegment(identity.rootGroupId).toLowerCase()))
+                continue;
             sources.push({
                 sourceKey: checksum([ledgerGroupId || item.groupId, item.file], 18),
+                sourceRootGroupKey: identity.rootGroupKey,
+                sourceSessionKey: identity.sourceSessionKey,
+                exactSession: identity.exactSession,
                 rows,
                 attributions: Array.isArray(archive.attributions) ? archive.attributions : [],
                 updatedAt: archive.updatedAt || parsed.updatedAt || "",
@@ -17163,15 +17491,48 @@ function buildProviderDispatchReliabilitySignalFromSources(sources = [], options
     const agentType = String(options.agentType || options.agent_type || "unknown").trim().toLowerCase() || "unknown";
     const failureThreshold = Math.max(1, Number(options.failureThreshold || options.failure_threshold || options.providerOverrideFollowupReceiptValidationFailureThreshold || options.provider_override_followup_receipt_validation_failure_threshold || 2));
     const minSourceGroups = Math.max(1, Number(options.minSourceGroups || options.min_source_groups || 2));
+    const minFreshSourceGroups = Math.max(1, Number(options.minFreshSourceGroups || options.min_fresh_source_groups || minSourceGroups));
+    const minSourceWeightedEvidence = Math.max(0.01, Number(options.minSourceWeightedEvidence || options.min_source_weighted_evidence || 0.25));
+    const minWeightedEvidence = Math.max(0.01, Number(options.minWeightedEvidence || options.min_weighted_evidence || 0.5));
+    const maxSourceGroupEvidenceShare = Math.max(0.5, Math.min(1, Number(options.maxSourceGroupEvidenceShare || options.max_source_group_evidence_share || 0.8)));
     const matchingSources = (sources || []).map((source) => {
         const rows = (Array.isArray(source.rows) ? source.rows : []).filter((row) => String(row.agent_type || row.agentType || "unknown").trim().toLowerCase() === agentType);
         const attributions = (Array.isArray(source.attributions) ? source.attributions : []).filter((row) => String(row.agent_type || row.agentType || "unknown").trim().toLowerCase() === agentType);
         return { ...source, rows, attributions };
     }).filter((source) => source.rows.length > 0);
     const score = scoreProviderDispatchReliabilityRows(matchingSources.flatMap((source) => source.rows), options);
-    const activeFailureSourceCount = matchingSources.filter((source) => source.attributions.some((row) => Number(row.consecutive_failure_count || row.consecutiveFailureCount || 0) >= failureThreshold)).length;
-    const sourceGroupCount = matchingSources.length;
-    const actionable = sourceGroupCount >= minSourceGroups && score.weightedEvidence >= 0.5;
+    const groupedSources = new Map();
+    for (const source of matchingSources) {
+        const key = String(source.sourceRootGroupKey || source.sourceKey || "");
+        groupedSources.set(key, [...(groupedSources.get(key) || []), source]);
+    }
+    const groupScores = [...groupedSources.entries()].map(([sourceRootGroupKey, groupSources]) => ({
+        sourceRootGroupKey,
+        sources: groupSources,
+        score: scoreProviderDispatchReliabilityRows(groupSources.flatMap((source) => source.rows), options),
+        activeFailure: groupSources.some((source) => source.attributions.some((row) => Number(row.consecutive_failure_count || row.consecutiveFailureCount || 0) >= failureThreshold)),
+    }));
+    const sourceGroupCount = groupScores.length;
+    const sourceSessionCount = new Set(matchingSources.map((source) => source.sourceSessionKey || source.sourceKey).filter(Boolean)).size;
+    const sourceLedgerCount = matchingSources.length;
+    const freshSourceGroupCount = groupScores.filter(item => item.score.weightedEvidence >= minSourceWeightedEvidence).length;
+    const activeFailureSourceCount = groupScores.filter(item => item.activeFailure).length;
+    const maxObservedSourceGroupEvidence = Math.max(0, ...groupScores.map(item => Number(item.score.weightedEvidence || 0)));
+    const maxObservedSourceGroupEvidenceShare = score.weightedEvidence > 0
+        ? providerDispatchReliabilityRound(maxObservedSourceGroupEvidence / score.weightedEvidence)
+        : 0;
+    const promotionStatus = !score.attemptCount
+        ? "empty"
+        : sourceGroupCount < minSourceGroups
+            ? "insufficient_independent_group_diversity"
+            : freshSourceGroupCount < minFreshSourceGroups
+                ? "insufficient_fresh_group_diversity"
+                : score.weightedEvidence < minWeightedEvidence
+                    ? "insufficient_decayed_evidence"
+                    : maxObservedSourceGroupEvidenceShare > maxSourceGroupEvidenceShare
+                        ? "single_group_evidence_dominance"
+                        : "eligible_guidance";
+    const actionable = promotionStatus === "eligible_guidance";
     const riskStatus = !score.attemptCount
         ? "empty"
         : actionable && (activeFailureSourceCount >= 2 || score.riskScore >= 0.67 && score.confidence >= 0.35)
@@ -17194,10 +17555,31 @@ function buildProviderDispatchReliabilitySignalFromSources(sources = [], options
         failed_count: score.failedCount,
         passed_count: score.passedCount,
         source_group_count: sourceGroupCount,
+        source_session_count: sourceSessionCount,
+        source_ledger_count: sourceLedgerCount,
+        fresh_source_group_count: freshSourceGroupCount,
         active_failure_source_count: activeFailureSourceCount,
         half_life_days: score.halfLifeDays,
         recovery_credit: score.recoveryCredit,
         minimum_source_groups: minSourceGroups,
+        promotion_contract: {
+            schema: "ccm-provider-reliability-cross-session-promotion-contract-v1",
+            status: promotionStatus,
+            exact_session_evidence_preserved: matchingSources.some((source) => source.exactSession === true),
+            distinct_root_groups_required: minSourceGroups,
+            distinct_root_groups_observed: sourceGroupCount,
+            distinct_source_sessions_observed: sourceSessionCount,
+            source_ledgers_observed: sourceLedgerCount,
+            fresh_root_groups_required: minFreshSourceGroups,
+            fresh_root_groups_observed: freshSourceGroupCount,
+            minimum_source_weighted_evidence: minSourceWeightedEvidence,
+            minimum_total_weighted_evidence: minWeightedEvidence,
+            maximum_single_group_evidence_share: maxSourceGroupEvidenceShare,
+            observed_maximum_single_group_evidence_share: maxObservedSourceGroupEvidenceShare,
+            time_decay_applied: true,
+            privacy_redaction_required: true,
+            same_group_sessions_count_as_one_group: true,
+        },
         actionable,
         guidance_only: true,
         local_policy_override_allowed: false,
@@ -17226,6 +17608,9 @@ function buildCrossGroupProviderDispatchReliabilitySignal(groupId, options = {})
 function providerDispatchReliabilitySourceProvenance(sources = []) {
     const rows = (sources || []).map((source) => ({
         source_key: source.sourceKey || "",
+        source_root_group_key: source.sourceRootGroupKey || source.sourceKey || "",
+        source_session_key: source.sourceSessionKey || source.sourceKey || "",
+        exact_session: source.exactSession === true,
         updated_at: source.updatedAt || "",
         attempt_count: Array.isArray(source.rows) ? source.rows.length : 0,
         content_checksum: checksum((source.rows || []).map((row) => ({
@@ -17235,12 +17620,25 @@ function providerDispatchReliabilitySourceProvenance(sources = []) {
             agent_type: row.agent_type || "",
         })), 32),
     })).sort((a, b) => String(a.source_key || "").localeCompare(String(b.source_key || "")));
+    const sourceGroupCount = new Set(rows.map((row) => row.source_root_group_key).filter(Boolean)).size;
+    const sourceSessionCount = new Set(rows.map((row) => row.source_session_key).filter(Boolean)).size;
+    const totalAttempts = rows.reduce((sum, row) => sum + Number(row.attempt_count || 0), 0);
+    const attemptsByGroup = new Map();
+    for (const row of rows)
+        attemptsByGroup.set(row.source_root_group_key, Number(attemptsByGroup.get(row.source_root_group_key) || 0) + Number(row.attempt_count || 0));
+    const maxGroupAttemptShare = totalAttempts > 0 ? Math.max(0, ...attemptsByGroup.values()) / totalAttempts : 0;
     return {
         schema: "ccm-provider-dispatch-reliability-source-provenance-v1",
         source_ledger_count: rows.length,
-        attempt_count: rows.reduce((sum, row) => sum + Number(row.attempt_count || 0), 0),
+        source_group_count: sourceGroupCount,
+        source_session_count: sourceSessionCount,
+        exact_session_ledger_count: rows.filter((row) => row.exact_session).length,
+        attempt_count: totalAttempts,
+        maximum_group_attempt_share: providerDispatchReliabilityRound(maxGroupAttemptShare),
         latest_source_updated_at: rows.map((row) => row.updated_at).filter(Boolean).sort().slice(-1)[0] || "",
         generation_checksum: checksum(rows, 40),
+        source_group_diversity_checksum: checksum([...attemptsByGroup.keys()].sort(), 32),
+        source_keys_hashed: true,
         group_ids_included: false,
         project_names_included: false,
         private_evidence_included: false,
@@ -18312,6 +18710,7 @@ function normalizeCompactStrategyCategories(strategy = {}) {
 }
 function normalizeCompactStrategyOutcomeRows(rows = [], options = {}) {
     const fallbackGroupId = String(options.groupId || options.group_id || "").trim();
+    const fallbackGroupSessionId = String(options.groupSessionId || options.group_session_id || "").trim();
     return rows.map((entry, index) => {
         const categories = [
             ...(Array.isArray(entry.partial_compact_policy?.selected_categories) ? entry.partial_compact_policy.selected_categories : []),
@@ -18321,6 +18720,7 @@ function normalizeCompactStrategyOutcomeRows(rows = [], options = {}) {
             schema: "ccm-compact-strategy-outcome-distilled-row-v1",
             version: exports.GROUP_COMPACT_STRATEGY_TYPED_MEMORY_DISTILLATION_VERSION,
             groupId: String(entry.groupId || entry.group_id || entry.group || fallbackGroupId || "").trim(),
+            groupSessionId: String(entry.groupSessionId || entry.group_session_id || fallbackGroupSessionId || "").trim(),
             outcome_id: String(entry.outcome_id || entry.outcomeId || "").trim(),
             retry_id: String(entry.retry_id || entry.retryId || "").trim(),
             hook_run_id: String(entry.hook_run_id || entry.hookRunId || "").trim(),
@@ -18348,6 +18748,7 @@ function normalizeCompactStrategyOutcomeRows(rows = [], options = {}) {
             ...row,
             row_id: `compact-strategy-outcome:${checksum([
                 row.groupId,
+                row.groupSessionId,
                 row.outcome_id,
                 row.retry_id,
                 row.hook_run_id,
@@ -18367,11 +18768,17 @@ function compactStrategyTypedArchive(strategy = {}, outcomes = [], options = {})
     const avoid = Array.isArray(strategy.avoid_categories || strategy.avoidCategories)
         ? (strategy.avoid_categories || strategy.avoidCategories).map((item) => String(item || "").trim()).filter(Boolean)
         : categories.filter((item) => item.recommendation === "avoid").map((item) => item.category);
-    const outcomeRows = normalizeCompactStrategyOutcomeRows(outcomes, { ...options, groupId: strategy.groupId || strategy.group_id });
+    const groupSessionId = String(strategy.groupSessionId || strategy.group_session_id || options.groupSessionId || options.group_session_id || "").trim();
+    const outcomeRows = normalizeCompactStrategyOutcomeRows(outcomes, {
+        ...options,
+        groupId: strategy.groupId || strategy.group_id,
+        groupSessionId,
+    });
     return {
         schema: "ccm-compact-strategy-typed-memory-distillation-v1",
         version: exports.GROUP_COMPACT_STRATEGY_TYPED_MEMORY_DISTILLATION_VERSION,
         groupId: String(strategy.groupId || strategy.group_id || options.groupId || options.group_id || "").trim(),
+        groupSessionId,
         strategy_id: String(strategy.strategy_id || strategy.strategyId || ""),
         strategy_sample_count: Number(strategy.sample_count || strategy.sampleCount || 0),
         category_count: categories.length,
@@ -18397,6 +18804,7 @@ function renderCompactStrategyReferenceBody(archive = {}, options = {}) {
         "# WorkerContextPacket Compact Strategy Memory",
         "",
         `Generated by CCM compact strategy typed-memory distillation at ${options.updatedAt || now()}.`,
+        archive.groupSessionId ? `Exact group-chat session: ${archive.groupSessionId}.` : "Legacy unscoped compact strategy memory.",
         "Use this memory when a future WorkerContextPacket is near or over budget and needs compact/crop before child-Agent dispatch.",
         "Prefer compact categories with proven recovery, positive free_token_delta, and task_hash_unchanged=true. Avoid categories that repeatedly block or compact the task body.",
         "",
@@ -18428,6 +18836,7 @@ function renderCompactStrategyCautionBody(archive = {}, options = {}) {
         "# WorkerContextPacket Compact Strategy Cautions",
         "",
         `Generated by CCM compact strategy typed-memory distillation at ${options.updatedAt || now()}.`,
+        archive.groupSessionId ? `Exact group-chat session: ${archive.groupSessionId}.` : "Legacy unscoped compact strategy memory.",
         "These categories or outcomes should not be blindly reused for future WorkerContextPacket compaction. Verify current task shape before applying them.",
         "",
         "## Avoid Or Review Categories",
@@ -18490,6 +18899,7 @@ function distillCompactStrategyToTypedMemory(groupId, input = {}, options = {}) 
         schema: "ccm-group-typed-memory-distillation-ledger-v1",
         version: exports.GROUP_TYPED_MEMORY_DISTILLATION_VERSION,
         groupId,
+        groupSessionId: archive.groupSessionId || "",
         facts: ledger.facts || {},
         compactStrategyArchive: archive,
         updatedAt,
@@ -18499,6 +18909,7 @@ function distillCompactStrategyToTypedMemory(groupId, input = {}, options = {}) 
         schema: "ccm-compact-strategy-typed-memory-distillation-v1",
         version: exports.GROUP_COMPACT_STRATEGY_TYPED_MEMORY_DISTILLATION_VERSION,
         groupId,
+        groupSessionId: archive.groupSessionId || "",
         skipped: false,
         reason: compactText(options.reason || "", 220),
         ledgerFile: ledger.file,
@@ -18522,6 +18933,7 @@ function normalizePtlEmergencyHintForTypedMemory(input = {}, options = {}) {
         schema: "ccm-ptl-emergency-typed-memory-hint-v1",
         version: exports.GROUP_PTL_EMERGENCY_TYPED_MEMORY_DISTILLATION_VERSION,
         groupId: String(raw.groupId || raw.group_id || options.groupId || options.group_id || "").trim(),
+        groupSessionId: String(raw.groupSessionId || raw.group_session_id || options.groupSessionId || options.group_session_id || "").trim(),
         hint_id: String(raw.hint_id || raw.hintId || "").trim(),
         engaged: raw.engaged === true,
         emergency_level: String(raw.emergency_level || raw.emergencyLevel || (raw.engaged ? "warning" : "none")).trim(),
@@ -18544,6 +18956,7 @@ function normalizePtlEmergencyHintForTypedMemory(input = {}, options = {}) {
 }
 function normalizePtlEmergencyOutcomeRows(rows = [], options = {}) {
     const fallbackGroupId = String(options.groupId || options.group_id || "").trim();
+    const fallbackGroupSessionId = String(options.groupSessionId || options.group_session_id || "").trim();
     return rows.map((entry, index) => {
         const categories = [
             ...(Array.isArray(entry.partial_compact_policy?.selected_categories) ? entry.partial_compact_policy.selected_categories : []),
@@ -18553,6 +18966,7 @@ function normalizePtlEmergencyOutcomeRows(rows = [], options = {}) {
             schema: "ccm-ptl-emergency-typed-memory-outcome-row-v1",
             version: exports.GROUP_PTL_EMERGENCY_TYPED_MEMORY_DISTILLATION_VERSION,
             groupId: String(entry.groupId || entry.group_id || entry.group || fallbackGroupId || "").trim(),
+            groupSessionId: String(entry.groupSessionId || entry.group_session_id || fallbackGroupSessionId || "").trim(),
             outcome_id: String(entry.outcome_id || entry.outcomeId || "").trim(),
             assignment_id: String(entry.assignment_id || entry.assignmentId || "").trim(),
             project: String(entry.project || entry.target_project || entry.targetProject || "").trim(),
@@ -18577,6 +18991,7 @@ function normalizePtlEmergencyOutcomeRows(rows = [], options = {}) {
             ...row,
             row_id: `ptl-emergency-outcome:${checksum([
                 row.groupId,
+                row.groupSessionId,
                 row.outcome_id,
                 row.assignment_id,
                 row.selected_categories.join(","),
@@ -18591,7 +19006,7 @@ function ptlEmergencyTypedArchive(groupId, input = {}, options = {}) {
     const outcomeRows = normalizePtlEmergencyOutcomeRows(Array.isArray(input.outcomes) ? input.outcomes
         : Array.isArray(input.entries) ? input.entries
             : Array.isArray(input.outcomeLedger?.entries) ? input.outcomeLedger.entries
-                : [], { ...options, groupId });
+                : [], { ...options, groupId, groupSessionId: hint.groupSessionId || options.groupSessionId || options.group_session_id || "" });
     const failedCategories = uniqueStrings([
         ...(hint.repeated_failed_categories || []),
         ...outcomeRows.flatMap((row) => row.selected_categories || []),
@@ -18600,6 +19015,7 @@ function ptlEmergencyTypedArchive(groupId, input = {}, options = {}) {
         schema: "ccm-ptl-emergency-typed-memory-distillation-v1",
         version: exports.GROUP_PTL_EMERGENCY_TYPED_MEMORY_DISTILLATION_VERSION,
         groupId,
+        groupSessionId: hint.groupSessionId || String(options.groupSessionId || options.group_session_id || ""),
         hint,
         engaged: hint.engaged === true,
         emergency_level: hint.emergency_level || "",
@@ -18623,6 +19039,7 @@ function renderPtlEmergencyTypedBody(archive = {}, options = {}) {
         "# WorkerContextPacket PTL Emergency Downgrade Discipline",
         "",
         `Generated by CCM PTL emergency typed-memory distillation at ${options.updatedAt || now()}.`,
+        archive.groupSessionId ? `Exact group-chat session: ${archive.groupSessionId}.` : "Legacy unscoped PTL emergency memory.",
         "This feedback memory records repeated compact failures where normal WorkerContextPacket retry was not enough before child-Agent dispatch.",
         "When similar pressure appears, switch to PTL emergency downgrade: shrink memory, replay repair briefs, metadata, and task body budgets before creating another child Agent session.",
         "",
@@ -18684,6 +19101,7 @@ function distillPtlEmergencyDowngradeToTypedMemory(groupId, input = {}, options 
         schema: "ccm-group-typed-memory-distillation-ledger-v1",
         version: exports.GROUP_TYPED_MEMORY_DISTILLATION_VERSION,
         groupId,
+        groupSessionId: archive.groupSessionId || "",
         facts: ledger.facts || {},
         ptlEmergencyArchive: archive,
         updatedAt,
@@ -18693,6 +19111,7 @@ function distillPtlEmergencyDowngradeToTypedMemory(groupId, input = {}, options 
         schema: "ccm-ptl-emergency-typed-memory-distillation-v1",
         version: exports.GROUP_PTL_EMERGENCY_TYPED_MEMORY_DISTILLATION_VERSION,
         groupId,
+        groupSessionId: archive.groupSessionId || "",
         skipped: false,
         reason: compactText(options.reason || "", 220),
         ledgerFile: ledger.file,

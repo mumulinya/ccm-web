@@ -20,6 +20,7 @@ import {
   saveMetrics,
   loadProjectConfigs,
   loadMcpTools,
+  loadFeishuConfig,
   saveMcpTool,
   deleteMcpTool,
   loadSkills,
@@ -35,6 +36,7 @@ import { handleTerminalApi } from "./terminal";
 import { completeToolCatalogMutationLifecycle, previewToolCatalogMutationImpact } from "./marketplace";
 import { mergeMcpToolUpdate, mergeSkillUpdate, normalizeToolCatalogName, redactMcpToolForDisplay } from "../../tools/tool-catalog-management";
 import { isCcmInternalSkillName } from "../../skills/internal-skill-catalog";
+import { buildInternalMcpCatalog, isInternalMcpName } from "../../tools/internal-mcp-registry";
 const { toolManager } = require("../../tools/tool-manager");
 const TOOL_CATALOG_AUDIT_FILE = path.join(os.homedir(), ".cc-connect", "tools", "catalog-operations.jsonl");
 const TOOL_INVOCATION_AUDIT_FILES = {
@@ -1464,6 +1466,12 @@ export function handleToolsAndMetricsApi(pathname: string, req: any, res: any, p
     return true;
   }
 
+  if (pathname === "/api/tools/internal-mcp" && req.method === "GET") {
+    const runtime = toolManager.getToolList();
+    sendJson(res, buildInternalMcpCatalog({ feishuConfig: loadFeishuConfig(), runtimeServers: runtime.servers || [] }));
+    return true;
+  }
+
   if (pathname === "/api/tools/authorization-options" && req.method === "GET") {
     sendJson(res, buildToolAuthorizationOptions({
       mcpTools: loadMcpTools(),
@@ -1636,7 +1644,7 @@ export function handleToolsAndMetricsApi(pathname: string, req: any, res: any, p
 
   // === MCP 工具管理 API ===
   if (pathname === "/api/mcp" && req.method === "GET") {
-    sendJson(res, { success: true, tools: loadMcpTools().map(redactMcpToolForDisplay) });
+    sendJson(res, { success: true, tools: loadMcpTools().filter(tool => !isInternalMcpName(tool?.name)).map(redactMcpToolForDisplay) });
     return true;
   }
 
@@ -1647,6 +1655,7 @@ export function handleToolsAndMetricsApi(pathname: string, req: any, res: any, p
       try {
         const payload = JSON.parse(body || "{}");
         const name = normalizeToolCatalogName(payload.name);
+        if (isInternalMcpName(name)) return sendJson(res, { success: false, error: "内部 MCP 随项目安装并由系统管理，不能在外部 MCP 连接中心编辑" }, 409);
         const previous = loadMcpTools().find(item => String(item.name) === name) || null;
         if (payload.createOnly === true && previous) return sendJson(res, { success: false, error: "同名 MCP 服务器已存在" }, 409);
         const tool = mergeMcpToolUpdate(previous, { ...payload, name }, { create: !previous });
@@ -1677,6 +1686,7 @@ export function handleToolsAndMetricsApi(pathname: string, req: any, res: any, p
       try {
         const { name: rawName } = JSON.parse(body || "{}");
         const name = normalizeToolCatalogName(rawName);
+        if (isInternalMcpName(name)) return sendJson(res, { success: false, error: "内部 MCP 是项目运行链路的一部分，不能删除" }, 409);
         const previous = loadMcpTools().find(item => String(item.name) === name) || null;
         const impact = previewToolCatalogMutationImpact({ action: "delete", type: "mcp", name });
         deleteMcpTool(name);

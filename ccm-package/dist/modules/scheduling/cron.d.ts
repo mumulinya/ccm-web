@@ -1,4 +1,5 @@
 import { type CollabCtx } from "../collaboration/collaboration";
+export declare function deleteConflictResolutionMemoryMaintenanceSchedulerSessionState(groupId: string, groupSessionId: string, options?: any): any;
 export declare function runConflictResolutionMemoryMaintenanceSchedulerTick(options?: any): any;
 export declare function runCronDailyDevProtocolSelfTest(): {
     pass: boolean;

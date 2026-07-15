@@ -7,10 +7,11 @@ function handleAgentQaRoutes(req, res, parsed, ctx, deps) {
     const pathname = parsed.pathname;
     if (pathname === "/api/agent-collaboration/protocol" && req.method === "GET") {
         const items = deps.getAgentQaItemsForGroup(String(parsed.query.group_id || parsed.query.id || ""), parseInt(String(parsed.query.limit || "")) || 100);
+        const coordination = deps.listGroupCoordinationRequests?.({ groupId: String(parsed.query.group_id || parsed.query.id || "") }) || [];
         (0, utils_1.sendJson)(res, {
             success: true,
-            version: "8.0",
-            mode: "task_bound_structured_collaboration",
+            version: "9.0",
+            mode: "group_main_agent_mcp_coordination",
             selftest: deps.runAgentCollaborationProtocolSelfTest(),
             summary: {
                 total: items.length,
@@ -19,9 +20,20 @@ function handleAgentQaRoutes(req, res, parsed, ctx, deps) {
                 rejected: items.filter((item) => item.acceptance?.accepted === false).length,
                 resumed: items.filter((item) => item.status === "resumed").length,
                 permission_violations: items.filter((item) => item.permission_boundary?.pass === false).length,
+                coordination_requests: coordination.length,
+                formal_work_items: coordination.filter((item) => !!item.work_item_task_id).length,
             },
             items,
+            coordination_requests: coordination,
         });
+        return true;
+    }
+    if (pathname === "/api/group-coordination/requests" && req.method === "GET") {
+        const groupId = String(parsed.query.group_id || parsed.query.groupId || "");
+        const taskId = String(parsed.query.task_id || parsed.query.taskId || "");
+        const sourceProject = String(parsed.query.source_project || parsed.query.sourceProject || "");
+        const items = deps.listGroupCoordinationRequests?.({ groupId, taskId, sourceProject }) || [];
+        (0, utils_1.sendJson)(res, { success: true, items: items.slice(-(parseInt(String(parsed.query.limit || "")) || 100)) });
         return true;
     }
     if (pathname === "/api/agent-qa/arbitrate" && req.method === "POST") {

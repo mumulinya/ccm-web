@@ -43,6 +43,10 @@ exports.resumeGlobalAgentLoopsForServer = resumeGlobalAgentLoopsForServer;
 exports.startGlobalMissionSupervisionForServer = startGlobalMissionSupervisionForServer;
 exports.bootstrapGlobalAgentMemoryForServer = bootstrapGlobalAgentMemoryForServer;
 exports.stopGlobalMissionSupervisionForServer = stopGlobalMissionSupervisionForServer;
+exports.parseFeishuConversationTurnCommand = parseFeishuConversationTurnCommand;
+exports.startFeishuConversationTurnRecoveryForServer = startFeishuConversationTurnRecoveryForServer;
+exports.stopFeishuConversationTurnRecoveryForServer = stopFeishuConversationTurnRecoveryForServer;
+exports.runFeishuConversationTurnCommandSelfTest = runFeishuConversationTurnCommandSelfTest;
 exports.handleGlobalAgentApi = handleGlobalAgentApi;
 exports.runGlobalModelRetrySelfTest = runGlobalModelRetrySelfTest;
 const fs = __importStar(require("fs"));
@@ -61,6 +65,7 @@ const reliability_ledger_1 = require("../../system/reliability-ledger");
 const worker_handoff_1 = require("../../agents/worker-handoff");
 const memory_1 = require("../collaboration/memory");
 const loop_1 = require("../../agents/global/loop");
+const conversation_turn_control_1 = require("../../agents/conversation-turn-control");
 const mission_supervisor_1 = require("../../agents/global/mission-supervisor");
 const memory_2 = require("../../agents/global/memory");
 const quality_center_1 = require("../../agents/quality-center");
@@ -883,6 +888,9 @@ function buildFeishuConversationId(payload) {
     return "feishu:" + String(raw || "default").replace(/[^a-zA-Z0-9:_@.-]/g, "_").slice(0, 120);
 }
 function resolveFeishuGlobalAgentSessionId(payload, store = loadGlobalAgentHistoryStore()) {
+    const explicitConversationId = String(payload?.ccm_conversation_id || payload?.ccmConversationId || "").trim();
+    if (explicitConversationId)
+        return explicitConversationId;
     const sessions = Array.isArray(store.sessions) ? store.sessions : [];
     const webSessions = sessions.filter((session) => session.source === "web" && session.id);
     const currentSessionId = String(store.current_session_id || "").trim();
@@ -5634,6 +5642,142 @@ async function processFeishuGlobalAgentMessage(baseUrl, ctx, text, payload, opti
         return markdown;
     }
 }
+function parseFeishuConversationTurnCommand(value) {
+    const text = String(value || "").trim();
+    if (/^(?:停止|停止当前|取消当前|stop)$/i.test(text))
+        return { kind: "stop", message: "" };
+    const steer = text.match(/^(?:引导|补充|调整)(?:当前)?\s*[:：]\s*([\s\S]+)$/i);
+    if (steer)
+        return { kind: "steer", message: steer[1].trim() };
+    const queue = text.match(/^(?:排队|稍后|下一条)\s*[:：]\s*([\s\S]+)$/i);
+    if (queue)
+        return { kind: "queue", message: queue[1].trim() };
+    return { kind: "normal", message: text };
+}
+const drainingFeishuConversationTurns = new Set();
+let feishuConversationTurnRecoveryTimer = null;
+async function drainFeishuConversationTurns(baseUrl, ctx, conversationId, payload) {
+    if (!conversationId || drainingFeishuConversationTurns.has(conversationId))
+        return;
+    drainingFeishuConversationTurns.add(conversationId);
+    try {
+        while (true) {
+            const turn = conversation_turn_control_1.conversationTurnControl.claim({ scope: "feishu", conversation_id: conversationId });
+            if (!turn)
+                break;
+            try {
+                const reply = await processFeishuGlobalAgentMessage(baseUrl, ctx, turn.message, payload, {
+                    sendReport: true,
+                    traceId: String(turn.metadata?.trace_id || ""),
+                });
+                conversation_turn_control_1.conversationTurnControl.settle({ id: turn.id, status: "completed", result: { reply } });
+            }
+            catch (error) {
+                conversation_turn_control_1.conversationTurnControl.settle({ id: turn.id, status: "failed", error: error?.message || String(error) });
+                break;
+            }
+        }
+    }
+    finally {
+        drainingFeishuConversationTurns.delete(conversationId);
+    }
+}
+function startFeishuConversationTurnRecoveryForServer(baseUrl, ctx) {
+    if (feishuConversationTurnRecoveryTimer)
+        return { started: false };
+    const tick = () => {
+        const queued = conversation_turn_control_1.conversationTurnControl.list({ scope: "feishu", statuses: "queued", limit: 500 }).turns;
+        const conversationIds = [...new Set(queued.map((turn) => String(turn.conversation_id || "")).filter(Boolean))];
+        for (const conversationId of conversationIds) {
+            const active = (0, loop_1.listGlobalAgentRuns)({ sessionId: conversationId, limit: 20 })
+                .some((run) => ["running", "supervising", "paused"].includes(String(run?.status || "")));
+            if (!active)
+                void drainFeishuConversationTurns(baseUrl, ctx, conversationId, { ccm_conversation_id: conversationId, source: "feishu_queue_recovery" });
+        }
+    };
+    tick();
+    feishuConversationTurnRecoveryTimer = setInterval(tick, 3_000);
+    feishuConversationTurnRecoveryTimer.unref?.();
+    return { started: true };
+}
+function stopFeishuConversationTurnRecoveryForServer() {
+    if (feishuConversationTurnRecoveryTimer)
+        clearInterval(feishuConversationTurnRecoveryTimer);
+    feishuConversationTurnRecoveryTimer = null;
+}
+async function processFeishuControlledMessage(baseUrl, ctx, text, payload, options = {}) {
+    const conversationId = resolveFeishuGlobalAgentSessionId(payload);
+    const messageId = getFeishuMessageId(payload);
+    const command = parseFeishuConversationTurnCommand(text);
+    const activeRun = (0, loop_1.listGlobalAgentRuns)({ sessionId: conversationId, limit: 20 })
+        .find((run) => ["running", "supervising", "paused"].includes(String(run?.status || ""))) || null;
+    if (command.kind === "stop") {
+        if (activeRun?.id)
+            (0, loop_1.cancelGlobalAgentRun)(activeRun.id);
+        void drainFeishuConversationTurns(baseUrl, ctx, conversationId, payload);
+        return {
+            reply: activeRun?.id
+                ? "已停止当前工作。已经排队的后续消息会继续保留，你也可以发送新的要求。"
+                : "当前没有正在执行的工作。已经排队的消息仍会保留。",
+            stopped_run_id: activeRun?.id || "",
+        };
+    }
+    if (activeRun && command.kind === "steer") {
+        const queued = conversation_turn_control_1.conversationTurnControl.enqueue({
+            scope: "feishu",
+            conversation_id: conversationId,
+            mode: "steer",
+            message: command.message,
+            request_id: messageId || options.traceId || undefined,
+            active_run_id: activeRun.id,
+            metadata: { source: "feishu-control-bot", trace_id: options.traceId || "" },
+        });
+        try {
+            (0, loop_1.steerGlobalAgentRun)(activeRun.id, command.message, {
+                kind: "auto",
+                source: "feishu_mid_turn",
+                requestId: queued.turn.request_id,
+            });
+            conversation_turn_control_1.conversationTurnControl.settle({ id: queued.turn.id, status: "applied", active_run_id: activeRun.id });
+            return { reply: "已把这条要求纳入当前工作，我会在安全节点重新核对计划并继续。", turn: queued.turn, run_id: activeRun.id };
+        }
+        catch (error) {
+            conversation_turn_control_1.conversationTurnControl.settle({ id: queued.turn.id, status: "failed", error: error?.message || String(error) });
+            throw error;
+        }
+    }
+    if (activeRun && (command.kind === "queue" || command.kind === "normal")) {
+        const queued = conversation_turn_control_1.conversationTurnControl.enqueue({
+            scope: "feishu",
+            conversation_id: conversationId,
+            mode: "queue",
+            message: command.message,
+            request_id: messageId || options.traceId || undefined,
+            active_run_id: activeRun.id,
+            metadata: { source: "feishu-control-bot", trace_id: options.traceId || "" },
+        });
+        const position = conversation_turn_control_1.conversationTurnControl.list({ scope: "feishu", conversation_id: conversationId, statuses: "queued,sending" })
+            .turns.find((turn) => turn.id === queued.turn.id)?.position || 1;
+        return {
+            reply: `当前工作仍在进行，这条消息已排在第 ${position} 位，完成后会自动处理。发送“停止”可以结束当前工作。`,
+            queued: true,
+            position,
+            turn: queued.turn,
+        };
+    }
+    const reply = await processFeishuGlobalAgentMessage(baseUrl, ctx, command.message, payload, options);
+    void drainFeishuConversationTurns(baseUrl, ctx, conversationId, payload);
+    return { reply };
+}
+function runFeishuConversationTurnCommandSelfTest() {
+    const checks = {
+        stop: parseFeishuConversationTurnCommand("停止").kind === "stop",
+        steer: parseFeishuConversationTurnCommand("引导：先补测试").message === "先补测试",
+        queue: parseFeishuConversationTurnCommand("排队: 再写文档").kind === "queue",
+        ordinaryDefaultsToNormal: parseFeishuConversationTurnCommand("进度怎么样").kind === "normal",
+    };
+    return { pass: Object.values(checks).every(Boolean), checks };
+}
 function handleGlobalAgentApi(pathname, req, res, parsed, ctx) {
     if (pathname === "/api/global-agent/history" && req.method === "POST") {
         let body = "";
@@ -5715,10 +5859,10 @@ function handleGlobalAgentApi(pathname, req, res, parsed, ctx) {
                     (0, utils_1.sendJson)(res, { success: settled?.status === "completed", duplicate: true, message: "重复控制消息已抑制", reply: replay.reply || replay.error || "消息仍在处理中", trace_id: settled?.trace_id || operation.traceId });
                     return;
                 }
-                const reply = await processFeishuGlobalAgentMessage(getRequestBaseUrl(req), ctx, text, payload, { sendReport: !isAcp, traceId: operation?.traceId });
+                const controlled = await processFeishuControlledMessage(getRequestBaseUrl(req), ctx, text, payload, { sendReport: !isAcp, traceId: operation?.traceId });
                 if (operationKey)
-                    (0, reliability_ledger_1.completeIdempotency)("feishu-control-message", operationKey, { reply });
-                (0, utils_1.sendJson)(res, { success: true, message: "控制机器人消息已处理", reply, trace_id: operation?.traceId || "" });
+                    (0, reliability_ledger_1.completeIdempotency)("feishu-control-message", operationKey, controlled);
+                (0, utils_1.sendJson)(res, { success: true, message: controlled.queued ? "控制机器人消息已排队" : "控制机器人消息已处理", ...controlled, trace_id: operation?.traceId || "" });
             }
             catch (error) {
                 if (!res.headersSent)
@@ -5796,9 +5940,14 @@ function handleGlobalAgentApi(pathname, req, res, parsed, ctx) {
                 const operation = operationKey ? (0, reliability_ledger_1.acquireIdempotency)({ scope: "feishu-event", key: operationKey, leaseMs: 11 * 60 * 1000, metadata: { message_id: messageId, event_id: payload?.header?.event_id || "" } }) : null;
                 if (operation && !operation.acquired)
                     return;
-                void processFeishuGlobalAgentMessage(getRequestBaseUrl(req), ctx, text, payload, { traceId: operation?.traceId })
-                    .then(reply => { if (operationKey)
-                    (0, reliability_ledger_1.completeIdempotency)("feishu-event", operationKey, { reply }); })
+                void processFeishuControlledMessage(getRequestBaseUrl(req), ctx, text, payload, { traceId: operation?.traceId })
+                    .then(result => {
+                    if (operationKey)
+                        (0, reliability_ledger_1.completeIdempotency)("feishu-event", operationKey, result);
+                    if (result.queued || result.stopped_run_id || result.turn?.mode === "steer") {
+                        return (0, collaboration_1.sendFeishuReportMessage)({ title: "全局 Agent", markdown: result.reply });
+                    }
+                })
                     .catch(error => { if (operationKey)
                     (0, reliability_ledger_1.failIdempotency)("feishu-event", operationKey, error); });
             }

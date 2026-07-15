@@ -82,6 +82,8 @@ process.env.CCM_PHASE261_ARTIFACT = artifactFile;
 const sessions = require(path.join(root, "ccm-package", "dist", "tasks", "agent-sessions.js"));
 const soak = require(path.join(root, "ccm-package", "dist", "tasks", "task-agent-continuation-soak.js"));
 const lineage = require(path.join(root, "ccm-package", "dist", "tasks", "task-agent-invocation-lineage.js"));
+const finalDispatchGate = require(path.join(root, "ccm-package", "dist", "agents", "final-dispatch-payload-gate.js"));
+const finalDispatchReactiveCompact = require(path.join(root, "ccm-package", "dist", "agents", "final-dispatch-reactive-compact.js"));
 const compaction = require(path.join(root, "ccm-package", "dist", "modules", "collaboration", "group-memory-compaction.js"));
 const compactHeadStore = require(path.join(root, "ccm-package", "dist", "modules", "collaboration", "group-compact-head.js"));
 
@@ -206,12 +208,17 @@ async function runTurn({ label, version, mode, nativeSessionId, serviceEpoch, co
   const options = sessions.getTaskAgentSessionOptions(taskSession);
   equal(options.resumeSession, expectResume, `${label} resume mode must match the durable Task Agent session`);
   if (expectedContractId) equal(options.expectedProviderContractId, expectedContractId, `${label} must carry the expected provider contract`);
-  const prompt = [
+  const taskPrompt = [
     "Implement the next provider evolution in src/provider-evolution.js.",
     `TURN=${label}`,
     `MEMORY_SENTINEL=${memorySentinel}`,
     `GROUP_SESSION=${groupSessionId}`,
   ].join(" ");
+  const reactiveRecentContext = label === "UPGRADE_B"
+    ? Array.from({ length: 12_000 }, (_, index) => `historical-provider-context-${index} ${"detail ".repeat(2)}`).join("\n") + "\nLATEST_REAL_PROVIDER_CONTEXT"
+    : "";
+  const renderPrompt = context => [taskPrompt, context].filter(Boolean).join("\n\n[RECENT_GROUP_CONTEXT]\n");
+  let prompt = renderPrompt(reactiveRecentContext);
   let invocationEdge = lineage.prepareTaskAgentInvocationEdge({
     groupId,
     groupSessionId,
@@ -225,6 +232,61 @@ async function runTurn({ label, version, mode, nativeSessionId, serviceEpoch, co
   });
   const edgeId = invocationEdge.invocation_edge_id;
   const memoryContext = buildMemoryContext(taskSession.id, compactTransactionReceipt);
+  const workerContextPacket = {
+    packet_id: `wcp_phase261_${label}_${nonce}`,
+    group: { id: groupId },
+    group_session_id: groupSessionId,
+    task_id: taskId,
+    task_agent_session_id: taskSession.id,
+    memory: memoryContext,
+    model_context_capacity: {
+      schema: "ccm-model-context-capacity-v1",
+      provider: "cursor",
+      contextWindow: 200_000,
+      reservedOutputTokens: 20_000,
+      effectiveContextWindow: 180_000,
+      autoCompactBufferTokens: 13_000,
+      autoCompactThreshold: 167_000,
+      source: "real_provider_soak",
+    },
+    task_agent_invocation_lineage: { invocation_edge_id: edgeId },
+  };
+  let finalPayloadGate = finalDispatchGate.buildFinalWorkerDispatchPayloadGate({
+    renderedPrompt: prompt,
+    workerContextPacket,
+    provider: "cursor",
+    groupId,
+    groupSessionId,
+    taskId,
+    taskAgentSessionId: taskSession.id,
+  });
+  let finalReactiveCompactReceipt = null;
+  if (finalPayloadGate.status === "recompact_required") {
+    const recovered = finalDispatchReactiveCompact.recoverFinalWorkerDispatchPayload({
+      renderedPrompt: prompt,
+      recentContext: reactiveRecentContext,
+      renderPrompt,
+      workerHandoff: { worker_context_packet: workerContextPacket },
+      provider: "cursor",
+      groupId,
+      groupSessionId,
+      taskId,
+      taskAgentSessionId: taskSession.id,
+      finalDispatchPayloadGate: finalPayloadGate,
+    });
+    prompt = recovered.prompt;
+    finalPayloadGate = recovered.gate;
+    finalReactiveCompactReceipt = recovered.receipt;
+  }
+  workerContextPacket.final_dispatch_payload_gate = finalPayloadGate;
+  if (finalReactiveCompactReceipt) workerContextPacket.final_dispatch_reactive_compact = finalReactiveCompactReceipt;
+  ok(finalPayloadGate.status === "ready" && finalPayloadGate.provider_call_allowed === true, `${label} final prompt must pass the exact provider-capacity gate before runner creation`);
+  if (label === "UPGRADE_B") {
+    ok(finalReactiveCompactReceipt?.status === "recovered", `${label} oversized real-provider prompt must recover before runner creation`);
+    ok(finalReactiveCompactReceipt?.attempt === 1, `${label} reactive compact must be single-shot`);
+    ok(prompt.includes("LATEST_REAL_PROVIDER_CONTEXT") && prompt.includes(`TURN=${label}`), `${label} recovered real prompt must preserve latest context and current task`);
+    ok(!JSON.stringify(finalReactiveCompactReceipt).includes("historical-provider-context-"), `${label} reactive receipt must remain body-free`);
+  }
   const bound = sessions.bindTaskAgentMemoryContextSnapshot(taskSession.id, {
     taskId,
     groupId,
@@ -234,11 +296,7 @@ async function runTurn({ label, version, mode, nativeSessionId, serviceEpoch, co
     turn: Number(taskSession.turnCount || 0) + 1,
     executionId: `${taskId}-${label}`,
     traceId: `trace-phase261-${label}`,
-    workerContextPacket: {
-      packet_id: `wcp_phase261_${label}_${nonce}`,
-      memory: memoryContext,
-      task_agent_invocation_lineage: { invocation_edge_id: edgeId },
-    },
+    workerContextPacket,
     memoryContext,
     renderedPrompt: prompt,
     invocationLineage: { invocation_edge_id: edgeId },
@@ -252,6 +310,7 @@ async function runTurn({ label, version, mode, nativeSessionId, serviceEpoch, co
     compactEpoch,
     groupSessionMemoryBinding: bound.snapshot.context.group_session_memory_binding,
     compactTransactionReceipt,
+    finalDispatchPayloadGate: finalPayloadGate,
   });
 
   const requestId = `ar_phase261_${label.toLowerCase()}_${nonce}`;
@@ -276,6 +335,7 @@ async function runTurn({ label, version, mode, nativeSessionId, serviceEpoch, co
     runnerRequestId: requestId,
     transport: "real_runner_fixture",
   });
+  ok(invocationEdge.final_dispatch_payload_gate_dispatch_valid === true && invocationEdge.final_dispatch_payload_gate_status === "ready", `${label} lineage must prove the same final-payload gate before the real runner`);
   const runnerOutput = runRunner();
   ok(runnerOutput.includes("handled 1 request(s)"), `${label} must execute through the real external runner`);
   const persistedRequest = JSON.parse(fs.readFileSync(requestFile, "utf-8"));

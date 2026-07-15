@@ -102,6 +102,48 @@ function extractMemoryText(value, max = 1200) {
     }
     return compact(value, max);
 }
+function extractInvokedSkillAttachmentText(value) {
+    if (!value || typeof value !== "object")
+        return "";
+    const direct = String(value.invoked_skill_attachment_text || value.invokedSkillAttachmentText || "").trim();
+    if (direct)
+        return direct;
+    if (value.group_memory)
+        return extractInvokedSkillAttachmentText(value.group_memory);
+    if (value.groupMemory)
+        return extractInvokedSkillAttachmentText(value.groupMemory);
+    if (value.memory)
+        return extractInvokedSkillAttachmentText(value.memory);
+    return "";
+}
+function extractPlanAttachmentText(value) {
+    if (!value || typeof value !== "object")
+        return "";
+    const direct = String(value.plan_attachment_text || value.planAttachmentText || "").trim();
+    if (direct)
+        return direct;
+    if (value.group_memory)
+        return extractPlanAttachmentText(value.group_memory);
+    if (value.groupMemory)
+        return extractPlanAttachmentText(value.groupMemory);
+    if (value.memory)
+        return extractPlanAttachmentText(value.memory);
+    return "";
+}
+function extractDynamicContextDeltaText(value) {
+    if (!value || typeof value !== "object")
+        return "";
+    const direct = String(value.dynamic_context_delta_text || value.dynamicContextDeltaText || "").trim();
+    if (direct)
+        return direct;
+    if (value.group_memory)
+        return extractDynamicContextDeltaText(value.group_memory);
+    if (value.groupMemory)
+        return extractDynamicContextDeltaText(value.groupMemory);
+    if (value.memory)
+        return extractDynamicContextDeltaText(value.memory);
+    return "";
+}
 function normalizeMemoryContext(value) {
     if (!value)
         return null;
@@ -310,7 +352,10 @@ function renderMemoryContextForWorker(memory) {
     if (!memory)
         return "";
     const text = extractMemoryText(memory, 10_000);
-    if (!text)
+    const invokedSkillAttachmentText = extractInvokedSkillAttachmentText(memory);
+    const planAttachmentText = extractPlanAttachmentText(memory);
+    const dynamicContextDeltaText = extractDynamicContextDeltaText(memory);
+    if (!text && !invokedSkillAttachmentText && !planAttachmentText && !dynamicContextDeltaText)
         return "";
     const schema = typeof memory === "object" ? String(memory.schema || "ccm-memory-context") : "ccm-memory-text";
     return [
@@ -318,6 +363,9 @@ function renderMemoryContextForWorker(memory) {
         typeof memory === "object" && memory.group_memory?.schema ? `group_memory_schema: ${memory.group_memory.schema}` : "",
         typeof memory === "object" && memory.group_id ? `group_id: ${memory.group_id}` : "",
         typeof memory === "object" && memory.target_project ? `target_project: ${memory.target_project}` : "",
+        invokedSkillAttachmentText && !text.includes(invokedSkillAttachmentText) ? invokedSkillAttachmentText : "",
+        planAttachmentText && !text.includes(planAttachmentText) ? planAttachmentText : "",
+        dynamicContextDeltaText && !text.includes(dynamicContextDeltaText) ? dynamicContextDeltaText : "",
         text,
     ].filter(Boolean).join("\n");
 }

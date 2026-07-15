@@ -1,5 +1,27 @@
 export declare const GROUP_MEMORY_BOUNDARY_JOURNAL_VERSION = 1;
-export declare const GROUP_MEMORY_RESUME_PROJECTION_VERSION = 1;
+export declare const GROUP_MEMORY_RESUME_PROJECTION_VERSION = 2;
+export declare function buildGroupMemorySnipBoundaryMarker(input?: any): {
+    id: string;
+    schema: string;
+    version: number;
+    type: string;
+    role: string;
+    groupId: string;
+    group_session_id: string;
+    parentUuid: any;
+    content: string;
+    snipMetadata: {
+        schema: string;
+        version: number;
+        groupId: string;
+        groupSessionId: string;
+        removedUuids: string[];
+        removedUuidsChecksum: string;
+        reason: string;
+        createdAt: string;
+    };
+    timestamp: string;
+};
 export declare function getGroupMemoryBoundaryJournalFile(groupId: string, sessionId: string, options?: any): string;
 export declare function getGroupMemoryResumeProofFile(groupId: string, sessionId: string, options?: any): string;
 export declare function readGroupMemoryBoundaryJournal(groupId: string, sessionId: string, options?: any): {

@@ -4,6 +4,7 @@ import * as os from "os";
 import { isCredentialReference, protectCredential, protectObjectSecrets, resolveObjectSecrets } from "./credential-store";
 import { normalizeMcpEnvironment } from "../tools/tool-catalog-management";
 import { assertCcmInternalSkillMutable, isCcmInternalSkillName } from "../skills/internal-skill-catalog";
+import { buildBundledFeishuMcpTool } from "../tools/internal-mcp-registry";
 
 const CCM_DIR = path.join(os.homedir(), ".cc-connect");
 const CONFIGS_DIR = path.join(CCM_DIR, "configs");
@@ -154,7 +155,7 @@ export function getPid(name: string): string | null {
 export function loadMcpTools(): any[] {
   try {
     const files = fs.readdirSync(MCP_DIR).filter(f => f.endsWith('.json'));
-    return files.map(f => {
+    const storedTools = files.map(f => {
       try {
         const file = path.join(MCP_DIR, f);
         const stored = JSON.parse(fs.readFileSync(file, 'utf-8'));
@@ -185,6 +186,11 @@ export function loadMcpTools(): any[] {
         return { ...content, filename: f };
       } catch { return null; }
     }).filter(Boolean) as any[];
+    const storedFeishu = storedTools.find(tool => String(tool?.name || "") === "mcp-feishu") || null;
+    const bundledFeishu = buildBundledFeishuMcpTool(loadFeishuConfig(), storedFeishu || {});
+    return bundledFeishu
+      ? [...storedTools.filter(tool => String(tool?.name || "") !== "mcp-feishu"), bundledFeishu]
+      : storedTools;
   } catch { return []; }
 }
 

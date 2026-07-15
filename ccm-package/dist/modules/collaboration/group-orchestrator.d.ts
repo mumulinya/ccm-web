@@ -18,6 +18,10 @@ export declare function defaultOrchestratorConfig(): {
     memoryContextPreset: string;
     modelContextWindow: number;
     modelAutoCompactTokenLimit: number;
+    timeBasedMicrocompactEnabled: boolean;
+    timeBasedThinkingClearEnabled: boolean;
+    timeBasedMicrocompactGapMinutes: number;
+    timeBasedMicrocompactKeepRecent: number;
     typedMemoryDeliveryMaxDocuments: number;
     typedMemoryDeliveryMaxBytesPerDocument: number;
     typedMemoryDeliveryMaxLinesPerDocument: number;
@@ -87,17 +91,20 @@ export declare function buildCoordinatorPrompt(input: {
     maintenanceAt?: string;
     contextId?: string;
     sessionId?: string;
+    groupSessionId?: string;
+    group_session_id?: string;
 }): string;
 export declare function buildCoordinatorMaintenanceNotificationInstructions(groupInput: any, options?: any): {
     text: string;
     context: any;
     health: any;
     cleanup_commit_repair_context?: undefined;
+    source_group_id?: undefined;
+    group_session_id?: undefined;
+    typed_scope_id?: undefined;
 } | {
     text: string;
     context: {
-        schema: string;
-        group_id: string;
         audience: string;
         generated_at: string;
         pending_count: any;
@@ -110,8 +117,6 @@ export declare function buildCoordinatorMaintenanceNotificationInstructions(grou
         notification_file: string;
         receipt_file: string;
         delivery: {
-            schema: string;
-            group_id: string;
             audience: string;
             context_id: string;
             consumer_session_id: string;
@@ -121,11 +126,21 @@ export declare function buildCoordinatorMaintenanceNotificationInstructions(grou
             created_task_count: number;
             created_approval_receipt_count: number;
             deleted_count: number;
+            source_group_id: string;
+            group_session_id: string;
+            typed_scope_id: string;
+            exact_session: boolean;
+            schema: string;
+            group_id: string;
         };
-    };
-    health: {
+        source_group_id: string;
+        group_session_id: string;
+        typed_scope_id: string;
+        exact_session: boolean;
         schema: string;
         group_id: string;
+    };
+    health: {
         generated_at: string;
         pending_count: number;
         delivered_pending_count: number;
@@ -142,7 +157,6 @@ export declare function buildCoordinatorMaintenanceNotificationInstructions(grou
         unprotected_repeated_unseen_count: number;
         retention: any;
         rows: {
-            group_id: string;
             audience: any;
             notification_id: any;
             state_fingerprint: any;
@@ -158,6 +172,11 @@ export declare function buildCoordinatorMaintenanceNotificationInstructions(grou
             repeated_unseen: boolean;
             advisory_only: boolean;
             should_create_real_task: boolean;
+            source_group_id: string;
+            group_session_id: string;
+            typed_scope_id: string;
+            exact_session: boolean;
+            group_id: string;
         }[];
         policy: string;
         destructive_action_authorized: boolean;
@@ -165,6 +184,12 @@ export declare function buildCoordinatorMaintenanceNotificationInstructions(grou
         created_approval_receipt_count: number;
         deleted_count: number;
         file: string;
+        source_group_id: string;
+        group_session_id: string;
+        typed_scope_id: string;
+        exact_session: boolean;
+        schema: string;
+        group_id: string;
     };
     cleanup_commit_repair_context: {
         rendered: string;
@@ -180,6 +205,9 @@ export declare function buildCoordinatorMaintenanceNotificationInstructions(grou
         cross_group_authorization_allowed: boolean;
         policy: string;
     };
+    source_group_id: string;
+    group_session_id: string;
+    typed_scope_id: string;
 };
 export declare function buildMemberPrompt(input: {
     group: any;
@@ -218,6 +246,8 @@ export declare function runCodedGroupOrchestrator(input: {
     workerContextRetryOptions?: any;
     providerSwitchRequests?: any;
     provider_switch_requests?: any;
+    groupSessionId?: string;
+    group_session_id?: string;
 }): {
     agent: any;
     delegated: any[];
@@ -1335,7 +1365,7 @@ export declare function buildCodedCoordinatorSummary(group: any, outputs: string
         next_action: string;
     };
 };
-export declare function runLlmCoordinatorSummary(group: any, userMessage: string, outputs: string[]): Promise<{
+export declare function runLlmCoordinatorSummary(group: any, userMessage: string, outputs: string[], options?: any): Promise<{
     agent: any;
     content: string;
 }>;
@@ -1348,6 +1378,8 @@ export declare function runLlmCoordinatorReview(group: any, userMessage: string,
     traceId?: string;
     taskId?: string;
     executionId?: string;
+    groupSessionId?: string;
+    group_session_id?: string;
 }): Promise<{
     agent: any;
     status: string;
@@ -1374,12 +1406,32 @@ export declare function runLlmCoordinatorReview(group: any, userMessage: string,
     };
 }>;
 export declare function decomposeRequirementWithCodedCoordinator(group: any, requirement: string): any;
-export declare function readWorkerContextCompactHookLedgerForCoordinator(groupId: string): any;
-export declare function readWorkerContextCompactStrategyMemoryForCoordinator(groupId: string): {
+export declare function readWorkerContextCompactHookLedgerForCoordinator(groupId: string, groupSessionId?: string): any;
+export declare function readWorkerContextCompactStrategyMemoryForCoordinator(groupId: string, groupSessionId?: string): {
     schema: string;
     version: number;
     strategy_id: string;
     groupId: string;
+    groupSessionId: string;
+    scopeId: string;
+    file: string;
+    source_ledger_file: string;
+    source_ledger_updated_at: string;
+    sample_count: number;
+    category_count: number;
+    preferred_categories: any;
+    avoid_categories: any;
+    categories: any;
+    generated_at: string;
+    updatedAt: string;
+} | {
+    recoveredFromBackup: boolean;
+    schema: string;
+    version: number;
+    strategy_id: string;
+    groupId: string;
+    groupSessionId: string;
+    scopeId: string;
     file: string;
     source_ledger_file: string;
     source_ledger_updated_at: string;
@@ -1391,11 +1443,38 @@ export declare function readWorkerContextCompactStrategyMemoryForCoordinator(gro
     generated_at: string;
     updatedAt: string;
 };
-export declare function readWorkerContextPtlEmergencyHintForCoordinator(groupId: string): {
+export declare function readWorkerContextPtlEmergencyHintForCoordinator(groupId: string, groupSessionId?: string): {
     schema: string;
     version: number;
     hint_id: string;
     groupId: string;
+    groupSessionId: string;
+    scopeId: string;
+    file: string;
+    engaged: boolean;
+    emergency_level: string;
+    reason: string;
+    blocked_outcome_count: number;
+    task_compacted_blocked_count: number;
+    repeated_failed_categories: any;
+    source_ledger_file: string;
+    source_strategy_file: string;
+    recommended_retry_options: {
+        memory: any;
+        replayRepairDispatchBriefs: any;
+        metadata: any;
+        maxTaskChars: number;
+    };
+    generated_at: string;
+    updatedAt: string;
+} | {
+    recoveredFromBackup: boolean;
+    schema: string;
+    version: number;
+    hint_id: string;
+    groupId: string;
+    groupSessionId: string;
+    scopeId: string;
     file: string;
     engaged: boolean;
     emergency_level: string;
@@ -1414,8 +1493,56 @@ export declare function readWorkerContextPtlEmergencyHintForCoordinator(groupId:
     generated_at: string;
     updatedAt: string;
 };
-export declare function readWorkerContextCompactOutcomeLedgerForCoordinator(groupId: string): any;
+export declare function readWorkerContextCompactOutcomeLedgerForCoordinator(groupId: string, groupSessionId?: string): any;
 export declare function compactWorkerContextCompactOutcomeLedgerRetentionForCoordinator(groupId: string, options?: any): any;
+export declare function readWorkerContextCompactSessionArtifactsForCoordinator(groupId: string, groupSessionId: string): {
+    schema: string;
+    status: string;
+    groupId: string;
+    groupSessionId: string;
+    scopeId: string;
+    hook: {
+        file: any;
+        entries: number;
+        recoveredFromBackup: boolean;
+    };
+    outcome: {
+        file: any;
+        entries: number;
+        recovered: number;
+        blocked: number;
+        recoveredFromBackup: boolean;
+    };
+    strategy: {
+        file: string;
+        sampleCount: number;
+        preferredCategories: any;
+        avoidCategories: any;
+        recoveredFromBackup: boolean;
+    };
+    ptlEmergency: {
+        file: string;
+        engaged: boolean;
+        emergencyLevel: string;
+        blockedOutcomeCount: number;
+        recoveredFromBackup: boolean;
+    };
+};
+export declare function deleteWorkerContextCompactSessionArtifactsForCoordinator(groupId: string, groupSessionId: string): {
+    deleted: number;
+    status: string;
+    schema?: undefined;
+    groupId?: undefined;
+    groupSessionId?: undefined;
+    scopeId?: undefined;
+} | {
+    schema: string;
+    status: string;
+    groupId: string;
+    groupSessionId: string;
+    scopeId: string;
+    deleted: number;
+};
 export declare function buildWorkerContextPacketForAssignment(baseAssignment: any, dependsOn: string, replayRepairDispatchBriefs: any[], options?: any): any;
 export declare function validateProviderSwitchDecisionReceiptForCoordinator(receipt?: any, options?: any): {
     schema: string;
@@ -1426,7 +1553,7 @@ export declare function validateProviderSwitchDecisionReceiptForCoordinator(rece
     checked_at: string;
 };
 export declare function buildProviderSwitchDecisionReceiptForCoordinator(groupId: string, assignment?: any, requestValue?: any, options?: any): any;
-export declare function readReplayRepairDispatchPlanLedgerForCoordinator(groupId: string): any;
+export declare function readReplayRepairDispatchPlanLedgerForCoordinator(groupId: string, groupSessionId?: string): any;
 export declare function readReplayRepairDispatchBindingLedgerForCoordinator(groupId: string): any;
 export declare function recordWorkerContextPacketAssignmentBindingForCoordinator(groupId: string, assignment?: any, options?: any): any;
 export declare function recordWorkerContextProviderSwitchSessionBindingForCoordinator(groupId: string, input?: any, options?: any): {
@@ -1636,6 +1763,8 @@ export declare function buildReplayRepairDispatchBriefForCoordinator(groupId: st
     schema: string;
     brief_id: string;
     groupId: string;
+    groupSessionId: string;
+    group_session_id: string;
     status: string;
     should_create_real_task: boolean;
     source_candidate_id: any;
@@ -1770,6 +1899,14 @@ export type GroupOrchestratorInput = {
     task_id?: string;
     executionId?: string;
     execution_id?: string;
+    groupSessionId?: string;
+    group_session_id?: string;
+    workerContextUsageOptions?: any;
+    worker_context_usage_options?: any;
+    autoWorkerContextCompactRetry?: boolean;
+    auto_worker_context_compact_retry?: boolean;
+    workerContextRetryOptions?: any;
+    worker_context_retry_options?: any;
 };
 export declare function runGroupOrchestrator(input: GroupOrchestratorInput): Promise<{
     selectedRoleSkills: string[];
@@ -1875,6 +2012,7 @@ export declare function runGroupOrchestrator(input: GroupOrchestratorInput): Pro
     coordinationStrategy?: undefined;
     coordinationPlan?: undefined;
     usage?: undefined;
+    contextRecovery?: undefined;
 } | {
     selectedRoleSkills: string[];
     runtime: string;
@@ -1927,6 +2065,7 @@ export declare function runGroupOrchestrator(input: GroupOrchestratorInput): Pro
         confidence: any;
     };
     usage?: undefined;
+    contextRecovery?: undefined;
 } | {
     selectedRoleSkills: string[];
     agent: any;
@@ -1941,6 +2080,7 @@ export declare function runGroupOrchestrator(input: GroupOrchestratorInput): Pro
     };
     content: string;
     usage?: undefined;
+    contextRecovery?: undefined;
 } | {
     selectedRoleSkills: string[];
     usage: LlmTokenUsage;
@@ -1948,6 +2088,7 @@ export declare function runGroupOrchestrator(input: GroupOrchestratorInput): Pro
         type: string;
         originalChars: number;
         recoveredChars: number;
+        ownership: any;
     };
     agent: any;
     delegated: any[];
@@ -1979,6 +2120,7 @@ export declare function runGroupOrchestrator(input: GroupOrchestratorInput): Pro
         type: string;
         originalChars: number;
         recoveredChars: number;
+        ownership: any;
     };
     agent: any;
     delegated: any[];
@@ -2014,6 +2156,12 @@ export declare function runGroupOrchestrator(input: GroupOrchestratorInput): Pro
     selectedRoleSkills: string[];
     runtime: string;
     usage: any;
+    contextRecovery: {
+        type: string;
+        ownership: any;
+        originalChars?: undefined;
+        recoveredChars?: undefined;
+    };
     agentBoundary: {
         layer: string;
         planner: string;
@@ -2059,6 +2207,12 @@ export declare function runGroupOrchestrator(input: GroupOrchestratorInput): Pro
     selectedRoleSkills: string[];
     runtime: string;
     usage: any;
+    contextRecovery: {
+        type: string;
+        ownership: any;
+        originalChars?: undefined;
+        recoveredChars?: undefined;
+    };
     agentBoundary: {
         layer: string;
         planner: string;
@@ -2114,6 +2268,12 @@ export declare function runGroupOrchestrator(input: GroupOrchestratorInput): Pro
     assignments: any[];
     runtime: string;
     usage: any;
+    contextRecovery: {
+        type: string;
+        ownership: any;
+        originalChars?: undefined;
+        recoveredChars?: undefined;
+    };
     agentBoundary: {
         layer: string;
         planner: string;

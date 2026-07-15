@@ -12,6 +12,7 @@ class McpClient {
     buffer = "";
     connected = false;
     serverName = "";
+    serverInstructions = "";
     tools = [];
     stderrBuffer = "";
     lastError = "";
@@ -64,6 +65,7 @@ class McpClient {
                 clientInfo: { name: "cc-connect", version: "1.0.0" },
             });
             this.serverName = initResult?.serverInfo?.name || "unknown";
+            this.serverInstructions = String(initResult?.instructions || "").trim();
             this.connected = true;
             // 发送 initialized 通知
             this.sendNotification("notifications/initialized", {});
@@ -174,12 +176,16 @@ class McpClient {
     getServerName() {
         return this.serverName;
     }
+    getServerInstructions() {
+        return this.serverInstructions;
+    }
     getDiagnostics() {
         return {
             lastError: this.lastError,
             stderr: this.stderrBuffer,
             elicitationRequired: this.elicitationRequired,
             elicitationMessage: this.elicitationMessage,
+            serverInstructions: this.serverInstructions,
         };
     }
     disconnect() {
@@ -188,6 +194,7 @@ class McpClient {
             this.process = null;
         }
         this.connected = false;
+        this.serverInstructions = "";
         for (const [, p] of this.pending) {
             clearTimeout(p.timer);
             p.reject(new Error("Disconnected"));

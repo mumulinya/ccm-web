@@ -55,6 +55,10 @@ const contextSettings = ref({
   memoryContextPreset: 'default',
   modelContextWindow: 0,
   modelAutoCompactTokenLimit: 0,
+  timeBasedMicrocompactEnabled: false,
+  timeBasedThinkingClearEnabled: false,
+  timeBasedMicrocompactGapMinutes: 60,
+  timeBasedMicrocompactKeepRecent: 5,
   typedMemoryDeliveryMaxDocuments: 5,
   typedMemoryDeliveryMaxBytesPerDocument: 4096,
   typedMemoryDeliveryMaxLinesPerDocument: 200,
@@ -584,9 +588,194 @@ const childAgentReliability = computed(() => postCompactUsage.value?.agentReliab
 const compactBoundaryTimeline = computed(() => postCompactUsage.value?.boundaryTimeline || null)
 const resumeProjection = computed(() => postCompactUsage.value?.resumeProjection || null)
 const compactStrategyDecision = computed(() => postCompactUsage.value?.compactStrategyDecision || null)
+const truePostCompactPayload = computed(() => postCompactUsage.value?.truePostCompactPayload || selectedSummary.value?.truePostCompactPayload || null)
 const postCompactCleanupAudit = computed(() => postCompactUsage.value?.postCompactCleanupAudit || null)
 const apiMicroCompactEditPlan = computed(() => postCompactUsage.value?.apiMicroCompactEditPlan || null)
 const apiMicrocompactReceiptDiscipline = computed(() => postCompactUsage.value?.apiMicrocompactReceiptDiscipline || null)
+const compactionSummaryInputProjection = computed(() => postCompactUsage.value?.compactionSummaryInputProjection || null)
+const compactionSummaryInputProjectionState = computed(() => {
+  const projection = compactionSummaryInputProjection.value || {}
+  if (projection.status === 'fail' || projection.receiptValid === false) return 'fail'
+  if (projection.status === 'applied') return 'ok'
+  return 'waiting'
+})
+const compactionSummaryInputProjectionCards = computed(() => {
+  const projection = compactionSummaryInputProjection.value || {}
+  const receipt = projection.receipt || {}
+  return [
+    { label: 'messages', value: receipt.projected_message_count || 0, note: `/ ${receipt.source_message_count || 0} source` },
+    { label: 'images', value: receipt.image_blocks_stripped || 0, note: 'replaced with marker' },
+    { label: 'documents', value: receipt.document_blocks_stripped || 0, note: 'replaced with marker' },
+    { label: 'attachments', value: receipt.reinjected_attachments_stripped || 0, note: 'restored after compact' },
+    { label: 'tokens saved', value: receipt.estimated_tokens_saved || 0, note: `${receipt.estimated_tokens_after || 0} projected` },
+    { label: 'receipt', value: projection.receiptValid === false ? 'invalid' : projection.receiptPresent ? 'valid' : 'none', note: receipt.receipt_checksum || 'no model compact yet' }
+  ]
+})
+const postCompactTaskStatusProjection = computed(() => postCompactUsage.value?.postCompactTaskStatusProjection || null)
+const postCompactTaskStatusProjectionState = computed(() => {
+  const projection = postCompactTaskStatusProjection.value || {}
+  if (projection.status === 'fail' || projection.receiptValid === false) return 'fail'
+  if (projection.status === 'applied') return 'ok'
+  return 'waiting'
+})
+const postCompactTaskStatusProjectionCards = computed(() => {
+  const projection = postCompactTaskStatusProjection.value || {}
+  const receipt = projection.receipt || {}
+  return [
+    { label: 'included', value: receipt.included_task_count || 0, note: `/ ${receipt.matched_task_count || 0} matched` },
+    { label: 'running', value: receipt.running_task_count || 0, note: 'avoid duplicate dispatch' },
+    { label: 'completed', value: receipt.completed_unretrieved_count || 0, note: 'result not retrieved' },
+    { label: 'blocked', value: receipt.blocked_task_count || 0, note: 'requires coordinator attention' },
+    { label: 'isolated', value: receipt.excluded_scope_count || 0, note: 'other group/session tasks' },
+    { label: 'receipt', value: projection.receiptValid === false ? 'invalid' : projection.receiptPresent ? 'valid' : 'none', note: receipt.receipt_checksum || 'no compact yet' }
+  ]
+})
+const postCompactTaskStatusRows = computed(() => postCompactTaskStatusProjection.value?.tasks || [])
+const postCompactFileRestoreDedup = computed(() => postCompactUsage.value?.postCompactFileRestoreDedup || null)
+const postCompactFileRestoreDedupState = computed(() => {
+  const projection = postCompactFileRestoreDedup.value || {}
+  if (projection.status === 'fail' || projection.receiptValid === false) return 'fail'
+  if (projection.status === 'applied') return 'ok'
+  return 'waiting'
+})
+const postCompactFileRestoreDedupCards = computed(() => {
+  const projection = postCompactFileRestoreDedup.value || {}
+  const receipt = projection.receipt || {}
+  return [
+    { label: 'candidates', value: receipt.source_file_candidate_count || 0, note: 'before preserved-tail dedup' },
+    { label: 'visible reads', value: receipt.preserved_full_read_path_count || 0, note: `${receipt.preserved_message_count || 0} preserved messages` },
+    { label: 'deduped', value: receipt.deduped_file_candidate_count || 0, note: 'already visible in recent window' },
+    { label: 'stub exempt', value: receipt.unchanged_stub_exemption_count || 0, note: 'restore real content' },
+    { label: 'restored', value: receipt.restored_file_candidate_count || 0, note: `/ ${receipt.file_budget || 5} budget` },
+    { label: 'receipt', value: projection.receiptValid === false ? 'invalid' : projection.receiptPresent ? 'valid' : 'none', note: receipt.receipt_checksum || 'no compact yet' }
+  ]
+})
+const postCompactInvokedSkillAttachment = computed(() => postCompactUsage.value?.postCompactInvokedSkillAttachment || null)
+const postCompactInvokedSkillAttachmentState = computed(() => {
+  const projection = postCompactInvokedSkillAttachment.value || {}
+  if (projection.status === 'fail' || projection.receiptValid === false) return 'fail'
+  if (projection.status === 'applied') return 'ok'
+  return 'waiting'
+})
+const postCompactInvokedSkillAttachmentCards = computed(() => {
+  const projection = postCompactInvokedSkillAttachment.value || {}
+  const receipt = projection.receipt || {}
+  return [
+    { label: 'invoked', value: receipt.invocation_count || 0, note: 'exact current gcs session' },
+    { label: 'attached', value: receipt.attachment_count || 0, note: (receipt.skill_names || []).join(', ') || 'no invoked skills' },
+    { label: 'tokens', value: receipt.attached_token_count || 0, note: `/ ${receipt.total_max_tokens || 25000} total` },
+    { label: 'truncated', value: receipt.truncated_skill_count || 0, note: `${receipt.single_skill_max_tokens || 5000} per skill` },
+    { label: 'catalog drift', value: receipt.catalog_drift_count || 0, note: (receipt.drift_skill_names || []).join(', ') || 'hashes current' },
+    { label: 'receipt', value: projection.receiptValid === false ? 'invalid' : projection.receiptPresent ? 'valid' : 'none', note: receipt.receipt_checksum || 'no compact yet' }
+  ]
+})
+const postCompactPlanAttachment = computed(() => postCompactUsage.value?.postCompactPlanAttachment || null)
+const postCompactPlanAttachmentState = computed(() => {
+  const projection = postCompactPlanAttachment.value || {}
+  if (projection.status === 'fail' || projection.receiptValid === false) return 'fail'
+  if (projection.status === 'applied') return 'ok'
+  if (projection.status === 'empty') return 'waiting'
+  return 'waiting'
+})
+const postCompactPlanAttachmentCards = computed(() => {
+  const projection = postCompactPlanAttachment.value || {}
+  const receipt = projection.receipt || {}
+  return [
+    { label: 'selected task', value: receipt.selected_task_id || 'none', note: receipt.selection_reason || 'no compact yet' },
+    { label: 'plan mode', value: receipt.plan_mode_active ? 'awaiting' : receipt.confirmation_status || 'none', note: receipt.intake_state || 'exact-session state' },
+    { label: 'tokens', value: receipt.attachment_token_count || 0, note: `/ ${receipt.max_plan_tokens || 50000} CC budget` },
+    { label: 'candidates', value: receipt.candidate_plan_count || 0, note: `${receipt.active_plan_count || 0} active` },
+    { label: 'isolated', value: receipt.excluded_scope_count || 0, note: 'other group/session tasks' },
+    { label: 'receipt', value: projection.receiptValid === false ? 'invalid' : projection.receiptPresent ? 'valid' : 'none', note: receipt.receipt_checksum || 'no compact yet' }
+  ]
+})
+const postCompactDynamicContextDelta = computed(() => postCompactUsage.value?.postCompactDynamicContextDelta || null)
+const postCompactDynamicContextDeltaState = computed(() => {
+  const projection = postCompactDynamicContextDelta.value || {}
+  if (projection.status === 'fail' || projection.receiptValid === false) return 'fail'
+  if (projection.status === 'applied') return 'ok'
+  return 'waiting'
+})
+const postCompactDynamicContextDeltaCards = computed(() => {
+  const projection = postCompactDynamicContextDelta.value || {}
+  const receipt = projection.receipt || {}
+  const tools = receipt.deferred_tools || {}
+  const agents = receipt.agent_listing || {}
+  const mcp = receipt.mcp_instructions || {}
+  const loaded = receipt.loaded_tool_state || {}
+  return [
+    { label: 'scan mode', value: receipt.scan_mode || 'none', note: `${receipt.prior_attachment_count || 0} prior deltas` },
+    { label: 'tools', value: tools.current_count || 0, note: `+${(tools.added_names || []).length} / -${(tools.removed_names || []).length}` },
+    { label: 'loaded tools', value: loaded.carried_count || 0, note: `${loaded.dropped_count || 0} dropped after auth/catalog check` },
+    { label: 'agents', value: agents.current_count || 0, note: `+${(agents.added_names || []).length} / -${(agents.removed_names || []).length}` },
+    { label: 'MCP instructions', value: mcp.current_count || 0, note: `+${(mcp.added_names || []).length} / -${(mcp.removed_names || []).length}` },
+    { label: 'tokens', value: receipt.attachment_token_count || 0, note: `/ ${receipt.max_attachment_tokens || 20000}` },
+    { label: 'receipt', value: projection.receiptValid === false ? 'invalid' : projection.receiptPresent ? 'valid' : 'none', note: receipt.receipt_checksum || 'no compact yet' }
+  ]
+})
+const compactionModelUsage = computed(() => postCompactUsage.value?.compactionModelUsage || null)
+const compactionModelUsageState = computed(() => {
+  const usage = compactionModelUsage.value || {}
+  if (usage.status === 'fail' || usage.receiptValid === false) return 'fail'
+  if (usage.status === 'reported') return 'ok'
+  if (usage.status === 'unreported' || usage.status === 'failed') return 'warn'
+  return 'waiting'
+})
+const compactionModelUsageCards = computed(() => {
+  const projection = compactionModelUsage.value || {}
+  const receipt = projection.receipt || {}
+  const delta = receipt.input_estimate_delta
+  return [
+    { label: 'provider', value: receipt.provider || 'none', note: receipt.model || 'no model compact yet' },
+    { label: 'input', value: receipt.input_tokens || 0, note: `estimated ${receipt.estimated_input_tokens || 0}` },
+    { label: 'output', value: receipt.output_tokens || 0, note: `delta ${delta === null || delta === undefined ? 'n/a' : delta}` },
+    { label: 'cache read', value: receipt.cache_read_input_tokens || 0, note: receipt.cache_read_included_in_input ? 'included in input' : 'separate tokens' },
+    { label: 'cache create', value: receipt.cache_creation_input_tokens || 0, note: 'provider reported' },
+    { label: 'total', value: receipt.accounted_total_tokens || 0, note: projection.status || 'waiting' },
+    { label: 'receipt', value: projection.receiptValid === false ? 'invalid' : projection.receiptPresent ? 'valid' : 'none', note: receipt.usage_checksum || 'no compact yet' }
+  ]
+})
+const timeBasedToolResultMicrocompact = computed(() => postCompactUsage.value?.timeBasedToolResultMicrocompact || null)
+const timeBasedToolResultMicrocompactState = computed(() => {
+  const micro = timeBasedToolResultMicrocompact.value || {}
+  if (micro.status === 'fail' || micro.receiptValid === false) return 'fail'
+  if (micro.status === 'applied') return 'ok'
+  if (micro.status === 'waiting') return 'warn'
+  return 'waiting'
+})
+const timeBasedToolResultMicrocompactCards = computed(() => {
+  const micro = timeBasedToolResultMicrocompact.value || {}
+  const receipt = micro.receipt || {}
+  return [
+    { label: 'policy', value: micro.enabled ? 'on' : 'off', note: `${micro.gapThresholdMinutes || 60} min gap` },
+    { label: 'keep recent', value: micro.keepRecent || 5, note: 'tool results' },
+    { label: 'cleared', value: receipt.cleared_tool_result_count || 0, note: `kept ${receipt.kept_tool_count || 0}` },
+    { label: 'tokens saved', value: receipt.tokens_saved || 0, note: receipt.reason || micro.status || 'waiting' },
+    { label: 'gap', value: receipt.gap_minutes || 0, note: `/ ${receipt.gap_threshold_minutes || micro.gapThresholdMinutes || 60} min` },
+    { label: 'receipt', value: micro.receiptValid === false ? 'invalid' : micro.receiptPresent ? 'valid' : 'none', note: receipt.receipt_checksum || 'no run yet' }
+  ]
+})
+const timeBasedThinkingMicrocompact = computed(() => postCompactUsage.value?.timeBasedThinkingMicrocompact || null)
+const timeBasedThinkingMicrocompactState = computed(() => {
+  const micro = timeBasedThinkingMicrocompact.value || {}
+  if (micro.status === 'fail' || micro.receiptValid === false) return 'fail'
+  if (micro.status === 'applied') return 'ok'
+  if (micro.status === 'latched') return 'ok'
+  if (micro.status === 'waiting') return 'warn'
+  return 'waiting'
+})
+const timeBasedThinkingMicrocompactCards = computed(() => {
+  const micro = timeBasedThinkingMicrocompact.value || {}
+  const receipt = micro.receipt || {}
+  return [
+    { label: 'policy', value: micro.enabled ? 'on' : 'off', note: `${micro.gapThresholdMinutes || 60} min gap` },
+    { label: 'latch', value: receipt.latched ? 'active' : 'idle', note: receipt.compact_epoch || micro.compactEpoch || 'precompact' },
+    { label: 'thinking turns', value: receipt.thinking_turn_count || 0, note: `cleared ${receipt.cleared_thinking_turn_count || 0} · kept ${receipt.kept_thinking_turn_count || 0}` },
+    { label: 'tokens saved', value: receipt.tokens_saved || 0, note: receipt.reason || micro.status || 'waiting' },
+    { label: 'restart', value: receipt.prior_latch_reused ? 'reused' : receipt.newly_latched ? 'latched' : 'waiting', note: 'exact gcs session' },
+    { label: 'receipt', value: micro.receiptValid === false ? 'invalid' : micro.receiptPresent ? 'valid' : 'none', note: receipt.receipt_checksum || 'no run yet' }
+  ]
+})
 const apiMicrocompactNativeApplyReadiness = computed(() => postCompactUsage.value?.apiMicrocompactNativeApplyReadiness || null)
 const apiMicrocompactNativeApplyProof = computed(() => postCompactUsage.value?.apiMicrocompactNativeApplyProof || null)
 const providerNativeCompactSessionCapacity = computed(() => postCompactUsage.value?.providerNativeCompactSessionCapacity || null)
@@ -700,6 +889,10 @@ const taskAgentMemoryContextSnapshotCards = computed(() => {
   const snapshots = taskAgentMemoryContextSnapshots.value || {}
   return [
     { label: 'snapshots', value: snapshots.snapshotCount || 0, note: `${(snapshots.projects || []).length} projects` },
+    { label: 'final prompt', value: snapshots.finalDispatchGateReadyCount || 0, note: `blocked ${snapshots.finalDispatchGateBlockedCount || 0} · missing ${snapshots.finalDispatchGateMissingCount || 0}` },
+    { label: 'prompt proof', value: snapshots.finalDispatchPromptBoundCount || 0, note: `lineage ${snapshots.finalDispatchLineageProofCount || 0} · invalid ${snapshots.finalDispatchGateInvalidCount || 0}` },
+    { label: 'reactive compact', value: snapshots.finalDispatchReactiveCompactRecoveredCount || 0, note: `blocked ${snapshots.finalDispatchReactiveCompactBlockedCount || 0} · invalid ${snapshots.finalDispatchReactiveCompactInvalidCount || 0}` },
+    { label: 'compact circuit', value: snapshots.finalDispatchReactiveCompactCircuitOpenCount || 0, note: `failures ${snapshots.finalDispatchReactiveCompactCircuitFailureCount || 0} · invalid ${snapshots.finalDispatchReactiveCompactCircuitInvalidCount || 0}` },
     { label: 'summary capsules', value: snapshots.postTurnSummaryCapsuleCount || 0, note: `valid ${snapshots.postTurnSummaryCapsuleValidCount || 0}` },
     { label: 'capsule gaps', value: Number(snapshots.postTurnSummaryCapsuleMissingCount || 0) + Number(snapshots.postTurnSummaryCapsuleInvalidCount || 0), note: `prompt ${snapshots.postTurnSummaryCapsulePromptBoundCount || 0} · epoch drift ${snapshots.postTurnSummaryCapsuleCompactEpochMismatchCount || 0}` },
     { label: 'failed / stale', value: snapshots.failCount || 0, note: `stale ${snapshots.staleCount || 0} · prunable ${snapshots.prunableCount || 0}` }
@@ -897,6 +1090,28 @@ const compactStrategyDecisionGaps = computed(() => {
   const decision = compactStrategyDecision.value || {}
   return (decision.gaps || []).slice(0, 6)
 })
+const truePostCompactPayloadState = computed(() => {
+  const payload = truePostCompactPayload.value || {}
+  if (!payload.hasPayload || payload.health === 'empty') return 'waiting'
+  if (payload.health === 'fail' || payload.gateStatus === 'recompact_required') return 'fail'
+  if (payload.health === 'warn' || payload.gateStatus === 'ptl_reduced') return 'warn'
+  return 'ok'
+})
+const truePostCompactPayloadCards = computed(() => {
+  const payload = truePostCompactPayload.value || {}
+  const components = payload.components || {}
+  return [
+    { label: 'gate', value: payload.gateStatus || '—', note: payload.action || 'no gate' },
+    { label: 'true tokens', value: payload.truePostCompactTokenCount || 0, note: `trigger ${formatNumber(payload.triggerTokens || 0)}` },
+    { label: 'pre-PTL', value: payload.prePtlTokenCount || 0, note: payload.ptlApplied ? 'PTL applied' : 'PTL not needed' },
+    { label: 'summary', value: components.summary || 0, note: 'summary payload' },
+    { label: 'recent', value: components.recentWindow || 0, note: 'kept message window' },
+    { label: 'reinjection', value: components.reinjection || 0, note: `persistent ${formatNumber(components.persistentMemory || 0)}` },
+    { label: 'session restore', value: components.sessionMemoryRestore || 0, note: `tools ${formatNumber(components.toolContinuityRestore || 0)}` },
+    { label: 'render cap', value: payload.safeRenderChars || 0, note: payload.willRetriggerNextTurn ? 'safe child context' : 'normal child context' }
+  ]
+})
+const truePostCompactPayloadGaps = computed(() => (truePostCompactPayload.value?.gaps || []).slice(0, 6))
 const postCompactCleanupAuditState = computed(() => {
   const cleanup = postCompactCleanupAudit.value || {}
   if (!cleanup.schema || cleanup.status === 'empty') return 'waiting'
@@ -925,6 +1140,56 @@ const postCompactCleanupAuditGaps = computed(() => {
   const cleanup = postCompactCleanupAudit.value || {}
   return (cleanup.gaps || []).slice(0, 6)
 })
+const postCompactSessionStateReset = computed(() => postCompactUsage.value?.postCompactSessionStateReset || null)
+const postCompactSessionStateResetState = computed(() => {
+  const reset = postCompactSessionStateReset.value || {}
+  if (!reset.schema) return 'waiting'
+  if (reset.status === 'fail_closed' || reset.checksum_valid === false || (reset.verification_issues || []).length) return 'fail'
+  return 'ok'
+})
+const postCompactSessionStateResetCards = computed(() => {
+  const reset = postCompactSessionStateReset.value || {}
+  return [
+    { label: 'path', value: reset.compact_path || '—', note: reset.group_session_id || 'exact session' },
+    { label: 'generation', value: reset.post_compact_mark?.generation || 0, note: reset.post_compact_mark?.status || 'waiting' },
+    { label: 'provider cursor', value: reset.provider_active_cursor?.status || '—', note: reset.provider_active_cursor?.previous_message_id || 'no prior cursor' },
+    { label: 'extraction', value: reset.session_memory_extraction_cursor?.status || '—', note: reset.session_memory_extraction_cursor?.message_id || 'no cursor' },
+    { label: 'cache baseline', value: reset.cache_read_baseline?.status || '—', note: `generation ${reset.cache_read_baseline?.generation || 0}` },
+    { label: 'warning', value: reset.compact_warning?.status || '—', note: reset.compact_warning?.suppressed ? 'until next pressure sample' : 'not suppressed' },
+    { label: 'failures', value: reset.auto_compact_failure_state?.consecutive_failures || 0, note: reset.auto_compact_failure_state?.status || 'waiting' },
+    { label: 'capacity', value: reset.provider_capacity_reset?.status || '—', note: `generation ${reset.provider_capacity_reset?.generation || 0}` }
+  ]
+})
+const promptCacheBreakDetection = computed(() => postCompactUsage.value?.promptCacheBreakDetection || null)
+const promptCacheCompactionNotification = computed(() => postCompactUsage.value?.promptCacheCompactionNotification || null)
+const promptCacheBreakDetectionState = computed(() => {
+  const cache = promptCacheBreakDetection.value || {}
+  if (!cache.schema) return 'waiting'
+  if (cache.status === 'fail_closed' || cache.checksum_valid === false) return 'fail'
+  if (cache.last_event?.cache_break === true) return 'warn'
+  return 'ok'
+})
+const promptCacheBreakDetectionCards = computed(() => {
+  const cache = promptCacheBreakDetection.value || {}
+  const event = cache.last_event || {}
+  const notification = promptCacheCompactionNotification.value || {}
+  const deletion = cache.pending_cache_deletion?.notification || {}
+  return [
+    { label: 'status', value: cache.status || '—', note: cache.group_session_id || 'exact session' },
+    { label: 'calls', value: cache.call_count || 0, note: `${cache.cache_break_count || 0} breaks` },
+    { label: 'generation', value: cache.baseline_generation || 0, note: notification.baseline_status || 'runtime baseline' },
+    { label: 'cache read', value: event.cache_read_input_tokens || cache.previous_cache_read_tokens || 0, note: `previous ${event.previous_cache_read_tokens ?? 'none'}` },
+    { label: 'classification', value: event.classification || (cache.pending_post_compaction ? 'post_compaction_pending' : (deletion.schema ? 'cache_deletion_pending' : '—')), note: event.source || 'group main' },
+    { label: 'post compact', value: event.is_post_compaction ? 'yes' : (cache.pending_post_compaction ? 'pending' : 'no'), note: event.post_compact_boundary_id || cache.pending_post_compaction?.boundary_id || 'no boundary' },
+    { label: 'microcompact', value: deletion.schema ? 'pending' : (event.cache_deletion_applied ? 'consumed' : 'no'), note: deletion.execution_receipt_id || event.microcompact_execution_receipt_id || `${cache.cache_deletion_consumed_count || 0} consumed` },
+    { label: 'drop', value: event.token_drop || 0, note: `${Math.round(Number(event.drop_ratio || 0) * 1000) / 10}%` },
+    { label: 'checksum', value: cache.checksum_valid === false ? 'invalid' : 'valid', note: (deletion.receipt_checksum || notification.receipt_checksum || '').slice(0, 12) || 'no notification' }
+  ]
+})
+const promptCacheBreakDetectionEvents = computed(() => {
+  const rows = promptCacheBreakDetection.value?.recent_events || []
+  return rows.slice(-8).reverse()
+})
 const autoCompactCircuitBreaker = computed(() => postCompactUsage.value?.autoCompactCircuitBreaker || null)
 const autoCompactCircuitBreakerState = computed(() => {
   const circuit = autoCompactCircuitBreaker.value || {}
@@ -947,6 +1212,49 @@ const autoCompactCircuitBreakerCards = computed(() => {
 const autoCompactCircuitBreakerEvents = computed(() => {
   const rows = autoCompactCircuitBreaker.value?.recent_events || []
   return rows.slice(-8).reverse()
+})
+const reactiveCompactRetryOwnership = computed(() => postCompactUsage.value?.reactiveCompactRetryOwnership || null)
+const reactiveCompactRetryOwnershipState = computed(() => {
+  const ownership = reactiveCompactRetryOwnership.value || {}
+  if (!ownership.schema) return 'waiting'
+  if (ownership.state === 'fail_closed' || ownership.checksum_valid === false || ownership.blocked === true) return 'fail'
+  if ((ownership.totals?.claimed || 0) > 0) return 'warn'
+  return 'ok'
+})
+const reactiveCompactRetryOwnershipCards = computed(() => {
+  const ownership = reactiveCompactRetryOwnership.value || {}
+  const totals = ownership.totals || {}
+  return [
+    { label: 'epochs', value: totals.total || 0, note: ownership.group_session_id || 'exact session' },
+    { label: 'claimed', value: totals.claimed || 0, note: 'active retry owners' },
+    { label: 'recovered', value: totals.recovered || 0, note: 'single-shot success' },
+    { label: 'failed', value: totals.failed || 0, note: 'single-shot exhausted' },
+    { label: 'fence', value: Math.max(0, Number(ownership.next_fencing_token || 1) - 1), note: `revision ${ownership.revision || 0}` },
+    { label: 'checksum', value: ownership.checksum_valid === false ? 'invalid' : 'valid', note: ownership.ledger_checksum ? ownership.ledger_checksum.slice(0, 12) : 'empty ledger' }
+  ]
+})
+const reactiveCompactRetryOwnershipRows = computed(() => {
+  const rows = reactiveCompactRetryOwnership.value?.entries || []
+  return rows.slice(-8).reverse()
+})
+const workerContextCompactSessionArtifacts = computed(() => postCompactUsage.value?.workerContextCompactSessionArtifacts || null)
+const workerContextCompactSessionState = computed(() => {
+  const artifacts = workerContextCompactSessionArtifacts.value || {}
+  if (!artifacts.schema || artifacts.status !== 'ok') return 'waiting'
+  if (artifacts.ptlEmergency?.engaged === true) return 'warn'
+  if ([artifacts.hook, artifacts.outcome, artifacts.strategy, artifacts.ptlEmergency].some(row => row?.recoveredFromBackup === true)) return 'warn'
+  return 'ok'
+})
+const workerContextCompactSessionCards = computed(() => {
+  const artifacts = workerContextCompactSessionArtifacts.value || {}
+  return [
+    { label: 'hooks', value: artifacts.hook?.entries || 0, note: 'pre/post compact hooks' },
+    { label: 'outcomes', value: artifacts.outcome?.entries || 0, note: `${artifacts.outcome?.recovered || 0} recovered` },
+    { label: 'blocked', value: artifacts.outcome?.blocked || 0, note: artifacts.groupSessionId || 'exact session' },
+    { label: 'samples', value: artifacts.strategy?.sampleCount || 0, note: `${(artifacts.strategy?.preferredCategories || []).length} preferred` },
+    { label: 'PTL', value: artifacts.ptlEmergency?.engaged ? artifacts.ptlEmergency?.emergencyLevel || 'engaged' : 'clear', note: `${artifacts.ptlEmergency?.blockedOutcomeCount || 0} blocked outcomes` },
+    { label: 'scope', value: artifacts.groupSessionId || 'unbound', note: artifacts.scopeId || 'missing scope' }
+  ]
 })
 const apiMicroCompactEditPlanState = computed(() => {
   const plan = apiMicroCompactEditPlan.value || {}
@@ -1342,6 +1650,10 @@ const loadContextSettings = async () => {
       memoryContextPreset: config.memoryContextPreset || 'default',
       modelContextWindow: Number(config.modelContextWindow || 0),
       modelAutoCompactTokenLimit: Number(config.modelAutoCompactTokenLimit || 0),
+      timeBasedMicrocompactEnabled: config.timeBasedMicrocompactEnabled === true,
+      timeBasedThinkingClearEnabled: config.timeBasedThinkingClearEnabled === true,
+      timeBasedMicrocompactGapMinutes: Number(config.timeBasedMicrocompactGapMinutes || 60),
+      timeBasedMicrocompactKeepRecent: Number(config.timeBasedMicrocompactKeepRecent || 5),
       typedMemoryDeliveryMaxDocuments: Number(config.typedMemoryDeliveryMaxDocuments || 5),
       typedMemoryDeliveryMaxBytesPerDocument: Number(config.typedMemoryDeliveryMaxBytesPerDocument || 4096),
       typedMemoryDeliveryMaxLinesPerDocument: Number(config.typedMemoryDeliveryMaxLinesPerDocument || 200),
@@ -1472,6 +1784,8 @@ const saveContextSettings = async () => {
   if (Number(settings.typedMemoryDeliveryMaxLinesPerDocument || 0) < 10 || Number(settings.typedMemoryDeliveryMaxLinesPerDocument || 0) > 200) return toast.error('单份记忆行数必须介于 10 和 200 行')
   if (Number(settings.typedMemoryDeliveryMaxSessionBytes || 0) < 4096 || Number(settings.typedMemoryDeliveryMaxSessionBytes || 0) > 61440) return toast.error('单个压缩周期容量必须介于 4096 和 61440 bytes')
   if (Number(settings.typedMemoryDeliveryMaxTokens || 0) < 500 || Number(settings.typedMemoryDeliveryMaxTokens || 0) > 20000) return toast.error('记忆投递 token 必须介于 500 和 20000')
+  if (Number(settings.timeBasedMicrocompactGapMinutes || 0) < 1 || Number(settings.timeBasedMicrocompactGapMinutes || 0) > 10080) return toast.error('时间触发间隔必须介于 1 和 10080 分钟')
+  if (Number(settings.timeBasedMicrocompactKeepRecent || 0) < 1 || Number(settings.timeBasedMicrocompactKeepRecent || 0) > 100) return toast.error('保留工具结果数必须介于 1 和 100')
   contextSettingsSaving.value = true
   try {
     const data = await requestJson('/api/orchestrator/config', {
@@ -1481,6 +1795,10 @@ const saveContextSettings = async () => {
         memoryContextPreset: settings.memoryContextPreset,
         modelContextWindow: windowTokens,
         modelAutoCompactTokenLimit: thresholdTokens,
+        timeBasedMicrocompactEnabled: settings.timeBasedMicrocompactEnabled === true,
+        timeBasedThinkingClearEnabled: settings.timeBasedThinkingClearEnabled === true,
+        timeBasedMicrocompactGapMinutes: Number(settings.timeBasedMicrocompactGapMinutes || 60),
+        timeBasedMicrocompactKeepRecent: Number(settings.timeBasedMicrocompactKeepRecent || 5),
         typedMemoryDeliveryMaxDocuments: Number(settings.typedMemoryDeliveryMaxDocuments || 5),
         typedMemoryDeliveryMaxBytesPerDocument: Number(settings.typedMemoryDeliveryMaxBytesPerDocument || 4096),
         typedMemoryDeliveryMaxLinesPerDocument: Number(settings.typedMemoryDeliveryMaxLinesPerDocument || 200),
@@ -1501,6 +1819,10 @@ const saveContextSettings = async () => {
       memoryContextPreset: config.memoryContextPreset || 'default',
       modelContextWindow: Number(config.modelContextWindow || 0),
       modelAutoCompactTokenLimit: Number(config.modelAutoCompactTokenLimit || 0),
+      timeBasedMicrocompactEnabled: config.timeBasedMicrocompactEnabled === true,
+      timeBasedThinkingClearEnabled: config.timeBasedThinkingClearEnabled === true,
+      timeBasedMicrocompactGapMinutes: Number(config.timeBasedMicrocompactGapMinutes || 60),
+      timeBasedMicrocompactKeepRecent: Number(config.timeBasedMicrocompactKeepRecent || 5),
       typedMemoryDeliveryMaxDocuments: Number(config.typedMemoryDeliveryMaxDocuments || 5),
       typedMemoryDeliveryMaxBytesPerDocument: Number(config.typedMemoryDeliveryMaxBytesPerDocument || 4096),
       typedMemoryDeliveryMaxLinesPerDocument: Number(config.typedMemoryDeliveryMaxLinesPerDocument || 200),
@@ -2239,6 +2561,32 @@ onMounted(() => loadOverview(false))
           <input v-model.number="contextSettings.modelAutoCompactTokenLimit" type="number" min="18000" max="3980000" step="1000" :disabled="contextSettings.memoryContextPreset !== 'custom'">
           <small>写入 model_auto_compact_token_limit，仅在“自定义”模式可编辑。</small>
         </label>
+        <label class="retention-toggle-field">
+          <span>空闲后清理旧工具结果</span>
+          <div class="retention-toggle-row">
+            <input v-model="contextSettings.timeBasedMicrocompactEnabled" type="checkbox">
+            <strong>{{ contextSettings.timeBasedMicrocompactEnabled ? '已开启' : '默认关闭' }}</strong>
+          </div>
+          <small>缓存过期后，在下一次模型调用前投影清理旧工具结果，不修改原始群聊记录。</small>
+        </label>
+        <label class="retention-toggle-field">
+          <span>空闲后只保留最近思考</span>
+          <div class="retention-toggle-row">
+            <input v-model="contextSettings.timeBasedThinkingClearEnabled" type="checkbox">
+            <strong>{{ contextSettings.timeBasedThinkingClearEnabled ? '已开启' : '默认关闭' }}</strong>
+          </div>
+          <small>缓存过期后锁存到当前群聊会话；完整压缩或新会话时重置。</small>
+        </label>
+        <label>
+          <span>空闲触发间隔（分钟）</span>
+          <input v-model.number="contextSettings.timeBasedMicrocompactGapMinutes" type="number" min="1" max="10080" step="1">
+          <small>默认 60 分钟，与 Claude Code 的安全缓存过期边界一致。</small>
+        </label>
+        <label>
+          <span>保留最近工具结果</span>
+          <input v-model.number="contextSettings.timeBasedMicrocompactKeepRecent" type="number" min="1" max="100" step="1">
+          <small>至少保留 1 条，默认保留最近 5 条可压缩工具结果。</small>
+        </label>
         <label>
           <span>每轮记忆文件数</span>
           <input v-model.number="contextSettings.typedMemoryDeliveryMaxDocuments" type="number" min="1" max="5" step="1">
@@ -2805,6 +3153,11 @@ onMounted(() => loadOverview(false))
               <article><span>保留原文</span><strong>{{ selectedScope === 'global' ? 'AES-256-GCM 加密转录' : formatNumber(detail.memory.compaction?.preservedRecentMessages || detail.memory.conclusions?.length) }}</strong></article>
               <article><span>事实校验</span><strong>{{ detail.memory.integrity?.pass === false || detail.memory.compaction?.validation?.pass === false ? '失败' : '通过' }}</strong></article>
               <article><span>最近压缩</span><strong>{{ formatTime(detail.memory.compaction?.lastCompactedAt || detail.memory.compression?.lastCompactedAt) }}</strong></article>
+              <article v-if="selectedScope === 'group' && detail.memory.compaction?.sessionMemoryCompactSelection?.schema">
+                <span>Session Memory</span>
+                <strong>{{ detail.memory.compaction.sessionMemoryCompactSelection.selected ? '已复用' : '已回退' }}</strong>
+                <small>{{ detail.memory.compaction.sessionMemoryCompactSelection.selected ? `保留 ${formatNumber(detail.memory.compaction.sessionMemoryCompactSelection.preserved_message_count)} 条 · API 闭包向前扩展 ${formatNumber(detail.memory.compaction.sessionMemoryCompactSelection.api_invariant_closure?.expanded_message_count)} 条 · 未调用压缩 API` : detail.memory.compaction.sessionMemoryCompactSelection.fallback_reason }}</small>
+              </article>
             </div>
             <section v-if="selectedScope === 'group' && resumeProjection" :class="['discipline-panel', resumeProjection.status === 'verified' || resumeProjection.status === 'no_boundary' ? 'ok' : 'fail']">
               <div class="discipline-head">
@@ -2947,8 +3300,8 @@ onMounted(() => loadOverview(false))
                     <article v-for="row in taskAgentMemoryContextSnapshotRows" :key="`${row.snapshotId}:${row.snapshotFile}`" :class="row.status === 'ok' ? 'ok' : row.status === 'warn' ? 'warn' : 'fail'">
                       <span :class="['usage-state', row.status === 'fail' ? 'fail' : row.status === 'warn' ? 'warn' : 'verified']">{{ row.status }}</span>
                       <strong>{{ row.snapshotId || row.sessionId || 'snapshot' }}</strong>
-                      <p>{{ compactDisplay(`${row.project || 'project'} · ${row.taskId || 'task'} · ${(row.gaps || [])[0]?.reason || row.workerContextPacketId || row.snapshotFile}`, 260) }}</p>
-                      <code>{{ row.postTurnSummaryCapsuleChecksum ? `summary ${row.postTurnSummaryCapsuleSelectedCount || 0}` : row.prunable ? 'prunable' : row.gateCount ? `${row.gateCount} gates` : 'gate check' }}</code>
+                      <p>{{ compactDisplay(`${row.project || 'project'} · ${row.taskId || 'task'} · ${(row.gaps || [])[0]?.reason || `${row.finalDispatchProvider || 'provider'}/${row.finalDispatchModel || 'default'} · ${row.workerContextPacketId || row.snapshotFile}`}`, 260) }}</p>
+                      <code>{{ row.finalDispatchPayloadGatePresent ? `${row.finalDispatchStatus} · ${row.finalDispatchPromptTokens || 0}/${row.finalDispatchAutoCompactThreshold || 0} tokens · circuit ${row.finalDispatchReactiveCompactCircuitState || 'closed'}/${row.finalDispatchReactiveCompactCircuitFailures || 0} · ${row.finalDispatchReactiveCompactPresent ? `compact ${row.finalDispatchReactiveCompactOriginalTokens || 0}->${row.finalDispatchReactiveCompactRecoveredTokens || 0}` : `lineage ${row.finalDispatchLineageProofValid ? 'ok' : row.finalDispatchLineageProofRequired ? 'missing' : 'n/a'}`}` : row.postTurnSummaryCapsuleChecksum ? `summary ${row.postTurnSummaryCapsuleSelectedCount || 0}` : row.prunable ? 'prunable' : row.gateCount ? `${row.gateCount} gates` : 'gate check' }}</code>
                     </article>
                   </div>
                 </div>
@@ -3160,6 +3513,37 @@ onMounted(() => loadOverview(false))
                     </article>
                   </div>
                 </div>
+                <div v-if="truePostCompactPayload?.hasPayload" :class="['discipline-panel', truePostCompactPayloadState]">
+                  <div class="discipline-head">
+                    <div>
+                      <strong>真实压缩后载荷</strong>
+                      <span>{{ truePostCompactPayload.groupSessionId || 'exact session' }}</span>
+                    </div>
+                    <code>{{ truePostCompactPayload.gateStatus || 'waiting' }}</code>
+                  </div>
+                  <div class="discipline-cards">
+                    <article v-for="card in truePostCompactPayloadCards" :key="card.label">
+                      <span>{{ card.label }}</span>
+                      <strong>{{ formatMetric(card.value) }}</strong>
+                      <small>{{ compactDisplay(card.note, 80) }}</small>
+                    </article>
+                  </div>
+                  <div class="hook-ledger-list">
+                    <article :class="truePostCompactPayload.gateStatus === 'recompact_required' ? 'warn' : 'ok'">
+                      <span :class="['usage-state', truePostCompactPayload.gateStatus === 'recompact_required' ? 'fail' : truePostCompactPayload.gateStatus === 'ptl_reduced' ? 'waiting' : 'verified']">dispatch</span>
+                      <strong>{{ truePostCompactPayload.willRetriggerNextTurn ? '再次收缩后派发' : '允许派发' }}</strong>
+                      <p>{{ compactDisplay(truePostCompactPayload.action || 'dispatch_ready', 220) }}</p>
+                      <code>{{ truePostCompactPayload.payloadChecksum || 'checksum missing' }}</code>
+                    </article>
+                  </div>
+                  <div v-if="truePostCompactPayloadGaps.length" class="discipline-gap-list">
+                    <article v-for="gap in truePostCompactPayloadGaps" :key="`${gap.severity}:${gap.reason}`">
+                      <span :class="['usage-state', gap.severity === 'fatal' ? 'fail' : 'warn']">{{ gap.severity || 'gap' }}</span>
+                      <strong>payload gate</strong>
+                      <p>{{ compactDisplay(gap.reason, 180) }}</p>
+                    </article>
+                  </div>
+                </div>
                 <div v-if="postCompactCleanupAudit" :class="['discipline-panel', postCompactCleanupAuditState]">
                   <div class="discipline-head">
                     <div>
@@ -3199,6 +3583,53 @@ onMounted(() => loadOverview(false))
                     </article>
                   </div>
                 </div>
+                <div v-if="postCompactSessionStateReset" :class="['discipline-panel', postCompactSessionStateResetState]">
+                  <div class="discipline-head">
+                    <div>
+                      <strong>压缩后会话状态</strong>
+                      <span>{{ postCompactSessionStateReset.scope_id || postCompactSessionStateReset.group_session_id || 'exact session' }}</span>
+                    </div>
+                    <code>{{ postCompactSessionStateReset.status || 'waiting' }}</code>
+                  </div>
+                  <div class="discipline-cards">
+                    <article v-for="card in postCompactSessionStateResetCards" :key="card.label">
+                      <span>{{ card.label }}</span>
+                      <strong>{{ formatMetric(card.value) }}</strong>
+                      <small>{{ compactDisplay(card.note, 80) }}</small>
+                    </article>
+                  </div>
+                  <div v-if="postCompactSessionStateReset.verification_issues?.length" class="discipline-gap-list">
+                    <article v-for="issue in postCompactSessionStateReset.verification_issues" :key="issue">
+                      <span class="usage-state fail">fail closed</span>
+                      <strong>session reset</strong>
+                      <p>{{ issue }}</p>
+                    </article>
+                  </div>
+                </div>
+                <div v-if="promptCacheBreakDetection" :class="['discipline-panel', promptCacheBreakDetectionState]">
+                  <div class="discipline-head">
+                    <div>
+                      <strong>Prompt Cache 运行时</strong>
+                      <span>{{ promptCacheBreakDetection.scope_id || promptCacheBreakDetection.group_session_id || 'exact session' }}</span>
+                    </div>
+                    <code>{{ promptCacheBreakDetection.last_event?.classification || promptCacheBreakDetection.status || 'waiting' }}</code>
+                  </div>
+                  <div class="discipline-cards">
+                    <article v-for="card in promptCacheBreakDetectionCards" :key="card.label">
+                      <span>{{ card.label }}</span>
+                      <strong>{{ formatMetric(card.value) }}</strong>
+                      <small>{{ compactDisplay(card.note, 80) }}</small>
+                    </article>
+                  </div>
+                  <div v-if="promptCacheBreakDetectionEvents.length" class="hook-ledger-list">
+                    <article v-for="row in promptCacheBreakDetectionEvents" :key="row.event_id" :class="row.cache_break ? 'warn' : 'ok'">
+                      <span :class="['usage-state', row.cache_break ? 'waiting' : 'verified']">{{ row.classification || 'usage' }}</span>
+                      <strong>{{ formatNumber(row.cache_read_input_tokens || 0) }} cache read</strong>
+                      <p>previous {{ row.previous_cache_read_tokens ?? 'none' }} · drop {{ row.token_drop || 0 }}</p>
+                      <code>gen {{ row.baseline_generation || 0 }} · call {{ row.call_number || 0 }}<template v-if="row.cache_deletion_applied"> · microcompact</template></code>
+                    </article>
+                  </div>
+                </div>
                 <div v-if="autoCompactCircuitBreaker" :class="['discipline-panel', autoCompactCircuitBreakerState]">
                   <div class="discipline-head">
                     <div>
@@ -3220,6 +3651,270 @@ onMounted(() => loadOverview(false))
                       <strong>{{ row.reason || row.error_class || 'compact' }}</strong>
                       <p>{{ row.error_class || row.error_fingerprint || 'success' }}</p>
                       <code>{{ row.consecutive_failures || 0 }}/{{ autoCompactCircuitBreaker.max_consecutive_failures || 3 }}</code>
+                    </article>
+                  </div>
+                </div>
+                <div v-if="reactiveCompactRetryOwnership" :class="['discipline-panel', reactiveCompactRetryOwnershipState]">
+                  <div class="discipline-head">
+                    <div>
+                      <strong>Reactive Compact 重试所有权</strong>
+                      <span>{{ reactiveCompactRetryOwnership.group_session_id || reactiveCompactRetryOwnership.scope_id || 'exact session' }}</span>
+                    </div>
+                    <code>{{ reactiveCompactRetryOwnership.totals?.total || 0 }} epochs</code>
+                  </div>
+                  <div class="discipline-cards">
+                    <article v-for="card in reactiveCompactRetryOwnershipCards" :key="card.label">
+                      <span>{{ card.label }}</span>
+                      <strong>{{ formatMetric(card.value) }}</strong>
+                      <small>{{ compactDisplay(card.note, 80) }}</small>
+                    </article>
+                  </div>
+                  <div v-if="reactiveCompactRetryOwnershipRows.length" class="hook-ledger-list">
+                    <article v-for="row in reactiveCompactRetryOwnershipRows" :key="row.entry_id" :class="row.state === 'failed' ? 'warn' : row.state === 'claimed' ? 'waiting' : 'ok'">
+                      <span :class="['usage-state', row.state === 'recovered' ? 'verified' : row.state === 'failed' ? 'warn' : 'waiting']">{{ row.state }}</span>
+                      <strong>{{ row.channel || 'group_main_prompt_too_long' }}</strong>
+                      <p>{{ compactDisplay(row.retry_epoch || row.outcome_reason, 220) }}</p>
+                      <code>fence {{ row.fencing_token || 0 }} · gen {{ row.claim_generation || 0 }}</code>
+                    </article>
+                  </div>
+                </div>
+                <div v-if="workerContextCompactSessionArtifacts" :class="['discipline-panel', workerContextCompactSessionState]">
+                  <div class="discipline-head">
+                    <div>
+                      <strong>Worker 压缩会话策略</strong>
+                      <span>{{ workerContextCompactSessionArtifacts.groupSessionId || workerContextCompactSessionArtifacts.scopeId || 'exact session' }}</span>
+                    </div>
+                    <code>{{ workerContextCompactSessionArtifacts.ptlEmergency?.engaged ? 'PTL engaged' : 'isolated' }}</code>
+                  </div>
+                  <div class="discipline-cards">
+                    <article v-for="card in workerContextCompactSessionCards" :key="card.label">
+                      <span>{{ card.label }}</span>
+                      <strong>{{ formatMetric(card.value) }}</strong>
+                      <small>{{ compactDisplay(card.note, 80) }}</small>
+                    </article>
+                  </div>
+                  <div class="hook-ledger-list">
+                    <article :class="workerContextCompactSessionArtifacts.ptlEmergency?.engaged ? 'warn' : 'ok'">
+                      <span :class="['usage-state', workerContextCompactSessionArtifacts.ptlEmergency?.engaged ? 'waiting' : 'verified']">strategy</span>
+                      <strong>{{ workerContextCompactSessionArtifacts.ptlEmergency?.emergencyLevel || 'none' }}</strong>
+                      <p>{{ compactDisplay((workerContextCompactSessionArtifacts.strategy?.preferredCategories || []).join(', ') || 'no learned compact preference', 220) }}</p>
+                      <code>{{ workerContextCompactSessionArtifacts.outcome?.file || 'empty exact-session ledger' }}</code>
+                    </article>
+                  </div>
+                </div>
+                <div v-if="timeBasedToolResultMicrocompact" :class="['discipline-panel', timeBasedToolResultMicrocompactState]">
+                  <div class="discipline-head">
+                    <div>
+                      <strong>Time-based Tool Result Microcompact</strong>
+                      <span>{{ timeBasedToolResultMicrocompact.groupSessionId || 'exact gcs session' }}</span>
+                    </div>
+                    <code>{{ timeBasedToolResultMicrocompact.status || 'disabled' }}</code>
+                  </div>
+                  <div class="discipline-cards">
+                    <article v-for="card in timeBasedToolResultMicrocompactCards" :key="card.label">
+                      <span>{{ card.label }}</span>
+                      <strong>{{ formatMetric(card.value) }}</strong>
+                      <small>{{ compactDisplay(card.note, 80) }}</small>
+                    </article>
+                  </div>
+                  <div v-if="timeBasedToolResultMicrocompact.receipt" class="hook-ledger-list">
+                    <article :class="timeBasedToolResultMicrocompact.receiptValid ? 'ok' : 'fail'">
+                      <span :class="['usage-state', timeBasedToolResultMicrocompact.receiptValid ? 'verified' : 'fail']">projection</span>
+                      <strong>{{ timeBasedToolResultMicrocompact.receipt.query_source || 'group_main_thread' }}</strong>
+                      <p>{{ timeBasedToolResultMicrocompact.receipt.reason || 'waiting for cache-cold gap' }}</p>
+                      <code>raw preserved · {{ timeBasedToolResultMicrocompact.receipt.last_assistant_at || 'no assistant turn' }}</code>
+                    </article>
+                  </div>
+                </div>
+                <div v-if="timeBasedThinkingMicrocompact" :class="['discipline-panel', timeBasedThinkingMicrocompactState]">
+                  <div class="discipline-head">
+                    <div>
+                      <strong>Time-based Thinking Clear Latch</strong>
+                      <span>{{ timeBasedThinkingMicrocompact.groupSessionId || 'exact gcs session' }}</span>
+                    </div>
+                    <code>{{ timeBasedThinkingMicrocompact.status || 'disabled' }}</code>
+                  </div>
+                  <div class="discipline-cards">
+                    <article v-for="card in timeBasedThinkingMicrocompactCards" :key="card.label">
+                      <span>{{ card.label }}</span>
+                      <strong>{{ formatMetric(card.value) }}</strong>
+                      <small>{{ compactDisplay(card.note, 80) }}</small>
+                    </article>
+                  </div>
+                  <div v-if="timeBasedThinkingMicrocompact.receipt" class="hook-ledger-list">
+                    <article :class="timeBasedThinkingMicrocompact.receiptValid ? 'ok' : 'fail'">
+                      <span :class="['usage-state', timeBasedThinkingMicrocompact.receiptValid ? 'verified' : 'fail']">thinking</span>
+                      <strong>{{ timeBasedThinkingMicrocompact.receipt.query_source || 'group_main_thread' }}</strong>
+                      <p>{{ timeBasedThinkingMicrocompact.receipt.reason || 'waiting for cache-cold gap' }}</p>
+                      <code>raw preserved · {{ timeBasedThinkingMicrocompact.receipt.compact_epoch || 'precompact' }}</code>
+                    </article>
+                  </div>
+                </div>
+                <div v-if="compactionSummaryInputProjection" :class="['discipline-panel', compactionSummaryInputProjectionState]">
+                  <div class="discipline-head">
+                    <div>
+                      <strong>Compaction Summary Input Projection</strong>
+                      <span>{{ compactionSummaryInputProjection.groupSessionId || 'exact gcs session' }}</span>
+                    </div>
+                    <code>{{ compactionSummaryInputProjection.status || 'waiting' }}</code>
+                  </div>
+                  <div class="discipline-cards">
+                    <article v-for="card in compactionSummaryInputProjectionCards" :key="card.label">
+                      <span>{{ card.label }}</span>
+                      <strong>{{ formatMetric(card.value) }}</strong>
+                      <small>{{ compactDisplay(card.note, 80) }}</small>
+                    </article>
+                  </div>
+                  <div v-if="compactionSummaryInputProjection.receipt" class="hook-ledger-list">
+                    <article :class="compactionSummaryInputProjection.receiptValid ? 'ok' : 'fail'">
+                      <span :class="['usage-state', compactionSummaryInputProjection.receiptValid ? 'verified' : 'fail']">summarizer</span>
+                      <strong>raw transcript preserved</strong>
+                      <p>media markers {{ compactionSummaryInputProjection.receipt.image_marker || '[image]' }} / {{ compactionSummaryInputProjection.receipt.document_marker || '[document]' }}</p>
+                      <code>{{ compactionSummaryInputProjection.receipt.receipt_checksum || 'no receipt' }}</code>
+                    </article>
+                  </div>
+                </div>
+                <div v-if="postCompactTaskStatusProjection" :class="['discipline-panel', postCompactTaskStatusProjectionState]">
+                  <div class="discipline-head">
+                    <div>
+                      <strong>Post-compact Child Task Status</strong>
+                      <span>{{ postCompactTaskStatusProjection.groupSessionId || 'exact gcs session' }}</span>
+                    </div>
+                    <code>{{ postCompactTaskStatusProjection.status || 'waiting' }}</code>
+                  </div>
+                  <div class="discipline-cards">
+                    <article v-for="card in postCompactTaskStatusProjectionCards" :key="card.label">
+                      <span>{{ card.label }}</span>
+                      <strong>{{ formatMetric(card.value) }}</strong>
+                      <small>{{ compactDisplay(card.note, 80) }}</small>
+                    </article>
+                  </div>
+                  <div v-if="postCompactTaskStatusRows.length" class="hook-ledger-list">
+                    <article v-for="row in postCompactTaskStatusRows" :key="row.task_id" :class="row.status === 'running' || row.status === 'completed' ? 'ok' : 'warn'">
+                      <span :class="['usage-state', row.status === 'running' ? 'waiting' : row.status === 'completed' ? 'verified' : 'warn']">{{ row.status || 'unknown' }}</span>
+                      <strong>{{ row.target_project || row.task_id || 'child task' }}</strong>
+                      <p>{{ compactDisplay(row.description || row.delta_summary || row.value, 220) }}</p>
+                      <code>{{ row.task_id || 'unbound' }}</code>
+                    </article>
+                  </div>
+                </div>
+                <div v-if="postCompactFileRestoreDedup" :class="['discipline-panel', postCompactFileRestoreDedupState]">
+                  <div class="discipline-head">
+                    <div>
+                      <strong>Post-compact File Restore Dedup</strong>
+                      <span>{{ postCompactFileRestoreDedup.groupSessionId || 'exact gcs session' }}</span>
+                    </div>
+                    <code>{{ postCompactFileRestoreDedup.status || 'waiting' }}</code>
+                  </div>
+                  <div class="discipline-cards">
+                    <article v-for="card in postCompactFileRestoreDedupCards" :key="card.label">
+                      <span>{{ card.label }}</span>
+                      <strong>{{ formatMetric(card.value) }}</strong>
+                      <small>{{ compactDisplay(card.note, 80) }}</small>
+                    </article>
+                  </div>
+                  <div v-if="postCompactFileRestoreDedup.receipt" class="hook-ledger-list">
+                    <article :class="postCompactFileRestoreDedup.receiptValid ? 'ok' : 'fail'">
+                      <span :class="['usage-state', postCompactFileRestoreDedup.receiptValid ? 'verified' : 'fail']">file restore</span>
+                      <strong>preserved tail checked</strong>
+                      <p>full Read results deduped; unchanged stubs remain eligible for restoration</p>
+                      <code>{{ postCompactFileRestoreDedup.receipt.projection_checksum || 'no projection' }}</code>
+                    </article>
+                  </div>
+                </div>
+                <div v-if="postCompactInvokedSkillAttachment" :class="['discipline-panel', postCompactInvokedSkillAttachmentState]">
+                  <div class="discipline-head">
+                    <div>
+                      <strong>Post-compact Invoked Skill Attachment</strong>
+                      <span>{{ postCompactInvokedSkillAttachment.groupSessionId || 'exact gcs session' }}</span>
+                    </div>
+                    <code>{{ postCompactInvokedSkillAttachment.status || 'waiting' }}</code>
+                  </div>
+                  <div class="discipline-cards">
+                    <article v-for="card in postCompactInvokedSkillAttachmentCards" :key="card.label">
+                      <span>{{ card.label }}</span>
+                      <strong>{{ formatMetric(card.value) }}</strong>
+                      <small>{{ compactDisplay(card.note, 80) }}</small>
+                    </article>
+                  </div>
+                  <div v-if="postCompactInvokedSkillAttachment.receipt" class="hook-ledger-list">
+                    <article :class="postCompactInvokedSkillAttachment.receiptValid ? 'ok' : 'fail'">
+                      <span :class="['usage-state', postCompactInvokedSkillAttachment.receiptValid ? 'verified' : 'fail']">skill body</span>
+                      <strong>body-free receipt verified</strong>
+                      <p>Skill content is attached only to the exact session prompt; this panel keeps hashes and token counts only.</p>
+                      <code>{{ postCompactInvokedSkillAttachment.receipt.attachment_manifest_checksum || 'no manifest' }}</code>
+                    </article>
+                  </div>
+                </div>
+                <div v-if="postCompactPlanAttachment" :class="['discipline-panel', postCompactPlanAttachmentState]">
+                  <div class="discipline-head">
+                    <div>
+                      <strong>Post-compact Current Plan Attachment</strong>
+                      <span>{{ postCompactPlanAttachment.groupSessionId || 'exact gcs session' }}</span>
+                    </div>
+                    <code>{{ postCompactPlanAttachment.status || 'waiting' }}</code>
+                  </div>
+                  <div class="discipline-cards">
+                    <article v-for="card in postCompactPlanAttachmentCards" :key="card.label">
+                      <span>{{ card.label }}</span>
+                      <strong>{{ formatMetric(card.value) }}</strong>
+                      <small>{{ compactDisplay(card.note, 80) }}</small>
+                    </article>
+                  </div>
+                  <div v-if="postCompactPlanAttachment.receipt" class="hook-ledger-list">
+                    <article :class="postCompactPlanAttachment.receiptValid ? 'ok' : 'fail'">
+                      <span :class="['usage-state', postCompactPlanAttachment.receiptValid ? 'verified' : 'fail']">plan reference</span>
+                      <strong>body-free receipt verified</strong>
+                      <p>Current plan content is restored only to the exact session prompt; this panel keeps mode state, hashes and token counts.</p>
+                      <code>{{ postCompactPlanAttachment.receipt.attachment_manifest_checksum || 'no manifest' }}</code>
+                    </article>
+                  </div>
+                </div>
+                <div v-if="postCompactDynamicContextDelta" :class="['discipline-panel', postCompactDynamicContextDeltaState]">
+                  <div class="discipline-head">
+                    <div>
+                      <strong>Post-compact Dynamic Context Delta</strong>
+                      <span>{{ postCompactDynamicContextDelta.groupSessionId || 'exact gcs session' }}</span>
+                    </div>
+                    <code>{{ postCompactDynamicContextDelta.status || 'waiting' }}</code>
+                  </div>
+                  <div class="discipline-cards">
+                    <article v-for="card in postCompactDynamicContextDeltaCards" :key="card.label">
+                      <span>{{ card.label }}</span>
+                      <strong>{{ formatMetric(card.value) }}</strong>
+                      <small>{{ compactDisplay(card.note, 80) }}</small>
+                    </article>
+                  </div>
+                  <div v-if="postCompactDynamicContextDelta.receipt" class="hook-ledger-list">
+                    <article :class="postCompactDynamicContextDelta.receiptValid ? 'ok' : 'fail'">
+                      <span :class="['usage-state', postCompactDynamicContextDelta.receiptValid ? 'verified' : 'fail']">runtime delta</span>
+                      <strong>body-free receipt verified</strong>
+                      <p>Current authorized tools, pre-compact loaded tool schemas, dispatchable Agents and connected MCP instructions are restored to the exact session prompt; removed entries are explicitly withdrawn.</p>
+                      <code>{{ postCompactDynamicContextDelta.receipt.catalog_checksum || 'no catalog' }}</code>
+                    </article>
+                  </div>
+                </div>
+                <div v-if="compactionModelUsage" :class="['discipline-panel', compactionModelUsageState]">
+                  <div class="discipline-head">
+                    <div>
+                      <strong>Compaction Model Usage</strong>
+                      <span>{{ compactionModelUsage.groupSessionId || 'exact gcs session' }}</span>
+                    </div>
+                    <code>{{ compactionModelUsage.status || 'waiting' }}</code>
+                  </div>
+                  <div class="discipline-cards">
+                    <article v-for="card in compactionModelUsageCards" :key="card.label">
+                      <span>{{ card.label }}</span>
+                      <strong>{{ formatMetric(card.value) }}</strong>
+                      <small>{{ compactDisplay(card.note, 80) }}</small>
+                    </article>
+                  </div>
+                  <div v-if="compactionModelUsage.receipt" class="hook-ledger-list">
+                    <article :class="compactionModelUsage.receiptValid ? 'ok' : 'fail'">
+                      <span :class="['usage-state', compactionModelUsage.receiptValid ? 'verified' : 'fail']">body-free usage</span>
+                      <strong>Provider usage receipt verified</strong>
+                      <p>Actual compaction-call usage is kept separate from the estimated post-compact context payload.</p>
+                      <code>{{ compactionModelUsage.receipt.usage_checksum || 'no checksum' }}</code>
                     </article>
                   </div>
                 </div>
@@ -3975,7 +4670,7 @@ onMounted(() => loadOverview(false))
 .view-tabs{display:flex;gap:4px;border-bottom:1px solid var(--border-color);margin-top:15px}.view-tabs button{border:0;background:transparent;color:var(--text-muted);padding:10px 13px;font-size:11px;font-weight:700;cursor:pointer;border-bottom:2px solid transparent}.view-tabs button.active{color:var(--accent-blue);border-bottom-color:var(--accent-blue)}.view-tabs span{margin-left:4px;padding:1px 5px;border-radius:8px;background:rgba(var(--accent-blue-rgb),.08)}
 .memory-toolbar{display:flex;min-width:0;flex-direction:column;gap:8px;padding:13px 0 8px}.type-filters{display:flex;width:100%;min-width:0;max-width:100%;gap:5px;overflow-x:auto;padding-bottom:3px}.type-filters button{flex:0 0 auto;white-space:nowrap;border:1px solid var(--border-color);background:rgba(255,255,255,.4);border-radius:16px;padding:5px 9px;font-size:10px;color:var(--text-muted);cursor:pointer}.type-filters button.active{border-color:rgba(var(--accent-blue-rgb),.25);background:rgba(var(--accent-blue-rgb),.08);color:var(--accent-blue)}.memory-search{width:100%;padding:7px 10px;font-size:11px}.memory-stats-line{display:flex;gap:14px;font-size:10px;color:var(--text-muted);padding:2px 0 10px}.memory-groups{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;max-height:560px;overflow:auto;padding-right:4px}.memory-group{border:1px solid var(--border-color);border-radius:11px;padding:10px;background:rgba(255,255,255,.25)}.group-heading{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}.group-heading h4{font-size:12px}.group-heading span{font-family:var(--font-tech);font-size:9px;color:var(--text-muted)}.memory-item{padding:10px;border-radius:9px;background:rgba(255,255,255,.55);border:1px solid transparent;margin-top:7px}.memory-item.pinned{border-color:rgba(var(--accent-blue-rgb),.25)}.memory-item.deprecated{opacity:.58;border-style:dashed}.memory-item p{font-size:11px;line-height:1.6;white-space:pre-wrap}.item-state{display:flex;gap:4px;margin-bottom:5px;min-height:14px}.state-tag{font-size:8px;font-weight:800;padding:2px 5px;border-radius:6px}.state-tag.pin{color:var(--accent-blue);background:rgba(var(--accent-blue-rgb),.1)}.state-tag.edit{color:var(--accent-purple);background:rgba(99,102,241,.1)}.state-tag.off{color:var(--accent-red);background:rgba(239,68,68,.08)}.state-tag.archive{color:var(--text-muted);background:rgba(100,116,139,.1)}.original-text{font-size:9px;color:var(--text-muted);padding:6px 8px;margin-top:7px;border-left:2px solid rgba(99,102,241,.2);line-height:1.5}.item-footer{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:8px;color:var(--text-muted);font-size:8px}.item-actions{display:flex;gap:2px;flex-wrap:wrap;justify-content:flex-end}.item-actions button{border:0;background:transparent;color:var(--text-muted);font-size:8px;padding:3px 4px;cursor:pointer}.item-actions button:hover{color:var(--accent-blue)}.item-actions button:disabled{opacity:.35;cursor:default}
 .boundary-grid,.metrics-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin:14px 0}.boundary-grid article,.metrics-grid article{padding:13px;border-radius:10px;border:1px solid var(--border-color);background:rgba(255,255,255,.4);display:flex;flex-direction:column;gap:7px}.boundary-grid span,.metrics-grid span{font-size:9px;color:var(--text-muted)}.boundary-grid strong{font-size:11px;overflow-wrap:anywhere}.metrics-grid strong{font-family:var(--font-tech);font-size:22px;color:var(--accent-blue)}.metrics-grid p{font-size:9px;color:var(--text-muted)}.summary-preview{border:1px solid var(--border-color);border-radius:11px;overflow:hidden}.preview-heading{padding:11px 13px;display:flex;justify-content:space-between;background:rgba(var(--accent-blue-rgb),.035)}.preview-heading h4{font-size:11px}.preview-heading span{font-family:monospace;font-size:9px;color:var(--text-muted)}.summary-preview pre,.evidence-row pre{margin:0;padding:14px;max-height:360px;overflow:auto;font:10px/1.6 'JetBrains Mono',monospace;white-space:pre-wrap;color:var(--text-secondary)}
-.post-compact-panel{margin:12px 0;border:1px solid rgba(var(--accent-blue-rgb),.12);border-radius:12px;background:rgba(var(--accent-blue-rgb),.035);padding:13px}.post-compact-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:10px}.post-compact-head h4{font-size:13px;margin-top:3px}.post-compact-head code{max-width:52%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:8px;color:var(--text-muted);background:rgba(100,116,139,.08);padding:5px 7px;border-radius:7px}.post-compact-error{padding:10px;border-radius:8px;background:rgba(239,68,68,.06);color:var(--accent-red);font-size:10px}.post-compact-cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px}.post-compact-cards article{min-width:0;padding:10px;border-radius:9px;border:1px solid var(--border-color);background:rgba(255,255,255,.48);display:flex;flex-direction:column;gap:4px}.post-compact-cards span{font-size:8px;color:var(--text-muted);font-weight:800}.post-compact-cards strong{font-family:var(--font-tech);font-size:17px;color:var(--accent-blue)}.post-compact-cards small{font-size:8px;color:var(--text-muted);line-height:1.35}.discipline-panel{margin-top:9px;border:1px solid rgba(16,185,129,.16);border-radius:10px;background:rgba(16,185,129,.045);overflow:hidden}.discipline-panel.warn,.discipline-panel.waiting{border-color:rgba(245,158,11,.22);background:rgba(245,158,11,.055)}.discipline-panel.fail{border-color:rgba(239,68,68,.22);background:rgba(239,68,68,.055)}.discipline-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 10px;border-bottom:1px solid var(--border-color)}.discipline-head div{display:flex;flex-direction:column;gap:2px;min-width:0}.discipline-head strong{font-size:10px;color:var(--text-primary)}.discipline-head span{font-size:8px;color:var(--text-muted);overflow-wrap:anywhere}.discipline-head code{font-family:var(--font-tech);font-size:18px;color:var(--accent-green)}.discipline-panel.warn .discipline-head code,.discipline-panel.waiting .discipline-head code{color:var(--accent-yellow)}.discipline-panel.fail .discipline-head code{color:var(--accent-red)}.discipline-cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px;padding:9px}.discipline-cards article,.discipline-buckets article{min-width:0;border:1px solid var(--border-color);border-radius:8px;background:rgba(255,255,255,.38);padding:8px;display:flex;flex-direction:column;gap:3px}.discipline-cards span,.discipline-buckets span{font-size:8px;color:var(--text-muted);font-weight:800}.discipline-cards strong,.discipline-buckets strong{font-family:var(--font-tech);font-size:15px;color:var(--accent-blue)}.discipline-cards small,.discipline-buckets small{font-size:7px;color:var(--text-muted);line-height:1.35}.discipline-buckets{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:5px;padding:0 9px 9px}.discipline-buckets article.weak{border-color:rgba(245,158,11,.24);background:rgba(245,158,11,.06)}.discipline-gap-list{border-top:1px solid var(--border-color)}.discipline-gap-list article{display:grid;grid-template-columns:64px minmax(90px,170px) minmax(0,1fr);gap:8px;align-items:center;padding:8px 10px;border-top:1px solid rgba(100,116,139,.08);font-size:9px}.discipline-gap-list article:first-child{border-top:0}.discipline-gap-list strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.discipline-gap-list p{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-muted)}.post-compact-buckets{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:9px}.post-compact-bucket{min-width:0;border:1px solid var(--border-color);border-radius:10px;background:rgba(255,255,255,.34);padding:9px}.bucket-heading{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}.bucket-heading h5{font-size:10px}.bucket-heading span{font-family:var(--font-tech);font-size:9px;color:var(--text-muted)}.candidate-row{border-radius:8px;border:1px solid transparent;background:rgba(255,255,255,.52);padding:8px;margin-top:6px}.candidate-row.useful{border-color:rgba(16,185,129,.14)}.candidate-row.ignored,.candidate-row.archive{border-color:rgba(245,158,11,.18)}.candidate-row.missing{border-color:rgba(99,102,241,.18)}.candidate-top{display:flex;align-items:center;justify-content:space-between;gap:8px}.candidate-top strong{font-size:9px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.candidate-top span{font-size:8px;color:var(--accent-blue);font-weight:800;white-space:nowrap}.candidate-row p{font-size:9px;line-height:1.5;color:var(--text-secondary);margin:5px 0;overflow-wrap:anywhere}.usage-counts{display:flex;gap:4px;flex-wrap:wrap}.usage-counts span{font-size:7px;color:var(--text-muted);background:rgba(100,116,139,.08);border-radius:999px;padding:2px 5px}.recall-diagnostic-list,.recent-usage-list{margin-top:9px;border:1px solid var(--border-color);border-radius:10px;background:rgba(255,255,255,.32);overflow:hidden}.recall-diagnostic-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;background:rgba(100,116,139,.06);font-size:9px;color:var(--text-muted)}.recall-diagnostic-head strong{font-size:10px;color:var(--text-primary)}.recall-diagnostic-row,.recent-usage-row{display:grid;grid-template-columns:44px minmax(0,1fr) 44px;gap:8px;align-items:center;padding:8px 10px;border-top:1px solid var(--border-color);font-size:9px}.recall-diagnostic-row span{font-weight:800;color:var(--accent-green)}.recall-diagnostic-row.deprioritized span{color:var(--accent-yellow)}.recall-diagnostic-row strong,.recent-usage-row strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.recall-diagnostic-row code{text-align:right;color:var(--accent-blue)}.recent-usage-row{grid-template-columns:64px 90px minmax(0,1fr)}.recent-usage-row p{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-muted)}.usage-state{font-size:8px;font-weight:800;border-radius:999px;padding:3px 6px;text-align:center;background:rgba(100,116,139,.1);color:var(--text-muted)}.usage-state.used{background:rgba(16,185,129,.1);color:var(--accent-green)}.usage-state.ignored,.usage-state.warn,.usage-state.waiting{background:rgba(245,158,11,.12);color:var(--accent-yellow)}.usage-state.verified{background:rgba(var(--accent-blue-rgb),.1);color:var(--accent-blue)}.usage-state.mentioned{background:rgba(99,102,241,.1);color:var(--accent-purple)}.usage-state.fail{background:rgba(239,68,68,.1);color:var(--accent-red)}
+.post-compact-panel{margin:12px 0;border:1px solid rgba(var(--accent-blue-rgb),.12);border-radius:12px;background:rgba(var(--accent-blue-rgb),.035);padding:13px}.post-compact-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:10px}.post-compact-head h4{font-size:13px;margin-top:3px}.post-compact-head code{max-width:52%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:8px;color:var(--text-muted);background:rgba(100,116,139,.08);padding:5px 7px;border-radius:7px}.post-compact-error{padding:10px;border-radius:8px;background:rgba(239,68,68,.06);color:var(--accent-red);font-size:10px}.post-compact-cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px}.post-compact-cards article{min-width:0;padding:10px;border-radius:9px;border:1px solid var(--border-color);background:rgba(255,255,255,.48);display:flex;flex-direction:column;gap:4px}.post-compact-cards span{font-size:8px;color:var(--text-muted);font-weight:800}.post-compact-cards strong{font-family:var(--font-tech);font-size:17px;color:var(--accent-blue)}.post-compact-cards small{font-size:8px;color:var(--text-muted);line-height:1.35}.discipline-panel{margin-top:9px;border:1px solid rgba(16,185,129,.16);border-radius:10px;background:rgba(16,185,129,.045);overflow:hidden}.discipline-panel.warn,.discipline-panel.waiting{border-color:rgba(245,158,11,.22);background:rgba(245,158,11,.055)}.discipline-panel.fail{border-color:rgba(239,68,68,.22);background:rgba(239,68,68,.055)}.discipline-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 10px;border-bottom:1px solid var(--border-color)}.discipline-head div{display:flex;flex-direction:column;gap:2px;min-width:0}.discipline-head strong{font-size:10px;color:var(--text-primary)}.discipline-head span{font-size:8px;color:var(--text-muted);overflow-wrap:anywhere}.discipline-head code{font-family:var(--font-tech);font-size:18px;color:var(--accent-green)}.discipline-panel.warn .discipline-head code,.discipline-panel.waiting .discipline-head code{color:var(--accent-yellow)}.discipline-panel.fail .discipline-head code{color:var(--accent-red)}.discipline-cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px;padding:9px}.discipline-cards article,.discipline-buckets article{min-width:0;border:1px solid var(--border-color);border-radius:8px;background:rgba(255,255,255,.38);padding:8px;display:flex;flex-direction:column;gap:3px}.discipline-cards span,.discipline-buckets span{font-size:8px;color:var(--text-muted);font-weight:800}.discipline-cards strong,.discipline-buckets strong{min-width:0;font-family:var(--font-tech);font-size:15px;color:var(--accent-blue);overflow-wrap:anywhere}.discipline-cards small,.discipline-buckets small{min-width:0;font-size:7px;color:var(--text-muted);line-height:1.35;overflow-wrap:anywhere}.discipline-buckets{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:5px;padding:0 9px 9px}.discipline-buckets article.weak{border-color:rgba(245,158,11,.24);background:rgba(245,158,11,.06)}.discipline-gap-list{border-top:1px solid var(--border-color)}.discipline-gap-list article{display:grid;grid-template-columns:64px minmax(90px,170px) minmax(0,1fr);gap:8px;align-items:center;padding:8px 10px;border-top:1px solid rgba(100,116,139,.08);font-size:9px}.discipline-gap-list article:first-child{border-top:0}.discipline-gap-list strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.discipline-gap-list p{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-muted)}.post-compact-buckets{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:9px}.post-compact-bucket{min-width:0;border:1px solid var(--border-color);border-radius:10px;background:rgba(255,255,255,.34);padding:9px}.bucket-heading{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}.bucket-heading h5{font-size:10px}.bucket-heading span{font-family:var(--font-tech);font-size:9px;color:var(--text-muted)}.candidate-row{border-radius:8px;border:1px solid transparent;background:rgba(255,255,255,.52);padding:8px;margin-top:6px}.candidate-row.useful{border-color:rgba(16,185,129,.14)}.candidate-row.ignored,.candidate-row.archive{border-color:rgba(245,158,11,.18)}.candidate-row.missing{border-color:rgba(99,102,241,.18)}.candidate-top{display:flex;align-items:center;justify-content:space-between;gap:8px}.candidate-top strong{font-size:9px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.candidate-top span{font-size:8px;color:var(--accent-blue);font-weight:800;white-space:nowrap}.candidate-row p{font-size:9px;line-height:1.5;color:var(--text-secondary);margin:5px 0;overflow-wrap:anywhere}.usage-counts{display:flex;gap:4px;flex-wrap:wrap}.usage-counts span{font-size:7px;color:var(--text-muted);background:rgba(100,116,139,.08);border-radius:999px;padding:2px 5px}.recall-diagnostic-list,.recent-usage-list{margin-top:9px;border:1px solid var(--border-color);border-radius:10px;background:rgba(255,255,255,.32);overflow:hidden}.recall-diagnostic-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;background:rgba(100,116,139,.06);font-size:9px;color:var(--text-muted)}.recall-diagnostic-head strong{font-size:10px;color:var(--text-primary)}.recall-diagnostic-row,.recent-usage-row{display:grid;grid-template-columns:44px minmax(0,1fr) 44px;gap:8px;align-items:center;padding:8px 10px;border-top:1px solid var(--border-color);font-size:9px}.recall-diagnostic-row span{font-weight:800;color:var(--accent-green)}.recall-diagnostic-row.deprioritized span{color:var(--accent-yellow)}.recall-diagnostic-row strong,.recent-usage-row strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.recall-diagnostic-row code{text-align:right;color:var(--accent-blue)}.recent-usage-row{grid-template-columns:64px 90px minmax(0,1fr)}.recent-usage-row p{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-muted)}.usage-state{font-size:8px;font-weight:800;border-radius:999px;padding:3px 6px;text-align:center;background:rgba(100,116,139,.1);color:var(--text-muted)}.usage-state.used{background:rgba(16,185,129,.1);color:var(--accent-green)}.usage-state.ignored,.usage-state.warn,.usage-state.waiting{background:rgba(245,158,11,.12);color:var(--accent-yellow)}.usage-state.verified{background:rgba(var(--accent-blue-rgb),.1);color:var(--accent-blue)}.usage-state.mentioned{background:rgba(99,102,241,.1);color:var(--accent-purple)}.usage-state.fail{background:rgba(239,68,68,.1);color:var(--accent-red)}
 .audit-view{padding-top:12px;max-height:560px;overflow:auto}.audit-item{display:grid;grid-template-columns:145px minmax(0,1fr) auto;gap:12px;padding:11px;border-bottom:1px solid var(--border-color);align-items:center}.audit-time{font-size:9px;color:var(--text-muted)}.audit-item strong{font-size:11px}.audit-item p{font-size:9px;color:var(--text-muted);margin-top:3px}.audit-item code{font-size:8px;color:var(--accent-blue)}.feedback-panel{display:flex;align-items:center;justify-content:space-between;gap:18px;margin-top:12px;padding:14px;border-radius:10px;background:rgba(var(--accent-blue-rgb),.04);border:1px solid rgba(var(--accent-blue-rgb),.1)}.feedback-panel h4{font-size:12px;margin-bottom:4px}.feedback-panel p{font-size:9px;color:var(--text-muted)}.feedback-actions{display:flex;gap:5px;flex-wrap:wrap}.counter-table{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:10px}.counter-table div{padding:11px;border-bottom:2px solid rgba(var(--accent-blue-rgb),.12);display:flex;justify-content:space-between;font-size:10px}.counter-table span{color:var(--text-muted)}
 .acceptance-note{margin-top:9px;padding:9px 11px;border-radius:8px;background:rgba(16,185,129,.06);color:var(--text-muted);font-size:9px;border:1px solid rgba(16,185,129,.12)}
 .empty-state{padding:35px;text-align:center;color:var(--text-muted);font-size:11px}.empty-state.large{padding-top:180px}.mc-modal-overlay{position:fixed;inset:0;background:rgba(15,23,42,.24);backdrop-filter:blur(10px);z-index:200;display:grid;place-items:center}.mc-modal{width:min(520px,calc(100vw - 36px));max-height:80vh;overflow:auto;border:1px solid var(--border-color);background:rgba(255,255,255,.92);box-shadow:0 26px 80px rgba(15,23,42,.18);border-radius:15px;padding:22px}.mc-modal h3{font-size:19px;margin:4px 0 14px}.mc-modal label{display:flex;flex-direction:column;gap:6px;font-size:10px;font-weight:700;color:var(--text-muted);margin-top:13px}.mc-modal textarea{resize:vertical;font-size:12px;line-height:1.5}.modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}.evidence-modal{width:min(760px,calc(100vw - 36px))}.evidence-row{border:1px solid var(--border-color);border-radius:10px;margin-top:9px;overflow:hidden}.evidence-row>div{display:flex;justify-content:space-between;padding:9px 12px;background:rgba(var(--accent-blue-rgb),.04);font-size:9px;color:var(--text-muted)}
@@ -3985,7 +4680,7 @@ onMounted(() => loadOverview(false))
 .scope-mark.global{background:linear-gradient(135deg,var(--accent-purple),var(--accent-blue))}
 .memory-policy-strip{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:8px 0 12px;font-size:10px;color:var(--text-muted)}.memory-policy-strip button{border:1px solid rgba(239,68,68,.18);background:rgba(239,68,68,.06);color:var(--accent-red);border-radius:14px;padding:4px 8px;cursor:pointer}
 .timeline-panel{margin-top:9px;border:1px solid rgba(var(--accent-blue-rgb),.16);border-radius:10px;background:rgba(var(--accent-blue-rgb),.04);overflow:hidden}.timeline-panel.warn,.timeline-panel.waiting{border-color:rgba(245,158,11,.22);background:rgba(245,158,11,.055)}.timeline-panel.fail{border-color:rgba(239,68,68,.22);background:rgba(239,68,68,.055)}.timeline-panel .discipline-head code{color:var(--accent-blue)}.timeline-panel.warn .discipline-head code,.timeline-panel.waiting .discipline-head code{color:var(--accent-yellow)}.timeline-panel.fail .discipline-head code{color:var(--accent-red)}.timeline-component-list{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:5px;padding:0 9px 9px}.timeline-component-list article{min-width:0;border:1px solid var(--border-color);border-radius:8px;background:rgba(255,255,255,.36);padding:7px;display:flex;flex-direction:column;gap:3px}.timeline-component-list article.warn{border-color:rgba(245,158,11,.2)}.timeline-component-list article.fail{border-color:rgba(239,68,68,.2)}.timeline-component-list span{font-size:8px;font-weight:800;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.timeline-component-list strong{font-family:var(--font-tech);font-size:13px;color:var(--accent-blue)}.timeline-event-list{border-top:1px solid var(--border-color)}.timeline-event-list article{display:grid;grid-template-columns:88px minmax(90px,170px) minmax(0,1fr) 120px;gap:8px;align-items:center;padding:8px 10px;border-top:1px solid rgba(100,116,139,.08);font-size:9px}.timeline-event-list article:first-child{border-top:0}.timeline-event-list span{font-size:8px;font-weight:800;color:var(--text-muted);text-transform:uppercase}.timeline-event-list strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.timeline-event-list p{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-muted)}.timeline-event-list code{font-size:8px;color:var(--text-muted);text-align:right}
-.hook-ledger-list{border-top:1px solid var(--border-color)}.hook-ledger-list article{display:grid;grid-template-columns:64px minmax(120px,220px) minmax(0,1fr) 120px;gap:8px;align-items:center;padding:8px 10px;border-top:1px solid rgba(100,116,139,.08);font-size:9px}.hook-ledger-list article:first-child{border-top:0}.hook-ledger-list strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.hook-ledger-list p{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-muted)}.hook-ledger-list code{font-size:8px;color:var(--text-muted);text-align:right}
+.hook-ledger-list{border-top:1px solid var(--border-color)}.hook-ledger-list article{min-width:0;display:grid;grid-template-columns:64px minmax(120px,220px) minmax(0,1fr) 120px;gap:8px;align-items:center;padding:8px 10px;border-top:1px solid rgba(100,116,139,.08);font-size:9px}.hook-ledger-list article:first-child{border-top:0}.hook-ledger-list strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.hook-ledger-list p{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-muted)}.hook-ledger-list code{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:8px;color:var(--text-muted);text-align:right}
 .replay-needle-list{border-top:1px solid var(--border-color)}.replay-needle-list article{display:grid;grid-template-columns:72px minmax(110px,190px) minmax(0,1fr);gap:8px;align-items:center;padding:8px 10px;border-top:1px solid rgba(100,116,139,.08);font-size:9px}.replay-needle-list article:first-child{border-top:0}.replay-needle-list article.fail{background:rgba(239,68,68,.045)}.replay-needle-list article.ok{background:rgba(16,185,129,.035)}.replay-needle-list strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.replay-needle-list p{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-muted)}
 .usage-state.completed{background:rgba(16,185,129,.1);color:var(--accent-green)}.usage-state.blocked{background:rgba(245,158,11,.12);color:var(--accent-yellow)}.usage-state.pending{background:rgba(var(--accent-blue-rgb),.1);color:var(--accent-blue)}.usage-state.in_progress{background:rgba(99,102,241,.1);color:var(--accent-purple)}.usage-state.cancelled{background:rgba(239,68,68,.1);color:var(--accent-red)}
 .replay-repair-list{border-top:1px solid var(--border-color);background:rgba(255,255,255,.24)}.replay-repair-list article{display:grid;grid-template-columns:72px minmax(130px,210px) minmax(0,1fr);gap:8px;align-items:center;padding:8px 10px;border-top:1px solid rgba(100,116,139,.08);font-size:9px}.replay-repair-list strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.replay-repair-list p{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-muted)}

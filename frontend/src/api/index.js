@@ -91,6 +91,7 @@ export const tasksApi = {
 
 // 工具相关 API
 export const toolsApi = {
+  internalMcp: () => api('/api/tools/internal-mcp'),
   authorizationInventory: () => api('/api/tools/authorization-inventory'),
   goalAudit: () => api('/api/tools/mcp-skill-goal-audit'),
   catalogImpact: (data) => api('/api/tools/catalog-impact', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),

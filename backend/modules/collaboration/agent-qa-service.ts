@@ -1,4 +1,3 @@
-import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
 import { CCM_DIR } from "../../core/utils";
@@ -7,6 +6,7 @@ import { appendTraceEvent, ensureTraceId } from "../../system/reliability-ledger
 import { compactMemoryText } from "./memory";
 import { appendTaskTimelineEvent, safeAddGroupLog } from "./logs";
 import { sanitizeMainAgentUserText } from "./display";
+import { readJsonWithBackup, withFileLock, writeJsonAtomic } from "../../core/atomic-json-file";
 
 export const AGENT_QA_TIMEOUT_MS = 5 * 60 * 1000;
 
@@ -25,36 +25,34 @@ export function configureAgentQaService(next: AgentQaServiceDeps) {
 }
 
 export function loadAgentQaItems() {
-  if (!fs.existsSync(AGENT_QA_FILE)) return [];
-  try {
-    const data = JSON.parse(fs.readFileSync(AGENT_QA_FILE, "utf-8"));
-    return Array.isArray(data) ? data : [];
-  } catch {
-    return [];
-  }
+  const data = readJsonWithBackup<any>(AGENT_QA_FILE, []);
+  return Array.isArray(data) ? data : [];
 }
 
 export function saveAgentQaItems(items: any[]) {
-  fs.writeFileSync(AGENT_QA_FILE, JSON.stringify((items || []).slice(-800), null, 2));
+  withFileLock(AGENT_QA_FILE, () => writeJsonAtomic(AGENT_QA_FILE, (items || []).slice(-800)));
 }
 
 export function upsertAgentQaItem(item: any) {
-  const items = loadAgentQaItems();
-  const idx = items.findIndex((entry: any) => entry.id === item.id);
-  const existing = idx >= 0 ? items[idx] : {};
-  const now = new Date().toISOString();
-  const next = {
-    created_at: existing.created_at || item.created_at || now,
-    retry_count: Number(existing.retry_count || item.retry_count || 0),
-    manual_takeover: !!(existing.manual_takeover || item.manual_takeover),
-    ...existing,
-    ...item,
-    updated_at: now,
-  };
-  if (idx >= 0) items[idx] = next;
-  else items.push(next);
-  saveAgentQaItems(items);
-  return next;
+  return withFileLock(AGENT_QA_FILE, () => {
+    const data = readJsonWithBackup<any>(AGENT_QA_FILE, []);
+    const items = Array.isArray(data) ? data : [];
+    const idx = items.findIndex((entry: any) => entry.id === item.id);
+    const existing = idx >= 0 ? items[idx] : {};
+    const now = new Date().toISOString();
+    const next = {
+      created_at: existing.created_at || item.created_at || now,
+      retry_count: Number(existing.retry_count || item.retry_count || 0),
+      manual_takeover: !!(existing.manual_takeover || item.manual_takeover),
+      ...existing,
+      ...item,
+      updated_at: now,
+    };
+    if (idx >= 0) items[idx] = next;
+    else items.push(next);
+    writeJsonAtomic(AGENT_QA_FILE, items.slice(-800));
+    return next;
+  });
 }
 
 export function markExpiredAgentQaItems(groupId = "") {
@@ -115,14 +113,18 @@ export function buildAgentQaUserPreview(qa: any = {}, kind = "") {
   const to = sanitizeAgentQaPreviewText(qa.to_agent || qa.target || "目标执行成员", "目标执行成员", 80);
   const status = String(kind === "question" ? "waiting" : qa.status || (qa.answer ? "answered" : "waiting")).toLowerCase();
   const accepted = qa.acceptance?.accepted === true || status === "resumed" || !!qa.resumed_at;
-  const waiting = ["waiting", "asking", "queued"].includes(status);
+  const executing = ["asking", "executing", "merging"].includes(status);
+  const waiting = ["waiting", "queued"].includes(status);
   const failed = ["failed", "timeout", "rejected"].includes(status);
   const needsUser = ["needs_user", "manual"].includes(status);
   const question = sanitizeAgentQaPreviewText(qa.question || "", "问题原文已收进技术详情。", 180);
   const answer = qa.answer ? sanitizeAgentQaPreviewText(qa.answer, "目标 Agent 已返回回答，详细内容已收进技术详情。", 220) : "";
-  const typeLabel = qa.type === "request_review" ? "评审请求" : "工作询问";
+  const isImplementation = qa.coordination_kind === "implementation" || qa.permission_contract?.mode === "formal_work_item_write";
+  const typeLabel = isImplementation ? "协作工作项" : qa.type === "request_review" ? "评审请求" : "工作询问";
   const label = accepted
     ? "已采纳并继续"
+    : executing
+      ? status === "merging" ? "正在安全合并" : "正在并行处理"
     : waiting
       ? "等待回答"
       : needsUser
@@ -133,9 +135,19 @@ export function buildAgentQaUserPreview(qa: any = {}, kind = "") {
             ? "已回答"
             : "已记录";
   const summary = accepted
-    ? `${to} 的回答已被主 Agent 采纳，${from} 正带着结论继续执行。`
+    ? isImplementation
+      ? `${to} 已完成协作工作项并通过主 Agent 验收，${from} 正从原任务继续。`
+      : `${to} 的回答已被主 Agent 采纳，${from} 正带着结论继续执行。`
+    : executing
+      ? isImplementation
+        ? status === "merging"
+          ? `${to} 已完成实现和验证，主 Agent 正在安全合并代码。`
+          : `${to} 已在独立会话和工作区中并行处理 ${from} 的工作依赖。`
+        : `${to} 正在处理 ${from} 的工作询问。`
     : waiting
-      ? `${from} 正在向 ${to} 确认依赖问题，回答到达后会自动继续。`
+      ? isImplementation
+        ? `主 Agent 已安排 ${to} 处理 ${from} 的工作依赖，验收通过后会自动继续原任务。`
+        : `${from} 正在向 ${to} 确认依赖问题，回答到达后会自动继续。`
       : needsUser
         ? `${from} 和 ${to} 的协作问题需要人工确认，主 Agent 已暂停相关步骤。`
         : failed
@@ -145,8 +157,14 @@ export function buildAgentQaUserPreview(qa: any = {}, kind = "") {
             : `${from} 与 ${to} 的协作问题已记录。`;
   const nextAction = accepted
     ? "继续原任务执行，后续由我汇总验收。"
+    : executing
+      ? status === "merging"
+        ? "等待代码安全合并；完成后自动唤醒原 Agent。"
+        : "目标 Agent 正在并行实现；完成后由主 Agent 验收。"
     : waiting
-      ? "等待目标 Agent 回答；回答到达后会自动唤醒原 Agent。"
+      ? isImplementation
+        ? "等待正式工作项完成并通过验收；通过后自动唤醒原 Agent。"
+        : "等待目标 Agent 回答；回答到达后会自动唤醒原 Agent。"
       : needsUser
         ? "需要你或我人工确认后再继续。"
         : failed
@@ -161,6 +179,8 @@ export function buildAgentQaUserPreview(qa: any = {}, kind = "") {
     qa.injected_at ? "已注入上下文" : "",
     qa.resumed_at ? "已续跑" : "",
     qa.permission_contract?.mode === "advisory_read_only" ? "只读问答" : "",
+    isImplementation ? "正式可写工作项" : "",
+    qa.work_item_task_id ? "已建立任务依赖" : "",
     Array.isArray(qa.answer_evidence) && qa.answer_evidence.length ? `${qa.answer_evidence.length} 条证据已收起` : "",
   ].filter(Boolean).slice(0, 6);
   return {
@@ -182,7 +202,7 @@ export function buildAgentQaUserPreview(qa: any = {}, kind = "") {
   };
 }
 
-export function buildAgentQaMessage(kind: "question" | "answer" | "resume", qa: any, content = "") {
+export function buildAgentQaMessage(kind: "question" | "progress" | "answer" | "resume", qa: any, content = "") {
   const preview = buildAgentQaUserPreview(qa, kind);
   const qaContent = preview.summary || sanitizeAgentQaPreviewText(content || qa.answer || qa.question || "", "Agent 问答进展已更新。", 260);
   return {
@@ -197,13 +217,13 @@ export function buildAgentQaMessage(kind: "question" | "answer" | "resume", qa: 
     qa: {
       ...qa,
       kind,
-      status: kind === "question" ? "waiting" : qa.status || "answered",
+      status: kind === "question" ? "waiting" : qa.status || (kind === "progress" ? "executing" : "answered"),
       user_preview: preview,
     },
   };
 }
 
-export function emitAgentQaEvent(streamRes: any, kind: "question" | "answer" | "resume", qa: any, content = "") {
+export function emitAgentQaEvent(streamRes: any, kind: "question" | "progress" | "answer" | "resume", qa: any, content = "") {
   if (!deps.writeSse) return;
   const preview = buildAgentQaUserPreview(qa, kind);
   deps.writeSse(streamRes, {

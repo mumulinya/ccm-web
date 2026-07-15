@@ -54,6 +54,7 @@ const storage_1 = require("../collaboration/storage");
 const tool_authorization_1 = require("../../tools/tool-authorization");
 const runtime_tool_sync_1 = require("../../tools/runtime-tool-sync");
 const internal_skill_catalog_1 = require("../../skills/internal-skill-catalog");
+const internal_mcp_registry_1 = require("../../tools/internal-mcp-registry");
 const { toolManager } = require("../../tools/tool-manager");
 const execFileAsync = (0, util_1.promisify)(child_process_1.execFile);
 const CCM_DIR = path.join(os.homedir(), ".cc-connect");
@@ -2356,6 +2357,8 @@ async function installMarketplaceItemWithStore(rawItem, store = {}, mode = "inst
     const item = normalizeMarketplaceItem(rawItem, { id: "custom", label: "Custom source", kind: "direct", trust: "custom" });
     if (item.type === "skill")
         (0, internal_skill_catalog_1.assertCcmInternalSkillMutable)(item.name, mode === "update" ? "通过商城更新或覆盖" : "从商城安装或覆盖");
+    if (item.type === "mcp" && (0, internal_mcp_registry_1.isInternalMcpName)(item.name))
+        throw new Error(`内部 MCP "${item.name}" 已随项目安装，不能通过商城覆盖`);
     const now = new Date().toISOString();
     let checksum = "";
     let packagePath = "";
@@ -2439,6 +2442,8 @@ async function updateMarketplaceItem(rawItem) {
 async function uninstallMarketplaceItemWithStore(payload, store = {}, options = {}) {
     const type = String(payload?.type || "").toLowerCase();
     const name = String(payload?.name || "").trim();
+    if (type === "mcp" && (0, internal_mcp_registry_1.isInternalMcpName)(name))
+        throw new Error(`内部 MCP "${name}" 由系统保护，不能卸载`);
     if (!["mcp", "skill"].includes(type) || !name)
         throw new Error("卸载参数无效");
     if (type === "skill")

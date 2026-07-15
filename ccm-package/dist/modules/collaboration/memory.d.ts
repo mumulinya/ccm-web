@@ -409,6 +409,13 @@ export declare function buildGroupSessionMemorySnapshot(groupId: string, memory?
     summaryFile: string;
     snapshotFile: string;
     lastSummarizedMessageId: string;
+    durableBoundaryMessageId: string;
+    providerActiveLastSummarizedMessageId: string;
+    providerActiveCursorStatus: string;
+    extractionCursorGeneration: number;
+    postCompactSessionStateReset: any;
+    postCompactSessionStateResetValid: boolean;
+    postCompactSessionStateResetIssues: string[];
     summaryChecksum: string;
     markdownChecksum: string;
     markdownChars: number;
@@ -605,6 +612,9 @@ export declare function buildGroupCompactFileReferenceReadPlanRevalidationGate(g
     };
     prompt_patch: string;
 };
+export declare function renderGroupPostCompactInvokedSkillAttachments(source: any): string;
+export declare function renderGroupPostCompactPlanAttachment(source: any): string;
+export declare function renderGroupPostCompactDynamicContextDelta(source: any): string;
 export declare function buildGroupMemoryContext(memory: any): string;
 export declare function deleteGroupSessionMemoryArtifacts(groupId: string, sessionId: string): {
     schema: string;
@@ -661,6 +671,38 @@ export declare function deleteGroupSessionMemoryArtifacts(groupId: string, sessi
     } | {
         deleted: number;
     };
+    reactiveCompactRetryOwnershipArtifacts: {
+        deleted: number;
+        groupId: string;
+        groupSessionId: string;
+        file: string;
+    } | {
+        deleted: number;
+    };
+    promptCacheBreakDetectionArtifacts: {
+        file: string;
+        deleted: number;
+    } | {
+        deleted: number;
+    };
+    workerContextCompactSessionArtifacts: {
+        deleted: number;
+        status: string;
+        schema?: undefined;
+        groupId?: undefined;
+        groupSessionId?: undefined;
+        scopeId?: undefined;
+    } | {
+        schema: string;
+        status: string;
+        groupId: string;
+        groupSessionId: string;
+        scopeId: string;
+        deleted: number;
+    } | {
+        deleted: number;
+    };
+    conflictResolutionMaintenanceSchedulerArtifacts: any;
     deletedAt: string;
 };
 export declare function appendGroupMemorySnipBoundaryMarker(groupId: string, groupSessionId: string, removedMessageIds: string[], options?: any): {
@@ -1003,6 +1045,28 @@ export declare function recordGroupMemoryReloadAudit(groupId: string, input?: an
         summaryChecksum: any;
     };
 };
+export declare function buildGroupPostCompactDynamicContextCatalog(groupId: string, memory?: any, options?: any): {
+    schema: string;
+    groupId: string;
+    tools: {
+        name: string;
+        description: string;
+        server: string;
+        line: string;
+    }[];
+    skills: {
+        name: string;
+        description: string;
+        contentHash: string;
+        line: string;
+    }[];
+    mcpInstructions: {
+        name: string;
+        instructions: string;
+        block: string;
+    }[];
+    agents: any;
+};
 export declare function scheduleGroupMemoryAutoCompaction(groupId: string, options?: any): {
     scheduled: boolean;
     reason: string;
@@ -1049,6 +1113,8 @@ export declare function runGroupMemoryAutoCompactionNow(groupId: string, options
     typedMemoryScopeId?: undefined;
     logDistillation?: undefined;
     providerNativeCompactSessionCapacityReset?: undefined;
+    postCompactSessionStateReset?: undefined;
+    promptCacheCompactionNotification?: undefined;
     error?: undefined;
 } | {
     success: boolean;
@@ -1067,6 +1133,8 @@ export declare function runGroupMemoryAutoCompactionNow(groupId: string, options
     typedMemoryScopeId?: undefined;
     logDistillation?: undefined;
     providerNativeCompactSessionCapacityReset?: undefined;
+    postCompactSessionStateReset?: undefined;
+    promptCacheCompactionNotification?: undefined;
     error?: undefined;
 } | {
     success: boolean;
@@ -1085,6 +1153,8 @@ export declare function runGroupMemoryAutoCompactionNow(groupId: string, options
     typedMemoryScopeId?: undefined;
     logDistillation?: undefined;
     providerNativeCompactSessionCapacityReset?: undefined;
+    postCompactSessionStateReset?: undefined;
+    promptCacheCompactionNotification?: undefined;
     error?: undefined;
 } | {
     success: boolean;
@@ -1103,6 +1173,8 @@ export declare function runGroupMemoryAutoCompactionNow(groupId: string, options
     typedMemoryScopeId?: undefined;
     logDistillation?: undefined;
     providerNativeCompactSessionCapacityReset?: undefined;
+    postCompactSessionStateReset?: undefined;
+    promptCacheCompactionNotification?: undefined;
     error?: undefined;
 } | {
     success: boolean;
@@ -1136,6 +1208,8 @@ export declare function runGroupMemoryAutoCompactionNow(groupId: string, options
     typedMemoryScopeId: string;
     logDistillation: any;
     providerNativeCompactSessionCapacityReset: any;
+    postCompactSessionStateReset: any;
+    promptCacheCompactionNotification: any;
     circuitBreaker: any;
     reason?: undefined;
     groupId?: undefined;
@@ -1177,6 +1251,8 @@ export declare function runGroupMemoryAutoCompactionNow(groupId: string, options
     typedMemoryScopeId?: undefined;
     logDistillation?: undefined;
     providerNativeCompactSessionCapacityReset?: undefined;
+    postCompactSessionStateReset?: undefined;
+    promptCacheCompactionNotification?: undefined;
 }>;
 export declare function ensureGroupMemoryAutoCompactionHook(): {
     registered: boolean;
