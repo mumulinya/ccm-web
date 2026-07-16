@@ -1,0 +1,146 @@
+import { InternalMcpTaskContext } from "./internal-mcp-runtime";
+export declare const MEMORY_CONTEXT_CONSUMPTION_CHALLENGE_SCHEMA = "ccm-memory-context-consumption-challenge-v1";
+export declare const MEMORY_CONTEXT_CONSUMPTION_RECEIPT_SCHEMA = "ccm-memory-context-consumption-receipt-v1";
+export declare function createMemoryContextConsumptionChallenge(input?: any): {
+    challenge_signature: string;
+    schema: string;
+    version: number;
+    challenge_id: string;
+    group_id: string;
+    group_session_id: string;
+    task_id: string;
+    execution_id: string;
+    project: string;
+    task_agent_session_id: string;
+    attempt: number;
+    issued_at: string;
+};
+export declare function verifyMemoryContextConsumptionChallenge(challenge: any, expected?: any): {
+    valid: boolean;
+    issues: string[];
+    challenge: {
+        challenge_signature: string;
+        schema: string;
+        version: number;
+        challenge_id: string;
+        group_id: string;
+        group_session_id: string;
+        task_id: string;
+        execution_id: string;
+        project: string;
+        task_agent_session_id: string;
+        attempt: number;
+        issued_at: string;
+    };
+};
+export declare function memoryContextConsumptionReceiptFile(challengeId: any): string;
+export declare function memoryContextConsumptionReceiptDirectory(): string;
+export declare function inspectMemoryContextConsumptionReceiptFile(challengeId: any): {
+    file: string;
+    receiptSignature: string;
+    valid: boolean;
+    issues: string[];
+    receipt: any;
+    present: boolean;
+};
+export declare function memoryContextConsumptionChallengeReferenceState(challengeId: string, options?: any): {
+    referenced: boolean;
+    uncertain: boolean;
+    referenceCount: number;
+    unreadableSnapshotCount: number;
+};
+export declare function removeMemoryContextConsumptionReceiptIfUnreferenced(challengeId: any, options?: any): {
+    removed: boolean;
+    reason: any;
+    challengeId: string;
+    file: string;
+};
+export declare function reconcileMemoryContextConsumptionReceipts(options?: any): {
+    schema: string;
+    generatedAt: string;
+    directory: string;
+    snapshotDirectory: string;
+    policy: {
+        orphanRetentionDays: number;
+        orphanGraceHours: number;
+        maxOrphanReceipts: number;
+    };
+    prune: boolean;
+    pruningBlocked: boolean;
+    summary: {
+        receiptFileCount: number;
+        referencedChallengeCount: number;
+        referencedValidCount: number;
+        referencedMissingCount: number;
+        referencedInvalidCount: number;
+        orphanCount: number;
+        orphanFreshCount: number;
+        orphanStaleCount: number;
+        orphanOverflowCount: number;
+        orphanInvalidCount: number;
+        prunableCount: number;
+        prunedCount: number;
+        skippedCount: number;
+        unreadableSnapshotCount: number;
+        unexpectedFileCount: number;
+    };
+    referencedRows: any[];
+    orphanRows: {
+        challengeId: string;
+        status: string;
+        valid: boolean;
+        issues: string[];
+        ageMs: number;
+        stale: boolean;
+        overflow: boolean;
+        prunable: boolean;
+        file: string;
+    }[];
+    unreadableSnapshots: any[];
+    unexpectedFiles: string[];
+    pruned: any[];
+    skipped: any[];
+};
+export declare function attachMemoryContextConsumptionChallenge(memoryContext: any, challenge: any): any;
+export declare function recordMemoryContextConsumptionReceipt(context: InternalMcpTaskContext, args?: any): {
+    receipt_signature: string;
+    schema: string;
+    version: number;
+    challenge_id: string;
+    challenge_signature: string;
+    group_id: string;
+    group_session_id: string;
+    task_id: string;
+    execution_id: string;
+    project: string;
+    task_agent_session_id: string;
+    agent_type: string;
+    native_session_id: string;
+    attempt: number;
+    state: string;
+    source: string;
+    server: string;
+    tool: string;
+    acknowledged_at: string;
+};
+export declare function readMemoryContextConsumptionReceipt(challenge: any, expected?: any): {
+    valid: boolean;
+    issues: string[];
+    file: string;
+    receipt: any;
+    challenge: {
+        challenge_signature: string;
+        schema: string;
+        version: number;
+        challenge_id: string;
+        group_id: string;
+        group_session_id: string;
+        task_id: string;
+        execution_id: string;
+        project: string;
+        task_agent_session_id: string;
+        attempt: number;
+        issued_at: string;
+    };
+    receiptSignature: string;
+};

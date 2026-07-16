@@ -1,0 +1,12 @@
+{
+  "pass": true,
+  "internal_mcp_count": 7,
+  "tools_count": 33,
+  "bundled_feishu_runtime_registered": true,
+  "internal_mcp_hidden_from_external_catalog": true,
+  "edit_and_delete_protected": true,
+  "secrets_hidden": true,
+  "npm_package_contains_registry_and_manifests": true,
+  "package_discovery_independent_of_working_directory": true,
+  "packed_files_checked": 18
+}
