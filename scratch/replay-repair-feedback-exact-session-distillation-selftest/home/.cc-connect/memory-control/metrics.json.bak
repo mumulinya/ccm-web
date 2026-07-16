@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "counters": {
+    "recallAttempts": 3
+  },
+  "events": [
+    {
+      "id": "metric-mrland6t-4d48",
+      "at": "2026-07-14T23:40:09.221Z",
+      "type": "recall_miss",
+      "scope": "global",
+      "scopeId": "global-agent",
+      "sessionId": "",
+      "queryHash": "799f5b7852a4bd73",
+      "selected": []
+    },
+    {
+      "id": "metric-mrlandd9-3f53",
+      "at": "2026-07-14T23:40:09.453Z",
+      "type": "recall_miss",
+      "scope": "global",
+      "scopeId": "global-agent",
+      "sessionId": "",
+      "queryHash": "799f5b7852a4bd73",
+      "selected": []
+    },
+    {
+      "id": "metric-mrlandjl-e745",
+      "at": "2026-07-14T23:40:09.681Z",
+      "type": "recall_miss",
+      "scope": "global",
+      "scopeId": "global-agent",
+      "sessionId": "",
+      "queryHash": "799f5b7852a4bd73",
+      "selected": []
+    }
+  ],
+  "updatedAt": "2026-07-14T23:40:09.681Z"
+}

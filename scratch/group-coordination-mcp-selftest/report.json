@@ -1,0 +1,42 @@
+{
+  "pass": true,
+  "protocol": "real-json-rpc-stdio-mcp",
+  "tools": [
+    "get_coordination_status",
+    "report_blocker",
+    "request_coordination",
+    "request_review"
+  ],
+  "idempotency": true,
+  "restart_persistence": true,
+  "task_session_bound": true,
+  "protected_runtime_injection": {
+    "claudecode": {
+      "snapshot": "7fd01959f8e13c22",
+      "config": "scratch\\group-coordination-mcp-selftest\\runtime\\claudecode\\7fd01959f8e13c22\\mcp-7fd01959f8e13c22.json",
+      "isolation": "strict"
+    },
+    "cursor": {
+      "snapshot": "0766083e4408fe90",
+      "config": "scratch\\group-coordination-mcp-selftest\\runtime\\cursor\\0766083e4408fe90\\plugin\\.mcp.json",
+      "isolation": "strict"
+    },
+    "codex": {
+      "snapshot": "518a120411ec2966",
+      "config": "scratch\\group-coordination-mcp-selftest\\runtime\\codex\\518a120411ec2966\\config.toml",
+      "isolation": "strict"
+    },
+    "gemini": {
+      "snapshot": "8f45ee60a1b27980",
+      "config": "scratch\\group-coordination-mcp-selftest\\work\\.gemini\\settings.json",
+      "isolation": "allowlist"
+    },
+    "qoder": {
+      "snapshot": "d033da086778f1ba",
+      "config": "scratch\\group-coordination-mcp-selftest\\work\\.qoder\\settings.local.json",
+      "isolation": "project-scope"
+    }
+  },
+  "request_id": "gcr_mrlwl5sv_de18950bd5",
+  "store": "scratch\\group-coordination-mcp-selftest\\group-coordination-requests.json"
+}

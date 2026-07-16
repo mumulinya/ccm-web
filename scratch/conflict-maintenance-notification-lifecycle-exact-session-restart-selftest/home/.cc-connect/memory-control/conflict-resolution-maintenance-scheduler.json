@@ -1,0 +1,18 @@
+{
+  "schema": "ccm-conflict-resolution-maintenance-scheduler-state-v1",
+  "version": 1,
+  "groups": {
+    "phase312-maintenance-notification-group--gcs_phase312_b": {
+      "source_group_id": "phase312-maintenance-notification-group",
+      "group_session_id": "gcs_phase312_b",
+      "typed_scope_id": "phase312-maintenance-notification-group--gcs_phase312_b",
+      "exact_session": true,
+      "failure_count": 0,
+      "next_retry_at": "",
+      "last_success_at": "2026-07-15T21:05:00.000Z",
+      "last_operation_key": "phase312-maintenance-notification-group--gcs_phase312_b:5947165",
+      "last_status": "completed"
+    }
+  },
+  "updated_at": "2026-07-15T21:05:00.000Z"
+}

@@ -1,0 +1,64 @@
+{
+  "schema": "ccm-group-typed-memory-shape-trend-ledger-v1",
+  "version": 1,
+  "scopeId": "phase311-repair-completion-maintenance-group--gcs_phase311_b",
+  "bodyFree": true,
+  "retentionDays": 180,
+  "mutableDays": 35,
+  "maxKeysPerBucket": 1200,
+  "generation": 5,
+  "headBucketChecksum": "c9069aa7ebb4a6c2f01764f3d5e2ef2fc56a55768ed20b0f62ae19a60f79b033",
+  "buckets": [
+    {
+      "date": "2026-07-14",
+      "sealed": false,
+      "sealedAt": "",
+      "selector": {
+        "runCount": 0,
+        "candidateTotal": 0,
+        "selectedTotal": 0,
+        "emptyCount": 0,
+        "selectedAgeWeightedDays": 0,
+        "selectedAgeDocumentCount": 0,
+        "freshCount": 0,
+        "staleCount": 0,
+        "candidateCapacityRunCount": 0,
+        "selectionCapacityRunCount": 0
+      },
+      "write": {
+        "eventCount": 5,
+        "changedCount": 4,
+        "createCount": 3,
+        "updateCount": 1,
+        "noopCount": 1,
+        "growthBytes": 5143,
+        "afterBytesTotal": 10295,
+        "maxAfterBytes": 2601,
+        "nearBodyLimitCount": 0,
+        "truncatedBodyCount": 0
+      },
+      "consumption": {
+        "outcomeCount": 0,
+        "deliveredDocumentCount": 0,
+        "usedDocumentCount": 0,
+        "verifiedDocumentCount": 0,
+        "ignoredDocumentCount": 0,
+        "unreportedDocumentCount": 0,
+        "strongReceiptOutcomeCount": 0,
+        "unexpectedClaimCount": 0
+      },
+      "contributionKeys": [
+        "3070528b1e025e7770a6ff4d768dd87e",
+        "4ea3ff1614586cfa32a3ddc2b61b6f3a",
+        "0344620f6f712234edc572a413ba833d",
+        "a085c4fbef3d56a7eb3bb80b03d98e70",
+        "f3e020219511aa5bc4b1a80ae078887d"
+      ],
+      "previousBucketChecksum": "",
+      "updatedAt": "2026-07-14T23:58:34.236Z",
+      "checksum": "c9069aa7ebb4a6c2f01764f3d5e2ef2fc56a55768ed20b0f62ae19a60f79b033"
+    }
+  ],
+  "updatedAt": "2026-07-14T23:58:34.236Z",
+  "checksum": "9b80c5e2f336c467bb5d37b22f74af7b868f20ae17beb4bca71dd8391d3fd4ee"
+}

@@ -1,0 +1,91 @@
+{
+  "schema": "ccm-compact-boundary-replay-repair-work-items-v1",
+  "version": 1,
+  "groupId": "phase306-runtime-group",
+  "file": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\provider-reliability-exact-session-promotion-selftest\\home\\.cc-connect\\group-memory-replay-repair-work-items\\phase306-runtime-group.json",
+  "updatedAt": "2026-07-15T08:00:00.000Z",
+  "stats": {
+    "total": 1,
+    "openItemCount": 1,
+    "pendingCount": 1,
+    "inProgressCount": 0,
+    "blockedCount": 0,
+    "completedCount": 0,
+    "cancelledCount": 0
+  },
+  "items": [
+    {
+      "schema": "ccm-provider-dispatch-override-followup-receipt-validation-repair-work-item-v1",
+      "id": "provider-dispatch-override-followup-receipt-validation-repair:5a6ed0a95352c1",
+      "work_item_id": "provider-dispatch-override-followup-receipt-validation-repair:5a6ed0a95352c1",
+      "source": "worker_context_provider_dispatch_override_followup_receipt_contract_validation_repair",
+      "component": "worker_context_provider_dispatch_override_followup_receipt_contract",
+      "subject": "Repair provider override follow-up receipt contract for runtime-private-project",
+      "status": "pending",
+      "priority": "high",
+      "owner": "group-main-agent",
+      "groupId": "phase306-runtime-group",
+      "project": "runtime-private-project",
+      "target_project": "runtime-private-project",
+      "dispatch_target": "runtime-private-project",
+      "agent_type": "codex",
+      "repair_target": "runtime-private-project",
+      "binding_id": "worker-context-packet-assignment:f5aa94f97cd036",
+      "worker_context_packet_binding_id": "worker-context-packet-assignment:f5aa94f97cd036",
+      "assignment_id": "phase306-runtime-assignment",
+      "dispatch_key": "phase306-runtime-dispatch",
+      "worker_context_packet_id": "phase306-runtime-packet",
+      "task_id": "",
+      "task_agent_session_id": "",
+      "execution_id": "phase306-runtime-execution",
+      "provider_override_followup_contract_validation_id": "provider-dispatch-override-followup-receipt-contract-validation:4fbf7fc768b4dd",
+      "provider_override_followup_contract_rel_paths": [
+        "private/runtime/path"
+      ],
+      "provider_override_followup_contract_work_item_ids": [],
+      "provider_override_followup_contract_override_ids": [],
+      "provider_override_followup_contract_gap_codes": [
+        "receipt_status_not_done",
+        "missing_memory_provenance_usage",
+        "missing_provider_override_followup_reverified_rows",
+        "missing_rel_path_coverage"
+      ],
+      "instruction": "Return a corrected CCM_AGENT_RECEIPT.memoryProvenanceUsage covering every provider override follow-up repaired-history relPath, work item, and override id.",
+      "expected": "validation.status=passed; providerDispatchOverrideFollowupHistoryReverified=true; currentSourceVerified=true for every required row",
+      "prompt_patch": "Only repair the final receipt evidence; do not redo unrelated implementation.\nRequired relPath: private/runtime/path.\nValidation gaps: receipt_status_not_done, missing_memory_provenance_usage, missing_provider_override_followup_reverified_rows, missing_rel_path_coverage.\nEach corrected memoryProvenanceUsage row must set repairGapType=provider_dispatch_override_followup, currentSourceVerified=true, and providerDispatchOverrideFollowupHistoryReverified=true.",
+      "reason": "provider override follow-up receipt contract missing required reverified memoryProvenanceUsage evidence",
+      "blockers": [
+        "receipt_status_not_done",
+        "missing_memory_provenance_usage",
+        "missing_provider_override_followup_reverified_rows",
+        "missing_rel_path_coverage"
+      ],
+      "needs": [
+        "corrected CCM_AGENT_RECEIPT.memoryProvenanceUsage"
+      ],
+      "evidence": [
+        "validation_id=provider-dispatch-override-followup-receipt-contract-validation:4fbf7fc768b4dd",
+        "binding_id=worker-context-packet-assignment:f5aa94f97cd036",
+        "worker_context_packet_id=phase306-runtime-packet",
+        "validation_status=failed",
+        "gap=receipt_status_not_done",
+        "gap=missing_memory_provenance_usage",
+        "gap=missing_provider_override_followup_reverified_rows",
+        "gap=missing_rel_path_coverage"
+      ],
+      "verification": [],
+      "createdAt": "2026-07-15T08:00:00.000Z",
+      "updatedAt": "2026-07-15T08:00:00.000Z",
+      "completedAt": "",
+      "completion_source": "",
+      "resolutionReason": ""
+    }
+  ],
+  "latestProviderDispatchOverrideFollowupReceiptValidationRepair": {
+    "work_item_id": "provider-dispatch-override-followup-receipt-validation-repair:5a6ed0a95352c1",
+    "validation_id": "provider-dispatch-override-followup-receipt-contract-validation:4fbf7fc768b4dd",
+    "status": "pending",
+    "binding_id": "worker-context-packet-assignment:f5aa94f97cd036",
+    "at": "2026-07-15T08:00:00.000Z"
+  }
+}

@@ -1,0 +1,110 @@
+{
+  "schema": "ccm-replay-repair-main-agent-dispatch-brief-assignment-ledger-v1",
+  "version": 1,
+  "groupId": "phase309-provider-ranking-memory-usage-group",
+  "file": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\provider-ranking-memory-usage-exact-session-repair-selftest\\home\\.cc-connect\\group-memory-replay-repair-dispatch-bindings\\phase309-provider-ranking-memory-usage-group.json",
+  "updatedAt": "2026-07-15T16:00:00.000Z",
+  "bindingCount": 2,
+  "entries": [
+    {
+      "schema": "ccm-replay-repair-main-agent-dispatch-brief-assignment-binding-v1",
+      "binding_id": "phase309-shared-binding",
+      "assignment_id": "phase309-shared-assignment",
+      "dispatch_key": "phase309-shared-dispatch",
+      "groupId": "phase309-provider-ranking-memory-usage-group",
+      "groupSessionId": "gcs_phase309_a",
+      "group_session_id": "gcs_phase309_a",
+      "project": "api",
+      "worker_context_packet_id": "phase309-shared-packet",
+      "provider_ranking_compact_repair_receipt_memory_contract": {
+        "schema": "ccm-provider-ranking-compact-repair-receipt-memory-usage-contract-v1",
+        "active": true,
+        "doc_rel_path": "provider-ranking-provenance-compact-repair-receipt-memory.md",
+        "required_receipt_fields": [
+          "memoryUsed",
+          "memoryIgnored"
+        ],
+        "authorization_boundary": "ranking evidence only, not authorization; fresh valid provider switch decision receipt required"
+      },
+      "worker_context_packet": {
+        "packet_id": "phase309-shared-packet",
+        "project": "api",
+        "group_session_id": "gcs_phase309_a",
+        "provider_ranking_compact_repair_receipt_memory_contract": {
+          "schema": "ccm-provider-ranking-compact-repair-receipt-memory-usage-contract-v1",
+          "active": true,
+          "doc_rel_path": "provider-ranking-provenance-compact-repair-receipt-memory.md",
+          "required_receipt_fields": [
+            "memoryUsed",
+            "memoryIgnored"
+          ],
+          "authorization_boundary": "ranking evidence only, not authorization; fresh valid provider switch decision receipt required"
+        },
+        "acceptance": {
+          "provider_ranking_compact_repair_receipt_memory_usage_required": true,
+          "provider_ranking_compact_repair_receipt_memory_authorization_boundary_required": true
+        }
+      },
+      "worker_context_packet_receipt": {
+        "worker_context_packet_id": "phase309-shared-packet",
+        "project": "api",
+        "status": "completed",
+        "memoryUsed": [
+          "provider-ranking-provenance-compact-repair-receipt-memory.md; usageState=verified"
+        ],
+        "memoryIgnored": []
+      },
+      "at": "2026-07-15T16:00:00.000Z"
+    },
+    {
+      "schema": "ccm-replay-repair-main-agent-dispatch-brief-assignment-binding-v1",
+      "binding_id": "phase309-shared-binding",
+      "assignment_id": "phase309-shared-assignment",
+      "dispatch_key": "phase309-shared-dispatch",
+      "groupId": "phase309-provider-ranking-memory-usage-group",
+      "groupSessionId": "gcs_phase309_b",
+      "group_session_id": "gcs_phase309_b",
+      "project": "api",
+      "worker_context_packet_id": "phase309-shared-packet",
+      "provider_ranking_compact_repair_receipt_memory_contract": {
+        "schema": "ccm-provider-ranking-compact-repair-receipt-memory-usage-contract-v1",
+        "active": true,
+        "doc_rel_path": "provider-ranking-provenance-compact-repair-receipt-memory.md",
+        "required_receipt_fields": [
+          "memoryUsed",
+          "memoryIgnored"
+        ],
+        "authorization_boundary": "ranking evidence only, not authorization; fresh valid provider switch decision receipt required"
+      },
+      "worker_context_packet": {
+        "packet_id": "phase309-shared-packet",
+        "project": "api",
+        "group_session_id": "gcs_phase309_b",
+        "provider_ranking_compact_repair_receipt_memory_contract": {
+          "schema": "ccm-provider-ranking-compact-repair-receipt-memory-usage-contract-v1",
+          "active": true,
+          "doc_rel_path": "provider-ranking-provenance-compact-repair-receipt-memory.md",
+          "required_receipt_fields": [
+            "memoryUsed",
+            "memoryIgnored"
+          ],
+          "authorization_boundary": "ranking evidence only, not authorization; fresh valid provider switch decision receipt required"
+        },
+        "acceptance": {
+          "provider_ranking_compact_repair_receipt_memory_usage_required": true,
+          "provider_ranking_compact_repair_receipt_memory_authorization_boundary_required": true
+        }
+      },
+      "worker_context_packet_receipt": {
+        "worker_context_packet_id": "phase309-shared-packet",
+        "project": "api",
+        "status": "completed",
+        "memoryUsed": [
+          "provider-ranking-provenance-compact-repair-receipt-memory.md; usageState=verified"
+        ],
+        "memoryIgnored": []
+      },
+      "at": "2026-07-15T16:00:00.000Z"
+    }
+  ]
+}

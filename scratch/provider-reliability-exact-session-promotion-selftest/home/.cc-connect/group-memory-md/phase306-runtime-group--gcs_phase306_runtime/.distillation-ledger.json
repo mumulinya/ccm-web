@@ -1,0 +1,129 @@
+{
+  "schema": "ccm-group-typed-memory-distillation-ledger-v1",
+  "version": 1,
+  "groupId": "phase306-runtime-group--gcs_phase306_runtime",
+  "facts": {},
+  "updatedAt": "2026-07-15T08:00:00.000Z",
+  "sourceGroupId": "phase306-runtime-group",
+  "groupSessionId": "gcs_phase306_runtime",
+  "pressureProvenanceProviderDispatchOverrideFollowupReceiptValidationArchive": {
+    "schema": "ccm-pressure-provenance-provider-dispatch-override-followup-receipt-validation-distillation-v1",
+    "version": 1,
+    "sourceGroupId": "phase306-runtime-group",
+    "groupSessionId": "gcs_phase306_runtime",
+    "exactSession": true,
+    "archived_count": 1,
+    "attempt_count": 1,
+    "failed_count": 1,
+    "passed_count": 0,
+    "attribution_count": 1,
+    "escalated_attribution_count": 0,
+    "repaired_attribution_count": 0,
+    "attributions": [
+      {
+        "agent_type": "codex",
+        "project": "runtime-private-project",
+        "attempt_count": 1,
+        "failed_count": 1,
+        "passed_count": 0,
+        "consecutive_failure_count": 1,
+        "latest_status": "failed",
+        "repair_verified": false,
+        "first_attempt_at": "2026-07-15T08:00:00.000Z",
+        "last_attempt_at": "2026-07-15T08:00:00.000Z",
+        "last_failed_at": "2026-07-15T08:00:00.000Z",
+        "last_passed_at": "",
+        "validation_ids": [
+          "provider-dispatch-override-followup-receipt-contract-validation:4fbf7fc768b4dd"
+        ],
+        "repair_work_item_ids": [
+          "provider-dispatch-override-followup-receipt-validation-repair:5a6ed0a95352c1"
+        ],
+        "rel_paths": [
+          "private/runtime/path"
+        ],
+        "followup_work_item_ids": [],
+        "override_ids": [],
+        "gap_codes": [
+          "receipt_status_not_done",
+          "missing_memory_provenance_usage",
+          "missing_provider_override_followup_reverified_rows",
+          "missing_rel_path_coverage"
+        ]
+      }
+    ],
+    "rows": [
+      {
+        "schema": "ccm-pressure-provenance-provider-dispatch-override-followup-receipt-validation-distilled-row-v1",
+        "version": 1,
+        "groupId": "phase306-runtime-group",
+        "groupSessionId": "gcs_phase306_runtime",
+        "project": "runtime-private-project",
+        "agent_type": "codex",
+        "validation_id": "provider-dispatch-override-followup-receipt-contract-validation:4fbf7fc768b4dd",
+        "binding_id": "worker-context-packet-assignment:f5aa94f97cd036",
+        "assignment_id": "phase306-runtime-assignment",
+        "dispatch_key": "phase306-runtime-dispatch",
+        "worker_context_packet_id": "phase306-runtime-packet",
+        "task_id": "",
+        "worker_handoff_id": "",
+        "task_agent_session_id": "",
+        "native_session_id": "",
+        "execution_id": "phase306-runtime-execution",
+        "receipt_status": "failed",
+        "attempt_status": "failed",
+        "contract_satisfied": false,
+        "repair_work_item_id": "provider-dispatch-override-followup-receipt-validation-repair:5a6ed0a95352c1",
+        "repair_work_item_status": "pending",
+        "required_rel_paths": [
+          "private/runtime/path"
+        ],
+        "required_followup_work_item_ids": [],
+        "required_override_ids": [],
+        "gap_codes": [
+          "receipt_status_not_done",
+          "missing_memory_provenance_usage",
+          "missing_provider_override_followup_reverified_rows",
+          "missing_rel_path_coverage"
+        ],
+        "gap_reasons": [
+          "receipt status failed is not done/completed/ok",
+          "receipt missing memoryProvenanceUsage rows",
+          "receipt missing provider override follow-up reverified memoryProvenanceUsage rows",
+          "receipt missing reverified relPath coverage: private/runtime/path"
+        ],
+        "receipt_evidence_reasons": [],
+        "memory_provenance_usage_count": 0,
+        "provider_override_followup_reverified_row_count": 0,
+        "current_source_verified_count": 0,
+        "reason": "provider override follow-up receipt contract missing required reverified memoryProvenanceUsage evidence",
+        "attempt_at": "2026-07-15T08:00:00.000Z",
+        "first_seen_at": "2026-07-15T08:00:00.000Z",
+        "last_seen_at": "2026-07-15T08:00:00.000Z",
+        "source_index": 0,
+        "row_id": "provider-dispatch-override-followup-receipt-validation:99d9e3ed18b1478bd8ba6f23",
+        "seen_count": 1
+      }
+    ],
+    "updatedAt": "2026-07-15T08:00:00.000Z"
+  },
+  "distillationMutation": {
+    "schema": "ccm-group-typed-memory-distillation-mutation-commit-v1",
+    "version": 1,
+    "groupId": "phase306-runtime-group--gcs_phase306_runtime",
+    "mutationKind": "provider_dispatch_override_followup_validation",
+    "mutationKinds": [
+      "provider_dispatch_override_followup_validation"
+    ],
+    "leaseId": "gtmdl_bf86b067303a61c521f29b91aa6e8392",
+    "fencingToken": 1784071370341072,
+    "ownerPid": 16072,
+    "ownerHostname": "DESKTOP-MN23N8A",
+    "acquiredAt": "2026-07-14T23:22:50.341Z",
+    "renewedAt": "2026-07-14T23:22:50.430Z",
+    "waitedMs": 0,
+    "recoveredLeaseCount": 0,
+    "writeSequence": 1,
+    "committedAt": "2026-07-14T23:22:50.446Z"
+  }
+}

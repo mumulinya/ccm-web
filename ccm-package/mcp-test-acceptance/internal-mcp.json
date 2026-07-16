@@ -1,0 +1,19 @@
+{
+  "schema": "ccm-internal-mcp-v1",
+  "name": "ccm__test_acceptance",
+  "display_name": "TestAgent 验收 MCP",
+  "description": "创建并运行原生 TestAgent 工作单，读取计划、状态、结论与截图等验收证据。",
+  "version": "1.0.0",
+  "entry": "../dist/integrations/test-acceptance-mcp.js",
+  "lifecycle": "task_scoped",
+  "lifecycle_label": "由主 Agent 发起验收",
+  "scopes": ["群聊主 Agent", "项目子 Agent", "TestAgent"],
+  "tools": [
+    { "name": "create_test_work_order", "label": "创建验收工作单", "description": "基于绑定任务创建原生 TestAgent 工作单。" },
+    { "name": "start_test_run", "label": "启动验收", "description": "后台执行命令、接口和浏览器验收。" },
+    { "name": "get_test_plan", "label": "查看测试计划", "description": "读取结构化测试范围和执行计划。" },
+    { "name": "get_test_status", "label": "查询测试状态", "description": "查询后台 TestAgent 运行状态。" },
+    { "name": "get_test_verdict", "label": "读取验收结论", "description": "读取 canAccept、报告摘要和证据完整性。" },
+    { "name": "list_test_evidence", "label": "列出测试证据", "description": "列出截图、报告、浏览器和命令证据。" }
+  ]
+}

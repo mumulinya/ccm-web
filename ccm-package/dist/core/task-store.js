@@ -1,0 +1,586 @@
+"use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.loadTasksFromSqlite = loadTasksFromSqlite;
+exports.saveTasksToSqlite = saveTasksToSqlite;
+exports.appendTaskLogRecord = appendTaskLogRecord;
+exports.getTaskLogRecords = getTaskLogRecords;
+exports.clearTaskLogRecords = clearTaskLogRecords;
+exports.loadTaskLogsFromSqlite = loadTaskLogsFromSqlite;
+exports.replaceTaskLogsInSqlite = replaceTaskLogsInSqlite;
+exports.appendGroupLogRecord = appendGroupLogRecord;
+exports.loadGroupLogsFromSqlite = loadGroupLogsFromSqlite;
+exports.replaceGroupLogsInSqlite = replaceGroupLogsInSqlite;
+exports.verifySqliteTaskStore = verifySqliteTaskStore;
+exports.getSqliteTaskStoreStatus = getSqliteTaskStoreStatus;
+exports.checkpointSqliteTaskStore = checkpointSqliteTaskStore;
+exports.backupSqliteTaskStore = backupSqliteTaskStore;
+exports.exportSqliteTaskStore = exportSqliteTaskStore;
+exports.restoreSqliteTaskStore = restoreSqliteTaskStore;
+exports.closeSqliteTaskStore = closeSqliteTaskStore;
+exports.getSqliteTaskStorePaths = getSqliteTaskStorePaths;
+const crypto = __importStar(require("crypto"));
+const fs = __importStar(require("fs"));
+const os = __importStar(require("os"));
+const path = __importStar(require("path"));
+const better_sqlite3_1 = __importDefault(require("better-sqlite3"));
+const STORE_SCHEMA_VERSION = 1;
+const DEFAULT_STORE_DIR = path.join(os.homedir(), ".cc-connect");
+const STORE_DIR = path.resolve(process.env.CCM_TASK_STORE_DIR || DEFAULT_STORE_DIR);
+const DATABASE_FILE = path.join(STORE_DIR, "ccm.db");
+const LEGACY_BACKUP_DIR = path.join(STORE_DIR, "legacy-json-backups");
+const DATABASE_BACKUP_DIR = path.join(STORE_DIR, "database-backups");
+const EXPORT_DIR = path.join(STORE_DIR, "exports");
+const LEGACY_FILES = {
+    tasks: path.join(STORE_DIR, "tasks.json"),
+    taskLogs: path.join(STORE_DIR, "task-logs.json"),
+    groupLogs: path.join(STORE_DIR, "group-logs.json"),
+};
+let database = null;
+let initialized = false;
+function isoFileStamp() {
+    return new Date().toISOString().replace(/[:.]/g, "-");
+}
+function stableHash(value) {
+    return crypto.createHash("sha256").update(value).digest("hex");
+}
+function stringifyJson(value) {
+    return JSON.stringify(value ?? null);
+}
+function parseJson(value, fallback) {
+    try {
+        return JSON.parse(String(value || ""));
+    }
+    catch {
+        return fallback;
+    }
+}
+function writeJsonAtomic(file, value) {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const temp = `${file}.${process.pid}.${Date.now()}.tmp`;
+    fs.writeFileSync(temp, `${JSON.stringify(value, null, 2)}\n`, "utf-8");
+    fs.renameSync(temp, file);
+}
+function readLegacyJson(file, expected) {
+    for (const candidate of [file, `${file}.bak`]) {
+        if (!fs.existsSync(candidate))
+            continue;
+        try {
+            const parsed = JSON.parse(fs.readFileSync(candidate, "utf-8"));
+            if (expected === "array" && Array.isArray(parsed))
+                return { source: candidate, value: parsed };
+            if (expected === "object" && parsed && typeof parsed === "object" && !Array.isArray(parsed))
+                return { source: candidate, value: parsed };
+        }
+        catch { }
+    }
+    return null;
+}
+function archiveLegacyFiles(file) {
+    if (process.env.CCM_SQLITE_KEEP_LEGACY_JSON === "1")
+        return [];
+    const archived = [];
+    fs.mkdirSync(LEGACY_BACKUP_DIR, { recursive: true });
+    const stamp = isoFileStamp();
+    for (const candidate of [file, `${file}.bak`]) {
+        if (!fs.existsSync(candidate))
+            continue;
+        const destination = path.join(LEGACY_BACKUP_DIR, `${path.basename(candidate)}.${stamp}`);
+        try {
+            fs.renameSync(candidate, destination);
+        }
+        catch {
+            fs.copyFileSync(candidate, destination);
+            fs.unlinkSync(candidate);
+        }
+        archived.push(destination);
+    }
+    return archived;
+}
+function configureDatabase(db) {
+    db.pragma("busy_timeout = 10000");
+    db.pragma("journal_mode = WAL");
+    db.pragma("synchronous = NORMAL");
+    db.pragma("foreign_keys = ON");
+    db.pragma("temp_store = MEMORY");
+    db.pragma("wal_autocheckpoint = 1000");
+}
+function createSchema(db) {
+    db.exec(`
+    CREATE TABLE IF NOT EXISTS app_meta (
+      key TEXT PRIMARY KEY,
+      value_json TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS tasks (
+      id TEXT PRIMARY KEY,
+      position INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT '',
+      group_id TEXT NOT NULL DEFAULT '',
+      target_project TEXT NOT NULL DEFAULT '',
+      workflow_type TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT '',
+      updated_at TEXT NOT NULL DEFAULT '',
+      archived INTEGER NOT NULL DEFAULT 0,
+      payload_json TEXT NOT NULL,
+      payload_hash TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
+    CREATE INDEX IF NOT EXISTS idx_tasks_group_status ON tasks(group_id, status);
+    CREATE INDEX IF NOT EXISTS idx_tasks_project_status ON tasks(target_project, status);
+    CREATE INDEX IF NOT EXISTS idx_tasks_workflow ON tasks(workflow_type);
+    CREATE INDEX IF NOT EXISTS idx_tasks_updated_at ON tasks(updated_at);
+    CREATE INDEX IF NOT EXISTS idx_tasks_archived ON tasks(archived, updated_at);
+
+    CREATE TABLE IF NOT EXISTS task_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      task_id TEXT NOT NULL,
+      timestamp TEXT NOT NULL,
+      level TEXT NOT NULL DEFAULT 'info',
+      message TEXT NOT NULL DEFAULT '',
+      payload_json TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_task_logs_task_id_id ON task_logs(task_id, id);
+    CREATE INDEX IF NOT EXISTS idx_task_logs_timestamp ON task_logs(timestamp);
+
+    CREATE TABLE IF NOT EXISTS group_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      group_id TEXT NOT NULL,
+      timestamp TEXT NOT NULL,
+      level TEXT NOT NULL DEFAULT 'info',
+      category TEXT NOT NULL DEFAULT '',
+      message TEXT NOT NULL DEFAULT '',
+      details_json TEXT NOT NULL DEFAULT 'null',
+      payload_json TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_group_logs_group_id_id ON group_logs(group_id, id);
+    CREATE INDEX IF NOT EXISTS idx_group_logs_timestamp ON group_logs(timestamp);
+  `);
+    setMeta(db, "schema_version", STORE_SCHEMA_VERSION);
+}
+function getMeta(db, key) {
+    const row = db.prepare("SELECT value_json FROM app_meta WHERE key = ?").get(key);
+    return row ? parseJson(row.value_json, null) : null;
+}
+function setMeta(db, key, value) {
+    db.prepare(`
+    INSERT INTO app_meta(key, value_json, updated_at) VALUES (?, ?, ?)
+    ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at
+  `).run(key, stringifyJson(value), new Date().toISOString());
+}
+function taskColumns(task, position) {
+    const payload = stringifyJson(task);
+    return {
+        id: String(task?.id || "").trim(),
+        position,
+        status: String(task?.status || ""),
+        groupId: String(task?.group_id || task?.groupId || ""),
+        targetProject: String(task?.target_project || task?.targetProject || ""),
+        workflowType: String(task?.workflow_type || task?.workflowType || ""),
+        createdAt: String(task?.created_at || task?.createdAt || ""),
+        updatedAt: String(task?.updated_at || task?.updatedAt || ""),
+        archived: task?.archived === true || !!task?.archived_at || !!task?.deleted_at ? 1 : 0,
+        payload,
+        hash: stableHash(payload),
+    };
+}
+function insertTasks(db, tasks) {
+    const statement = db.prepare(`
+    INSERT INTO tasks(
+      id, position, status, group_id, target_project, workflow_type,
+      created_at, updated_at, archived, payload_json, payload_hash
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      position = excluded.position,
+      status = excluded.status,
+      group_id = excluded.group_id,
+      target_project = excluded.target_project,
+      workflow_type = excluded.workflow_type,
+      created_at = excluded.created_at,
+      updated_at = excluded.updated_at,
+      archived = excluded.archived,
+      payload_json = excluded.payload_json,
+      payload_hash = excluded.payload_hash
+  `);
+    for (let position = 0; position < tasks.length; position += 1) {
+        const row = taskColumns(tasks[position], position);
+        if (!row.id)
+            throw new Error(`任务缺少 id，位置 ${position}`);
+        statement.run(row.id, row.position, row.status, row.groupId, row.targetProject, row.workflowType, row.createdAt, row.updatedAt, row.archived, row.payload, row.hash);
+    }
+}
+function insertTaskLogs(db, logs) {
+    const statement = db.prepare("INSERT INTO task_logs(task_id, timestamp, level, message, payload_json) VALUES (?, ?, ?, ?, ?)");
+    for (const [taskId, values] of Object.entries(logs || {})) {
+        const rows = Array.isArray(values) ? values.slice(-100) : [];
+        for (const entry of rows) {
+            const record = entry || {};
+            statement.run(String(taskId), String(record.timestamp || new Date().toISOString()), String(record.level || "info"), String(record.message || ""), stringifyJson(record));
+        }
+    }
+}
+function insertGroupLogs(db, logs) {
+    const statement = db.prepare("INSERT INTO group_logs(group_id, timestamp, level, category, message, details_json, payload_json) VALUES (?, ?, ?, ?, ?, ?, ?)");
+    for (const [groupId, values] of Object.entries(logs || {})) {
+        const rows = Array.isArray(values) ? values.slice(-500) : [];
+        for (const entry of rows) {
+            const record = entry || {};
+            statement.run(String(groupId), String(record.timestamp || new Date().toISOString()), String(record.level || "info"), String(record.category || ""), String(record.message || ""), stringifyJson(record.details ?? null), stringifyJson(record));
+        }
+    }
+}
+function migrateLegacyStore(db) {
+    const migrations = [
+        {
+            key: "legacy_tasks_imported_v1",
+            table: "tasks",
+            file: LEGACY_FILES.tasks,
+            expected: "array",
+            insert: (value) => insertTasks(db, value),
+        },
+        {
+            key: "legacy_task_logs_imported_v1",
+            table: "task_logs",
+            file: LEGACY_FILES.taskLogs,
+            expected: "object",
+            insert: (value) => insertTaskLogs(db, value),
+        },
+        {
+            key: "legacy_group_logs_imported_v1",
+            table: "group_logs",
+            file: LEGACY_FILES.groupLogs,
+            expected: "object",
+            insert: (value) => insertGroupLogs(db, value),
+        },
+    ];
+    for (const migration of migrations) {
+        if (getMeta(db, migration.key))
+            continue;
+        const existingCount = Number(db.prepare(`SELECT COUNT(*) AS count FROM ${migration.table}`).get()?.count || 0);
+        const legacy = existingCount === 0 ? readLegacyJson(migration.file, migration.expected) : null;
+        const importedAt = new Date().toISOString();
+        const transaction = db.transaction(() => {
+            if (legacy)
+                migration.insert(legacy.value);
+            setMeta(db, migration.key, {
+                imported_at: importedAt,
+                imported: !!legacy,
+                source: legacy?.source || "",
+                count: legacy
+                    ? migration.expected === "array"
+                        ? legacy.value.length
+                        : Object.values(legacy.value).reduce((total, rows) => total + (Array.isArray(rows) ? rows.length : 0), 0)
+                    : existingCount,
+            });
+        });
+        transaction();
+        const archived = legacy ? archiveLegacyFiles(migration.file) : [];
+        if (archived.length) {
+            const current = getMeta(db, migration.key) || {};
+            setMeta(db, migration.key, { ...current, archived });
+        }
+    }
+    db.pragma("wal_checkpoint(PASSIVE)");
+}
+function getDatabase() {
+    if (database)
+        return database;
+    fs.mkdirSync(STORE_DIR, { recursive: true });
+    database = new better_sqlite3_1.default(DATABASE_FILE);
+    configureDatabase(database);
+    createSchema(database);
+    if (!initialized) {
+        migrateLegacyStore(database);
+        initialized = true;
+    }
+    return database;
+}
+function loadTasksFromSqlite() {
+    const rows = getDatabase().prepare("SELECT payload_json FROM tasks ORDER BY position ASC, rowid ASC").all();
+    return rows.map(row => parseJson(row.payload_json, null)).filter(Boolean);
+}
+function saveTasksToSqlite(tasks) {
+    if (!Array.isArray(tasks))
+        throw new Error("任务存储只接受数组");
+    const db = getDatabase();
+    const currentRows = db.prepare("SELECT id, position, payload_hash FROM tasks").all();
+    const current = new Map(currentRows.map(row => [row.id, row]));
+    const desiredIds = new Set();
+    const upsert = db.prepare(`
+    INSERT INTO tasks(
+      id, position, status, group_id, target_project, workflow_type,
+      created_at, updated_at, archived, payload_json, payload_hash
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      position = excluded.position,
+      status = excluded.status,
+      group_id = excluded.group_id,
+      target_project = excluded.target_project,
+      workflow_type = excluded.workflow_type,
+      created_at = excluded.created_at,
+      updated_at = excluded.updated_at,
+      archived = excluded.archived,
+      payload_json = excluded.payload_json,
+      payload_hash = excluded.payload_hash
+  `);
+    const remove = db.prepare("DELETE FROM tasks WHERE id = ?");
+    let inserted = 0;
+    let updated = 0;
+    let deleted = 0;
+    const transaction = db.transaction(() => {
+        for (let position = 0; position < tasks.length; position += 1) {
+            const row = taskColumns(tasks[position], position);
+            if (!row.id)
+                throw new Error(`任务缺少 id，位置 ${position}`);
+            if (desiredIds.has(row.id))
+                throw new Error(`任务 id 重复：${row.id}`);
+            desiredIds.add(row.id);
+            const previous = current.get(row.id);
+            if (previous && previous.payload_hash === row.hash && Number(previous.position) === position)
+                continue;
+            upsert.run(row.id, row.position, row.status, row.groupId, row.targetProject, row.workflowType, row.createdAt, row.updatedAt, row.archived, row.payload, row.hash);
+            if (previous)
+                updated += 1;
+            else
+                inserted += 1;
+        }
+        for (const id of current.keys()) {
+            if (desiredIds.has(id))
+                continue;
+            remove.run(id);
+            deleted += 1;
+        }
+    });
+    transaction();
+    return { total: tasks.length, inserted, updated, deleted };
+}
+function appendTaskLogRecord(taskId, entry, maxEntries = 100) {
+    const db = getDatabase();
+    const record = entry || {};
+    const transaction = db.transaction(() => {
+        const result = db.prepare("INSERT INTO task_logs(task_id, timestamp, level, message, payload_json) VALUES (?, ?, ?, ?, ?)")
+            .run(String(taskId), String(record.timestamp || new Date().toISOString()), String(record.level || "info"), String(record.message || ""), stringifyJson(record));
+        db.prepare(`DELETE FROM task_logs WHERE task_id = ? AND id NOT IN (
+      SELECT id FROM task_logs WHERE task_id = ? ORDER BY id DESC LIMIT ?
+    )`).run(String(taskId), String(taskId), Math.max(1, maxEntries));
+        return Number(result.lastInsertRowid);
+    });
+    return transaction();
+}
+function getTaskLogRecords(taskId, limit = 50) {
+    const rows = getDatabase().prepare("SELECT payload_json FROM task_logs WHERE task_id = ? ORDER BY id DESC LIMIT ?")
+        .all(String(taskId), Math.max(1, limit));
+    return rows.reverse().map(row => parseJson(row.payload_json, null)).filter(Boolean);
+}
+function clearTaskLogRecords(taskId) {
+    return getDatabase().prepare("DELETE FROM task_logs WHERE task_id = ?").run(String(taskId)).changes;
+}
+function loadTaskLogsFromSqlite() {
+    const rows = getDatabase().prepare("SELECT task_id, payload_json FROM task_logs ORDER BY id ASC").all();
+    const output = {};
+    for (const row of rows) {
+        if (!output[row.task_id])
+            output[row.task_id] = [];
+        const value = parseJson(row.payload_json, null);
+        if (value)
+            output[row.task_id].push(value);
+    }
+    return output;
+}
+function replaceTaskLogsInSqlite(logs) {
+    const db = getDatabase();
+    const transaction = db.transaction(() => {
+        db.exec("DELETE FROM task_logs");
+        insertTaskLogs(db, logs || {});
+    });
+    transaction();
+}
+function appendGroupLogRecord(groupId, entry, maxEntries = 500) {
+    const db = getDatabase();
+    const record = entry || {};
+    const transaction = db.transaction(() => {
+        const result = db.prepare("INSERT INTO group_logs(group_id, timestamp, level, category, message, details_json, payload_json) VALUES (?, ?, ?, ?, ?, ?, ?)")
+            .run(String(groupId), String(record.timestamp || new Date().toISOString()), String(record.level || "info"), String(record.category || ""), String(record.message || ""), stringifyJson(record.details ?? null), stringifyJson(record));
+        db.prepare(`DELETE FROM group_logs WHERE group_id = ? AND id NOT IN (
+      SELECT id FROM group_logs WHERE group_id = ? ORDER BY id DESC LIMIT ?
+    )`).run(String(groupId), String(groupId), Math.max(1, maxEntries));
+        return Number(result.lastInsertRowid);
+    });
+    return transaction();
+}
+function loadGroupLogsFromSqlite() {
+    const rows = getDatabase().prepare("SELECT group_id, payload_json FROM group_logs ORDER BY id ASC").all();
+    const output = {};
+    for (const row of rows) {
+        if (!output[row.group_id])
+            output[row.group_id] = [];
+        const value = parseJson(row.payload_json, null);
+        if (value)
+            output[row.group_id].push(value);
+    }
+    return output;
+}
+function replaceGroupLogsInSqlite(logs) {
+    const db = getDatabase();
+    const transaction = db.transaction(() => {
+        db.exec("DELETE FROM group_logs");
+        insertGroupLogs(db, logs || {});
+    });
+    transaction();
+}
+function verifySqliteTaskStore() {
+    const db = getDatabase();
+    const integrityRows = db.pragma("integrity_check");
+    const foreignKeyRows = db.pragma("foreign_key_check");
+    const integrity = integrityRows.map(row => String(row.integrity_check || "")).filter(Boolean);
+    return {
+        valid: integrity.length === 1 && integrity[0] === "ok" && foreignKeyRows.length === 0,
+        integrity,
+        foreign_key_issues: foreignKeyRows,
+    };
+}
+function getSqliteTaskStoreStatus() {
+    const db = getDatabase();
+    const journalMode = String(db.pragma("journal_mode", { simple: true }) || "");
+    const count = (table) => Number(db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get()?.count || 0);
+    const statSize = (file) => {
+        try {
+            return fs.statSync(file).size;
+        }
+        catch {
+            return 0;
+        }
+    };
+    return {
+        schema: "ccm-sqlite-task-store-status-v1",
+        schema_version: Number(getMeta(db, "schema_version") || STORE_SCHEMA_VERSION),
+        database_file: DATABASE_FILE,
+        journal_mode: journalMode,
+        synchronous: Number(db.pragma("synchronous", { simple: true })),
+        database_bytes: statSize(DATABASE_FILE),
+        wal_bytes: statSize(`${DATABASE_FILE}-wal`),
+        shm_bytes: statSize(`${DATABASE_FILE}-shm`),
+        counts: {
+            tasks: count("tasks"),
+            task_logs: count("task_logs"),
+            group_logs: count("group_logs"),
+        },
+        migrations: {
+            tasks: getMeta(db, "legacy_tasks_imported_v1"),
+            task_logs: getMeta(db, "legacy_task_logs_imported_v1"),
+            group_logs: getMeta(db, "legacy_group_logs_imported_v1"),
+        },
+        integrity: verifySqliteTaskStore(),
+    };
+}
+function checkpointSqliteTaskStore(mode = "PASSIVE") {
+    return getDatabase().pragma(`wal_checkpoint(${mode})`);
+}
+function backupSqliteTaskStore(destination = path.join(DATABASE_BACKUP_DIR, `ccm-${isoFileStamp()}.db`)) {
+    const db = getDatabase();
+    const resolved = path.resolve(destination);
+    fs.mkdirSync(path.dirname(resolved), { recursive: true });
+    if (fs.existsSync(resolved))
+        fs.unlinkSync(resolved);
+    const escaped = resolved.replace(/'/g, "''");
+    db.exec(`VACUUM INTO '${escaped}'`);
+    return { destination: resolved, bytes: fs.statSync(resolved).size, created_at: new Date().toISOString() };
+}
+function exportSqliteTaskStore(destination = path.join(EXPORT_DIR, isoFileStamp())) {
+    const resolved = path.resolve(destination);
+    fs.mkdirSync(resolved, { recursive: true });
+    const files = {
+        tasks: path.join(resolved, "tasks.json"),
+        task_logs: path.join(resolved, "task-logs.json"),
+        group_logs: path.join(resolved, "group-logs.json"),
+    };
+    writeJsonAtomic(files.tasks, loadTasksFromSqlite());
+    writeJsonAtomic(files.task_logs, loadTaskLogsFromSqlite());
+    writeJsonAtomic(files.group_logs, loadGroupLogsFromSqlite());
+    return { destination: resolved, files, exported_at: new Date().toISOString() };
+}
+function restoreSqliteTaskStore(source) {
+    const resolvedSource = path.resolve(source);
+    if (!fs.existsSync(resolvedSource))
+        throw new Error(`SQLite 备份不存在：${resolvedSource}`);
+    const candidate = new better_sqlite3_1.default(resolvedSource, { readonly: true, fileMustExist: true });
+    const check = candidate.pragma("integrity_check", { simple: true });
+    candidate.close();
+    if (String(check) !== "ok")
+        throw new Error(`SQLite 备份完整性检查失败：${check}`);
+    closeSqliteTaskStore();
+    fs.mkdirSync(DATABASE_BACKUP_DIR, { recursive: true });
+    const previous = fs.existsSync(DATABASE_FILE)
+        ? path.join(DATABASE_BACKUP_DIR, `ccm-before-restore-${isoFileStamp()}.db`)
+        : "";
+    if (previous)
+        fs.copyFileSync(DATABASE_FILE, previous);
+    for (const suffix of ["-wal", "-shm"]) {
+        try {
+            fs.unlinkSync(`${DATABASE_FILE}${suffix}`);
+        }
+        catch { }
+    }
+    fs.copyFileSync(resolvedSource, DATABASE_FILE);
+    initialized = false;
+    const status = getSqliteTaskStoreStatus();
+    return { restored_from: resolvedSource, previous_backup: previous, status };
+}
+function closeSqliteTaskStore() {
+    if (database) {
+        try {
+            database.pragma("wal_checkpoint(TRUNCATE)");
+        }
+        catch { }
+        database.close();
+    }
+    database = null;
+    initialized = false;
+}
+function getSqliteTaskStorePaths() {
+    return {
+        store_dir: STORE_DIR,
+        database_file: DATABASE_FILE,
+        legacy_backup_dir: LEGACY_BACKUP_DIR,
+        database_backup_dir: DATABASE_BACKUP_DIR,
+        export_dir: EXPORT_DIR,
+        legacy_files: { ...LEGACY_FILES },
+    };
+}
+//# sourceMappingURL=task-store.js.map
