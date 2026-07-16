@@ -35,9 +35,10 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.createGlobalAgentAgenticRuntime = createGlobalAgentAgenticRuntime;
 const crypto = __importStar(require("crypto"));
+const source_ingestion_1 = require("../requirements/source-ingestion");
 // Global-only context, tool execution, mission supervision, and agentic loop lifecycle.
 function createGlobalAgentAgenticRuntime(deps) {
-    const { GLOBAL_AGENT_TOOL_SPECS, GLOBAL_MANAGEMENT_ACTIONS, GLOBAL_PET_AGENT_NAME, acquireIdempotency, annotateGlobalAction, attachGlobalAgentRunSupervision, bindFeishuIdentifiersFromValue, bindFeishuTaskContext, buildGlobalAgentMemoryPacket, buildGlobalSingleProjectMissionPayload, callGlobalModelWithRetry, compactGlobalAgentSession, compactPetText, completeGlobalAgentSupervision, completeIdempotency, continueGlobalAgentRunWithClarification, controlGlobalDevelopmentMission, controlGlobalMissionSupervisor, createGlobalDevelopmentMission, createPetGenerationJob, executeFeishuAction, failIdempotency, findClarifyingGlobalAgentRun, formatGlobalMissionFinalReport, getAgentQualityPolicy, getConfigInfo, getConfigs, getGlobalAgentBackgroundOutput, getGlobalAgentMemoryPolicy, getGlobalAgentRun, getGlobalDevelopmentMission, getGlobalMissionSupervisor, getGlobalMissionSupervisorSchedulerStatus, globalRunVisibleReply, hasExplicitDevelopmentExecutionIntent, inferLocalGlobalAction, ingestGlobalAgentConversation, listGlobalAgentRuns, listGlobalMissionSupervisors, listTaskAgentSessions, loadCronJobs, loadGlobalAgentHistoryStore, loadGlobalAgentHooks, loadGlobalAgentMemory, loadGlobalAgentPermissionRules, loadGroups, loadMcpTools, loadOrchestratorConfig, loadSkills, loadTasks, normalizeText, notifyFeishuTaskStage, postLocalApi, queryKnowledgeBase, recallGlobalAgentMemory, rebuildGlobalAgentMemory, recordGlobalAgentRuntimeOutput, recordGlobalMissionMemory, recoverInterruptedGlobalAgentRuns, refreshGlobalDevelopmentMissions, renderGlobalGroupMemoryContextBundle, resumeGlobalAgentRun, sanitizeGlobalDirectAgentOutput, sendFeishuReportMessage, setGlobalAgentMemoryPolicy, settleIdempotencyByTrace, startGlobalAgentRun, startGlobalMissionSupervisor, startGlobalMissionSupervisorScheduler, stopGlobalMissionSupervisorScheduler, superviseGlobalDevelopmentMissionCycle, updateGlobalAgentSupervisionState, waitForIdempotencyResult } = deps;
+    const { GLOBAL_AGENT_TOOL_SPECS, GLOBAL_MANAGEMENT_ACTIONS, GLOBAL_PET_AGENT_NAME, acquireIdempotency, annotateGlobalAction, attachGlobalAgentRunSupervision, bindFeishuIdentifiersFromValue, bindFeishuTaskContext, buildGlobalAgentMemoryPacket, buildGlobalSingleProjectMissionPayload, callGlobalModelWithRetry, compactGlobalAgentSession, compactPetText, completeGlobalAgentSupervision, completeIdempotency, continueGlobalAgentRunWithClarification, controlGlobalDevelopmentMission, controlGlobalMissionSupervisor, createGlobalDevelopmentMission, createRequirementEpicWithChildren, createPetGenerationJob, executeFeishuAction, executePlayMusic, failIdempotency, findClarifyingGlobalAgentRun, formatGlobalMissionFinalReport, getAgentQualityPolicy, getConfigInfo, getConfigs, getGlobalAgentBackgroundOutput, getGlobalAgentMemoryPolicy, getGlobalAgentRun, getGlobalDevelopmentMission, getGlobalMissionSupervisor, getGlobalMissionSupervisorSchedulerStatus, globalRunVisibleReply, hasExplicitDevelopmentExecutionIntent, inferLocalGlobalAction, ingestGlobalAgentConversation, listGlobalAgentRuns, listGlobalMissionSupervisors, listTaskAgentSessions, loadCronJobs, loadGlobalAgentHistoryStore, loadGlobalAgentHooks, loadGlobalAgentMemory, loadGlobalAgentPermissionRules, loadGroups, loadMcpTools, loadOrchestratorConfig, loadSkills, loadTasks, normalizeText, notifyFeishuTaskStage, postLocalApi, queryKnowledgeBase, recallGlobalAgentMemory, rebuildGlobalAgentMemory, recordGlobalAgentRuntimeOutput, recordGlobalMissionMemory, recoverInterruptedGlobalAgentRuns, refreshGlobalDevelopmentMissions, renderGlobalGroupMemoryContextBundle, resumeGlobalAgentRun, sanitizeGlobalDirectAgentOutput, sendFeishuReportMessage, setGlobalAgentMemoryPolicy, settleIdempotencyByTrace, startGlobalAgentRun, startGlobalMissionSupervisor, startGlobalMissionSupervisorScheduler, stopGlobalMissionSupervisorScheduler, superviseGlobalDevelopmentMissionCycle, updateGlobalAgentSupervisionState, waitForIdempotencyResult } = deps;
     function hasExplicitGlobalWriteAuthorization(message) {
         const text = normalizeText(message);
         if (!text)
@@ -494,6 +495,159 @@ function createGlobalAgentAgenticRuntime(deps) {
                 else
                     throw new Error(`不支持的全局记忆操作：${operation}`);
             }
+            else if (name === "decompose_requirement_epic") {
+                let plan = args.decomposition_plan
+                    || args.decompositionPlan
+                    || run.requirement_decomposition
+                    || run.requirementDecomposition;
+                if (!plan?.items?.length) {
+                    const availableTargets = [
+                        ...loadGroups().map((group) => ({
+                            type: "group",
+                            id: group.id,
+                            name: group.name || group.id,
+                            capabilities: (group.members || []).flatMap((member) => member.skills || member.capabilities || []),
+                        })),
+                        ...getConfigs().map((config) => ({ type: "project", id: config.name, name: config.name })),
+                    ];
+                    const requirement = args.requirement_extraction
+                        || args.requirementExtraction
+                        || run.requirement_extraction
+                        || run.requirementExtraction;
+                    if (requirement) {
+                        plan = await (0, source_ingestion_1.decomposeRequirementToTaskPlan)({
+                            requirement,
+                            sources: run.requirement_sources || run.requirementSources || [],
+                            contentHash: run.requirement_content_hash || run.requirementContentHash || "",
+                            availableTargets,
+                        });
+                    }
+                    else {
+                        const sourceAttachments = Array.isArray(run.source_attachments) ? run.source_attachments : [];
+                        const ingestion = await (0, source_ingestion_1.ingestRequirementSources)({
+                            files: sourceAttachments
+                                .filter((item) => item?.path)
+                                .map((item) => ({
+                                filename: item.name || item.filename || "requirement-source",
+                                savedPath: item.path,
+                                size: Number(item.size || 0),
+                                type: item.type || "",
+                            })),
+                            userText: run.original_user_message || run.user_message || "",
+                            extractRequirement: true,
+                            decomposeRequirement: true,
+                            availableTargets,
+                        });
+                        attachGlobalRunRequirementSources(run, ingestion);
+                        plan = ingestion.decomposition;
+                    }
+                    if (!plan?.items?.length)
+                        throw new Error("大模型未能从当前消息或资料生成可靠的 Epic 任务图，请补充业务目标、范围或验收标准");
+                    run.requirement_decomposition = plan;
+                    run.requirementDecomposition = plan;
+                }
+                observation = {
+                    success: true,
+                    read_only: true,
+                    needs_confirmation: true,
+                    needs_clarification: Array.isArray(plan.clarification_questions) && plan.clarification_questions.length > 0,
+                    clarification_questions: plan.clarification_questions || [],
+                    decomposition_plan: plan,
+                    summary: `已将需求文档拆成 ${plan.items.length} 个持久子任务；确认任务图后才会创建和派发。`,
+                };
+            }
+            else if (name === "create_requirement_epic") {
+                const plan = args.decomposition_plan
+                    || args.decompositionPlan
+                    || run.requirement_decomposition
+                    || run.requirementDecomposition;
+                if (!plan?.items?.length)
+                    throw new Error("缺少已确认的需求拆解计划");
+                const clarificationQuestions = Array.isArray(plan.clarification_questions) ? plan.clarification_questions.filter(Boolean) : [];
+                const clarificationsResolved = args.clarifications_resolved === true
+                    || args.clarificationsResolved === true
+                    || clarificationQuestions.length === 0;
+                if (clarificationQuestions.length && !clarificationsResolved) {
+                    observation = {
+                        success: false,
+                        accepted: false,
+                        completed: false,
+                        needs_clarification: true,
+                        clarification_questions: clarificationQuestions,
+                        decomposition_plan: plan,
+                        message: "需求拆解仍有阻断问题；请先逐项回答 clarification_questions，并在更新后的计划中清空这些问题后再创建 Epic。",
+                    };
+                }
+                else {
+                    const epicResult = createRequirementEpicWithChildren({
+                        ...args,
+                        decomposition_plan: plan,
+                        requirement_extraction: args.requirement_extraction || args.requirementExtraction || run.requirement_extraction || null,
+                        requirement_content_hash: args.requirement_content_hash || args.requirementContentHash || run.requirement_content_hash || plan.content_hash || "",
+                        source_documents: args.source_documents || args.sourceDocuments || run.user_message || "",
+                        source_attachments: args.source_attachments || args.sourceAttachments || run.source_attachments || [],
+                        source_ingestion: args.source_ingestion || args.sourceIngestion || run.source_ingestion || null,
+                        group_id: args.group_id || args.groupId || "",
+                        target_project: args.target_project || args.targetProject || "",
+                        source: run.source || "global-agent-requirement-epic",
+                        channel: run.source || "global-agent",
+                        conversation_id: run.session_id,
+                        client_message_id: args.client_message_id || args.clientMessageId || run.id,
+                        trace_id: run.trace_id,
+                        idempotency_key: args.idempotency_key || `${run.id}:requirement-epic:${plan.content_hash || "v1"}`,
+                        owner_agent: "global-agent",
+                        confirmed: args.confirmed === true || args.user_confirmed === true || args.userConfirmed === true,
+                        clarifications_resolved: clarificationsResolved,
+                        auto_execute: args.auto_execute !== false,
+                        requires_independent_review: args.requires_independent_review !== false,
+                    });
+                    if (!epicResult.success) {
+                        observation = {
+                            ...epicResult,
+                            success: false,
+                            accepted: false,
+                            completed: false,
+                            message: epicResult.needs_clarification
+                                ? "需求拆解仍有阻断问题；请先回答 clarification_questions，再重新确认任务图。"
+                                : "需求拆解计划仍需用户确认后才能创建。",
+                        };
+                    }
+                    else {
+                        const supervisor = startGlobalMissionSupervisor({
+                            mission_id: epicResult.epic.id,
+                            global_run_id: run.id,
+                            trace_id: run.trace_id,
+                            session_id: run.session_id,
+                            source: run.source,
+                            business_goal: epicResult.epic.business_goal,
+                            acceptance: epicResult.epic.acceptance_criteria,
+                            max_attempts: args.max_attempts || 3,
+                        });
+                        attachGlobalAgentRunSupervision(run, { mission_id: epicResult.epic.id, supervisor_id: supervisor.id, state: supervisor.status });
+                        const dispatch = await superviseGlobalDevelopmentMissionCycle(epicResult.epic.id, ctx, { max_attempts: args.max_attempts || 3 });
+                        observation = {
+                            success: true,
+                            accepted: true,
+                            completed: false,
+                            message: `需求 Epic 已创建，${epicResult.children.length} 个子任务将按依赖执行；当前不是完成状态。`,
+                            mission_id: epicResult.epic.id,
+                            epic: epicResult.epic,
+                            children: epicResult.children.map((task) => ({
+                                task_id: task.id,
+                                item_key: task.requirement_item_key,
+                                title: task.title,
+                                target: task.mission_target?.name || task.target_project,
+                                dependencies: task.mission_dependencies || [],
+                                status: task.status,
+                            })),
+                            dependency_edges: epicResult.dependency_edges,
+                            supervisor_id: supervisor.id,
+                            supervisor_status: supervisor.status,
+                            dispatch_actions: dispatch?.actions || [],
+                        };
+                    }
+                }
+            }
             else if (name === "inspect_mission") {
                 const mission = getGlobalDevelopmentMission(String(args.id || ""));
                 if (!mission)
@@ -601,6 +755,22 @@ function createGlobalAgentAgenticRuntime(deps) {
             else if (name === "navigate") {
                 observation = { success: true, message: `Web 客户端可切换到 ${args.tab}`, client_effect: { type: "navigate", params: { tab: args.tab } } };
             }
+            else if (name === "play_music") {
+                const played = await executePlayMusic(baseUrl, {
+                    keyword: args.keyword || args.query || args.song || "",
+                    mode: args.mode || "",
+                    source: run.source || "global-agent",
+                    originalText: run.user_message,
+                });
+                observation = {
+                    success: played.success !== false,
+                    message: played.message,
+                    keyword: played.keyword,
+                    mode: played.mode,
+                    command: played.command,
+                    client_effect: played.client_effect,
+                };
+            }
             else if (name === "git_review") {
                 observation = await postLocalApi(baseUrl, "/api/global-agent/git-review", { project: args.project });
             }
@@ -668,7 +838,7 @@ function createGlobalAgentAgenticRuntime(deps) {
         }
     }
     function attachGlobalRunRequirementSources(run, ingestion) {
-        if (!ingestion?.sources?.length)
+        if (!ingestion)
             return;
         run.source_ingestion = ingestion.technical;
         run.sourceIngestion = ingestion.technical;
@@ -676,6 +846,14 @@ function createGlobalAgentAgenticRuntime(deps) {
         run.sourceAttachments = ingestion.attachments;
         run.requirement_extraction = ingestion.requirement;
         run.requirementExtraction = ingestion.requirement;
+        run.requirement_decomposition = ingestion.decomposition;
+        run.requirementDecomposition = ingestion.decomposition;
+        run.requirement_content_hash = ingestion.content_hash;
+        run.requirementContentHash = ingestion.content_hash;
+        run.requirement_source_documents = ingestion.source_documents || "";
+        run.requirementSourceDocuments = ingestion.source_documents || "";
+        run.requirement_sources = ingestion.sources || [];
+        run.requirementSources = ingestion.sources || [];
     }
     function createAgenticRuntime(baseUrl, ctx, input = {}) {
         const config = loadOrchestratorConfig();
@@ -696,16 +874,14 @@ function createGlobalAgentAgenticRuntime(deps) {
                 const detail = compactPetText(error?.message || error || "统一大模型调用失败", 800);
                 console.warn(`[全局 Agent] 模型决策失败，已进入安全兜底：${detail}`);
                 recordGlobalAgentRuntimeOutput(run, { type: "model_fallback", status: "warning", error: detail });
-                return localActionToAgenticDecision(input.localIntent || null, run);
+                // 模型不可用时只总结已有观察；不得让本地关键词规则替模型选择新工作流。
+                return localActionToAgenticDecision(null, run);
             },
             onEvent: input.onEvent ? (event) => input.onEvent(event) : undefined,
         };
     }
     async function runAgenticGlobalRequest(baseUrl, ctx, input) {
-        const projects = getConfigs().map((item) => item.name);
-        const groups = loadGroups();
-        const localIntent = inferLocalGlobalAction(input.message, projects, groups, { cronJobs: loadCronJobs(), tasks: loadTasks(), mcpTools: loadMcpTools(), skills: loadSkills() });
-        const runtime = createAgenticRuntime(baseUrl, ctx, { localIntent, onEvent: input.onEvent, sourceIngestion: input.sourceIngestion });
+        const runtime = createAgenticRuntime(baseUrl, ctx, { localIntent: null, onEvent: input.onEvent, sourceIngestion: input.sourceIngestion });
         const sessionId = input.sessionId || "default";
         if (!/feishu/i.test(input.source || "")) {
             try {
@@ -775,6 +951,10 @@ function createGlobalAgentAgenticRuntime(deps) {
         return result;
     }
     function startGlobalMissionSupervisionForServer(ctx) {
+        try {
+            require("../collaboration/collaboration-task-runtime").bindTaskRuntimeCollabCtx(ctx);
+        }
+        catch { /* ignore bind failures during optional boot wiring */ }
         return startGlobalMissionSupervisorScheduler(createMissionSupervisorRuntime(ctx));
     }
     function bootstrapGlobalAgentMemoryForServer() {

@@ -20,7 +20,7 @@ import {
   saveGroups,
   selectGroupChatSession,
 } from "./storage";
-import { loadGroupLogs, saveGroupLogs } from "./logs";
+import { clearGroupLogs, loadGroupLogs } from "./logs";
 import { getCoordinatorMember, loadOrchestratorConfig, normalizeGroupOrchestrator } from "./group-orchestrator";
 import { buildFreshToolAuthorizationPayload, buildToolAuthorizationPayload, normalizeToolAuthorization, recordToolAuthorizationChange } from "../../tools/tool-authorization";
 import { sanitizeMainAgentDeliveryText } from "../../agents/delivery-report";
@@ -2773,10 +2773,8 @@ export function handleBasicGroupRoutes(
     req.on("end", () => {
       try {
         const { group_id } = JSON.parse(body);
-        const logs = loadGroupLogs();
-        delete logs[group_id];
-        saveGroupLogs(logs);
-        sendJson(res, { success: true });
+        const cleared = clearGroupLogs(String(group_id || ""));
+        sendJson(res, { success: true, cleared });
       } catch (e: any) {
         sendJson(res, { error: e.message }, 400);
       }

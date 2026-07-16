@@ -569,7 +569,7 @@ export function buildGlobalDirectDispatchRollbackMessage(task: any) {
 
 export function refreshGlobalDevelopmentMissions() {
   const tasks = loadTasks();
-  const parents = tasks.filter((item: any) => item.workflow_type === "global_mission");
+  const parents = tasks.filter((item: any) => ["global_mission", "requirement_epic"].includes(String(item.workflow_type || "")));
   for (const parent of parents) refreshGlobalMissionParentInTaskList(tasks, parent.id);
   saveTasks(tasks);
   return parents.map((parent: any) => tasks.find((item: any) => item.id === parent.id));
@@ -578,7 +578,7 @@ export function refreshGlobalDevelopmentMissions() {
 export function getGlobalDevelopmentMission(id: string) {
   refreshGlobalDevelopmentMissions();
   const tasks = loadTasks();
-  const mission = tasks.find((item: any) => item.id === id && item.workflow_type === "global_mission");
+  const mission = tasks.find((item: any) => item.id === id && ["global_mission", "requirement_epic"].includes(String(item.workflow_type || "")));
   if (!mission) return null;
   return {
     mission,
@@ -726,7 +726,15 @@ export function superviseGlobalDevelopmentMissionCycle(id: string, ctx: CollabCt
 
   const current = getGlobalDevelopmentMission(id)!;
   const summary = current.mission.mission_summary || {};
-  const terminal = summary.all_passed === true;
+  const requirementEpicAwaitingReview = current.mission.workflow_type === "requirement_epic"
+    && summary.all_passed === true
+    && current.mission.epic_review?.status !== "approved";
+  if (requirementEpicAwaitingReview) {
+    waitingUser.push({ task_id: current.mission.id, reason: "所有子任务已通过，等待用户审阅整批变更并批准 Epic 交付" });
+  }
+  const terminal = current.mission.workflow_type === "requirement_epic"
+    ? current.mission.status === "done" && current.mission.epic_review?.status === "approved"
+    : summary.all_passed === true;
   if (actions.length > 0 || terminal || waitingUser.length > 0) {
     appendTraceEvent(current.mission.trace_id, {
       id: `mission:${id}:supervisor:${Date.now()}`,

@@ -129,7 +129,7 @@ import { closeSqliteTaskStore } from "./core/task-store";
 
 // 导入子模块控制器
 import { handleProjectsApi, startControlBotConnection } from "./modules/projects/projects";
-import { classifyProjectChatIntent } from "./modules/projects/project-chat-intent";
+import { classifyProjectChatIntentWithModel } from "./modules/projects/project-chat-intent";
 import { handleSessionsApi } from "./modules/projects/sessions";
 import { handleConversationSearchApi } from "./modules/search/conversation-search";
 import { handleGitApi } from "./modules/tools/git";
@@ -1965,6 +1965,10 @@ function callAgentForGroupStream(projectName: string, message: string, workDir: 
         taskAgentSessionId: options.taskAgentSessionId || options.task_agent_session_id || "",
         nativeSessionId: nativeContinuationEvidence.effectiveNativeSessionId,
       });
+      // This direct CLI path does not inject the trusted provider-memory channel.
+      const providerMemoryChannelEvidence = null;
+      const memoryContextConsumptionReceipt = null;
+      const memoryContextConsumptionRecovery = null;
       const nativeModelCapabilityReceipt = isError ? null : extractNativeModelCapabilityReceipt(agentType, output, {
         runner: "direct-cli",
         runnerRequestId: durableGroupDispatch?.id || "",
@@ -2108,6 +2112,9 @@ function callAgentStream(projectName: string, message: string, workDir: string, 
   const showTaskExperience = messageMode === "task";
   const changeSnapshot = workDir ? createFileChangeSnapshot(workDir) : null;
   const projectRun = createProjectChatRun(projectName, options.userMessage || message, workDir, String(options.parentRunId || options.parent_run_id || ""));
+  projectRun.message_mode = messageMode;
+  projectRun.workflow_decision = options.workflowDecision || options.workflow_decision || null;
+  saveProjectChatRuns();
   const { session: taskAgentSession, options: taskAgentSessionOptions } = bindProjectRunAgentSession(projectRun, projectName, agentType);
   const safeCwd = (workDir || process.cwd()).replace(/\\/g, "/");
   const tmpMsg = path.join(UPLOAD_DIR, `_msg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.txt`);
@@ -2150,7 +2157,7 @@ function callAgentStream(projectName: string, message: string, workDir: string, 
     "X-Accel-Buffering": "no",
   });
   if (typeof res.flushHeaders === "function") res.flushHeaders();
-  send({ type: "presentation", message_mode: messageMode, show_task_card: showTaskExperience });
+  send({ type: "presentation", message_mode: messageMode, show_task_card: showTaskExperience, workflow_decision: projectRun.workflow_decision });
   if (showTaskExperience) send({ type: "task_runtime", run: publicProjectChatRun(projectRun), taskExperience: {
     task_id: projectRun.id,
     trace_id: projectRun.trace_id,
@@ -2853,7 +2860,7 @@ function handleRequest(req: any, res: any) {
   // === 流式发送消息给 Agent（SSE）===
   if (pathname === "/api/send-stream" && req.method === "POST") {
     const contentType = req.headers["content-type"] || "";
-    const handleStreamSend = (project: string, message: string, files: any[] = [], parentRunId = "") => {
+    const handleStreamSend = async (project: string, message: string, files: any[] = [], parentRunId = "") => {
       const finalMessage = files && files.length > 0
         ? `${message || ""}${buildUploadedFilesContext(files, "本次消息附件")}`
         : (message || "");
@@ -2866,7 +2873,15 @@ function handleRequest(req: any, res: any) {
       const configuredAgentType = info[0]?.agent || "claudecode";
       const resolvedRuntime = resolveAvailableAgentRuntime(configuredAgentType);
       const agentType = resolvedRuntime.selected;
-      const chatIntent = classifyProjectChatIntent(message, files, { forceTask: !!parentRunId });
+      let chatIntent: any;
+      try {
+        chatIntent = await classifyProjectChatIntentWithModel(message, files, { forceTask: !!parentRunId, project });
+      } catch (error: any) {
+        return sendJson(res, {
+          success: false,
+          error: `统一大模型无法形成可靠工作流决策，本轮未启动项目 Agent：${error?.message || error}`,
+        }, 503);
+      }
       const toolContext = buildProjectToolContext(project, workDir, agentType);
       if (toolContext.dispatchGate?.dispatchReady === false) return sendRuntimeToolDispatchBlocked(res, toolContext);
       if (resolvedRuntime.switched) {
@@ -2883,6 +2898,7 @@ function handleRequest(req: any, res: any) {
         userMessage: finalMessage,
         parentRunId,
         messageMode: chatIntent.mode,
+        workflowDecision: chatIntent.workflowDecision,
       });
     };
 
@@ -2892,7 +2908,7 @@ function handleRequest(req: any, res: any) {
           const boundary = getMultipartBoundary(contentType);
           if (!boundary) return sendJson(res, { error: "无效请求" }, 400);
           const { files, fields } = parseMultipart(buffer, boundary);
-          handleStreamSend((fields as any).project, (fields as any).message, files, String((fields as any).parent_run_id || (fields as any).parentRunId || ""));
+          void handleStreamSend((fields as any).project, (fields as any).message, files, String((fields as any).parent_run_id || (fields as any).parentRunId || ""));
         } catch (e: any) {
           sendJson(res, { error: e.message }, 400);
         }
@@ -2905,7 +2921,7 @@ function handleRequest(req: any, res: any) {
     req.on("end", () => {
       try {
         const { project, message, parent_run_id, parentRunId } = JSON.parse(body);
-        handleStreamSend(project, message, [], String(parent_run_id || parentRunId || ""));
+        void handleStreamSend(project, message, [], String(parent_run_id || parentRunId || ""));
       } catch (e: any) {
         sendJson(res, { error: e.message }, 400);
       }

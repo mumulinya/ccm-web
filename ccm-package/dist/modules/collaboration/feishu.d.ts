@@ -1,4 +1,15 @@
 export declare const FEISHU_SCOPES: string[];
+export declare function downloadFeishuMessageResource(input: {
+    messageId: string;
+    fileKey: string;
+    type?: "file" | "image";
+    maxBytes?: number;
+}): Promise<{
+    buffer: Buffer<ArrayBuffer>;
+    content_type: string;
+    content_disposition: string;
+    size: number;
+}>;
 export declare function getFeishuUserToken(appId: string, appSecret: string, code: string): Promise<any>;
 export declare function getFeishuUserInfo(accessToken: string): Promise<any>;
 export declare function getFeishuChatList(accessToken: string): Promise<any[]>;

@@ -10,6 +10,7 @@ import MusicAgentSettingsModal from './MusicAgentSettingsModal.vue'
 import MusicDownloadCenter from './MusicDownloadCenter.vue'
 import { useMusicDownloadJobs } from '../../composables/useMusicDownloadJobs.js'
 import { useMusicLibraryState } from '../../composables/useMusicLibraryState.js'
+import { getPreferredMusicMode, setPreferredMusicMode } from '../../composables/useMusicRemotePlayback.js'
 
 const props = defineProps({
   agentLabel: { type: String, default: '乖乖' }
@@ -17,7 +18,8 @@ const props = defineProps({
 const musicAgentLabel = computed(() => props.agentLabel?.trim() || '乖乖')
 
 // === 基础核心状态 ===
-const mode = ref('cloud') // local | cloud(B站) | netease(网易云)
+const mode = ref(getPreferredMusicMode()) // local | cloud(B站) | netease(网易云)
+watch(mode, (value) => setPreferredMusicMode(value))
 const tracks = ref([])
 const playlist = ref([])
 const currentIndex = ref(-1)
@@ -911,25 +913,63 @@ onMounted(async () => {
   loadAgentConfig()
   loadChatMessages()
   
-  window.__cc_global_play_music = async (keyword) => {
-    console.log('[GlobalPlay] 收到全局播放指令:', keyword)
-    const kw = String(keyword || '').toLowerCase().trim()
+  window.__cc_global_play_music = async (keyword, options = {}) => {
+    console.log('[GlobalPlay] 收到全局播放指令:', keyword, options)
+    const kw = String(keyword || '').trim()
+    const playModeHint = String(options.mode || mode.value || getPreferredMusicMode() || 'cloud').trim()
+    if (['local', 'cloud', 'netease'].includes(playModeHint) && mode.value !== playModeHint) {
+      mode.value = playModeHint
+    }
 
     if (!tracks.value.length) {
       await loadTracks()
     }
 
-    if (isRandomMusicKeyword(kw)) {
-      const pool = (playlist.value.length ? playlist.value : tracks.value).filter(track => track?.filename)
-      if (!pool.length) return { success: false, error: '本地没有可随机播放的音乐' }
-      const randomTrack = pool[Math.floor(Math.random() * pool.length)]
-      console.log('[GlobalPlay] 随机播放本地音乐:', randomTrack.title || randomTrack.filename)
-      const playResult = await play(randomTrack, { remote: true })
-      if (!playResult?.success) return { success: false, error: playResult?.error || '播放失败' }
-      return { success: true, source: 'local-random', title: formatTrackLabel(randomTrack) }
+    const playCloudByMode = async (query) => {
+      const q = String(query || '').trim()
+      if (!q) return { success: false, error: '缺少搜索关键词' }
+      if (playModeHint === 'local') {
+        return { success: false, error: '本地模式未找到可播放歌曲' }
+      }
+      if (playModeHint === 'netease') {
+        console.log('[GlobalPlay] 网易云搜索:', q)
+        const res = await fetch(`/api/music/search-netease?q=${encodeURIComponent(q)}`)
+        const data = await res.json()
+        if (data.success && data.results?.length) {
+          return await convertNeteaseAndPlay(data.results[0], { remote: true })
+        }
+        return { success: false, error: data.error || '网易云未找到相关歌曲' }
+      }
+      console.log('[GlobalPlay] B站搜索:', q)
+      const biliRes = await fetch(`/api/music/search?q=${encodeURIComponent(q)}`)
+      const biliData = await biliRes.json()
+      if (biliData.success && biliData.results?.length) {
+        return await convertAndPlay(biliData.results[0], { remote: true })
+      }
+      return { success: false, error: biliData.error || 'B站未找到相关歌曲' }
     }
 
-    // 1. 先在本地已下载音乐中搜索，支持“歌手 + 歌名”组合匹配。
+    if (isRandomMusicKeyword(kw)) {
+      const pool = (playlist.value.length ? playlist.value : tracks.value).filter(track => track?.filename)
+      if (pool.length) {
+        const randomTrack = pool[Math.floor(Math.random() * pool.length)]
+        console.log('[GlobalPlay] 随机播放本地音乐:', randomTrack.title || randomTrack.filename)
+        const playResult = await play(randomTrack, { remote: true })
+        if (!playResult?.success) return { success: false, error: playResult?.error || '播放失败' }
+        return { success: true, source: 'local-random', title: formatTrackLabel(randomTrack) }
+      }
+      // Local empty: fall back to cloud/netease random search.
+      const cloudQuery = playModeHint === 'netease' ? '热门歌曲' : '热门流行音乐'
+      try {
+        const cloud = await playCloudByMode(cloudQuery)
+        if (cloud.success) return { ...cloud, source: `${cloud.source || playModeHint}-random` }
+        return cloud
+      } catch (err) {
+        return { success: false, error: err?.message || '随机播放失败' }
+      }
+    }
+
+    // 1. Local match first.
     const matchedLocal = findLocalTrackByKeyword(kw)
     if (matchedLocal) {
       console.log('[GlobalPlay] 本地匹配成功，直接播放:', formatTrackLabel(matchedLocal))
@@ -938,37 +978,14 @@ onMounted(async () => {
       return { success: true, source: 'local', title: formatTrackLabel(matchedLocal) }
     }
 
-    // 2. 本地未找到，再去 B 站搜索并转码播放
-    console.log('[GlobalPlay] 本地无匹配歌曲，正在进行B站搜索:', kw)
+    // 2. Mode-aware cloud search.
     try {
-      const biliRes = await fetch(`/api/music/search?q=${encodeURIComponent(kw)}`)
-      const biliData = await biliRes.json()
-      if (biliData.success && biliData.results && biliData.results.length > 0) {
-        const firstVideo = biliData.results[0]
-        console.log('[GlobalPlay] B站匹配成功，开始转码并播放:', firstVideo.title)
-        return await convertAndPlay(firstVideo, { remote: true })
-      }
+      return await playCloudByMode(kw)
     } catch (err) {
-      console.error('[GlobalPlay] B站播放失败:', err)
+      console.error('[GlobalPlay] 云端播放失败:', err)
+      return { success: false, error: err?.message || '未在本地或网络搜索到相关歌曲' }
     }
-
-    return { success: false, error: '未在本地或网络搜索到相关歌曲' }
   }
-
-  remoteCommandTimer = setInterval(async () => {
-    try {
-      const res = await fetch('/api/music/remote-command')
-      const data = await res.json()
-      const command = data.command
-      if (!command?.id || command.type !== 'play' || !command.keyword) return
-      await fetch('/api/music/remote-command/consume', { method: 'POST' })
-      const remoteRandom = isRandomMusicKeyword(command.keyword)
-      toast.info(remoteRandom ? '收到远程随机播放音乐指令' : `收到远程点歌：${command.keyword}`)
-      const result = await window.__cc_global_play_music(command.keyword)
-      if (result.success) toast.success(remoteRandom ? `远程随机播放已开始：${result.title}` : `远程点歌已播放：${result.title}`)
-      else toast.error(`远程点歌失败：${result.error || '未找到歌曲'}`)
-    } catch {}
-  }, 3000)
 
   // 播放时长：仅在播放状态下计时，每秒存储到 localStorage
   companionTimer = setInterval(() => {
@@ -996,7 +1013,10 @@ onUnmounted(() => {
   if (animFrame) cancelAnimationFrame(animFrame)
   if (danmakuFrame) cancelAnimationFrame(danmakuFrame)
   if (spectrumFrameId) cancelAnimationFrame(spectrumFrameId)
-  if (remoteCommandTimer) clearInterval(remoteCommandTimer)
+  if (remoteCommandTimer) {
+    clearInterval(remoteCommandTimer)
+    remoteCommandTimer = null
+  }
   if (companionTimer) clearInterval(companionTimer)
   if (weatherTimer) clearInterval(weatherTimer)
   detachAgentChatResizeObserver()

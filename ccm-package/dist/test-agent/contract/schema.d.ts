@@ -58805,6 +58805,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             [k: string]: unknown;
         };
         nextActions?: string[];
+        risks?: string[];
         requiredCheckSummary?: {
             unknown?: z.objectOutputType<{
                 check: z.ZodString;
@@ -59507,7 +59508,6 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             nextAction: z.ZodOptional<z.ZodString>;
             diagnostics: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
         }, z.ZodTypeAny, "passthrough">[];
-        risks?: string[];
         blockedReasons?: string[];
         reportId?: string;
         needsRework?: boolean;
@@ -59710,6 +59710,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             [k: string]: unknown;
         };
         nextActions?: string[];
+        risks?: string[];
         requiredCheckSummary?: {
             unknown?: z.objectInputType<{
                 check: z.ZodString;
@@ -60412,7 +60413,6 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             nextAction: z.ZodOptional<z.ZodString>;
             diagnostics: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
         }, z.ZodTypeAny, "passthrough">[];
-        risks?: string[];
         blockedReasons?: string[];
         reportId?: string;
         needsRework?: boolean;
@@ -60615,6 +60615,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             [k: string]: unknown;
         };
         nextActions?: string[];
+        risks?: string[];
         requiredCheckSummary?: {
             unknown?: z.objectOutputType<{
                 check: z.ZodString;
@@ -61317,7 +61318,6 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             nextAction: z.ZodOptional<z.ZodString>;
             diagnostics: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
         }, z.ZodTypeAny, "passthrough">[];
-        risks?: string[];
         blockedReasons?: string[];
         reportId?: string;
         needsRework?: boolean;
@@ -61520,6 +61520,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             [k: string]: unknown;
         };
         nextActions?: string[];
+        risks?: string[];
         requiredCheckSummary?: {
             unknown?: z.objectInputType<{
                 check: z.ZodString;
@@ -62222,7 +62223,6 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             nextAction: z.ZodOptional<z.ZodString>;
             diagnostics: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
         }, z.ZodTypeAny, "passthrough">[];
-        risks?: string[];
         blockedReasons?: string[];
         reportId?: string;
         needsRework?: boolean;

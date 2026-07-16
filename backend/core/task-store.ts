@@ -290,6 +290,50 @@ export function loadTasksFromSqlite(): any[] {
   return rows.map(row => parseJson(row.payload_json, null)).filter(Boolean);
 }
 
+export function getTaskByIdFromSqlite(id: string): any | null {
+  const taskId = String(id || "").trim();
+  if (!taskId) return null;
+  const row = getDatabase().prepare("SELECT payload_json FROM tasks WHERE id = ?").get(taskId) as { payload_json?: string } | undefined;
+  return row ? parseJson(row.payload_json, null) : null;
+}
+
+export function listTasksByParentIdFromSqlite(parentId: string): any[] {
+  const parent = String(parentId || "").trim();
+  if (!parent) return [];
+  const rows = getDatabase().prepare(
+    "SELECT payload_json FROM tasks WHERE json_extract(payload_json, '$.parent_task_id') = ? ORDER BY position ASC, rowid ASC",
+  ).all(parent) as Array<{ payload_json: string }>;
+  return rows.map(row => parseJson(row.payload_json, null)).filter(Boolean);
+}
+
+/** 行级更新：只读写单条任务，避免整表进出。 */
+export function updateTaskByIdInSqlite(id: string, patchOrMutator: any): any | null {
+  const taskId = String(id || "").trim();
+  if (!taskId) return null;
+  const db = getDatabase();
+  const existing = db.prepare("SELECT id, position, payload_json FROM tasks WHERE id = ?").get(taskId) as
+    | { id: string; position: number; payload_json: string }
+    | undefined;
+  if (!existing) return null;
+  const current = parseJson(existing.payload_json, null);
+  if (!current) return null;
+  const next = typeof patchOrMutator === "function"
+    ? patchOrMutator({ ...current })
+    : { ...current, ...(patchOrMutator || {}), id: current.id, updated_at: new Date().toISOString() };
+  if (!next || String(next.id) !== taskId) throw new Error("行级更新不能改变任务 id");
+  const row = taskColumns(next, Number(existing.position) || 0);
+  db.prepare(`
+    UPDATE tasks SET
+      position = ?, status = ?, group_id = ?, target_project = ?, workflow_type = ?,
+      created_at = ?, updated_at = ?, archived = ?, payload_json = ?, payload_hash = ?
+    WHERE id = ?
+  `).run(
+    row.position, row.status, row.groupId, row.targetProject, row.workflowType,
+    row.createdAt, row.updatedAt, row.archived, row.payload, row.hash, taskId,
+  );
+  return next;
+}
+
 export function saveTasksToSqlite(tasks: any[]) {
   if (!Array.isArray(tasks)) throw new Error("任务存储只接受数组");
   const db = getDatabase();
@@ -337,6 +381,73 @@ export function saveTasksToSqlite(tasks: any[]) {
   });
   transaction();
   return { total: tasks.length, inserted, updated, deleted };
+}
+
+export function runTaskStoreAtomicBatchSelfTest() {
+  const db = new Database(":memory:");
+  const restartFile = path.join(os.tmpdir(), `ccm-epic-restart-${process.pid}-${Date.now()}.db`);
+  try {
+    configureDatabase(db);
+    createSchema(db);
+    const now = new Date().toISOString();
+    const parent = {
+      id: "epic-self-test",
+      status: "in_progress",
+      workflow_type: "requirement_epic",
+      child_task_ids: ["epic-child-a", "epic-child-b"],
+      created_at: now,
+      updated_at: now,
+    };
+    const children = [
+      { id: "epic-child-a", parent_task_id: parent.id, status: "pending", workflow_type: "daily_dev", created_at: now, updated_at: now },
+      { id: "epic-child-b", parent_task_id: parent.id, status: "pending", workflow_type: "daily_dev", created_at: now, updated_at: now },
+    ];
+    let rollbackObserved = false;
+    const rollback = db.transaction(() => {
+      insertTasks(db, [parent, ...children]);
+      throw new Error("intentional rollback");
+    });
+    try {
+      rollback();
+    } catch {
+      rollbackObserved = Number((db.prepare("SELECT COUNT(*) AS count FROM tasks").get() as any)?.count || 0) === 0;
+    }
+    const commit = db.transaction(() => insertTasks(db, [parent, ...children]));
+    commit();
+    const committedCount = Number((db.prepare("SELECT COUNT(*) AS count FROM tasks").get() as any)?.count || 0);
+    const replay = db.transaction(() => insertTasks(db, [parent, ...children]));
+    replay();
+    const replayCount = Number((db.prepare("SELECT COUNT(*) AS count FROM tasks").get() as any)?.count || 0);
+    const parentPayload = parseJson((db.prepare("SELECT payload_json FROM tasks WHERE id = ?").get(parent.id) as any)?.payload_json, null);
+    const beforeRestart = new Database(restartFile);
+    configureDatabase(beforeRestart);
+    createSchema(beforeRestart);
+    insertTasks(beforeRestart, [parent, ...children]);
+    beforeRestart.close();
+    const afterRestart = new Database(restartFile);
+    configureDatabase(afterRestart);
+    createSchema(afterRestart);
+    const restartCount = Number((afterRestart.prepare("SELECT COUNT(*) AS count FROM tasks").get() as any)?.count || 0);
+    const restartedParent = parseJson((afterRestart.prepare("SELECT payload_json FROM tasks WHERE id = ?").get(parent.id) as any)?.payload_json, null);
+    afterRestart.close();
+    const restartRecovered = restartCount === 3
+      && restartedParent?.workflow_type === "requirement_epic"
+      && restartedParent?.child_task_ids?.length === 2;
+    const idempotentReplay = replayCount === committedCount;
+    const passed = rollbackObserved && committedCount === 3 && idempotentReplay && parentPayload?.workflow_type === "requirement_epic" && restartRecovered;
+    return {
+      success: passed,
+      rollback_observed: rollbackObserved,
+      committed_count: committedCount,
+      idempotent_replay: idempotentReplay,
+      parent_round_trip: parentPayload?.id === parent.id,
+      restart_recovered: restartRecovered,
+      restart_count: restartCount,
+    };
+  } finally {
+    db.close();
+    try { fs.rmSync(restartFile, { force: true }); } catch { /* ignore self-test cleanup errors */ }
+  }
 }
 
 export function appendTaskLogRecord(taskId: string, entry: any, maxEntries = 100) {
@@ -415,6 +526,76 @@ export function replaceGroupLogsInSqlite(logs: any) {
     insertGroupLogs(db, logs || {});
   });
   transaction();
+}
+
+export function clearGroupLogRecords(groupId: string) {
+  const id = String(groupId || "").trim();
+  if (!id) return 0;
+  return Number(getDatabase().prepare("DELETE FROM group_logs WHERE group_id = ?").run(id).changes || 0);
+}
+
+export function runTaskStoreRowApiSelfTest() {
+  const db = new Database(":memory:");
+  try {
+    configureDatabase(db);
+    createSchema(db);
+    const now = new Date().toISOString();
+    insertTasks(db, [
+      {
+        id: "row-epic",
+        status: "in_progress",
+        workflow_type: "requirement_epic",
+        child_task_ids: ["row-a", "row-b"],
+        created_at: now,
+        updated_at: now,
+      },
+      {
+        id: "row-a",
+        parent_task_id: "row-epic",
+        status: "pending",
+        workflow_type: "daily_dev",
+        requirement_item_key: "a",
+        created_at: now,
+        updated_at: now,
+      },
+      {
+        id: "row-b",
+        parent_task_id: "row-epic",
+        status: "pending",
+        workflow_type: "daily_dev",
+        requirement_item_key: "b",
+        mission_dependencies: ["row-a"],
+        created_at: now,
+        updated_at: now,
+      },
+    ]);
+    const previousDatabase = database;
+    database = db;
+    try {
+      const loaded = getTaskByIdFromSqlite("row-a");
+      if (!loaded || loaded.id !== "row-a") throw new Error("getTaskById 失败");
+      const updated = updateTaskByIdInSqlite("row-a", {
+        status: "done",
+        global_mission_gate_passed: true,
+        completed_at: now,
+      });
+      if (updated?.status !== "done" || updated?.global_mission_gate_passed !== true) throw new Error("updateTaskById 失败");
+      const children = listTasksByParentIdFromSqlite("row-epic");
+      if (children.length !== 2) throw new Error("listTasksByParentId 数量不正确");
+      appendGroupLogRecord("g-row", { timestamp: now, level: "info", category: "test", message: "keep" });
+      appendGroupLogRecord("g-row", { timestamp: now, level: "info", category: "test", message: "drop" });
+      appendGroupLogRecord("g-other", { timestamp: now, level: "info", category: "test", message: "other" });
+      const cleared = clearGroupLogRecords("g-row");
+      if (cleared < 2) throw new Error("clearGroupLogRecords 未按群删除");
+      const remaining = Number((db.prepare("SELECT COUNT(*) AS count FROM group_logs WHERE group_id = ?").get("g-other") as any)?.count || 0);
+      if (remaining !== 1) throw new Error("clearGroupLogRecords 误删其他群日志");
+      return { success: true, row_get: true, row_update: true, parent_list: children.length, group_logs_cleared: cleared };
+    } finally {
+      database = previousDatabase;
+    }
+  } finally {
+    db.close();
+  }
 }
 
 export function verifySqliteTaskStore() {

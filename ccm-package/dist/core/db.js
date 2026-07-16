@@ -51,6 +51,9 @@ exports.recordMetric = recordMetric;
 exports.runMetricsAggregationSelfTest = runMetricsAggregationSelfTest;
 exports.loadTasks = loadTasks;
 exports.saveTasks = saveTasks;
+exports.getTaskById = getTaskById;
+exports.updateTaskById = updateTaskById;
+exports.listTasksByParentId = listTasksByParentId;
 exports.loadTemplates = loadTemplates;
 exports.saveTemplates = saveTemplates;
 exports.loadProjectConfigs = loadProjectConfigs;
@@ -569,6 +572,15 @@ function loadTasks() {
 }
 function saveTasks(tasks) {
     return (0, task_store_1.saveTasksToSqlite)(tasks);
+}
+function getTaskById(id) {
+    return (0, task_store_1.getTaskByIdFromSqlite)(id);
+}
+function updateTaskById(id, patchOrMutator) {
+    return (0, task_store_1.updateTaskByIdInSqlite)(id, patchOrMutator);
+}
+function listTasksByParentId(parentId) {
+    return (0, task_store_1.listTasksByParentIdFromSqlite)(parentId);
 }
 // === Dialogue Templates ===
 function loadTemplates() {

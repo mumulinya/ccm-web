@@ -361,6 +361,7 @@ function completeDirectAgentDispatch(id, input = {}) {
         providerMemoryChannelEvidence: input.providerMemoryChannelEvidence || input.provider_memory_channel_evidence || null,
         memoryContextConsumptionReceipt: input.memoryContextConsumptionReceipt || input.memory_context_consumption_receipt || null,
         memoryContextConsumptionRecovery: input.memoryContextConsumptionRecovery || input.memory_context_consumption_recovery || null,
+        usage: input.usage && typeof input.usage === "object" ? input.usage : null,
         exitCode: input.exitCode ?? input.exit_code ?? null,
         signal: String(input.signal || ""),
         taskId: String(current.taskId || ""),

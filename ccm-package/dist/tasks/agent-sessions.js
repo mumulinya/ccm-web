@@ -3388,6 +3388,23 @@ function buildTaskAgentMemorySnapshotRow(input) {
         || "").trim();
     const deliveryReceipt = deliveryReceiptFile ? safeReadJson(deliveryReceiptFile, null) : null;
     const deliveryReceiptChecksumValid = !!deliveryReceipt && verifyMemoryContextDeliveryReceiptChecksum(deliveryReceipt);
+    const providerMemoryTransportUsage = deliveryReceipt?.providerMemoryTransportUsage || null;
+    const providerMemoryTransportUsagePresent = !!providerMemoryTransportUsage?.schema;
+    const providerMemoryTransportUsageVerification = providerMemoryTransportUsagePresent
+        ? (0, task_agent_memory_transport_usage_1.verifyTaskAgentMemoryTransportUsageReceipt)(providerMemoryTransportUsage, {
+            groupId: String(loadedSession.group_id || session?.groupId || ""),
+            groupSessionId: String(groupSessionMemoryBinding?.groupSessionId || ""),
+            taskId: String(loadedSession.task_id || session?.taskId || ""),
+            taskAgentSessionId: sessionId,
+            targetProject: String(loadedSession.project || session?.project || ""),
+            snapshotId,
+            snapshotChecksum: String(loaded?.checksum || input.ref?.checksum || ""),
+            runnerRequestId: String(deliveryReceipt?.runnerRequestId || ""),
+            provider: String(deliveryReceipt?.runtime || session?.agentType || ""),
+            nativeSessionId: String(deliveryReceipt?.nativeSessionId || ""),
+            transportMode: String(memoryEntrySync?.transport_mode || "legacy"),
+        })
+        : { valid: false, issues: ["memory_transport_usage_missing"] };
     const memoryContinuationBaselineVerification = deliveryReceipt
         ? verifyTaskAgentMemoryContinuationBaselineDelivery(loaded, {
             runtime: deliveryReceipt.runtime,
@@ -3544,6 +3561,8 @@ function buildTaskAgentMemorySnapshotRow(input) {
         hardGaps.push({ reason: `task Agent memory snapshot sync commit 被拒绝：${memorySnapshotSyncCommit?.delivery_status || memorySnapshotSyncCommit?.status || "unknown"}` });
     if (deliveryReceipt && !deliveryReceiptChecksumValid)
         hardGaps.push({ reason: "runner memory delivery receipt checksum 不匹配" });
+    if (deliveryReceipt && providerMemoryTransportUsagePresent && !providerMemoryTransportUsageVerification.valid)
+        hardGaps.push({ reason: `Provider memory transport usage 无效：${providerMemoryTransportUsageVerification.issues.join(",") || "unknown"}` });
     if (deliveryReceipt && !deliverySnapshotBound)
         hardGaps.push({ reason: "runner memory delivery receipt 未绑定当前 task Agent snapshot/session" });
     if (deliveryReceipt && !deliveryGroupSessionBound)
@@ -3561,6 +3580,8 @@ function buildTaskAgentMemorySnapshotRow(input) {
         hardGaps.push({ reason: "最新 runner memory delivery attempt 证据无效" });
     if (input.source === "session_ref" && !deliveryReceipt)
         warningGaps.push({ reason: "快照尚无 runner memory delivery receipt" });
+    if (deliveryReceipt && !providerMemoryTransportUsagePresent)
+        warningGaps.push({ reason: "runner memory delivery receipt 缺少 Provider transport usage（旧回执兼容）" });
     if (loaded && !memoryPromptInjectionProofPresent)
         warningGaps.push({ reason: "快照缺少 memory prompt injection proof（旧快照兼容）" });
     if (loaded && !memoryEntrySyncPresent)
@@ -3692,6 +3713,24 @@ function buildTaskAgentMemorySnapshotRow(input) {
         memoryContextConsumptionRecoveryStatus: String(deliveryReceipt?.memoryContextConsumptionRecoveryStatus || "not_needed"),
         memoryContextConsumptionRecoveryId: String(deliveryReceipt?.memoryContextConsumptionRecoveryId || ""),
         memoryContextConsumptionRecoveryIssues: Array.isArray(deliveryReceipt?.memoryContextConsumptionRecoveryIssues) ? deliveryReceipt.memoryContextConsumptionRecoveryIssues : [],
+        providerMemoryTransportUsagePresent,
+        providerMemoryTransportUsageValid: providerMemoryTransportUsagePresent && providerMemoryTransportUsageVerification.valid === true,
+        providerMemoryTransportUsageStatus: String(providerMemoryTransportUsage?.status || "missing"),
+        providerMemoryTransportUsageReported: providerMemoryTransportUsage?.reported === true,
+        providerMemoryTransportUsageChecksum: String(providerMemoryTransportUsage?.usage_checksum || ""),
+        providerMemoryTransportUsageIssues: providerMemoryTransportUsageVerification.issues,
+        providerMemoryTransportInputTokens: Number(providerMemoryTransportUsage?.input_tokens || 0),
+        providerMemoryTransportDirectInputTokens: Number(providerMemoryTransportUsage?.direct_input_tokens || 0),
+        providerMemoryTransportOutputTokens: Number(providerMemoryTransportUsage?.output_tokens || 0),
+        providerMemoryTransportCacheReadTokens: Number(providerMemoryTransportUsage?.cache_read_input_tokens || 0),
+        providerMemoryTransportCacheCreationTokens: Number(providerMemoryTransportUsage?.cache_creation_input_tokens || 0),
+        providerMemoryTransportAccountedTotalTokens: Number(providerMemoryTransportUsage?.accounted_total_tokens || 0),
+        providerMemoryTransportCacheHitRatio: providerMemoryTransportUsage?.cache_hit_ratio ?? null,
+        providerMemoryTransportEstimatedTokens: Number(providerMemoryTransportUsage?.memory_transport_estimated_tokens || 0),
+        providerMemoryTransportFinalPromptEstimatedTokens: Number(providerMemoryTransportUsage?.final_prompt_estimated_tokens || 0),
+        providerMemoryTransportMode: String(providerMemoryTransportUsage?.transport_mode || memoryEntrySync?.transport_mode || "legacy"),
+        providerMemoryTransportProvider: String(providerMemoryTransportUsage?.provider || deliveryReceipt?.runtime || ""),
+        providerMemoryTransportModel: String(providerMemoryTransportUsage?.model || ""),
         memorySnapshotSyncCommitPath: memorySnapshotSyncCommitFile,
         memorySnapshotSyncCommitPresent,
         memorySnapshotSyncCommitValid,

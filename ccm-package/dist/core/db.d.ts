@@ -37,6 +37,9 @@ export declare function saveTasks(tasks: any[]): {
     updated: number;
     deleted: number;
 };
+export declare function getTaskById(id: string): any;
+export declare function updateTaskById(id: string, patchOrMutator: any): any;
+export declare function listTasksByParentId(parentId: string): any[];
 export declare function loadTemplates(): any[];
 export declare function saveTemplates(templates: any[]): void;
 export declare function loadProjectConfigs(): any;

@@ -35,6 +35,8 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.createTask = createTask;
+exports.createRequirementEpicWithChildren = createRequirementEpicWithChildren;
+exports.updateRequirementEpicFromPlan = updateRequirementEpicFromPlan;
 exports.classifyTaskContinuation = classifyTaskContinuation;
 exports.looksLikeTaskContinuation = looksLikeTaskContinuation;
 exports.updateTask = updateTask;
@@ -45,12 +47,15 @@ exports.continueDailyDevTasksFromGaps = continueDailyDevTasksFromGaps;
 exports.retryTask = retryTask;
 exports.purgeArchivedTask = purgeArchivedTask;
 const crypto = __importStar(require("crypto"));
+const source_ingestion_1 = require("../requirements/source-ingestion");
 const db_1 = require("../../core/db");
+const group_orchestrator_1 = require("./group-orchestrator");
 const memory_1 = require("./memory");
 const logs_1 = require("./logs");
 const test_agent_runner_1 = require("./test-agent-runner");
 const artifact_retention_1 = require("../../test-agent/artifact-retention");
 const storage_1 = require("./storage");
+const daily_dev_backlog_1 = require("./daily-dev-backlog");
 const execution_kernel_1 = require("../../agents/execution-kernel");
 const agent_sessions_1 = require("../../tasks/agent-sessions");
 const reliability_ledger_1 = require("../../system/reliability-ledger");
@@ -112,6 +117,11 @@ function createTask(task) {
             ? (task.source_attachments || task.sourceAttachments)
             : [],
         requirement_extraction: task.requirement_extraction || task.requirementExtraction || null,
+        requirement_decomposition: task.requirement_decomposition || task.requirementDecomposition || null,
+        decomposition_plan: task.decomposition_plan || task.decompositionPlan || null,
+        requirement_content_hash: task.requirement_content_hash || task.requirementContentHash || "",
+        requirement_version: Math.max(1, Number(task.requirement_version || task.requirementVersion || 1)),
+        requirement_item_key: task.requirement_item_key || task.requirementItemKey || "",
         source_ingestion: task.source_ingestion || task.sourceIngestion || null,
         requires_code_changes: task.requires_code_changes ?? task.requiresCodeChanges ?? (task.workflow_type === "daily_dev" || task.workflowType === "daily_dev"),
         requires_verification: task.requires_verification ?? task.requiresVerification ?? (task.workflow_type === "daily_dev" || task.workflowType === "daily_dev"),
@@ -144,6 +154,517 @@ function createTask(task) {
     (0, reliability_ledger_1.appendTraceEvent)(traceId, { id: `task:${newTask.id}:created`, type: "task.created", status: "ok", task_id: newTask.id, group_id: newTask.group_id || "", agent: newTask.target_project || "", message: newTask.title, data: { workflow_type: newTask.workflow_type, assign_type: newTask.assign_type, group_session_id: newTask.group_session_id || "", idempotency_key: idempotencyKey ? "present" : "absent" } });
     return newTask;
 }
+function requirementEpicTaskId(prefix = "task") {
+    return `${prefix}_${Date.now().toString(36)}_${crypto.randomBytes(4).toString("hex")}`;
+}
+function requirementEpicTextList(value, fallback = "") {
+    const rows = Array.isArray(value) ? value : value ? [value] : [];
+    const cleaned = rows.map(item => (0, collaboration_1.compactFormText)(item, "")).filter(Boolean);
+    return cleaned.length ? cleaned.join("；") : fallback;
+}
+function resolveRequirementEpicTarget(item, input, groups, configs) {
+    const requestedType = String(item.target_type || "auto").toLowerCase();
+    const requestedId = String(item.target_id || "").trim();
+    const defaultGroupId = String(input.group_id || input.groupId || input.default_group_id || input.defaultGroupId || "").trim();
+    const defaultProject = String(input.target_project || input.targetProject || input.default_project || input.defaultProject || "").trim();
+    const directProject = requestedType === "group"
+        ? null
+        : requestedId
+            ? configs.find((config) => config.name === requestedId)
+            : defaultProject ? configs.find((config) => config.name === defaultProject) : null;
+    if (requestedType === "project" && requestedId && !directProject)
+        throw new Error(`子任务 ${item.item_key} 指定的项目不存在：${requestedId}`);
+    if (directProject) {
+        const containingGroup = groups.find((group) => group.id === defaultGroupId)
+            || groups.find((group) => (group.members || []).some((member) => String(member?.project || "") === directProject.name));
+        return {
+            assign_type: containingGroup ? "group" : "project",
+            group_id: containingGroup?.id || null,
+            target_project: directProject.name,
+            target: {
+                type: "project",
+                name: directProject.name,
+                project: directProject.name,
+                group_id: containingGroup?.id || "",
+                item_key: item.item_key,
+            },
+        };
+    }
+    const requestedGroup = requestedType === "group" && requestedId
+        ? groups.find((group) => group.id === requestedId || group.name === requestedId)
+        : null;
+    if (requestedType === "group" && requestedId && !requestedGroup)
+        throw new Error(`子任务 ${item.item_key} 指定的群聊不存在：${requestedId}`);
+    const group = requestedGroup || groups.find((entry) => entry.id === defaultGroupId) || null;
+    if (!group)
+        throw new Error(`子任务 ${item.item_key} 未找到可执行项目或群聊`);
+    const coordinator = (0, group_orchestrator_1.getCoordinatorMember)(group);
+    if (!coordinator?.project)
+        throw new Error(`群聊 ${group.name || group.id} 没有可执行的主 Agent`);
+    return {
+        assign_type: "group",
+        group_id: group.id,
+        target_project: coordinator.project,
+        target: {
+            type: "group",
+            name: group.name || group.id,
+            group_id: group.id,
+            coordinator: coordinator.project,
+            item_key: item.item_key,
+        },
+    };
+}
+function buildRequirementEpicTaskRecord(input, id, traceId, now) {
+    const groupId = String(input.group_id || input.groupId || "").trim();
+    const groupSession = groupId
+        ? (0, storage_1.resolveWritableGroupChatSession)(groupId, input.group_session_id || input.groupSessionId || "", {
+            title: (0, memory_1.compactMemoryText)(input.title || "需求 Epic", 80),
+        })
+        : null;
+    const record = {
+        id,
+        title: input.title || "需求开发任务",
+        description: input.description || "",
+        target_project: input.target_project || "",
+        group_id: groupId || null,
+        group_session_id: String(groupSession?.id || input.group_session_id || input.groupSessionId || "") || null,
+        assign_type: input.assign_type || "project",
+        status: input.status || "pending",
+        status_detail: input.status_detail || "",
+        priority: input.priority || "normal",
+        auto_execute: input.auto_execute === true || input.autoExecute === true,
+        queue_scope: input.queue_scope || input.queueScope || "",
+        child_agent_isolation: input.child_agent_isolation || input.childAgentIsolation || "",
+        branch_policy: input.branch_policy || input.branchPolicy || "",
+        commit_policy: input.commit_policy || input.commitPolicy || "",
+        allowed_paths: Array.isArray(input.allowed_paths || input.allowedPaths) ? (input.allowed_paths || input.allowedPaths) : [],
+        workflow_type: input.workflow_type || input.workflowType || "daily_dev",
+        business_goal: input.business_goal || input.businessGoal || "",
+        acceptance_criteria: input.acceptance_criteria || input.acceptanceCriteria || "",
+        source_documents: input.source_documents || input.sourceDocuments || "",
+        source_attachments: Array.isArray(input.source_attachments || input.sourceAttachments) ? (input.source_attachments || input.sourceAttachments) : [],
+        requirement_extraction: input.requirement_extraction || input.requirementExtraction || null,
+        requirement_decomposition: input.requirement_decomposition || input.requirementDecomposition || null,
+        source_ingestion: input.source_ingestion || input.sourceIngestion || null,
+        requirement_content_hash: input.requirement_content_hash || input.requirementContentHash || "",
+        requirement_version: Math.max(1, Number(input.requirement_version || input.requirementVersion || 1)),
+        requirement_item_key: input.requirement_item_key || input.requirementItemKey || "",
+        decomposition_plan: input.decomposition_plan || input.decompositionPlan || null,
+        requires_code_changes: input.requires_code_changes ?? input.requiresCodeChanges ?? true,
+        requires_verification: input.requires_verification ?? input.requiresVerification ?? true,
+        requires_independent_review: input.requires_independent_review ?? input.requiresIndependentReview ?? false,
+        requires_agent_qa: input.requires_agent_qa ?? input.requiresAgentQa ?? false,
+        workflow_meta: input.workflow_meta || input.workflowMeta || null,
+        parent_task_id: input.parent_task_id || input.parentTaskId || null,
+        global_mission_id: input.global_mission_id || input.globalMissionId || null,
+        requirement_epic_id: input.requirement_epic_id || input.requirementEpicId || null,
+        mission_target: input.mission_target || input.missionTarget || null,
+        mission_handoff: input.mission_handoff || input.missionHandoff || null,
+        mission_dependencies: Array.isArray(input.mission_dependencies || input.missionDependencies) ? (input.mission_dependencies || input.missionDependencies) : [],
+        requirement_dependency_keys: Array.isArray(input.requirement_dependency_keys || input.requirementDependencyKeys) ? (input.requirement_dependency_keys || input.requirementDependencyKeys) : [],
+        child_task_ids: Array.isArray(input.child_task_ids || input.childTaskIds) ? (input.child_task_ids || input.childTaskIds) : [],
+        mission_plan: input.mission_plan || input.missionPlan || null,
+        intake_state: input.intake_state || input.intakeState || "confirmed",
+        intake_draft: input.intake_draft || input.intakeDraft || null,
+        trace_id: traceId,
+        idempotency_key: String(input.idempotency_key || input.idempotencyKey || "").trim() || null,
+        created_at: now,
+        updated_at: now,
+    };
+    record.work_items = (0, work_items_1.buildMainAgentWorkItems)(record);
+    record.work_item_summary = (0, work_items_1.buildMainAgentWorkItemSummary)(record.work_items);
+    return record;
+}
+function createRequirementEpicWithChildren(payload) {
+    const tasks = (0, db_1.loadTasks)();
+    const rawPlan = payload.decomposition_plan || payload.decompositionPlan || payload.requirement_decomposition || payload.requirementDecomposition;
+    const requirement = payload.requirement_extraction || payload.requirementExtraction || null;
+    const contentHash = String(payload.requirement_content_hash || payload.requirementContentHash || rawPlan?.content_hash || "").trim();
+    const plan = (0, source_ingestion_1.validateRequirementDecomposition)(rawPlan, {
+        contentHash,
+        requirement,
+        extractionMethod: rawPlan?.extraction_method,
+    });
+    const channel = (0, collaboration_1.compactFormText)(payload.channel || payload.source, "ccm").replace(/[^a-zA-Z0-9_.:-]/g, "-");
+    const conversation = (0, collaboration_1.compactFormText)(payload.conversation_id || payload.conversationId || payload.group_session_id || payload.groupSessionId || payload.group_id || payload.groupId, "default").replace(/[^a-zA-Z0-9_.:-]/g, "-");
+    const clientMessageId = (0, collaboration_1.compactFormText)(payload.client_message_id || payload.clientMessageId, plan.content_hash.slice(0, 16))
+        .replace(/[^a-zA-Z0-9_.:-]/g, "-");
+    const batchKey = String(payload.idempotency_key || payload.idempotencyKey || `requirement-epic:${channel}:${conversation}:${clientMessageId}:${plan.content_hash}`).trim();
+    const requestedDraftId = String(payload.draft_task_id || payload.draftTaskId || "").trim();
+    const existingParent = tasks.find((task) => task.workflow_type === "requirement_epic"
+        && (task.idempotency_key === batchKey || (requestedDraftId && task.id === requestedDraftId)));
+    if (existingParent && Array.isArray(existingParent.child_task_ids) && existingParent.child_task_ids.length > 0) {
+        const byId = new Map(tasks.map((task) => [task.id, task]));
+        return {
+            success: true,
+            duplicate: true,
+            epic: existingParent,
+            children: (existingParent.child_task_ids || []).map((id) => byId.get(id)).filter(Boolean),
+            decomposition_plan: existingParent.decomposition_plan || plan,
+        };
+    }
+    if (plan.clarification_questions.length && payload.clarifications_resolved !== true && payload.clarificationsResolved !== true) {
+        return {
+            success: false,
+            needs_clarification: true,
+            decomposition_plan: plan,
+            clarification_questions: plan.clarification_questions,
+        };
+    }
+    if (payload.confirmed !== true) {
+        return {
+            success: false,
+            needs_confirmation: true,
+            decomposition_plan: plan,
+        };
+    }
+    const groups = (0, storage_1.loadGroups)();
+    const configs = (0, db_1.getConfigs)();
+    const traceId = (0, reliability_ledger_1.ensureTraceId)(payload.trace_id || payload.traceId, "requirement-epic");
+    const now = new Date().toISOString();
+    const parentId = existingParent?.id || requirementEpicTaskId("epic");
+    const childIdByKey = new Map(plan.items.map(item => [item.item_key, requirementEpicTaskId("task")]));
+    const resolved = plan.items.map(item => ({
+        item,
+        target: resolveRequirementEpicTarget(item, payload, groups, configs),
+    }));
+    const dependencyEdges = resolved.flatMap(({ item }) => item.depends_on.map(dependency => ({
+        from_item_key: dependency,
+        to_item_key: item.item_key,
+        from_task_id: childIdByKey.get(dependency),
+        to_task_id: childIdByKey.get(item.item_key),
+    })));
+    const shared = {
+        priority: payload.priority || "normal",
+        source_documents: payload.source_documents || payload.sourceDocuments || "",
+        source_attachments: payload.source_attachments || payload.sourceAttachments || [],
+        requirement_extraction: requirement,
+        requirement_decomposition: plan,
+        source_ingestion: payload.source_ingestion || payload.sourceIngestion || null,
+        requirement_content_hash: plan.content_hash,
+        requirement_version: plan.version,
+        trace_id: traceId,
+    };
+    const parent = buildRequirementEpicTaskRecord({
+        ...shared,
+        title: plan.epic_title,
+        description: plan.business_goal,
+        business_goal: plan.business_goal,
+        acceptance_criteria: requirementEpicTextList(plan.global_acceptance_criteria, "所有必需子任务通过验收并完成 Epic 集成验证"),
+        target_project: "global-agent",
+        group_id: payload.group_id || payload.groupId || null,
+        group_session_id: payload.group_session_id || payload.groupSessionId || null,
+        assign_type: "global",
+        workflow_type: "requirement_epic",
+        status: "in_progress",
+        status_detail: `Epic 已确认，准备派发 ${plan.items.length} 个子任务`,
+        auto_execute: false,
+        requires_code_changes: resolved.some(({ item }) => item.suggested_agent_capabilities.some(capability => capability !== "documentation")),
+        requires_verification: true,
+        requires_independent_review: true,
+        decomposition_plan: { ...plan, dependency_edges: dependencyEdges },
+        child_task_ids: [...childIdByKey.values()],
+        intake_state: "confirmed",
+        workflow_meta: {
+            requirement_epic: {
+                owner_agent: payload.owner_agent || payload.ownerAgent || "global-agent",
+                source: payload.source || channel,
+                batch_key: batchKey,
+                confirmed_at: now,
+                child_count: plan.items.length,
+            },
+        },
+        idempotency_key: batchKey,
+    }, parentId, traceId, now);
+    if (existingParent?.created_at)
+        parent.created_at = existingParent.created_at;
+    const children = resolved.map(({ item, target }) => {
+        const childId = childIdByKey.get(item.item_key);
+        const dependencyTaskIds = item.depends_on.map(key => childIdByKey.get(key)).filter(Boolean);
+        return buildRequirementEpicTaskRecord({
+            ...shared,
+            title: item.title,
+            description: (0, daily_dev_backlog_1.buildDailyDevTaskDescription)({
+                title: item.title,
+                business_goal: item.business_goal,
+                scope: requirementEpicTextList(item.scope, "按确认后的 Epic 子任务边界执行"),
+                documents: payload.source_documents || payload.sourceDocuments || "",
+                acceptance: requirementEpicTextList(item.acceptance_criteria, "完成子任务并提供实际验证证据"),
+                constraints: `这是需求 Epic ${parentId} 的子任务 ${item.item_key}；不得静默扩大确认范围。`,
+            }),
+            business_goal: item.business_goal,
+            acceptance_criteria: requirementEpicTextList(item.acceptance_criteria),
+            target_project: target.target_project,
+            group_id: target.group_id,
+            group_session_id: payload.group_session_id || payload.groupSessionId || null,
+            assign_type: target.assign_type,
+            workflow_type: "daily_dev",
+            status: "pending",
+            status_detail: dependencyTaskIds.length ? "等待前置子任务通过验收" : "等待进入执行队列",
+            auto_execute: payload.auto_execute !== false && payload.autoExecute !== false,
+            parent_task_id: parentId,
+            global_mission_id: parentId,
+            requirement_epic_id: parentId,
+            requirement_item_key: item.item_key,
+            mission_target: target.target,
+            mission_dependencies: dependencyTaskIds,
+            requirement_dependency_keys: item.depends_on,
+            requires_code_changes: item.item_key === "epic-integration-acceptance"
+                ? false
+                : !item.suggested_agent_capabilities.every(capability => capability === "documentation"),
+            requires_verification: true,
+            requires_independent_review: payload.requires_independent_review !== false,
+            workflow_meta: {
+                requirement_epic: {
+                    parent_task_id: parentId,
+                    item_key: item.item_key,
+                    scope: item.scope,
+                    risks: item.risks,
+                    source_evidence: item.source_evidence,
+                    confirmed_plan_version: plan.version,
+                },
+            },
+            idempotency_key: `${batchKey}:item:${item.item_key}`,
+        }, childId, traceId, now);
+    });
+    const retainedTasks = existingParent ? tasks.filter((task) => task.id !== existingParent.id) : tasks;
+    const duplicateTaskIds = new Set(retainedTasks.map((task) => task.id));
+    for (const record of [parent, ...children]) {
+        if (duplicateTaskIds.has(record.id))
+            throw new Error(`批量创建任务 ID 冲突：${record.id}`);
+        duplicateTaskIds.add(record.id);
+    }
+    (0, db_1.saveTasks)([...retainedTasks, parent, ...children]);
+    (0, reliability_ledger_1.appendTraceEvent)(traceId, {
+        id: `requirement-epic:${parentId}:created`,
+        type: "requirement_epic.created",
+        status: "ok",
+        task_id: parentId,
+        group_id: parent.group_id || "",
+        agent: payload.owner_agent || payload.ownerAgent || "global-agent",
+        message: `已从需求文档原子创建 Epic 和 ${children.length} 个子任务`,
+        data: { batch_key: batchKey, content_hash: plan.content_hash, version: plan.version, child_task_ids: children.map(child => child.id), dependency_edges: dependencyEdges },
+    });
+    (0, logs_1.appendTaskTimelineEvent)(parentId, {
+        type: "requirement_epic_created",
+        title: "需求文档已拆分为持久任务",
+        detail: `一次创建 ${children.length} 个子任务，依赖关系已保存`,
+        status: "active",
+        phase: "dispatching",
+        agent: payload.owner_agent || payload.ownerAgent || "global-agent",
+        data: { decomposition_plan: plan, dependency_edges: dependencyEdges },
+    });
+    return {
+        success: true,
+        duplicate: false,
+        epic: parent,
+        children,
+        decomposition_plan: plan,
+        dependency_edges: dependencyEdges,
+    };
+}
+function updateRequirementEpicFromPlan(payload) {
+    const tasks = (0, db_1.loadTasks)();
+    const epicId = String(payload.epic_id || payload.epicId || payload.id || "").trim();
+    const epic = tasks.find((task) => task.id === epicId && task.workflow_type === "requirement_epic");
+    if (!epic)
+        throw new Error("需求 Epic 不存在");
+    if (payload.confirmed !== true)
+        return { success: false, needs_confirmation: true, epic };
+    const previousPlan = epic.decomposition_plan || epic.requirement_decomposition;
+    const requestedPlan = payload.decomposition_plan || payload.decompositionPlan || payload.requirement_decomposition || payload.requirementDecomposition;
+    const nextPlan = (0, source_ingestion_1.validateRequirementDecomposition)({
+        ...requestedPlan,
+        version: Math.max(Number(previousPlan?.version || epic.requirement_version || 1) + 1, Number(requestedPlan?.version || 1)),
+    }, {
+        contentHash: requestedPlan?.content_hash || payload.requirement_content_hash || payload.requirementContentHash,
+        requirement: payload.requirement_extraction || payload.requirementExtraction || epic.requirement_extraction,
+        extractionMethod: requestedPlan?.extraction_method,
+    });
+    const diff = (0, source_ingestion_1.diffRequirementDecompositionPlans)(previousPlan, nextPlan);
+    if (!diff.has_changes && nextPlan.content_hash === previousPlan?.content_hash) {
+        return { success: true, duplicate: true, epic, children: tasks.filter((task) => task.parent_task_id === epic.id), diff };
+    }
+    const groups = (0, storage_1.loadGroups)();
+    const configs = (0, db_1.getConfigs)();
+    const now = new Date().toISOString();
+    const traceId = epic.trace_id;
+    const existingChildren = tasks.filter((task) => task.parent_task_id === epic.id);
+    const childByKey = new Map(existingChildren.map((task) => [String(task.requirement_item_key || ""), task]));
+    const childIdByKey = new Map(nextPlan.items.map(item => [
+        item.item_key,
+        childByKey.get(item.item_key)?.id || requirementEpicTaskId("task"),
+    ]));
+    const resolved = nextPlan.items.map(item => ({
+        item,
+        target: resolveRequirementEpicTarget(item, { ...epic, ...payload }, groups, configs),
+    }));
+    const changedKeys = new Set([...diff.added, ...diff.changed]);
+    let expanded = true;
+    while (expanded) {
+        expanded = false;
+        for (const item of nextPlan.items) {
+            if (changedKeys.has(item.item_key))
+                continue;
+            if (item.depends_on.some(dependency => changedKeys.has(dependency))) {
+                changedKeys.add(item.item_key);
+                expanded = true;
+            }
+        }
+    }
+    const impactDiff = {
+        ...diff,
+        affected: [...changedKeys],
+        reopened: [...changedKeys].filter(key => !diff.added.includes(key)),
+    };
+    const activeChildren = resolved.map(({ item, target }) => {
+        const existing = childByKey.get(item.item_key);
+        const dependencies = item.depends_on.map(key => childIdByKey.get(key)).filter(Boolean);
+        if (existing && !changedKeys.has(item.item_key)) {
+            return {
+                ...existing,
+                mission_dependencies: dependencies,
+                requirement_dependency_keys: item.depends_on,
+                requirement_version: nextPlan.version,
+                requirement_content_hash: nextPlan.content_hash,
+                requirement_decomposition: nextPlan,
+                mission_target: target.target,
+                updated_at: now,
+            };
+        }
+        const record = buildRequirementEpicTaskRecord({
+            title: item.title,
+            description: (0, daily_dev_backlog_1.buildDailyDevTaskDescription)({
+                title: item.title,
+                business_goal: item.business_goal,
+                scope: requirementEpicTextList(item.scope),
+                documents: payload.source_documents || epic.source_documents || "",
+                acceptance: requirementEpicTextList(item.acceptance_criteria),
+                constraints: `这是需求 Epic ${epic.id} 的第 ${nextPlan.version} 版子任务 ${item.item_key}；只处理新版计划中受影响的范围。`,
+            }),
+            business_goal: item.business_goal,
+            acceptance_criteria: requirementEpicTextList(item.acceptance_criteria),
+            target_project: target.target_project,
+            group_id: target.group_id,
+            group_session_id: epic.group_session_id,
+            assign_type: target.assign_type,
+            workflow_type: "daily_dev",
+            status: "pending",
+            status_detail: existing ? `需求第 ${nextPlan.version} 版影响该子任务，已保留历史并重新等待执行` : `需求第 ${nextPlan.version} 版新增子任务，等待执行`,
+            auto_execute: payload.auto_execute !== false,
+            parent_task_id: epic.id,
+            global_mission_id: epic.id,
+            requirement_epic_id: epic.id,
+            requirement_item_key: item.item_key,
+            requirement_version: nextPlan.version,
+            requirement_content_hash: nextPlan.content_hash,
+            requirement_extraction: payload.requirement_extraction || epic.requirement_extraction,
+            requirement_decomposition: nextPlan,
+            source_documents: payload.source_documents || epic.source_documents,
+            source_attachments: payload.source_attachments || epic.source_attachments,
+            source_ingestion: payload.source_ingestion || epic.source_ingestion,
+            mission_target: target.target,
+            mission_dependencies: dependencies,
+            requirement_dependency_keys: item.depends_on,
+            requires_code_changes: item.item_key === "epic-integration-acceptance"
+                ? false
+                : !item.suggested_agent_capabilities.every(capability => capability === "documentation"),
+            requires_verification: true,
+            requires_independent_review: true,
+            workflow_meta: {
+                requirement_epic: {
+                    parent_task_id: epic.id,
+                    item_key: item.item_key,
+                    confirmed_plan_version: nextPlan.version,
+                    changed_from_previous_version: !!existing,
+                    previous_delivery: existing?.delivery_summary || null,
+                },
+            },
+            idempotency_key: `${epic.id}:v${nextPlan.version}:item:${item.item_key}`,
+        }, childIdByKey.get(item.item_key), traceId, now);
+        if (existing?.created_at)
+            record.created_at = existing.created_at;
+        if (existing) {
+            record.delivery_history = [
+                ...(Array.isArray(existing.delivery_history) ? existing.delivery_history : []),
+                {
+                    version: Number(existing.requirement_version || nextPlan.version - 1),
+                    archived_at: now,
+                    status: existing.status,
+                    delivery_summary: existing.delivery_summary || null,
+                    receipt: existing.receipt || null,
+                },
+            ].slice(-20);
+        }
+        return record;
+    });
+    const activeIds = new Set(activeChildren.map(child => child.id));
+    const retiredChildren = existingChildren
+        .filter(child => !activeIds.has(child.id))
+        .map(child => ({
+        ...child,
+        status: child.status === "done" ? child.status : "cancelled",
+        auto_execute: false,
+        requirement_removed_in_version: nextPlan.version,
+        status_detail: child.status === "done"
+            ? `需求第 ${nextPlan.version} 版已删除该范围；保留已完成交付作为历史`
+            : `需求第 ${nextPlan.version} 版已删除该范围，尚未完成的子任务已取消`,
+        updated_at: now,
+    }));
+    const dependencyEdges = nextPlan.items.flatMap(item => item.depends_on.map(key => ({
+        from_item_key: key,
+        to_item_key: item.item_key,
+        from_task_id: childIdByKey.get(key),
+        to_task_id: childIdByKey.get(item.item_key),
+    })));
+    const updatedEpic = {
+        ...epic,
+        status: "in_progress",
+        status_detail: `需求已升级到第 ${nextPlan.version} 版：新增 ${diff.added.length}、重开 ${impactDiff.reopened.length}、移除 ${diff.removed.length}`,
+        decomposition_plan: { ...nextPlan, dependency_edges: dependencyEdges },
+        requirement_decomposition: nextPlan,
+        requirement_content_hash: nextPlan.content_hash,
+        requirement_version: nextPlan.version,
+        requirement_extraction: payload.requirement_extraction || epic.requirement_extraction,
+        source_documents: payload.source_documents || epic.source_documents,
+        source_attachments: payload.source_attachments || epic.source_attachments,
+        source_ingestion: payload.source_ingestion || epic.source_ingestion,
+        child_task_ids: activeChildren.map(child => child.id),
+        requirement_version_history: [
+            ...(Array.isArray(epic.requirement_version_history) ? epic.requirement_version_history : []),
+            {
+                version: Number(previousPlan?.version || epic.requirement_version || 1),
+                content_hash: previousPlan?.content_hash || epic.requirement_content_hash || "",
+                archived_at: now,
+                decomposition_plan: previousPlan,
+            },
+        ].slice(-10),
+        last_requirement_diff: impactDiff,
+        updated_at: now,
+    };
+    const existingChildIds = new Set(existingChildren.map(child => child.id));
+    const retained = tasks.filter((task) => task.id !== epic.id && !existingChildIds.has(task.id));
+    (0, db_1.saveTasks)([...retained, updatedEpic, ...activeChildren, ...retiredChildren]);
+    (0, reliability_ledger_1.appendTraceEvent)(traceId, {
+        id: `requirement-epic:${epic.id}:version:${nextPlan.version}`,
+        type: "requirement_epic.version_changed",
+        status: "ok",
+        task_id: epic.id,
+        group_id: epic.group_id || "",
+        agent: payload.owner_agent || "global-agent",
+        message: `需求 Epic 已升级到第 ${nextPlan.version} 版`,
+        data: { diff: impactDiff, dependency_edges: dependencyEdges },
+    });
+    (0, logs_1.appendTaskTimelineEvent)(epic.id, {
+        type: "requirement_epic_version_changed",
+        title: `需求文档已更新到第 ${nextPlan.version} 版`,
+        detail: `新增 ${diff.added.length}、重开 ${impactDiff.reopened.length}、移除 ${diff.removed.length}，未受影响的已完成成果保持不变`,
+        status: "active",
+        phase: "planning",
+        data: { diff: impactDiff },
+    });
+    return { success: true, epic: updatedEpic, children: activeChildren, retired_children: retiredChildren, diff: impactDiff, dependency_edges: dependencyEdges };
+}
 function classifyTaskContinuation(message) {
     const text = String(message || "").trim();
     if (/(?:这是|作为|创建|开始).{0,10}(?:新任务|另一个任务)|与当前任务无关|另外一个项目/i.test(text))
@@ -161,6 +682,7 @@ function updateTask(id, updates) {
     if (idx === -1)
         return null;
     const previousStatus = tasks[idx].status;
+    const previousGatePassed = tasks[idx].global_mission_gate_passed === true;
     const previousReceiptKey = String(tasks[idx].receipt_idempotency_key || "");
     const previousCollaborationState = tasks[idx].collaboration_state || {};
     tasks[idx].trace_id = (0, reliability_ledger_1.ensureTraceId)(tasks[idx].trace_id || updates.trace_id || updates.traceId, "task");
@@ -199,6 +721,17 @@ function updateTask(id, updates) {
     }
     if (updates.receipt && updates.receipt_idempotency_key !== previousReceiptKey) {
         (0, reliability_ledger_1.appendTraceEvent)(tasks[idx].trace_id, { id: `task:${id}:receipt:${updates.receipt_idempotency_key}`, type: "worker.receipt_persisted", status: updates.receipt.status === "done" ? "ok" : updates.receipt.status === "failed" ? "error" : "warning", task_id: id, group_id: tasks[idx].group_id || "", agent: updates.receipt.agent || tasks[idx].target_project || "", message: updates.receipt.summary || `回执状态 ${updates.receipt.status || "unknown"}`, data: { receipt_status: updates.receipt.status || "", filesChanged: updates.receipt.filesChanged || [], verification: updates.receipt.verification || [] } });
+    }
+    const gatePassed = tasks[idx].global_mission_gate_passed === true;
+    const gateNewlyPassed = gatePassed && !previousGatePassed;
+    const doneNewly = updates.status === "done" && previousStatus !== "done";
+    if (tasks[idx].parent_task_id && gatePassed && (gateNewlyPassed || doneNewly)) {
+        try {
+            require("./collaboration-task-runtime").scheduleRequirementEpicDependencyUnlock(tasks[idx].parent_task_id, gateNewlyPassed ? "child_gate_newly_passed" : "child_done_gate_passed");
+        }
+        catch (error) {
+            console.warn(`[Epic 依赖解锁] 调度失败 ${tasks[idx].parent_task_id}:`, error?.message || error);
+        }
     }
     return tasks[idx];
 }

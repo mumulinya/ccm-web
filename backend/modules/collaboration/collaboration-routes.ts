@@ -21,7 +21,9 @@ import {
   CCM_DIR,
 } from "../../core/utils";
 
-import { ingestRequirementSources, requirementToIntakeDraft } from "../requirements/source-ingestion";
+import { decomposeRequirementToTaskPlan, ingestRequirementSources, requirementToIntakeDraft } from "../requirements/source-ingestion";
+import { runRequirementEpicSelfTest } from "../requirements/requirement-epic-self-tests";
+import { startGlobalMissionSupervisor } from "../../agents/global/mission-supervisor";
 
 import {
   loadCronJobs,
@@ -476,6 +478,7 @@ import {
   compactFormText,
   continueTaskWithMessage,
   createDailyDevSmokeTask,
+  createRequirementEpicWithChildren,
   createTask,
   enqueueTask,
   extractActionableMentions,
@@ -525,6 +528,7 @@ import {
   taskQueues,
   uniqueStrings,
   updateGroupTaskInlineStatus,
+  updateRequirementEpicFromPlan,
   updateTask,
   validateDailyDevGroupReady,
   validateTaskManualStatusUpdate,
@@ -977,19 +981,80 @@ export function handleCollaborationApi(
     return true;
   }
 
+  if (pathname === "/api/tasks/requirement-epic/self-test" && req.method === "GET") {
+    try {
+      sendJson(res, runRequirementEpicSelfTest());
+    } catch (error: any) {
+      sendJson(res, { success: false, error: error?.message || String(error) }, 500);
+    }
+    return true;
+  }
+
+  if (pathname === "/api/tasks/requirement-epic/metrics" && req.method === "GET") {
+    const tasks = loadTasks();
+    const epics = tasks.filter((task: any) => task.workflow_type === "requirement_epic");
+    const epicIds = new Set(epics.map((task: any) => task.id));
+    const children = tasks.filter((task: any) => epicIds.has(task.parent_task_id));
+    const durations = epics
+      .filter((task: any) => task.completed_at && task.created_at)
+      .map((task: any) => Math.max(0, Date.parse(task.completed_at) - Date.parse(task.created_at)))
+      .filter(Number.isFinite);
+    const byStatus = (rows: any[]) => rows.reduce((result: any, row: any) => {
+      const status = String(row.status || "unknown");
+      result[status] = Number(result[status] || 0) + 1;
+      return result;
+    }, {});
+    sendJson(res, {
+      success: true,
+      schema: "ccm-requirement-epic-metrics-v1",
+      generated_at: new Date().toISOString(),
+      epics: {
+        total: epics.length,
+        by_status: byStatus(epics),
+        awaiting_confirmation: epics.filter((task: any) => task.intake_state === "awaiting_confirmation").length,
+        awaiting_change_review: epics.filter((task: any) => task.status === "awaiting_change_review").length,
+        versioned: epics.filter((task: any) => Number(task.requirement_version || 1) > 1).length,
+        average_completion_ms: durations.length ? Math.round(durations.reduce((sum: number, value: number) => sum + value, 0) / durations.length) : 0,
+      },
+      children: {
+        total: children.length,
+        by_status: byStatus(children),
+        dependency_waiting: children.filter((task: any) => task.status === "pending" && Array.isArray(task.mission_dependencies) && task.mission_dependencies.length > 0).length,
+        reworked: children.filter((task: any) => Number(task.retry_count || 0) > 0 || Number(task.requirement_version || 1) > 1).length,
+      },
+    });
+    return true;
+  }
+
   if (pathname === "/api/usability/intake/preview" && req.method === "POST") {
     const handleIntakePreview = async (payload: any, files: any[] = []) => {
       try {
         const userRequirement = compactFormText(payload.requirement || payload.goal || payload.message, "");
-        const sourceIngestion = await ingestRequirementSources({ files, userText: userRequirement, extractRequirement: true });
+        const groups = loadGroups();
+        const configs = getConfigs();
+        const availableTargets = [
+          ...groups.map((group: any) => ({
+            type: "group",
+            id: group.id,
+            name: group.name || group.id,
+            capabilities: (group.members || []).flatMap((member: any) => member.skills || member.capabilities || []),
+          })),
+          ...configs.map((config: any) => ({ type: "project", id: config.name, name: config.name })),
+        ];
+        const sourceIngestion = await ingestRequirementSources({
+          files,
+          userText: userRequirement,
+          extractRequirement: true,
+          decomposeRequirement: true,
+          availableTargets,
+        });
         const extractedRequirement = sourceIngestion.requirement;
         const requirement = compactFormText(extractedRequirement?.business_goal || userRequirement, "");
         if (!requirement && sourceIngestion.sources.length === 0) return sendJson(res, { error: "请先说说你想完成什么，或者上传需求资料" }, 400);
-        const groups = loadGroups();
         const group = groups.find((item: any) => item.id === (payload.group_id || payload.groupId)) || null;
         const requestedProject = compactFormText(payload.target_project || payload.targetProject, "");
         const coordinator = group?.members?.find((member: any) => member.role === "coordinator")?.project || group?.members?.[0]?.project || "";
-        const targetProject = requestedProject || coordinator || getConfigs()[0]?.name || "";
+        const targetProject = requestedProject || coordinator || configs[0]?.name || "";
         if (!targetProject && !group) return sendJson(res, { error: "还没有可执行项目，请先添加项目或开发群聊" }, 409);
         const lower = `${requirement}\n${sourceIngestion.source_documents}`.toLowerCase();
         const areas = [
@@ -1022,6 +1087,8 @@ export function handleCollaborationApi(
           group_name: group?.name || "",
           source_summary: sourceIngestion.user_summary,
           source_ingestion: sourceIngestion.technical,
+          decomposition_plan: sourceIngestion.decomposition,
+          requirement_content_hash: sourceIngestion.content_hash,
         };
         const sourceDocuments = [
           userRequirement ? `用户输入：\n${userRequirement}` : "",
@@ -1036,16 +1103,33 @@ export function handleCollaborationApi(
           source_documents: sourceDocuments,
           source_attachments: sourceIngestion.attachments,
           requirement_extraction: extractedRequirement,
+          requirement_decomposition: sourceIngestion.decomposition,
+          decomposition_plan: sourceIngestion.decomposition,
+          requirement_content_hash: sourceIngestion.content_hash,
           source_ingestion: sourceIngestion.technical,
           target_project: targetProject,
           group_id: group?.id || null,
           assign_type: group ? "group" : "project",
-          workflow_type: group ? "daily_dev" : "general",
+          workflow_type: "requirement_epic",
           requires_code_changes: payload.requires_code_changes !== false,
           requires_verification: true,
           auto_execute: false,
           intake_state: "awaiting_confirmation",
           intake_draft: intakeDraft,
+          workflow_meta: {
+            intake: {
+              source: "usability-intake",
+              channel: payload.channel || "web",
+              client_message_id: payload.client_message_id || payload.clientMessageId || "",
+              source_ingestion: sourceIngestion.technical,
+            },
+            requirement_epic: {
+              version_of_epic_id: payload.epic_id || payload.epicId || "",
+              content_hash: sourceIngestion.content_hash,
+            },
+          },
+          trace_id: payload.trace_id || payload.traceId,
+          idempotency_key: payload.idempotency_key || payload.idempotencyKey || `requirement-epic-preview:${payload.client_message_id || payload.clientMessageId || sourceIngestion.content_hash}`,
         });
         const updated = updateTask(task.id, { status: "pending", auto_execute: false, intake_state: "awaiting_confirmation", intake_draft: intakeDraft, status_detail: "执行计划已准备好，等待你确认" }) || task;
         appendTraceEvent(updated.trace_id, { type: "intake.previewed", status: "ok", task_id: updated.id, group_id: updated.group_id || "", agent: targetProject, message: "已生成执行前确认卡，尚未开始执行", data: intakeDraft });
@@ -1081,7 +1165,7 @@ export function handleCollaborationApi(
   if (pathname === "/api/usability/intake/confirm" && req.method === "POST") {
     let body = "";
     req.on("data", (chunk) => body += chunk);
-    req.on("end", () => {
+    req.on("end", async () => {
       try {
         const payload = body ? JSON.parse(body) : {};
         const taskId = String(payload.task_id || payload.id || "").trim();
@@ -1091,6 +1175,137 @@ export function handleCollaborationApi(
         if (current.intake_state === "confirmed") return sendJson(res, { success: true, duplicate: true, task: current, trace_id: current.trace_id });
         if (current.intake_state !== "awaiting_confirmation") return sendJson(res, { error: "这张确认卡已经失效" }, 409);
         const confirmedAt = new Date().toISOString();
+        if (current.workflow_type === "requirement_epic" && (current.decomposition_plan || current.requirement_decomposition)) {
+          const versionOfEpicId = String(current.workflow_meta?.requirement_epic?.version_of_epic_id || "").trim();
+          if (versionOfEpicId) {
+            const versionResult = updateRequirementEpicFromPlan({
+              epic_id: versionOfEpicId,
+              decomposition_plan: current.decomposition_plan || current.requirement_decomposition,
+              requirement_extraction: current.requirement_extraction,
+              requirement_content_hash: current.requirement_content_hash,
+              source_documents: current.source_documents,
+              source_attachments: current.source_attachments,
+              source_ingestion: current.source_ingestion,
+              confirmed: true,
+              auto_execute: true,
+              owner_agent: current.target_project || "global-agent",
+            });
+            const supervisor = startGlobalMissionSupervisor({
+              mission_id: versionResult.epic.id,
+              trace_id: versionResult.epic.trace_id,
+              session_id: versionResult.epic.group_session_id || versionResult.epic.group_id || "web",
+              source: current.workflow_meta?.intake?.source || "requirement-epic-version",
+              business_goal: versionResult.epic.business_goal,
+              acceptance: versionResult.epic.acceptance_criteria,
+              max_attempts: 3,
+              restart: true,
+            });
+            updateTask(current.id, {
+              status: "cancelled",
+              intake_state: "superseded",
+              status_detail: `该确认卡已应用到需求 Epic ${versionOfEpicId} 的新版本`,
+              superseded_by_task_id: versionOfEpicId,
+            });
+            const queueResults = (versionResult.children || [])
+              .filter((child: any) => child.status === "pending" && (!child.mission_dependencies || child.mission_dependencies.length === 0))
+              .map((child: any) => ({ task_id: child.id, ...enqueueTask(child.id, ctx) }));
+            return sendJson(res, {
+              success: true,
+              task: versionResult.epic,
+              epic: versionResult.epic,
+              children: versionResult.children,
+              retired_children: versionResult.retired_children,
+              diff: versionResult.diff,
+              queue_results: queueResults,
+              supervisor,
+              trace_id: versionResult.epic.trace_id,
+              same_task_trace: true,
+            });
+          }
+          const epicResult = createRequirementEpicWithChildren({
+            draft_task_id: current.id,
+            decomposition_plan: current.decomposition_plan || current.requirement_decomposition,
+            requirement_extraction: current.requirement_extraction,
+            requirement_content_hash: current.requirement_content_hash,
+            source_documents: current.source_documents,
+            source_attachments: current.source_attachments,
+            source_ingestion: current.source_ingestion,
+            group_id: current.group_id,
+            group_session_id: current.group_session_id,
+            target_project: current.target_project,
+            priority: current.priority,
+            source: current.workflow_meta?.intake?.source || "usability-intake",
+            channel: current.workflow_meta?.intake?.channel || "web",
+            conversation_id: current.group_session_id || current.group_id || "global",
+            client_message_id: current.workflow_meta?.intake?.client_message_id || current.id,
+            trace_id: current.trace_id,
+            idempotency_key: current.idempotency_key,
+            owner_agent: current.target_project || "global-agent",
+            confirmed: true,
+            clarifications_resolved: !(current.decomposition_plan || current.requirement_decomposition)?.clarification_questions?.length || !!acceptFeedback,
+            auto_execute: true,
+            requires_independent_review: true,
+          });
+          if (!epicResult.success) {
+            return sendJson(res, {
+              ...epicResult,
+              error: epicResult.needs_clarification
+                ? "仍有阻断问题，请先在“调整计划”中补充答案后再确认"
+                : "请先确认完整的 Epic 任务图",
+              trace_id: current.trace_id,
+            }, 409);
+          }
+          const supervisor = startGlobalMissionSupervisor({
+            mission_id: epicResult.epic.id,
+            global_run_id: current.workflow_meta?.global_run_id || "",
+            trace_id: epicResult.epic.trace_id,
+            session_id: current.group_session_id || current.group_id || "web",
+            source: current.workflow_meta?.intake?.source || "usability-intake",
+            business_goal: epicResult.epic.business_goal,
+            acceptance: epicResult.epic.acceptance_criteria,
+            max_attempts: 3,
+          });
+          const queueResults = epicResult.children.map((child: any) => {
+            if (Array.isArray(child.mission_dependencies) && child.mission_dependencies.length > 0) {
+              return { task_id: child.id, queued: false, message: "等待前置子任务通过验收" };
+            }
+            const result = enqueueTask(child.id, ctx);
+            return { task_id: child.id, ...result };
+          });
+          const updatedEpic = updateTask(epicResult.epic.id, {
+            intake_state: "confirmed",
+            confirmed_at: confirmedAt,
+            status: "in_progress",
+            status_detail: `已确认任务图，${queueResults.filter((item: any) => item.queued).length}/${epicResult.children.length} 个子任务已进入队列`,
+            plan_accept_feedback: acceptFeedback,
+            workflow_meta: {
+              ...(epicResult.epic.workflow_meta || {}),
+              plan_mode: {
+                ...(current.intake_draft || {}),
+                requires_confirmation: false,
+                accepted_at: confirmedAt,
+                accepted_feedback: acceptFeedback,
+              },
+              requirement_epic: {
+                ...((epicResult.epic.workflow_meta || {}).requirement_epic || {}),
+                confirmed_at: confirmedAt,
+                accepted_feedback: acceptFeedback,
+              },
+            },
+          }) || epicResult.epic;
+          updateGroupTaskInlineStatus(updatedEpic, updatedEpic.status, updatedEpic.status_detail);
+          return sendJson(res, {
+            success: true,
+            task: updatedEpic,
+            epic: updatedEpic,
+            children: epicResult.children,
+            queue_results: queueResults,
+            supervisor,
+            decomposition_plan: epicResult.decomposition_plan,
+            trace_id: updatedEpic.trace_id,
+            same_task_trace: true,
+          });
+        }
         const basePlan = getTaskPlanMode(current) || current.intake_draft || {};
         const acceptedPlan = buildAcceptedPlanModeDraft(basePlan, acceptFeedback, confirmedAt);
         const meta = current.workflow_meta || {};
@@ -1170,7 +1385,7 @@ export function handleCollaborationApi(
   if (pathname === "/api/usability/intake/revise" && req.method === "POST") {
     let body = "";
     req.on("data", (chunk) => body += chunk);
-    req.on("end", () => {
+    req.on("end", async () => {
       try {
         const payload = body ? JSON.parse(body) : {};
         const taskId = String(payload.task_id || payload.id || "").trim();
@@ -1180,11 +1395,61 @@ export function handleCollaborationApi(
         if (current.intake_state !== "awaiting_confirmation") return sendJson(res, { error: "这张确认卡已经失效，不能调整计划" }, 409);
         if (!feedback) return sendJson(res, { error: "请填写希望主 Agent 调整的地方" }, 400);
         const basePlan = getTaskPlanMode(current) || current.intake_draft || {};
-        const revisedPlan = buildRevisedPlanModeDraft(basePlan, feedback);
+        let revisedDecomposition = current.decomposition_plan || current.requirement_decomposition || null;
+        let revisedRequirement = current.requirement_extraction || null;
+        if (current.workflow_type === "requirement_epic" && revisedDecomposition) {
+          const groups = loadGroups();
+          const configs = getConfigs();
+          const availableTargets = [
+            ...groups.map((group: any) => ({
+              type: "group",
+              id: group.id,
+              name: group.name || group.id,
+              capabilities: (group.members || []).flatMap((member: any) => member.skills || member.capabilities || []),
+            })),
+            ...configs.map((config: any) => ({ type: "project", id: config.name, name: config.name })),
+          ];
+          revisedRequirement = {
+            ...(revisedRequirement || {}),
+            schema: revisedRequirement?.schema || "ccm-business-requirement-v1",
+            business_goal: `${revisedRequirement?.business_goal || current.business_goal || current.description || current.title}\n用户修订意见：${feedback}`,
+            scope: revisedRequirement?.scope || revisedDecomposition.items.flatMap((item: any) => item.scope || []),
+            acceptance_criteria: revisedRequirement?.acceptance_criteria || revisedDecomposition.global_acceptance_criteria || [],
+            dependencies: revisedRequirement?.dependencies || [],
+            risks: revisedRequirement?.risks || revisedDecomposition.items.flatMap((item: any) => item.risks || []),
+            clarification_questions: [],
+            source_evidence: revisedRequirement?.source_evidence || revisedDecomposition.source_evidence || [],
+            extraction_method: revisedRequirement?.extraction_method || "model",
+          };
+          revisedDecomposition = await decomposeRequirementToTaskPlan({
+            requirement: revisedRequirement,
+            availableTargets,
+          });
+        }
+        const revisedPlan = buildRevisedPlanModeDraft({
+          ...basePlan,
+          ...(revisedDecomposition ? {
+            decomposition_plan: revisedDecomposition,
+            requirement_epic: {
+              ...(basePlan.requirement_epic || {}),
+              schema: revisedDecomposition.schema,
+              content_hash: revisedDecomposition.content_hash,
+              epic_title: revisedDecomposition.epic_title,
+              global_acceptance_criteria: revisedDecomposition.global_acceptance_criteria,
+              clarification_questions: revisedDecomposition.clarification_questions,
+              items: revisedDecomposition.items,
+              version: revisedDecomposition.version,
+            },
+          } : {}),
+        }, feedback);
         const meta = current.workflow_meta || {};
         const task = updateTask(taskId, {
           intake_state: "awaiting_confirmation",
           intake_draft: revisedPlan,
+          requirement_extraction: revisedRequirement,
+          requirement_decomposition: revisedDecomposition,
+          decomposition_plan: revisedDecomposition,
+          requirement_content_hash: revisedDecomposition?.content_hash || current.requirement_content_hash,
           auto_execute: false,
           status: "pending",
           status_detail: "执行前计划已按你的反馈调整，等待你重新确认",
@@ -1436,6 +1701,210 @@ export function handleCollaborationApi(
         sendJson(res, result);
       } catch (e: any) {
         sendJson(res, { success: false, error: e.message }, 400);
+      }
+    });
+    return true;
+  }
+
+  if (pathname === "/api/tasks/requirement-epic/version" && req.method === "POST") {
+    let body = "";
+    req.on("data", (chunk) => body += chunk);
+    req.on("end", () => {
+      try {
+        const payload = body ? JSON.parse(body) : {};
+        const result = updateRequirementEpicFromPlan(payload);
+        if (result.needs_confirmation) return sendJson(res, result, 409);
+        const supervisor = result.epic ? startGlobalMissionSupervisor({
+          mission_id: result.epic.id,
+          trace_id: result.epic.trace_id,
+          session_id: result.epic.group_session_id || result.epic.group_id || "web",
+          source: payload.source || "requirement-epic-version",
+          business_goal: result.epic.business_goal,
+          acceptance: result.epic.acceptance_criteria,
+          max_attempts: payload.max_attempts || payload.maxAttempts || 3,
+          restart: true,
+        }) : null;
+        const queueResults = (result.children || [])
+          .filter((child: any) => child.status === "pending" && (!child.mission_dependencies || child.mission_dependencies.length === 0))
+          .map((child: any) => ({ task_id: child.id, ...enqueueTask(child.id, ctx) }));
+        sendJson(res, { ...result, queue_results: queueResults, supervisor });
+      } catch (error: any) {
+        sendJson(res, { success: false, error: error?.message || String(error) }, 400);
+      }
+    });
+    return true;
+  }
+
+  if (pathname === "/api/tasks/requirement-epic/review" && req.method === "POST") {
+    let body = "";
+    req.on("data", (chunk) => body += chunk);
+    req.on("end", () => {
+      try {
+        const payload = body ? JSON.parse(body) : {};
+        const taskId = String(payload.id || payload.task_id || payload.taskId || "").trim();
+        const operation = String(payload.operation || "approve").trim().toLowerCase();
+        const tasks = loadTasks();
+        const epic = tasks.find((task: any) => task.id === taskId && task.workflow_type === "requirement_epic");
+        if (!epic) return sendJson(res, { success: false, error: "需求 Epic 不存在" }, 404);
+        const plan = epic.decomposition_plan || epic.requirement_decomposition || {};
+        const children = tasks.filter((task: any) => task.parent_task_id === epic.id);
+        if (operation === "approve") {
+          if (epic.status === "done" && epic.epic_review?.status === "approved") {
+            return sendJson(res, { success: true, duplicate: true, task: epic, evidence_matrix: epic.epic_review?.evidence_matrix || [] });
+          }
+          const summary = epic.mission_summary || {};
+          if (summary.all_passed !== true || children.length === 0) {
+            return sendJson(res, { success: false, error: "仍有子任务未通过交付验收，不能批准 Epic" }, 409);
+          }
+          const statusByTaskId = new Map((summary.children || []).map((row: any) => [String(row.task_id || ""), row]));
+          const childByKey = new Map(children.map((child: any) => [String(child.requirement_item_key || ""), child]));
+          const evidenceMatrix = (plan.items || []).map((item: any) => {
+            const child = childByKey.get(String(item.item_key || "")) as any;
+            const status = child ? statusByTaskId.get(String(child.id)) as any : null;
+            return {
+              item_key: item.item_key,
+              title: item.title,
+              task_id: child?.id || "",
+              acceptance_criteria: item.acceptance_criteria || [],
+              source_evidence: item.source_evidence || [],
+              gate_passed: status?.gate_passed === true,
+              verification_count: Number(status?.verification_count || 0),
+              actual_file_change_count: Number(status?.actual_file_change_count || 0),
+            };
+          });
+          const approvedAt = new Date().toISOString();
+          const epicDeliverySummary = {
+            ...(epic.delivery_summary || {}),
+            headline: "需求 Epic 已通过整批变更审阅并完成交付",
+            requirement_epic: true,
+            acceptance_gate_passed: true,
+            evidence_matrix: evidenceMatrix,
+            global_acceptance_criteria: plan.global_acceptance_criteria || [],
+            requirement_content_hash: epic.requirement_content_hash || plan.content_hash || "",
+            plan_version: epic.requirement_version || plan.version || 1,
+            child_task_count: children.length,
+            approved_at: approvedAt,
+          };
+          const deliveryReport = buildTaskDeliveryReport(
+            { ...epic, status: "done", status_detail: "用户已审阅整批变更并批准需求 Epic 交付" },
+            epicDeliverySummary,
+            "done",
+            "全部子任务、集成验收证据与原始需求验收矩阵已归档"
+          );
+          const updated = updateTask(epic.id, {
+            status: "done",
+            status_detail: "用户已审阅整批变更并批准需求 Epic 交付",
+            completed_at: approvedAt,
+            epic_review: {
+              status: "approved",
+              approved_at: approvedAt,
+              reviewer: payload.reviewer || "user",
+              comment: payload.comment || payload.feedback || "",
+              evidence_matrix: evidenceMatrix,
+            },
+            delivery_summary: {
+              ...epicDeliverySummary,
+              delivery_report: deliveryReport,
+            },
+            collaboration_state: { ...(epic.collaboration_state || {}), phase: "completed", needs_user: false, completed_at: approvedAt },
+          }) || epic;
+          appendTaskTimelineEvent(epic.id, {
+            type: "requirement_epic_approved",
+            title: "用户已批准 Epic 整批交付",
+            detail: `${children.length} 个子任务和原始验收标准证据矩阵已归档`,
+            status: "ok",
+            phase: "completed",
+            data: { evidence_matrix: evidenceMatrix },
+          });
+          return sendJson(res, { success: true, task: updated, evidence_matrix: evidenceMatrix });
+        }
+        if (operation === "rework") {
+          const itemKey = String(payload.item_key || payload.itemKey || "").trim();
+          const feedback = compactFormText(payload.feedback || payload.reason || payload.message, "");
+          if (!itemKey || !feedback) return sendJson(res, { success: false, error: "退回返工需要 item_key 和反馈说明" }, 400);
+          const child = children.find((task: any) => String(task.requirement_item_key || "") === itemKey || String(task.id) === itemKey);
+          if (!child) return sendJson(res, { success: false, error: "没有找到要返工的 Epic 子任务" }, 404);
+          const reworkKey = `${epic.id}:review-rework:${child.id}:${crypto.createHash("sha256").update(feedback).digest("hex").slice(0, 12)}`;
+          if (epic.epic_review?.status === "rework_requested" && epic.epic_review?.idempotency_key === reworkKey) {
+            return sendJson(res, { success: true, duplicate: true, task: epic, child });
+          }
+          const continuation = continueTaskWithMessage(child.id, `需求 Epic 整批审阅退回返工：${feedback}`, ctx, {
+            source: "requirement_epic_targeted_rework",
+            auto_execute: true,
+            idempotency_key: reworkKey,
+            status_detail: "用户在 Epic 整批审阅中退回该子任务返工",
+          });
+          const affectedDescendantIds = new Set<string>();
+          let expanded = true;
+          while (expanded) {
+            expanded = false;
+            for (const candidate of children) {
+              if (candidate.id === child.id || affectedDescendantIds.has(candidate.id)) continue;
+              const dependencies = Array.isArray(candidate.mission_dependencies) ? candidate.mission_dependencies.map(String) : [];
+              if (dependencies.includes(child.id) || dependencies.some((dependencyId: string) => affectedDescendantIds.has(dependencyId))) {
+                affectedDescendantIds.add(candidate.id);
+                expanded = true;
+              }
+            }
+          }
+          const reopenedDescendants = children
+            .filter((candidate: any) => affectedDescendantIds.has(candidate.id))
+            .map((candidate: any) => updateTask(candidate.id, {
+              status: "pending",
+              status_detail: `上游子任务 ${child.title} 已退回返工，等待上游重新验收后重跑`,
+              completed_at: null,
+              acceptance: null,
+              delivery_summary: null,
+              receipt: null,
+              global_mission_gate_passed: false,
+              dependency_blocked: true,
+              delivery_history: [
+                ...(Array.isArray(candidate.delivery_history) ? candidate.delivery_history : []),
+                {
+                  archived_at: new Date().toISOString(),
+                  reason: `上游 ${child.requirement_item_key || child.id} 定向返工`,
+                  status: candidate.status,
+                  delivery_summary: candidate.delivery_summary || null,
+                  receipt: candidate.receipt || null,
+                },
+              ].slice(-20),
+            })).filter(Boolean);
+          const updatedEpic = updateTask(epic.id, {
+            status: "in_progress",
+            status_detail: `子任务 ${child.title} 已退回返工，后继依赖将继续等待`,
+            epic_review: {
+              status: "rework_requested",
+              item_key: itemKey,
+              child_task_id: child.id,
+              feedback,
+              idempotency_key: reworkKey,
+              requested_at: new Date().toISOString(),
+            },
+            collaboration_state: { ...(epic.collaboration_state || {}), phase: "reworking", needs_user: false },
+          }) || epic;
+          appendTaskTimelineEvent(epic.id, {
+            type: "requirement_epic_targeted_rework",
+            title: `已退回子任务：${child.title}`,
+            detail: feedback,
+            status: "active",
+            phase: "reworking",
+            data: { item_key: itemKey, child_task_id: child.id, reopened_descendant_ids: [...affectedDescendantIds] },
+          });
+          const supervisor = startGlobalMissionSupervisor({
+            mission_id: epic.id,
+            trace_id: epic.trace_id,
+            session_id: epic.group_session_id || epic.group_id || "web",
+            source: "requirement-epic-targeted-rework",
+            business_goal: epic.business_goal,
+            acceptance: epic.acceptance_criteria,
+            max_attempts: 3,
+            restart: true,
+          });
+          return sendJson(res, { success: true, task: updatedEpic, child, continuation, reopened_descendants: reopenedDescendants, supervisor });
+        }
+        return sendJson(res, { success: false, error: "不支持的 Epic 审阅操作" }, 400);
+      } catch (error: any) {
+        sendJson(res, { success: false, error: error?.message || String(error) }, 400);
       }
     });
     return true;

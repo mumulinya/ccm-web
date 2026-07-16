@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.runMusicAgentIntentSelfTest = void 0;
+exports.runMusicRemoteCommandQueueSelfTest = exports.runMusicAgentIntentSelfTest = void 0;
 exports.handleMusicApi = handleMusicApi;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
@@ -52,6 +52,8 @@ const download_jobs_1 = require("./download-jobs");
 const library_state_1 = require("./library-state");
 var agent_2 = require("./agent");
 Object.defineProperty(exports, "runMusicAgentIntentSelfTest", { enumerable: true, get: function () { return agent_2.runMusicAgentIntentSelfTest; } });
+var state_2 = require("./state");
+Object.defineProperty(exports, "runMusicRemoteCommandQueueSelfTest", { enumerable: true, get: function () { return state_2.runMusicRemoteCommandQueueSelfTest; } });
 function readMusicJsonBody(req, maxBytes = 64 * 1024) {
     return new Promise((resolve, reject) => {
         const chunks = [];
@@ -217,7 +219,12 @@ function handleMusicApi(pathname, req, res, parsed, ctx) {
                 const keyword = String(payload.keyword || payload.query || "").trim();
                 if (!keyword)
                     return (0, utils_1.sendJson)(res, { success: false, error: "缺少音乐关键词" }, 400);
-                const command = (0, state_1.saveMusicRemoteCommand)({ type: "play", keyword, source: payload.source || "global-agent" });
+                const command = (0, state_1.enqueueMusicRemoteCommand)({
+                    type: "play",
+                    keyword,
+                    mode: String(payload.mode || "").trim(),
+                    source: payload.source || "global-agent",
+                });
                 (0, utils_1.sendJson)(res, { success: true, command });
             }
             catch (e) {
@@ -227,18 +234,64 @@ function handleMusicApi(pathname, req, res, parsed, ctx) {
         return true;
     }
     if (pathname === "/api/music/remote-command" && req.method === "GET") {
-        const command = (0, state_1.loadMusicRemoteCommand)();
-        (0, utils_1.sendJson)(res, { success: true, command: command && !command.consumed ? command : null });
+        const claimed = (0, state_1.claimMusicRemoteCommand)();
+        (0, utils_1.sendJson)(res, {
+            success: true,
+            command: claimed,
+            stale_hint: claimed?.status === "stale" ? "播放指令超时未完成，请确认 CCM Web 已打开" : "",
+        });
         return true;
     }
+    if (pathname === "/api/music/remote-command/take" && req.method === "POST") {
+        let body = "";
+        req.on("data", (chunk) => body += chunk);
+        req.on("end", () => {
+            try {
+                const payload = body ? JSON.parse(body) : {};
+                const command = (0, state_1.takeMusicRemoteCommand)(String(payload.id || ""));
+                (0, utils_1.sendJson)(res, { success: !!command, command });
+            }
+            catch (e) {
+                (0, utils_1.sendJson)(res, { success: false, error: e.message || "领取音乐指令失败" }, 400);
+            }
+        });
+        return true;
+    }
+    if (pathname === "/api/music/remote-command/ack" && req.method === "POST") {
+        let body = "";
+        req.on("data", (chunk) => body += chunk);
+        req.on("end", () => {
+            try {
+                const payload = body ? JSON.parse(body) : {};
+                const result = (0, state_1.ackMusicRemoteCommand)({
+                    id: String(payload.id || ""),
+                    status: payload.status === "failed" ? "failed" : "success",
+                    error: payload.error,
+                });
+                (0, utils_1.sendJson)(res, result, result.success === false ? 400 : 200);
+            }
+            catch (e) {
+                (0, utils_1.sendJson)(res, { success: false, error: e.message || "确认音乐指令失败" }, 400);
+            }
+        });
+        return true;
+    }
+    // Legacy consume: treat as failed ack so the command can be retried instead of dropped.
     if (pathname === "/api/music/remote-command/consume" && req.method === "POST") {
-        const command = (0, state_1.loadMusicRemoteCommand)();
-        if (command) {
-            command.consumed = true;
-            command.consumed_at = new Date().toISOString();
-            fs.writeFileSync(state_1.MUSIC_REMOTE_COMMAND_FILE, JSON.stringify(command, null, 2), "utf-8");
-        }
-        (0, utils_1.sendJson)(res, { success: true });
+        let body = "";
+        req.on("data", (chunk) => body += chunk);
+        req.on("end", () => {
+            try {
+                const payload = body ? JSON.parse(body) : {};
+                const id = String(payload.id || (0, state_1.loadMusicRemoteCommand)()?.id || "").trim();
+                if (id)
+                    (0, state_1.ackMusicRemoteCommand)({ id, status: "failed", error: "legacy_consume_without_play_result" });
+                (0, utils_1.sendJson)(res, { success: true, legacy: true });
+            }
+            catch (e) {
+                (0, utils_1.sendJson)(res, { success: false, error: e.message || "消费音乐指令失败" }, 400);
+            }
+        });
         return true;
     }
     if (pathname === "/api/music/pet-state" && req.method === "GET") {
@@ -770,28 +823,40 @@ function handleMusicApi(pathname, req, res, parsed, ctx) {
     if (pathname === "/api/music/chat" && req.method === "POST") {
         let body = "";
         req.on("data", (chunk) => body += chunk);
-        req.on("end", () => {
+        req.on("end", async () => {
             try {
-                const { message, mode: chatMode } = JSON.parse(body);
-                const intent = (0, agent_1.extractMusicIntent)(message);
-                const action = (0, agent_1.normalizeMusicAgentAction)({ action: intent.type === "play" ? "play_music" : intent.type === "search" ? "search_music" : intent.type === "convert" ? "convert_music" : "none", keyword: intent.keyword }, message, chatMode, "simple-fallback");
-                const result = { intent: intent.type, keyword: intent.keyword, action };
-                if (intent.type === "search") {
+                const { message, mode: chatMode, history } = JSON.parse(body);
+                const cfg = (0, state_1.loadMusicAgentConfig)();
+                let action;
+                try {
+                    action = await (0, agent_1.classifyMusicAgentAction)(cfg, message, chatMode, history || []);
+                }
+                catch {
+                    const intent = (0, agent_1.extractMusicIntent)(message);
+                    action = (0, agent_1.normalizeMusicAgentAction)({ action: intent.type === "play" ? "play_music" : intent.type === "search" ? "search_music" : intent.type === "convert" ? "convert_music" : "none", keyword: intent.keyword }, message, chatMode, "simple-fallback");
+                }
+                const intentType = action.type === "play_music" ? "play"
+                    : action.type === "search_music" ? "search"
+                        : action.type === "convert_music" ? "convert"
+                            : "none";
+                const keyword = String(action.keyword || "").trim();
+                const result = { intent: intentType, keyword, action };
+                if (intentType === "search") {
                     if (chatMode === "local") {
-                        const localResults = (0, library_1.searchLocalMusic)(intent.keyword);
+                        const localResults = (0, library_1.searchLocalMusic)(keyword);
                         result.localResults = localResults;
                         result.reply = localResults.length > 0
                             ? `在本地找到 ${localResults.length} 首匹配的音乐：`
-                            : `本地没有找到"${intent.keyword}"相关音乐，试试切换到 B站模式？`;
+                            : `本地没有找到"${keyword}"相关音乐，试试切换到 B站模式？`;
                         (0, utils_1.sendJson)(res, { success: true, ...result });
                     }
                     else if (chatMode === "netease") {
-                        (0, netease_1.neteaseSearch)(intent.keyword).then((rawResults) => {
-                            const neteaseResults = (0, search_results_1.signSearchResults)("netease", intent.keyword, rawResults);
+                        (0, netease_1.neteaseSearch)(keyword).then((rawResults) => {
+                            const neteaseResults = (0, search_results_1.signSearchResults)("netease", keyword, rawResults);
                             result.neteaseResults = neteaseResults;
                             result.reply = neteaseResults.length > 0
                                 ? `在网易云找到 ${neteaseResults.length} 个相关结果：`
-                                : `网易云没有找到"${intent.keyword}"相关的结果，换个关键词试试？`;
+                                : `网易云没有找到"${keyword}"相关的结果，换个关键词试试？`;
                             (0, utils_1.sendJson)(res, { success: true, ...result });
                         }).catch((e) => {
                             result.reply = `搜索出错: ${e.message}`;
@@ -799,12 +864,12 @@ function handleMusicApi(pathname, req, res, parsed, ctx) {
                         });
                     }
                     else {
-                        (0, bilibili_1.biliSearch)(intent.keyword).then((rawResults) => {
-                            const biliResults = (0, search_results_1.signSearchResults)("bilibili", intent.keyword, rawResults);
+                        (0, bilibili_1.biliSearch)(keyword).then((rawResults) => {
+                            const biliResults = (0, search_results_1.signSearchResults)("bilibili", keyword, rawResults);
                             result.biliResults = biliResults;
                             result.reply = biliResults.length > 0
                                 ? `在B站找到 ${biliResults.length} 个相关结果：`
-                                : `没有找到"${intent.keyword}"相关的结果，换个关键词试试？`;
+                                : `没有找到"${keyword}"相关的结果，换个关键词试试？`;
                             (0, utils_1.sendJson)(res, { success: true, ...result });
                         }).catch((e) => {
                             result.reply = `搜索出错: ${e.message}`;
@@ -812,23 +877,23 @@ function handleMusicApi(pathname, req, res, parsed, ctx) {
                         });
                     }
                 }
-                else if (intent.type === "convert") {
+                else if (intentType === "convert") {
                     result.reply = "请提供B站视频链接或BV号，我帮你转码。";
                     (0, utils_1.sendJson)(res, { success: true, ...result });
                 }
-                else if (intent.type === "play") {
+                else if (intentType === "play") {
                     if (chatMode === "local") {
-                        const localResults = (0, library_1.searchLocalMusic)(intent.keyword);
+                        const localResults = (0, library_1.searchLocalMusic)(keyword);
                         result.localResults = localResults;
                         result.autoPlay = localResults.length > 0;
                         result.reply = localResults.length > 0
                             ? `找到并播放：${localResults[0].title}`
-                            : `本地没有找到"${intent.keyword}"`;
+                            : `本地没有找到"${keyword}"`;
                         (0, utils_1.sendJson)(res, { success: true, ...result });
                     }
                     else if (chatMode === "netease") {
-                        (0, netease_1.neteaseSearch)(intent.keyword).then((rawResults) => {
-                            const neteaseResults = (0, search_results_1.signSearchResults)("netease", intent.keyword, rawResults, 5);
+                        (0, netease_1.neteaseSearch)(keyword).then((rawResults) => {
+                            const neteaseResults = (0, search_results_1.signSearchResults)("netease", keyword, rawResults, 5);
                             result.neteaseResults = neteaseResults.slice(0, 5);
                             result.reply = neteaseResults.length > 0
                                 ? `找到以下结果，点击下载播放：`
@@ -840,8 +905,8 @@ function handleMusicApi(pathname, req, res, parsed, ctx) {
                         });
                     }
                     else {
-                        (0, bilibili_1.biliSearch)(intent.keyword).then((rawResults) => {
-                            const biliResults = (0, search_results_1.signSearchResults)("bilibili", intent.keyword, rawResults, 3);
+                        (0, bilibili_1.biliSearch)(keyword).then((rawResults) => {
+                            const biliResults = (0, search_results_1.signSearchResults)("bilibili", keyword, rawResults, 3);
                             result.biliResults = biliResults.slice(0, 3);
                             result.reply = biliResults.length > 0
                                 ? `找到以下结果，点击转码播放：`
@@ -859,7 +924,7 @@ function handleMusicApi(pathname, req, res, parsed, ctx) {
                 }
             }
             catch (e) {
-                (0, utils_1.sendJson)(res, { error: e.message }, 400);
+                (0, utils_1.sendJson)(res, { success: false, error: e.message }, 400);
             }
         });
         return true;

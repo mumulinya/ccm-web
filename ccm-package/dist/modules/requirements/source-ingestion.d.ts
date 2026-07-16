@@ -1,5 +1,6 @@
 export declare const REQUIREMENT_SOURCE_SCHEMA = "ccm-requirement-source-ingestion-v1";
 export declare const REQUIREMENT_EXTRACTION_SCHEMA = "ccm-business-requirement-extraction-v1";
+export declare const REQUIREMENT_DECOMPOSITION_SCHEMA = "ccm-requirement-decomposition-v1";
 export declare const MAX_REQUIREMENT_SOURCE_CHARS = 20000;
 export declare const MAX_REQUIREMENT_TOTAL_CHARS = 60000;
 export declare const MAX_REQUIREMENT_FILE_BYTES: number;
@@ -41,6 +42,35 @@ export type BusinessRequirementExtraction = {
     source_evidence: string[];
     extraction_method: "model" | "deterministic_fallback";
 };
+export type RequirementDecompositionItem = {
+    item_key: string;
+    title: string;
+    business_goal: string;
+    scope: string[];
+    target_type: "group" | "project" | "auto";
+    target_id: string;
+    acceptance_criteria: string[];
+    depends_on: string[];
+    risks: string[];
+    suggested_agent_capabilities: string[];
+    parallelizable: boolean;
+    source_evidence: string[];
+};
+export type RequirementDecompositionPlan = {
+    schema: typeof REQUIREMENT_DECOMPOSITION_SCHEMA;
+    epic_title: string;
+    business_goal: string;
+    global_acceptance_criteria: string[];
+    items: RequirementDecompositionItem[];
+    clarification_questions: string[];
+    risks: string[];
+    source_evidence: string[];
+    execution_order: "dag";
+    content_hash: string;
+    version: number;
+    extraction_method: "model" | "deterministic_fallback";
+    generated_at: string;
+};
 export type RequirementIngestionResult = {
     schema: string;
     generated_at: string;
@@ -51,9 +81,41 @@ export type RequirementIngestionResult = {
     user_summary: string;
     warnings: string[];
     requirement: BusinessRequirementExtraction | null;
+    decomposition: RequirementDecompositionPlan | null;
+    content_hash: string;
     technical: any;
 };
+export declare function validateRequirementDecomposition(value: any, options?: {
+    contentHash?: string;
+    requirement?: BusinessRequirementExtraction | null;
+    extractionMethod?: "model" | "deterministic_fallback";
+}): RequirementDecompositionPlan;
+export declare function diffRequirementDecompositionPlans(previous: RequirementDecompositionPlan | null | undefined, next: RequirementDecompositionPlan): {
+    schema: string;
+    from_version: number;
+    to_version: number;
+    from_content_hash: string;
+    to_content_hash: string;
+    added: string[];
+    removed: string[];
+    changed: string[];
+    unchanged: string[];
+    has_changes: boolean;
+};
 export declare function extractOnlineDocumentUrls(text: string): string[];
+/** 各通道统一的开发意图识别：命中后应设置 decomposeRequirement: true。 */
+export declare function shouldDecomposeRequirementIntent(input?: {
+    userText?: string;
+    files?: Array<any> | null;
+    urls?: string[] | null;
+}): boolean;
+export declare function decomposeRequirementToTaskPlan(input: {
+    requirement: BusinessRequirementExtraction;
+    sources?: RequirementSourceRecord[];
+    contentHash?: string;
+    availableTargets?: any[];
+    requirementConfig?: any;
+}): Promise<RequirementDecompositionPlan>;
 export declare function ingestRequirementSources(input?: {
     files?: UploadedFile[];
     userText?: string;
@@ -63,6 +125,8 @@ export declare function ingestRequirementSources(input?: {
     visionConfig?: any;
     onlineDocumentFetcher?: (url: string) => Promise<any>;
     requirementConfig?: any;
+    decomposeRequirement?: boolean;
+    availableTargets?: any[];
 }): Promise<RequirementIngestionResult>;
 export declare function requirementToIntakeDraft(requirement: BusinessRequirementExtraction | null, fallback?: any): {
     requirement: any;

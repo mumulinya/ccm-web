@@ -10031,6 +10031,7 @@ function recoverDeliveryReceiptFromRunnerWal(record) {
             dispatched: true,
             executionSucceeded: result.success === true,
             output: String(result.output || result.error || ""),
+            providerUsage: result.usage || null,
         });
     }
     catch {

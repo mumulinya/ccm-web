@@ -3,6 +3,7 @@ import { loadTasks, saveTasks } from "../../core/db";
 import {
   appendGroupLogRecord,
   appendTaskLogRecord,
+  clearGroupLogRecords,
   clearTaskLogRecords,
   getTaskLogRecords,
   loadGroupLogsFromSqlite,
@@ -39,6 +40,15 @@ export function saveGroupLogs(logs: any) {
     replaceGroupLogsInSqlite(logs);
   } catch (e: any) {
     console.error("保存群聊日志失败:", e.message);
+  }
+}
+
+export function clearGroupLogs(groupId: string) {
+  try {
+    return clearGroupLogRecords(groupId);
+  } catch (e: any) {
+    console.error("清空群聊日志失败:", e.message);
+    return 0;
   }
 }
 

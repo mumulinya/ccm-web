@@ -17,6 +17,7 @@ exports.buildProjectCodeReadOnlySnapshot = buildProjectCodeReadOnlySnapshot;
 exports.buildChildAgentWorkerHandoff = buildChildAgentWorkerHandoff;
 exports.buildQueuedGroupTaskMessage = buildQueuedGroupTaskMessage;
 const db_1 = require("../../core/db");
+const workflow_decision_1 = require("../../agents/workflow-decision");
 const group_orchestrator_1 = require("./group-orchestrator");
 const project_analysis_1 = require("./project-analysis");
 const memory_1 = require("./memory");
@@ -197,35 +198,80 @@ function normalizeGroupAgentGatewayTaskIntent(fallback, coordinatorResult, messa
     const action = String(dispatchPolicy.action || "").trim();
     const assignments = Array.isArray(coordinatorResult?.assignments) ? coordinatorResult.assignments : [];
     const llmBacked = runtime === "llm-api";
+    const workflowDecision = coordinatorResult?.workflowDecision
+        || coordinatorResult?.analysis?.workflowDecision
+        || null;
     if (!llmBacked) {
         return {
             ...fallback,
             executable: false,
-            analysisEligible: fallback.analysisEligible === true,
-            kind: fallback.analysisEligible ? "project_analysis" : fallback.kind === "greeting" ? "greeting" : fallback.kind === "question" ? "question" : "conversation",
-            reason: `Agent intent gateway 未获得大模型决策（${runtime || "unknown"}），规则兜底不创建任务卡`,
-            agent_gateway: { runtime, dispatchPolicy, llm_backed: false, fallback_kind: fallback.kind },
+            analysisEligible: false,
+            kind: "model_unavailable",
+            reason: `Agent intent gateway 未获得大模型决策（${runtime || "unknown"}），本轮停止自动路由`,
+            workflowDecision: null,
+            agent_gateway: { runtime, dispatchPolicy, llm_backed: false, fallback_kind: fallback.kind, safe_stop: true },
         };
     }
-    const delegates = action === "delegate" && dispatchPolicy.requiresConfirmation !== true && assignments.length > 0;
-    const analysisEligible = !delegates && (fallback.analysisEligible === true || action === "direct_answer" || action === "ask_user");
+    if (!workflowDecision) {
+        return {
+            executable: false,
+            analysisEligible: false,
+            kind: "model_invalid",
+            reason: "群聊主 Agent 未返回 workflowDecision，本轮停止自动路由",
+            workflowDecision: null,
+            agent_gateway: { runtime, dispatchPolicy, llm_backed: true, safe_stop: true, contract_invalid: true },
+        };
+    }
+    const delegates = workflowDecision.actionRequired
+        && ["execute_direct", "plan_task", "decompose_epic"].includes(workflowDecision.mode)
+        && action === "delegate"
+        && assignments.length > 0;
+    const analysisEligible = !delegates && workflowDecision.mode === "project_analysis";
     return {
         executable: delegates,
         analysisEligible,
-        kind: delegates ? "task" : analysisEligible ? "project_analysis" : fallback.kind,
+        kind: delegates ? "task" : analysisEligible ? "project_analysis" : workflowDecision.mode === "answer" ? "conversation" : "needs_clarification",
         reason: delegates
             ? `Agent intent gateway 允许创建任务卡：${dispatchPolicy.reason || "主 Agent 判定需要派发"}`
             : `Agent intent gateway 不创建任务卡：${dispatchPolicy.reason || "主 Agent 判定无需派发"}`,
+        workflowDecision,
+        confidence: workflowDecision.confidence,
         agent_gateway: { runtime, dispatchPolicy, llm_backed: true, assignments: assignments.map((item) => item.project).filter(Boolean) },
     };
 }
 async function classifyGroupProjectTaskIntentWithAgent(input) {
     const fallback = classifyGroupProjectTaskIntent(input.message, input.uploadedFiles || []);
     const mode = String(input.messageMode || "conversation").trim().toLowerCase();
-    if (!input.isOrchestrated || input.forceProjectTask || !["project_task", "daily_dev", "mission", "project_analysis"].includes(mode)) {
-        return { ...fallback, agent_gateway: { runtime: "not-required", llm_backed: false, fallback_kind: fallback.kind } };
+    if (input.forceProjectTask) {
+        const workflowDecision = (0, workflow_decision_1.explicitWorkflowDecision)("execute_direct", "用户显式要求创建并执行项目任务");
+        return {
+            executable: true,
+            analysisEligible: false,
+            kind: "task",
+            reason: workflowDecision.reason,
+            confidence: 1,
+            workflowDecision,
+            agent_gateway: { runtime: "explicit-user-choice", llm_backed: false, explicit: true },
+        };
     }
     try {
+        if (!input.isOrchestrated) {
+            const workflowDecision = await (0, workflow_decision_1.decideWorkflowWithModel)({
+                message: input.message,
+                scope: "group",
+                sourceCount: (input.uploadedFiles || []).length,
+                context: { group_id: input.group?.id || "", message_mode: mode, target: "direct-project" },
+            });
+            return {
+                executable: workflowDecision.actionRequired,
+                analysisEligible: workflowDecision.mode === "project_analysis",
+                kind: workflowDecision.actionRequired ? "task" : workflowDecision.mode === "project_analysis" ? "project_analysis" : "conversation",
+                reason: workflowDecision.reason,
+                confidence: workflowDecision.confidence,
+                workflowDecision,
+                agent_gateway: { runtime: "llm-api", llm_backed: true, direct_project: true },
+            };
+        }
         const coordinatorResult = await (0, group_orchestrator_1.runGroupOrchestrator)({
             group: input.group,
             message: input.message,
@@ -237,29 +283,23 @@ async function classifyGroupProjectTaskIntentWithAgent(input) {
     }
     catch (error) {
         return {
-            ...fallback,
             executable: false,
-            analysisEligible: fallback.analysisEligible === true,
-            kind: fallback.analysisEligible ? "project_analysis" : fallback.kind === "greeting" ? "greeting" : fallback.kind === "question" ? "question" : "conversation",
-            reason: `Agent intent gateway 调用失败，规则兜底不创建任务卡：${error?.message || error}`,
-            agent_gateway: { runtime: "error", llm_backed: false, error: error?.message || String(error), fallback_kind: fallback.kind },
+            analysisEligible: false,
+            kind: "model_unavailable",
+            reason: `Agent intent gateway 调用失败，本轮停止自动路由：${error?.message || error}`,
+            workflowDecision: null,
+            agent_gateway: { runtime: "error", llm_backed: false, safe_stop: true, error: error?.message || String(error), fallback_kind: fallback.kind },
         };
     }
 }
 function shouldUseProjectAnalysisMode(input) {
-    const mode = String(input.messageMode || "conversation").trim().toLowerCase();
     if (!input.isOrchestrated)
         return false;
-    if (mode === "project_analysis")
-        return input.taskIntent?.kind !== "greeting";
-    if (["project_task", "daily_dev", "mission"].includes(mode) && input.taskIntent?.analysisEligible === true)
-        return true;
-    return false;
+    return input.taskIntent?.workflowDecision?.mode === "project_analysis"
+        || input.taskIntent?.analysisEligible === true;
 }
 function shouldCreatePersistentGroupTask(input) {
-    const mode = String(input.messageMode || "conversation").trim().toLowerCase();
     return !!input.isOrchestrated
-        && ["project_task", "daily_dev", "mission"].includes(mode)
         && (!!input.forceProjectTask || input.taskIntent?.executable === true);
 }
 function classifyPlanModeRisk(message, group, taskIntent = {}, attachmentCount = 0) {
@@ -268,9 +308,9 @@ function classifyPlanModeRisk(message, group, taskIntent = {}, attachmentCount =
     const lower = text.toLowerCase();
     const signals = {
         destructive: /删除|清空|清理|移除|drop\s+table|truncate|purge|永久|销毁|撤销|覆盖/i.test(text),
-        migration: /迁移|重构|拆分|合并|数据库|schema|权限|登录|支付|订单|部署|上线|生产|线上|配置|环境变量/i.test(text),
+        migration: /数据库迁移|schema|权限模型|支付|部署|上线|生产|线上|环境变量|密钥|secret/i.test(text),
         crossProject: /跨项目|多项目|所有项目|全部项目|前后端|全栈|多个 Agent|多个项目/i.test(text) || routableCount > 1 && /前端|后端|接口|页面|数据库|全栈/i.test(text),
-        vague: taskIntent?.executable === true && text.replace(/\s+/g, "").length < 18 && /优化|修复|改一下|处理|看一下|做一下/i.test(text),
+        vague: false,
         attachment: attachmentCount > 0,
     };
     const reasons = [
@@ -280,8 +320,8 @@ function classifyPlanModeRisk(message, group, taskIntent = {}, attachmentCount =
         signals.vague ? "需求较短或范围模糊，需要先确认影响范围" : "",
         signals.attachment ? "包含附件，需要先只读解析需求文档" : "",
     ].filter(Boolean);
-    const requiresConfirmation = signals.destructive || signals.migration || signals.crossProject || signals.vague || signals.attachment;
-    const level = signals.destructive || signals.migration ? "high" : requiresConfirmation ? "medium" : "low";
+    const requiresConfirmation = signals.destructive || signals.migration;
+    const level = requiresConfirmation ? "high" : "low";
     return {
         level,
         requiresConfirmation,
@@ -322,17 +362,19 @@ function buildGroupPlanModePreflight(input) {
     const configs = input.configs || (0, db_1.getConfigs)();
     const message = String(input.message || "");
     const risk = classifyPlanModeRisk(message, group, input.taskIntent, input.attachmentCount || 0);
+    const workflowDecision = input.taskIntent?.workflowDecision || null;
+    if (!workflowDecision)
+        throw new Error("缺少群聊主 Agent 的 workflowDecision，不能生成执行前计划");
     const members = (0, group_orchestrator_1.getRoutableMembers)(group);
     const coordinatorProject = input.coordinatorProject || (0, group_orchestrator_1.getCoordinatorMember)(group).project;
     const projectNames = members.map((member) => member.project).filter(Boolean);
-    const relevantProjects = projectNames.filter((name) => message.toLowerCase().includes(String(name).toLowerCase())).slice(0, 6);
+    const modelTargets = [
+        ...(workflowDecision.targetRefs || []),
+        ...(input.taskIntent?.agent_gateway?.assignments || []),
+    ];
+    const relevantProjects = projectNames.filter((name) => modelTargets.includes(name)).slice(0, 6);
     const selectedProjects = relevantProjects.length ? relevantProjects : projectNames.slice(0, Math.min(3, projectNames.length));
-    const areas = [
-        /页面|前端|ui|组件|样式/i.test(message) ? "前端页面与交互" : "",
-        /接口|后端|服务|数据库|api/i.test(message) ? "后端接口与数据契约" : "",
-        /权限|登录|支付|订单/i.test(message) ? "业务权限与关键流程" : "",
-        /测试|验证|bug|报错|修复/i.test(message) ? "测试、回归与缺陷修复" : "",
-    ].filter(Boolean);
+    const areas = [...(workflowDecision.impactScope || [])];
     if (!areas.length)
         areas.push("由主 Agent 只读探索后收敛影响范围");
     let readOnlyContext = "";
@@ -354,7 +396,29 @@ function buildGroupPlanModePreflight(input) {
         "子 Agent 只能在对应项目工作区和工作单范围内修改",
         "任务完成前必须保留 native session / scratchpad 续跑上下文",
     ];
-    const clarificationQuestions = buildPlanModeClarificationQuestions(message, risk, selectedProjects);
+    const modelClarifications = (workflowDecision.clarificationQuestions || []).map((question, index) => ({
+        id: `model_question_${index + 1}`,
+        question,
+        reason: "主 Agent 判断该信息会影响执行边界或验收",
+        examples: [],
+        status: "open",
+        source: "model",
+    }));
+    const safetyClarifications = buildPlanModeClarificationQuestions(message, risk, selectedProjects)
+        .filter(item => ["destructive_permission", "compatibility_boundary"].includes(item.id))
+        .map(item => ({ ...item, source: "server_safety_floor" }));
+    const clarificationQuestions = [...modelClarifications, ...safetyClarifications].slice(0, 6);
+    const requiresConfirmation = workflowDecision.needsPlanning
+        || workflowDecision.mode === "decompose_epic"
+        || risk.requiresConfirmation
+        || clarificationQuestions.length > 0;
+    const modelPlanSteps = (workflowDecision.planSteps || []).map((label, index) => ({
+        id: `model_plan_${index + 1}`,
+        label,
+        detail: "由群聊主 Agent 根据完整语义生成",
+        status: "pending",
+        source: "model",
+    }));
     const steps = [
         {
             id: "understand_goal",
@@ -368,19 +432,20 @@ function buildGroupPlanModePreflight(input) {
             detail: (0, memory_1.compactMemoryText)(readOnlyContext || "已完成只读探索。", 220),
             status: "completed",
         },
+        ...modelPlanSteps,
         {
             id: "confirm_boundary",
             label: "确认执行边界",
             detail: clarificationQuestions.length
                 ? "需要先补充关键问题，再进入派发。"
-                : risk.requiresConfirmation ? "涉及高风险或写入边界，等待你确认后执行。" : "当前边界清晰，可自动继续。",
-            status: clarificationQuestions.length || risk.requiresConfirmation ? "needs_confirmation" : "completed",
+                : requiresConfirmation ? "模型选择先规划，或服务端安全下限要求确认后执行。" : "模型选择直接执行，当前安全边界允许自动继续。",
+            status: requiresConfirmation ? "needs_confirmation" : "completed",
         },
         {
             id: "dispatch_sub_agents",
             label: "派发子 Agent 工作单",
             detail: "每个子 Agent 会收到目标、允许范围、禁止事项和验收标准。",
-            status: clarificationQuestions.length || risk.requiresConfirmation ? "pending" : "in_progress",
+            status: requiresConfirmation ? "pending" : "in_progress",
         },
         {
             id: "verify_and_summarize",
@@ -392,7 +457,8 @@ function buildGroupPlanModePreflight(input) {
     return {
         title: "执行前计划",
         mode: "cc-style-plan-mode",
-        source: "group-main-agent-plan-mode-4.0",
+        source: "group-main-agent-model-plan-mode-5.0",
+        workflow_decision: workflowDecision,
         coordinator: coordinatorProject,
         group_id: group?.id || "",
         requirement: (0, collaboration_1.compactFormText)(message, ""),
@@ -408,7 +474,7 @@ function buildGroupPlanModePreflight(input) {
             projects: selectedProjects,
             multi_agent: selectedProjects.length > 1 || risk.signals.crossProject,
         },
-        risk,
+        risk: { ...risk, model_reason: workflowDecision.reason, workflow_mode: workflowDecision.mode },
         acceptance,
         clarification_questions: clarificationQuestions,
         needs_clarification: clarificationQuestions.length > 0,
@@ -423,11 +489,11 @@ function buildGroupPlanModePreflight(input) {
             keep_task_session_until_final_review: true,
             fallback: "native 不可用时使用 scratchpad 续跑，并注入上轮回执、未完成 Todo 和验收缺口",
         },
-        requires_confirmation: risk.requiresConfirmation,
-        auto_continue: !risk.requiresConfirmation,
+        requires_confirmation: requiresConfirmation,
+        auto_continue: !requiresConfirmation,
         next_step: clarificationQuestions.length
             ? "请先确认或补充上面的问题；确认后才会派发子 Agent"
-            : risk.requiresConfirmation ? "等待用户确认后创建执行队列并派发子 Agent" : "低风险明确任务，自动进入执行队列",
+            : requiresConfirmation ? "等待用户确认后创建执行队列并派发子 Agent" : "模型选择直接执行，自动进入执行队列",
         generated_at: new Date().toISOString(),
     };
 }

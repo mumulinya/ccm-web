@@ -2,7 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { execFileSync } from "child_process";
 import { CCM_DIR, createUnifiedDiff, readWorkingFileText, sendJson } from "../../core/utils";
-import { getConfigs, getConfigInfo } from "../../core/db";
+import { getConfigs, getConfigInfo, loadTasks } from "../../core/db";
 
 const MAX_PATCH_BYTES = 2 * 1024 * 1024;
 const LARGE_FILE_BYTES = 1024 * 1024;
@@ -157,8 +157,7 @@ function timeOf(item: any) {
 
 function buildChangeContext(project: string, workDir: string, changedPaths: string[]) {
   const normalizedFiles = new Set(changedPaths.map(normalizeRepoPath));
-  const taskStore = readJson(path.join(CCM_DIR, "tasks.json"), []);
-  const tasks = Array.isArray(taskStore) ? taskStore : taskStore?.tasks || [];
+  const tasks = loadTasks();
   const sessionStore = readJson(path.join(CCM_DIR, "task-agent-sessions.json"), { sessions: [] });
   const sessions = Array.isArray(sessionStore) ? sessionStore : sessionStore?.sessions || [];
   const runStore = readJson(path.join(CCM_DIR, "project-chat-runs.json"), { runs: [] });

@@ -8,6 +8,8 @@ export declare function publicProjectChatRun(run: any): {
     trace_id: any;
     project: any;
     status: any;
+    message_mode: any;
+    workflow_decision: any;
     checkpoint_id: any;
     rollback_available: boolean;
     parent_run_id: any;

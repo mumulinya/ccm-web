@@ -2,6 +2,7 @@ import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
 import { loadCronJobs, loadTasks, saveCronJobs } from "../core/db";
+import { getSqliteTaskStoreStatus } from "../core/task-store";
 import { withFileLock } from "../core/atomic-json-file";
 import { CCM_DIR, GROUP_MESSAGES_DIR, GROUPS_FILE } from "../core/utils";
 import { purgeArchivedTask } from "../modules/collaboration/collaboration";
@@ -295,7 +296,14 @@ export function getCleanupSummary() {
       id: "tasks",
       title: "任务记录",
       count: tasks.length,
-      bytes: fileBytes(path.join(CCM_DIR, "tasks.json")),
+      bytes: (() => {
+        try {
+          const status = getSqliteTaskStoreStatus();
+          return Number(status.database_bytes || 0) + Number(status.wal_bytes || 0) + Number(status.shm_bytes || 0);
+        } catch {
+          return fileBytes(path.join(CCM_DIR, "ccm.db")) || fileBytes(path.join(CCM_DIR, "tasks.json"));
+        }
+      })(),
       detail: `${tasks.filter((task: any) => task.archived || task.deleted_at || task.status === "archived").length} 项已归档`,
     },
     {

@@ -41,6 +41,7 @@ const crypto = __importStar(require("crypto"));
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const db_1 = require("../core/db");
+const task_store_1 = require("../core/task-store");
 const atomic_json_file_1 = require("../core/atomic-json-file");
 const utils_1 = require("../core/utils");
 const collaboration_1 = require("../modules/collaboration/collaboration");
@@ -312,7 +313,15 @@ function getCleanupSummary() {
             id: "tasks",
             title: "任务记录",
             count: tasks.length,
-            bytes: fileBytes(path.join(utils_1.CCM_DIR, "tasks.json")),
+            bytes: (() => {
+                try {
+                    const status = (0, task_store_1.getSqliteTaskStoreStatus)();
+                    return Number(status.database_bytes || 0) + Number(status.wal_bytes || 0) + Number(status.shm_bytes || 0);
+                }
+                catch {
+                    return fileBytes(path.join(utils_1.CCM_DIR, "ccm.db")) || fileBytes(path.join(utils_1.CCM_DIR, "tasks.json"));
+                }
+            })(),
             detail: `${tasks.filter((task) => task.archived || task.deleted_at || task.status === "archived").length} 项已归档`,
         },
         {

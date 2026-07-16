@@ -1,4 +1,5 @@
 import { type LlmTokenUsage } from "./group-orchestrator-llm-client";
+import { type WorkflowDecision } from "../../agents/workflow-decision";
 export { COORDINATOR_PROJECT, DEFAULT_GROUP_ORCHESTRATOR, CCM_DIR, defaultOrchestratorConfig, loadOrchestratorConfig, saveOrchestratorConfig, publicOrchestratorConfig, testUnifiedModelConnection, } from "./group-orchestrator-config";
 export declare const GROUP_MEMORY_REPLAY_REPAIR_WORK_ITEMS_DIR: string;
 export declare const GROUP_MEMORY_REPLAY_REPAIR_DISPATCH_PLANS_DIR: string;
@@ -1333,7 +1334,7 @@ export declare function recordWorkerContextProviderSwitchExecutionReceiptForCoor
 export declare function recordWorkerContextProviderDispatchOverrideCompletionForCoordinator(groupId: string, input?: any, options?: any): any;
 export declare function readReplayRepairDispatchTimelineBindingLedgerForCoordinator(groupId: string): any;
 export declare function uniqueCoordinatorStrings(values?: any[]): string[];
-export declare function replayRepairWorkItemStatusForCoordinator(value: any): "pending" | "completed" | "blocked" | "in_progress" | "cancelled";
+export declare function replayRepairWorkItemStatusForCoordinator(value: any): "in_progress" | "pending" | "completed" | "blocked" | "cancelled";
 export declare function replayRepairWorkItemOpenForCoordinator(status: any): boolean;
 export declare function isApiMicrocompactNativeProofRepairSourceForCoordinator(source: any): boolean;
 export declare function isPostCompactReinjectionRepairForCoordinator(value?: any): boolean;
@@ -1664,6 +1665,7 @@ export declare function runGroupOrchestrator(input: GroupOrchestratorInput): Pro
     delegated: any[];
     assignments: any[];
     analysis: any;
+    workflowDecision: WorkflowDecision;
     dispatchPolicy: {
         action: string;
         reason: string;
@@ -1690,6 +1692,7 @@ export declare function runGroupOrchestrator(input: GroupOrchestratorInput): Pro
     delegated: any[];
     assignments: any[];
     analysis: any;
+    workflowDecision: WorkflowDecision;
     coordinationPlan: {
         mode: string;
         strategy: string;
@@ -1843,6 +1846,7 @@ export declare function runGroupOrchestrator(input: GroupOrchestratorInput): Pro
     delegated: any[];
     assignments: any[];
     analysis: any;
+    workflowDecision: WorkflowDecision;
     dispatchPolicy: {
         action: string;
         reason: string;
@@ -1875,6 +1879,7 @@ export declare function runGroupOrchestrator(input: GroupOrchestratorInput): Pro
     delegated: any[];
     assignments: any[];
     analysis: any;
+    workflowDecision: WorkflowDecision;
     coordinationPlan: {
         mode: string;
         strategy: string;

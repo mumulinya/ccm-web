@@ -1043,6 +1043,33 @@ const sendMessage = async (options = {}) => {
           if (run.status === 'supervising' && run.mission_id) trackGlobalMission(run.mission_id, currentSessionId.value)
           for (const effect of (run.client_effects || [])) {
             if (effect?.type === 'navigate' && effect.params?.tab) emit('switch-tab', effect.params.tab)
+            if (effect?.type === 'play_music') {
+              const keyword = String(effect.params?.keyword || '').trim()
+              const mode = String(effect.params?.mode || '').trim()
+              const commandId = String(effect.params?.command_id || '').trim()
+              if (keyword) {
+                void (async () => {
+                  const playFn = window.__cc_music_remote_play || window.__cc_global_play_music
+                  if (typeof playFn !== 'function') return // leave queued command for App poller
+                  if (commandId) {
+                    try {
+                      await fetch('/api/music/remote-command/take', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ id: commandId }),
+                      })
+                    } catch {}
+                  }
+                  try {
+                    const result = await playFn(keyword, { mode, remote: true })
+                    if (result?.success) toast.success(`已开始播放：${result.title || keyword}`)
+                    else if (result?.error) toast.error(`播放失败：${result.error}`)
+                  } catch (err) {
+                    toast.error(`播放失败：${err?.message || err}`)
+                  }
+                })()
+              }
+            }
           }
         } else if (data.type === 'error') {
           globalStreamFailed = true
@@ -1232,6 +1259,27 @@ const controlAgenticRun = async (msg, operation, approved = true, feedback = '',
     }
     for (const effect of (run.client_effects || [])) {
       if (effect?.type === 'navigate' && effect.params?.tab) emit('switch-tab', effect.params.tab)
+      if (effect?.type === 'play_music') {
+        const keyword = String(effect.params?.keyword || '').trim()
+        const mode = String(effect.params?.mode || '').trim()
+        const commandId = String(effect.params?.command_id || '').trim()
+        if (keyword) {
+          void (async () => {
+            const playFn = window.__cc_music_remote_play || window.__cc_global_play_music
+            if (typeof playFn !== 'function') return
+            if (commandId) {
+              try {
+                await fetch('/api/music/remote-command/take', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ id: commandId }),
+                })
+              } catch {}
+            }
+            await playFn(keyword, { mode, remote: true })
+          })()
+        }
+      }
     }
     saveHistory()
     toast.success(operation === 'confirm' ? (approved ? '已确认，Agent 继续执行' : '已取消操作') : '运行状态已更新')
@@ -1379,6 +1427,41 @@ const handleGlobalTaskAction = async (msg, action) => {
       localStorage.setItem('trace-replay-target', JSON.stringify({ scope: 'global', task_id: replayTaskId, trace_id: action.trace_id || card?.technical?.trace_id || '', at: Date.now() }))
       emit('switch-tab', 'trace-replay')
       window.dispatchEvent(new CustomEvent('trace-replay-target', { detail: { scope: 'global', task_id: replayTaskId, trace_id: action.trace_id || card?.technical?.trace_id || '' } }))
+      return
+    }
+    if (action.kind === 'approve_epic') {
+      const epicId = msg?.globalMission?.id || card?.task_id || msg?.agenticRun?.mission_id
+      if (!epicId) throw new Error('当前需求 Epic 没有任务 ID')
+      if (!await confirmDialog(`确认批准“${card?.title || epicId}”的整批变更并完成 Epic 交付？`)) return
+      const data = await postJson('/api/tasks/requirement-epic/review', { id: epicId, operation: 'approve' })
+      if (data.task) msg.globalMission = data.task
+      saveHistory()
+      toast.success('需求 Epic 已批准交付')
+      return
+    }
+    if (action.kind === 'targeted_rework' && (action.requirement_epic || card?.requirement_epic)) {
+      const epicId = msg?.globalMission?.id || card?.task_id || msg?.agenticRun?.mission_id
+      const items = card?.requirement_epic?.items || []
+      const itemHint = items.map(item => `${item.item_key}: ${item.title}`).join('\n')
+      const itemKey = window.prompt(`输入要退回的子任务 item_key：\n${itemHint}`, items[0]?.item_key || '')
+      if (!itemKey?.trim()) return
+      const feedback = window.prompt('说明需要返工的内容：', '')
+      if (!feedback?.trim()) return
+      const data = await postJson('/api/tasks/requirement-epic/review', { id: epicId, operation: 'rework', item_key: itemKey.trim(), feedback: feedback.trim() })
+      if (data.task) msg.globalMission = data.task
+      saveHistory()
+      toast.success('已退回指定子任务返工')
+      return
+    }
+    if (action.kind === 'confirm_plan') {
+      const taskId = card?.task_id || msg?.task_id
+      const feedback = String(action.accept_feedback || action.acceptFeedback || action.feedback || '').trim()
+      if (!await confirmDialog(`确认执行“${card?.title || taskId}”的需求拆单计划？`)) return
+      const data = await postJson('/api/usability/intake/confirm', { id: taskId, ...(feedback ? { accept_feedback: feedback } : {}) })
+      if (data.epic || data.task) msg.globalMission = data.epic || data.task
+      if (data.children) msg.globalMissionChildren = data.children.map(task => ({ task, target: task.mission_target || null }))
+      saveHistory()
+      toast.success('需求任务图已确认并开始派发')
       return
     }
     if (action.kind === 'continue_work_item') {
@@ -1731,9 +1814,8 @@ const executeAction = async (action, actionFiles = []) => {
           })
           const data = await res.json()
           if (!res.ok || data.success === false) throw new Error(data.error || '创建音乐播放指令失败')
-          toast.success('已发送给音乐播放器，打开音乐页后会自动播放')
-          addAssistantMessage(systemResultMessage('🎵', `已把${requestLabel}发送给音乐播放器。\n- **状态**: 等待音乐播放器消费指令\n- **指令ID**: ${data.command?.id || '已创建'}`))
-          emit('switch-tab', 'music')
+          toast.success('已发送播放指令，音乐引擎就绪后会自动播放')
+          addAssistantMessage(systemResultMessage('🎵', `已把${requestLabel}发送给音乐播放器。\n- **状态**: 等待常驻音乐引擎消费指令\n- **指令ID**: ${data.command?.id || '已创建'}`))
         } catch (err) {
           toast.error(`播放出错: ${err.message || err}`)
           addAssistantMessage(`❌ [音乐播放失败]: ${err.message || err}`)

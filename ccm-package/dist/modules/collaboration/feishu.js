@@ -34,6 +34,7 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.FEISHU_SCOPES = void 0;
+exports.downloadFeishuMessageResource = downloadFeishuMessageResource;
 exports.getFeishuUserToken = getFeishuUserToken;
 exports.getFeishuUserInfo = getFeishuUserInfo;
 exports.getFeishuChatList = getFeishuChatList;
@@ -73,6 +74,37 @@ async function getControlBotTenantToken() {
     if (!appId || !appSecret)
         return null;
     return getFeishuTenantToken(appId, appSecret);
+}
+async function downloadFeishuMessageResource(input) {
+    const messageId = String(input.messageId || "").trim();
+    const fileKey = String(input.fileKey || "").trim();
+    if (!messageId || !fileKey)
+        throw new Error("飞书附件缺少 message_id 或 file_key");
+    const token = await getControlBotTenantToken();
+    if (!token)
+        throw new Error("无法获取飞书控制机器人 Token");
+    const type = input.type === "image" ? "image" : "file";
+    const maxBytes = Math.max(1, Number(input.maxBytes || 25 * 1024 * 1024));
+    const response = await fetch(`https://open.feishu.cn/open-apis/im/v1/messages/${encodeURIComponent(messageId)}/resources/${encodeURIComponent(fileKey)}?type=${type}`, {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(30_000),
+    });
+    if (!response.ok) {
+        const detail = await response.text();
+        throw new Error(`飞书附件下载失败 HTTP ${response.status}: ${detail.slice(0, 240)}`);
+    }
+    const declaredSize = Number(response.headers.get("content-length") || 0);
+    if (declaredSize > maxBytes)
+        throw new Error(`飞书附件超过 ${Math.floor(maxBytes / 1024 / 1024)} MB`);
+    const buffer = Buffer.from(await response.arrayBuffer());
+    if (buffer.length > maxBytes)
+        throw new Error(`飞书附件超过 ${Math.floor(maxBytes / 1024 / 1024)} MB`);
+    return {
+        buffer,
+        content_type: String(response.headers.get("content-type") || ""),
+        content_disposition: String(response.headers.get("content-disposition") || ""),
+        size: buffer.length,
+    };
 }
 async function getFeishuUserToken(appId, appSecret, code) {
     try {

@@ -2,6 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as dns from "dns/promises";
 import * as net from "net";
+import * as crypto from "crypto";
 import { describeFileFromPath, truncateInlineContent } from "../../core/utils";
 import { loadOrchestratorConfig } from "../collaboration/group-orchestrator";
 import {
@@ -17,6 +18,7 @@ const pdfParse = require("pdf-parse");
 
 export const REQUIREMENT_SOURCE_SCHEMA = "ccm-requirement-source-ingestion-v1";
 export const REQUIREMENT_EXTRACTION_SCHEMA = "ccm-business-requirement-extraction-v1";
+export const REQUIREMENT_DECOMPOSITION_SCHEMA = "ccm-requirement-decomposition-v1";
 export const MAX_REQUIREMENT_SOURCE_CHARS = 20_000;
 export const MAX_REQUIREMENT_TOTAL_CHARS = 60_000;
 export const MAX_REQUIREMENT_FILE_BYTES = 25 * 1024 * 1024;
@@ -62,6 +64,37 @@ export type BusinessRequirementExtraction = {
   extraction_method: "model" | "deterministic_fallback";
 };
 
+export type RequirementDecompositionItem = {
+  item_key: string;
+  title: string;
+  business_goal: string;
+  scope: string[];
+  target_type: "group" | "project" | "auto";
+  target_id: string;
+  acceptance_criteria: string[];
+  depends_on: string[];
+  risks: string[];
+  suggested_agent_capabilities: string[];
+  parallelizable: boolean;
+  source_evidence: string[];
+};
+
+export type RequirementDecompositionPlan = {
+  schema: typeof REQUIREMENT_DECOMPOSITION_SCHEMA;
+  epic_title: string;
+  business_goal: string;
+  global_acceptance_criteria: string[];
+  items: RequirementDecompositionItem[];
+  clarification_questions: string[];
+  risks: string[];
+  source_evidence: string[];
+  execution_order: "dag";
+  content_hash: string;
+  version: number;
+  extraction_method: "model" | "deterministic_fallback";
+  generated_at: string;
+};
+
 export type RequirementIngestionResult = {
   schema: string;
   generated_at: string;
@@ -72,6 +105,8 @@ export type RequirementIngestionResult = {
   user_summary: string;
   warnings: string[];
   requirement: BusinessRequirementExtraction | null;
+  decomposition: RequirementDecompositionPlan | null;
+  content_hash: string;
   technical: any;
 };
 
@@ -86,6 +121,166 @@ function compact(value: any, max = 240) {
 
 function unique(items: any[], max = 12) {
   return Array.from(new Set((items || []).map(item => compact(item, 500)).filter(Boolean))).slice(0, max);
+}
+
+function stableHash(value: any) {
+  return crypto.createHash("sha256").update(typeof value === "string" ? value : JSON.stringify(value)).digest("hex");
+}
+
+function stableItemKey(value: any, index = 0) {
+  const source = compact(value, 500).toLowerCase();
+  const slug = source
+    .replace(/[^a-z0-9\u4e00-\u9fff]+/gi, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 36);
+  return `${slug || "work-item"}-${stableHash(`${index}:${source}`).slice(0, 8)}`;
+}
+
+function normalizeStringList(value: any, max = 12, itemMax = 500) {
+  const rows = Array.isArray(value) ? value : value ? [value] : [];
+  return unique(rows.map(item => compact(item, itemMax)), max);
+}
+
+function inferTargetHint(text: string) {
+  const value = String(text || "");
+  if (/前端|页面|UI|交互|组件|样式/i.test(value)) return { target_type: "auto" as const, target_id: "", capabilities: ["frontend", "ui"] };
+  if (/后端|接口|服务|数据库|API/i.test(value)) return { target_type: "auto" as const, target_id: "", capabilities: ["backend", "api"] };
+  if (/测试|验收|回归|QA|TestAgent/i.test(value)) return { target_type: "auto" as const, target_id: "", capabilities: ["test", "qa"] };
+  if (/文档|说明|README/i.test(value)) return { target_type: "auto" as const, target_id: "", capabilities: ["documentation"] };
+  return { target_type: "auto" as const, target_id: "", capabilities: ["general-development"] };
+}
+
+export function validateRequirementDecomposition(value: any, options: {
+  contentHash?: string;
+  requirement?: BusinessRequirementExtraction | null;
+  extractionMethod?: "model" | "deterministic_fallback";
+} = {}): RequirementDecompositionPlan {
+  const requirement = options.requirement || null;
+  const rawItems = Array.isArray(value?.items) ? value.items.slice(0, 50) : [];
+  if (!rawItems.length) throw new Error("需求拆解计划至少需要一个子任务");
+  const usedKeys = new Set<string>();
+  const items: RequirementDecompositionItem[] = rawItems.map((item: any, index: number) => {
+    const title = compact(item?.title || item?.business_goal || item?.businessGoal || `子任务 ${index + 1}`, 100);
+    const suppliedItemKey = compact(item?.item_key || item?.itemKey || "", 80).replace(/[^a-zA-Z0-9_.:\-\u4e00-\u9fff]/g, "-");
+    let itemKey = suppliedItemKey;
+    if (!itemKey) itemKey = stableItemKey(title, index);
+    if (usedKeys.has(itemKey) && suppliedItemKey) throw new Error(`需求拆解 item_key 重复：${itemKey}`);
+    if (usedKeys.has(itemKey)) itemKey = `${itemKey}-${stableHash(`${index}:${title}`).slice(0, 6)}`;
+    usedKeys.add(itemKey);
+    const targetTypeValue = String(item?.target_type || item?.targetType || "auto").toLowerCase();
+    const targetType = ["group", "project"].includes(targetTypeValue) ? targetTypeValue as "group" | "project" : "auto";
+    const hint = inferTargetHint([title, item?.business_goal, ...(Array.isArray(item?.scope) ? item.scope : [])].join(" "));
+    return {
+      item_key: itemKey,
+      title,
+      business_goal: compact(item?.business_goal || item?.businessGoal || title, 1600),
+      scope: normalizeStringList(item?.scope, 16, 600),
+      target_type: targetType,
+      target_id: compact(item?.target_id || item?.targetId || item?.target_project || item?.targetProject || item?.group_id || item?.groupId || "", 120),
+      acceptance_criteria: normalizeStringList(item?.acceptance_criteria || item?.acceptanceCriteria || item?.acceptance, 16, 700),
+      depends_on: normalizeStringList(item?.depends_on || item?.dependsOn || item?.dependencies, 20, 80),
+      risks: normalizeStringList(item?.risks, 12, 500),
+      suggested_agent_capabilities: normalizeStringList(item?.suggested_agent_capabilities || item?.suggestedAgentCapabilities || hint.capabilities, 12, 100),
+      parallelizable: item?.parallelizable !== false,
+      source_evidence: normalizeStringList(item?.source_evidence || item?.sourceEvidence || requirement?.source_evidence || [], 16, 300),
+    };
+  });
+  if (items.length > 1 && !items.some(item => item.item_key === "epic-integration-acceptance")) {
+    const verificationTarget = [...items].reverse().find(item => item.target_id) || items[items.length - 1];
+    items.push({
+      item_key: "epic-integration-acceptance",
+      title: "Epic 跨任务集成验收",
+      business_goal: "在全部开发子任务通过后，验证跨模块主流程并逐条归档原始需求验收证据",
+      scope: ["跨子任务集成验证", "原始需求验收标准证据矩阵"],
+      target_type: verificationTarget.target_type,
+      target_id: verificationTarget.target_id,
+      acceptance_criteria: normalizeStringList(
+        value?.global_acceptance_criteria || value?.globalAcceptanceCriteria || requirement?.acceptance_criteria || ["跨模块主流程验证通过", "形成需求验收证据矩阵"],
+        20,
+        700,
+      ),
+      depends_on: items.map(item => item.item_key),
+      risks: ["集成验收失败时只退回受影响子任务，不得跳过验收直接完成 Epic"],
+      suggested_agent_capabilities: ["integration-test", "test", "qa"],
+      parallelizable: false,
+      source_evidence: normalizeStringList(value?.source_evidence || value?.sourceEvidence || requirement?.source_evidence || [], 20, 300),
+    });
+  }
+  const keys = new Set(items.map(item => item.item_key));
+  for (const item of items) {
+    if (item.depends_on.includes(item.item_key)) throw new Error(`需求拆解子任务不能依赖自身：${item.item_key}`);
+    const unknownDependencies = item.depends_on.filter(key => !keys.has(key));
+    if (unknownDependencies.length) throw new Error(`需求拆解依赖不存在：${item.item_key} -> ${unknownDependencies.join("、")}`);
+    if (!item.acceptance_criteria.length) {
+      item.acceptance_criteria = normalizeStringList(requirement?.acceptance_criteria || ["完成该子任务范围并提供实际验证证据"], 12, 700);
+    }
+  }
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+  const byKey = new Map(items.map(item => [item.item_key, item]));
+  const visit = (key: string, chain: string[] = []) => {
+    if (visiting.has(key)) throw new Error(`需求拆解依赖存在环：${[...chain, key].join(" -> ")}`);
+    if (visited.has(key)) return;
+    visiting.add(key);
+    for (const dependency of byKey.get(key)?.depends_on || []) visit(dependency, [...chain, key]);
+    visiting.delete(key);
+    visited.add(key);
+  };
+  for (const item of items) visit(item.item_key);
+  return {
+    schema: REQUIREMENT_DECOMPOSITION_SCHEMA,
+    epic_title: compact(value?.epic_title || value?.epicTitle || requirement?.title || "需求文档开发任务", 100),
+    business_goal: compact(value?.business_goal || value?.businessGoal || requirement?.business_goal || "", 1800),
+    global_acceptance_criteria: normalizeStringList(value?.global_acceptance_criteria || value?.globalAcceptanceCriteria || requirement?.acceptance_criteria || [], 20, 700),
+    items,
+    clarification_questions: normalizeStringList(value?.clarification_questions || value?.clarificationQuestions || requirement?.clarification_questions || [], 12, 600),
+    risks: normalizeStringList(value?.risks || requirement?.risks || [], 16, 600),
+    source_evidence: normalizeStringList(value?.source_evidence || value?.sourceEvidence || requirement?.source_evidence || [], 20, 300),
+    execution_order: "dag",
+    content_hash: options.contentHash || compact(value?.content_hash || value?.contentHash || "", 80),
+    version: Math.max(1, Number(value?.version || 1)),
+    extraction_method: options.extractionMethod || (value?.extraction_method === "deterministic_fallback" ? "deterministic_fallback" : "model"),
+    generated_at: new Date().toISOString(),
+  };
+}
+
+export function diffRequirementDecompositionPlans(
+  previous: RequirementDecompositionPlan | null | undefined,
+  next: RequirementDecompositionPlan,
+) {
+  const previousItems = new Map((previous?.items || []).map(item => [item.item_key, item]));
+  const nextItems = new Map((next?.items || []).map(item => [item.item_key, item]));
+  const comparable = (item: RequirementDecompositionItem | undefined) => item ? {
+    title: item.title,
+    business_goal: item.business_goal,
+    scope: item.scope,
+    target_type: item.target_type,
+    target_id: item.target_id,
+    acceptance_criteria: item.acceptance_criteria,
+    depends_on: item.depends_on,
+    risks: item.risks,
+    suggested_agent_capabilities: item.suggested_agent_capabilities,
+    parallelizable: item.parallelizable,
+  } : null;
+  const added = next.items.filter(item => !previousItems.has(item.item_key)).map(item => item.item_key);
+  const removed = (previous?.items || []).filter(item => !nextItems.has(item.item_key)).map(item => item.item_key);
+  const changed = next.items.filter(item => {
+    const oldItem = previousItems.get(item.item_key);
+    return !!oldItem && stableHash(comparable(oldItem)) !== stableHash(comparable(item));
+  }).map(item => item.item_key);
+  const unchanged = next.items.filter(item => previousItems.has(item.item_key) && !changed.includes(item.item_key)).map(item => item.item_key);
+  return {
+    schema: "ccm-requirement-decomposition-diff-v1",
+    from_version: previous?.version || 0,
+    to_version: next.version,
+    from_content_hash: previous?.content_hash || "",
+    to_content_hash: next.content_hash,
+    added,
+    removed,
+    changed,
+    unchanged,
+    has_changes: added.length + removed.length + changed.length > 0,
+  };
 }
 
 function decodeHtml(text: string) {
@@ -474,6 +669,165 @@ async function extractRequirementWithModel(userText: string, sources: Requiremen
   };
 }
 
+function fallbackRequirementDecomposition(
+  requirement: BusinessRequirementExtraction,
+  contentHash: string,
+): RequirementDecompositionPlan {
+  const scopes = requirement.scope.length ? requirement.scope : [requirement.business_goal || requirement.title];
+  const items = scopes.slice(0, 12).map((scope, index) => {
+    const hint = inferTargetHint(scope);
+    return {
+      item_key: stableItemKey(scope, index),
+      title: compact(scope, 100),
+      business_goal: compact(`完成需求「${requirement.title}」中的范围：${scope}`, 1200),
+      scope: [scope],
+      target_type: hint.target_type,
+      target_id: hint.target_id,
+      acceptance_criteria: requirement.acceptance_criteria,
+      depends_on: [],
+      risks: requirement.risks,
+      suggested_agent_capabilities: hint.capabilities,
+      parallelizable: true,
+      source_evidence: requirement.source_evidence,
+    };
+  });
+  return validateRequirementDecomposition({
+    epic_title: requirement.title,
+    business_goal: requirement.business_goal,
+    global_acceptance_criteria: requirement.acceptance_criteria,
+    items,
+    clarification_questions: requirement.clarification_questions,
+    risks: requirement.risks,
+    source_evidence: requirement.source_evidence,
+    version: 1,
+  }, {
+    contentHash,
+    requirement,
+    extractionMethod: "deterministic_fallback",
+  });
+}
+
+async function extractRequirementDecompositionWithModel(input: {
+  requirement: BusinessRequirementExtraction;
+  sources: RequirementSourceRecord[];
+  contentHash: string;
+  availableTargets?: any[];
+  configOverride?: any;
+}) {
+  const config = input.configOverride || loadOrchestratorConfig();
+  if (!config.enabled || !config.apiKey || !config.apiUrl || !config.model) throw new Error("主 Agent 模型未配置");
+  const readable = input.sources
+    .filter(item => item.readable && item.content)
+    .map(item => `【${item.name}】\n${item.content}`)
+    .join("\n\n")
+    .slice(0, MAX_REQUIREMENT_TOTAL_CHARS);
+  const availableTargets = (input.availableTargets || []).slice(0, 80).map((target: any) => ({
+    type: target?.type || target?.target_type || (target?.group_id || target?.groupId ? "group" : "project"),
+    id: target?.id || target?.target_id || target?.group_id || target?.groupId || target?.project || target?.name || "",
+    name: target?.name || target?.project || target?.group_name || "",
+    capabilities: normalizeStringList(target?.capabilities || target?.skills || [], 20, 100),
+  }));
+  const prompt = `你是软件需求拆解协调者。请把需求文档拆成可独立追踪、可验收、可按依赖执行的开发子任务。只返回 JSON，不要 Markdown。
+结构：
+{
+  "epic_title": string,
+  "business_goal": string,
+  "global_acceptance_criteria": string[],
+  "items": [{
+    "item_key": string,
+    "title": string,
+    "business_goal": string,
+    "scope": string[],
+    "target_type": "group"|"project"|"auto",
+    "target_id": string,
+    "acceptance_criteria": string[],
+    "depends_on": string[],
+    "risks": string[],
+    "suggested_agent_capabilities": string[],
+    "parallelizable": boolean,
+    "source_evidence": string[]
+  }],
+  "clarification_questions": string[],
+  "risks": string[],
+  "source_evidence": string[]
+}
+规则：
+1. item_key 必须稳定、简短、唯一，depends_on 只能引用同一结果中的 item_key，禁止环依赖。
+2. 按可交付业务能力拆分，不要仅按“前端/后端/测试”机械拆分；一个 item 必须有清晰边界和验收标准。
+3. 可并行项目不要添加伪依赖；接口契约、数据迁移等真实前置条件必须声明。
+4. 只有目标明确存在于可用目标中才填 target_id，否则 target_type=auto 且 target_id=""。
+5. 文档冲突、权限未知或关键业务决定缺失时写 clarification_questions，不得猜测。
+6. 子任务数控制在 1-20 个，覆盖原始验收标准并保留 source_evidence。
+
+结构化需求：
+${JSON.stringify(input.requirement)}
+
+可用目标：
+${JSON.stringify(availableTargets)}
+
+资料正文：
+${readable || "（无可读正文）"}`;
+  const options = {
+    messages: [{ role: "user", content: prompt }],
+    temperature: 0,
+    maxTokens: 5000,
+    defaultTimeoutMs: Math.max(15_000, Number(config.timeoutMs) || 120_000),
+    httpErrorPrefix: "需求拆解模型",
+    invalidJsonMessage: "需求拆解模型未返回有效 JSON",
+  };
+  const value: any = shouldUseAnthropic(config)
+    ? await callAnthropicCompatibleJson(config, options)
+    : await callOpenAiCompatibleJson(config, options);
+  return validateRequirementDecomposition(value, {
+    contentHash: input.contentHash,
+    requirement: input.requirement,
+    extractionMethod: "model",
+  });
+}
+
+/** 各通道统一的开发意图识别：命中后应设置 decomposeRequirement: true。 */
+export function shouldDecomposeRequirementIntent(input: {
+  userText?: string;
+  files?: Array<any> | null;
+  urls?: string[] | null;
+} = {}): boolean {
+  const text = String(input.userText || "").trim();
+  const files = Array.isArray(input.files) ? input.files : [];
+  const explicitUrls = Array.isArray(input.urls) ? input.urls.filter(Boolean) : [];
+  const hasFiles = files.length > 0;
+  const hasUrls = explicitUrls.length > 0 || /https?:\/\/\S+/i.test(text);
+  const hasDevIntent = /(?:开发|实现|改造|拆(?:分|任务)|需求|PRD|功能|Epic|迭代|交付|验收)/i.test(
+    text || (hasFiles || hasUrls ? "需求文档开发" : ""),
+  );
+  if (!hasDevIntent) return false;
+  // 有附件/链接，或正文足够承载需求时拆单（与 usability intake 对齐，避免纯闲聊误拆）
+  return hasFiles || hasUrls || text.length >= 24;
+}
+
+export async function decomposeRequirementToTaskPlan(input: {
+  requirement: BusinessRequirementExtraction;
+  sources?: RequirementSourceRecord[];
+  contentHash?: string;
+  availableTargets?: any[];
+  requirementConfig?: any;
+}): Promise<RequirementDecompositionPlan> {
+  const contentHash = input.contentHash || stableHash({
+    requirement: input.requirement,
+    sources: (input.sources || []).map(source => ({ name: source.name, status: source.status, content: source.content })),
+  });
+  try {
+    return await extractRequirementDecompositionWithModel({
+      requirement: input.requirement,
+      sources: input.sources || [],
+      contentHash,
+      availableTargets: input.availableTargets,
+      configOverride: input.requirementConfig,
+    });
+  } catch {
+    return fallbackRequirementDecomposition(input.requirement, contentHash);
+  }
+}
+
 export async function ingestRequirementSources(input: {
   files?: UploadedFile[];
   userText?: string;
@@ -483,17 +837,31 @@ export async function ingestRequirementSources(input: {
   visionConfig?: any;
   onlineDocumentFetcher?: (url: string) => Promise<any>;
   requirementConfig?: any;
+  decomposeRequirement?: boolean;
+  availableTargets?: any[];
 } = {}): Promise<RequirementIngestionResult> {
   const files = (input.files || []).slice(0, 10);
   const urls = unique([...(input.urls || []), ...extractOnlineDocumentUrls(input.userText || "")], 3);
   const fileSources = await Promise.all(files.map(file => parseUploadedFile(file, { visionConfig: input.visionConfig })));
   const urlSources = await Promise.all(urls.map(url => parseOnlineDocument(url, input.onlineDocumentFetcher || fetchPublicDocument)));
   const sources = [...fileSources, ...urlSources];
+  const contentHash = stableHash({
+    user_text: String(input.userText || "").trim(),
+    sources: sources.map(source => ({
+      name: source.name,
+      kind: source.kind,
+      status: source.status,
+      content: source.content,
+      size: source.size || 0,
+    })),
+  });
   const sourceWarnings = sources.filter(item => !item.readable).map(item => `${item.name}：${item.error || item.summary}`);
   const warnings = [...sourceWarnings];
   const context = renderSourcesForAgent(sources);
   let requirement: BusinessRequirementExtraction | null = null;
+  let decomposition: RequirementDecompositionPlan | null = null;
   let extractionError = "";
+  let decompositionError = "";
   if (input.extractRequirement !== false && (String(input.userText || "").trim() || sources.length)) {
     try {
       requirement = await extractRequirementWithModel(input.userText || "", sources, input.requirementConfig);
@@ -501,6 +869,21 @@ export async function ingestRequirementSources(input: {
       extractionError = compact(error?.message || String(error), 500);
       requirement = fallbackRequirement(input.userText || "", sources);
       warnings.push("需求结构化模型暂时不可用，已改用本地规则整理，请在开始前确认计划。");
+    }
+  }
+  if (input.decomposeRequirement === true && requirement) {
+    try {
+      decomposition = await extractRequirementDecompositionWithModel({
+        requirement,
+        sources,
+        contentHash,
+        availableTargets: input.availableTargets,
+        configOverride: input.requirementConfig,
+      });
+    } catch (error: any) {
+      decompositionError = compact(error?.message || String(error), 500);
+      decomposition = fallbackRequirementDecomposition(requirement, contentHash);
+      warnings.push("需求拆解模型暂时不可用，已生成本地保守拆解计划，请确认任务边界和依赖。");
     }
   }
   const readableCount = sources.filter(item => item.readable).length;
@@ -533,6 +916,8 @@ export async function ingestRequirementSources(input: {
     user_summary: userSummary,
     warnings,
     requirement,
+    decomposition,
+    content_hash: contentHash,
     technical: {
       schema: REQUIREMENT_SOURCE_SCHEMA,
       source_count: sources.length,
@@ -543,6 +928,11 @@ export async function ingestRequirementSources(input: {
       extraction_method: requirement?.extraction_method || "not_requested",
       extraction_error: extractionError,
       fallback_used: requirement?.extraction_method === "deterministic_fallback",
+      decomposition_schema: decomposition?.schema || "",
+      decomposition_method: decomposition?.extraction_method || "not_requested",
+      decomposition_error: decompositionError,
+      decomposition_item_count: decomposition?.items.length || 0,
+      content_hash: contentHash,
       warnings,
       sources: attachments,
     },

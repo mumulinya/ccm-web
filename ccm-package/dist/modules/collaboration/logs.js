@@ -36,6 +36,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.safeAddGroupLog = safeAddGroupLog;
 exports.loadGroupLogs = loadGroupLogs;
 exports.saveGroupLogs = saveGroupLogs;
+exports.clearGroupLogs = clearGroupLogs;
 exports.addGroupLog = addGroupLog;
 exports.addTaskLog = addTaskLog;
 exports.appendTaskTimelineEvent = appendTaskTimelineEvent;
@@ -76,6 +77,15 @@ function saveGroupLogs(logs) {
     }
     catch (e) {
         console.error("保存群聊日志失败:", e.message);
+    }
+}
+function clearGroupLogs(groupId) {
+    try {
+        return (0, task_store_1.clearGroupLogRecords)(groupId);
+    }
+    catch (e) {
+        console.error("清空群聊日志失败:", e.message);
+        return 0;
     }
 }
 function addGroupLog(groupId, level, category, message, details = null) {

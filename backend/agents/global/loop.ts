@@ -31,6 +31,11 @@ import { buildMainAgentWorkchain, formatMainAgentCompletionReply, runMainAgentWo
 import { buildMainAgentDeliveryReport, formatMainAgentDeliveryReply, runMainAgentDeliveryReportSelfTest } from "../delivery-report";
 import { sanitizeMainAgentRoleLanguage, sanitizeMainAgentUserFacingText } from "../user-facing-text";
 import { buildRoleSkillPrompt } from "../../skills/role-skills";
+import {
+  WORKFLOW_DECISION_GUIDANCE,
+  normalizeWorkflowDecision,
+  type WorkflowDecision,
+} from "../workflow-decision";
 
 export type GlobalAgentRunStatus = "running" | "supervising" | "paused" | "waiting_confirmation" | "waiting_clarification" | "completed" | "failed" | "cancelled";
 export type GlobalAgentDecisionState = "answer" | "investigate" | "plan" | "execute" | "needs_confirmation" | "complete";
@@ -63,6 +68,7 @@ export interface GlobalAgentDecision {
   plan?: string[];
   tool?: { name: string; arguments?: any } | null;
   intent?: Partial<AgentDecisionIntent>;
+  workflowDecision?: WorkflowDecision;
   completion?: { summary?: string; evidence?: string[]; risks?: string[]; next_action?: string };
 }
 
@@ -130,6 +136,8 @@ export interface GlobalAgentRun {
   test_agent_report?: any;
   testAgentReport?: any;
   decision_summary?: any;
+  workflow_decision?: WorkflowDecision;
+  workflowDecision?: WorkflowDecision;
   clarification_question?: string;
   clarification_summary?: any;
   confirmation_summary?: any;
@@ -173,7 +181,7 @@ const STORE_FILE = path.join(STORE_DIR, "runs.json");
 const STORE_BACKUP = `${STORE_FILE}.bak`;
 const MAX_STORED_RUNS = 120;
 const MAX_OBSERVATION_CHARS = 12_000;
-const GLOBAL_DISPATCH_TOOL_NAMES = ["orchestrate_development", "send_group_cmd", "send_project_cmd", "create_task"];
+const GLOBAL_DISPATCH_TOOL_NAMES = ["orchestrate_development", "create_requirement_epic", "send_group_cmd", "send_project_cmd", "create_task"];
 const activeRuns = new Set<string>();
 const pauseRequests = new Set<string>();
 const cancelRequests = new Set<string>();
@@ -192,6 +200,8 @@ export const GLOBAL_AGENT_TOOL_SPECS: GlobalAgentToolSpec[] = [
   { name: "manage_global_memory", description: "查询状态、压缩、重建、启用或禁用全局 Agent 长期记忆；变更操作必须提供 reason。", required: ["operation"], risk: args => String(args?.operation || "").toLowerCase() === "status" ? "read" : ["disable", "rebuild"].includes(String(args?.operation || "").toLowerCase()) ? "high" : "write" },
   { name: "inspect_mission", description: "查询全局开发任务及子任务交付状态。", required: ["id"], risk: "read" },
   { name: "inspect_supervision", description: "查询长期任务跟进、恢复动作、交付验收和等待人工事项。", required: ["id"], risk: "read" },
+  { name: "decompose_requirement_epic", description: "由你在完整理解用户语义后选择调用：当需求来自 PRD/需求文档、跨项目或包含多个可独立验收子目标时，按需生成结构化 Epic/DAG 任务图。该工具只读，不创建任务；普通问答、方案咨询和简单单项目修复不要调用。", risk: "read" },
+  { name: "create_requirement_epic", description: "按用户已确认的需求文档拆解计划，原子创建 Epic 父任务和多个持久子任务并开始依赖调度。计划含 clarification_questions 时必须先逐项获得用户答案，再传已按答案更新且清空阻断问题的 decomposition_plan 与 clarifications_resolved=true；不得用普通确认绕过阻断问题。", risk: "write" },
   { name: "orchestrate_development", description: "创建跨项目开发任务并持久派发给真实群聊或项目 Agent。", required: ["business_goal", "targets"], risk: "write" },
   { name: "manage_supervision", description: "暂停、恢复、立即检查、修改目标、取消、归档或人工接管长期任务跟进。", required: ["id", "operation"], risk: args => ["cancel", "archive"].includes(String(args?.operation || "").toLowerCase()) ? "high" : "write" },
   { name: "create_task", description: "创建并派发单群聊开发任务。", required: ["title", "business_goal", "group_id"], risk: "write" },
@@ -205,7 +215,7 @@ export const GLOBAL_AGENT_TOOL_SPECS: GlobalAgentToolSpec[] = [
   { name: "git_review", description: "读取并审查指定项目的 Git 变更。", required: ["project"], risk: "read" },
   { name: "git_commit", description: "提交指定项目的代码变更。", required: ["project"], risk: "write" },
   { name: "create_template", description: "创建全局对话模板。", required: ["name", "content"], risk: "write" },
-  { name: "play_music", description: "搜索并播放音乐。", required: ["keyword"], risk: "write" },
+  { name: "play_music", description: "搜索并播放音乐（浏览器 UI 副作用，自动执行，不需要写授权确认）。keyword 可为歌名/歌手，或 __random__ 表示随机播放。", required: ["keyword"], risk: "read" },
   { name: "toggle_pet", description: "打开或关闭桌面宠物。", required: ["action"], risk: "write" },
   { name: "create_pet_from_image", description: "使用本次消息上传的参考图片创建动作齐全的 Codex v2 宠物皮肤。reference_path 必须是本次上传附件的本地路径；生成是持久化异步任务。", required: ["reference_path"], risk: "write" },
   { name: "navigate", description: "通知 Web 客户端切换页面；不改变项目数据。", required: ["tab"], risk: "read" },
@@ -704,6 +714,8 @@ function normalizeRun(run: any): GlobalAgentRun {
     test_agent_report: run?.test_agent_report || run?.testAgentReport || null,
     testAgentReport: run?.testAgentReport || run?.test_agent_report || null,
     decision_summary: run?.decision_summary || null,
+    workflow_decision: run?.workflow_decision || run?.workflowDecision || null,
+    workflowDecision: run?.workflowDecision || run?.workflow_decision || null,
     clarification_question: String(run?.clarification_question || ""),
     clarification_summary: run?.clarification_summary || run?.clarificationSummary || null,
     confirmation_summary: run?.confirmation_summary || run?.confirmationSummary || null,
@@ -1308,12 +1320,26 @@ function normalizeDecision(value: any): GlobalAgentDecision {
   const tool = value?.tool && value.tool.name ? { name: String(value.tool.name), arguments: value.tool.arguments && typeof value.tool.arguments === "object" ? value.tool.arguments : {} } : null;
   const rawCompletion = value?.completion && typeof value.completion === "object" ? value.completion : null;
   const compactItem = (item: any) => typeof item === "string" ? item : JSON.stringify(item);
+  const workflowDecision = value?.workflowDecision || value?.workflow_decision
+    ? normalizeWorkflowDecision(value.workflowDecision || value.workflow_decision)
+    : normalizeWorkflowDecision({
+        mode: tool?.name === "decompose_requirement_epic"
+          ? "decompose_epic"
+          : state === "plan"
+            ? "plan_task"
+            : tool
+              ? "execute_direct"
+              : "answer",
+        reason: "根据大模型返回的状态和工具选择生成工作流记录",
+        confidence: Number(value?.intent?.confidence ?? 0.8),
+      });
   return {
     state,
     message: String(value?.message || "").slice(0, 20_000),
     plan: Array.isArray(value?.plan) ? value.plan.map((item: any) => String(item).slice(0, 500)).slice(0, 12) : [],
     tool,
     intent: value?.intent && typeof value.intent === "object" ? value.intent : undefined,
+    workflowDecision,
     completion: rawCompletion ? {
       summary: String(rawCompletion.summary || ""),
       evidence: Array.isArray(rawCompletion.evidence) ? rawCompletion.evidence.map(compactItem).slice(0, 20) : [],
@@ -1351,6 +1377,10 @@ export async function buildGlobalAgentModelMessages(run: GlobalAgentRun, runtime
   );
   const system = `你是 CCM 全局 Agent 的决策内核。你不是关键词触发器，而是根据用户完整语义、真实系统上下文和工具观察结果决定下一步。
 
+${WORKFLOW_DECISION_GUIDANCE}
+
+每轮必须输出 workflowDecision。它决定本轮是直接回答、只读项目分析、直接执行、先计划还是拆 Epic。附件和 URL 只提供上下文，绝不能自动触发拆解。
+
 状态只能是 answer、investigate、plan、execute、needs_confirmation、complete。
 - 普通聊天、知识问答、原理说明、可行性咨询：answer 或 complete，不调用写工具。
 - 事实不足时先调用读取工具调查；不得猜测项目、群聊、任务 ID。
@@ -1375,7 +1405,7 @@ export async function buildGlobalAgentModelMessages(run: GlobalAgentRun, runtime
 ${buildToolPrompt()}
 
 只输出一个合法 JSON 对象，不要输出 Markdown：
-{"state":"investigate|plan|execute|needs_confirmation|answer|complete","message":"非终态写进度；终态写直接回答用户的完整内容","intent":{"category":"conversation|question|analysis|execution|high_risk|ambiguous","goal":"用户真实目标","action_required":false,"target_refs":[],"impact_scope":[],"confidence":0.95,"authorization_basis":"current_message|confirmation|none","reason":"判断依据"},"plan":["步骤"],"tool":{"name":"工具名","arguments":{}},"completion":{"summary":"结论","evidence":[],"risks":[],"next_action":""}}
+{"state":"investigate|plan|execute|needs_confirmation|answer|complete","message":"非终态写进度；终态写直接回答用户的完整内容","workflowDecision":{"mode":"answer|project_analysis|execute_direct|plan_task|decompose_epic","reason":"完整语义判断依据","confidence":0.95,"needsPlanning":false,"needsEpicDecomposition":false,"actionRequired":false,"continuationKind":"new_task|supplement|revise_goal","readAction":"none|inspect_status","targetRefs":[],"impactScope":[],"planSteps":[],"clarificationQuestions":[]},"intent":{"category":"conversation|question|analysis|execution|high_risk|ambiguous","goal":"用户真实目标","action_required":false,"target_refs":[],"impact_scope":[],"confidence":0.95,"authorization_basis":"current_message|confirmation|none","reason":"判断依据"},"plan":["步骤"],"tool":{"name":"工具名","arguments":{}},"completion":{"summary":"结论","evidence":[],"risks":[],"next_action":""}}
 不调用工具时 tool 必须为 null。${roleSkills.prompt ? `\n\n${roleSkills.prompt}` : ""}`;
   const state = JSON.stringify({
     run: {
@@ -1388,6 +1418,22 @@ ${buildToolPrompt()}
       latest_user_steer: run.last_user_steer || run.lastUserSteer || null,
       replan_required: run.reasoning_loop.replan_required === true,
       selected_role_skills: roleSkills.names,
+      workflow_decision: run.workflow_decision || run.workflowDecision || null,
+      requirement_sources: {
+        available: Number((run as any).source_ingestion?.source_count || 0) > 0
+          || !!(run as any).requirement_extraction
+          || !!(run as any).requirement_decomposition,
+        content_hash: String((run as any).requirement_content_hash || ""),
+        source_count: Number((run as any).source_ingestion?.source_count || 0),
+        has_extraction: !!(run as any).requirement_extraction,
+        has_decomposition: !!(run as any).requirement_decomposition,
+        decomposition_item_count: Array.isArray((run as any).requirement_decomposition?.items)
+          ? (run as any).requirement_decomposition.items.length
+          : 0,
+        clarification_question_count: Array.isArray((run as any).requirement_decomposition?.clarification_questions)
+          ? (run as any).requirement_decomposition.clarification_questions.length
+          : 0,
+      },
     },
     reasoning_loop: projectGlobalAgentReasoningForModel(run.reasoning_loop),
     context,
@@ -2125,6 +2171,8 @@ async function continueLoop(run: GlobalAgentRun, runtime: GlobalAgentLoopRuntime
       }
 
       run.phase = decision.state;
+      run.workflow_decision = decision.workflowDecision;
+      run.workflowDecision = decision.workflowDecision;
       const normalizedIntent = normalizeAgentDecisionIntent(decision.intent, run.user_message);
       decision.intent = normalizedIntent;
       updateReasoningPlan(run.reasoning_loop, decision.plan || [], normalizedIntent.reason || `decision:${decision.state}`);

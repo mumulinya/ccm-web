@@ -2667,10 +2667,8 @@ function handleBasicGroupRoutes(req, res, parsed, ctx, deps) {
         req.on("end", () => {
             try {
                 const { group_id } = JSON.parse(body);
-                const logs = (0, logs_1.loadGroupLogs)();
-                delete logs[group_id];
-                (0, logs_1.saveGroupLogs)(logs);
-                (0, utils_1.sendJson)(res, { success: true });
+                const cleared = (0, logs_1.clearGroupLogs)(String(group_id || ""));
+                (0, utils_1.sendJson)(res, { success: true, cleared });
             }
             catch (e) {
                 (0, utils_1.sendJson)(res, { error: e.message }, 400);

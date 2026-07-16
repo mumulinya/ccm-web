@@ -16,6 +16,57 @@ const uniq = (items) => [...new Set(asList(items).map(item => String(item || '')
 const displayValue = (value, fallback = '任务状态已整理。', max = 420) => sanitizeUserFacingPlanStructure(value, { fallback, max })
 const planCopy = (value, fallback = '计划信息已整理。', max = 260) => sanitizeUserFacingPlanText(value, fallback, max)
 const card = computed(() => displayValue(props.card))
+const requirementEpic = computed(() => props.card.requirement_epic || props.card.requirementEpic || null)
+const requirementEpicItems = computed(() => {
+  const epic = requirementEpic.value
+  const statusRows = asList(epic?.summary?.children)
+  const statusByKey = new Map()
+  const statusByTaskId = new Map()
+  for (const row of statusRows) {
+    const key = String(row.requirement_item_key || row.item_key || '').trim()
+    const taskId = String(row.task_id || row.id || '').trim()
+    if (key) statusByKey.set(key, row)
+    if (taskId) statusByTaskId.set(taskId, row)
+  }
+  const items = asList(epic?.items).map((item) => {
+    const itemKey = String(item.item_key || item.requirement_item_key || '').trim()
+    const status = (itemKey && statusByKey.get(itemKey))
+      || statusRows.find(row => String(row.requirement_item_key || row.item_key || '') === itemKey)
+      || null
+    const childId = String(
+      status?.task_id
+      || status?.id
+      || item.child_task_id
+      || item.task_id
+      || ''
+    ).trim()
+    return {
+      ...item,
+      item_key: itemKey || item.item_key,
+      child_task_id: childId,
+      status: status?.display_status || status?.status || statusByTaskId.get(childId)?.display_status || statusByTaskId.get(childId)?.status || (props.card.intake_state === 'awaiting_confirmation' ? 'pending' : 'queued'),
+      status_detail: status?.status_detail || statusByTaskId.get(childId)?.status_detail || '',
+    }
+  })
+  const byKey = new Map(items.map(item => [String(item.item_key || ''), item]))
+  return items.map(item => {
+    const dependencies = asList(item.depends_on).map(key => byKey.get(String(key))).filter(Boolean)
+    const failedDependencies = dependencies.filter(dependency => ['failed', 'cancelled'].includes(String(dependency.status || '')))
+    const waitingDependencies = dependencies.filter(dependency => !['done', 'completed', 'passed', 'approved'].includes(String(dependency.status || '')))
+    return {
+      ...item,
+      branch_state: failedDependencies.length ? 'blocked' : waitingDependencies.length ? 'waiting' : ['pending', 'queued'].includes(String(item.status || '')) ? 'ready' : '',
+      branch_detail: failedDependencies.length
+        ? `阻塞链：${failedDependencies.map(dependency => dependency.title || dependency.item_key).join('、')}`
+        : waitingDependencies.length
+          ? `等待链：${waitingDependencies.map(dependency => dependency.title || dependency.item_key).join('、')}`
+          : ['pending', 'queued'].includes(String(item.status || ''))
+            ? '当前分支可继续'
+            : '',
+    }
+  })
+})
+const requirementEpicDependencyCount = computed(() => requirementEpicItems.value.reduce((total, item) => total + asList(item.depends_on).length, 0))
 
 const kicker = computed(() => card.value.kicker || ({
   group: 'AI 编程任务',
@@ -984,7 +1035,7 @@ const taskActionPayload = (action) => {
 watch(() => props.card.task_id || props.card.id || '', () => {
   planAcceptFeedback.value = ''
 })
-const handoffActionCanEmit = (action) => ['view_changes', 'continue', 'retry', 'resume', 'gap_continue', 'confirm_plan', 'revise_plan', 'targeted_rework', 'continue_work_item', 'rollback', 'save_knowledge'].includes(action?.kind)
+const handoffActionCanEmit = (action) => ['view_changes', 'continue', 'retry', 'resume', 'gap_continue', 'confirm_plan', 'revise_plan', 'approve_epic', 'targeted_rework', 'continue_work_item', 'rollback', 'save_knowledge'].includes(action?.kind)
 const handoffActionPayload = (action) => {
   if (!action) return action
   if (action.kind === 'view_changes') {
@@ -1013,6 +1064,26 @@ const handoffActionPayload = (action) => {
     <div class="task-card-streamlined">
       <strong>{{ streamlinedText }}</strong>
       <small>{{ streamlinedToolSummary }}</small>
+    </div>
+    <div v-if="requirementEpicItems.length" class="task-card-section requirement-epic-plan">
+      <div class="section-head">
+        <label>需求拆单任务图</label>
+        <span>{{ requirementEpicItems.length }} 个任务 · {{ requirementEpicDependencyCount }} 条依赖</span>
+      </div>
+      <div class="requirement-epic-items">
+        <article v-for="item in requirementEpicItems" :key="item.item_key" :class="['requirement-epic-item', item.status]">
+          <div>
+            <strong>{{ item.title }}</strong>
+            <small>{{ item.target_id || (item.target_type === 'auto' ? '由主 Agent 分派' : item.target_type) }}</small>
+          </div>
+          <span>{{ agentLabel(item.status) }}</span>
+          <p v-if="item.depends_on?.length">前置：{{ item.depends_on.join('、') }}</p>
+          <p v-if="item.branch_detail" :class="['requirement-epic-branch', item.branch_state]">{{ item.branch_detail }}</p>
+          <p v-if="item.status_detail">{{ item.status_detail }}</p>
+          <p v-if="item.acceptance_criteria?.length">验收：{{ item.acceptance_criteria.slice(0, 2).join('；') }}</p>
+        </article>
+      </div>
+      <small v-if="card.phase === 'needs_user'">确认一次任务图后，系统会原子创建全部子任务并按依赖派发。</small>
     </div>
     <div v-if="workchainStages.length" class="task-card-workchain" aria-label="处理链路">
       <div v-for="stage in workchainStages" :key="stage.id" :class="['workchain-stage', stage.status]">
@@ -1991,6 +2062,8 @@ const handoffActionPayload = (action) => {
 .post-review-spot-check-summary.passed small { color:#166534; }
 .post-review-spot-check-summary.needs_recheck small,.post-review-spot-check-summary.needs_user small { color:#92400e; }
 .task-card-agents { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:7px; margin-top:12px; }.task-card-agent { display:grid; grid-template-columns:1fr auto; gap:3px 8px; padding:8px 10px; border-radius:9px; background:rgba(255,255,255,.82); border:1px solid #e2e8f0; font-size:12px; }.task-card-agent small { grid-column:1/-1; color:#64748b; }.task-card-section ul { margin:0; padding-left:18px; color:#475569; font-size:12px; line-height:1.65; }.task-card-section.completed li::marker { color:#16a34a; }.task-card-section.blockers { padding:10px; border-radius:9px; background:#fff7ed; }
+.requirement-epic-plan { padding:12px; border:1px solid rgba(124,58,237,.22); border-radius:11px; background:rgba(245,243,255,.72); }.requirement-epic-items { display:grid; gap:7px; margin-top:9px; }.requirement-epic-item { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:4px 10px; padding:9px 10px; border:1px solid rgba(124,58,237,.16); border-left:3px solid #8b5cf6; border-radius:9px; background:rgba(255,255,255,.78); }.requirement-epic-item>div { min-width:0; display:grid; gap:2px; }.requirement-epic-item strong { color:#4c1d95; font-size:12px; overflow-wrap:anywhere; }.requirement-epic-item small,.requirement-epic-item p { color:#64748b; font-size:10.5px; line-height:1.4; }.requirement-epic-item>span { color:#6d28d9; font-size:10.5px; font-weight:800; white-space:nowrap; }.requirement-epic-item p { grid-column:1/-1; margin:0; }.requirement-epic-item.done,.requirement-epic-item.completed { border-left-color:#22c55e; }.requirement-epic-item.failed,.requirement-epic-item.blocked { border-left-color:#ef4444; }
+.requirement-epic-item .requirement-epic-branch.ready { color:#166534; font-weight:800; }.requirement-epic-item .requirement-epic-branch.waiting { color:#92400e; font-weight:800; }.requirement-epic-item .requirement-epic-branch.blocked { color:#b91c1c; font-weight:800; }
 .task-card-flow ol { display:grid; gap:7px; margin:0; padding:0; list-style:none; }.task-card-flow li { display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:start; gap:8px; padding:8px 9px; border:1px solid #e2e8f0; border-radius:9px; background:rgba(255,255,255,.74); font-size:12px; }.task-card-flow strong { display:block; color:#334155; }.task-card-flow small { display:block; margin-top:2px; color:#64748b; line-height:1.45; }.task-card-flow em { align-self:center; font-style:normal; font-size:10px; color:#64748b; }.flow-dot { width:9px; height:9px; margin-top:4px; border-radius:999px; background:#cbd5e1; box-shadow:0 0 0 3px rgba(148,163,184,.16); }.task-card-flow li.done .flow-dot { background:#22c55e; box-shadow:0 0 0 3px rgba(34,197,94,.14); }.task-card-flow li.active .flow-dot { background:#2563eb; box-shadow:0 0 0 3px rgba(37,99,235,.16); }.task-card-flow li.warning .flow-dot { background:#f59e0b; box-shadow:0 0 0 3px rgba(245,158,11,.18); }.task-card-flow li.failed .flow-dot { background:#ef4444; box-shadow:0 0 0 3px rgba(239,68,68,.16); }
 .task-card-qa { display:grid; gap:7px; }.task-card-qa-row { display:grid; grid-template-columns:1fr auto; gap:3px 8px; padding:8px 9px; border-radius:9px; border:1px solid #e2e8f0; background:rgba(255,255,255,.72); font-size:12px; }.task-card-qa-row strong { color:#334155; }.task-card-qa-row span { color:#2563eb; font-weight:700; font-size:11px; }.task-card-qa-row small { grid-column:1/-1; color:#64748b; line-height:1.45; overflow-wrap:anywhere; }.task-card-qa-row .qa-summary { color:#334155; font-weight:700; }.task-card-qa-row .qa-next { color:#1d4ed8; font-weight:800; }.task-card-qa-row.waiting span { color:#92400e; }.task-card-qa-row.accepted span { color:#166534; }.qa-badges { grid-column:1/-1; display:flex; flex-wrap:wrap; gap:5px; margin-top:3px; }.qa-badges em { padding:2px 7px; border-radius:999px; background:#eff6ff; color:#1d4ed8; font-size:10.5px; font-style:normal; font-weight:800; }
 .task-card-conflicts { padding:10px; border-radius:9px; background:#fffbeb; }.task-card-conflict { display:grid; gap:4px; font-size:12px; }.task-card-conflict + .task-card-conflict { margin-top:8px; padding-top:8px; border-top:1px solid rgba(245,158,11,.22); }.task-card-conflict strong { color:#92400e; }.task-card-conflict span { color:#64748b; line-height:1.45; }.task-card-conflict code { width:max-content; max-width:100%; padding:3px 6px; border-radius:6px; background:rgba(245,158,11,.12); color:#92400e; overflow-wrap:anywhere; }

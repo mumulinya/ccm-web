@@ -250,7 +250,24 @@ export function listGlobalMissionSupervisors(options: { status?: string; limit?:
 
 export function startGlobalMissionSupervisor(input: any) {
   const existing = loadStore().find(item => item.mission_id === String(input.mission_id || input.missionId || "") && !["failed", "cancelled"].includes(item.status));
-  if (existing) return existing;
+  if (existing) {
+    if ((input.restart === true || input.resume === true) && ["completed", "waiting_user", "manual_takeover"].includes(existing.status)) {
+      existing.status = "monitoring";
+      existing.phase = "supervising";
+      existing.next_check_at = new Date().toISOString();
+      existing.updated_at = existing.next_check_at;
+      delete existing.completed_at;
+      saveRecord(existing);
+      appendTraceEvent(existing.trace_id, {
+        id: `${existing.id}:restarted:${Date.now()}`,
+        type: "mission.supervisor_restarted",
+        status: "ok",
+        task_id: existing.mission_id,
+        message: "需求版本变化后已恢复同一个 Epic 监工",
+      });
+    }
+    return existing;
+  }
   const created = new Date().toISOString();
   const record = normalizeRecord({
     id: `gms_${Date.now().toString(36)}_${crypto.randomBytes(4).toString("hex")}`,

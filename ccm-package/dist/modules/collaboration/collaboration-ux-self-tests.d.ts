@@ -6138,6 +6138,15 @@ export declare function runCollaborationUxSelfTest(): {
                 work_item_id: string;
             };
         };
+        requirement_epic: {
+            schema: any;
+            content_hash: any;
+            version: number;
+            title: any;
+            items: any;
+            child_task_ids: any;
+            summary: any;
+        };
         plan_mode: {
             title: any;
             mode: any;

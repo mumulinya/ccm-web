@@ -49,6 +49,11 @@ import {
 import { resolveTrustedModelContextCapacity } from "./model-capability-cache";
 import { buildRoleSkillPrompt } from "../../skills/role-skills";
 import {
+  WORKFLOW_DECISION_GUIDANCE,
+  normalizeWorkflowDecision,
+  type WorkflowDecision,
+} from "../../agents/workflow-decision";
+import {
   claimGroupReactiveCompactRetry,
   completeGroupReactiveCompactRetry,
 } from "./group-reactive-compact-retry-ownership";
@@ -1352,22 +1357,14 @@ function inferCodedDispatchPolicy(group: any, message: string, analysis: any, ta
 function normalizeDispatchPolicy(parsed: any, analysis: any, targets: any[]) {
   const rawAction = String(parsed?.dispatchPolicy?.action || parsed?.dispatchAction || "").trim();
   const allowed = new Set(["direct_answer", "ask_user", "delegate", "hold"]);
-  const broadDevelopmentRequest = isBroadDevelopmentRequest(parsed?.summary || analysis.raw || "", analysis);
   const parsedRequiresConfirmation = !!(parsed?.dispatchPolicy?.requiresConfirmation || parsed?.requiresConfirmation);
-  const explicitExecution = isExplicitExecutionRequest(analysis?.raw || parsed?.summary || "");
-  const action = !explicitExecution
-    ? "direct_answer"
-    : broadDevelopmentRequest && targets.length > 0 && !parsedRequiresConfirmation
-    ? "delegate"
-    : allowed.has(rawAction)
+  const action = allowed.has(rawAction)
     ? rawAction
     : targets.length > 0 ? "delegate" : analysis.missingInfo?.length ? "ask_user" : "direct_answer";
-  const reason = broadDevelopmentRequest && action === "delegate"
-    ? String(parsed?.dispatchPolicy?.reason || parsed?.dispatchReason || "业务开发需求可先由项目 Agent 按职责判断并处理").trim()
-    : String(parsed?.dispatchPolicy?.reason || parsed?.dispatchReason || "").trim();
+  const reason = String(parsed?.dispatchPolicy?.reason || parsed?.dispatchReason || "").trim();
   return buildDispatchPolicy(action, reason, analysis, {
     requiresConfirmation: parsedRequiresConfirmation,
-    risk: String(parsed?.dispatchPolicy?.risk || parsed?.risk || (broadDevelopmentRequest && analysis.missingInfo?.length ? analysis.missingInfo.join("；") : "")).trim(),
+    risk: String(parsed?.dispatchPolicy?.risk || parsed?.risk || "").trim(),
     nextStep: String(parsed?.dispatchPolicy?.nextStep || parsed?.nextStep || (action === "delegate" ? "立即派发给对应子 Agent" : "")).trim(),
   });
 }
@@ -6102,6 +6099,10 @@ function buildLlmCoordinatorMessages(input: {
   const roleSkillsPart = roleSkills.prompt ? `\n\n${roleSkills.prompt}` : "";
   const system = `你是 CCM 群聊的主 Agent（工作协调者）。
 
+${WORKFLOW_DECISION_GUIDANCE}
+
+你必须先根据完整语义生成 workflowDecision，再决定回答、只读分析、直接派发、先计划或拆 Epic。不得用附件、关键词或文本长度机械触发任务/拆解。
+
 你可以使用大模型理解用户需求，但你不是项目开发 Agent：
 - 不写代码。
 - 不调用项目工具。
@@ -6145,6 +6146,20 @@ ${buildAllowedProjectBrief(group) || "- 无"}${sharedFilesPart}${ragPart}${extra
 
 JSON 格式：
 {
+  "workflowDecision": {
+    "mode": "answer | project_analysis | execute_direct | plan_task | decompose_epic",
+    "reason": "为什么选择该工作流",
+    "confidence": 0.95,
+    "needsPlanning": false,
+    "needsEpicDecomposition": false,
+    "actionRequired": false,
+    "continuationKind": "new_task | supplement | revise_goal",
+    "readAction": "none | inspect_status",
+    "targetRefs": [],
+    "impactScope": ["模型识别的影响范围"],
+    "planSteps": ["若选择 plan_task/decompose_epic，给出执行前步骤"],
+    "clarificationQuestions": []
+  },
   "intent": "greeting | question | planning | implementation | bugfix | review | verification | discussion",
   "summary": "你对用户需求的一句话理解",
   "domains": ["frontend", "backend", "general"],
@@ -6288,6 +6303,11 @@ export function normalizeLlmAnalysis(parsed: any, fallback: any) {
       replanTriggers: Array.isArray(parsed?.reasoning?.replanTriggers) ? parsed.reasoning.replanTriggers.map((x: any) => String(x)).filter(Boolean).slice(0, 20) : [],
     },
     confidence: typeof parsed?.confidence === "number" ? parsed.confidence : fallback.confidence,
+    workflowDecision: normalizeWorkflowDecision(parsed?.workflowDecision || parsed?.workflow_decision || {
+      mode: parsed?.shouldDelegate === true ? "execute_direct" : "answer",
+      reason: parsed?.dispatchPolicy?.reason || "大模型已选择协调方式",
+      confidence: parsed?.confidence ?? fallback?.confidence ?? 0.8,
+    }),
   };
 }
 
@@ -6300,6 +6320,11 @@ function buildCoordinatorResultFromAnalysis(group: any, message: string, analysi
     : inferCodedDispatchPolicy(group, message, analysis, targets);
   const shouldDispatch = dispatchPolicy.action === "delegate" && !dispatchPolicy.requiresConfirmation;
   const effectiveTargets = shouldDispatch ? targets : [];
+  const workflowDecision: WorkflowDecision = analysis.workflowDecision
+    || normalizeWorkflowDecision({
+      mode: effectiveTargets.length ? "execute_direct" : "answer",
+      reason: dispatchPolicy.reason || "主 Agent 已选择协调方式",
+    });
 
   if (effectiveTargets.length === 0) {
     const response = friendlyText || String(parsed?.questionForUser || parsed?.directResponse || "").trim();
@@ -6312,6 +6337,7 @@ function buildCoordinatorResultFromAnalysis(group: any, message: string, analysi
       delegated: [],
       assignments: [],
       analysis,
+      workflowDecision,
       dispatchPolicy,
       runtime,
       agentBoundary: buildGroupMainAgentBoundary(runtime === "llm-api" ? "llm" : runtime),
@@ -6340,6 +6366,7 @@ function buildCoordinatorResultFromAnalysis(group: any, message: string, analysi
       providerSwitchRequests: options.providerSwitchRequests || options.provider_switch_requests || null,
     }),
     analysis,
+    workflowDecision,
     coordinationPlan,
     dispatchPolicy,
     runtime,
@@ -6494,8 +6521,9 @@ async function runGroupOrchestratorCore(input: GroupOrchestratorInput) {
   const coordinator = getCoordinatorMember(group);
   const config = loadOrchestratorConfig();
   const configIssue = getLlmConfigIssue(config);
-  const informationalFallback = !isExplicitExecutionRequest(enrichedInput.message || "");
-  const safeCodedFallback = isStructuredCoordinatorFallbackAllowed(enrichedInput) || informationalFallback;
+  const informationalFallback = false;
+  // 规则编排只允许继续已经结构化、已授权的内部工作单；自动对话入口模型失败时安全停止。
+  const safeCodedFallback = isStructuredCoordinatorFallbackAllowed(enrichedInput);
 
   if (configIssue) {
     if (config.fallbackToRules && safeCodedFallback) {

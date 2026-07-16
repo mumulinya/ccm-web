@@ -1,3 +1,4 @@
+import { type WorkflowDecision } from "../../agents/workflow-decision";
 import { CollabCtx } from "./collaboration";
 export declare function getTaskPlanMode(task: any): any;
 export declare function buildDispatchLaunchSummary(input: {
@@ -91,6 +92,7 @@ export declare function buildGroupPlanModePreflight(input: {
     title: string;
     mode: string;
     source: string;
+    workflow_decision: WorkflowDecision;
     coordinator: any;
     group_id: any;
     requirement: string;
@@ -100,18 +102,26 @@ export declare function buildGroupPlanModePreflight(input: {
         knowledge_used: boolean;
         code_snapshot_used: boolean;
     };
-    steps: {
+    steps: ({
         id: string;
         label: string;
         detail: string;
         status: string;
-    }[];
+        source: string;
+    } | {
+        id: string;
+        label: string;
+        detail: string;
+        status: string;
+    })[];
     impact_scope: {
         areas: string[];
         projects: any;
         multi_agent: boolean;
     };
     risk: {
+        model_reason: string;
+        workflow_mode: import("../../agents/workflow-decision").WorkflowDecisionMode;
         level: string;
         requiresConfirmation: boolean;
         reasons: string[];

@@ -5,7 +5,13 @@ import { isCredentialReference, protectCredential, protectObjectSecrets, resolve
 import { normalizeMcpEnvironment } from "../tools/tool-catalog-management";
 import { assertCcmInternalSkillMutable, isCcmInternalSkillName } from "../skills/internal-skill-catalog";
 import { buildBundledFeishuMcpTool } from "../tools/internal-mcp-registry";
-import { loadTasksFromSqlite, saveTasksToSqlite } from "./task-store";
+import {
+  getTaskByIdFromSqlite,
+  listTasksByParentIdFromSqlite,
+  loadTasksFromSqlite,
+  saveTasksToSqlite,
+  updateTaskByIdInSqlite,
+} from "./task-store";
 
 const CCM_DIR = path.join(os.homedir(), ".cc-connect");
 const CONFIGS_DIR = path.join(CCM_DIR, "configs");
@@ -477,6 +483,18 @@ export function loadTasks(): any[] {
 
 export function saveTasks(tasks: any[]) {
   return saveTasksToSqlite(tasks);
+}
+
+export function getTaskById(id: string) {
+  return getTaskByIdFromSqlite(id);
+}
+
+export function updateTaskById(id: string, patchOrMutator: any) {
+  return updateTaskByIdInSqlite(id, patchOrMutator);
+}
+
+export function listTasksByParentId(parentId: string) {
+  return listTasksByParentIdFromSqlite(parentId);
 }
 
 // === Dialogue Templates ===

@@ -144,7 +144,7 @@ function buildGlobalDirectDispatchRollbackMessage(task) {
 }
 function refreshGlobalDevelopmentMissions() {
     const tasks = (0, db_1.loadTasks)();
-    const parents = tasks.filter((item) => item.workflow_type === "global_mission");
+    const parents = tasks.filter((item) => ["global_mission", "requirement_epic"].includes(String(item.workflow_type || "")));
     for (const parent of parents)
         (0, collaboration_1.refreshGlobalMissionParentInTaskList)(tasks, parent.id);
     (0, db_1.saveTasks)(tasks);
@@ -153,7 +153,7 @@ function refreshGlobalDevelopmentMissions() {
 function getGlobalDevelopmentMission(id) {
     refreshGlobalDevelopmentMissions();
     const tasks = (0, db_1.loadTasks)();
-    const mission = tasks.find((item) => item.id === id && item.workflow_type === "global_mission");
+    const mission = tasks.find((item) => item.id === id && ["global_mission", "requirement_epic"].includes(String(item.workflow_type || "")));
     if (!mission)
         return null;
     return {
@@ -302,7 +302,15 @@ function superviseGlobalDevelopmentMissionCycle(id, ctx, options = {}) {
     }
     const current = getGlobalDevelopmentMission(id);
     const summary = current.mission.mission_summary || {};
-    const terminal = summary.all_passed === true;
+    const requirementEpicAwaitingReview = current.mission.workflow_type === "requirement_epic"
+        && summary.all_passed === true
+        && current.mission.epic_review?.status !== "approved";
+    if (requirementEpicAwaitingReview) {
+        waitingUser.push({ task_id: current.mission.id, reason: "所有子任务已通过，等待用户审阅整批变更并批准 Epic 交付" });
+    }
+    const terminal = current.mission.workflow_type === "requirement_epic"
+        ? current.mission.status === "done" && current.mission.epic_review?.status === "approved"
+        : summary.all_passed === true;
     if (actions.length > 0 || terminal || waitingUser.length > 0) {
         (0, reliability_ledger_1.appendTraceEvent)(current.mission.trace_id, {
             id: `mission:${id}:supervisor:${Date.now()}`,

@@ -1,5 +1,6 @@
 import { type AgentDecisionIntent } from "../quality-center";
 import { type AgentReasoningState } from "../reasoning-loop";
+import { type WorkflowDecision } from "../workflow-decision";
 export type GlobalAgentRunStatus = "running" | "supervising" | "paused" | "waiting_confirmation" | "waiting_clarification" | "completed" | "failed" | "cancelled";
 export type GlobalAgentDecisionState = "answer" | "investigate" | "plan" | "execute" | "needs_confirmation" | "complete";
 export type GlobalAgentToolRisk = "read" | "write" | "high";
@@ -31,6 +32,7 @@ export interface GlobalAgentDecision {
         arguments?: any;
     } | null;
     intent?: Partial<AgentDecisionIntent>;
+    workflowDecision?: WorkflowDecision;
     completion?: {
         summary?: string;
         evidence?: string[];
@@ -114,6 +116,8 @@ export interface GlobalAgentRun {
     test_agent_report?: any;
     testAgentReport?: any;
     decision_summary?: any;
+    workflow_decision?: WorkflowDecision;
+    workflowDecision?: WorkflowDecision;
     clarification_question?: string;
     clarification_summary?: any;
     confirmation_summary?: any;

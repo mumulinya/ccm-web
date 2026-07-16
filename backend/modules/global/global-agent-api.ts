@@ -1,9 +1,20 @@
 import { execFileSync } from "child_process";
 import type { CollabCtx } from "../collaboration/collaboration";
+import { decideWorkflowWithModel } from "../../agents/workflow-decision";
 
 // HTTP transport adapter for the global Agent feature surface.
 export function createGlobalAgentApi(deps: any) {
-  const { GLOBAL_AGENT_TOOL_SPECS, GLOBAL_AGENT_VISIBLE_RESULT_FALLBACK, GLOBAL_MANAGEMENT_ACTIONS, GLOBAL_MANAGEMENT_REQUIRED_PARAMS, GLOBAL_PET_AGENT_NAME, acquireIdempotency, appendGlobalActionAudit, applyGlobalAgentSupervisionSteer, buildAgentQualitySnapshot, buildAgenticContext, buildGlobalAgentEventUi, buildGlobalAgentGroupMemoryModelContext, buildGlobalAgentSessionDebug, buildGlobalAgentToolDefinitions, buildGlobalControlCenterSnapshot, buildGlobalDispatchStrategy, buildGlobalGroupMemoryContext, buildGlobalSystemHealth, buildPublicGlobalStatusRun, buildTraceReplaySuite, buildUploadedFilesContext, callLlm, cancelGlobalAgentRun, checkGlobalMissionSupervisorNow, classifyGlobalAgentUserSteer, classifyGlobalControlIntent, collectRequestBuffer, completeGlobalAgentSupervision, completeIdempotency, controlGlobalMissionSupervisor, createAgenticRuntime, createGlobalDevelopmentMission, createMissionSupervisorRuntime, deleteGlobalAgentHook, deleteGlobalAgentPermissionRule, ensureTraceId, extractCcConnectHookText, extractFeishuMessageText, failIdempotency, formatMissionStatus, getAgentQualityPolicy, getConfigInfo, getConfigs, getFeishuMessageId, getGlobalAgentBackgroundOutput, getGlobalAgentRun, getGlobalDevelopmentMission, getGlobalMissionSupervisor, getGlobalMissionSupervisorSchedulerStatus, getIdempotencyRecord, getMultipartBoundary, getRequestBaseUrl, globalRunVisibleReply, ingestGlobalAgentConversation, ingestRequirementSources, isGlobalProgressStatusRequest, listGlobalAgentRuns, listGlobalMissionSupervisors, listTaskAgentSessions, loadFeishuConfig, loadGlobalAgentHooks, loadGlobalAgentPermissionRules, loadGlobalAgentBridgeStore, loadGlobalAgentHistoryStore, loadGroups, loadOrchestratorConfig, loadTasks, normalizeFeishuEventPayload, parseMultipart, pauseGlobalAgentRun, processedFeishuMessageIds, processFeishuControlledMessage, publicGlobalAgentRun, refreshGlobalDevelopmentMissions, relayGlobalPetEvent, replayAgentTrace, resolveFeishuDestination, resolveFeishuGlobalAgentSessionId, resumeGlobalAgentRun, runAgentQualityCenterSelfTest, runAgentReasoningLoopSelfTest, runAgentRuntimeKernelSelfTest, runGlobalAgentLoopSelfTest, runGlobalAgentRuntimeSelfTest, runGlobalControlCenterSelfTest, runGlobalGroupMemoryContextSelfTest, runGlobalMissionSupervisorAsyncSelfTest, runGlobalMissionSupervisorSelfTest, runAgenticGlobalRequest, saveGlobalAgentBridgeStore, saveGlobalAgentHook, saveGlobalAgentPermissionRule, sendFeishuReportMessage, sendJson, setAgentQualityPolicy, startGlobalMissionSupervisor, steerGlobalAgentRun, syncGlobalAgentWebHistory, updateGlobalAgentSupervisionState, verifyFeishuEventToken, waitForIdempotencyResult } = deps
+  const { GLOBAL_AGENT_TOOL_SPECS, GLOBAL_AGENT_VISIBLE_RESULT_FALLBACK, GLOBAL_MANAGEMENT_ACTIONS, GLOBAL_MANAGEMENT_REQUIRED_PARAMS, GLOBAL_PET_AGENT_NAME, acquireIdempotency, appendGlobalActionAudit, applyGlobalAgentSupervisionSteer, buildAgentQualitySnapshot, buildAgenticContext, buildGlobalAgentEventUi, buildGlobalAgentGroupMemoryModelContext, buildGlobalAgentSessionDebug, buildGlobalAgentToolDefinitions, buildGlobalControlCenterSnapshot, buildGlobalDispatchStrategy, buildGlobalGroupMemoryContext, buildGlobalSystemHealth, buildPublicGlobalStatusRun, buildTraceReplaySuite, buildUploadedFilesContext, callLlm, cancelGlobalAgentRun, checkGlobalMissionSupervisorNow, classifyGlobalAgentUserSteer, classifyGlobalControlIntent, collectRequestBuffer, completeGlobalAgentSupervision, completeIdempotency, controlGlobalMissionSupervisor, createAgenticRuntime, createGlobalDevelopmentMission, createRequirementEpicWithChildren, createMissionSupervisorRuntime, deleteGlobalAgentHook, deleteGlobalAgentPermissionRule, ensureTraceId, extractCcConnectHookText, extractFeishuMessageText, failIdempotency, formatMissionStatus, getAgentQualityPolicy, getConfigInfo, getConfigs, getFeishuMessageId, getGlobalAgentBackgroundOutput, getGlobalAgentRun, getGlobalDevelopmentMission, getGlobalMissionSupervisor, getGlobalMissionSupervisorSchedulerStatus, getIdempotencyRecord, getMultipartBoundary, getRequestBaseUrl, globalRunVisibleReply, ingestGlobalAgentConversation, ingestRequirementSources, isGlobalProgressStatusRequest, listGlobalAgentRuns, listGlobalMissionSupervisors, listTaskAgentSessions, loadFeishuConfig, loadGlobalAgentHooks, loadGlobalAgentPermissionRules, loadGlobalAgentBridgeStore, loadGlobalAgentHistoryStore, loadGroups, loadOrchestratorConfig, loadTasks, normalizeFeishuEventPayload, parseMultipart, pauseGlobalAgentRun, processedFeishuMessageIds, processFeishuControlledMessage, publicGlobalAgentRun, refreshGlobalDevelopmentMissions, relayGlobalPetEvent, replayAgentTrace, resolveFeishuDestination, resolveFeishuGlobalAgentSessionId, resumeGlobalAgentRun, runAgentQualityCenterSelfTest, runAgentReasoningLoopSelfTest, runAgentRuntimeKernelSelfTest, runGlobalAgentLoopSelfTest, runGlobalAgentRuntimeSelfTest, runGlobalControlCenterSelfTest, runGlobalGroupMemoryContextSelfTest, runGlobalMissionSupervisorAsyncSelfTest, runGlobalMissionSupervisorSelfTest, runAgenticGlobalRequest, saveGlobalAgentBridgeStore, saveGlobalAgentHook, saveGlobalAgentPermissionRule, sendFeishuReportMessage, sendJson, setAgentQualityPolicy, startGlobalMissionSupervisor, steerGlobalAgentRun, syncGlobalAgentWebHistory, updateGlobalAgentSupervisionState, verifyFeishuEventToken, waitForIdempotencyResult } = deps
+
+  const requirementTargets = () => [
+    ...loadGroups().map((group: any) => ({
+      type: "group",
+      id: group.id,
+      name: group.name || group.id,
+      capabilities: (group.members || []).flatMap((member: any) => member.skills || member.capabilities || []),
+    })),
+    ...getConfigs().map((config: any) => ({ type: "project", id: config.name, name: config.name })),
+  ];
 
   function handleGlobalAgentApi(
     pathname: string,
@@ -216,21 +227,36 @@ export function createGlobalAgentApi(deps: any) {
       req.on("end", () => {
         try {
           const payload = body ? JSON.parse(body) : {};
-          const result = createGlobalDevelopmentMission({
-            ...payload,
-            source: payload.source || "global-agent-chat",
-          }, ctx);
+          const decompositionPlan = payload.decomposition_plan || payload.decompositionPlan || payload.requirement_decomposition || payload.requirementDecomposition;
+          const result = decompositionPlan?.items?.length
+            ? createRequirementEpicWithChildren({
+                ...payload,
+                decomposition_plan: decompositionPlan,
+                confirmed: payload.confirmed === true,
+                source: payload.source || "global-agent-chat",
+                channel: payload.channel || "web-global-agent",
+                conversation_id: payload.session_id || payload.sessionId || "default",
+                client_message_id: payload.client_message_id || payload.clientMessageId || payload.request_id || payload.requestId || "",
+              })
+            : createGlobalDevelopmentMission({
+                ...payload,
+                source: payload.source || "global-agent-chat",
+              }, ctx);
+          if (result.needs_clarification || result.needs_confirmation) {
+            return sendJson(res, result, 409);
+          }
+          const mission = result.epic || result.mission;
           const supervisor = startGlobalMissionSupervisor({
-            mission_id: result.mission.id,
+            mission_id: mission.id,
             global_run_id: payload.global_run_id || payload.globalRunId || "",
-            trace_id: result.mission.trace_id,
+            trace_id: mission.trace_id,
             session_id: payload.session_id || payload.sessionId || "default",
             source: payload.source || "global-agent-chat",
-            business_goal: result.mission.business_goal,
-            acceptance: result.mission.acceptance_criteria,
+            business_goal: mission.business_goal,
+            acceptance: mission.acceptance_criteria,
             max_attempts: payload.max_attempts || payload.maxAttempts || 3,
           });
-          sendJson(res, { ...result, supervisor });
+          sendJson(res, { ...result, mission, supervisor });
         } catch (error: any) {
           sendJson(res, { success: false, error: error.message || "全局任务创建失败" }, 400);
         }
@@ -341,7 +367,15 @@ export function createGlobalAgentApi(deps: any) {
   
     if (pathname === "/api/global-agent/control-center/intent-preview" && req.method === "GET") {
       const message = String(parsed.query.message || "").trim();
-      sendJson(res, { success: true, intent: classifyGlobalControlIntent(message), dispatch: buildGlobalDispatchStrategy(message) });
+      void decideWorkflowWithModel({
+        message,
+        scope: "global",
+        context: { projects: requirementTargets().map((item: any) => ({ type: item.type, id: item.id, name: item.name })) },
+      }).then(workflowDecision => {
+        sendJson(res, { success: true, workflow_decision: workflowDecision, intent: workflowDecision, dispatch: { mode: workflowDecision.mode, targets: workflowDecision.targetRefs } });
+      }).catch((error: any) => {
+        sendJson(res, { success: false, error: `统一大模型无法形成路由预览：${error?.message || error}` }, 503);
+      });
       return true;
     }
   
@@ -579,10 +613,14 @@ export function createGlobalAgentApi(deps: any) {
                   : "补充要求已接收，已并入当前任务继续处理。",
               });
             }
-            const kind = classifyGlobalAgentUserSteer(
-              message,
-              payload.kind || payload.steering_kind || payload.steeringKind || "auto",
-            );
+            const requestedKind = String(payload.kind || payload.steering_kind || payload.steeringKind || "auto");
+            const kind = requestedKind === "auto"
+              ? (await decideWorkflowWithModel({
+                  message,
+                  scope: "global",
+                  context: { current_goal: storedRun.original_user_message || storedRun.user_message, phase: "supervising" },
+                })).continuationKind
+              : requestedKind === "revise_goal" ? "revise_goal" : "supplement";
             const supervisorBefore = getGlobalMissionSupervisor(storedRun.supervisor_id);
             if (!supervisorBefore) throw new Error("全局任务跟进记录不存在");
             const goalPrefix = String(supervisorBefore.business_goal || storedRun.original_user_message || storedRun.user_message || "").trim();
@@ -656,8 +694,16 @@ export function createGlobalAgentApi(deps: any) {
                 : "补充要求已接收，已并入当前任务继续处理。",
             });
           }
+          const requestedKind = String(payload.kind || payload.steering_kind || payload.steeringKind || "auto");
+          const modelKind = requestedKind === "auto"
+            ? (await decideWorkflowWithModel({
+                message,
+                scope: "global",
+                context: { current_goal: storedRun?.original_user_message || storedRun?.user_message || "", phase: "running" },
+              })).continuationKind
+            : requestedKind === "revise_goal" ? "revise_goal" : "supplement";
           const result = steerGlobalAgentRun(id, message, {
-            kind: payload.kind || payload.steering_kind || payload.steeringKind || "auto",
+            kind: modelKind,
             source: payload.source || "global_web_mid_turn",
             requestId: payload.request_id || payload.requestId || "",
           });
@@ -766,6 +812,8 @@ export function createGlobalAgentApi(deps: any) {
             files,
             userText: message,
             extractRequirement: files.length > 0 || /https?:\/\//i.test(message),
+            decomposeRequirement: false,
+            availableTargets: requirementTargets(),
           });
           if (sourceIngestion.agent_context) {
             message = message ? `${message}${sourceIngestion.agent_context}` : `请处理以下资料：${sourceIngestion.agent_context}`;
@@ -792,31 +840,6 @@ export function createGlobalAgentApi(deps: any) {
               emit({ type: "done" });
               res.end();
             } else sendJson(res, { success: true, run: result, duplicate: true });
-            return;
-          }
-          if (isGlobalProgressStatusRequest(message)) {
-            const reply = formatMissionStatus();
-            const result = buildPublicGlobalStatusRun({ message, reply, sessionId, source: "web", traceId: operation?.traceId });
-            try {
-              ingestGlobalAgentConversation({
-                sessionId,
-                source: "web",
-                messages: [
-                  ...history,
-                  { role: "user", content: message, timestamp: new Date().toISOString(), trace_id: operation?.traceId },
-                  { role: "assistant", content: reply, timestamp: new Date().toISOString(), trace_id: result.trace_id },
-                ],
-              });
-            } catch (error: any) {
-              console.warn(`[全局记忆] 状态追问写入失败：${error?.message || error}`);
-            }
-            appendGlobalActionAudit({ source: "web", action: { type: "mission_status", params: { message } }, status: "success", result: { summary: reply, trace_id: result.trace_id } });
-            if (operationKey) completeIdempotency("global-agent-request", operationKey, { run: result, status: result.status });
-            if (isStream) {
-              emit({ type: "result", run: result, files: files.map(file => ({ name: file.filename, size: file.size, savedPath: file.savedPath })) });
-              emit({ type: "done" });
-              res.end();
-            } else sendJson(res, { success: true, run: result, files: files.map(file => ({ name: file.filename, size: file.size, savedPath: file.savedPath })) });
             return;
           }
           let finalPetEventRelayed = false;
@@ -901,6 +924,8 @@ export function createGlobalAgentApi(deps: any) {
             files,
             userText: message,
             extractRequirement: files.length > 0 || /https?:\/\//i.test(message),
+            decomposeRequirement: false,
+            availableTargets: requirementTargets(),
           });
           if (sourceIngestion.agent_context) {
             message = message ? `${message}${sourceIngestion.agent_context}` : `请处理以下资料：${sourceIngestion.agent_context}`;
@@ -909,31 +934,6 @@ export function createGlobalAgentApi(deps: any) {
           let history: any[] = [];
           try { history = Array.isArray(payload.history) ? payload.history : JSON.parse(String(payload.history || "[]")); } catch {}
           const sessionId = String(payload.session_id || payload.sessionId || "legacy:web");
-          if (isGlobalProgressStatusRequest(message)) {
-            const reply = formatMissionStatus();
-            const result = buildPublicGlobalStatusRun({ message, reply, sessionId, source: "legacy-chat-proxy" });
-            try {
-              ingestGlobalAgentConversation({
-                sessionId,
-                source: "legacy-chat-proxy",
-                messages: [
-                  ...history,
-                  { role: "user", content: message, timestamp: new Date().toISOString() },
-                  { role: "assistant", content: reply, timestamp: new Date().toISOString(), trace_id: result.trace_id },
-                ],
-              });
-            } catch (error: any) {
-              console.warn(`[全局记忆] 状态追问写入失败：${error?.message || error}`);
-            }
-            if (isStream) {
-              emit({ type: "result", run: result, files: files.map(file => ({ name: file.filename, size: file.size, savedPath: file.savedPath })) });
-              emit({ type: "done" });
-              res.end();
-            } else {
-              sendJson(res, { success: true, reply, run: result, files: files.map(file => ({ name: file.filename, size: file.size, savedPath: file.savedPath })), agentic: true });
-            }
-            return;
-          }
           const run = await runAgenticGlobalRequest(getRequestBaseUrl(req), ctx, {
             message,
             history,

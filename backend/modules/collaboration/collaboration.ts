@@ -789,6 +789,7 @@ function taskCardPhase(task: any, executions: any[]) {
   const explicit = String(task?.collaboration_state?.phase || "");
   if (task?.rolled_back_at) return "reverted";
   if (task?.intake_state === "awaiting_confirmation") return "needs_user";
+  if (task?.status === "awaiting_change_review") return "change_review";
   if (explicit) return explicit === "completed" && !hasStrongTaskAcceptanceEvidence(task, executions) ? "reviewing" : explicit;
   if (task?.status === "done") return hasStrongTaskAcceptanceEvidence(task, executions) ? "completed" : "reviewing";
   if (task?.status === "cancelled") return "cancelled";
@@ -1203,6 +1204,12 @@ function buildUserTaskActions(task: any, phase: string, executions: any[]) {
     actions.push({ id: "cancel", label: "取消任务", kind: "cancel", tone: "danger" });
     return actions;
   }
+  if (task?.workflow_type === "requirement_epic" && task?.status === "awaiting_change_review") {
+    actions.push({ id: "changes", label: "查看整批改动", kind: "view_changes", tone: "outline" });
+    actions.push({ id: "approve_epic", label: "批准 Epic 交付", kind: "approve_epic", tone: "primary" });
+    actions.push({ id: "targeted_rework", label: "退回子任务返工", kind: "targeted_rework", tone: "warning", requirement_epic: true });
+    return actions;
+  }
   if (task?.delivery_summary || task?.file_changes) actions.push({ id: "changes", label: "查看改动", kind: "view_changes", tone: "outline" });
   if (completed) actions.push({ id: "continue", label: "继续修改", kind: "continue", tone: "primary" });
   else if (!terminal) actions.push({ id: "supplement", label: "追加要求", kind: "continue", tone: "primary" });
@@ -1562,12 +1569,13 @@ export function buildTaskCardView(task: any, executions: any[], sessions: any[])
     reworking: "正在修复问题",
     reviewing: "正在运行测试",
     needs_user: "需要你确认",
+    change_review: "等待你审阅",
     blocked: "正在恢复",
     completed: "已完成",
     cancelled: "已取消",
     reverted: "已安全撤销",
   };
-  const progressByPhase: any = { planning: 10, queued: 20, dispatching: 30, executing: 55, reworking: 65, reviewing: 85, needs_user: 70, blocked: 60, completed: 100, cancelled: 0, reverted: 100 };
+  const progressByPhase: any = { planning: 10, queued: 20, dispatching: 30, executing: 55, reworking: 65, reviewing: 85, needs_user: 70, change_review: 95, blocked: 60, completed: 100, cancelled: 0, reverted: 100 };
   const terminalPhase = phase === "completed" || phase === "cancelled" || phase === "reverted";
   const gapItems = terminalPhase ? [] : getTaskGapItems(task);
   const dashboardWorkers = getDashboardWorkerRows(task);
@@ -1651,6 +1659,7 @@ export function buildTaskCardView(task: any, executions: any[], sessions: any[])
   else if (phase === "executing") nextAction = "完成修改后会自动运行检查";
   else if (phase === "reworking") nextAction = waitingUserResolved ? "正在沿用原任务继续复核和验收" : "修复后会重新运行检查";
   else if (phase === "reviewing") nextAction = "检查通过后自动交付";
+  else if (phase === "change_review") nextAction = "请审阅整批变更后批准交付，或退回指定子任务返工";
   else if (phase === "needs_user") nextAction = task?.intake_state === "awaiting_confirmation" ? "请确认执行前计划，确认后才会派发子 Agent" : "请补充卡片中列出的信息";
   else if (phase === "blocked") nextAction = "系统正在重试或切换执行器";
   else if (phase === "completed") nextAction = "可以查看改动、继续修改或安全撤销";
@@ -1728,6 +1737,25 @@ export function buildTaskCardView(task: any, executions: any[], sessions: any[])
     recoverySummary,
     continuation_status: continuationStatus,
     continuationStatus,
+    requirement_epic: task?.workflow_type === "requirement_epic" ? {
+      schema: task?.decomposition_plan?.schema || task?.requirement_decomposition?.schema || "ccm-requirement-decomposition-v1",
+      content_hash: task?.requirement_content_hash || task?.decomposition_plan?.content_hash || "",
+      version: Number(task?.requirement_version || task?.decomposition_plan?.version || 1),
+      title: task?.decomposition_plan?.epic_title || task?.title || "需求 Epic",
+      items: Array.isArray(task?.decomposition_plan?.items)
+        ? task.decomposition_plan.items.slice(0, 50).map((item: any) => ({
+            item_key: item.item_key,
+            title: compactMemoryText(item.title || item.business_goal || "子任务", 120),
+            target_type: item.target_type || "auto",
+            target_id: item.target_id || "",
+            depends_on: Array.isArray(item.depends_on) ? item.depends_on.slice(0, 20) : [],
+            acceptance_criteria: Array.isArray(item.acceptance_criteria) ? item.acceptance_criteria.slice(0, 8) : [],
+            parallelizable: item.parallelizable !== false,
+          }))
+        : [],
+      child_task_ids: Array.isArray(task?.child_task_ids) ? task.child_task_ids : [],
+      summary: task?.mission_summary || null,
+    } : null,
     plan_mode: planMode ? {
       title: planMode.title || "执行前计划",
       mode: planMode.mode || "",
@@ -15502,6 +15530,32 @@ export async function runCoordinatorReviewLoop(input: {
   return finalSummary;
 }
 
+function requirementEpicExecutionBoundary(task: any) {
+  const item = task?.requirement_item;
+  if (task?.parent_workflow_type !== "requirement_epic" || !item) return "";
+  return [
+    "【已确认的 Requirement Epic 子任务边界】",
+    `item_key：${item.item_key || task.requirement_item_key || ""}`,
+    `标题：${item.title || task.title || ""}`,
+    `业务目标：${item.business_goal || task.business_goal || ""}`,
+    `范围：${(item.scope || []).join("；") || "仅限本子任务"}`,
+    `验收标准：${(item.acceptance_criteria || []).join("；") || task.acceptance_criteria || ""}`,
+    `依赖：${(item.depends_on || []).join("、") || "无"}`,
+    "这是用户已确认的范围。主 Agent 和子 Agent不得静默扩大、删减或替换；发现冲突或需要跨项变更时暂停并请求用户调整 Epic 计划。",
+  ].join("\n");
+}
+
+function alignRequirementEpicAssignments(task: any, assignments: any[]) {
+  const boundary = requirementEpicExecutionBoundary(task);
+  if (!boundary) return assignments;
+  return assignments.map((assignment: any) => ({
+    ...assignment,
+    task: [assignment.task || task.description || task.title, boundary].filter(Boolean).join("\n\n"),
+    requirement_item_key: task.requirement_item_key || task.requirement_item?.item_key || "",
+    confirmed_scope_locked: true,
+  }));
+}
+
 // === 执行任务核心 ===
 async function executeTask(task: any, ctx: CollabCtx) {
   const configs = getConfigs();
@@ -15552,11 +15606,12 @@ async function executeTask(task: any, ctx: CollabCtx) {
       traceId: task.trace_id || task.traceId || "",
       taskId: task.id,
       executionId: task.execution_id || task.executionId || task.id,
+      extraInstructions: requirementEpicExecutionBoundary(task),
     });
     let coordinatorOutput = coordinatorResult.content;
     const coordinatorTranscript = [coordinatorOutput].filter(Boolean);
     let coordinatorMessageId = "m" + Date.now().toString(36) + "coord";
-    let planAssignments = normalizePlanAssignments((coordinatorResult as any).assignments || []);
+    let planAssignments = alignRequirementEpicAssignments(task, normalizePlanAssignments((coordinatorResult as any).assignments || []));
     let dispatchPolicy = (coordinatorResult as any).dispatchPolicy || null;
     let workflowMeta = getInitialWorkflowMeta(planAssignments, dispatchPolicy, "任务队列协调");
     appendGroupMessage(task.group_id, {
@@ -15617,7 +15672,7 @@ async function executeTask(task: any, ctx: CollabCtx) {
         coordinatorOutput = repairOutput;
         coordinatorTranscript.push(repairOutput);
         coordinatorMessageId = "m" + Date.now().toString(36) + "repair";
-        planAssignments = normalizePlanAssignments((coordinatorResult as any).assignments || []);
+        planAssignments = alignRequirementEpicAssignments(task, normalizePlanAssignments((coordinatorResult as any).assignments || []));
         dispatchPolicy = (coordinatorResult as any).dispatchPolicy || null;
         workflowMeta = getInitialWorkflowMeta(planAssignments, dispatchPolicy, "daily_dev 派发修复");
         appendGroupMessage(task.group_id, {
@@ -15985,6 +16040,8 @@ async function executeTask(task: any, ctx: CollabCtx) {
       handoff: directWorkerHandoff,
     });
     const message = `${toolContext.prompt}${runtimeToolContext.prompt}\n\n${developmentContract}\n\n${worktreeNotice}\n\n📋 执行任务：${task.title}\n${directTaskText}
+
+${requirementEpicExecutionBoundary(task)}
 
 请直接完成开发工作。完成后必须追加 CCM_AGENT_RECEIPT 结构化回执，格式如下：
 \`\`\`json
@@ -19487,6 +19544,14 @@ function buildTaskContinuationBlock(message: string) {
 
 export function createTask(task: any) {
   return require("./collaboration-task-service").createTask(task);
+}
+
+export function createRequirementEpicWithChildren(payload: any) {
+  return require("./collaboration-task-service").createRequirementEpicWithChildren(payload);
+}
+
+export function updateRequirementEpicFromPlan(payload: any) {
+  return require("./collaboration-task-service").updateRequirementEpicFromPlan(payload);
 }
 
 export function classifyTaskContinuation(message: string) {

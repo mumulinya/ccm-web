@@ -1,7 +1,7 @@
 import type { CollabCtx } from "../collaboration/collaboration";
 import type { GlobalAgentDecision, GlobalAgentLoopRuntime, GlobalAgentRun } from "../../agents/global/loop";
 import type { GlobalMissionSupervisorRuntime } from "../../agents/global/mission-supervisor";
-import type { RequirementIngestionResult } from "../requirements/source-ingestion";
+import { type RequirementIngestionResult } from "../requirements/source-ingestion";
 type LocalIntentResult = any;
 export declare function createGlobalAgentAgenticRuntime(deps: any): {
     hasExplicitGlobalWriteAuthorization: (message: string) => boolean;

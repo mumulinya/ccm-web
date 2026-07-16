@@ -49,6 +49,7 @@ const CronJobs = defineAsyncComponent(() => import('./components/tools/CronJobs.
 const AgentMetrics = defineAsyncComponent(() => import('./components/agents/AgentMetrics.vue'))
 const SearchHistory = defineAsyncComponent(() => import('./components/workspace/SearchHistory.vue'))
 const MusicPlayer = defineAsyncComponent(() => import('./components/music/MusicPlayer.vue'))
+const MusicRemoteHost = defineAsyncComponent(() => import('./components/music/MusicRemoteHost.vue'))
 const MenuManager = defineAsyncComponent(() => import('./components/workspace/MenuManager.vue'))
 const PetMenu = defineAsyncComponent(() => import('./components/pets/PetMenu.vue'))
 const GlobalAgent = defineAsyncComponent(() => import('./components/global/GlobalAgent.vue'))
@@ -646,7 +647,9 @@ const closeTab = (tabId, event) => {
         <div v-if="isTabOpen('dashboard')" v-show="currentTab === 'dashboard'" class="tab-pane scrollable-pane"><UsabilityWorkbench @navigate="handleWorkbenchNavigate" /></div>
         <div v-if="isTabOpen('metrics')" v-show="currentTab === 'metrics'" class="tab-pane"><AgentMetrics /></div>
         <div v-if="isTabOpen('search')" v-show="currentTab === 'search'" class="tab-pane"><SearchHistory @go-to="goToResult" /></div>
-        <div v-if="isTabOpen('music')" v-show="currentTab === 'music'" class="tab-pane"><MusicPlayer :agent-label="musicPetLabel" /></div>
+        <!-- MusicPlayer stays mounted so global/Feishu point-song works from any tab -->
+        <div v-show="currentTab === 'music'" class="tab-pane"><MusicPlayer :agent-label="musicPetLabel" /></div>
+        <MusicRemoteHost @switch-tab="switchTab" />
         <div v-if="isTabOpen('settings')" v-show="currentTab === 'settings'" class="tab-pane"><Settings /></div>
         <div v-if="isTabOpen('menumanager')" v-show="currentTab === 'menumanager'" class="tab-pane"><MenuManager :tabs="tabs" :config="menuConfig" @update-config="updateMenuConfiguration" /></div>
       </div>

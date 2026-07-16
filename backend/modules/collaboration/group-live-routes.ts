@@ -384,10 +384,29 @@ export function handleGroupLiveRoutes(
         const { group_id, target_project, message, client_message_id } = payload;
         let groupSessionId = String(payload.group_session_id || payload.groupSessionId || "").trim();
         const userMessage = String(message || "").trim();
-        const sourceIngestion = await ingestRequirementSources({
+        const groups = loadGroups();
+        const group = groups.find(g => g.id === group_id);
+        if (!group) return sendJson(res, { error: "群聊不存在" }, 400);
+        const availableTargets = [
+          {
+            type: "group",
+            id: group.id,
+            name: group.name || group.id,
+            capabilities: (group.members || []).flatMap((member: any) => member.skills || member.capabilities || []),
+          },
+          ...(group.members || []).map((member: any) => ({
+            type: "project",
+            id: member.project,
+            name: member.name || member.project,
+            capabilities: member.skills || member.capabilities || [],
+          })),
+        ];
+        let sourceIngestion = await ingestRequirementSources({
           files: uploadedFiles,
           userText: userMessage,
           extractRequirement: uploadedFiles.length > 0 || /https?:\/\//i.test(userMessage),
+          decomposeRequirement: false,
+          availableTargets,
         });
         const uploadedFilesContext = sourceIngestion.agent_context
           || ctx.buildUploadedFilesContext(uploadedFiles, "本次群聊消息附件");
@@ -397,9 +416,6 @@ export function handleGroupLiveRoutes(
           ? `${userMessage || "请处理附件"}\n\n[附件]\n${attachmentSummary}`
           : userMessage;
         if (!incomingMessageForAgent) return sendJson(res, { error: "消息或附件不能为空" }, 400);
-        const groups = loadGroups();
-        const group = groups.find(g => g.id === group_id);
-        if (!group) return sendJson(res, { error: "群聊不存在" }, 400);
         try {
           groupSessionId = resolveWritableGroupChatSession(group_id, groupSessionId, { title: "新会话" }).id;
         } catch (error: any) {
@@ -519,15 +535,10 @@ export function handleGroupLiveRoutes(
         const messageMode = String(clarificationContext?.message_mode || clarificationContext?.messageMode || payload.message_mode || payload.messageMode || "conversation").trim().toLowerCase();
         const messageTraceId = ensureTraceId(payload.trace_id || payload.traceId || clarificationContext?.trace_id || clarificationContext?.traceId, "group");
         const forceProjectTask = groupLiveFlag(payload.force_task ?? payload.forceTask, groupLiveFlag(clarificationContext?.force_task ?? clarificationContext?.forceTask, false));
-        const statusFollowupRequest = isOrchestrated
-          && !clarificationContext
-          && !forceProjectTask
-          && sourceIngestion.sources.length === 0
-          && isGroupProgressStatusRequest(userMessage);
         const taskIntent = explicitContinuationTask
-          ? { executable: true, kind: "project_task", confidence: 1, reason: "用户正在补充当前任务所需条件", source: "explicit_task_continuation" }
+          ? { executable: true, kind: "project_task", confidence: 1, reason: "用户正在补充当前任务所需条件", source: "explicit_task_continuation", workflowDecision: { mode: "execute_direct", continuationKind: explicitContinuationKind, needsPlanning: false, needsEpicDecomposition: false, actionRequired: true, confidence: 1, reason: "用户显式继续现有任务", source: "explicit_user_choice" } }
           : forceProjectTask
-            ? { executable: true, kind: "project_task", confidence: 1, reason: "用户已明确要求创建并执行项目任务", source: "explicit_force_task" }
+            ? { executable: true, kind: "project_task", confidence: 1, reason: "用户已明确要求创建并执行项目任务", source: "explicit_force_task", workflowDecision: { mode: "execute_direct", continuationKind: "new_task", needsPlanning: false, needsEpicDecomposition: false, actionRequired: true, confidence: 1, reason: "用户显式要求创建任务", source: "explicit_user_choice" } }
           : await classifyGroupProjectTaskIntentWithAgent({
             group,
             message: effectiveUserMessage,
@@ -538,10 +549,26 @@ export function handleGroupLiveRoutes(
             sharedFilesContext: uploadedFilesContext,
             groupSessionId,
           });
+        const statusFollowupRequest = isOrchestrated
+          && !clarificationContext
+          && !forceProjectTask
+          && taskIntent?.workflowDecision?.readAction === "inspect_status";
+        if (taskIntent?.workflowDecision?.needsEpicDecomposition === true && !sourceIngestion.decomposition) {
+          // 只有主 Agent 的模型选择 Epic 后才生成任务图；入口不再按关键词预拆解。
+          sourceIngestion = await ingestRequirementSources({
+            files: uploadedFiles,
+            userText: effectiveUserMessage,
+            extractRequirement: true,
+            decomposeRequirement: true,
+            availableTargets,
+          });
+        }
         const persistentTaskRequest = !!explicitContinuationTask || (!statusFollowupRequest && shouldCreatePersistentGroupTask({ isOrchestrated, messageMode, taskIntent, forceProjectTask }));
         const projectAnalysisRequest = !statusFollowupRequest && shouldUseProjectAnalysisMode({ isOrchestrated, messageMode, taskIntent }) && !persistentTaskRequest;
-        const continuationKind = explicitContinuationTask ? explicitContinuationKind : classifyTaskContinuation(effectiveUserMessage);
-        const continuationTask = explicitContinuationTask || (!clarificationContext && persistentTaskRequest && continuationKind !== "new_task" && looksLikeTaskContinuation(effectiveUserMessage)
+        const continuationKind = explicitContinuationTask
+          ? explicitContinuationKind
+          : String(taskIntent?.workflowDecision?.continuationKind || "new_task");
+        const continuationTask = explicitContinuationTask || (!clarificationContext && persistentTaskRequest && continuationKind !== "new_task"
           ? loadTasks()
             .filter((item: any) => item.group_id === group_id && !item.archived && !item.deleted_at && !["cancelled", "archived"].includes(String(item.status || "")))
             .filter((item: any) => String(item.group_session_id || item.groupSessionId || "default") === groupSessionId)
@@ -764,6 +791,45 @@ export function handleGroupLiveRoutes(
             attachmentCount: attachmentRecords.length,
             coordinatorProject: coordinator.project,
           });
+          const requirementEpicPlan = sourceIngestion.decomposition && sourceIngestion.decomposition.items.length > 1
+            ? sourceIngestion.decomposition
+            : null;
+          if (requirementEpicPlan) {
+            planModePreflight.requires_confirmation = true;
+            planModePreflight.auto_continue = false;
+            planModePreflight.requirement_epic = {
+              schema: requirementEpicPlan.schema,
+              epic_title: requirementEpicPlan.epic_title,
+              item_count: requirementEpicPlan.items.length,
+              items: requirementEpicPlan.items.map((item: any) => ({
+                item_key: item.item_key,
+                title: item.title,
+                target_type: item.target_type,
+                target_id: item.target_id,
+                depends_on: item.depends_on,
+                acceptance_criteria: item.acceptance_criteria,
+              })),
+              content_hash: requirementEpicPlan.content_hash,
+              version: requirementEpicPlan.version,
+            };
+            if (requirementEpicPlan.clarification_questions.length) {
+              planModePreflight.needs_clarification = true;
+              planModePreflight.clarification_questions = [
+                ...(Array.isArray(planModePreflight.clarification_questions) ? planModePreflight.clarification_questions : []),
+                ...requirementEpicPlan.clarification_questions.map((question: string, index: number) => ({
+                  id: `requirement-epic-question-${index + 1}`,
+                  question,
+                  reason: "该问题会影响子任务边界、目标项目或验收标准，未澄清前不能批量建单",
+                  status: "open",
+                })),
+              ];
+            }
+            planModePreflight.risk = {
+              ...(planModePreflight.risk || {}),
+              level: planModePreflight.risk?.level || "medium",
+              summary: `需求文档已拆成 ${requirementEpicPlan.items.length} 个持久子任务，请确认一次任务图后再开始开发`,
+            };
+          }
           addGroupLog(group_id, "info", "project_task_preflight", "执行前计划已生成", {
             requires_confirmation: planModePreflight.requires_confirmation === true,
             risk_level: planModePreflight.risk?.level || "",
@@ -784,7 +850,7 @@ export function handleGroupLiveRoutes(
             accepted_at: now,
           } : null);
           let task = createTask({
-            title: taskTitle,
+            title: requirementEpicPlan?.epic_title || taskTitle,
             description: buildDailyDevTaskDescription({
               title: taskTitle,
               business_goal: businessGoal,
@@ -800,7 +866,7 @@ export function handleGroupLiveRoutes(
             assign_type: "group",
             priority: payload.priority || "normal",
             auto_execute: autoExecute,
-            workflow_type: "daily_dev",
+            workflow_type: requirementEpicPlan ? "requirement_epic" : "daily_dev",
             requires_code_changes: flagEnabled(payload.requires_code_changes ?? payload.requiresCodeChanges, true),
             requires_verification: flagEnabled(payload.requires_verification ?? payload.requiresVerification, true),
             requires_independent_review: flagEnabled(payload.requires_independent_review ?? payload.requiresIndependentReview, false),
@@ -810,6 +876,9 @@ export function handleGroupLiveRoutes(
             source_documents: sourceDocuments,
             source_attachments: attachmentRecords,
             requirement_extraction: extractedRequirement,
+            requirement_decomposition: requirementEpicPlan,
+            decomposition_plan: requirementEpicPlan,
+            requirement_content_hash: sourceIngestion.content_hash,
             source_ingestion: sourceIngestion.technical,
             intake_state: planModePreflight.requires_confirmation ? "awaiting_confirmation" : "confirmed",
             intake_draft: planModePreflight,
@@ -824,6 +893,8 @@ export function handleGroupLiveRoutes(
                 source_summary: sourceIngestion.user_summary,
                 source_ingestion: sourceIngestion.technical,
                 requirement_extraction: extractedRequirement,
+                requirement_decomposition: requirementEpicPlan,
+                requirement_content_hash: sourceIngestion.content_hash,
                 task_intent: taskIntent,
                 ...(clarificationContext ? {
                   clarification_request_id: clarificationRequestId || clarificationContext.id || clarificationContext.request_id || "",
@@ -1049,7 +1120,7 @@ export function handleGroupLiveRoutes(
           });
 
           const coordinator = getCoordinatorMember(group);
-          const conversationalOnly = (["project_task", "daily_dev", "mission"].includes(messageMode) && !persistentTaskRequest) || projectAnalysisRequest;
+          const conversationalOnly = taskIntent?.workflowDecision?.mode === "answer" || projectAnalysisRequest;
           writeSse(res, {
             type: "status",
             text: projectAnalysisRequest

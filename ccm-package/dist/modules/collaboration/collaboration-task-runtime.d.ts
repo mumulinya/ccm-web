@@ -1,8 +1,32 @@
 import { CollabCtx } from "./collaboration";
+export declare function bindTaskRuntimeCollabCtx(ctx: CollabCtx): void;
+/** 子任务强验收通过后立即调度父 Epic，解锁并入队后继节点（不依赖看门狗轮询）。 */
+export declare function scheduleRequirementEpicDependencyUnlock(parentId: string, reason?: string): {
+    scheduled: boolean;
+    reason: string;
+    mission_id?: undefined;
+} | {
+    scheduled: boolean;
+    mission_id: string;
+    reason: string;
+};
 export declare function enqueueTask(taskId: string, ctx: CollabCtx): {
     queued: boolean;
     message: string;
     blocked?: undefined;
+    dependency_wait?: undefined;
+    dependencies?: undefined;
+    duplicate_block_suppressed?: undefined;
+    reason?: undefined;
+    readiness?: undefined;
+    targetKey?: undefined;
+    position?: undefined;
+} | {
+    queued: boolean;
+    blocked: boolean;
+    dependency_wait: boolean;
+    dependencies: any;
+    message: string;
     duplicate_block_suppressed?: undefined;
     reason?: undefined;
     readiness?: undefined;
@@ -15,6 +39,8 @@ export declare function enqueueTask(taskId: string, ctx: CollabCtx): {
     reason: string;
     message: any;
     readiness: any;
+    dependency_wait?: undefined;
+    dependencies?: undefined;
     targetKey?: undefined;
     position?: undefined;
 } | {
@@ -23,6 +49,8 @@ export declare function enqueueTask(taskId: string, ctx: CollabCtx): {
     targetKey: string;
     position: number;
     blocked?: undefined;
+    dependency_wait?: undefined;
+    dependencies?: undefined;
     duplicate_block_suppressed?: undefined;
     reason?: undefined;
     readiness?: undefined;
@@ -33,6 +61,19 @@ export declare function createAndQueueTask(task: any, ctx: CollabCtx): {
         queued: boolean;
         message: string;
         blocked?: undefined;
+        dependency_wait?: undefined;
+        dependencies?: undefined;
+        duplicate_block_suppressed?: undefined;
+        reason?: undefined;
+        readiness?: undefined;
+        targetKey?: undefined;
+        position?: undefined;
+    } | {
+        queued: boolean;
+        blocked: boolean;
+        dependency_wait: boolean;
+        dependencies: any;
+        message: string;
         duplicate_block_suppressed?: undefined;
         reason?: undefined;
         readiness?: undefined;
@@ -45,6 +86,8 @@ export declare function createAndQueueTask(task: any, ctx: CollabCtx): {
         reason: string;
         message: any;
         readiness: any;
+        dependency_wait?: undefined;
+        dependencies?: undefined;
         targetKey?: undefined;
         position?: undefined;
     } | {
@@ -53,6 +96,8 @@ export declare function createAndQueueTask(task: any, ctx: CollabCtx): {
         targetKey: string;
         position: number;
         blocked?: undefined;
+        dependency_wait?: undefined;
+        dependencies?: undefined;
         duplicate_block_suppressed?: undefined;
         reason?: undefined;
         readiness?: undefined;
@@ -129,6 +174,7 @@ export declare function runTaskWatchdog(ctx: CollabCtx, options?: any): {
     gap_results: any[];
     gap_continue_skipped_reason: any;
     runtime_retry: any;
+    requirement_epic_results: any[];
     runtime_retry_skipped_reason: any;
     execution_readiness: any;
     daily_dev_execution_readiness: any;

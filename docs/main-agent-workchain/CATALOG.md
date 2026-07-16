@@ -1,6 +1,6 @@
 # Main Agent Workchain 文档总目录
 
-> 共 308 篇功能与验收记录。该文件由 `node scripts/generate-main-agent-doc-catalog.mjs` 生成。
+> 共 309 篇功能与验收记录。该文件由 `node scripts/generate-main-agent-doc-catalog.mjs` 生成。
 
 ## global-agent/conversation-and-ui (21)
 
@@ -276,8 +276,9 @@
 - [交付后回看摘要 v1](./shared-workchain/delivery-and-acceptance/2026-07-07-delivery-pickup-summary-v1.md)
 - [取消态交付报告停止原因 v1](./shared-workchain/delivery-and-acceptance/2026-07-07-cancelled-delivery-stop-reason-v1.md)
 
-## shared-workchain/planning-and-todo (26)
+## shared-workchain/planning-and-todo (27)
 
+- [需求文档自动拆单与 Epic 开发链 v1](./shared-workchain/planning-and-todo/2026-07-16-requirement-document-epic-workflow-v1.md)
 - [Workchain Quality Followup Todo v1](./shared-workchain/planning-and-todo/2026-07-09-workchain-quality-followup-todo-v1.md)
 - [Frontend Strong Acceptance Plan Alignment v1](./shared-workchain/planning-and-todo/2026-07-09-frontend-strong-acceptance-plan-alignment-v1.md)
 - [Workchain Todo Display Bridge v1](./shared-workchain/planning-and-todo/2026-07-08-workchain-todo-display-bridge-v1.md)

@@ -6177,6 +6177,15 @@ export declare function buildTaskCardView(task: any, executions: any[], sessions
             work_item_id: string;
         };
     };
+    requirement_epic: {
+        schema: any;
+        content_hash: any;
+        version: number;
+        title: any;
+        items: any;
+        child_task_ids: any;
+        summary: any;
+    };
     plan_mode: {
         title: any;
         mode: any;
@@ -17340,6 +17349,15 @@ export declare function buildInlineTaskRuntime(task: any): {
                 work_item_id: string;
             };
         };
+        requirement_epic: {
+            schema: any;
+            content_hash: any;
+            version: number;
+            title: any;
+            items: any;
+            child_task_ids: any;
+            summary: any;
+        };
         plan_mode: {
             title: any;
             mode: any;
@@ -27857,6 +27875,15 @@ export declare function buildInlineTaskRuntime(task: any): {
                 kind: string;
                 work_item_id: string;
             };
+        };
+        requirement_epic: {
+            schema: any;
+            content_hash: any;
+            version: number;
+            title: any;
+            items: any;
+            child_task_ids: any;
+            summary: any;
         };
         plan_mode: {
             title: any;
@@ -38410,6 +38437,15 @@ export declare function updateGroupTaskInlineStatus(task: any, status: string, d
                 work_item_id: string;
             };
         };
+        requirement_epic: {
+            schema: any;
+            content_hash: any;
+            version: number;
+            title: any;
+            items: any;
+            child_task_ids: any;
+            summary: any;
+        };
         plan_mode: {
             title: any;
             mode: any;
@@ -48928,6 +48964,15 @@ export declare function updateGroupTaskInlineStatus(task: any, status: string, d
                 work_item_id: string;
             };
         };
+        requirement_epic: {
+            schema: any;
+            content_hash: any;
+            version: number;
+            title: any;
+            items: any;
+            child_task_ids: any;
+            summary: any;
+        };
         plan_mode: {
             title: any;
             mode: any;
@@ -54280,7 +54325,7 @@ export declare function createDiagnosticCheck(id: string, label: string, status:
 };
 export declare function getGroupMainAgentActionRegistry(): ({
     backend: ("listTaskAgentSessions" | "queryKnowledgeBase" | "buildGroupContextPacket" | "createTask" | "shouldCreatePersistentGroupTask" | "buildInlineTaskRuntime" | "buildGroupProjectAnalysisContext" | "getInitialWorkflowMeta" | "prepareAgentRuntimeTools" | "extractAgentReceipt" | "listExecutions" | "buildRecentGroupContext" | "buildGroupMemoryContext" | "buildProjectCodeReadOnlySnapshot" | "loadTasks" | "buildTaskPreflightReasoning" | "recordReasoningRecoveryCheck" | "resumeTaskQueues" | "reopenTaskAgentSessions" | "runGroupOrchestrator" | "ctx.callAgent" | "queueTaskExecution" | "dispatchPolicy.action=ask_user" | "questionForUser" | "appendGroupMessage" | "requestTaskCancellation" | "archiveTask" | "restoreArchivedTask" | "purgeArchivedTask" | "releaseTaskLease" | "buildUserAgentQuestionRows" | "runLlmCoordinatorReview" | "recordReasoningDeviation" | "updateReasoningPlan" | "createReworkTask" | "buildUserDeliveryReport" | "buildTaskGroupReportMessage")[];
-    evidence: ("task_id" | "execution_id" | "verification" | "task_status" | "group_memory" | "CCM_AGENT_RECEIPT" | "work_dir" | "acceptance_gate" | "risks" | "files_changed" | "recovery_checks" | "task_card" | "work_items" | "assignments" | "recent_messages" | "active_goal" | "safe_file_snippets" | "project_memory" | "rag_citations" | "matched_documents" | "execution_state" | "session_state" | "task_recovery" | "workflow_meta" | "dispatch_policy" | "missing_info" | "clarification_question" | "cancellation_record" | "archive_record" | "cleanup_result" | "receipt_statuses" | "failed_assertions" | "gap_fingerprint" | "rework_plan" | "verification_executed")[];
+    evidence: ("task_id" | "execution_id" | "verification" | "task_status" | "group_memory" | "CCM_AGENT_RECEIPT" | "work_dir" | "risks" | "acceptance_gate" | "files_changed" | "recovery_checks" | "task_card" | "work_items" | "assignments" | "recent_messages" | "active_goal" | "safe_file_snippets" | "project_memory" | "rag_citations" | "matched_documents" | "execution_state" | "session_state" | "task_recovery" | "workflow_meta" | "dispatch_policy" | "missing_info" | "clarification_question" | "cancellation_record" | "archive_record" | "cleanup_result" | "receipt_statuses" | "failed_assertions" | "gap_fingerprint" | "rework_plan" | "verification_executed")[];
     id: "read_group_context";
     label: "读取群聊上下文";
     category: "context";
@@ -54290,7 +54335,7 @@ export declare function getGroupMainAgentActionRegistry(): ({
     description: "读取当前群聊最近消息、压缩摘要、当前目标和协作记忆，作为主 Agent 判断的第一层上下文。";
 } | {
     backend: ("listTaskAgentSessions" | "queryKnowledgeBase" | "buildGroupContextPacket" | "createTask" | "shouldCreatePersistentGroupTask" | "buildInlineTaskRuntime" | "buildGroupProjectAnalysisContext" | "getInitialWorkflowMeta" | "prepareAgentRuntimeTools" | "extractAgentReceipt" | "listExecutions" | "buildRecentGroupContext" | "buildGroupMemoryContext" | "buildProjectCodeReadOnlySnapshot" | "loadTasks" | "buildTaskPreflightReasoning" | "recordReasoningRecoveryCheck" | "resumeTaskQueues" | "reopenTaskAgentSessions" | "runGroupOrchestrator" | "ctx.callAgent" | "queueTaskExecution" | "dispatchPolicy.action=ask_user" | "questionForUser" | "appendGroupMessage" | "requestTaskCancellation" | "archiveTask" | "restoreArchivedTask" | "purgeArchivedTask" | "releaseTaskLease" | "buildUserAgentQuestionRows" | "runLlmCoordinatorReview" | "recordReasoningDeviation" | "updateReasoningPlan" | "createReworkTask" | "buildUserDeliveryReport" | "buildTaskGroupReportMessage")[];
-    evidence: ("task_id" | "execution_id" | "verification" | "task_status" | "group_memory" | "CCM_AGENT_RECEIPT" | "work_dir" | "acceptance_gate" | "risks" | "files_changed" | "recovery_checks" | "task_card" | "work_items" | "assignments" | "recent_messages" | "active_goal" | "safe_file_snippets" | "project_memory" | "rag_citations" | "matched_documents" | "execution_state" | "session_state" | "task_recovery" | "workflow_meta" | "dispatch_policy" | "missing_info" | "clarification_question" | "cancellation_record" | "archive_record" | "cleanup_result" | "receipt_statuses" | "failed_assertions" | "gap_fingerprint" | "rework_plan" | "verification_executed")[];
+    evidence: ("task_id" | "execution_id" | "verification" | "task_status" | "group_memory" | "CCM_AGENT_RECEIPT" | "work_dir" | "risks" | "acceptance_gate" | "files_changed" | "recovery_checks" | "task_card" | "work_items" | "assignments" | "recent_messages" | "active_goal" | "safe_file_snippets" | "project_memory" | "rag_citations" | "matched_documents" | "execution_state" | "session_state" | "task_recovery" | "workflow_meta" | "dispatch_policy" | "missing_info" | "clarification_question" | "cancellation_record" | "archive_record" | "cleanup_result" | "receipt_statuses" | "failed_assertions" | "gap_fingerprint" | "rework_plan" | "verification_executed")[];
     id: "read_project_code_snapshot";
     label: "读取项目代码快照";
     category: "context";
@@ -54300,7 +54345,7 @@ export declare function getGroupMainAgentActionRegistry(): ({
     description: "只读读取群聊绑定项目的有限代码片段，过滤密钥、依赖和构建产物，用于项目分析和任务前理解。";
 } | {
     backend: ("listTaskAgentSessions" | "queryKnowledgeBase" | "buildGroupContextPacket" | "createTask" | "shouldCreatePersistentGroupTask" | "buildInlineTaskRuntime" | "buildGroupProjectAnalysisContext" | "getInitialWorkflowMeta" | "prepareAgentRuntimeTools" | "extractAgentReceipt" | "listExecutions" | "buildRecentGroupContext" | "buildGroupMemoryContext" | "buildProjectCodeReadOnlySnapshot" | "loadTasks" | "buildTaskPreflightReasoning" | "recordReasoningRecoveryCheck" | "resumeTaskQueues" | "reopenTaskAgentSessions" | "runGroupOrchestrator" | "ctx.callAgent" | "queueTaskExecution" | "dispatchPolicy.action=ask_user" | "questionForUser" | "appendGroupMessage" | "requestTaskCancellation" | "archiveTask" | "restoreArchivedTask" | "purgeArchivedTask" | "releaseTaskLease" | "buildUserAgentQuestionRows" | "runLlmCoordinatorReview" | "recordReasoningDeviation" | "updateReasoningPlan" | "createReworkTask" | "buildUserDeliveryReport" | "buildTaskGroupReportMessage")[];
-    evidence: ("task_id" | "execution_id" | "verification" | "task_status" | "group_memory" | "CCM_AGENT_RECEIPT" | "work_dir" | "acceptance_gate" | "risks" | "files_changed" | "recovery_checks" | "task_card" | "work_items" | "assignments" | "recent_messages" | "active_goal" | "safe_file_snippets" | "project_memory" | "rag_citations" | "matched_documents" | "execution_state" | "session_state" | "task_recovery" | "workflow_meta" | "dispatch_policy" | "missing_info" | "clarification_question" | "cancellation_record" | "archive_record" | "cleanup_result" | "receipt_statuses" | "failed_assertions" | "gap_fingerprint" | "rework_plan" | "verification_executed")[];
+    evidence: ("task_id" | "execution_id" | "verification" | "task_status" | "group_memory" | "CCM_AGENT_RECEIPT" | "work_dir" | "risks" | "acceptance_gate" | "files_changed" | "recovery_checks" | "task_card" | "work_items" | "assignments" | "recent_messages" | "active_goal" | "safe_file_snippets" | "project_memory" | "rag_citations" | "matched_documents" | "execution_state" | "session_state" | "task_recovery" | "workflow_meta" | "dispatch_policy" | "missing_info" | "clarification_question" | "cancellation_record" | "archive_record" | "cleanup_result" | "receipt_statuses" | "failed_assertions" | "gap_fingerprint" | "rework_plan" | "verification_executed")[];
     id: "query_knowledge_base";
     label: "查询知识库";
     category: "context";
@@ -54310,7 +54355,7 @@ export declare function getGroupMainAgentActionRegistry(): ({
     description: "检索本地知识库，为回答、计划或子 Agent 工作单提供依据；知识库内容不等于执行授权。";
 } | {
     backend: ("listTaskAgentSessions" | "queryKnowledgeBase" | "buildGroupContextPacket" | "createTask" | "shouldCreatePersistentGroupTask" | "buildInlineTaskRuntime" | "buildGroupProjectAnalysisContext" | "getInitialWorkflowMeta" | "prepareAgentRuntimeTools" | "extractAgentReceipt" | "listExecutions" | "buildRecentGroupContext" | "buildGroupMemoryContext" | "buildProjectCodeReadOnlySnapshot" | "loadTasks" | "buildTaskPreflightReasoning" | "recordReasoningRecoveryCheck" | "resumeTaskQueues" | "reopenTaskAgentSessions" | "runGroupOrchestrator" | "ctx.callAgent" | "queueTaskExecution" | "dispatchPolicy.action=ask_user" | "questionForUser" | "appendGroupMessage" | "requestTaskCancellation" | "archiveTask" | "restoreArchivedTask" | "purgeArchivedTask" | "releaseTaskLease" | "buildUserAgentQuestionRows" | "runLlmCoordinatorReview" | "recordReasoningDeviation" | "updateReasoningPlan" | "createReworkTask" | "buildUserDeliveryReport" | "buildTaskGroupReportMessage")[];
-    evidence: ("task_id" | "execution_id" | "verification" | "task_status" | "group_memory" | "CCM_AGENT_RECEIPT" | "work_dir" | "acceptance_gate" | "risks" | "files_changed" | "recovery_checks" | "task_card" | "work_items" | "assignments" | "recent_messages" | "active_goal" | "safe_file_snippets" | "project_memory" | "rag_citations" | "matched_documents" | "execution_state" | "session_state" | "task_recovery" | "workflow_meta" | "dispatch_policy" | "missing_info" | "clarification_question" | "cancellation_record" | "archive_record" | "cleanup_result" | "receipt_statuses" | "failed_assertions" | "gap_fingerprint" | "rework_plan" | "verification_executed")[];
+    evidence: ("task_id" | "execution_id" | "verification" | "task_status" | "group_memory" | "CCM_AGENT_RECEIPT" | "work_dir" | "risks" | "acceptance_gate" | "files_changed" | "recovery_checks" | "task_card" | "work_items" | "assignments" | "recent_messages" | "active_goal" | "safe_file_snippets" | "project_memory" | "rag_citations" | "matched_documents" | "execution_state" | "session_state" | "task_recovery" | "workflow_meta" | "dispatch_policy" | "missing_info" | "clarification_question" | "cancellation_record" | "archive_record" | "cleanup_result" | "receipt_statuses" | "failed_assertions" | "gap_fingerprint" | "rework_plan" | "verification_executed")[];
     id: "inspect_task_status";
     label: "查看任务状态";
     category: "observe";
@@ -54320,7 +54365,7 @@ export declare function getGroupMainAgentActionRegistry(): ({
     description: "查看任务、执行器、会话、时间线和验收状态，用于判断继续、等待、返工还是回复用户。";
 } | {
     backend: ("listTaskAgentSessions" | "queryKnowledgeBase" | "buildGroupContextPacket" | "createTask" | "shouldCreatePersistentGroupTask" | "buildInlineTaskRuntime" | "buildGroupProjectAnalysisContext" | "getInitialWorkflowMeta" | "prepareAgentRuntimeTools" | "extractAgentReceipt" | "listExecutions" | "buildRecentGroupContext" | "buildGroupMemoryContext" | "buildProjectCodeReadOnlySnapshot" | "loadTasks" | "buildTaskPreflightReasoning" | "recordReasoningRecoveryCheck" | "resumeTaskQueues" | "reopenTaskAgentSessions" | "runGroupOrchestrator" | "ctx.callAgent" | "queueTaskExecution" | "dispatchPolicy.action=ask_user" | "questionForUser" | "appendGroupMessage" | "requestTaskCancellation" | "archiveTask" | "restoreArchivedTask" | "purgeArchivedTask" | "releaseTaskLease" | "buildUserAgentQuestionRows" | "runLlmCoordinatorReview" | "recordReasoningDeviation" | "updateReasoningPlan" | "createReworkTask" | "buildUserDeliveryReport" | "buildTaskGroupReportMessage")[];
-    evidence: ("task_id" | "execution_id" | "verification" | "task_status" | "group_memory" | "CCM_AGENT_RECEIPT" | "work_dir" | "acceptance_gate" | "risks" | "files_changed" | "recovery_checks" | "task_card" | "work_items" | "assignments" | "recent_messages" | "active_goal" | "safe_file_snippets" | "project_memory" | "rag_citations" | "matched_documents" | "execution_state" | "session_state" | "task_recovery" | "workflow_meta" | "dispatch_policy" | "missing_info" | "clarification_question" | "cancellation_record" | "archive_record" | "cleanup_result" | "receipt_statuses" | "failed_assertions" | "gap_fingerprint" | "rework_plan" | "verification_executed")[];
+    evidence: ("task_id" | "execution_id" | "verification" | "task_status" | "group_memory" | "CCM_AGENT_RECEIPT" | "work_dir" | "risks" | "acceptance_gate" | "files_changed" | "recovery_checks" | "task_card" | "work_items" | "assignments" | "recent_messages" | "active_goal" | "safe_file_snippets" | "project_memory" | "rag_citations" | "matched_documents" | "execution_state" | "session_state" | "task_recovery" | "workflow_meta" | "dispatch_policy" | "missing_info" | "clarification_question" | "cancellation_record" | "archive_record" | "cleanup_result" | "receipt_statuses" | "failed_assertions" | "gap_fingerprint" | "rework_plan" | "verification_executed")[];
     id: "restore_task_context";
     label: "恢复任务上下文";
     category: "context";
@@ -54330,7 +54375,7 @@ export declare function getGroupMainAgentActionRegistry(): ({
     description: "服务重启、执行器重试或用户继续旧任务时，重新灌回原始目标、未完成 Todo、执行队列和可恢复会话。";
 } | {
     backend: ("listTaskAgentSessions" | "queryKnowledgeBase" | "buildGroupContextPacket" | "createTask" | "shouldCreatePersistentGroupTask" | "buildInlineTaskRuntime" | "buildGroupProjectAnalysisContext" | "getInitialWorkflowMeta" | "prepareAgentRuntimeTools" | "extractAgentReceipt" | "listExecutions" | "buildRecentGroupContext" | "buildGroupMemoryContext" | "buildProjectCodeReadOnlySnapshot" | "loadTasks" | "buildTaskPreflightReasoning" | "recordReasoningRecoveryCheck" | "resumeTaskQueues" | "reopenTaskAgentSessions" | "runGroupOrchestrator" | "ctx.callAgent" | "queueTaskExecution" | "dispatchPolicy.action=ask_user" | "questionForUser" | "appendGroupMessage" | "requestTaskCancellation" | "archiveTask" | "restoreArchivedTask" | "purgeArchivedTask" | "releaseTaskLease" | "buildUserAgentQuestionRows" | "runLlmCoordinatorReview" | "recordReasoningDeviation" | "updateReasoningPlan" | "createReworkTask" | "buildUserDeliveryReport" | "buildTaskGroupReportMessage")[];
-    evidence: ("task_id" | "execution_id" | "verification" | "task_status" | "group_memory" | "CCM_AGENT_RECEIPT" | "work_dir" | "acceptance_gate" | "risks" | "files_changed" | "recovery_checks" | "task_card" | "work_items" | "assignments" | "recent_messages" | "active_goal" | "safe_file_snippets" | "project_memory" | "rag_citations" | "matched_documents" | "execution_state" | "session_state" | "task_recovery" | "workflow_meta" | "dispatch_policy" | "missing_info" | "clarification_question" | "cancellation_record" | "archive_record" | "cleanup_result" | "receipt_statuses" | "failed_assertions" | "gap_fingerprint" | "rework_plan" | "verification_executed")[];
+    evidence: ("task_id" | "execution_id" | "verification" | "task_status" | "group_memory" | "CCM_AGENT_RECEIPT" | "work_dir" | "risks" | "acceptance_gate" | "files_changed" | "recovery_checks" | "task_card" | "work_items" | "assignments" | "recent_messages" | "active_goal" | "safe_file_snippets" | "project_memory" | "rag_citations" | "matched_documents" | "execution_state" | "session_state" | "task_recovery" | "workflow_meta" | "dispatch_policy" | "missing_info" | "clarification_question" | "cancellation_record" | "archive_record" | "cleanup_result" | "receipt_statuses" | "failed_assertions" | "gap_fingerprint" | "rework_plan" | "verification_executed")[];
     id: "create_project_task";
     label: "创建项目任务";
     category: "act";
@@ -54340,7 +54385,7 @@ export declare function getGroupMainAgentActionRegistry(): ({
     description: "只有当前用户消息明确要求实现/修改/修复/执行时，才创建持久任务卡。";
 } | {
     backend: ("listTaskAgentSessions" | "queryKnowledgeBase" | "buildGroupContextPacket" | "createTask" | "shouldCreatePersistentGroupTask" | "buildInlineTaskRuntime" | "buildGroupProjectAnalysisContext" | "getInitialWorkflowMeta" | "prepareAgentRuntimeTools" | "extractAgentReceipt" | "listExecutions" | "buildRecentGroupContext" | "buildGroupMemoryContext" | "buildProjectCodeReadOnlySnapshot" | "loadTasks" | "buildTaskPreflightReasoning" | "recordReasoningRecoveryCheck" | "resumeTaskQueues" | "reopenTaskAgentSessions" | "runGroupOrchestrator" | "ctx.callAgent" | "queueTaskExecution" | "dispatchPolicy.action=ask_user" | "questionForUser" | "appendGroupMessage" | "requestTaskCancellation" | "archiveTask" | "restoreArchivedTask" | "purgeArchivedTask" | "releaseTaskLease" | "buildUserAgentQuestionRows" | "runLlmCoordinatorReview" | "recordReasoningDeviation" | "updateReasoningPlan" | "createReworkTask" | "buildUserDeliveryReport" | "buildTaskGroupReportMessage")[];
-    evidence: ("task_id" | "execution_id" | "verification" | "task_status" | "group_memory" | "CCM_AGENT_RECEIPT" | "work_dir" | "acceptance_gate" | "risks" | "files_changed" | "recovery_checks" | "task_card" | "work_items" | "assignments" | "recent_messages" | "active_goal" | "safe_file_snippets" | "project_memory" | "rag_citations" | "matched_documents" | "execution_state" | "session_state" | "task_recovery" | "workflow_meta" | "dispatch_policy" | "missing_info" | "clarification_question" | "cancellation_record" | "archive_record" | "cleanup_result" | "receipt_statuses" | "failed_assertions" | "gap_fingerprint" | "rework_plan" | "verification_executed")[];
+    evidence: ("task_id" | "execution_id" | "verification" | "task_status" | "group_memory" | "CCM_AGENT_RECEIPT" | "work_dir" | "risks" | "acceptance_gate" | "files_changed" | "recovery_checks" | "task_card" | "work_items" | "assignments" | "recent_messages" | "active_goal" | "safe_file_snippets" | "project_memory" | "rag_citations" | "matched_documents" | "execution_state" | "session_state" | "task_recovery" | "workflow_meta" | "dispatch_policy" | "missing_info" | "clarification_question" | "cancellation_record" | "archive_record" | "cleanup_result" | "receipt_statuses" | "failed_assertions" | "gap_fingerprint" | "rework_plan" | "verification_executed")[];
     id: "dispatch_child_agent";
     label: "派发子 Agent";
     category: "act";
@@ -54350,7 +54395,7 @@ export declare function getGroupMainAgentActionRegistry(): ({
     description: "把自包含工作单派发给绑定项目 Agent，要求子 Agent 读取真实项目、执行、验证并提交结构化回执。";
 } | {
     backend: ("listTaskAgentSessions" | "queryKnowledgeBase" | "buildGroupContextPacket" | "createTask" | "shouldCreatePersistentGroupTask" | "buildInlineTaskRuntime" | "buildGroupProjectAnalysisContext" | "getInitialWorkflowMeta" | "prepareAgentRuntimeTools" | "extractAgentReceipt" | "listExecutions" | "buildRecentGroupContext" | "buildGroupMemoryContext" | "buildProjectCodeReadOnlySnapshot" | "loadTasks" | "buildTaskPreflightReasoning" | "recordReasoningRecoveryCheck" | "resumeTaskQueues" | "reopenTaskAgentSessions" | "runGroupOrchestrator" | "ctx.callAgent" | "queueTaskExecution" | "dispatchPolicy.action=ask_user" | "questionForUser" | "appendGroupMessage" | "requestTaskCancellation" | "archiveTask" | "restoreArchivedTask" | "purgeArchivedTask" | "releaseTaskLease" | "buildUserAgentQuestionRows" | "runLlmCoordinatorReview" | "recordReasoningDeviation" | "updateReasoningPlan" | "createReworkTask" | "buildUserDeliveryReport" | "buildTaskGroupReportMessage")[];
-    evidence: ("task_id" | "execution_id" | "verification" | "task_status" | "group_memory" | "CCM_AGENT_RECEIPT" | "work_dir" | "acceptance_gate" | "risks" | "files_changed" | "recovery_checks" | "task_card" | "work_items" | "assignments" | "recent_messages" | "active_goal" | "safe_file_snippets" | "project_memory" | "rag_citations" | "matched_documents" | "execution_state" | "session_state" | "task_recovery" | "workflow_meta" | "dispatch_policy" | "missing_info" | "clarification_question" | "cancellation_record" | "archive_record" | "cleanup_result" | "receipt_statuses" | "failed_assertions" | "gap_fingerprint" | "rework_plan" | "verification_executed")[];
+    evidence: ("task_id" | "execution_id" | "verification" | "task_status" | "group_memory" | "CCM_AGENT_RECEIPT" | "work_dir" | "risks" | "acceptance_gate" | "files_changed" | "recovery_checks" | "task_card" | "work_items" | "assignments" | "recent_messages" | "active_goal" | "safe_file_snippets" | "project_memory" | "rag_citations" | "matched_documents" | "execution_state" | "session_state" | "task_recovery" | "workflow_meta" | "dispatch_policy" | "missing_info" | "clarification_question" | "cancellation_record" | "archive_record" | "cleanup_result" | "receipt_statuses" | "failed_assertions" | "gap_fingerprint" | "rework_plan" | "verification_executed")[];
     id: "ask_user_clarification";
     label: "追问用户";
     category: "decide";
@@ -54360,7 +54405,7 @@ export declare function getGroupMainAgentActionRegistry(): ({
     description: "当目标、项目、授权或高风险范围不清时，主 Agent 先问一个最关键问题，不派发子 Agent。";
 } | {
     backend: ("listTaskAgentSessions" | "queryKnowledgeBase" | "buildGroupContextPacket" | "createTask" | "shouldCreatePersistentGroupTask" | "buildInlineTaskRuntime" | "buildGroupProjectAnalysisContext" | "getInitialWorkflowMeta" | "prepareAgentRuntimeTools" | "extractAgentReceipt" | "listExecutions" | "buildRecentGroupContext" | "buildGroupMemoryContext" | "buildProjectCodeReadOnlySnapshot" | "loadTasks" | "buildTaskPreflightReasoning" | "recordReasoningRecoveryCheck" | "resumeTaskQueues" | "reopenTaskAgentSessions" | "runGroupOrchestrator" | "ctx.callAgent" | "queueTaskExecution" | "dispatchPolicy.action=ask_user" | "questionForUser" | "appendGroupMessage" | "requestTaskCancellation" | "archiveTask" | "restoreArchivedTask" | "purgeArchivedTask" | "releaseTaskLease" | "buildUserAgentQuestionRows" | "runLlmCoordinatorReview" | "recordReasoningDeviation" | "updateReasoningPlan" | "createReworkTask" | "buildUserDeliveryReport" | "buildTaskGroupReportMessage")[];
-    evidence: ("task_id" | "execution_id" | "verification" | "task_status" | "group_memory" | "CCM_AGENT_RECEIPT" | "work_dir" | "acceptance_gate" | "risks" | "files_changed" | "recovery_checks" | "task_card" | "work_items" | "assignments" | "recent_messages" | "active_goal" | "safe_file_snippets" | "project_memory" | "rag_citations" | "matched_documents" | "execution_state" | "session_state" | "task_recovery" | "workflow_meta" | "dispatch_policy" | "missing_info" | "clarification_question" | "cancellation_record" | "archive_record" | "cleanup_result" | "receipt_statuses" | "failed_assertions" | "gap_fingerprint" | "rework_plan" | "verification_executed")[];
+    evidence: ("task_id" | "execution_id" | "verification" | "task_status" | "group_memory" | "CCM_AGENT_RECEIPT" | "work_dir" | "risks" | "acceptance_gate" | "files_changed" | "recovery_checks" | "task_card" | "work_items" | "assignments" | "recent_messages" | "active_goal" | "safe_file_snippets" | "project_memory" | "rag_citations" | "matched_documents" | "execution_state" | "session_state" | "task_recovery" | "workflow_meta" | "dispatch_policy" | "missing_info" | "clarification_question" | "cancellation_record" | "archive_record" | "cleanup_result" | "receipt_statuses" | "failed_assertions" | "gap_fingerprint" | "rework_plan" | "verification_executed")[];
     id: "govern_task_lifecycle";
     label: "停止/取消/归档任务";
     category: "govern";
@@ -54370,7 +54415,7 @@ export declare function getGroupMainAgentActionRegistry(): ({
     description: "停止、取消、归档和永久清除任务属于治理动作，必须来自用户明确指令或按钮操作。";
 } | {
     backend: ("listTaskAgentSessions" | "queryKnowledgeBase" | "buildGroupContextPacket" | "createTask" | "shouldCreatePersistentGroupTask" | "buildInlineTaskRuntime" | "buildGroupProjectAnalysisContext" | "getInitialWorkflowMeta" | "prepareAgentRuntimeTools" | "extractAgentReceipt" | "listExecutions" | "buildRecentGroupContext" | "buildGroupMemoryContext" | "buildProjectCodeReadOnlySnapshot" | "loadTasks" | "buildTaskPreflightReasoning" | "recordReasoningRecoveryCheck" | "resumeTaskQueues" | "reopenTaskAgentSessions" | "runGroupOrchestrator" | "ctx.callAgent" | "queueTaskExecution" | "dispatchPolicy.action=ask_user" | "questionForUser" | "appendGroupMessage" | "requestTaskCancellation" | "archiveTask" | "restoreArchivedTask" | "purgeArchivedTask" | "releaseTaskLease" | "buildUserAgentQuestionRows" | "runLlmCoordinatorReview" | "recordReasoningDeviation" | "updateReasoningPlan" | "createReworkTask" | "buildUserDeliveryReport" | "buildTaskGroupReportMessage")[];
-    evidence: ("task_id" | "execution_id" | "verification" | "task_status" | "group_memory" | "CCM_AGENT_RECEIPT" | "work_dir" | "acceptance_gate" | "risks" | "files_changed" | "recovery_checks" | "task_card" | "work_items" | "assignments" | "recent_messages" | "active_goal" | "safe_file_snippets" | "project_memory" | "rag_citations" | "matched_documents" | "execution_state" | "session_state" | "task_recovery" | "workflow_meta" | "dispatch_policy" | "missing_info" | "clarification_question" | "cancellation_record" | "archive_record" | "cleanup_result" | "receipt_statuses" | "failed_assertions" | "gap_fingerprint" | "rework_plan" | "verification_executed")[];
+    evidence: ("task_id" | "execution_id" | "verification" | "task_status" | "group_memory" | "CCM_AGENT_RECEIPT" | "work_dir" | "risks" | "acceptance_gate" | "files_changed" | "recovery_checks" | "task_card" | "work_items" | "assignments" | "recent_messages" | "active_goal" | "safe_file_snippets" | "project_memory" | "rag_citations" | "matched_documents" | "execution_state" | "session_state" | "task_recovery" | "workflow_meta" | "dispatch_policy" | "missing_info" | "clarification_question" | "cancellation_record" | "archive_record" | "cleanup_result" | "receipt_statuses" | "failed_assertions" | "gap_fingerprint" | "rework_plan" | "verification_executed")[];
     id: "read_child_agent_receipts";
     label: "读取子 Agent 结果说明";
     category: "observe";
@@ -54380,7 +54425,7 @@ export declare function getGroupMainAgentActionRegistry(): ({
     description: "读取子 Agent 的结构化回执、文件变更、验证结果和阻塞原因，供主 Agent 验收。";
 } | {
     backend: ("listTaskAgentSessions" | "queryKnowledgeBase" | "buildGroupContextPacket" | "createTask" | "shouldCreatePersistentGroupTask" | "buildInlineTaskRuntime" | "buildGroupProjectAnalysisContext" | "getInitialWorkflowMeta" | "prepareAgentRuntimeTools" | "extractAgentReceipt" | "listExecutions" | "buildRecentGroupContext" | "buildGroupMemoryContext" | "buildProjectCodeReadOnlySnapshot" | "loadTasks" | "buildTaskPreflightReasoning" | "recordReasoningRecoveryCheck" | "resumeTaskQueues" | "reopenTaskAgentSessions" | "runGroupOrchestrator" | "ctx.callAgent" | "queueTaskExecution" | "dispatchPolicy.action=ask_user" | "questionForUser" | "appendGroupMessage" | "requestTaskCancellation" | "archiveTask" | "restoreArchivedTask" | "purgeArchivedTask" | "releaseTaskLease" | "buildUserAgentQuestionRows" | "runLlmCoordinatorReview" | "recordReasoningDeviation" | "updateReasoningPlan" | "createReworkTask" | "buildUserDeliveryReport" | "buildTaskGroupReportMessage")[];
-    evidence: ("task_id" | "execution_id" | "verification" | "task_status" | "group_memory" | "CCM_AGENT_RECEIPT" | "work_dir" | "acceptance_gate" | "risks" | "files_changed" | "recovery_checks" | "task_card" | "work_items" | "assignments" | "recent_messages" | "active_goal" | "safe_file_snippets" | "project_memory" | "rag_citations" | "matched_documents" | "execution_state" | "session_state" | "task_recovery" | "workflow_meta" | "dispatch_policy" | "missing_info" | "clarification_question" | "cancellation_record" | "archive_record" | "cleanup_result" | "receipt_statuses" | "failed_assertions" | "gap_fingerprint" | "rework_plan" | "verification_executed")[];
+    evidence: ("task_id" | "execution_id" | "verification" | "task_status" | "group_memory" | "CCM_AGENT_RECEIPT" | "work_dir" | "risks" | "acceptance_gate" | "files_changed" | "recovery_checks" | "task_card" | "work_items" | "assignments" | "recent_messages" | "active_goal" | "safe_file_snippets" | "project_memory" | "rag_citations" | "matched_documents" | "execution_state" | "session_state" | "task_recovery" | "workflow_meta" | "dispatch_policy" | "missing_info" | "clarification_question" | "cancellation_record" | "archive_record" | "cleanup_result" | "receipt_statuses" | "failed_assertions" | "gap_fingerprint" | "rework_plan" | "verification_executed")[];
     id: "replan_from_observation";
     label: "重新规划";
     category: "decide";
@@ -54390,7 +54435,7 @@ export declare function getGroupMainAgentActionRegistry(): ({
     description: "当回执缺证据、验证失败、目标偏离或依赖事实变化时，主 Agent 重新规划并决定返工、等待或停止。";
 } | {
     backend: ("listTaskAgentSessions" | "queryKnowledgeBase" | "buildGroupContextPacket" | "createTask" | "shouldCreatePersistentGroupTask" | "buildInlineTaskRuntime" | "buildGroupProjectAnalysisContext" | "getInitialWorkflowMeta" | "prepareAgentRuntimeTools" | "extractAgentReceipt" | "listExecutions" | "buildRecentGroupContext" | "buildGroupMemoryContext" | "buildProjectCodeReadOnlySnapshot" | "loadTasks" | "buildTaskPreflightReasoning" | "recordReasoningRecoveryCheck" | "resumeTaskQueues" | "reopenTaskAgentSessions" | "runGroupOrchestrator" | "ctx.callAgent" | "queueTaskExecution" | "dispatchPolicy.action=ask_user" | "questionForUser" | "appendGroupMessage" | "requestTaskCancellation" | "archiveTask" | "restoreArchivedTask" | "purgeArchivedTask" | "releaseTaskLease" | "buildUserAgentQuestionRows" | "runLlmCoordinatorReview" | "recordReasoningDeviation" | "updateReasoningPlan" | "createReworkTask" | "buildUserDeliveryReport" | "buildTaskGroupReportMessage")[];
-    evidence: ("task_id" | "execution_id" | "verification" | "task_status" | "group_memory" | "CCM_AGENT_RECEIPT" | "work_dir" | "acceptance_gate" | "risks" | "files_changed" | "recovery_checks" | "task_card" | "work_items" | "assignments" | "recent_messages" | "active_goal" | "safe_file_snippets" | "project_memory" | "rag_citations" | "matched_documents" | "execution_state" | "session_state" | "task_recovery" | "workflow_meta" | "dispatch_policy" | "missing_info" | "clarification_question" | "cancellation_record" | "archive_record" | "cleanup_result" | "receipt_statuses" | "failed_assertions" | "gap_fingerprint" | "rework_plan" | "verification_executed")[];
+    evidence: ("task_id" | "execution_id" | "verification" | "task_status" | "group_memory" | "CCM_AGENT_RECEIPT" | "work_dir" | "risks" | "acceptance_gate" | "files_changed" | "recovery_checks" | "task_card" | "work_items" | "assignments" | "recent_messages" | "active_goal" | "safe_file_snippets" | "project_memory" | "rag_citations" | "matched_documents" | "execution_state" | "session_state" | "task_recovery" | "workflow_meta" | "dispatch_policy" | "missing_info" | "clarification_question" | "cancellation_record" | "archive_record" | "cleanup_result" | "receipt_statuses" | "failed_assertions" | "gap_fingerprint" | "rework_plan" | "verification_executed")[];
     id: "generate_final_reply";
     label: "生成最终回复";
     category: "reply";
@@ -54415,7 +54460,7 @@ export declare function runGroupMainAgentActionRegistrySelfTest(): {
     total: number;
     actions: ({
         backend: ("listTaskAgentSessions" | "queryKnowledgeBase" | "buildGroupContextPacket" | "createTask" | "shouldCreatePersistentGroupTask" | "buildInlineTaskRuntime" | "buildGroupProjectAnalysisContext" | "getInitialWorkflowMeta" | "prepareAgentRuntimeTools" | "extractAgentReceipt" | "listExecutions" | "buildRecentGroupContext" | "buildGroupMemoryContext" | "buildProjectCodeReadOnlySnapshot" | "loadTasks" | "buildTaskPreflightReasoning" | "recordReasoningRecoveryCheck" | "resumeTaskQueues" | "reopenTaskAgentSessions" | "runGroupOrchestrator" | "ctx.callAgent" | "queueTaskExecution" | "dispatchPolicy.action=ask_user" | "questionForUser" | "appendGroupMessage" | "requestTaskCancellation" | "archiveTask" | "restoreArchivedTask" | "purgeArchivedTask" | "releaseTaskLease" | "buildUserAgentQuestionRows" | "runLlmCoordinatorReview" | "recordReasoningDeviation" | "updateReasoningPlan" | "createReworkTask" | "buildUserDeliveryReport" | "buildTaskGroupReportMessage")[];
-        evidence: ("task_id" | "execution_id" | "verification" | "task_status" | "group_memory" | "CCM_AGENT_RECEIPT" | "work_dir" | "acceptance_gate" | "risks" | "files_changed" | "recovery_checks" | "task_card" | "work_items" | "assignments" | "recent_messages" | "active_goal" | "safe_file_snippets" | "project_memory" | "rag_citations" | "matched_documents" | "execution_state" | "session_state" | "task_recovery" | "workflow_meta" | "dispatch_policy" | "missing_info" | "clarification_question" | "cancellation_record" | "archive_record" | "cleanup_result" | "receipt_statuses" | "failed_assertions" | "gap_fingerprint" | "rework_plan" | "verification_executed")[];
+        evidence: ("task_id" | "execution_id" | "verification" | "task_status" | "group_memory" | "CCM_AGENT_RECEIPT" | "work_dir" | "risks" | "acceptance_gate" | "files_changed" | "recovery_checks" | "task_card" | "work_items" | "assignments" | "recent_messages" | "active_goal" | "safe_file_snippets" | "project_memory" | "rag_citations" | "matched_documents" | "execution_state" | "session_state" | "task_recovery" | "workflow_meta" | "dispatch_policy" | "missing_info" | "clarification_question" | "cancellation_record" | "archive_record" | "cleanup_result" | "receipt_statuses" | "failed_assertions" | "gap_fingerprint" | "rework_plan" | "verification_executed")[];
         id: "read_group_context";
         label: "读取群聊上下文";
         category: "context";
@@ -54425,7 +54470,7 @@ export declare function runGroupMainAgentActionRegistrySelfTest(): {
         description: "读取当前群聊最近消息、压缩摘要、当前目标和协作记忆，作为主 Agent 判断的第一层上下文。";
     } | {
         backend: ("listTaskAgentSessions" | "queryKnowledgeBase" | "buildGroupContextPacket" | "createTask" | "shouldCreatePersistentGroupTask" | "buildInlineTaskRuntime" | "buildGroupProjectAnalysisContext" | "getInitialWorkflowMeta" | "prepareAgentRuntimeTools" | "extractAgentReceipt" | "listExecutions" | "buildRecentGroupContext" | "buildGroupMemoryContext" | "buildProjectCodeReadOnlySnapshot" | "loadTasks" | "buildTaskPreflightReasoning" | "recordReasoningRecoveryCheck" | "resumeTaskQueues" | "reopenTaskAgentSessions" | "runGroupOrchestrator" | "ctx.callAgent" | "queueTaskExecution" | "dispatchPolicy.action=ask_user" | "questionForUser" | "appendGroupMessage" | "requestTaskCancellation" | "archiveTask" | "restoreArchivedTask" | "purgeArchivedTask" | "releaseTaskLease" | "buildUserAgentQuestionRows" | "runLlmCoordinatorReview" | "recordReasoningDeviation" | "updateReasoningPlan" | "createReworkTask" | "buildUserDeliveryReport" | "buildTaskGroupReportMessage")[];
-        evidence: ("task_id" | "execution_id" | "verification" | "task_status" | "group_memory" | "CCM_AGENT_RECEIPT" | "work_dir" | "acceptance_gate" | "risks" | "files_changed" | "recovery_checks" | "task_card" | "work_items" | "assignments" | "recent_messages" | "active_goal" | "safe_file_snippets" | "project_memory" | "rag_citations" | "matched_documents" | "execution_state" | "session_state" | "task_recovery" | "workflow_meta" | "dispatch_policy" | "missing_info" | "clarification_question" | "cancellation_record" | "archive_record" | "cleanup_result" | "receipt_statuses" | "failed_assertions" | "gap_fingerprint" | "rework_plan" | "verification_executed")[];
+        evidence: ("task_id" | "execution_id" | "verification" | "task_status" | "group_memory" | "CCM_AGENT_RECEIPT" | "work_dir" | "risks" | "acceptance_gate" | "files_changed" | "recovery_checks" | "task_card" | "work_items" | "assignments" | "recent_messages" | "active_goal" | "safe_file_snippets" | "project_memory" | "rag_citations" | "matched_documents" | "execution_state" | "session_state" | "task_recovery" | "workflow_meta" | "dispatch_policy" | "missing_info" | "clarification_question" | "cancellation_record" | "archive_record" | "cleanup_result" | "receipt_statuses" | "failed_assertions" | "gap_fingerprint" | "rework_plan" | "verification_executed")[];
         id: "read_project_code_snapshot";
         label: "读取项目代码快照";
         category: "context";
@@ -54435,7 +54480,7 @@ export declare function runGroupMainAgentActionRegistrySelfTest(): {
         description: "只读读取群聊绑定项目的有限代码片段，过滤密钥、依赖和构建产物，用于项目分析和任务前理解。";
     } | {
         backend: ("listTaskAgentSessions" | "queryKnowledgeBase" | "buildGroupContextPacket" | "createTask" | "shouldCreatePersistentGroupTask" | "buildInlineTaskRuntime" | "buildGroupProjectAnalysisContext" | "getInitialWorkflowMeta" | "prepareAgentRuntimeTools" | "extractAgentReceipt" | "listExecutions" | "buildRecentGroupContext" | "buildGroupMemoryContext" | "buildProjectCodeReadOnlySnapshot" | "loadTasks" | "buildTaskPreflightReasoning" | "recordReasoningRecoveryCheck" | "resumeTaskQueues" | "reopenTaskAgentSessions" | "runGroupOrchestrator" | "ctx.callAgent" | "queueTaskExecution" | "dispatchPolicy.action=ask_user" | "questionForUser" | "appendGroupMessage" | "requestTaskCancellation" | "archiveTask" | "restoreArchivedTask" | "purgeArchivedTask" | "releaseTaskLease" | "buildUserAgentQuestionRows" | "runLlmCoordinatorReview" | "recordReasoningDeviation" | "updateReasoningPlan" | "createReworkTask" | "buildUserDeliveryReport" | "buildTaskGroupReportMessage")[];
-        evidence: ("task_id" | "execution_id" | "verification" | "task_status" | "group_memory" | "CCM_AGENT_RECEIPT" | "work_dir" | "acceptance_gate" | "risks" | "files_changed" | "recovery_checks" | "task_card" | "work_items" | "assignments" | "recent_messages" | "active_goal" | "safe_file_snippets" | "project_memory" | "rag_citations" | "matched_documents" | "execution_state" | "session_state" | "task_recovery" | "workflow_meta" | "dispatch_policy" | "missing_info" | "clarification_question" | "cancellation_record" | "archive_record" | "cleanup_result" | "receipt_statuses" | "failed_assertions" | "gap_fingerprint" | "rework_plan" | "verification_executed")[];
+        evidence: ("task_id" | "execution_id" | "verification" | "task_status" | "group_memory" | "CCM_AGENT_RECEIPT" | "work_dir" | "risks" | "acceptance_gate" | "files_changed" | "recovery_checks" | "task_card" | "work_items" | "assignments" | "recent_messages" | "active_goal" | "safe_file_snippets" | "project_memory" | "rag_citations" | "matched_documents" | "execution_state" | "session_state" | "task_recovery" | "workflow_meta" | "dispatch_policy" | "missing_info" | "clarification_question" | "cancellation_record" | "archive_record" | "cleanup_result" | "receipt_statuses" | "failed_assertions" | "gap_fingerprint" | "rework_plan" | "verification_executed")[];
         id: "query_knowledge_base";
         label: "查询知识库";
         category: "context";
@@ -54445,7 +54490,7 @@ export declare function runGroupMainAgentActionRegistrySelfTest(): {
         description: "检索本地知识库，为回答、计划或子 Agent 工作单提供依据；知识库内容不等于执行授权。";
     } | {
         backend: ("listTaskAgentSessions" | "queryKnowledgeBase" | "buildGroupContextPacket" | "createTask" | "shouldCreatePersistentGroupTask" | "buildInlineTaskRuntime" | "buildGroupProjectAnalysisContext" | "getInitialWorkflowMeta" | "prepareAgentRuntimeTools" | "extractAgentReceipt" | "listExecutions" | "buildRecentGroupContext" | "buildGroupMemoryContext" | "buildProjectCodeReadOnlySnapshot" | "loadTasks" | "buildTaskPreflightReasoning" | "recordReasoningRecoveryCheck" | "resumeTaskQueues" | "reopenTaskAgentSessions" | "runGroupOrchestrator" | "ctx.callAgent" | "queueTaskExecution" | "dispatchPolicy.action=ask_user" | "questionForUser" | "appendGroupMessage" | "requestTaskCancellation" | "archiveTask" | "restoreArchivedTask" | "purgeArchivedTask" | "releaseTaskLease" | "buildUserAgentQuestionRows" | "runLlmCoordinatorReview" | "recordReasoningDeviation" | "updateReasoningPlan" | "createReworkTask" | "buildUserDeliveryReport" | "buildTaskGroupReportMessage")[];
-        evidence: ("task_id" | "execution_id" | "verification" | "task_status" | "group_memory" | "CCM_AGENT_RECEIPT" | "work_dir" | "acceptance_gate" | "risks" | "files_changed" | "recovery_checks" | "task_card" | "work_items" | "assignments" | "recent_messages" | "active_goal" | "safe_file_snippets" | "project_memory" | "rag_citations" | "matched_documents" | "execution_state" | "session_state" | "task_recovery" | "workflow_meta" | "dispatch_policy" | "missing_info" | "clarification_question" | "cancellation_record" | "archive_record" | "cleanup_result" | "receipt_statuses" | "failed_assertions" | "gap_fingerprint" | "rework_plan" | "verification_executed")[];
+        evidence: ("task_id" | "execution_id" | "verification" | "task_status" | "group_memory" | "CCM_AGENT_RECEIPT" | "work_dir" | "risks" | "acceptance_gate" | "files_changed" | "recovery_checks" | "task_card" | "work_items" | "assignments" | "recent_messages" | "active_goal" | "safe_file_snippets" | "project_memory" | "rag_citations" | "matched_documents" | "execution_state" | "session_state" | "task_recovery" | "workflow_meta" | "dispatch_policy" | "missing_info" | "clarification_question" | "cancellation_record" | "archive_record" | "cleanup_result" | "receipt_statuses" | "failed_assertions" | "gap_fingerprint" | "rework_plan" | "verification_executed")[];
         id: "inspect_task_status";
         label: "查看任务状态";
         category: "observe";
@@ -54455,7 +54500,7 @@ export declare function runGroupMainAgentActionRegistrySelfTest(): {
         description: "查看任务、执行器、会话、时间线和验收状态，用于判断继续、等待、返工还是回复用户。";
     } | {
         backend: ("listTaskAgentSessions" | "queryKnowledgeBase" | "buildGroupContextPacket" | "createTask" | "shouldCreatePersistentGroupTask" | "buildInlineTaskRuntime" | "buildGroupProjectAnalysisContext" | "getInitialWorkflowMeta" | "prepareAgentRuntimeTools" | "extractAgentReceipt" | "listExecutions" | "buildRecentGroupContext" | "buildGroupMemoryContext" | "buildProjectCodeReadOnlySnapshot" | "loadTasks" | "buildTaskPreflightReasoning" | "recordReasoningRecoveryCheck" | "resumeTaskQueues" | "reopenTaskAgentSessions" | "runGroupOrchestrator" | "ctx.callAgent" | "queueTaskExecution" | "dispatchPolicy.action=ask_user" | "questionForUser" | "appendGroupMessage" | "requestTaskCancellation" | "archiveTask" | "restoreArchivedTask" | "purgeArchivedTask" | "releaseTaskLease" | "buildUserAgentQuestionRows" | "runLlmCoordinatorReview" | "recordReasoningDeviation" | "updateReasoningPlan" | "createReworkTask" | "buildUserDeliveryReport" | "buildTaskGroupReportMessage")[];
-        evidence: ("task_id" | "execution_id" | "verification" | "task_status" | "group_memory" | "CCM_AGENT_RECEIPT" | "work_dir" | "acceptance_gate" | "risks" | "files_changed" | "recovery_checks" | "task_card" | "work_items" | "assignments" | "recent_messages" | "active_goal" | "safe_file_snippets" | "project_memory" | "rag_citations" | "matched_documents" | "execution_state" | "session_state" | "task_recovery" | "workflow_meta" | "dispatch_policy" | "missing_info" | "clarification_question" | "cancellation_record" | "archive_record" | "cleanup_result" | "receipt_statuses" | "failed_assertions" | "gap_fingerprint" | "rework_plan" | "verification_executed")[];
+        evidence: ("task_id" | "execution_id" | "verification" | "task_status" | "group_memory" | "CCM_AGENT_RECEIPT" | "work_dir" | "risks" | "acceptance_gate" | "files_changed" | "recovery_checks" | "task_card" | "work_items" | "assignments" | "recent_messages" | "active_goal" | "safe_file_snippets" | "project_memory" | "rag_citations" | "matched_documents" | "execution_state" | "session_state" | "task_recovery" | "workflow_meta" | "dispatch_policy" | "missing_info" | "clarification_question" | "cancellation_record" | "archive_record" | "cleanup_result" | "receipt_statuses" | "failed_assertions" | "gap_fingerprint" | "rework_plan" | "verification_executed")[];
         id: "restore_task_context";
         label: "恢复任务上下文";
         category: "context";
@@ -54465,7 +54510,7 @@ export declare function runGroupMainAgentActionRegistrySelfTest(): {
         description: "服务重启、执行器重试或用户继续旧任务时，重新灌回原始目标、未完成 Todo、执行队列和可恢复会话。";
     } | {
         backend: ("listTaskAgentSessions" | "queryKnowledgeBase" | "buildGroupContextPacket" | "createTask" | "shouldCreatePersistentGroupTask" | "buildInlineTaskRuntime" | "buildGroupProjectAnalysisContext" | "getInitialWorkflowMeta" | "prepareAgentRuntimeTools" | "extractAgentReceipt" | "listExecutions" | "buildRecentGroupContext" | "buildGroupMemoryContext" | "buildProjectCodeReadOnlySnapshot" | "loadTasks" | "buildTaskPreflightReasoning" | "recordReasoningRecoveryCheck" | "resumeTaskQueues" | "reopenTaskAgentSessions" | "runGroupOrchestrator" | "ctx.callAgent" | "queueTaskExecution" | "dispatchPolicy.action=ask_user" | "questionForUser" | "appendGroupMessage" | "requestTaskCancellation" | "archiveTask" | "restoreArchivedTask" | "purgeArchivedTask" | "releaseTaskLease" | "buildUserAgentQuestionRows" | "runLlmCoordinatorReview" | "recordReasoningDeviation" | "updateReasoningPlan" | "createReworkTask" | "buildUserDeliveryReport" | "buildTaskGroupReportMessage")[];
-        evidence: ("task_id" | "execution_id" | "verification" | "task_status" | "group_memory" | "CCM_AGENT_RECEIPT" | "work_dir" | "acceptance_gate" | "risks" | "files_changed" | "recovery_checks" | "task_card" | "work_items" | "assignments" | "recent_messages" | "active_goal" | "safe_file_snippets" | "project_memory" | "rag_citations" | "matched_documents" | "execution_state" | "session_state" | "task_recovery" | "workflow_meta" | "dispatch_policy" | "missing_info" | "clarification_question" | "cancellation_record" | "archive_record" | "cleanup_result" | "receipt_statuses" | "failed_assertions" | "gap_fingerprint" | "rework_plan" | "verification_executed")[];
+        evidence: ("task_id" | "execution_id" | "verification" | "task_status" | "group_memory" | "CCM_AGENT_RECEIPT" | "work_dir" | "risks" | "acceptance_gate" | "files_changed" | "recovery_checks" | "task_card" | "work_items" | "assignments" | "recent_messages" | "active_goal" | "safe_file_snippets" | "project_memory" | "rag_citations" | "matched_documents" | "execution_state" | "session_state" | "task_recovery" | "workflow_meta" | "dispatch_policy" | "missing_info" | "clarification_question" | "cancellation_record" | "archive_record" | "cleanup_result" | "receipt_statuses" | "failed_assertions" | "gap_fingerprint" | "rework_plan" | "verification_executed")[];
         id: "create_project_task";
         label: "创建项目任务";
         category: "act";
@@ -54475,7 +54520,7 @@ export declare function runGroupMainAgentActionRegistrySelfTest(): {
         description: "只有当前用户消息明确要求实现/修改/修复/执行时，才创建持久任务卡。";
     } | {
         backend: ("listTaskAgentSessions" | "queryKnowledgeBase" | "buildGroupContextPacket" | "createTask" | "shouldCreatePersistentGroupTask" | "buildInlineTaskRuntime" | "buildGroupProjectAnalysisContext" | "getInitialWorkflowMeta" | "prepareAgentRuntimeTools" | "extractAgentReceipt" | "listExecutions" | "buildRecentGroupContext" | "buildGroupMemoryContext" | "buildProjectCodeReadOnlySnapshot" | "loadTasks" | "buildTaskPreflightReasoning" | "recordReasoningRecoveryCheck" | "resumeTaskQueues" | "reopenTaskAgentSessions" | "runGroupOrchestrator" | "ctx.callAgent" | "queueTaskExecution" | "dispatchPolicy.action=ask_user" | "questionForUser" | "appendGroupMessage" | "requestTaskCancellation" | "archiveTask" | "restoreArchivedTask" | "purgeArchivedTask" | "releaseTaskLease" | "buildUserAgentQuestionRows" | "runLlmCoordinatorReview" | "recordReasoningDeviation" | "updateReasoningPlan" | "createReworkTask" | "buildUserDeliveryReport" | "buildTaskGroupReportMessage")[];
-        evidence: ("task_id" | "execution_id" | "verification" | "task_status" | "group_memory" | "CCM_AGENT_RECEIPT" | "work_dir" | "acceptance_gate" | "risks" | "files_changed" | "recovery_checks" | "task_card" | "work_items" | "assignments" | "recent_messages" | "active_goal" | "safe_file_snippets" | "project_memory" | "rag_citations" | "matched_documents" | "execution_state" | "session_state" | "task_recovery" | "workflow_meta" | "dispatch_policy" | "missing_info" | "clarification_question" | "cancellation_record" | "archive_record" | "cleanup_result" | "receipt_statuses" | "failed_assertions" | "gap_fingerprint" | "rework_plan" | "verification_executed")[];
+        evidence: ("task_id" | "execution_id" | "verification" | "task_status" | "group_memory" | "CCM_AGENT_RECEIPT" | "work_dir" | "risks" | "acceptance_gate" | "files_changed" | "recovery_checks" | "task_card" | "work_items" | "assignments" | "recent_messages" | "active_goal" | "safe_file_snippets" | "project_memory" | "rag_citations" | "matched_documents" | "execution_state" | "session_state" | "task_recovery" | "workflow_meta" | "dispatch_policy" | "missing_info" | "clarification_question" | "cancellation_record" | "archive_record" | "cleanup_result" | "receipt_statuses" | "failed_assertions" | "gap_fingerprint" | "rework_plan" | "verification_executed")[];
         id: "dispatch_child_agent";
         label: "派发子 Agent";
         category: "act";
@@ -54485,7 +54530,7 @@ export declare function runGroupMainAgentActionRegistrySelfTest(): {
         description: "把自包含工作单派发给绑定项目 Agent，要求子 Agent 读取真实项目、执行、验证并提交结构化回执。";
     } | {
         backend: ("listTaskAgentSessions" | "queryKnowledgeBase" | "buildGroupContextPacket" | "createTask" | "shouldCreatePersistentGroupTask" | "buildInlineTaskRuntime" | "buildGroupProjectAnalysisContext" | "getInitialWorkflowMeta" | "prepareAgentRuntimeTools" | "extractAgentReceipt" | "listExecutions" | "buildRecentGroupContext" | "buildGroupMemoryContext" | "buildProjectCodeReadOnlySnapshot" | "loadTasks" | "buildTaskPreflightReasoning" | "recordReasoningRecoveryCheck" | "resumeTaskQueues" | "reopenTaskAgentSessions" | "runGroupOrchestrator" | "ctx.callAgent" | "queueTaskExecution" | "dispatchPolicy.action=ask_user" | "questionForUser" | "appendGroupMessage" | "requestTaskCancellation" | "archiveTask" | "restoreArchivedTask" | "purgeArchivedTask" | "releaseTaskLease" | "buildUserAgentQuestionRows" | "runLlmCoordinatorReview" | "recordReasoningDeviation" | "updateReasoningPlan" | "createReworkTask" | "buildUserDeliveryReport" | "buildTaskGroupReportMessage")[];
-        evidence: ("task_id" | "execution_id" | "verification" | "task_status" | "group_memory" | "CCM_AGENT_RECEIPT" | "work_dir" | "acceptance_gate" | "risks" | "files_changed" | "recovery_checks" | "task_card" | "work_items" | "assignments" | "recent_messages" | "active_goal" | "safe_file_snippets" | "project_memory" | "rag_citations" | "matched_documents" | "execution_state" | "session_state" | "task_recovery" | "workflow_meta" | "dispatch_policy" | "missing_info" | "clarification_question" | "cancellation_record" | "archive_record" | "cleanup_result" | "receipt_statuses" | "failed_assertions" | "gap_fingerprint" | "rework_plan" | "verification_executed")[];
+        evidence: ("task_id" | "execution_id" | "verification" | "task_status" | "group_memory" | "CCM_AGENT_RECEIPT" | "work_dir" | "risks" | "acceptance_gate" | "files_changed" | "recovery_checks" | "task_card" | "work_items" | "assignments" | "recent_messages" | "active_goal" | "safe_file_snippets" | "project_memory" | "rag_citations" | "matched_documents" | "execution_state" | "session_state" | "task_recovery" | "workflow_meta" | "dispatch_policy" | "missing_info" | "clarification_question" | "cancellation_record" | "archive_record" | "cleanup_result" | "receipt_statuses" | "failed_assertions" | "gap_fingerprint" | "rework_plan" | "verification_executed")[];
         id: "ask_user_clarification";
         label: "追问用户";
         category: "decide";
@@ -54495,7 +54540,7 @@ export declare function runGroupMainAgentActionRegistrySelfTest(): {
         description: "当目标、项目、授权或高风险范围不清时，主 Agent 先问一个最关键问题，不派发子 Agent。";
     } | {
         backend: ("listTaskAgentSessions" | "queryKnowledgeBase" | "buildGroupContextPacket" | "createTask" | "shouldCreatePersistentGroupTask" | "buildInlineTaskRuntime" | "buildGroupProjectAnalysisContext" | "getInitialWorkflowMeta" | "prepareAgentRuntimeTools" | "extractAgentReceipt" | "listExecutions" | "buildRecentGroupContext" | "buildGroupMemoryContext" | "buildProjectCodeReadOnlySnapshot" | "loadTasks" | "buildTaskPreflightReasoning" | "recordReasoningRecoveryCheck" | "resumeTaskQueues" | "reopenTaskAgentSessions" | "runGroupOrchestrator" | "ctx.callAgent" | "queueTaskExecution" | "dispatchPolicy.action=ask_user" | "questionForUser" | "appendGroupMessage" | "requestTaskCancellation" | "archiveTask" | "restoreArchivedTask" | "purgeArchivedTask" | "releaseTaskLease" | "buildUserAgentQuestionRows" | "runLlmCoordinatorReview" | "recordReasoningDeviation" | "updateReasoningPlan" | "createReworkTask" | "buildUserDeliveryReport" | "buildTaskGroupReportMessage")[];
-        evidence: ("task_id" | "execution_id" | "verification" | "task_status" | "group_memory" | "CCM_AGENT_RECEIPT" | "work_dir" | "acceptance_gate" | "risks" | "files_changed" | "recovery_checks" | "task_card" | "work_items" | "assignments" | "recent_messages" | "active_goal" | "safe_file_snippets" | "project_memory" | "rag_citations" | "matched_documents" | "execution_state" | "session_state" | "task_recovery" | "workflow_meta" | "dispatch_policy" | "missing_info" | "clarification_question" | "cancellation_record" | "archive_record" | "cleanup_result" | "receipt_statuses" | "failed_assertions" | "gap_fingerprint" | "rework_plan" | "verification_executed")[];
+        evidence: ("task_id" | "execution_id" | "verification" | "task_status" | "group_memory" | "CCM_AGENT_RECEIPT" | "work_dir" | "risks" | "acceptance_gate" | "files_changed" | "recovery_checks" | "task_card" | "work_items" | "assignments" | "recent_messages" | "active_goal" | "safe_file_snippets" | "project_memory" | "rag_citations" | "matched_documents" | "execution_state" | "session_state" | "task_recovery" | "workflow_meta" | "dispatch_policy" | "missing_info" | "clarification_question" | "cancellation_record" | "archive_record" | "cleanup_result" | "receipt_statuses" | "failed_assertions" | "gap_fingerprint" | "rework_plan" | "verification_executed")[];
         id: "govern_task_lifecycle";
         label: "停止/取消/归档任务";
         category: "govern";
@@ -54505,7 +54550,7 @@ export declare function runGroupMainAgentActionRegistrySelfTest(): {
         description: "停止、取消、归档和永久清除任务属于治理动作，必须来自用户明确指令或按钮操作。";
     } | {
         backend: ("listTaskAgentSessions" | "queryKnowledgeBase" | "buildGroupContextPacket" | "createTask" | "shouldCreatePersistentGroupTask" | "buildInlineTaskRuntime" | "buildGroupProjectAnalysisContext" | "getInitialWorkflowMeta" | "prepareAgentRuntimeTools" | "extractAgentReceipt" | "listExecutions" | "buildRecentGroupContext" | "buildGroupMemoryContext" | "buildProjectCodeReadOnlySnapshot" | "loadTasks" | "buildTaskPreflightReasoning" | "recordReasoningRecoveryCheck" | "resumeTaskQueues" | "reopenTaskAgentSessions" | "runGroupOrchestrator" | "ctx.callAgent" | "queueTaskExecution" | "dispatchPolicy.action=ask_user" | "questionForUser" | "appendGroupMessage" | "requestTaskCancellation" | "archiveTask" | "restoreArchivedTask" | "purgeArchivedTask" | "releaseTaskLease" | "buildUserAgentQuestionRows" | "runLlmCoordinatorReview" | "recordReasoningDeviation" | "updateReasoningPlan" | "createReworkTask" | "buildUserDeliveryReport" | "buildTaskGroupReportMessage")[];
-        evidence: ("task_id" | "execution_id" | "verification" | "task_status" | "group_memory" | "CCM_AGENT_RECEIPT" | "work_dir" | "acceptance_gate" | "risks" | "files_changed" | "recovery_checks" | "task_card" | "work_items" | "assignments" | "recent_messages" | "active_goal" | "safe_file_snippets" | "project_memory" | "rag_citations" | "matched_documents" | "execution_state" | "session_state" | "task_recovery" | "workflow_meta" | "dispatch_policy" | "missing_info" | "clarification_question" | "cancellation_record" | "archive_record" | "cleanup_result" | "receipt_statuses" | "failed_assertions" | "gap_fingerprint" | "rework_plan" | "verification_executed")[];
+        evidence: ("task_id" | "execution_id" | "verification" | "task_status" | "group_memory" | "CCM_AGENT_RECEIPT" | "work_dir" | "risks" | "acceptance_gate" | "files_changed" | "recovery_checks" | "task_card" | "work_items" | "assignments" | "recent_messages" | "active_goal" | "safe_file_snippets" | "project_memory" | "rag_citations" | "matched_documents" | "execution_state" | "session_state" | "task_recovery" | "workflow_meta" | "dispatch_policy" | "missing_info" | "clarification_question" | "cancellation_record" | "archive_record" | "cleanup_result" | "receipt_statuses" | "failed_assertions" | "gap_fingerprint" | "rework_plan" | "verification_executed")[];
         id: "read_child_agent_receipts";
         label: "读取子 Agent 结果说明";
         category: "observe";
@@ -54515,7 +54560,7 @@ export declare function runGroupMainAgentActionRegistrySelfTest(): {
         description: "读取子 Agent 的结构化回执、文件变更、验证结果和阻塞原因，供主 Agent 验收。";
     } | {
         backend: ("listTaskAgentSessions" | "queryKnowledgeBase" | "buildGroupContextPacket" | "createTask" | "shouldCreatePersistentGroupTask" | "buildInlineTaskRuntime" | "buildGroupProjectAnalysisContext" | "getInitialWorkflowMeta" | "prepareAgentRuntimeTools" | "extractAgentReceipt" | "listExecutions" | "buildRecentGroupContext" | "buildGroupMemoryContext" | "buildProjectCodeReadOnlySnapshot" | "loadTasks" | "buildTaskPreflightReasoning" | "recordReasoningRecoveryCheck" | "resumeTaskQueues" | "reopenTaskAgentSessions" | "runGroupOrchestrator" | "ctx.callAgent" | "queueTaskExecution" | "dispatchPolicy.action=ask_user" | "questionForUser" | "appendGroupMessage" | "requestTaskCancellation" | "archiveTask" | "restoreArchivedTask" | "purgeArchivedTask" | "releaseTaskLease" | "buildUserAgentQuestionRows" | "runLlmCoordinatorReview" | "recordReasoningDeviation" | "updateReasoningPlan" | "createReworkTask" | "buildUserDeliveryReport" | "buildTaskGroupReportMessage")[];
-        evidence: ("task_id" | "execution_id" | "verification" | "task_status" | "group_memory" | "CCM_AGENT_RECEIPT" | "work_dir" | "acceptance_gate" | "risks" | "files_changed" | "recovery_checks" | "task_card" | "work_items" | "assignments" | "recent_messages" | "active_goal" | "safe_file_snippets" | "project_memory" | "rag_citations" | "matched_documents" | "execution_state" | "session_state" | "task_recovery" | "workflow_meta" | "dispatch_policy" | "missing_info" | "clarification_question" | "cancellation_record" | "archive_record" | "cleanup_result" | "receipt_statuses" | "failed_assertions" | "gap_fingerprint" | "rework_plan" | "verification_executed")[];
+        evidence: ("task_id" | "execution_id" | "verification" | "task_status" | "group_memory" | "CCM_AGENT_RECEIPT" | "work_dir" | "risks" | "acceptance_gate" | "files_changed" | "recovery_checks" | "task_card" | "work_items" | "assignments" | "recent_messages" | "active_goal" | "safe_file_snippets" | "project_memory" | "rag_citations" | "matched_documents" | "execution_state" | "session_state" | "task_recovery" | "workflow_meta" | "dispatch_policy" | "missing_info" | "clarification_question" | "cancellation_record" | "archive_record" | "cleanup_result" | "receipt_statuses" | "failed_assertions" | "gap_fingerprint" | "rework_plan" | "verification_executed")[];
         id: "replan_from_observation";
         label: "重新规划";
         category: "decide";
@@ -54525,7 +54570,7 @@ export declare function runGroupMainAgentActionRegistrySelfTest(): {
         description: "当回执缺证据、验证失败、目标偏离或依赖事实变化时，主 Agent 重新规划并决定返工、等待或停止。";
     } | {
         backend: ("listTaskAgentSessions" | "queryKnowledgeBase" | "buildGroupContextPacket" | "createTask" | "shouldCreatePersistentGroupTask" | "buildInlineTaskRuntime" | "buildGroupProjectAnalysisContext" | "getInitialWorkflowMeta" | "prepareAgentRuntimeTools" | "extractAgentReceipt" | "listExecutions" | "buildRecentGroupContext" | "buildGroupMemoryContext" | "buildProjectCodeReadOnlySnapshot" | "loadTasks" | "buildTaskPreflightReasoning" | "recordReasoningRecoveryCheck" | "resumeTaskQueues" | "reopenTaskAgentSessions" | "runGroupOrchestrator" | "ctx.callAgent" | "queueTaskExecution" | "dispatchPolicy.action=ask_user" | "questionForUser" | "appendGroupMessage" | "requestTaskCancellation" | "archiveTask" | "restoreArchivedTask" | "purgeArchivedTask" | "releaseTaskLease" | "buildUserAgentQuestionRows" | "runLlmCoordinatorReview" | "recordReasoningDeviation" | "updateReasoningPlan" | "createReworkTask" | "buildUserDeliveryReport" | "buildTaskGroupReportMessage")[];
-        evidence: ("task_id" | "execution_id" | "verification" | "task_status" | "group_memory" | "CCM_AGENT_RECEIPT" | "work_dir" | "acceptance_gate" | "risks" | "files_changed" | "recovery_checks" | "task_card" | "work_items" | "assignments" | "recent_messages" | "active_goal" | "safe_file_snippets" | "project_memory" | "rag_citations" | "matched_documents" | "execution_state" | "session_state" | "task_recovery" | "workflow_meta" | "dispatch_policy" | "missing_info" | "clarification_question" | "cancellation_record" | "archive_record" | "cleanup_result" | "receipt_statuses" | "failed_assertions" | "gap_fingerprint" | "rework_plan" | "verification_executed")[];
+        evidence: ("task_id" | "execution_id" | "verification" | "task_status" | "group_memory" | "CCM_AGENT_RECEIPT" | "work_dir" | "risks" | "acceptance_gate" | "files_changed" | "recovery_checks" | "task_card" | "work_items" | "assignments" | "recent_messages" | "active_goal" | "safe_file_snippets" | "project_memory" | "rag_citations" | "matched_documents" | "execution_state" | "session_state" | "task_recovery" | "workflow_meta" | "dispatch_policy" | "missing_info" | "clarification_question" | "cancellation_record" | "archive_record" | "cleanup_result" | "receipt_statuses" | "failed_assertions" | "gap_fingerprint" | "rework_plan" | "verification_executed")[];
         id: "generate_final_reply";
         label: "生成最终回复";
         category: "reply";
@@ -54557,7 +54602,7 @@ declare function buildMainAgentDecisionChain(input: {
     task_id: string;
     message_id: string;
     coordinator: string;
-    mode: "conversation" | "project_analysis" | "delegation" | "project_task" | "followup" | "governance";
+    mode: "project_analysis" | "conversation" | "delegation" | "project_task" | "followup" | "governance";
     decision: {
         selected_actions: string[];
         dispatch_policy: any;
@@ -56308,7 +56353,7 @@ export declare function appendMainAgentDecisionTrace(input: Parameters<typeof bu
     task_id: string;
     message_id: string;
     coordinator: string;
-    mode: "conversation" | "project_analysis" | "delegation" | "project_task" | "followup" | "governance";
+    mode: "project_analysis" | "conversation" | "delegation" | "project_task" | "followup" | "governance";
     decision: {
         selected_actions: string[];
         dispatch_policy: any;
@@ -58083,7 +58128,7 @@ export declare function runGroupMainAgentToolLoopSelfTest(): {
             task_id: string;
             message_id: string;
             coordinator: string;
-            mode: "conversation" | "project_analysis" | "delegation" | "project_task" | "followup" | "governance";
+            mode: "project_analysis" | "conversation" | "delegation" | "project_task" | "followup" | "governance";
             decision: {
                 selected_actions: string[];
                 dispatch_policy: any;
@@ -59834,7 +59879,7 @@ export declare function runGroupMainAgentToolLoopSelfTest(): {
             task_id: string;
             message_id: string;
             coordinator: string;
-            mode: "conversation" | "project_analysis" | "delegation" | "project_task" | "followup" | "governance";
+            mode: "project_analysis" | "conversation" | "delegation" | "project_task" | "followup" | "governance";
             decision: {
                 selected_actions: string[];
                 dispatch_policy: any;
@@ -61585,7 +61630,7 @@ export declare function runGroupMainAgentToolLoopSelfTest(): {
             task_id: string;
             message_id: string;
             coordinator: string;
-            mode: "conversation" | "project_analysis" | "delegation" | "project_task" | "followup" | "governance";
+            mode: "project_analysis" | "conversation" | "delegation" | "project_task" | "followup" | "governance";
             decision: {
                 selected_actions: string[];
                 dispatch_policy: any;
@@ -63336,7 +63381,7 @@ export declare function runGroupMainAgentToolLoopSelfTest(): {
             task_id: string;
             message_id: string;
             coordinator: string;
-            mode: "conversation" | "project_analysis" | "delegation" | "project_task" | "followup" | "governance";
+            mode: "project_analysis" | "conversation" | "delegation" | "project_task" | "followup" | "governance";
             decision: {
                 selected_actions: string[];
                 dispatch_policy: any;
@@ -65327,6 +65372,8 @@ export declare function getProjectVerificationHintDetail(projectName: string, wo
 export declare function buildProjectVerificationHints(projectName: string, workDir?: string): string[];
 export declare function compactFormText(value: any, fallback?: string): string;
 export declare function createTask(task: any): any;
+export declare function createRequirementEpicWithChildren(payload: any): any;
+export declare function updateRequirementEpicFromPlan(payload: any): any;
 export declare function classifyTaskContinuation(message: string): any;
 export declare function looksLikeTaskContinuation(message: string): any;
 export declare function getGlobalMissionChildDeliveryEvidence(task: any): {

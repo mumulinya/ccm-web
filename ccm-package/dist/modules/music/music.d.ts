@@ -1,4 +1,5 @@
 export { runMusicAgentIntentSelfTest } from "./agent";
+export { runMusicRemoteCommandQueueSelfTest } from "./state";
 interface MusicCtx {
     getMusicPetAgent: () => any;
     setMusicPetState: (state: string, detail?: string, track?: any) => void;

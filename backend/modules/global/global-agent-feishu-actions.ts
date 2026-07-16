@@ -2,12 +2,47 @@
 export function createGlobalAgentFeishuActions(deps: any) {
   const { GLOBAL_MANAGEMENT_ACTIONS, RANDOM_MUSIC_KEYWORD, buildGlobalDirectDispatchHandoff, buildGlobalSingleProjectMissionPayload, callLocalApi, formatGlobalDevelopmentDispatchVisibleResult, formatSystemStatus, getConfigs, guessCronSchedule, inferGlobalDirectDispatchRequiresCodeChanges, loadGroups, normalizeText, parseMusicKeyword, postLocalApi, postLocalSseOrJsonApi, relayGlobalTestAgentEventFromGroup, renderGlobalDirectGroupDispatchAcceptedSummary, renderGlobalDirectGroupWorkOrder } = deps
 
-  async function queueMusicPlayback(baseUrl: string, keyword: string): Promise<string> {
-    const normalizedKeyword = parseMusicKeyword(keyword) || (/(播放|放一首|放|来一首|来点|听|听歌|音乐|歌曲|歌)/.test(keyword) ? RANDOM_MUSIC_KEYWORD : normalizeText(keyword));
-    if (!normalizedKeyword) return "缺少要播放的歌曲或歌手关键词。";
-    const result = await postLocalApi(baseUrl, "/api/music/remote-command", { keyword: normalizedKeyword, source: "feishu-global-agent" });
+  async function executePlayMusic(baseUrl: string, input: { keyword?: string; mode?: string; source?: string; originalText?: string } = {}) {
+    const raw = String(input.keyword || input.originalText || "").trim();
+    const normalizedKeyword = parseMusicKeyword(raw)
+      || (/(播放|放一首|放|来一首|来点|听|听歌|音乐|歌曲|歌)/.test(raw) ? RANDOM_MUSIC_KEYWORD : normalizeText(raw));
+    if (!normalizedKeyword) {
+      return {
+        success: false,
+        message: "缺少要播放的歌曲或歌手关键词。",
+        client_effect: null,
+        command: null,
+      };
+    }
+    const mode = String(input.mode || "").trim();
+    const source = String(input.source || "global-agent").trim() || "global-agent";
+    const result = await postLocalApi(baseUrl, "/api/music/remote-command", {
+      keyword: normalizedKeyword,
+      mode,
+      source,
+    });
     const label = normalizedKeyword === RANDOM_MUSIC_KEYWORD ? "随机播放音乐" : `「${normalizedKeyword}」`;
-    return `已把${label}发送给音乐播放器。请保持 CCM 音乐播放器页面打开，它会在后台自动检索并播放。${result.command?.id ? `\n- 指令 ID：${result.command.id}` : ""}`;
+    const command = result.command || null;
+    return {
+      success: result.success !== false,
+      message: `已把${label}交给音乐播放器，CCM Web 在任意页面都会自动检索并播放。${command?.id ? `\n- 指令 ID：${command.id}` : ""}`,
+      keyword: normalizedKeyword,
+      mode,
+      command,
+      client_effect: {
+        type: "play_music",
+        params: {
+          keyword: normalizedKeyword,
+          mode,
+          command_id: command?.id || "",
+        },
+      },
+    };
+  }
+
+  async function queueMusicPlayback(baseUrl: string, keyword: string): Promise<string> {
+    const played = await executePlayMusic(baseUrl, { keyword, source: "feishu-global-agent" });
+    return played.message;
   }
   
   function fillCronParams(params: any, originalText: string, groups: any[] = [], projects: string[] = []) {
@@ -106,7 +141,13 @@ export function createGlobalAgentFeishuActions(deps: any) {
     if (GLOBAL_MANAGEMENT_ACTIONS[action.type]) return executeFeishuManagementAction(baseUrl, { ...action, params: { ...(action.params || {}), idempotency_key: traceId || action.params?.idempotency_key } }, originalText);
     const params = action.params || {};
     if (action.type === "play_music") {
-      return queueMusicPlayback(baseUrl, params.keyword || params.query || params.song || originalText);
+      const played = await executePlayMusic(baseUrl, {
+        keyword: params.keyword || params.query || params.song || originalText,
+        mode: params.mode,
+        source: options.source || "feishu-global-agent",
+        originalText,
+      });
+      return played.message;
     }
     if (action.type === "toggle_pet") {
       const operation = params.action || params.operation || "open";
@@ -249,5 +290,5 @@ export function createGlobalAgentFeishuActions(deps: any) {
     return `已识别动作 ${action.type}，但它不适合从飞书远程执行。`;
   }
 
-  return { queueMusicPlayback, fillCronParams, executeFeishuManagementAction, executeFeishuAction }
+  return { queueMusicPlayback, executePlayMusic, fillCronParams, executeFeishuManagementAction, executeFeishuAction }
 }

@@ -1,7 +1,9 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.classifyProjectChatIntent = classifyProjectChatIntent;
+exports.classifyProjectChatIntentWithModel = classifyProjectChatIntentWithModel;
 exports.runProjectChatIntentSelfTest = runProjectChatIntentSelfTest;
+const workflow_decision_1 = require("../../agents/workflow-decision");
 const GREETING_ONLY = /^(你好|您好|hi|hello|hey|在吗|在不在|早上好|下午好|晚上好|谢谢|感谢|ok|好的|嗯|哦|哈喽)[。.!！?？\s]*$/i;
 const ORDINARY_QUESTION = /^(你|我|它|这个|那个|模型|系统|项目\s*Agent|agent|Agent).{0,48}(是什么|是谁|是啥|什么意思|叫什么|什么模型|能做什么|怎么样|有问题吗|需要吗)[。.!！?？\s]*$/i;
 const PROJECT_ANALYSIS_SIGNAL = /项目|代码|仓库|架构|技术栈|目录|文件|模块|接口|页面|组件|数据库|配置|依赖|怎么运行|如何运行|能运行吗|可以运行吗/i;
@@ -32,19 +34,55 @@ function classifyProjectChatIntent(message, uploadedFiles = [], options = {}) {
     }
     return { mode: "conversation", executable: false, reason: "未发现明确项目执行动作" };
 }
+/**
+ * 健康自动入口唯一使用的项目聊天语义决策。
+ * 本地 classifyProjectChatIntent 仅保留给诊断/旧数据展示，不得在模型失败时创建任务。
+ */
+async function classifyProjectChatIntentWithModel(message, uploadedFiles = [], options = {}) {
+    const workflowDecision = options.forceTask
+        ? (0, workflow_decision_1.explicitWorkflowDecision)("execute_direct", "用户显式继续已有项目任务")
+        : await (0, workflow_decision_1.decideWorkflowWithModel)({
+            message,
+            scope: "project",
+            sourceCount: Array.isArray(uploadedFiles) ? uploadedFiles.length : 0,
+            context: {
+                project: String(options.project || ""),
+                attachments: (uploadedFiles || []).map((file) => ({
+                    name: String(file?.filename || file?.name || ""),
+                    type: String(file?.type || ""),
+                    size: Number(file?.size || 0),
+                })),
+            },
+        });
+    const mode = workflowDecision.mode === "answer"
+        ? "conversation"
+        : workflowDecision.mode === "project_analysis"
+            ? "project_analysis"
+            : "task";
+    return {
+        mode,
+        executable: workflowDecision.actionRequired,
+        reason: workflowDecision.reason,
+        workflowDecision,
+    };
+}
 function runProjectChatIntentSelfTest() {
     const cases = [
-        ["你好", "conversation"],
-        ["你是什么模型", "conversation"],
-        ["这个项目是什么架构？", "project_analysis"],
-        ["修改登录接口并运行测试", "task"],
-        ["帮我修复登录 bug 并跑测试", "task"],
+        ["你好", "answer", "conversation"],
+        ["你是什么模型", "answer", "conversation"],
+        ["这个项目是什么架构？", "project_analysis", "project_analysis"],
+        ["修改登录接口并运行测试", "execute_direct", "task"],
+        ["先规划认证重构再实施", "plan_task", "task"],
     ];
-    const checks = cases.map(([message, expected]) => ({
-        message,
-        expected,
-        actual: classifyProjectChatIntent(message).mode,
-    }));
+    const checks = cases.map(([message, modelMode, expected]) => {
+        const workflowDecision = (0, workflow_decision_1.normalizeWorkflowDecision)({ mode: modelMode, reason: "脚本化模型决策" });
+        const actual = workflowDecision.mode === "answer"
+            ? "conversation"
+            : workflowDecision.mode === "project_analysis"
+                ? "project_analysis"
+                : "task";
+        return { message, expected, actual, workflowDecision };
+    });
     return { success: checks.every(item => item.actual === item.expected), checks };
 }
 //# sourceMappingURL=project-chat-intent.js.map

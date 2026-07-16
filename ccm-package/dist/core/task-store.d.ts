@@ -1,9 +1,22 @@
 export declare function loadTasksFromSqlite(): any[];
+export declare function getTaskByIdFromSqlite(id: string): any | null;
+export declare function listTasksByParentIdFromSqlite(parentId: string): any[];
+/** 行级更新：只读写单条任务，避免整表进出。 */
+export declare function updateTaskByIdInSqlite(id: string, patchOrMutator: any): any | null;
 export declare function saveTasksToSqlite(tasks: any[]): {
     total: number;
     inserted: number;
     updated: number;
     deleted: number;
+};
+export declare function runTaskStoreAtomicBatchSelfTest(): {
+    success: boolean;
+    rollback_observed: boolean;
+    committed_count: number;
+    idempotent_replay: boolean;
+    parent_round_trip: boolean;
+    restart_recovered: boolean;
+    restart_count: number;
 };
 export declare function appendTaskLogRecord(taskId: string, entry: any, maxEntries?: number): number;
 export declare function getTaskLogRecords(taskId: string, limit?: number): any[];
@@ -13,6 +26,14 @@ export declare function replaceTaskLogsInSqlite(logs: any): void;
 export declare function appendGroupLogRecord(groupId: string, entry: any, maxEntries?: number): number;
 export declare function loadGroupLogsFromSqlite(): Record<string, any[]>;
 export declare function replaceGroupLogsInSqlite(logs: any): void;
+export declare function clearGroupLogRecords(groupId: string): number;
+export declare function runTaskStoreRowApiSelfTest(): {
+    success: boolean;
+    row_get: boolean;
+    row_update: boolean;
+    parent_list: number;
+    group_logs_cleared: number;
+};
 export declare function verifySqliteTaskStore(): {
     valid: boolean;
     integrity: string[];

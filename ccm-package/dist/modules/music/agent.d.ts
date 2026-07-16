@@ -48,6 +48,8 @@ export declare function runMusicAgentIntentSelfTest(): {
         structuredTextContentSupported: boolean;
         openAiBaseUrlUsesUnifiedEndpoint: boolean;
         anthropicBaseUrlUsesUnifiedEndpoint: boolean;
+        remoteCommandQueue: boolean;
+        playMusicIsReadRisk: boolean;
     };
     samples: {
         playSpecific: {
@@ -90,5 +92,6 @@ export declare function runMusicAgentIntentSelfTest(): {
             role: "user" | "assistant";
             content: string;
         }[];
+        queueSelfTest: any;
     };
 };

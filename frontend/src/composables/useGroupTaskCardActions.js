@@ -106,6 +106,9 @@ export function createGroupTaskCardActionHandler(options = {}) {
         await postTaskCardAction('/api/tasks/queue', { task_id: id })
       } else if (action.kind === 'gap_continue') {
         await postTaskCardAction('/api/tasks/continue-from-gaps', { id, source: 'user_gap_rework', auto_execute: true })
+      } else if (action.kind === 'approve_epic') {
+        if (!await confirmDialog(`确认批准“${card?.title || id}”的整批变更并完成 Epic 交付？`)) return
+        await postTaskCardAction('/api/tasks/requirement-epic/review', { id, operation: 'approve' })
       } else if (action.kind === 'continue_work_item') {
         if (!await confirmDialog(`继续安排“${action.reason || action.target || '已解锁工作项'}”？我会复用当前任务上下文，只推进这个工作项。`)) return
         const actionResult = await postTaskCardAction('/api/tasks/continue-from-gaps', {
@@ -127,6 +130,17 @@ export function createGroupTaskCardActionHandler(options = {}) {
           return
         }
       } else if (action.kind === 'targeted_rework') {
+        if (action.requirement_epic || card?.requirement_epic) {
+          const items = card?.requirement_epic?.items || []
+          const itemHint = items.map(item => `${item.item_key}: ${item.title}`).join('\n')
+          const itemKey = window.prompt(`输入要退回的子任务 item_key：\n${itemHint}`, items[0]?.item_key || '')
+          if (!itemKey?.trim()) return
+          const feedback = window.prompt('说明需要返工的内容：', '')
+          if (!feedback?.trim()) return
+          await postTaskCardAction('/api/tasks/requirement-epic/review', { id, operation: 'rework', item_key: itemKey.trim(), feedback: feedback.trim() })
+          await loadMessages?.()
+          return
+        }
         if (!await confirmDialog(`按“${action.title || action.label || '精准返工'}”继续任务？系统会复用原任务上下文，只处理这个缺口。`)) return
         await postTaskCardAction('/api/tasks/continue-from-gaps', {
           id,

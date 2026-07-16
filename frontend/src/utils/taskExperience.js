@@ -962,9 +962,11 @@ export const globalMissionTaskCard = (message = {}) => {
   const revisionNeedsReplan = lastContinuationKind === 'revise_goal'
     && mission.status !== 'done'
     && !['paused', 'waiting_user', 'manual_takeover', 'cancelled', 'failed', 'completed'].includes(String(supervisorStatus).toLowerCase())
-  const presentation = revisionNeedsReplan
-    ? { phase: 'planning', label: '重新规划中', progress: 35 }
-    : basePresentation
+  const presentation = mission.status === 'awaiting_change_review'
+    ? { phase: 'change_review', label: '等待整批审阅', progress: 95 }
+    : revisionNeedsReplan
+      ? { phase: 'planning', label: '重新规划中', progress: 35 }
+      : basePresentation
   const total = Number(summary.total || children.length || 0)
   const passed = Number(summary.passed || children.filter(row => row.task?.status === 'done').length || 0)
   const blocked = Number(summary.blocked || children.filter(row => ['blocked', 'failed'].includes(row.task?.status)).length || 0)
@@ -1054,6 +1056,22 @@ export const globalMissionTaskCard = (message = {}) => {
     rollback: !!mission.rollback_available,
     saveKnowledge: true,
   })
+  const requirementEpic = mission.workflow_type === 'requirement_epic' ? {
+    schema: mission.decomposition_plan?.schema || mission.requirement_decomposition?.schema || 'ccm-requirement-decomposition-v1',
+    content_hash: mission.requirement_content_hash || mission.decomposition_plan?.content_hash || '',
+    version: Number(mission.requirement_version || mission.decomposition_plan?.version || 1),
+    title: mission.decomposition_plan?.epic_title || mission.title,
+    items: asArray(mission.decomposition_plan?.items || mission.requirement_decomposition?.items),
+    child_task_ids: asArray(mission.child_task_ids),
+    summary,
+  } : null
+  if (mission.status === 'awaiting_change_review') {
+    actions.splice(0, actions.length,
+      ...(files.length ? [{ id: 'changes', label: '查看整批改动', kind: 'view_changes', tone: 'outline' }] : []),
+      { id: 'approve_epic', label: '批准 Epic 交付', kind: 'approve_epic', tone: 'primary' },
+      { id: 'targeted_rework', label: '退回子任务返工', kind: 'targeted_rework', tone: 'warning', requirement_epic: true },
+    )
+  }
   const missionTodoPlan = mission.todo_plan || mission.todoPlan || mission.workchain?.todo_plan || mission.workchain?.todoPlan || missionDelivery.todo_plan || missionDelivery.todoPlan || null
   const missionTestAgentExecutionPlan = mission.test_agent_execution_plan || mission.testAgentExecutionPlan || missionDelivery.test_agent_execution_plan || missionDelivery.testAgentExecutionPlan || mission.workchain?.test_agent_execution_plan || mission.workchain?.testAgentExecutionPlan || null
   const missionTestAgentExecutionPlanSummary = normalizeTestAgentExecutionPlanSummary(
@@ -1117,6 +1135,8 @@ export const globalMissionTaskCard = (message = {}) => {
   const notificationText = compact(message.content, 260)
   const nextAction = presentation.phase === 'completed'
     ? '可以查看交付总结、验证结果和风险提示'
+    : presentation.phase === 'change_review'
+      ? '请审阅整批变更后批准交付，或退回指定子任务返工。'
     : presentation.phase === 'needs_user'
       ? waitingReason || notificationText || '请补充任务卡中的待确认信息；收到后我会继续执行和验收。'
       : presentation.phase === 'failed'
@@ -1161,6 +1181,7 @@ export const globalMissionTaskCard = (message = {}) => {
     userHandoff,
     recovery_summary: recoverySummary,
     continuation_status: continuationStatus,
+    requirement_epic: requirementEpic,
     receipt_rework_summary: receiptReworkSummary,
     completed: uniq([passed ? `${passed}/${total || passed} 个执行目标已完成` : '', files.length ? `修改了 ${files.length} 个文件` : '', verification.length ? `${verification.length} 项检查已执行` : '']),
     blockers: blocked ? [`${blocked} 个执行目标待补齐`] : risks.slice(0, 4),

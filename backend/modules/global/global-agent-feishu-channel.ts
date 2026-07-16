@@ -1,10 +1,16 @@
 import * as crypto from "crypto";
+import * as fs from "fs";
+import * as path from "path";
 import type { CollabCtx } from "../collaboration/collaboration";
 import type { GlobalAgentRun } from "../../agents/global/loop";
+import { UPLOAD_DIR } from "../../core/utils";
+import { downloadFeishuMessageResource } from "../collaboration/feishu";
+import { ingestRequirementSources, type RequirementIngestionResult } from "../requirements/source-ingestion";
+import { decideWorkflowWithModel } from "../../agents/workflow-decision";
 
 // Feishu event decoding, message lifecycle, turn control, and restart recovery.
 export function createGlobalAgentFeishuChannel(deps: any) {
-  const { GLOBAL_AGENT_VISIBLE_RESULT_FALLBACK, appendGlobalActionAudit, appendGlobalAgentConversationMessage, appendTraceEvent, bindFeishuIdentifiersFromValue, bindFeishuTaskContext, cancelGlobalAgentRun, conversationTurnControl, createAgenticRuntime, ensureTraceId, feishuRuntimeEventPresentation, findWaitingGlobalAgentRun, formatMissionStatus, getFeishuMessageId, getGlobalAgentConversationMessages, getGlobalAgentRun, getGlobalDevelopmentMission, globalRunVisibleReply, isGlobalProgressStatusRequest, listGlobalAgentRuns, notifyFeishuTaskStage, recordFeishuInbound, resolveFeishuGlobalAgentSessionId, resumeGlobalAgentRun, runAgenticGlobalRequest, sendFeishuReportMessage, steerGlobalAgentRun } = deps
+  const { GLOBAL_AGENT_VISIBLE_RESULT_FALLBACK, appendGlobalActionAudit, appendGlobalAgentConversationMessage, appendTraceEvent, bindFeishuIdentifiersFromValue, bindFeishuTaskContext, cancelGlobalAgentRun, conversationTurnControl, createAgenticRuntime, ensureTraceId, feishuRuntimeEventPresentation, findWaitingGlobalAgentRun, formatMissionStatus, getConfigs, getFeishuMessageId, getGlobalAgentConversationMessages, getGlobalAgentRun, getGlobalDevelopmentMission, globalRunVisibleReply, isGlobalProgressStatusRequest, listGlobalAgentRuns, loadGroups, notifyFeishuTaskStage, recordFeishuInbound, resolveFeishuGlobalAgentSessionId, resumeGlobalAgentRun, runAgenticGlobalRequest, sendFeishuReportMessage, steerGlobalAgentRun } = deps
 
   function decryptFeishuEvent(encrypted: string, encryptKey: string): any {
     const key = crypto.createHash("sha256").update(encryptKey).digest();
@@ -30,13 +36,68 @@ export function createGlobalAgentFeishuChannel(deps: any) {
   
   function extractFeishuMessageText(payload: any): string {
     const message = payload?.event?.message || {};
-    if (message.message_type !== "text") return "";
     let content: any = {};
     try { content = JSON.parse(String(message.content || "{}")); } catch {}
+    if (["file", "media", "image"].includes(String(message.message_type || ""))) {
+      const fileName = String(content.file_name || content.name || (message.message_type === "image" ? "需求图片.png" : "需求附件")).trim();
+      return `请读取附件「${fileName}」，根据我的真实目标判断是直接回答、只读分析、执行、先规划还是拆成 Epic；未经确认不要创建或派发任务。`;
+    }
+    if (message.message_type !== "text") return "";
     return String(content.text || "")
       .replace(/@_user_\d+/g, "")
       .replace(/<at[^>]*>.*?<\/at>/gi, "")
       .trim();
+  }
+
+  function safeFeishuFileName(value: any, fallback: string) {
+    const name = path.basename(String(value || fallback)).replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").slice(0, 180);
+    return name || fallback;
+  }
+
+  function feishuRequirementTargets() {
+    return [
+      ...(typeof loadGroups === "function" ? loadGroups().map((group: any) => ({
+        type: "group",
+        id: group.id,
+        name: group.name || group.id,
+        capabilities: (group.members || []).flatMap((member: any) => member.skills || member.capabilities || []),
+      })) : []),
+      ...(typeof getConfigs === "function" ? getConfigs().map((config: any) => ({ type: "project", id: config.name, name: config.name })) : []),
+    ];
+  }
+
+  async function ingestFeishuRequirementAttachment(payload: any, userText: string): Promise<RequirementIngestionResult | null> {
+    const message = payload?.event?.message || {};
+    const messageType = String(message.message_type || "").toLowerCase();
+    const targets = feishuRequirementTargets();
+    if (["file", "media", "image"].includes(messageType)) {
+      let content: any = {};
+      try { content = JSON.parse(String(message.content || "{}")); } catch {}
+      const fileKey = String(content.file_key || content.image_key || "").trim();
+      const messageId = String(message.message_id || getFeishuMessageId(payload) || "").trim();
+      if (!fileKey || !messageId) throw new Error("飞书附件事件缺少资源标识");
+      const image = messageType === "image" && !content.file_key;
+      const fallbackName = image ? `feishu-image-${fileKey.slice(-8)}.png` : `feishu-file-${fileKey.slice(-8)}`;
+      const fileName = safeFeishuFileName(content.file_name || content.name, fallbackName);
+      const downloaded = await downloadFeishuMessageResource({
+        messageId,
+        fileKey,
+        type: image ? "image" : "file",
+        maxBytes: 25 * 1024 * 1024,
+      });
+      fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+      const savedPath = path.join(UPLOAD_DIR, `feishu-${Date.now()}-${crypto.randomBytes(4).toString("hex")}-${fileName}`);
+      fs.writeFileSync(savedPath, downloaded.buffer);
+      return ingestRequirementSources({
+        files: [{ filename: fileName, savedPath, size: downloaded.size }],
+        userText,
+        extractRequirement: true,
+        decomposeRequirement: false,
+        availableTargets: targets,
+      });
+    }
+    // 纯文本直接交给 Agentic Loop；由大模型选择工作流。
+    return null;
   }
   
   function extractCcConnectHookText(payload: any): string {
@@ -79,6 +140,7 @@ export function createGlobalAgentFeishuChannel(deps: any) {
     const destination = recordFeishuInbound({ payload, sessionId: conversationId, messageId: getFeishuMessageId(payload) });
     bindFeishuTaskContext({ sessionId: conversationId, destination, source: "feishu-control-bot" });
     const historyBeforeUser = getGlobalAgentConversationMessages(conversationId);
+    const sourceIngestion = await ingestFeishuRequirementAttachment(payload, text);
     appendGlobalAgentConversationMessage(conversationId, "user", text, "feishu");
     const auditBase = {
       source: "feishu-control-bot",
@@ -91,13 +153,6 @@ export function createGlobalAgentFeishuChannel(deps: any) {
       if (/^(帮助|help|\/help)$/i.test(text)) {
         const markdown = "可以直接发送业务需求，也可以说：\n- 查看任务状态\n- 检查系统状态\n- 给某个协作群或项目执行成员下发指令\n- 每天 9 点执行某项任务\n- 暂停、恢复或重试指定任务\n\n删除等高风险操作必须回到 CCM 界面确认。";
         if (sendReport) await sendFeishuReportMessage({ title: "全局 Agent 使用帮助", markdown });
-        appendGlobalAgentConversationMessage(conversationId, "assistant", markdown, "feishu");
-        return markdown;
-      }
-      if (isGlobalProgressStatusRequest(text)) {
-        const markdown = formatMissionStatus();
-        appendGlobalActionAudit({ ...auditBase, action: { type: "mission_status", params: { message: text } }, status: "success", result: { summary: markdown } });
-        if (sendReport) await sendFeishuReportMessage({ title: "全局任务状态", markdown });
         appendGlobalAgentConversationMessage(conversationId, "assistant", markdown, "feishu");
         return markdown;
       }
@@ -133,6 +188,7 @@ export function createGlobalAgentFeishuChannel(deps: any) {
           sessionId: conversationId,
           source: "feishu-control-bot",
           traceId,
+          sourceIngestion,
           onEvent: onFeishuRuntimeEvent,
         });
       }
@@ -252,8 +308,13 @@ export function createGlobalAgentFeishuChannel(deps: any) {
         metadata: { source: "feishu-control-bot", trace_id: options.traceId || "" },
       });
       try {
+        const continuationKind = (await decideWorkflowWithModel({
+          message: command.message,
+          scope: "global",
+          context: { current_goal: activeRun.original_user_message || activeRun.user_message || "", phase: activeRun.status },
+        })).continuationKind;
         steerGlobalAgentRun(activeRun.id, command.message, {
-          kind: "auto",
+          kind: continuationKind,
           source: "feishu_mid_turn",
           requestId: queued.turn.request_id,
         });

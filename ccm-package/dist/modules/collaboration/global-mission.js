@@ -272,16 +272,19 @@ function globalMissionChildGatePassed(task, deps) {
 function refreshGlobalMissionParentInTaskList(tasks, parentId, deps) {
     if (!parentId)
         return null;
-    const parent = tasks.find((item) => item.id === parentId && item.workflow_type === "global_mission");
+    const parent = tasks.find((item) => item.id === parentId && ["global_mission", "requirement_epic"].includes(String(item.workflow_type || "")));
     if (!parent)
         return null;
     const children = tasks.filter((item) => item.parent_task_id === parentId);
     const rows = children.map((child) => {
         const evidence = getGlobalMissionChildDeliveryEvidence(child, deps);
         const gatePassed = globalMissionChildGatePassedFromEvidence(child, deps, evidence);
+        child.global_mission_gate_passed = gatePassed;
+        child.global_mission_gate_checked_at = new Date().toISOString();
         return {
             ...evidence,
             task_id: child.id,
+            requirement_item_key: child.requirement_item_key || "",
             title: child.title,
             target_type: child.mission_target?.type || child.assign_type,
             target: child.mission_target?.name || child.group_id || child.target_project || "",
@@ -317,20 +320,31 @@ function refreshGlobalMissionParentInTaskList(tasks, parentId, deps) {
         .filter((item) => item?.path);
     const controlMode = parent.supervisor_control?.mode || "automatic";
     const cancelled = parent.status === "cancelled";
-    parent.status = allPassed ? "done" : cancelled ? "cancelled" : "in_progress";
-    parent.status_detail = allPassed
-        ? "所有执行成员子任务都已通过交付验收"
-        : cancelled
-            ? (parent.status_detail || "全局任务已取消")
-            : controlMode === "manual"
-                ? "全局任务已由用户人工接管"
-                : controlMode === "paused"
-                    ? "全局任务跟进已暂停"
-                    : failed > 0
-                        ? `${failed} 个子任务执行失败，等待全局 Agent重试或用户干预`
-                        : blocked > 0
-                            ? `${blocked} 个子任务存在验收缺口或阻塞`
-                            : `跨项目任务执行中：${completed}/${rows.length} 已完成`;
+    const requirementEpicApproved = parent.workflow_type === "requirement_epic"
+        && parent.epic_review?.status === "approved"
+        && parent.status === "done";
+    parent.status = requirementEpicApproved
+        ? "done"
+        : allPassed
+            ? (parent.workflow_type === "requirement_epic" ? "awaiting_change_review" : "done")
+            : cancelled ? "cancelled" : "in_progress";
+    parent.status_detail = requirementEpicApproved
+        ? (parent.status_detail || "用户已审阅整批变更并批准需求 Epic 交付")
+        : allPassed
+            ? (parent.workflow_type === "requirement_epic"
+                ? "所有子任务已通过交付验收，等待审阅整批变更并完成 Epic 集成验收"
+                : "所有执行成员子任务都已通过交付验收")
+            : cancelled
+                ? (parent.status_detail || "全局任务已取消")
+                : controlMode === "manual"
+                    ? "全局任务已由用户人工接管"
+                    : controlMode === "paused"
+                        ? "全局任务跟进已暂停"
+                        : failed > 0
+                            ? `${failed} 个子任务执行失败，等待全局 Agent重试或用户干预`
+                            : blocked > 0
+                                ? `${blocked} 个子任务存在验收缺口或阻塞`
+                                : `跨项目任务执行中：${completed}/${rows.length} 已完成`;
     parent.mission_summary = {
         total: rows.length,
         completed,
@@ -344,8 +358,14 @@ function refreshGlobalMissionParentInTaskList(tasks, parentId, deps) {
         updated_at: now,
     };
     parent.delivery_summary = {
-        headline: allPassed ? "全局开发任务已完成并通过全部交付验收" : "全局开发任务仍在执行或验收中",
-        global_mission: true,
+        ...(parent.delivery_summary || {}),
+        headline: requirementEpicApproved
+            ? "需求 Epic 已通过整批变更审阅并完成交付"
+            : allPassed
+                ? (parent.workflow_type === "requirement_epic" ? "需求 Epic 的子任务已全部通过，等待整批变更审阅" : "全局开发任务已完成并通过全部交付验收")
+                : (parent.workflow_type === "requirement_epic" ? "需求 Epic 仍在执行或验收中" : "全局开发任务仍在执行或验收中"),
+        global_mission: parent.workflow_type === "global_mission",
+        requirement_epic: parent.workflow_type === "requirement_epic",
         child_tasks: rows,
         actual_file_changes: actualFileChanges,
         actual_file_change_count: actualFileChanges.length,
@@ -355,7 +375,7 @@ function refreshGlobalMissionParentInTaskList(tasks, parentId, deps) {
         failed_count: failed,
         blocked_count: blocked,
         reviewing_count: reviewing,
-        acceptance_gate_passed: allPassed,
+        acceptance_gate_passed: requirementEpicApproved || (allPassed && parent.workflow_type !== "requirement_epic"),
         acceptance_evidence_status_counts: {
             strong: rows.filter((item) => item.acceptance_evidence_status === "strong").length,
             weak: rows.filter((item) => item.acceptance_evidence_status === "weak").length,
@@ -364,8 +384,10 @@ function refreshGlobalMissionParentInTaskList(tasks, parentId, deps) {
         generated_at: now,
     };
     parent.updated_at = now;
-    if (allPassed)
+    if (requirementEpicApproved || (allPassed && parent.workflow_type !== "requirement_epic"))
         parent.completed_at = parent.completed_at || now;
+    else if (parent.workflow_type === "requirement_epic" && allPassed)
+        delete parent.completed_at;
     else if (!cancelled)
         delete parent.completed_at;
     return parent;
@@ -427,6 +449,14 @@ function runGlobalMissionStrongAcceptanceSelfTest() {
     const strongTasks = [strongParent, strongChild];
     const refreshedWeak = refreshGlobalMissionParentInTaskList(weakTasks, "mission-weak", deps);
     const refreshedStrong = refreshGlobalMissionParentInTaskList(strongTasks, "mission-strong", deps);
+    const epicParent = { id: "epic-strong", workflow_type: "requirement_epic", status: "in_progress" };
+    const epicChild = { ...strongChild, id: "epic-child", parent_task_id: "epic-strong", requirement_item_key: "feature" };
+    const epicTasks = [epicParent, epicChild];
+    const refreshedEpicReview = refreshGlobalMissionParentInTaskList(epicTasks, "epic-strong", deps);
+    const approvedEpic = refreshGlobalMissionParentInTaskList([
+        { ...refreshedEpicReview, status: "done", epic_review: { status: "approved" } },
+        epicChild,
+    ], "epic-strong", deps);
     const weakRow = refreshedWeak?.mission_summary?.children?.[0] || {};
     const strongRow = refreshedStrong?.mission_summary?.children?.[0] || {};
     const checks = {
@@ -437,6 +467,8 @@ function runGlobalMissionStrongAcceptanceSelfTest() {
         globalMissionStrongAcceptanceGatePasses: globalMissionChildGatePassed(strongChild, deps) === true,
         globalMissionStrongAcceptanceParentCompletes: refreshedStrong?.status === "done" && refreshedStrong?.mission_summary?.all_passed === true,
         globalMissionStrongAcceptanceEvidenceVisible: strongRow.strong_acceptance_passed === true && strongRow.acceptance_evidence_status === "strong",
+        requirementEpicWaitsForBatchReview: refreshedEpicReview?.status === "awaiting_change_review" && !refreshedEpicReview?.completed_at,
+        requirementEpicCompletesOnlyAfterApproval: approvedEpic?.status === "done" && approvedEpic?.epic_review?.status === "approved" && !!approvedEpic?.completed_at,
     };
     return { pass: Object.values(checks).every(Boolean), checks, weak: refreshedWeak, strong: refreshedStrong };
 }

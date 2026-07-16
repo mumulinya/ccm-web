@@ -487,6 +487,32 @@ import {
   updateTask,
 } from "./collaboration";
 
+let runtimeCollabCtx: CollabCtx | null = null;
+const unlockingMissionParents = new Set<string>();
+
+export function bindTaskRuntimeCollabCtx(ctx: CollabCtx) {
+  if (ctx) runtimeCollabCtx = ctx;
+}
+
+/** 子任务强验收通过后立即调度父 Epic，解锁并入队后继节点（不依赖看门狗轮询）。 */
+export function scheduleRequirementEpicDependencyUnlock(parentId: string, reason = "child_gate_passed") {
+  const missionId = String(parentId || "").trim();
+  if (!missionId || unlockingMissionParents.has(missionId)) return { scheduled: false, reason: "busy_or_missing" };
+  const ctx = runtimeCollabCtx;
+  if (!ctx) return { scheduled: false, reason: "collab_ctx_unbound" };
+  unlockingMissionParents.add(missionId);
+  setImmediate(() => {
+    try {
+      require("./collaboration-global-missions").superviseGlobalDevelopmentMissionCycle(missionId, ctx, { max_attempts: 3 });
+    } catch (error: any) {
+      console.warn(`[Epic 依赖解锁] ${missionId} (${reason}):`, error?.message || error);
+    } finally {
+      unlockingMissionParents.delete(missionId);
+    }
+  });
+  return { scheduled: true, mission_id: missionId, reason };
+}
+
 export function enqueueTask(taskId: string, ctx: CollabCtx) {
   const tasks = loadTasks();
   const task = tasks.find(t => t.id === taskId);
@@ -502,6 +528,22 @@ export function enqueueTask(taskId: string, ctx: CollabCtx) {
   if (isTaskPaused(task)) {
     addTaskLog(taskId, "info", "任务已暂停，跳过入队");
     return { queued: false, message: "任务已暂停，跳过入队" };
+  }
+  const dependencyIds = Array.isArray(task.mission_dependencies) ? task.mission_dependencies.map(String).filter(Boolean) : [];
+  const blockedDependencies = dependencyIds.filter((dependencyId: string) => {
+    const dependency = tasks.find((candidate: any) => String(candidate.id) === dependencyId);
+    if (!dependency || dependency.status !== "done") return true;
+    const summary = dependency.delivery_summary || {};
+    if (task.parent_workflow_type === "requirement_epic" || task.requirement_epic_id) {
+      return dependency.global_mission_gate_passed !== true;
+    }
+    return false;
+  });
+  if (blockedDependencies.length) {
+    const message = `等待前置子任务通过交付验收：${blockedDependencies.join("、")}`;
+    updateTask(taskId, { status: "pending", status_detail: message, dependency_blocked: true });
+    addTaskLog(taskId, "info", message);
+    return { queued: false, blocked: true, dependency_wait: true, dependencies: blockedDependencies, message };
   }
 
   const readiness = getTaskAgentExecutionReadiness(task);
@@ -566,6 +608,7 @@ export function createAndQueueTask(task: any, ctx: CollabCtx) {
 }
 
 export function resumeTaskQueues(ctx: CollabCtx, options: any = {}) {
+  bindTaskRuntimeCollabCtx(ctx);
   const testAgentRunnerRecovery = reconcileTestAgentRunnerRecords();
   const traceBackfilled = backfillTaskTraceIds();
   const tasks = loadTasks();
@@ -579,6 +622,31 @@ export function resumeTaskQueues(ctx: CollabCtx, options: any = {}) {
   for (const entry of candidates) {
     const task = entry.task;
     const recoveryDecision = entry.decision;
+    const dependencyIds = Array.isArray(task?.mission_dependencies) ? task.mission_dependencies.map(String).filter(Boolean) : [];
+    const blockedDependencies = dependencyIds.filter((dependencyId: string) => {
+      const dependency = tasks.find((candidate: any) => String(candidate.id) === dependencyId);
+      if (!dependency || dependency.status !== "done") return true;
+      const summary = dependency.delivery_summary || {};
+      const report = summary.delivery_report || dependency.delivery_report || {};
+      if (task?.parent_workflow_type === "requirement_epic" || task?.requirement_epic_id) {
+        return dependency.global_mission_gate_passed !== true;
+      }
+      return summary.acceptance_gate_passed !== true
+        && summary.acceptanceGatePassed !== true
+        && summary.acceptance_gate?.pass !== true
+        && report.status !== "done";
+    });
+    if (blockedDependencies.length > 0) {
+      results.push({
+        task_id: task.id,
+        queued: false,
+        skipped: true,
+        dependency_wait: true,
+        dependencies: blockedDependencies,
+        message: "等待前置子任务通过交付验收",
+      });
+      continue;
+    }
     if (recoveryDecision.mode === "skip") {
       results.push({
         task_id: task.id,
@@ -844,6 +912,7 @@ export function runTaskWatchdog(ctx: CollabCtx, options: any = {}) {
   const results: any[] = [];
   const gapResults: any[] = [];
   const workItemResults: any[] = [];
+  const requirementEpicResults: any[] = [];
   const executionReadiness = getAgentExecutionReadiness();
   const freshRecoveryProbeGroups = getAgentRecoveryProbeGroups(taskSnapshot)
     .filter((group: any) => getAgentProbeHealth(readAgentProbeStatus(group.probe_target)).successFresh);
@@ -927,7 +996,32 @@ export function runTaskWatchdog(ctx: CollabCtx, options: any = {}) {
     ));
   }
 
-  const stateChanged = results.length > 0 || workItemResults.length > 0 || gapResults.length > 0 || Number(blockedRecovery?.recovered || 0) > 0 || Number(runtimeRetry?.queued || 0) > 0;
+  for (const epic of taskSnapshot.filter((task: any) =>
+    task.workflow_type === "requirement_epic"
+    && task.intake_state === "confirmed"
+    && !["done", "cancelled", "archived"].includes(String(task.status || ""))
+  )) {
+    try {
+      const cycle = require("./collaboration-global-missions").superviseGlobalDevelopmentMissionCycle(epic.id, ctx, {
+        max_attempts: options.epic_max_attempts || options.epicMaxAttempts || 3,
+      });
+      requirementEpicResults.push({
+        epic_id: epic.id,
+        terminal: cycle?.terminal === true,
+        actions: cycle?.actions || [],
+        waiting_user: cycle?.waiting_user || [],
+      });
+    } catch (error: any) {
+      requirementEpicResults.push({ epic_id: epic.id, error: error?.message || String(error), actions: [], waiting_user: [] });
+    }
+  }
+
+  const stateChanged = results.length > 0
+    || workItemResults.length > 0
+    || gapResults.length > 0
+    || requirementEpicResults.some(item => item.actions.length > 0)
+    || Number(blockedRecovery?.recovered || 0) > 0
+    || Number(runtimeRetry?.queued || 0) > 0;
   return {
     success: true,
     recovered: results.filter(item => item.queued).length + Number(blockedRecovery?.recovered || 0),
@@ -947,6 +1041,7 @@ export function runTaskWatchdog(ctx: CollabCtx, options: any = {}) {
     gap_results: gapResults,
     gap_continue_skipped_reason: status.gap_rework.length > 0 && !canAutoContinueGaps ? dailyDevExecutionReadiness.message : "",
     runtime_retry: runtimeRetry,
+    requirement_epic_results: requirementEpicResults,
     runtime_retry_skipped_reason: status.runtime_failed.length > 0 && !canAutoRetryRuntimeFailures
       ? (executionReadiness.ready ? "等待目标项目 Agent CLI 探针通过后再自动重试" : executionReadiness.message)
       : "",
@@ -1081,6 +1176,7 @@ export function stopAgentRecoveryMonitor() {
 }
 
 export function startTaskWatchdog(ctx: CollabCtx) {
+  bindTaskRuntimeCollabCtx(ctx);
   if (taskWatchdogTimer) clearInterval(taskWatchdogTimer);
   const autoRecover = /^(1|true|yes|on)$/i.test(String(process.env.CCM_AUTO_TASK_WATCHDOG_RECOVERY || ""));
   const tick = () => {

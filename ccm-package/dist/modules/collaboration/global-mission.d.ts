@@ -37,6 +37,8 @@ export declare function runGlobalMissionStrongAcceptanceSelfTest(): {
         globalMissionStrongAcceptanceGatePasses: boolean;
         globalMissionStrongAcceptanceParentCompletes: boolean;
         globalMissionStrongAcceptanceEvidenceVisible: boolean;
+        requirementEpicWaitsForBatchReview: boolean;
+        requirementEpicCompletesOnlyAfterApproval: boolean;
     };
     weak: any;
     strong: any;

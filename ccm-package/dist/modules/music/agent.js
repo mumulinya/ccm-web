@@ -457,6 +457,7 @@ async function callAnthropicNative(cfg, system, messages, tools, res) {
     }
 }
 function runMusicAgentIntentSelfTest() {
+    const { runMusicRemoteCommandQueueSelfTest } = require("./state");
     const playSpecific = normalizeMusicAgentAction({ action: "play_music", keyword: "周杰伦 晴天", confidence: 0.93 }, "我想听周杰伦的晴天", "cloud", "agent");
     const playRandom = normalizeMusicAgentAction({}, "播放音乐", "cloud", "fallback");
     const searchOnly = normalizeMusicAgentAction({ action: "search_music", keyword: "轻音乐", confidence: 0.9 }, "搜索轻音乐", "cloud", "agent");
@@ -470,6 +471,16 @@ function runMusicAgentIntentSelfTest() {
         { role: "operator", content: [{ type: "input_text", text: "搜索轻音乐" }] },
         { role: "agent", content: [{ type: "output_text", text: "找到一些结果" }] },
     ], "继续推荐");
+    const queueSelfTest = runMusicRemoteCommandQueueSelfTest();
+    const playMusicSpec = (() => {
+        try {
+            const { GLOBAL_AGENT_TOOL_SPECS } = require("../../agents/global/loop");
+            return (GLOBAL_AGENT_TOOL_SPECS || []).find((item) => item.name === "play_music");
+        }
+        catch {
+            return null;
+        }
+    })();
     const checks = {
         agentPlayAction: playSpecific.type === "play_music" && playSpecific.keyword === "周杰伦 晴天" && playSpecific.source === "agent",
         genericPlayBecomesRandom: playRandom.type === "play_music" && playRandom.keyword === exports.RANDOM_MUSIC_KEYWORD,
@@ -482,7 +493,9 @@ function runMusicAgentIntentSelfTest() {
         structuredTextContentSupported: structuredHistory.map(item => item.content).join("|") === "搜索轻音乐|找到一些结果|继续推荐",
         openAiBaseUrlUsesUnifiedEndpoint: (0, group_orchestrator_llm_client_1.normalizeChatCompletionsUrl)("https://provider.example") === "https://provider.example/v1/chat/completions",
         anthropicBaseUrlUsesUnifiedEndpoint: (0, group_orchestrator_llm_client_1.normalizeAnthropicMessagesUrl)("https://provider.example") === "https://provider.example/v1/messages",
+        remoteCommandQueue: queueSelfTest.success === true,
+        playMusicIsReadRisk: !playMusicSpec || playMusicSpec.risk === "read",
     };
-    return { pass: Object.values(checks).every(Boolean), checks, samples: { playSpecific, playRandom, searchOnly, questionOnly, normalizedHistory, structuredHistory } };
+    return { pass: Object.values(checks).every(Boolean), checks, samples: { playSpecific, playRandom, searchOnly, questionOnly, normalizedHistory, structuredHistory, queueSelfTest } };
 }
 //# sourceMappingURL=agent.js.map

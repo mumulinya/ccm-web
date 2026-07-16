@@ -1471,6 +1471,7 @@ async function callAgent(projectName, message, workDir, agentType, timeoutMs, wo
                 providerMemoryChannelEvidence,
                 memoryContextConsumptionReceipt,
                 memoryContextConsumptionRecovery,
+                usage: normalized.usage || null,
                 exitCode: managed.exitCode,
                 signal: managed.signal,
             });
@@ -1490,6 +1491,7 @@ async function callAgent(projectName, message, workDir, agentType, timeoutMs, wo
             isError: false,
             runnerStarted: durableDirectDispatch ? durableDirectDispatchStarted : true,
             fileChanges,
+            usage: normalized.usage || null,
         });
         (0, db_1.recordMetric)(projectName, {
             ...metricContext,
@@ -1580,6 +1582,7 @@ async function callAgent(projectName, message, workDir, agentType, timeoutMs, wo
                     isError: false,
                     runnerStarted: true,
                     fileChanges,
+                    usage: runner.usage || null,
                 });
                 (0, db_1.recordMetric)(projectName, {
                     ...metricContext,
@@ -1765,7 +1768,7 @@ function callAgentForGroupStream(projectName, message, workDir, agentType, optio
                 try {
                     if (typeof options.onDone === "function") {
                         pushWorkEvent("done", "外部 Runner 执行完成", { final: true, fileChanges });
-                        options.onDone({ text: runner.output, fileChanges, isError: false, runnerStarted: true, runnerRequestId: runner.runnerRequestId, nativeSessionId: runner.nativeSessionId || "", ...nativeContinuationDoneFields(runner.nativeContinuationEvidence), nativeModelCapabilityReceipt: runner.nativeModelCapabilityReceipt || null, nativeModelCapabilityRecord: runner.nativeModelCapabilityRecord || null, modelCapabilityRefreshOutcome: runner.modelCapabilityRefreshOutcome || null, providerToolAccessEvidence: runner.providerToolAccessEvidence || null, workEvents });
+                        options.onDone({ text: runner.output, fileChanges, isError: false, runnerStarted: true, runnerRequestId: runner.runnerRequestId, nativeSessionId: runner.nativeSessionId || "", ...nativeContinuationDoneFields(runner.nativeContinuationEvidence), nativeModelCapabilityReceipt: runner.nativeModelCapabilityReceipt || null, nativeModelCapabilityRecord: runner.nativeModelCapabilityRecord || null, modelCapabilityRefreshOutcome: runner.modelCapabilityRefreshOutcome || null, providerToolAccessEvidence: runner.providerToolAccessEvidence || null, providerMemoryChannelEvidence: runner.providerMemoryChannelEvidence || null, memoryContextConsumptionReceipt: runner.memoryContextConsumptionReceipt || null, memoryContextConsumptionRecovery: runner.memoryContextConsumptionRecovery || null, usage: runner.usage || null, workEvents });
                     }
                 }
                 catch { }
@@ -1856,6 +1859,10 @@ function callAgentForGroupStream(projectName, message, workDir, agentType, optio
                 taskAgentSessionId: options.taskAgentSessionId || options.task_agent_session_id || "",
                 nativeSessionId: nativeContinuationEvidence.effectiveNativeSessionId,
             });
+            // This direct CLI path does not inject the trusted provider-memory channel.
+            const providerMemoryChannelEvidence = null;
+            const memoryContextConsumptionReceipt = null;
+            const memoryContextConsumptionRecovery = null;
             const nativeModelCapabilityReceipt = isError ? null : (0, runtime_1.extractNativeModelCapabilityReceipt)(agentType, output, {
                 runner: "direct-cli",
                 runnerRequestId: durableGroupDispatch?.id || "",
@@ -1933,6 +1940,7 @@ function callAgentForGroupStream(projectName, message, workDir, agentType, optio
                     nativeModelCapabilityReceipt,
                     nativeModelCapabilityRecord,
                     providerToolAccessEvidence,
+                    usage: normalized.usage || null,
                 });
                 durableGroupDispatchCompleted = true;
             }
@@ -1947,7 +1955,7 @@ function callAgentForGroupStream(projectName, message, workDir, agentType, optio
             try {
                 if (typeof options.onDone === "function") {
                     pushWorkEvent(isError ? "error" : "done", isError ? finalText : "执行完成", { final: true, fileChanges });
-                    options.onDone({ text: finalText, fileChanges, isError, runnerRequestId: durableGroupDispatch?.id || "", runnerStarted: durableGroupDispatch ? durableGroupDispatchStarted : true, nativeSessionId: durableNativeSessionId, ...nativeContinuationDoneFields(nativeContinuationEvidence), nativeModelCapabilityReceipt, nativeModelCapabilityRecord, modelCapabilityRefreshOutcome, providerToolAccessEvidence, workEvents });
+                    options.onDone({ text: finalText, fileChanges, isError, runnerRequestId: durableGroupDispatch?.id || "", runnerStarted: durableGroupDispatch ? durableGroupDispatchStarted : true, nativeSessionId: durableNativeSessionId, ...nativeContinuationDoneFields(nativeContinuationEvidence), nativeModelCapabilityReceipt, nativeModelCapabilityRecord, modelCapabilityRefreshOutcome, providerToolAccessEvidence, providerMemoryChannelEvidence, memoryContextConsumptionReceipt, memoryContextConsumptionRecovery, usage: normalized.usage || null, workEvents });
                 }
             }
             catch { }
@@ -1998,6 +2006,9 @@ function callAgentStream(projectName, message, workDir, agentType, res, options 
     const showTaskExperience = messageMode === "task";
     const changeSnapshot = workDir ? (0, utils_1.createFileChangeSnapshot)(workDir) : null;
     const projectRun = (0, chat_runs_1.createProjectChatRun)(projectName, options.userMessage || message, workDir, String(options.parentRunId || options.parent_run_id || ""));
+    projectRun.message_mode = messageMode;
+    projectRun.workflow_decision = options.workflowDecision || options.workflow_decision || null;
+    (0, chat_runs_1.saveProjectChatRuns)();
     const { session: taskAgentSession, options: taskAgentSessionOptions } = bindProjectRunAgentSession(projectRun, projectName, agentType);
     const safeCwd = (workDir || process.cwd()).replace(/\\/g, "/");
     const tmpMsg = path.join(utils_1.UPLOAD_DIR, `_msg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.txt`);
@@ -2040,7 +2051,7 @@ function callAgentStream(projectName, message, workDir, agentType, res, options 
     });
     if (typeof res.flushHeaders === "function")
         res.flushHeaders();
-    send({ type: "presentation", message_mode: messageMode, show_task_card: showTaskExperience });
+    send({ type: "presentation", message_mode: messageMode, show_task_card: showTaskExperience, workflow_decision: projectRun.workflow_decision });
     if (showTaskExperience)
         send({ type: "task_runtime", run: (0, chat_runs_1.publicProjectChatRun)(projectRun), taskExperience: {
                 task_id: projectRun.id,
@@ -2783,7 +2794,7 @@ function handleRequest(req, res) {
     // === 流式发送消息给 Agent（SSE）===
     if (pathname === "/api/send-stream" && req.method === "POST") {
         const contentType = req.headers["content-type"] || "";
-        const handleStreamSend = (project, message, files = [], parentRunId = "") => {
+        const handleStreamSend = async (project, message, files = [], parentRunId = "") => {
             const finalMessage = files && files.length > 0
                 ? `${message || ""}${(0, utils_1.buildUploadedFilesContext)(files, "本次消息附件")}`
                 : (message || "");
@@ -2798,7 +2809,16 @@ function handleRequest(req, res) {
             const configuredAgentType = info[0]?.agent || "claudecode";
             const resolvedRuntime = (0, runtime_1.resolveAvailableAgentRuntime)(configuredAgentType);
             const agentType = resolvedRuntime.selected;
-            const chatIntent = (0, project_chat_intent_1.classifyProjectChatIntent)(message, files, { forceTask: !!parentRunId });
+            let chatIntent;
+            try {
+                chatIntent = await (0, project_chat_intent_1.classifyProjectChatIntentWithModel)(message, files, { forceTask: !!parentRunId, project });
+            }
+            catch (error) {
+                return (0, utils_1.sendJson)(res, {
+                    success: false,
+                    error: `统一大模型无法形成可靠工作流决策，本轮未启动项目 Agent：${error?.message || error}`,
+                }, 503);
+            }
             const toolContext = buildProjectToolContext(project, workDir, agentType);
             if (toolContext.dispatchGate?.dispatchReady === false)
                 return sendRuntimeToolDispatchBlocked(res, toolContext);
@@ -2816,6 +2836,7 @@ function handleRequest(req, res) {
                 userMessage: finalMessage,
                 parentRunId,
                 messageMode: chatIntent.mode,
+                workflowDecision: chatIntent.workflowDecision,
             });
         };
         if (contentType.includes("multipart/form-data")) {
@@ -2825,7 +2846,7 @@ function handleRequest(req, res) {
                     if (!boundary)
                         return (0, utils_1.sendJson)(res, { error: "无效请求" }, 400);
                     const { files, fields } = (0, utils_1.parseMultipart)(buffer, boundary);
-                    handleStreamSend(fields.project, fields.message, files, String(fields.parent_run_id || fields.parentRunId || ""));
+                    void handleStreamSend(fields.project, fields.message, files, String(fields.parent_run_id || fields.parentRunId || ""));
                 }
                 catch (e) {
                     (0, utils_1.sendJson)(res, { error: e.message }, 400);
@@ -2838,7 +2859,7 @@ function handleRequest(req, res) {
         req.on("end", () => {
             try {
                 const { project, message, parent_run_id, parentRunId } = JSON.parse(body);
-                handleStreamSend(project, message, [], String(parent_run_id || parentRunId || ""));
+                void handleStreamSend(project, message, [], String(parent_run_id || parentRunId || ""));
             }
             catch (e) {
                 (0, utils_1.sendJson)(res, { error: e.message }, 400);

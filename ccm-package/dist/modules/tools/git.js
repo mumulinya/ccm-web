@@ -195,8 +195,7 @@ function timeOf(item) {
 }
 function buildChangeContext(project, workDir, changedPaths) {
     const normalizedFiles = new Set(changedPaths.map(normalizeRepoPath));
-    const taskStore = readJson(path.join(utils_1.CCM_DIR, "tasks.json"), []);
-    const tasks = Array.isArray(taskStore) ? taskStore : taskStore?.tasks || [];
+    const tasks = (0, db_1.loadTasks)();
     const sessionStore = readJson(path.join(utils_1.CCM_DIR, "task-agent-sessions.json"), { sessions: [] });
     const sessions = Array.isArray(sessionStore) ? sessionStore : sessionStore?.sessions || [];
     const runStore = readJson(path.join(utils_1.CCM_DIR, "project-chat-runs.json"), { runs: [] });
