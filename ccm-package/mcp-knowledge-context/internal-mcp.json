@@ -1,0 +1,18 @@
+{
+  "schema": "ccm-internal-mcp-v1",
+  "name": "ccm__knowledge_context",
+  "display_name": "知识上下文 MCP",
+  "description": "按任务、群聊和项目权限检索知识库、读取文档并返回可追溯引用。",
+  "version": "1.0.0",
+  "entry": "../dist/integrations/knowledge-context-mcp.js",
+  "lifecycle": "task_scoped",
+  "lifecycle_label": "按知识范围注入",
+  "scopes": ["全局 Agent", "群聊主 Agent", "项目子 Agent", "TestAgent"],
+  "tools": [
+    { "name": "get_project_context", "label": "提取项目上下文", "description": "按当前任务目标自动提取相关知识。" },
+    { "name": "search_knowledge", "label": "检索知识", "description": "检索允许范围内的知识片段和来源。" },
+    { "name": "read_knowledge_document", "label": "读取知识文档", "description": "分页读取允许范围内的已解析文档。" },
+    { "name": "list_citations", "label": "列出引用", "description": "列出可用于交付说明的文档和引用标识。" },
+    { "name": "acknowledge_memory_context", "label": "确认记忆已加载", "description": "用一次性 challenge 生成模型侧记忆加载回执。" }
+  ]
+}

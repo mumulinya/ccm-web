@@ -1,0 +1,36 @@
+{
+  "schema": "ccm-group-reactive-compact-retry-ownership-v1",
+  "version": 1,
+  "group_id": "phase303-reactive-ownership",
+  "group_session_id": "gcs_phase303_integration",
+  "scope_id": "phase303-reactive-ownership::gcs_phase303_integration",
+  "revision": 1,
+  "next_fencing_token": 2,
+  "entries": [
+    {
+      "schema": "ccm-group-reactive-compact-retry-entry-v1",
+      "entry_id": "rcre_f8aa3497bfeef14046065867",
+      "channel": "group_main_prompt_too_long",
+      "retry_epoch": "ctx_phase303_integration_epoch",
+      "state": "claimed",
+      "claim_id": "rcco_e94ffdd1dd7b1ac118cd5eac",
+      "fencing_token": 1,
+      "claim_generation": 1,
+      "reclaimed": false,
+      "owner_pid": 7416,
+      "owner_hostname": "DESKTOP-MN23N8A",
+      "lease_expires_at": "2026-07-15T04:28:13.513Z",
+      "request_fingerprint": "3615d267dc27b7f4674a8b8f5c33aa94",
+      "context_checksum": "2d59eec9376cad4020b1afb7ae2777cf",
+      "input_chars": 119044,
+      "output_chars": 0,
+      "claimed_at": "2026-07-15T04:26:13.513Z",
+      "completed_at": "",
+      "outcome_reason": "",
+      "error_class": "",
+      "error_fingerprint": ""
+    }
+  ],
+  "updated_at": "2026-07-15T04:26:13.513Z",
+  "ledger_checksum": "85fa8fd76a1fda94d3c555b125b19a2a4222478856be014563bcbaeb956c388f"
+}
