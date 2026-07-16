@@ -1,0 +1,8 @@
+{
+  "enabled": true,
+  "format": "openai-compatible",
+  "apiUrl": "http://phase303.invalid/v1",
+  "apiKey": "ccm-secret://unified-model:apikey-8e148a4c6ded",
+  "model": "phase303-test-model",
+  "fallbackToRules": false
+}

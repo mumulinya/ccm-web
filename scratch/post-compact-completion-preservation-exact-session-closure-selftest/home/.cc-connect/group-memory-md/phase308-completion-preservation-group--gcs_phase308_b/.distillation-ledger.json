@@ -1,0 +1,107 @@
+{
+  "schema": "ccm-group-typed-memory-distillation-ledger-v1",
+  "version": 1,
+  "groupId": "phase308-completion-preservation-group--gcs_phase308_b",
+  "facts": {},
+  "updatedAt": "2026-07-15T14:00:00.000Z",
+  "sourceGroupId": "phase308-completion-preservation-group",
+  "groupSessionId": "gcs_phase308_b",
+  "postCompactCompletionMemoryPreservationRepairClosureArchive": {
+    "schema": "ccm-post-compact-completion-memory-preservation-repair-closure-distillation-v1",
+    "version": 1,
+    "archived_count": 1,
+    "verified_count": 1,
+    "failed_outcome_count": 1,
+    "corrected_outcome_count": 1,
+    "completion_doc_count": 1,
+    "completion_work_item_count": 1,
+    "timeline_binding_count": 1,
+    "rows": [
+      {
+        "schema": "ccm-post-compact-completion-memory-preservation-repair-closure-distilled-row-v1",
+        "version": 1,
+        "groupId": "phase308-completion-preservation-group",
+        "groupSessionId": "gcs_phase308_b",
+        "source": "post_compact_receipt_memory_usage_repair_completion_compaction_preservation_repair",
+        "component": "post_compact_receipt_memory_usage_repair_completion_compaction_preservation",
+        "project": "api",
+        "work_item_id": "post-compact-completion-preservation-repair:89678cf7ca5e1b78",
+        "assignment_id": "phase308-shared-assignment",
+        "dispatch_key": "phase308-shared-dispatch",
+        "worker_context_packet_id": "phase308-shared-packet",
+        "binding_id": "worker-context-packet-assignment:f1724559105fdb",
+        "failed_retry_id": "phase308-shared-failed-retry",
+        "failed_outcome_id": "phase308-shared-failed-outcome",
+        "failed_hook_run_id": "phase308-shared-failed-hook",
+        "corrected_retry_id": "phase308-shared-corrected-retry",
+        "corrected_outcome_id": "phase308-shared-corrected-outcome",
+        "corrected_hook_run_id": "phase308-shared-corrected-hook",
+        "completion_doc_rel_paths": [
+          "post-compact-receipt-memory-usage-repair-completions.md"
+        ],
+        "required_doc_rel_paths": [
+          "post-compact-receipt-memory-usage-repair-completions.md"
+        ],
+        "completion_work_item_ids": [
+          "post-compact-receipt-memory-usage-repair:PHASE308_SESSION_B_SENTINEL"
+        ],
+        "completion_timeline_binding_ids": [
+          "replay-repair-brief-timeline:PHASE308_SESSION_B_SENTINEL"
+        ],
+        "historical_task_agent_session_ids": [
+          "historical-task-PHASE308_SESSION_B_SENTINEL"
+        ],
+        "historical_native_session_ids": [
+          "historical-native-PHASE308_SESSION_B_SENTINEL"
+        ],
+        "current_session_binding_id": "current-binding-PHASE308_SESSION_B_SENTINEL",
+        "current_task_agent_session_id": "current-task-PHASE308_SESSION_B_SENTINEL",
+        "current_native_session_id": "current-native-PHASE308_SESSION_B_SENTINEL",
+        "original_gap_codes": [
+          "completion_doc_rel_paths_missing_after_compact",
+          "completion_work_item_ids_missing_after_compact",
+          "completion_timeline_binding_ids_missing_after_compact",
+          "current_task_agent_session_changed_after_compact",
+          "historical_session_promoted_to_current_authority",
+          "completion_memory_preservation_lost",
+          "completion_memory_authority_boundary"
+        ],
+        "exact_identity_restored": true,
+        "current_session_boundary_restored": true,
+        "historical_sessions_remain_evidence_only": true,
+        "completion_source": "post_compact_receipt_memory_usage_repair_completion_compaction_preservation_corrected_retry",
+        "resolution_reason": "completion_memory_compaction_preservation_corrected_retry_verified",
+        "completed_at": "2026-07-15T14:01:00.000Z",
+        "reuse_policy": "historical_compaction_repair_closure_requires_new_session_current_source_reverification",
+        "source_index": 0,
+        "row_id": "post-compact-completion-memory-preservation-repair-closure:65bbf4e1a1bd844dfb35733e",
+        "first_seen_at": "2026-07-15T14:01:00.000Z",
+        "last_seen_at": "2026-07-15T14:00:00.000Z",
+        "seen_count": 4
+      }
+    ],
+    "updatedAt": "2026-07-15T14:00:00.000Z",
+    "sourceGroupId": "phase308-completion-preservation-group",
+    "groupSessionId": "gcs_phase308_b",
+    "exactSession": true
+  },
+  "distillationMutation": {
+    "schema": "ccm-group-typed-memory-distillation-mutation-commit-v1",
+    "version": 1,
+    "groupId": "phase308-completion-preservation-group--gcs_phase308_b",
+    "mutationKind": "post_compact_completion_memory_preservation_closure",
+    "mutationKinds": [
+      "post_compact_completion_memory_preservation_closure"
+    ],
+    "leaseId": "gtmdl_158d7448805bad237732e86c2bfc1858",
+    "fencingToken": 1784072408340132,
+    "ownerPid": 12132,
+    "ownerHostname": "DESKTOP-MN23N8A",
+    "acquiredAt": "2026-07-14T23:40:08.339Z",
+    "renewedAt": "2026-07-14T23:40:08.412Z",
+    "waitedMs": 0,
+    "recoveredLeaseCount": 0,
+    "writeSequence": 1,
+    "committedAt": "2026-07-14T23:40:08.421Z"
+  }
+}

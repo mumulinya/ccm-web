@@ -1,0 +1,65 @@
+{
+  "schema": "ccm-group-typed-memory-shape-trend-ledger-v1",
+  "version": 1,
+  "scopeId": "phase308-completion-preservation-group--gcs_phase308_b",
+  "bodyFree": true,
+  "retentionDays": 180,
+  "mutableDays": 35,
+  "maxKeysPerBucket": 1200,
+  "generation": 6,
+  "headBucketChecksum": "eb9a55ee9815f929f3fb11ce1d6baafeb201c3853c819477e6cb5412f36208d3",
+  "buckets": [
+    {
+      "date": "2026-07-14",
+      "sealed": false,
+      "sealedAt": "",
+      "selector": {
+        "runCount": 0,
+        "candidateTotal": 0,
+        "selectedTotal": 0,
+        "emptyCount": 0,
+        "selectedAgeWeightedDays": 0,
+        "selectedAgeDocumentCount": 0,
+        "freshCount": 0,
+        "staleCount": 0,
+        "candidateCapacityRunCount": 0,
+        "selectionCapacityRunCount": 0
+      },
+      "write": {
+        "eventCount": 6,
+        "changedCount": 3,
+        "createCount": 2,
+        "updateCount": 1,
+        "noopCount": 3,
+        "growthBytes": 3486,
+        "afterBytesTotal": 13210,
+        "maxAfterBytes": 3119,
+        "nearBodyLimitCount": 0,
+        "truncatedBodyCount": 0
+      },
+      "consumption": {
+        "outcomeCount": 0,
+        "deliveredDocumentCount": 0,
+        "usedDocumentCount": 0,
+        "verifiedDocumentCount": 0,
+        "ignoredDocumentCount": 0,
+        "unreportedDocumentCount": 0,
+        "strongReceiptOutcomeCount": 0,
+        "unexpectedClaimCount": 0
+      },
+      "contributionKeys": [
+        "c955ec67966e48ed7ae59b29066e7fd3",
+        "32091d284cbf5d51eb4730920f5d9d5b",
+        "0755e8c31d6edc4f1cfc8a5cdd8f17ea",
+        "dfa5e4750770f50e50f608298a029d47",
+        "5ddf9cfca9ca5c655be8c08e834e73e5",
+        "35478cc47b40ee34ee68b50dd3d9a60c"
+      ],
+      "previousBucketChecksum": "",
+      "updatedAt": "2026-07-14T23:40:09.224Z",
+      "checksum": "eb9a55ee9815f929f3fb11ce1d6baafeb201c3853c819477e6cb5412f36208d3"
+    }
+  ],
+  "updatedAt": "2026-07-14T23:40:09.224Z",
+  "checksum": "546628c10c5dcb7f0fc98d1c2763b9661310ee9771428ce8d1f8d8a03163d508"
+}
