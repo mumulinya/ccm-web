@@ -1,0 +1,100 @@
+{
+  "schema": "ccm-worker-context-compact-hook-ledger-v1",
+  "version": 1,
+  "groupId": "phase303-reactive-ownership",
+  "groupSessionId": "gcs_phase303_a",
+  "scopeId": "phase303-reactive-ownership::gcs_phase303_a",
+  "file": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\group-reactive-compact-retry-ownership-selftest\\home\\.cc-connect\\group-memory-worker-context-compact-hooks\\phase303-reactive-ownership\\gcs_phase303_a.json",
+  "entries": [
+    {
+      "schema": "ccm-worker-context-compact-hook-entry-v1",
+      "entry_id": "wcch-entry:5103444ddd5c6d",
+      "hook_run_id": "wcch_8c0fead8d1e529d3",
+      "group_id": "phase303-reactive-ownership",
+      "group_session_id": "gcs_phase303_a",
+      "phase": "pre",
+      "ok": true,
+      "status": "ok",
+      "assignment_id": "api::phase303-reactive-ownership|coordinator|api|主 agent 工作单 api workercontextpacket wcp 6e2f4fee21a83c trace id task id project api goal 用户想要验证步骤 结果和遗留风险 涉及backend 点名api 任务 请在 api 项目实现 phase303 worker gcs sentinel 并运行验证 context context context context context context ::initial::1",
+      "dispatch_key": "phase303-reactive-ownership|coordinator|api|主 agent 工作单 api workercontextpacket wcp 6e2f4fee21a83c trace id task id project api goal 用户想要验证步骤 结果和遗留风险 涉及backend 点名api 任务 请在 api 项目实现 phase303 worker gcs sentinel 并运行验证 context context context context context context ",
+      "project": "api",
+      "from_packet_id": "wcp_ce1e4a4e4e2226",
+      "retry_packet_id": "",
+      "method": "worker_context_memory_first_retry",
+      "memory_first": true,
+      "initial_usage_status": "over_budget",
+      "final_usage_status": "",
+      "dispatch_ready": false,
+      "result_summary": {
+        "over_budget": true,
+        "total_tokens": 19882,
+        "max_tokens": 1800,
+        "free_tokens": -18202,
+        "memory_present": false,
+        "task_chars": 53322,
+        "ptl_emergency_engaged": false,
+        "ptl_emergency_level": ""
+      },
+      "error": "",
+      "at": "2026-07-15T04:26:12.973Z"
+    },
+    {
+      "schema": "ccm-worker-context-compact-hook-entry-v1",
+      "entry_id": "wcch-entry:4e930aee6c1b73",
+      "hook_run_id": "wcch_8c0fead8d1e529d3",
+      "group_id": "phase303-reactive-ownership",
+      "group_session_id": "gcs_phase303_a",
+      "phase": "post",
+      "ok": false,
+      "status": "fail",
+      "assignment_id": "api::phase303-reactive-ownership|coordinator|api|主 agent 工作单 api workercontextpacket wcp 6e2f4fee21a83c trace id task id project api goal 用户想要验证步骤 结果和遗留风险 涉及backend 点名api 任务 请在 api 项目实现 phase303 worker gcs sentinel 并运行验证 context context context context context context ::initial::1",
+      "dispatch_key": "phase303-reactive-ownership|coordinator|api|主 agent 工作单 api workercontextpacket wcp 6e2f4fee21a83c trace id task id project api goal 用户想要验证步骤 结果和遗留风险 涉及backend 点名api 任务 请在 api 项目实现 phase303 worker gcs sentinel 并运行验证 context context context context context context ",
+      "project": "api",
+      "from_packet_id": "wcp_ce1e4a4e4e2226",
+      "retry_packet_id": "wcp_457c933f184cae",
+      "method": "deterministic_head_tail_critical_lines",
+      "memory_first": false,
+      "initial_usage_status": "over_budget",
+      "final_usage_status": "over_budget",
+      "dispatch_ready": false,
+      "result_summary": {
+        "retry_status": "blocked",
+        "auto_retry_status": "blocked",
+        "total_tokens": 3642,
+        "max_tokens": 1800,
+        "free_tokens": -1962,
+        "memory_reinjection_status": "no_memory",
+        "memory_hash_matches_compaction": true,
+        "omitted_chars": 50956,
+        "ptl_emergency_engaged": false,
+        "ptl_emergency_level": "",
+        "provider_ranking_provenance_preserved": true,
+        "completion_memory_preservation_required": false,
+        "completion_memory_preserved": true,
+        "task_compacted": true,
+        "partial_compact": false,
+        "partial_compaction_category": "",
+        "partial_compaction_categories": []
+      },
+      "error": "",
+      "at": "2026-07-15T04:26:13.006Z"
+    }
+  ],
+  "stats": {
+    "total": 2,
+    "ok": 1,
+    "failed": 1,
+    "pre": {
+      "total": 1,
+      "ok": 1,
+      "failed": 0
+    },
+    "post": {
+      "total": 1,
+      "ok": 0,
+      "failed": 1
+    },
+    "latestAt": "2026-07-15T04:26:13.006Z"
+  },
+  "updatedAt": "2026-07-15T04:26:13.006Z"
+}

@@ -1,0 +1,34 @@
+{
+  "schema": "ccm-group-typed-memory-artifact-transaction-v1",
+  "version": 1,
+  "groupId": "phase307-replay-repair-feedback-group--gcs_phase307_b",
+  "status": "committed",
+  "leaseId": "gtmdl_82a88e97f37d9aee37b643b5013663cb",
+  "fencingToken": 1784072409995664,
+  "mutationKind": "provider_reproof_receipt_consumption",
+  "mutationKinds": [
+    "provider_reproof_receipt_consumption"
+  ],
+  "artifactCount": 1,
+  "artifacts": [
+    {
+      "target": ".distillation-ledger.json",
+      "beforeExists": true,
+      "beforeChecksum": "8fd3a69ec3142f48a47bfc5e746b0e1fd8db9e63793d9dc3eb99fa29a19e8361",
+      "beforeBytes": 14964,
+      "beforeStage": "before-000.bin",
+      "afterDelete": false,
+      "afterChecksum": "4cae90b8404631db1ad930c5b6265f4f37f9d6849ce34868b0eda5aefb528163",
+      "afterBytes": 14964,
+      "afterStage": "after-000.bin",
+      "commitOrder": 0
+    }
+  ],
+  "preparedAt": "2026-07-14T23:40:10.073Z",
+  "committedAt": "2026-07-14T23:40:10.081Z",
+  "recoveredAt": "",
+  "recoveryAction": "",
+  "stageCleanedAt": "2026-07-14T23:40:10.081Z",
+  "updatedAt": "2026-07-14T23:40:10.081Z",
+  "journalChecksum": "5ec7bcf22ec7716a9f974d018bf87e2f6c3b874091f9fd32810db6464958d933"
+}

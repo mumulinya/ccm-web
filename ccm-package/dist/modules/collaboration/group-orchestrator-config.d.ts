@@ -1,0 +1,62 @@
+export declare const COORDINATOR_PROJECT = "coordinator";
+export declare const DEFAULT_GROUP_ORCHESTRATOR: {
+    enabled: boolean;
+    mode: string;
+    coordinatorProject: string;
+    maxDepth: number;
+};
+export declare const CCM_DIR: string;
+export declare function defaultOrchestratorConfig(): {
+    enabled: boolean;
+    format: string;
+    apiUrl: string;
+    apiKey: string;
+    model: string;
+    temperature: number;
+    timeoutMs: number;
+    fallbackToRules: boolean;
+    memoryContextPreset: string;
+    modelContextWindow: number;
+    modelAutoCompactTokenLimit: number;
+    timeBasedMicrocompactEnabled: boolean;
+    timeBasedThinkingClearEnabled: boolean;
+    timeBasedMicrocompactGapMinutes: number;
+    timeBasedMicrocompactKeepRecent: number;
+    typedMemoryDeliveryMaxDocuments: number;
+    typedMemoryDeliveryMaxBytesPerDocument: number;
+    typedMemoryDeliveryMaxLinesPerDocument: number;
+    typedMemoryDeliveryMaxSessionBytes: number;
+    typedMemoryDeliveryMaxTokens: number;
+    sessionMemoryCompactMaxSectionTokens: number;
+    sessionMemoryCompactMaxTotalTokens: number;
+    groupSessionRetentionDays: number;
+    groupSessionMaxArchived: number;
+    groupSessionAutoPruneEnabled: boolean;
+    groupSessionRetentionIntervalHours: number;
+    groupSessionArtifactAutoArchiveEnabled: boolean;
+    groupSessionArtifactHotExecutions: number;
+    groupSessionArtifactMaxHotMb: number;
+    groupSessionArtifactMaxAgeDays: number;
+};
+export declare function loadOrchestratorConfig(): any;
+export declare function saveOrchestratorConfig(updates: any): any;
+export declare function publicOrchestratorConfig(config?: any): any;
+export declare function testUnifiedModelConnection(): Promise<{
+    success: boolean;
+    checkedAt: string;
+    latencyMs: number;
+    provider: string;
+    model: any;
+    message: string;
+    consumers: {
+        ready: boolean;
+        id: string;
+        label: string;
+    }[];
+}>;
+export declare function buildGroupMainAgentBoundary(planner?: string): {
+    layer: string;
+    planner: string;
+    runtime: string;
+    responsibility: string;
+};

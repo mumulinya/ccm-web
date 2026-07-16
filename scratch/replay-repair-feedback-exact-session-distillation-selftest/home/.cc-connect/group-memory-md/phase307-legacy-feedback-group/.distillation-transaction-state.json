@@ -1,0 +1,24 @@
+{
+  "schema": "ccm-group-typed-memory-distillation-transaction-state-v1",
+  "version": 1,
+  "groupId": "phase307-legacy-feedback-group",
+  "status": "completed",
+  "mutationKind": "provider_reproof_receipt_consumption",
+  "mutationKinds": [
+    "provider_reproof_receipt_consumption"
+  ],
+  "lastMutationKind": "provider_reproof_receipt_consumption",
+  "leaseId": "gtmdl_ee8ba14a31ca182d8b056ccc01076d75",
+  "fencingToken": 1784072410289664,
+  "lastFencingToken": 1784072410289664,
+  "lastCommittedFencingToken": 1784072410289664,
+  "recoveredLeaseCount": 0,
+  "waitedMs": 0,
+  "writeCount": 1,
+  "startedAt": "2026-07-14T23:40:10.289Z",
+  "completedAt": "2026-07-14T23:40:10.344Z",
+  "failedAt": "",
+  "error": "",
+  "updatedAt": "2026-07-14T23:40:10.344Z",
+  "stateChecksum": "5fe2502e966993cba3635cec96326377ac51d727ed99d67214e1775ead5a26e8"
+}

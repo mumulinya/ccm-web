@@ -1,0 +1,1 @@
+import{j as e}from"./index-B1Irth9t.js";var t=e(`columns-2`,[[`rect`,{width:`18`,height:`18`,x:`3`,y:`3`,rx:`2`,key:`afitv7`}],[`path`,{d:`M12 3v18`,key:`108xh3`}]]);export{t};

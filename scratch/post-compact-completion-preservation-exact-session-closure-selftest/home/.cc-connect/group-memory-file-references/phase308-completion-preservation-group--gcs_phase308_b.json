@@ -1,0 +1,501 @@
+{
+  "schema": "ccm-group-compact-file-reference-ledger-v1",
+  "version": 1,
+  "groupId": "phase308-completion-preservation-group--gcs_phase308_b",
+  "entries": [
+    {
+      "entry_id": "file-ref:a4f9b1278d3427",
+      "generated_at": "2026-07-14T23:40:09.185Z",
+      "scope": "child:api",
+      "target_project": "api",
+      "task_id": "phase186-quality-6a83f6e9af",
+      "trace_id": "",
+      "task_agent_session_id": "phase186-quality-task-session-b-6a83f6e9af",
+      "native_session_id": "phase186-quality-native-session-b-6a83f6e9af",
+      "session_binding": {
+        "schema": "ccm-child-agent-memory-session-binding-v1",
+        "binding_id": "csm:71ba7441567a68",
+        "group_id": "phase308-completion-preservation-group",
+        "target_project": "api",
+        "task_id": "phase186-quality-6a83f6e9af",
+        "trace_id": "",
+        "execution_id": "phase186-quality-execution-6a83f6e9af",
+        "parent_run_id": "",
+        "task_agent_session_id": "phase186-quality-task-session-b-6a83f6e9af",
+        "native_session_id": "phase186-quality-native-session-b-6a83f6e9af",
+        "agent_type": "",
+        "turn": 0,
+        "binding_required": true,
+        "scope": "child:api"
+      },
+      "task_query_hash": "a2d013133658",
+      "reference_count": 14,
+      "missing_count": 6,
+      "read_plan_count": 10,
+      "reference_fingerprint": "2438aa152c9b5779",
+      "references": [
+        {
+          "reference_id": "compact-file:9517a68f3ac430",
+          "type": "group_session_memory",
+          "kind": "missing",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\post-compact-completion-preservation-exact-session-closure-selftest\\home\\.cc-connect\\group-session-memory\\phase308-completion-preservation-group--gcs_phase308_b\\summary.md",
+          "checksum": "",
+          "exists": false
+        },
+        {
+          "reference_id": "compact-file:fc76a2faff0d88",
+          "type": "group_session_memory_snapshot",
+          "kind": "file",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\post-compact-completion-preservation-exact-session-closure-selftest\\home\\.cc-connect\\group-session-memory\\phase308-completion-preservation-group--gcs_phase308_b\\snapshot.json",
+          "checksum": "",
+          "exists": true
+        },
+        {
+          "reference_id": "compact-file:3c458aaf8f1368",
+          "type": "tool_continuity_summary",
+          "kind": "file",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\post-compact-completion-preservation-exact-session-closure-selftest\\home\\.cc-connect\\group-tool-continuity\\phase308-completion-preservation-group--gcs_phase308_b\\summary.md",
+          "checksum": "6651dbaa3fe1f5b27478d7c9",
+          "exists": true
+        },
+        {
+          "reference_id": "compact-file:e63f06504358b8",
+          "type": "tool_continuity_snapshot",
+          "kind": "file",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\post-compact-completion-preservation-exact-session-closure-selftest\\home\\.cc-connect\\group-tool-continuity\\phase308-completion-preservation-group--gcs_phase308_b\\snapshot.json",
+          "checksum": "b28c94b2195c8ed259f0b415",
+          "exists": true
+        },
+        {
+          "reference_id": "compact-file:315de6447ac3f6",
+          "type": "typed_memory_index",
+          "kind": "file",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\post-compact-completion-preservation-exact-session-closure-selftest\\home\\.cc-connect\\group-memory-md\\phase308-completion-preservation-group--gcs_phase308_b\\MEMORY.md",
+          "checksum": "e2c0966d8e40309b59ecb7be",
+          "exists": true
+        },
+        {
+          "reference_id": "compact-file:ca145c02f38253",
+          "type": "typed_memory_dir",
+          "kind": "directory",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\post-compact-completion-preservation-exact-session-closure-selftest\\home\\.cc-connect\\group-memory-md\\phase308-completion-preservation-group--gcs_phase308_b",
+          "checksum": "3bf5bef3c63ffbfe35180b81",
+          "exists": true
+        },
+        {
+          "reference_id": "compact-file:df88d82a34b48a",
+          "type": "group_memory_json",
+          "kind": "file",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\post-compact-completion-preservation-exact-session-closure-selftest\\home\\.cc-connect\\group-memory-sessions\\phase308-completion-preservation-group\\gcs_phase308_b.json",
+          "checksum": "4973b066a152f186d6cbb68f",
+          "exists": true
+        },
+        {
+          "reference_id": "compact-file:b4a5f4fd01f24c",
+          "type": "raw_group_messages_json",
+          "kind": "missing",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\post-compact-completion-preservation-exact-session-closure-selftest\\home\\.cc-connect\\group-messages\\sessions\\phase308-completion-preservation-group\\gcs_phase308_b.json",
+          "checksum": "",
+          "exists": false
+        },
+        {
+          "reference_id": "compact-file:22050d2864f842",
+          "type": "global_agent_memory_json",
+          "kind": "missing",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\post-compact-completion-preservation-exact-session-closure-selftest\\home\\.cc-connect\\global-agent-memory\\memory.json",
+          "checksum": "",
+          "exists": false
+        },
+        {
+          "reference_id": "compact-file:b653fba7d2135f",
+          "type": "typed_memory_recall_ledger",
+          "kind": "missing",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\post-compact-completion-preservation-exact-session-closure-selftest\\home\\.cc-connect\\group-memory-md\\phase308-completion-preservation-group--gcs_phase308_b\\.recall-ledger.json",
+          "checksum": "",
+          "exists": false
+        },
+        {
+          "reference_id": "compact-file:ec92f6baf91057",
+          "type": "typed_memory_distillation_ledger",
+          "kind": "file",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\post-compact-completion-preservation-exact-session-closure-selftest\\home\\.cc-connect\\group-memory-md\\phase308-completion-preservation-group--gcs_phase308_b\\.distillation-ledger.json",
+          "checksum": "693d06873a696a313351cb22",
+          "exists": true
+        },
+        {
+          "reference_id": "compact-file:9391460cc42de1",
+          "type": "post_compact_candidate_usage_ledger",
+          "kind": "missing",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\post-compact-completion-preservation-exact-session-closure-selftest\\home\\.cc-connect\\group-memory-post-compact-candidate-usage\\phase308-completion-preservation-group\\gcs_phase308_b.json",
+          "checksum": "",
+          "exists": false
+        },
+        {
+          "reference_id": "compact-file:51b5c5b6f82967",
+          "type": "post_compact_dispatch_ledger",
+          "kind": "missing",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\post-compact-completion-preservation-exact-session-closure-selftest\\home\\.cc-connect\\group-memory-post-compact-dispatch\\phase308-completion-preservation-group\\gcs_phase308_b.json",
+          "checksum": "",
+          "exists": false
+        },
+        {
+          "reference_id": "compact-file:9a99e10b9f62a4",
+          "type": "replay_repair_work_items",
+          "kind": "file",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\post-compact-completion-preservation-exact-session-closure-selftest\\home\\.cc-connect\\group-memory-replay-repair-work-items\\phase308-completion-preservation-group\\gcs_phase308_b.json",
+          "checksum": "d97abc131651988bca8bad84",
+          "exists": true
+        }
+      ],
+      "read_plan_entries": [
+        {
+          "read_plan_id": "cfr-read:af4561bd33ba",
+          "reference_id": "compact-file:315de6447ac3f6",
+          "type": "typed_memory_index",
+          "action": "read_index_before_specific_memory_docs",
+          "priority": 30,
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\post-compact-completion-preservation-exact-session-closure-selftest\\home\\.cc-connect\\group-memory-md\\phase308-completion-preservation-group--gcs_phase308_b\\MEMORY.md",
+          "exists": true,
+          "sourceChecksum": "e2c0966d8e40309b59ecb7be",
+          "sourceChecksumMode": "full",
+          "sourceMtimeMs": 1784072409099,
+          "sourceBytes": 566
+        },
+        {
+          "read_plan_id": "cfr-read:a5eda1516734",
+          "reference_id": "compact-file:ca145c02f38253",
+          "type": "typed_memory_dir",
+          "action": "list_or_open_index_only",
+          "priority": 35,
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\post-compact-completion-preservation-exact-session-closure-selftest\\home\\.cc-connect\\group-memory-md\\phase308-completion-preservation-group--gcs_phase308_b",
+          "exists": true,
+          "sourceChecksum": "3bf5bef3c63ffbfe35180b81",
+          "sourceChecksumMode": "directory_listing",
+          "sourceMtimeMs": 1784072409265,
+          "sourceBytes": 0
+        },
+        {
+          "read_plan_id": "cfr-read:97e30538a4c2",
+          "reference_id": "compact-file:df88d82a34b48a",
+          "type": "group_memory_json",
+          "action": "read_for_structured_state",
+          "priority": 40,
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\post-compact-completion-preservation-exact-session-closure-selftest\\home\\.cc-connect\\group-memory-sessions\\phase308-completion-preservation-group\\gcs_phase308_b.json",
+          "exists": true,
+          "sourceChecksum": "4973b066a152f186d6cbb68f",
+          "sourceChecksumMode": "full",
+          "sourceMtimeMs": 1784072409203,
+          "sourceBytes": 16029
+        },
+        {
+          "read_plan_id": "cfr-read:0910c16e969f",
+          "reference_id": "compact-file:fc76a2faff0d88",
+          "type": "group_session_memory_snapshot",
+          "action": "read_to_verify_summary_checksum",
+          "priority": 45,
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\post-compact-completion-preservation-exact-session-closure-selftest\\home\\.cc-connect\\group-session-memory\\phase308-completion-preservation-group--gcs_phase308_b\\snapshot.json",
+          "exists": true,
+          "sourceChecksum": "cd55a045e70e66bff6b83e91",
+          "sourceChecksumMode": "full",
+          "sourceMtimeMs": 1784072409190,
+          "sourceBytes": 1672
+        },
+        {
+          "read_plan_id": "cfr-read:b84564012bb3",
+          "reference_id": "compact-file:3c458aaf8f1368",
+          "type": "tool_continuity_summary",
+          "action": "read_if_tool_or_skill_context_matters",
+          "priority": 50,
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\post-compact-completion-preservation-exact-session-closure-selftest\\home\\.cc-connect\\group-tool-continuity\\phase308-completion-preservation-group--gcs_phase308_b\\summary.md",
+          "exists": true,
+          "sourceChecksum": "6651dbaa3fe1f5b27478d7c9",
+          "sourceChecksumMode": "full",
+          "sourceMtimeMs": 1784072409194,
+          "sourceBytes": 572
+        },
+        {
+          "read_plan_id": "cfr-read:050acf39f0bb",
+          "reference_id": "compact-file:e63f06504358b8",
+          "type": "tool_continuity_snapshot",
+          "action": "read_to_verify_tool_context_only",
+          "priority": 55,
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\post-compact-completion-preservation-exact-session-closure-selftest\\home\\.cc-connect\\group-tool-continuity\\phase308-completion-preservation-group--gcs_phase308_b\\snapshot.json",
+          "exists": true,
+          "sourceChecksum": "74a07d80d6b5c180a41e3819",
+          "sourceChecksumMode": "full",
+          "sourceMtimeMs": 1784072409198,
+          "sourceBytes": 2993
+        },
+        {
+          "read_plan_id": "cfr-read:7f57d36f6031",
+          "reference_id": "compact-file:ec92f6baf91057",
+          "type": "typed_memory_distillation_ledger",
+          "action": "read_for_distillation_archive",
+          "priority": 75,
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\post-compact-completion-preservation-exact-session-closure-selftest\\home\\.cc-connect\\group-memory-md\\phase308-completion-preservation-group--gcs_phase308_b\\.distillation-ledger.json",
+          "exists": true,
+          "sourceChecksum": "693d06873a696a313351cb22",
+          "sourceChecksumMode": "full",
+          "sourceMtimeMs": 1784072408458,
+          "sourceBytes": 5039
+        },
+        {
+          "read_plan_id": "cfr-read:d22ce9057330",
+          "reference_id": "compact-file:9a99e10b9f62a4",
+          "type": "replay_repair_work_items",
+          "action": "read_for_replay_repair_work",
+          "priority": 80,
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\post-compact-completion-preservation-exact-session-closure-selftest\\home\\.cc-connect\\group-memory-replay-repair-work-items\\phase308-completion-preservation-group\\gcs_phase308_b.json",
+          "exists": true,
+          "sourceChecksum": "d97abc131651988bca8bad84",
+          "sourceChecksumMode": "full",
+          "sourceMtimeMs": 1784072407279,
+          "sourceBytes": 26975
+        },
+        {
+          "read_plan_id": "cfr-read:1ed685b72af4",
+          "reference_id": "compact-file:22050d2864f842",
+          "type": "global_agent_memory_json",
+          "action": "skip_missing",
+          "priority": 900,
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\post-compact-completion-preservation-exact-session-closure-selftest\\home\\.cc-connect\\global-agent-memory\\memory.json",
+          "exists": false,
+          "sourceChecksum": "",
+          "sourceChecksumMode": "",
+          "sourceMtimeMs": 0,
+          "sourceBytes": 0
+        },
+        {
+          "read_plan_id": "cfr-read:9990dced298f",
+          "reference_id": "compact-file:9517a68f3ac430",
+          "type": "group_session_memory",
+          "action": "skip_missing",
+          "priority": 900,
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\post-compact-completion-preservation-exact-session-closure-selftest\\home\\.cc-connect\\group-session-memory\\phase308-completion-preservation-group--gcs_phase308_b\\summary.md",
+          "exists": false,
+          "sourceChecksum": "",
+          "sourceChecksumMode": "",
+          "sourceMtimeMs": 0,
+          "sourceBytes": 0
+        }
+      ],
+      "read_plan_revalidation_gate": {
+        "schema": "ccm-group-compact-file-reference-read-plan-revalidation-gate-v1",
+        "version": 1,
+        "revalidation_gate_id": "cfr-rvg:4d5ee8b45ae2ca",
+        "group_id": "phase308-completion-preservation-group--gcs_phase308_b",
+        "target_project": "api",
+        "scope": "child:api",
+        "generated_at": "2026-07-14T23:40:09.185Z",
+        "status": "required",
+        "action": "re_read_changed_sources_before_using_compact_memory",
+        "required_count": 5,
+        "verification_count": 0,
+        "checked_count": 8,
+        "required_read_plan_ids": [
+          "cfr-read:a5eda1516734",
+          "cfr-read:97e30538a4c2",
+          "cfr-read:0910c16e969f",
+          "cfr-read:b84564012bb3",
+          "cfr-read:050acf39f0bb"
+        ],
+        "verification_read_plan_ids": [],
+        "required_entries": [
+          {
+            "read_plan_id": "cfr-read:a5eda1516734",
+            "reference_id": "compact-file:ca145c02f38253",
+            "type": "typed_memory_dir",
+            "action": "list_or_open_index_only",
+            "revalidation_action": "must_re_read_current_source_before_use",
+            "priority": 35,
+            "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\post-compact-completion-preservation-exact-session-closure-selftest\\home\\.cc-connect\\group-memory-md\\phase308-completion-preservation-group--gcs_phase308_b",
+            "displayPath": "C:/Users/admin/.cc-connect/ccm/scratch/post-compact-completion-preservation-exact-session-closure-selftest/home/.cc-connect/group-memory-md/phase308-completion-preservation-group--gcs_phase308_b",
+            "freshness_status": "changed",
+            "changes": [
+              "mtimeMs"
+            ],
+            "expected": {
+              "checksum": "3bf5bef3c63ffbfe35180b81",
+              "checksumMode": "directory_listing",
+              "mtimeMs": 1784072409101,
+              "bytes": 0
+            },
+            "current": {
+              "checksum": "3bf5bef3c63ffbfe35180b81",
+              "checksumMode": "directory_listing",
+              "mtimeMs": 1784072409265,
+              "bytes": 0,
+              "status": "present"
+            },
+            "reason": "read plan source changed after surfacing; re-read and verify current source before using this memory"
+          },
+          {
+            "read_plan_id": "cfr-read:97e30538a4c2",
+            "reference_id": "compact-file:df88d82a34b48a",
+            "type": "group_memory_json",
+            "action": "read_for_structured_state",
+            "revalidation_action": "must_re_read_current_source_before_use",
+            "priority": 40,
+            "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\post-compact-completion-preservation-exact-session-closure-selftest\\home\\.cc-connect\\group-memory-sessions\\phase308-completion-preservation-group\\gcs_phase308_b.json",
+            "displayPath": "C:/Users/admin/.cc-connect/ccm/scratch/post-compact-completion-preservation-exact-session-closure-selftest/home/.cc-connect/group-memory-sessions/phase308-completion-preservation-group/gcs_phase308_b.json",
+            "freshness_status": "changed",
+            "changes": [
+              "checksum",
+              "mtimeMs"
+            ],
+            "expected": {
+              "checksum": "cb3e59964d3c1224a897745a",
+              "checksumMode": "full",
+              "mtimeMs": 1784072408979,
+              "bytes": 16029
+            },
+            "current": {
+              "checksum": "4973b066a152f186d6cbb68f",
+              "checksumMode": "full",
+              "mtimeMs": 1784072409203,
+              "bytes": 16029,
+              "status": "present"
+            },
+            "reason": "read plan source changed after surfacing; re-read and verify current source before using this memory"
+          },
+          {
+            "read_plan_id": "cfr-read:0910c16e969f",
+            "reference_id": "compact-file:fc76a2faff0d88",
+            "type": "group_session_memory_snapshot",
+            "action": "read_to_verify_summary_checksum",
+            "revalidation_action": "must_re_read_current_source_before_use",
+            "priority": 45,
+            "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\post-compact-completion-preservation-exact-session-closure-selftest\\home\\.cc-connect\\group-session-memory\\phase308-completion-preservation-group--gcs_phase308_b\\snapshot.json",
+            "displayPath": "C:/Users/admin/.cc-connect/ccm/scratch/post-compact-completion-preservation-exact-session-closure-selftest/home/.cc-connect/group-session-memory/phase308-completion-preservation-group--gcs_phase308_b/snapshot.json",
+            "freshness_status": "changed",
+            "changes": [
+              "checksum",
+              "mtimeMs"
+            ],
+            "expected": {
+              "checksum": "9fbf00045dd2862416ca7648",
+              "checksumMode": "full",
+              "mtimeMs": 1784072408962,
+              "bytes": 1672
+            },
+            "current": {
+              "checksum": "cd55a045e70e66bff6b83e91",
+              "checksumMode": "full",
+              "mtimeMs": 1784072409190,
+              "bytes": 1672,
+              "status": "present"
+            },
+            "reason": "read plan source changed after surfacing; re-read and verify current source before using this memory"
+          },
+          {
+            "read_plan_id": "cfr-read:b84564012bb3",
+            "reference_id": "compact-file:3c458aaf8f1368",
+            "type": "tool_continuity_summary",
+            "action": "read_if_tool_or_skill_context_matters",
+            "revalidation_action": "must_re_read_current_source_before_use",
+            "priority": 50,
+            "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\post-compact-completion-preservation-exact-session-closure-selftest\\home\\.cc-connect\\group-tool-continuity\\phase308-completion-preservation-group--gcs_phase308_b\\summary.md",
+            "displayPath": "C:/Users/admin/.cc-connect/ccm/scratch/post-compact-completion-preservation-exact-session-closure-selftest/home/.cc-connect/group-tool-continuity/phase308-completion-preservation-group--gcs_phase308_b/summary.md",
+            "freshness_status": "changed",
+            "changes": [
+              "checksum",
+              "mtimeMs"
+            ],
+            "expected": {
+              "checksum": "aede736dc39211d4164836ee",
+              "checksumMode": "full",
+              "mtimeMs": 1784072408970,
+              "bytes": 572
+            },
+            "current": {
+              "checksum": "6651dbaa3fe1f5b27478d7c9",
+              "checksumMode": "full",
+              "mtimeMs": 1784072409194,
+              "bytes": 572,
+              "status": "present"
+            },
+            "reason": "read plan source changed after surfacing; re-read and verify current source before using this memory"
+          },
+          {
+            "read_plan_id": "cfr-read:050acf39f0bb",
+            "reference_id": "compact-file:e63f06504358b8",
+            "type": "tool_continuity_snapshot",
+            "action": "read_to_verify_tool_context_only",
+            "revalidation_action": "must_re_read_current_source_before_use",
+            "priority": 55,
+            "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\post-compact-completion-preservation-exact-session-closure-selftest\\home\\.cc-connect\\group-tool-continuity\\phase308-completion-preservation-group--gcs_phase308_b\\snapshot.json",
+            "displayPath": "C:/Users/admin/.cc-connect/ccm/scratch/post-compact-completion-preservation-exact-session-closure-selftest/home/.cc-connect/group-tool-continuity/phase308-completion-preservation-group--gcs_phase308_b/snapshot.json",
+            "freshness_status": "changed",
+            "changes": [
+              "checksum",
+              "mtimeMs"
+            ],
+            "expected": {
+              "checksum": "620bd8aed6c8be4309723673",
+              "checksumMode": "full",
+              "mtimeMs": 1784072408975,
+              "bytes": 2993
+            },
+            "current": {
+              "checksum": "74a07d80d6b5c180a41e3819",
+              "checksumMode": "full",
+              "mtimeMs": 1784072409198,
+              "bytes": 2993,
+              "status": "present"
+            },
+            "reason": "read plan source changed after surfacing; re-read and verify current source before using this memory"
+          }
+        ],
+        "verification_entries": [],
+        "receipt_contract": {
+          "required_receipt_fields": [
+            "memoryUsed",
+            "memoryIgnored"
+          ],
+          "required_reference": "cfr-rvg:4d5ee8b45ae2ca",
+          "required_read_plan_ids": [
+            "cfr-read:a5eda1516734",
+            "cfr-read:97e30538a4c2",
+            "cfr-read:0910c16e969f",
+            "cfr-read:b84564012bb3",
+            "cfr-read:050acf39f0bb"
+          ],
+          "required_task_agent_session_id": "phase186-quality-task-session-b-6a83f6e9af",
+          "required_native_session_id": "phase186-quality-native-session-b-6a83f6e9af",
+          "memory_used_must_reference_gate": true,
+          "memory_ignored_must_reference_gate": true,
+          "receipt_should_match_session": true,
+          "require_current_source_verification": true,
+          "required_receipt_signal": "read_plan_id plus re-read/current source verified, or memoryIgnored explaining the read_plan_id was not used",
+          "note": "changed read plan entries must be re-read from the current source before applying compact memory; the receipt must mention the read_plan_id and gate id."
+        },
+        "session_binding": {
+          "schema": "ccm-child-agent-memory-session-binding-v1",
+          "binding_id": "csm:71ba7441567a68",
+          "group_id": "phase308-completion-preservation-group",
+          "target_project": "api",
+          "task_id": "phase186-quality-6a83f6e9af",
+          "trace_id": "",
+          "execution_id": "phase186-quality-execution-6a83f6e9af",
+          "parent_run_id": "",
+          "task_agent_session_id": "phase186-quality-task-session-b-6a83f6e9af",
+          "native_session_id": "phase186-quality-native-session-b-6a83f6e9af",
+          "agent_type": "",
+          "turn": 0,
+          "binding_required": true,
+          "scope": "child:api"
+        }
+      }
+    }
+  ],
+  "stats": {
+    "entryCount": 1,
+    "latestReferenceCount": 14,
+    "latestMissingCount": 6,
+    "latestReadPlanCount": 10,
+    "targetProjects": [
+      "api"
+    ]
+  },
+  "updatedAt": "2026-07-14T23:40:09.185Z"
+}
