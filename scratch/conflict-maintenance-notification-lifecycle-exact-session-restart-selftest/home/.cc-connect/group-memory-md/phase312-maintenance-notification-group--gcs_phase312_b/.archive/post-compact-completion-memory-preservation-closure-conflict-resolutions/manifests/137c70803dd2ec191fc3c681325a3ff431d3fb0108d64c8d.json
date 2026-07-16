@@ -1,0 +1,34 @@
+{
+  "schema": "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-cold-manifest-v1",
+  "version": 1,
+  "group_id": "phase312-maintenance-notification-group--gcs_phase312_b",
+  "row_count": 1,
+  "hot_row_count": 1,
+  "shard_count": 1,
+  "rows_checksum": "c12149e03f32dad1990f55b775c908b36fe2cd8ae1d0fb90",
+  "shards": [
+    {
+      "shard_id": "conflict-resolution-shard:f:c12149e03f32dad1990f55b775c908b36fe2cd8ae1d0fb90",
+      "bucket": "f",
+      "rel_path": ".archive/post-compact-completion-memory-preservation-closure-conflict-resolutions/shards/f/c12149e03f32dad1990f55b775c908b36fe2cd8ae1d0fb90.json",
+      "content_checksum": "c12149e03f32dad1990f55b775c908b36fe2cd8ae1d0fb90",
+      "row_count": 1,
+      "row_ids": [
+        "post-compact-closure-conflict-resolution:d71223e97883f3406c1bdd3d"
+      ],
+      "resolution_entry_ids": [
+        "phase312-shared-resolution-entry"
+      ],
+      "task_family_keys": [
+        "phase312-shared-family"
+      ],
+      "row_ids_checksum": "4497e398953e980c6b13c7732314e920bef66b65cfff7e33"
+    }
+  ],
+  "generation_number": 1,
+  "generation_id": "conflict-resolution-cold-generation:1:c12149e03f32dad1",
+  "previous_manifest_checksum": "",
+  "previous_manifest_rel_path": "",
+  "updated_at": "2026-07-15T21:00:00.000Z",
+  "manifest_checksum": "137c70803dd2ec191fc3c681325a3ff431d3fb0108d64c8d"
+}
