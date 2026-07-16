@@ -1,0 +1,14 @@
+{
+  "at": "2026-07-16T04:25:23.950Z",
+  "result": {
+    "schema": "ccm-test-agent-artifact-retention-v1",
+    "rootDir": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\internal-workflow-mcp-selftest\\.cc-connect\\test-agent-artifacts",
+    "scannedRuns": 1,
+    "retainedRuns": 1,
+    "removedRuns": 0,
+    "removedBytes": 0,
+    "retainedBytes": 34454,
+    "skipped": false,
+    "errors": []
+  }
+}

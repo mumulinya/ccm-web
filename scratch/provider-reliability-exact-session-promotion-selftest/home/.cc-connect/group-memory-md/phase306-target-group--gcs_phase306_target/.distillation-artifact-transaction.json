@@ -1,0 +1,58 @@
+{
+  "schema": "ccm-group-typed-memory-artifact-transaction-v1",
+  "version": 1,
+  "groupId": "phase306-target-group--gcs_phase306_target",
+  "status": "committed",
+  "leaseId": "gtmdl_cf4ccc720b84014277491071de3cabc6",
+  "fencingToken": 1784071369846072,
+  "mutationKind": "provider_dispatch_override_followup_validation",
+  "mutationKinds": [
+    "provider_dispatch_override_followup_validation"
+  ],
+  "artifactCount": 3,
+  "artifacts": [
+    {
+      "target": "provider-dispatch-override-followup-receipt-validation-history.md",
+      "beforeExists": false,
+      "beforeChecksum": "",
+      "beforeBytes": 0,
+      "beforeStage": "",
+      "afterDelete": false,
+      "afterChecksum": "9cf2d96469495c11d6553794d3ac7ec21fb2e80deb5643cdd86d2ff47f872d99",
+      "afterBytes": 3371,
+      "afterStage": "after-000.bin",
+      "commitOrder": 0
+    },
+    {
+      "target": "MEMORY.md",
+      "beforeExists": false,
+      "beforeChecksum": "",
+      "beforeBytes": 0,
+      "beforeStage": "",
+      "afterDelete": false,
+      "afterChecksum": "cc847c1a62c7d577c047a6031bf71ba17b55127035419548599e2eca28e52999",
+      "afterBytes": 399,
+      "afterStage": "after-001.bin",
+      "commitOrder": 1
+    },
+    {
+      "target": ".distillation-ledger.json",
+      "beforeExists": false,
+      "beforeChecksum": "",
+      "beforeBytes": 0,
+      "beforeStage": "",
+      "afterDelete": false,
+      "afterChecksum": "2cd2b39b1fb0acb38ae87f61959f6b613a42376d7d543ac227091dc77d96ee5a",
+      "afterBytes": 15907,
+      "afterStage": "after-002.bin",
+      "commitOrder": 2
+    }
+  ],
+  "preparedAt": "2026-07-14T23:22:50.004Z",
+  "committedAt": "2026-07-14T23:22:50.025Z",
+  "recoveredAt": "",
+  "recoveryAction": "",
+  "stageCleanedAt": "2026-07-14T23:22:50.025Z",
+  "updatedAt": "2026-07-14T23:22:50.025Z",
+  "journalChecksum": "9856e3228031b7a742cdad71c344082821a2fb94f6c2a1871f17846169b54767"
+}
